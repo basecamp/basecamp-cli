@@ -60,6 +60,7 @@ func formatSteps(val any) string {
 	var lines []string
 	for _, m := range items {
 		title, _ := m["title"].(string)
+		title = richtext.SanitizeSingleLine(title)
 		marker := "[ ]"
 		if completed, ok := m["completed"].(bool); ok && completed {
 			marker = "[x]"

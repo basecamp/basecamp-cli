@@ -693,10 +693,9 @@ func extractDotPath(data map[string]any, path string) string {
 }
 
 func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, locale Locale) {
-	if section.Heading != "" {
-		b.WriteString("\n#### " + section.Heading + "\n\n")
-	}
-
+	// Same visible-field prepass as the styled renderDetailSection: body
+	// fields count only when non-empty, detail fields whenever present.
+	var visibleFields []string
 	for _, name := range section.Fields {
 		spec := schema.Fields[name]
 		val := data[name]
@@ -707,8 +706,28 @@ func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, secti
 		if spec.Role == "title" {
 			continue
 		}
+		if spec.Role == "body" {
+			if !isEmpty(val) {
+				visibleFields = append(visibleFields, name)
+			}
+			continue
+		}
 
-		formatted := FormatField(spec, name, val, locale)
+		visibleFields = append(visibleFields, name)
+	}
+
+	// Skip the whole section (heading included) when nothing renders.
+	if len(visibleFields) == 0 {
+		return
+	}
+
+	if section.Heading != "" {
+		b.WriteString("\n#### " + section.Heading + "\n\n")
+	}
+
+	for _, name := range visibleFields {
+		spec := schema.Fields[name]
+		formatted := FormatField(spec, name, data[name], locale)
 
 		if spec.Role == "body" {
 			if formatted != "" {
@@ -721,8 +740,7 @@ func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, secti
 			continue
 		}
 
-		label := fieldLabel(name)
-		b.WriteString("- **" + label + ":** " + formatted + "\n")
+		b.WriteString("- **" + fieldLabel(name) + ":** " + formatted + "\n")
 	}
 }
 

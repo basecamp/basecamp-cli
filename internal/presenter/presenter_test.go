@@ -248,6 +248,31 @@ func TestFormatFieldPeopleEmpty(t *testing.T) {
 	}
 }
 
+func TestFormatFieldSteps(t *testing.T) {
+	spec := FieldSpec{Format: "steps"}
+
+	steps := []any{
+		map[string]any{"title": "Second", "completed": true, "position": float64(2)},
+		map[string]any{"title": "First", "completed": false, "position": float64(1)},
+	}
+	want := "[ ] First\n[x] Second"
+	assert.Equal(t, want, FormatField(spec, "steps", steps, enUS))
+
+	assert.Empty(t, FormatField(spec, "steps", []any{}, enUS))
+	assert.Empty(t, FormatField(spec, "steps", nil, enUS))
+}
+
+func TestFormatFieldStepsSanitizesTitles(t *testing.T) {
+	spec := FieldSpec{Format: "steps"}
+
+	steps := []any{
+		map[string]any{"title": "evil\x1b]8;;https://example.com\x1b\\link\ntwo lines", "completed": false},
+	}
+	got := FormatField(spec, "steps", steps, enUS)
+	assert.NotContains(t, got, "\x1b")
+	assert.Equal(t, "[ ] evillink two lines", got)
+}
+
 func TestFormatFieldText(t *testing.T) {
 	spec := FieldSpec{Format: "text"}
 
@@ -972,6 +997,32 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("Markdown output should contain no ANSI codes, got:\n%q", out)
 	}
+
+	// Todo without steps skips the Steps section entirely, heading included
+	if strings.Contains(out, "#### Steps") {
+		t.Errorf("Markdown detail should omit empty Steps section, got:\n%s", out)
+	}
+}
+
+func TestRenderDetailMarkdownSteps(t *testing.T) {
+	schema := LookupByName("todo")
+	require.NotNil(t, schema)
+
+	data := map[string]any{
+		"id":      float64(12345),
+		"content": "Fix the login bug",
+		"steps": []any{
+			map[string]any{"title": "Reproduce", "completed": true, "position": float64(1)},
+			map[string]any{"title": "Fix", "completed": false, "position": float64(2)},
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+	out := buf.String()
+
+	assert.Contains(t, out, "#### Steps")
+	assert.Contains(t, out, "[x] Reproduce\n[ ] Fix")
 }
 
 func TestRenderListMarkdown(t *testing.T) {

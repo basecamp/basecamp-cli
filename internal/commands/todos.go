@@ -734,7 +734,7 @@ You can pass either a todo ID or a Basecamp URL:
 				output.Breadcrumb{
 					Action:      "steps",
 					Cmd:         "basecamp cards step complete <step-id>",
-					Description: "Complete a step (step IDs in --output json)",
+					Description: "Complete a step (step IDs in --json output)",
 				},
 			))
 		}
