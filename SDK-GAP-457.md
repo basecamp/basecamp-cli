@@ -93,11 +93,12 @@ will not offer the flag on `cards create`, `todos create`, or `comments create`.
 ## Current SDK state (the gap)
 
 Verified against the pinned revision **`github.com/basecamp/basecamp-sdk/go
-v0.8.0`** (the version this CLI builds against). No create-request path carries a
-client-visibility field:
+v0.8.0`** (the version this CLI builds against). None of the six target
+create-request paths carry a client-visibility field:
 
-- Wrapper structs `CreateMessageRequest`, `CreateTodoRequest`,
-  `CreateCardRequest`, `CreateCommentRequest` (`pkg/basecamp/*.go`).
+- Wrapper structs `CreateMessageRequest`, `CreateTodolistRequest`,
+  `CreateQuestionRequest`, `CreateScheduleEntryRequest`, `CreateDocumentRequest`,
+  `CreateUploadRequest` (`pkg/basecamp/*.go`) — all exist, none has the field.
 - Generated `Create*RequestContent` bodies (`pkg/generated/client.gen.go`).
 - Smithy `Create*Input` shapes (`spec/basecamp.smithy`).
 
@@ -119,16 +120,20 @@ request structs in `pkg/basecamp/schedules.go` (`AllDay *bool
 \`json:"all_day,omitempty"\``; see `TestSchedulesService_UpdateEntryAllDay`,
 which asserts that setting it to `false` sends `false` rather than omitting it).
 
+Apply to **all six** server-supported inputs (SDK completeness — the CLI's
+deferral of the document/upload *flag* per #556 is a CLI-UX concern that must not
+narrow the SDK):
+
 1. **Smithy** (`spec/basecamp.smithy`): add an optional `visible_to_clients:
    Boolean` member to `CreateMessageInput`, `CreateTodolistInput`,
-   `CreateQuestionInput`, `CreateScheduleEntryInput` (and later
-   `CreateDocumentInput`, `CreateUploadInput` once the CLI handles nested
-   vaults). Top-level body field.
+   `CreateQuestionInput`, `CreateScheduleEntryInput`, `CreateDocumentInput`, and
+   `CreateUploadInput`. Top-level body field.
 2. **Regenerate** → `*bool` `VisibleToClients` on the corresponding
    `Create*RequestContent` types in `pkg/generated`.
 3. **Wrapper structs** (`pkg/basecamp/*.go`): add `VisibleToClients *bool
-   \`json:"visible_to_clients,omitempty"\`` to `CreateMessageRequest` and the
-   other in-scope `Create*Request` structs.
+   \`json:"visible_to_clients,omitempty"\`` to `CreateMessageRequest`,
+   `CreateTodolistRequest`, `CreateQuestionRequest`, `CreateScheduleEntryRequest`,
+   `CreateDocumentRequest`, and `CreateUploadRequest`.
 4. **Mapping**: pass the pointer through in each `Create` method where the
    wrapper is mapped into `generated.Create*JSONRequestBody{…}`.
 5. **Tests**: cover `nil` (field omitted from body), `true` (`"visible_to_clients":
@@ -139,12 +144,13 @@ questions, and schedule entries can land in the same SDK change or follow.
 Documents and uploads are in scope for the SDK (completeness) even though the CLI
 defers their flag — see #556.
 
-**#457 closure:** the intent is a single CLI PR wiring the four initial commands
-(messages, todolists, check-in questions, schedule) once their SDK inputs land,
-closing #457; docs/uploads follow via #556. Because #395 prioritizes messages, if
-the message input lands well ahead of the others we may instead ship messages
-first and close #457, moving the remaining three to a follow-up — a sequencing
-call to make when the SDK unblocks, not now.
+**#457 closure (locked):** #457 completes only when all four initial commands —
+messages, todolists, check-in questions, schedule entries — are wired. If the
+messages SDK input lands first, shipping a messages-only PR is fine, but it keeps
+`Refs #457` and leaves #457 **open**; the switch to `Fixes #457` happens only once
+all four are wired. This fixes a stable completion boundary rather than deciding
+it under merge pressure. Docs/uploads remain a separate follow-up (#556) and are
+not part of the #457 boundary.
 
 ## CLI wiring that follows (after SDK bump)
 
