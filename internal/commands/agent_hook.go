@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,20 +76,42 @@ func NewAgentHookCmd() *cobra.Command {
 	return cmd
 }
 
-// newAgentHookApp builds the hook app from whatever config is usable. An
-// insecure base_url must be neutralized before NewApp: the SDK client
-// constructor panics on a non-localhost http URL, and root's HTTPS gate —
-// which normally catches it first — is bypassed by the hook lifecycle.
+// newAgentHookApp builds the hook app from whatever config is usable. A
+// base_url the SDK rejects must be neutralized before NewApp: the SDK client
+// constructor panics on it, and root's HTTPS gate — which normally catches
+// bad values first — is bypassed by the hook lifecycle.
 func newAgentHookApp() *appctx.App {
 	cfg, err := config.Load(config.FlagOverrides{})
 	if err != nil || cfg == nil {
 		cfg = config.Default()
 	}
 	applyAgentHookProfile(cfg)
-	if hostutil.RequireSecureURL(cfg.BaseURL) != nil {
+	if !agentHookSDKAcceptsBaseURL(cfg.BaseURL) {
 		cfg.BaseURL = config.Default().BaseURL
 	}
 	return appctx.NewApp(cfg)
+}
+
+// agentHookSDKAcceptsBaseURL mirrors the SDK client constructor's base-URL
+// validation: empty is skipped, https is accepted anywhere, and http only on
+// localhost. Everything else — including non-HTTP schemes and bare hosts,
+// which hostutil.RequireSecureURL passes — makes the constructor panic.
+func agentHookSDKAcceptsBaseURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		return hostutil.IsLocalhost(u.Host)
+	default:
+		return false
+	}
 }
 
 // applyAgentHookProfile applies an unambiguous profile selection so stored

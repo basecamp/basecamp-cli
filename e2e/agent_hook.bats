@@ -52,12 +52,15 @@ assert_hook_context_contains() {
 }
 
 @test "agent-hook tolerates invalid config (exit 0, still emits)" {
-  # Non-localhost http base_url fails the root command's HTTPS enforcement
-  # with exit 7 — the hook lifecycle must bypass that and stay non-blocking.
-  run bash -c 'echo "{}" | BASECAMP_BASE_URL=http://example.test basecamp agent-hook session-start'
-  assert_success
-  is_valid_json
-  assert_json_value ".hookSpecificOutput.hookEventName" "SessionStart"
+  # Values the SDK client constructor rejects (panics on): non-localhost
+  # http, a non-HTTP scheme, and a bare host with no scheme. The hook
+  # lifecycle must neutralize all of them and stay non-blocking.
+  for bad_url in "http://example.test" "ftp://example.test" "example.test"; do
+    run bash -c "echo '{}' | BASECAMP_BASE_URL='$bad_url' basecamp agent-hook session-start"
+    assert_success
+    is_valid_json
+    assert_json_value ".hookSpecificOutput.hookEventName" "SessionStart"
+  done
 }
 
 @test "agent-hook tolerates multiple profiles without a default (exit 0)" {
