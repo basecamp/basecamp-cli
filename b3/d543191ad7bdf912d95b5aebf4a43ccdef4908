@@ -1,0 +1,21 @@
+SDK-GAP-457.md
+  s_12f38d49bacd84::t_3b0a528f26e1b8 11-13
+  s_12f38d49bacd84::t_b31c6367b03496 6-9,14-17,22-24,28-34,37,40-44,47-49,51-101,106-115,119-124,127-130,132-133,138-154
+  s_12f38d49bacd84::t_1a3a4a565f4369 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b3d543191ad7bdf912d95b5aebf4a43ccdef4908",
+  "prompts": {},
+  "sessions": {
+    "s_12f38d49bacd84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f55a9c2-4bb1-4397-abd9-1bf435f183ea",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
