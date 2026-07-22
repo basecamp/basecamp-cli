@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -83,10 +84,38 @@ func newAgentHookApp() *appctx.App {
 	if err != nil || cfg == nil {
 		cfg = config.Default()
 	}
+	applyAgentHookProfile(cfg)
 	if hostutil.RequireSecureURL(cfg.BaseURL) != nil {
 		cfg.BaseURL = config.Default().BaseURL
 	}
 	return appctx.NewApp(cfg)
+}
+
+// applyAgentHookProfile applies an unambiguous profile selection so stored
+// profile credentials (keyed "profile:<name>") are detected: BASECAMP_PROFILE,
+// else default_profile, else the single configured profile. Ambiguity or any
+// error skips profile selection — hooks tolerate rather than fail.
+func applyAgentHookProfile(cfg *config.Config) {
+	name := os.Getenv("BASECAMP_PROFILE")
+	if _, ok := cfg.Profiles[name]; !ok {
+		name = ""
+	}
+	if name == "" {
+		if _, ok := cfg.Profiles[cfg.DefaultProfile]; ok {
+			name = cfg.DefaultProfile
+		}
+	}
+	if name == "" && len(cfg.Profiles) == 1 {
+		for only := range cfg.Profiles {
+			name = only
+		}
+	}
+	if name == "" || cfg.ApplyProfile(name) != nil {
+		return
+	}
+	// Per the ApplyProfile contract, re-apply env values so precedence stays
+	// env > profile > file. Flags don't apply — hooks accept none.
+	_ = config.LoadFromEnv(cfg)
 }
 
 func newAgentHookSessionStartCmd() *cobra.Command {
@@ -113,7 +142,8 @@ func newAgentHookPreCommitSnapshotCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input, ok := readAgentHookInput(cmd.InOrStdin())
-			if !ok || !strings.Contains(strings.ToLower(agentHookCommand(input.ToolInput)), "commit") {
+			if !ok || !agentHookHasSnapshotKey(input) ||
+				!strings.Contains(strings.ToLower(agentHookCommand(input.ToolInput)), "commit") {
 				return nil
 			}
 			head, ok := agentHookHead(cmd.Context(), input.CWD)
@@ -135,7 +165,7 @@ func newAgentHookPostCommitCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input, ok := readAgentHookInput(cmd.InOrStdin())
-			if !ok {
+			if !ok || !agentHookHasSnapshotKey(input) {
 				return nil
 			}
 			dir := agentHookStateDir(cmd.Context())
@@ -220,12 +250,19 @@ func agentHookHead(ctx context.Context, cwd string) (string, bool) {
 	if err == nil {
 		return head, true
 	}
-	// HEAD did not verify. Claim EMPTY only for a proven unborn branch —
-	// HEAD is still a symbolic ref to a branch with no commits. Any other
-	// failure (transient git error, broken HEAD) stays silent rather than
-	// risk a later nudge against state the snapshot never established.
-	if _, symErr := gitOutput(ctx, cwd, "symbolic-ref", "-q", "HEAD"); symErr == nil {
-		return unbornHeadSnapshot, true
+	// HEAD did not verify. Claim EMPTY only for a proven unborn branch:
+	// HEAD is a symbolic ref to a branch ref that does not exist yet.
+	// show-ref --verify exits 1 for exactly that missing-ref state; an
+	// existing ref here means HEAD^{commit} failed for another reason
+	// (e.g. the ref points at a missing object). Everything else —
+	// transient git errors included — stays silent rather than risk a
+	// later nudge against state the snapshot never established.
+	if ref, symErr := gitOutput(ctx, cwd, "symbolic-ref", "-q", "HEAD"); symErr == nil && ref != "" {
+		_, verifyErr := gitOutput(ctx, cwd, "show-ref", "--verify", "--quiet", ref)
+		var exitErr *exec.ExitError
+		if errors.As(verifyErr, &exitErr) && exitErr.ExitCode() == 1 {
+			return unbornHeadSnapshot, true
+		}
 	}
 	return "", false
 }
@@ -278,6 +315,14 @@ func agentHookStateDir(ctx context.Context) string {
 		return ""
 	}
 	return filepath.Join(app.Config.CacheDir, "agent-hook")
+}
+
+// agentHookHasSnapshotKey requires both identifiers that key a snapshot to
+// one tool call. Payloads missing either would all collapse onto one shared
+// hash, letting unrelated deliveries collide with or consume each other's
+// snapshots — such payloads are ignored.
+func agentHookHasSnapshotKey(input agentHookInput) bool {
+	return input.SessionID != "" && input.ToolUseID != ""
 }
 
 // agentHookSnapshotName keys a snapshot to one tool call without exposing the

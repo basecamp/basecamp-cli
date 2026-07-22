@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
@@ -336,6 +337,87 @@ func TestAgentHookDoesNotClaimEmptyForBrokenHead(t *testing.T) {
 	// later commit would nudge against state the snapshot never established.
 	require.NoError(t, os.WriteFile(filepath.Join(repo, ".git", "HEAD"),
 		[]byte(strings.Repeat("0", 40)+"\n"), 0o644))
+
+	assert.Empty(t, runAgentHook(t, "pre-commit-snapshot", agentHookPayload("PreToolUse", "s", "t", "git commit -m ship"), repo))
+
+	entries, err := os.ReadDir(filepath.Join(data, "commit-snapshots"))
+	if err == nil {
+		assert.Empty(t, entries)
+	} else {
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	}
+}
+
+func TestAgentHookSessionStartDetectsStoredProfileCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_PROFILE", "")
+
+	configDir := config.GlobalConfigDir()
+	require.NoError(t, os.MkdirAll(configDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.json"), []byte(`{
+		"default_profile": "work",
+		"profiles": {
+			"work": {"base_url": "https://3.basecampapi.com", "account_id": "111"},
+			"personal": {"base_url": "https://3.basecampapi.com", "account_id": "222"}
+		}
+	}`), 0o600))
+	require.NoError(t, auth.NewStore(configDir).Save("profile:work", &auth.Credentials{
+		AccessToken: "stored-profile-token",
+		OAuthType:   "bc3",
+	}))
+
+	// No injected app: the hook lifecycle must build one itself, applying
+	// the default profile so the profile-keyed credentials are found.
+	cmd := NewAgentHookCmd()
+	var stdout bytes.Buffer
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"session-start"})
+	require.NoError(t, cmd.Execute())
+
+	_, context := hookSpecificOutput(t, strings.TrimSpace(stdout.String()))
+	assert.Contains(t, context, "OAuth is ready")
+	assert.NotContains(t, context, "stored-profile-token")
+}
+
+func TestAgentHookIgnoresPayloadMissingSnapshotIDs(t *testing.T) {
+	repo := newGitRepo(t, "main", "initial")
+	data := t.TempDir()
+	t.Setenv("CLAUDE_PLUGIN_DATA", data)
+
+	// Missing tool_use_id: no snapshot may be written — otherwise every
+	// incomplete payload hashes the same shared key.
+	pre := `{"session_id":"s","hook_event_name":"PreToolUse","tool_input":{"command":"git commit -m ship"}}`
+	assert.Empty(t, runAgentHook(t, "pre-commit-snapshot", pre, repo))
+	_, err := os.Stat(filepath.Join(data, "commit-snapshots"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// Missing session_id on delivery: must not read (or consume) any state.
+	require.NoError(t, os.MkdirAll(filepath.Join(data, "commit-snapshots"), 0o700))
+	shared := filepath.Join(data, "commit-snapshots", agentHookSnapshotName(agentHookInput{}))
+	require.NoError(t, os.WriteFile(shared, []byte("EMPTY\n"), 0o600))
+	post := `{"tool_use_id":"t","hook_event_name":"PostToolUse","tool_input":{"command":"git commit -m ship"}}`
+	assert.Empty(t, runAgentHook(t, "post-commit", post, repo))
+	_, err = os.Stat(shared)
+	assert.NoError(t, err, "incomplete payload must not consume the shared-key snapshot")
+}
+
+func TestAgentHookDoesNotClaimEmptyForBrokenSymbolicRef(t *testing.T) {
+	repo := newGitRepo(t, "main", "initial")
+	data := t.TempDir()
+	t.Setenv("CLAUDE_PLUGIN_DATA", data)
+
+	// Symbolic HEAD pointing at a branch ref whose object is missing:
+	// HEAD^{commit} fails, symbolic-ref succeeds, but show-ref --verify
+	// finds the ref — this is a broken ref, not an unborn branch.
+	runGit(t, repo, "symbolic-ref", "HEAD", "refs/heads/broken")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".git", "refs", "heads", "broken"),
+		[]byte("1111111111111111111111111111111111111111\n"), 0o644))
 
 	assert.Empty(t, runAgentHook(t, "pre-commit-snapshot", agentHookPayload("PreToolUse", "s", "t", "git commit -m ship"), repo))
 
