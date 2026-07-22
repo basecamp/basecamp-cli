@@ -1,0 +1,58 @@
+scripts/install.ps1
+  s_e655a660e9dd25::t_af6627c9872c83 9-17
+  s_e655a660e9dd25::t_b346208d7e3e57 272-274
+  s_e655a660e9dd25::t_85f21c7e207902 288-290
+.surface
+  s_e655a660e9dd25::t_6e595d8348307a 853,11432-11452,16495
+internal/commands/setup_agents_test.go
+  s_e655a660e9dd25::t_910d10036dddcc 1-292
+internal/commands/auth_test.go
+  s_e655a660e9dd25::t_ee6067da11fe26 1-63
+scripts/install.sh
+  s_e655a660e9dd25::t_af443f7668d8ac 13-21
+  s_e655a660e9dd25::t_3bf88a56108b6b 461,471,480-493
+  s_e655a660e9dd25::t_75f4a5f46f9aee 455-458
+e2e/smoke/smoke_lifecycle.bats
+  s_e655a660e9dd25::t_713e456b31597a 35-38
+internal/commands/auth.go
+  s_e655a660e9dd25::t_5c61c3638498b3 336-339,341-342,349-350,354-367
+  s_e655a660e9dd25::t_2ef57ab94fdce9 8
+  s_87ab7528cc99ff::t_1790df456acccc 368-369
+e2e/installer.bats
+  s_e655a660e9dd25::t_469b16a5048040 1-79
+internal/commands/wizard_agents.go
+  s_e655a660e9dd25::t_1d65c4d0f11175 548-710,715-861
+  s_e655a660e9dd25::t_9e63c008645cec 10
+  s_e655a660e9dd25::t_03b8d67ceb53be 711-714
+internal/commands/wizard.go
+  s_e655a660e9dd25::t_7429b0a8e74f00 48
+install.md
+  s_e655a660e9dd25::t_e2962ad9c21c3a 5-6
+  s_e655a660e9dd25::t_054f42c1831b48 121
+  s_e655a660e9dd25::t_46b8818808ae58 33-37
+  s_e655a660e9dd25::t_0db507c4323aeb 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "76dc027cdbeb0bbfcb3e372c5bbbf7b2159a5afc",
+  "prompts": {},
+  "sessions": {
+    "s_87ab7528cc99ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f713a78-6868-4b1e-8dc8-0fdcf8e1bfa2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_e655a660e9dd25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69453502-1952-42fc-8bb9-c34a8d94d478",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
