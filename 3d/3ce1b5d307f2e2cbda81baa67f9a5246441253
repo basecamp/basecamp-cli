@@ -1,0 +1,38 @@
+internal/commands/wizard_agents.go
+  s_42b3ffb6d83499::t_00801312087273 37-92
+  s_42b3ffb6d83499::t_2983d85536d5b8 138
+  s_42b3ffb6d83499::t_6e2233cfc31732 181-184
+  s_42b3ffb6d83499::t_03d121631c1c03 224,227
+  s_42b3ffb6d83499::t_785857ce69a59a 257
+  s_42b3ffb6d83499::t_95a964800c669c 7
+  s_42b3ffb6d83499::t_cc75f2a0c3c0be 378
+  s_42b3ffb6d83499::t_3e52f14f10c5f4 352
+  s_42b3ffb6d83499::t_d0d8974312fc38 298,303-304,308,320,324-327,329
+internal/commands/wizard.go
+  s_42b3ffb6d83499::t_5af3be179cd617 443-446,448,450
+  s_42b3ffb6d83499::t_7c22fea1785ca8 121
+  s_42b3ffb6d83499::t_c2ca67cca9eedd 314-320,323,325-326,328,331-335,337
+  s_42b3ffb6d83499::t_3e8b7fd9b45d7f 321-322,324
+  s_42b3ffb6d83499::t_4faeeb333c3200 366-385
+  s_42b3ffb6d83499::t_88b282fb91f851 106-107,110
+internal/commands/wizard_test.go
+  s_42b3ffb6d83499::t_1f20423403f57a 16
+  s_42b3ffb6d83499::t_703b298234a8be 98-154
+  s_42b3ffb6d83499::t_7f38604efc5225 532-573
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3d3ce1b5d307f2e2cbda81baa67f9a5246441253",
+  "prompts": {},
+  "sessions": {
+    "s_42b3ffb6d83499": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47173847-86ff-4d2d-823f-70a5d3df02ae",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
