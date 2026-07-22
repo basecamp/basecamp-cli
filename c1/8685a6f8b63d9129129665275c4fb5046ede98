@@ -1,0 +1,19 @@
+internal/commands/agent_hook_test.go
+  s_5e51cc5fce0c0c::t_b6167f44b1c5ce 488-491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c18685a6f8b63d9129129665275c4fb5046ede98",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
