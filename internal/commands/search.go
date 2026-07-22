@@ -13,6 +13,13 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
+// defaultSearchLimit caps results when neither --all nor an explicit --limit is
+// given. The SDK treats Limit==0 as "fetch every page" and follows Link-header
+// pagination unbounded, which can hang for 90s+ on a broad query (#470); a
+// bounded default keeps the common case fast while --all preserves opt-in
+// exhaustive fetches.
+const defaultSearchLimit = 20
+
 // NewSearchCmd creates the search command for full-text search.
 func NewSearchCmd() *cobra.Command {
 	var sortBy string
@@ -25,9 +32,10 @@ func NewSearchCmd() *cobra.Command {
 		Long: `Search across all Basecamp content.
 
 Uses the Basecamp search API to find content matching your query.
-Use 'basecamp search metadata' to see available search scopes.`,
+Results are capped at 20 by default; pass --all to fetch every match.
+Use 'basecamp search metadata' to inspect the search metadata the API reports.`,
 		Example: `  basecamp search "quarterly goals"
-  basecamp search "bug report" --sort created_at
+  basecamp search "bug report" --sort recency
   basecamp search "design review" --limit 5
   basecamp search "meeting notes" --all`,
 		Annotations: map[string]string{"agent_notes": "Use search for keyword queries, use recordings for browsing by type/status without a search term"},
@@ -47,21 +55,49 @@ Use 'basecamp search metadata' to see available search scopes.`,
 
 			query := args[0]
 
-			if all && limit > 0 {
+			// The global --project/--in flag is accepted but the pinned SDK's
+			// SearchParams exposes only q/sort — no bucket_ids[]. Reject explicit
+			// project scoping rather than silently returning unscoped results.
+			// Ambient config.ProjectID is never rejected; only an explicit flag
+			// signals search-scoping intent.
+			// Follow-up (post-SDK-bump that absorbs bucket_ids[], BC3 #12361 merged
+			// server-side): resolve via app.Names.ResolveProject and pass the bucket
+			// ID. See spec/api-gaps/search-filter-additions.md in the SDK repo.
+			if app.Flags.Project != "" {
+				return output.ErrUsageHint(
+					"project-scoped search is not supported yet",
+					"The Basecamp API now accepts bucket_ids[] (BC3 #12361), but no published SDK build exposes it. Re-run the search without --project/--in for now.",
+				)
+			}
+
+			sort, err := normalizeSearchSort(sortBy)
+			if err != nil {
+				return err
+			}
+
+			limitChanged := cmd.Flags().Changed("limit")
+			if all && limitChanged {
 				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+
+			effectiveLimit := defaultSearchLimit
+			switch {
+			case all:
+				effectiveLimit = 0 // unbounded: follow pagination to the end
+			case limitChanged:
+				if limit <= 0 {
+					return output.ErrUsage("--limit must be a positive number; use --all to fetch every result")
+				}
+				effectiveLimit = limit
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Build search options
-			opts := &basecamp.SearchOptions{}
-			if sortBy != "" {
-				opts.Sort = sortBy
-			}
-			if !all && limit > 0 {
-				opts.Limit = limit
+			opts := &basecamp.SearchOptions{
+				Sort:  sort,
+				Limit: effectiveLimit,
 			}
 
 			searchResult, err := app.Account().Search().Search(cmd.Context(), query, opts)
@@ -98,8 +134,8 @@ Use 'basecamp search metadata' to see available search scopes.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "Sort by: created_at or updated_at (default: relevance)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of results to fetch")
+	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "Sort order: relevance (default) or recency")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of results to fetch (default 20; use --all for every result)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all results (no limit)")
 
 	cmd.AddCommand(newSearchMetadataCmd())
@@ -107,12 +143,33 @@ Use 'basecamp search metadata' to see available search scopes.`,
 	return cmd
 }
 
+// normalizeSearchSort maps the user-facing --sort vocabulary onto the values the
+// Basecamp search API accepts. Empty/relevance normalizes to best_match (BC3's
+// default, pinned explicitly for deterministic output); recency and its
+// deprecated created_at/updated_at aliases normalize to recency (newest-first).
+// BC3 treats any non-blank, non-best_match sort as created-at descending, so
+// recency works today regardless of the search-filter release. Unknown values
+// are a usage error.
+func normalizeSearchSort(sort string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(sort)) {
+	case "", "relevance", "best_match":
+		return "best_match", nil
+	case "recency", "newest", "created_at", "updated_at":
+		return "recency", nil
+	default:
+		return "", output.ErrUsage(fmt.Sprintf("invalid --sort value %q; valid values are relevance or recency", sort))
+	}
+}
+
 func newSearchMetadataCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "metadata",
 		Aliases: []string{"types"},
-		Short:   "Show available search scopes",
-		Long:    "Display available projects for search scope filtering.",
+		Short:   "Show search metadata reported by the API",
+		Long: `Display the search metadata returned by the Basecamp API.
+
+Note: this SDK build surfaces only project scopes; the API also returns
+recording/file search types and labels that are not yet modeled.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			return runSearchMetadata(cmd, app)
@@ -200,18 +257,16 @@ func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
 	if err != nil {
 		return convertSDKError(err)
 	}
-
-	// Handle empty response
-	if metadata == nil || len(metadata.Projects) == 0 {
-		return output.ErrUsageHint(
-			"Search metadata not available",
-			"No projects available for search filtering",
-		)
+	if metadata == nil {
+		metadata = &basecamp.SearchMetadata{}
 	}
 
-	summary := fmt.Sprintf("Available projects: %d", len(metadata.Projects))
+	summary := "Search metadata (limited SDK coverage)"
+	if len(metadata.Projects) > 0 {
+		summary = fmt.Sprintf("Search metadata: %d project scopes", len(metadata.Projects))
+	}
 
-	return app.OK(metadata,
+	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -220,5 +275,18 @@ func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
 				Description: "Search content",
 			},
 		),
-	)
+	}
+
+	// The pinned SDK models only `projects`, but /searches/metadata.json now also
+	// returns recording/file search types and labels. An empty projects list is
+	// SDK schema drift, not an empty account — surface a notice rather than the
+	// former fatal "Search metadata not available" error (#546). Reserve errors
+	// for genuine transport/API failures (handled by convertSDKError above).
+	if len(metadata.Projects) == 0 {
+		respOpts = append(respOpts, output.WithNotice(
+			"This SDK build surfaces only project scopes; the Basecamp API also returns recording/file search types and labels that are not yet modeled.",
+		))
+	}
+
+	return app.OK(metadata, respOpts...)
 }

@@ -893,9 +893,9 @@ basecamp people remove <id> --project <project>    # Remove from project
 ### Search
 
 ```bash
-basecamp search "query" --json                    # Full-text search
-basecamp search "query" --sort updated_at --limit 20
-basecamp search metadata --json                   # Available search scopes
+basecamp search "query" --json                    # Full-text search (capped at 20; --all for every match)
+basecamp search "query" --sort recency --limit 20
+basecamp search metadata --json                   # Search metadata reported by the API (limited SDK coverage)
 ```
 
 ### Generic Show
