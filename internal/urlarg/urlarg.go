@@ -19,6 +19,7 @@ type Parsed struct {
 	ProjectID      string // BucketID in Basecamp terminology
 	Type           string // e.g., "todos", "messages", "cards"
 	RecordingID    string
+	CampfireID     string // parent campfire ID for chat-line URLs (chats/{campfireId}/lines/{lineId})
 	CommentID      string
 	IsCollection   bool   // URL points to a list of items, not an individual resource
 	OccurrenceDate string // date from schedule_entries/{id}/occurrences/{date} URLs
@@ -86,11 +87,21 @@ func Parse(input string) *Parsed {
 		}
 	}
 
+	// Chat-line URLs (.../chats/{campfireId}/lines/{lineId}) carry the parent
+	// campfire ID as a path param. Surface it so callers can target the specific
+	// campfire that owns the line rather than a project-default room. The
+	// "campfireId" param name comes from the SDK's url-routes.json route table
+	// entry for /{accountId}/chats/{campfireId}/lines/{lineId}. Non-chat-line
+	// URLs simply lack this key — the map read then yields "" (a nil Params on
+	// structural matches reads the same way), leaving CampfireID empty.
+	campfireID := m.Params["campfireId"]
+
 	return &Parsed{
 		AccountID:      m.AccountID,
 		ProjectID:      m.ProjectID,
 		Type:           pathType,
 		RecordingID:    resourceID,
+		CampfireID:     campfireID,
 		CommentID:      m.CommentID,
 		IsCollection:   isCollection,
 		OccurrenceDate: occurrenceDate,

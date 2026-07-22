@@ -452,6 +452,22 @@ func isEmptyParagraph(block string) bool {
 	return strings.TrimSpace(inner) == ""
 }
 
+// PlainToHTML serializes literal plain text as Basecamp rich text: HTML-special
+// characters are escaped so they render as typed (not interpreted as markup),
+// and line breaks are preserved as <br> so multi-line input keeps its shape.
+// Windows CRLF and bare CR are normalized to LF first so a single <br> is
+// emitted per line break. Use this when the caller wants the text delivered
+// verbatim to an endpoint that always stores rich text.
+func PlainToHTML(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = escapeHTML(s)
+	return strings.ReplaceAll(s, "\n", "<br>")
+}
+
 // escapeHTML escapes special HTML characters.
 func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")

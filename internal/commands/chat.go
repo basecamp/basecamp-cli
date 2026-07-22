@@ -12,9 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewChatCmd creates the chat command for real-time chat.
@@ -44,6 +46,7 @@ Use 'basecamp chat post "message"' to post a message.`,
 		newChatPostCmd(&project, &chatID, &contentType),
 		newChatUploadCmd(&project, &chatID),
 		newChatLineShowCmd(&project, &chatID),
+		newChatLineUpdateCmd(&project, &chatID, &contentType),
 		newChatLineDeleteCmd(&project, &chatID),
 	)
 
@@ -729,6 +732,234 @@ You can pass either a line ID or a Basecamp line URL:
 	}
 
 	cf = addCommentFlags(cmd, false)
+
+	return cmd
+}
+
+func newChatLineUpdateCmd(project, chatID, contentType *string) *cobra.Command {
+	var content string
+
+	cmd := &cobra.Command{
+		Use:   "update <id|url> [content]",
+		Short: "Update an existing message",
+		Long: `Update the content of an existing chat message.
+
+You can pass either a line ID or a Basecamp line URL:
+  basecamp chat update 789 "edited message" --in my-project
+  basecamp chat update https://3.basecamp.com/123/buckets/456/chats/789/lines/111 --content "edited"
+
+Chat edits are always stored as rich text. By default, content is treated as
+Markdown and converted to HTML, and @mentions resolve like 'chat post'. Use
+--content-type text/html to supply HTML directly, or --content-type text/plain
+to send the text verbatim (escaped, line breaks preserved, no mention
+resolution). --content-type is applied locally — the server always coerces the
+edit to rich text.`,
+		// Accept 0–2 args so a missing <id|url> yields a purpose-specific usage
+		// error from RunE, rather than Cobra's generic "requires at least" (which
+		// root.go rewrites into a misleading "Todo ID(s) required"). Mirrors
+		// chat post's MaximumNArgs handling.
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>")
+			}
+
+			messageContent := content
+			if len(args) > 1 {
+				messageContent = args[1]
+			}
+
+			if strings.TrimSpace(messageContent) == "" {
+				return missingArg(cmd, "<content>")
+			}
+
+			// Validate the content mode before any request or account setup so an
+			// unknown --content-type fails fast rather than silently sending raw
+			// bytes (the SDK no longer validates content type for us).
+			ct := *contentType
+			switch ct {
+			case "", "text/html", "text/plain":
+			default:
+				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", ct))
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// Resolve the line reference. A bare numeric ID falls through to
+			// --room/dock resolution; a URL must be a chat-line URL on a trusted
+			// host so a pasted card/todo/message URL — or a look-alike on an
+			// attacker-controlled host — can't be misinterpreted into an edit.
+			lineID := args[0]
+			urlChatID := ""
+			urlProjectID := ""
+			if urlarg.IsURL(args[0]) {
+				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+				}
+				parsed := urlarg.Parse(args[0])
+				// Require an individual chat-line URL. A room's line-collection URL
+				// (/chats/{c}/lines) also parses as Type "lines" but with
+				// IsCollection set and RecordingID holding the campfire ID, not a
+				// line ID — accepting it would edit PUT /chats/{c}/lines/{c}.
+				if parsed == nil || parsed.Type != "lines" || parsed.IsCollection {
+					return output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
+				}
+				// Guard against editing in the wrong account: the URL names an
+				// account, and if it disagrees with the configured one the safe
+				// move is to stop rather than silently target a different account.
+				if parsed.AccountID != "" && app.Config.AccountID != "" && parsed.AccountID != app.Config.AccountID {
+					return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+				}
+				lineID = parsed.RecordingID
+				urlChatID = parsed.CampfireID
+				urlProjectID = parsed.ProjectID
+			}
+
+			// Resolve the chat (campfire) ID, and a project only when needed. The
+			// PUT needs just the chat + line IDs; a project is required only to
+			// discover the default room (no URL chat and no --room) and is
+			// otherwise resolved opportunistically for breadcrumbs — never by
+			// prompting. URL-derived values win over --room/--in/--project, which
+			// may be stale from a previous command in the same shell.
+			effectiveChatID := urlChatID
+			if effectiveChatID == "" {
+				effectiveChatID = *chatID
+			}
+
+			projectHint := urlProjectID
+			if projectHint == "" {
+				projectHint = *project
+			}
+			if projectHint == "" {
+				projectHint = app.Flags.Project
+			}
+			if projectHint == "" {
+				projectHint = app.Config.ProjectID
+			}
+
+			var resolvedProjectID string
+			var err error
+			if effectiveChatID == "" {
+				// No room in hand — resolve a project (prompting as a last resort)
+				// so we can discover the project's default chat.
+				if projectHint == "" {
+					if err = ensureProject(cmd, app); err != nil {
+						return err
+					}
+					projectHint = app.Config.ProjectID
+				}
+				resolvedProjectID, _, err = app.Names.ResolveProject(cmd.Context(), projectHint)
+				if err != nil {
+					return err
+				}
+				effectiveChatID, err = getChatID(cmd, app, resolvedProjectID)
+				if err != nil {
+					return err
+				}
+			}
+			// When the room is already known (--room or a URL), the project is
+			// needed only for breadcrumbs — resolved best-effort *after* the edit
+			// (below) so a stale/unreachable default project can't fail the PUT.
+
+			chatIDInt, err := strconv.ParseInt(effectiveChatID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid chat room ID")
+			}
+			lineIDInt, err := strconv.ParseInt(lineID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid line ID")
+			}
+
+			// Resolve the content into the exact rich-text body we PUT. Chat edits
+			// always render as rich text server-side, so:
+			//   - unset (default): Markdown → HTML unconditionally, then resolve
+			//     @mentions (mirrors messages.go, which converts unconditionally);
+			//   - text/html: use the supplied HTML as-is, then resolve @mentions;
+			//   - text/plain: serialize literally (escape + preserve breaks) and
+			//     skip mention resolution.
+			var mentionNotice string
+			switch ct {
+			case "text/plain":
+				messageContent = richtext.PlainToHTML(messageContent)
+			default:
+				if ct == "" {
+					messageContent = richtext.MarkdownToHTML(messageContent)
+				}
+				result, resolveErr := resolveMentions(cmd.Context(), app.Names, messageContent)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				messageContent = result.HTML
+				mentionNotice = unresolvedMentionWarning(result.Unresolved)
+			}
+
+			if err := app.Account().Campfires().UpdateLine(cmd.Context(), chatIDInt, lineIDInt, messageContent); err != nil {
+				return convertSDKError(err)
+			}
+
+			// SDK PUT returns 204; re-fetch so the response carries the canonical
+			// post-update line. A failure here doesn't roll back the update — we
+			// surface it as a diagnostic rather than the command's exit code.
+			line, fetchErr := app.Account().Campfires().GetLine(cmd.Context(), chatIDInt, lineIDInt)
+
+			// Resolve the project for breadcrumbs only, best-effort: the edit has
+			// already been sent using just the chat + line IDs, so a stale or
+			// unreachable default project must not fail the command — it only
+			// drops --in from the breadcrumbs.
+			if resolvedProjectID == "" && projectHint != "" {
+				if rp, _, perr := app.Names.ResolveProject(cmd.Context(), projectHint); perr == nil {
+					resolvedProjectID = rp
+				}
+			}
+
+			// Include --in only when a project was resolved (mirrors post/upload,
+			// which omit it when editing via --room without a project).
+			showCmd := fmt.Sprintf("basecamp chat line %s --room %s", lineID, effectiveChatID)
+			messagesCmd := fmt.Sprintf("basecamp chat messages --room %s", effectiveChatID)
+			if resolvedProjectID != "" {
+				showCmd = fmt.Sprintf("basecamp chat line %s --room %s --in %s", lineID, effectiveChatID, resolvedProjectID)
+				messagesCmd = fmt.Sprintf("basecamp chat messages --room %s --in %s", effectiveChatID, resolvedProjectID)
+			}
+
+			respOpts := []output.ResponseOption{
+				output.WithSummary(fmt.Sprintf("Updated line #%s", lineID)),
+				output.WithEntity("chat_line"),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         showCmd,
+						Description: "View line",
+					},
+					output.Breadcrumb{
+						Action:      "messages",
+						Cmd:         messagesCmd,
+						Description: "Back to messages",
+					},
+				),
+			}
+			if line != nil {
+				respOpts = append(respOpts, output.WithDisplayData(chatLineDisplayData(line)))
+			}
+			if mentionNotice != "" {
+				respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
+			}
+			if fetchErr != nil {
+				respOpts = append(respOpts, output.WithDiagnostic(fmt.Sprintf("update succeeded; refetch failed: %v", fetchErr)))
+			}
+
+			if line == nil {
+				return app.OK(map[string]any{"updated": true, "id": lineID}, respOpts...)
+			}
+			return app.OK(line, respOpts...)
+		},
+	}
+
+	cmd.Flags().StringVar(&content, "content", "", "New message content")
+	cmd.Flags().StringVar(contentType, "content-type", "", "Input handling: text/html (supply HTML) or text/plain (verbatim); applied locally, edits always render as rich text")
 
 	return cmd
 }
