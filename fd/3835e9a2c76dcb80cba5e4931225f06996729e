@@ -1,0 +1,25 @@
+API-COVERAGE.md
+  s_41e2ae999367a0::t_faf6b3c90cb3b8 19
+  s_41e2ae999367a0::t_6e1cb606c1a284 33
+  s_41e2ae999367a0::t_1b1e7a1e8aae54 17
+  s_41e2ae999367a0::t_8257804e72b261 9,11,13
+internal/commands/tools.go
+  s_41e2ae999367a0::t_0dce5e7ef8a7b2 31-35
+  s_41e2ae999367a0::t_6e1a14cdd27d5a 264,270-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fd3835e9a2c76dcb80cba5e4931225f06996729e",
+  "prompts": {},
+  "sessions": {
+    "s_41e2ae999367a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a79f404d-7161-44f2-a4a6-499af48d19b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
