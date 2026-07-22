@@ -1,0 +1,19 @@
+scripts/check-bare-groups.sh
+  s_5e51cc5fce0c0c::t_ab0a07eab08a36 45-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f2061d8b4592bb19a8a16d4cf43a2c7c130e3f17",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
