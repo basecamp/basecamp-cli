@@ -942,6 +942,41 @@ func TestTodos_BoostTarget_IncludesAccountID(t *testing.T) {
 	assert.Equal(t, int64(42), picker.Target.ProjectID)
 }
 
+// --- Edit description: table fail-closed guard ---
+
+const todoTableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
+	"<tbody><tr><td>Baz</td></tr></tbody></table></figure>"
+
+func TestTodos_EditDescription_BlockedForTable(t *testing.T) {
+	v := testTodosViewWithTodos()
+
+	todos := sampleTodos()
+	todos[0].Description = todoTableHTML
+	v.session.Hub().Todos(42, 10).Set(todos)
+
+	cmd := v.startEditDescription()
+	assert.False(t, v.editingDesc, "must not enter edit mode on table content")
+
+	require.NotNil(t, cmd, "should return a status command")
+	status, ok := cmd().(workspace.StatusMsg)
+	require.True(t, ok, "cmd should produce a StatusMsg")
+	assert.Contains(t, status.Text, "table")
+	assert.True(t, status.IsError)
+}
+
+func TestTodos_EditDescription_EntersForNonTable(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.descComposer = widget.NewComposer(v.styles, widget.WithMode(widget.ComposerRich))
+
+	todos := sampleTodos()
+	todos[0].Description = "<p>plain description</p>"
+	v.session.Hub().Todos(42, 10).Set(todos)
+
+	cmd := v.startEditDescription()
+	assert.True(t, v.editingDesc, "should enter edit mode on table-free content")
+	assert.NotNil(t, cmd)
+}
+
 // newTextInputWithValue creates a textinput with a preset value for testing.
 func newTextInputWithValue(val string) textinput.Model {
 	ti := textinput.New()

@@ -212,6 +212,19 @@ func TestComposerSubmitRich(t *testing.T) {
 	}
 }
 
+func TestComposerSubmitTableIsRich(t *testing.T) {
+	// A table-only submission has no other Markdown formatting; without AST-based
+	// table detection it would be misclassified as plain and sent as raw pipes.
+	c := NewComposer(testStyles(), WithMode(ComposerRich))
+	c.SetValue("| Foo | Bar |\n| --- | --- |\n| Baz | Qux |")
+	cmd := c.Submit()
+	msg := cmd()
+	submitMsg := msg.(ComposerSubmitMsg)
+	if submitMsg.Content.IsPlain {
+		t.Error("table-only content should not be plain text")
+	}
+}
+
 func TestComposerSubmitEmpty(t *testing.T) {
 	c := NewComposer(testStyles())
 	cmd := c.Submit()

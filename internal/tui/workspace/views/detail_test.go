@@ -573,6 +573,50 @@ func TestDetail_CommentEdit_Ignored_WhenNoFocus(t *testing.T) {
 	assert.False(t, v.editingComment)
 }
 
+const tableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
+	"<tbody><tr><td>Baz</td></tr></tbody></table></figure>"
+
+func TestDetail_EditBody_BlockedForTable(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	v.data.content = tableHTML
+
+	cmd := v.startEditBody()
+	assert.False(t, v.editingBody, "must not enter edit mode on table content")
+	assert.Nil(t, v.bodyEditComposer, "composer must not be built")
+
+	require.NotNil(t, cmd, "should return a status command")
+	status, ok := cmd().(workspace.StatusMsg)
+	require.True(t, ok, "cmd should produce a StatusMsg")
+	assert.Contains(t, status.Text, "table")
+	assert.True(t, status.IsError)
+}
+
+func TestDetail_EditBody_EntersForNonTable(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	v.data.content = "<p>plain body</p>"
+
+	cmd := v.startEditBody()
+	assert.True(t, v.editingBody, "should enter edit mode on table-free content")
+	require.NotNil(t, v.bodyEditComposer, "composer should be built")
+	assert.NotNil(t, cmd)
+}
+
+func TestDetail_CommentEdit_BlockedForTable(t *testing.T) {
+	v := detailWithComments()
+	v.focusedComment = 0
+	v.data.comments[0].content = tableHTML
+
+	cmd := v.startCommentEdit()
+	assert.False(t, v.editingComment, "must not enter edit mode on table content")
+	assert.Nil(t, v.commentEditComposer, "composer must not be built")
+
+	require.NotNil(t, cmd, "should return a status command")
+	status, ok := cmd().(workspace.StatusMsg)
+	require.True(t, ok, "cmd should produce a StatusMsg")
+	assert.Contains(t, status.Text, "table")
+	assert.True(t, status.IsError)
+}
+
 func TestDetail_CommentTrash_DoublePress(t *testing.T) {
 	v := detailWithComments()
 	v.focusedComment = 1
