@@ -1,0 +1,55 @@
+internal/presenter/format.go
+  s_a2478f56149e05::t_188de89c314842 31-32,38-86
+  s_020ddda80a0e3e::t_64df73b99caf0b 87
+internal/version/sdk-provenance.json
+  s_020ddda80a0e3e::t_dd5f5bbaf80d9a 4-6
+API-COVERAGE.md
+  s_020ddda80a0e3e::t_7fa46c708ea182 43
+  s_020ddda80a0e3e::t_f23006f4ecbc94 29
+  s_020ddda80a0e3e::t_8195dab9b26bd4 31
+  s_020ddda80a0e3e::t_0d0d06662d2b5e 50
+internal/commands/todos.go
+  s_020ddda80a0e3e::t_1a60a61ba13e06 732-741
+go.mod
+  s_020ddda80a0e3e::t_dd5f5bbaf80d9a 9,69
+internal/commands/notifications.go
+  s_020ddda80a0e3e::t_b5a76c4ce72f35 10-11
+  s_020ddda80a0e3e::t_5b85dd7d32ac97 156-158,160-164
+  s_020ddda80a0e3e::t_a9a0d5dbff5751 74-81,86-91
+  s_020ddda80a0e3e::t_f327248205ff94 23-25,29
+internal/presenter/presenter_test.go
+  s_a2478f56149e05::t_188de89c314842 112-113
+internal/presenter/schemas/todo.yaml
+  s_a2478f56149e05::t_188de89c314842 27-31,72-73
+internal/commands/todosets.go
+  s_020ddda80a0e3e::t_0d83d6238458b8 218-242,244-245
+internal/presenter/render.go
+  s_a2478f56149e05::t_188de89c314842 193-202
+  s_020ddda80a0e3e::t_db1ab24d26e3d0 203
+go.sum
+  s_020ddda80a0e3e::t_b610d2c6ae417f 26-27,134-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "aafa7c4fdb200fd84a04f14089f527f4b3e7de58",
+  "prompts": {},
+  "sessions": {
+    "s_020ddda80a0e3e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6e0f46c8-58e3-4727-8798-927bff9fb74a",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_a2478f56149e05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3768d9b4-493f-4c98-82ff-f6f1e061eafd",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": null
+    }
+  }
+}
