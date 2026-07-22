@@ -850,6 +850,7 @@ CMD basecamp search
 CMD basecamp search metadata
 CMD basecamp search types
 CMD basecamp setup
+CMD basecamp setup agents
 CMD basecamp setup claude
 CMD basecamp setup codex
 CMD basecamp show
@@ -11428,6 +11429,27 @@ FLAG basecamp setup --stats type=bool
 FLAG basecamp setup --styled type=bool
 FLAG basecamp setup --todolist type=string
 FLAG basecamp setup --verbose type=count
+FLAG basecamp setup agents --account type=string
+FLAG basecamp setup agents --agent type=bool
+FLAG basecamp setup agents --cache-dir type=string
+FLAG basecamp setup agents --count type=bool
+FLAG basecamp setup agents --help type=bool
+FLAG basecamp setup agents --hints type=bool
+FLAG basecamp setup agents --ids-only type=bool
+FLAG basecamp setup agents --in type=string
+FLAG basecamp setup agents --jq type=string
+FLAG basecamp setup agents --json type=bool
+FLAG basecamp setup agents --markdown type=bool
+FLAG basecamp setup agents --md type=bool
+FLAG basecamp setup agents --no-hints type=bool
+FLAG basecamp setup agents --no-stats type=bool
+FLAG basecamp setup agents --profile type=string
+FLAG basecamp setup agents --project type=string
+FLAG basecamp setup agents --quiet type=bool
+FLAG basecamp setup agents --stats type=bool
+FLAG basecamp setup agents --styled type=bool
+FLAG basecamp setup agents --todolist type=string
+FLAG basecamp setup agents --verbose type=count
 FLAG basecamp setup claude --account type=string
 FLAG basecamp setup claude --agent type=bool
 FLAG basecamp setup claude --cache-dir type=string
@@ -16470,6 +16492,7 @@ SUB basecamp search
 SUB basecamp search metadata
 SUB basecamp search types
 SUB basecamp setup
+SUB basecamp setup agents
 SUB basecamp setup claude
 SUB basecamp setup codex
 SUB basecamp show

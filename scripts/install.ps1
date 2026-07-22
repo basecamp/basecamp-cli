@@ -6,6 +6,15 @@ try {
   # Ignore when the runtime manages TLS defaults.
 }
 
+# Environment options:
+#   BASECAMP_VERSION      Specific version to install (default: latest)
+#   BASECAMP_BIN_DIR      Where to install the binary
+#   BASECAMP_SKIP_SETUP   Set to 1 to skip the interactive wizard (still runs
+#                         `basecamp setup agents`)
+#   BASECAMP_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
+#                         claude | codex | all | none. Unset = auto-detect.
+#                         Piped install sets it for the interpreter, not the fetch:
+#                           $env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 $Repo = 'basecamp/basecamp-cli'
 $Version = $env:BASECAMP_VERSION
 $SkipSetup = $env:BASECAMP_SKIP_SETUP
@@ -260,6 +269,9 @@ function Main {
     Write-Host ''
     if ($SkipSetup -eq '1') {
       Step 'Skipping setup wizard (BASECAMP_SKIP_SETUP=1)'
+      # Still install the baseline skill and connect coding agents (never prompts).
+      # Honors BASECAMP_SETUP_AGENT (claude|codex|all|none; unset = auto-detect).
+      & $installedBinary setup agents
       Write-Host ''
       Write-Host '  Next steps:'
       Write-Host '    basecamp auth login        Authenticate with Basecamp'
@@ -273,6 +285,9 @@ function Main {
       Write-Host ''
     } else {
       Info 'Skipping interactive setup because PowerShell is running non-interactively.'
+      # Install the baseline skill and connect coding agents (never prompts).
+      # Honors BASECAMP_SETUP_AGENT (claude|codex|all|none; unset = auto-detect).
+      & $installedBinary setup agents
       Write-Host ''
       Write-Host '  Installed executable:'
       Write-Host "    $installedBinary"

@@ -10,6 +10,15 @@
 #                        otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 #   BASECAMP_VERSION    Specific version to install (default: latest)
 #   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
+#                       (still runs `basecamp setup agents` to install the skill
+#                        and connect coding agents)
+#   BASECAMP_SETUP_AGENT
+#                       Which coding agent(s) `setup agents` connects:
+#                       claude | codex | all | none. Unset = auto-detect (connect
+#                       a single detected agent; if several, install the skill
+#                       only and surface the per-agent commands).
+#                       Piped install sets it for the interpreter, not the fetch:
+#                         curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash
 
 set -euo pipefail
 
@@ -443,12 +452,13 @@ main() {
   echo ""
 
   # Run interactive setup wizard only when stdin is a TTY and not explicitly skipped.
-  # Non-interactive environments (CI, piped input, coding agents like Claude Code)
-  # get the agent skill installed and next-step instructions instead — the wizard
-  # requires interactive prompts that don't work without a terminal.
+  # Non-interactive environments (CI, piped input, coding agents like Claude Code
+  # or Codex) get the baseline skill installed, a best-effort agent connection via
+  # `setup agents`, and next-step instructions instead — the wizard requires
+  # interactive prompts that don't work without a terminal.
   if [[ "${BASECAMP_SKIP_SETUP:-}" == "1" ]]; then
     step "Skipping setup wizard (BASECAMP_SKIP_SETUP=1)"
-    "$BIN_DIR/$binary_name" setup claude || true
+    post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
@@ -458,7 +468,7 @@ main() {
     "$BIN_DIR/$binary_name" setup
   else
     info "Skipping interactive setup (no terminal detected)."
-    "$BIN_DIR/$binary_name" setup claude || true
+    post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
@@ -467,4 +477,17 @@ main() {
   fi
 }
 
-main "$@"
+# post_install_setup installs the baseline skill and connects coding agents
+# without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# unset = auto-detect). Never runs the interactive wizard.
+post_install_setup() {
+  local binary_name="$1"
+  "$BIN_DIR/$binary_name" setup agents || true
+}
+
+# Guard so sourcing the script (e.g. from tests) doesn't run the installer.
+# The if-form is required: `[[ … ]] && main` returns 1 when sourced, which
+# trips `set -e` in the sourcing shell.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

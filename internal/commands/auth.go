@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -332,18 +333,38 @@ func buildLogoutCmd(use string) *cobra.Command {
 }
 
 // printAgentNudge prints a hint about coding agent setup after login.
+//
+// Detection proves presence, not intent: with a single detected-unhealthy agent
+// it points at that agent; with several, it never guesses — it prints every
+// `basecamp setup <id>` choice so the user picks.
 func printAgentNudge(w io.Writer, r *output.Renderer) {
+	type nudgeAgent struct{ id, name string }
+	var unhealthy []nudgeAgent
 	for _, agent := range harness.DetectedAgents() {
 		if agent.Checks == nil {
 			continue
 		}
 		for _, c := range agent.Checks() {
 			if c.Status != "pass" {
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("  %s detected. Connect it to Basecamp:", agent.Name)))
-				fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", agent.ID)))
-				return // one nudge is enough
+				unhealthy = append(unhealthy, nudgeAgent{id: agent.ID, name: agent.Name})
+				break
 			}
+		}
+	}
+	sort.Slice(unhealthy, func(i, j int) bool { return unhealthy[i].id < unhealthy[j].id })
+
+	switch len(unhealthy) {
+	case 0:
+		return
+	case 1:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("  %s detected. Connect it to Basecamp:", unhealthy[0].name)))
+		fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", unhealthy[0].id)))
+	default:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, r.Muted.Render("  Multiple coding agents detected. Choose one:"))
+		for _, a := range unhealthy {
+			fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", a.id)))
 		}
 	}
 }
