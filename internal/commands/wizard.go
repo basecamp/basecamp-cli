@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -101,7 +102,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	configScope := wizardSaveConfig(cmd.OutOrStdout(), styles, accountID, projectID)
 	result.ConfigScope = configScope
 
-	// Step 6: Coding agent integration
+	// Coding agent integration
 	agentOutcome, err := wizardAgents(cmd, styles)
 	if err != nil {
 		return err
@@ -117,7 +118,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// Interactive mode shows the rich checklist directly; non-interactive
 	// or machine-output mode delegates to app.OK which renders the structured envelope.
 	if app.IsInteractive() && !app.IsMachineOutput() {
-		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues)
+		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped)
 		return nil
 	}
 
@@ -323,10 +324,14 @@ func successHeadline(status string, issueCount int) string {
 	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
 }
 
-// showSuccess displays the completion summary with example commands. checks and
-// issues come from one post-setup snapshot so the headline, checklist, and
-// remediation are always consistent.
-func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue) {
+// showSuccess displays the completion summary with example commands. checks is
+// the agent-health snapshot rendered as the checklist; issues holds every
+// unresolved problem — snapshot failures plus standalone setup failures such as
+// the baseline skill install or surviving stale entries — and drives the
+// headline and remediation. When the user skipped agent setup the checks are
+// reported as skipped rather than as failures, so the summary never shows red
+// checks under a "complete" headline.
+func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue, skipped bool) {
 	divider := styles.Muted.Render("─────────────────────────────────")
 
 	headlineStyle := styles.Success
@@ -354,8 +359,12 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []
 	if result.ConfigScope != "" {
 		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Config saved (%s)", result.ConfigScope)))
 	}
-	for _, check := range checks {
-		fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
+	if skipped {
+		fmt.Fprintln(w, styles.Muted.Render("  Coding agent setup skipped — run: basecamp setup"))
+	} else {
+		for _, check := range checks {
+			fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
+		}
 	}
 	fmt.Fprintln(w)
 
@@ -365,8 +374,11 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []
 	if len(issues) > 0 {
 		fmt.Fprintln(w, styles.Body.Render("  Some steps need attention:"))
 		for _, issue := range issues {
+			// Check names usually already carry the agent (e.g. "Claude Code
+			// Plugin"); only prefix when they don't, to avoid "Claude Code —
+			// Claude Code Plugin".
 			label := issue.Check
-			if issue.Agent != "" {
+			if issue.Agent != "" && !strings.HasPrefix(issue.Check, issue.Agent) {
 				label = issue.Agent + " — " + issue.Check
 			}
 			line := "    " + label

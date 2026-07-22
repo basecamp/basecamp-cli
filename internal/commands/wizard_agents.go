@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -99,13 +100,19 @@ func statusFromOutcome(o agentSetupOutcome) string {
 	return "complete"
 }
 
+// claudeMarketplaceTimeout bounds the marketplace refresh so a hung clone can't
+// stall setup indefinitely.
+const claudeMarketplaceTimeout = 60 * time.Second
+
 // refreshClaudeMarketplace refreshes the 37signals marketplace cache from source
 // before an install. `claude plugin marketplace add` no-ops on an
 // already-registered marketplace, so a pre-existing entry that still declares the
 // SSH `source: github` shorthand would otherwise strand `claude plugin install`
 // on an SSH clone. `marketplace update` re-clones and picks up the current HTTPS
 // `source: url`. Best-effort: install still proceeds if the refresh fails.
-func refreshClaudeMarketplace(ctx context.Context, claudePath string, stdout, stderr io.Writer) {
+func refreshClaudeMarketplace(parent context.Context, claudePath string, stdout, stderr io.Writer) {
+	ctx, cancel := context.WithTimeout(parent, claudeMarketplaceTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "update", harness.ClaudeMarketplaceName) //nolint:gosec // G204: claudePath from FindClaudeBinary
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -339,8 +346,23 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	postChecks := snapshotAgentChecks(agents)
 	issues = append(issues, issuesFromChecks(postChecks)...)
 
+	// Post-condition: the all-good gate also requires stale-plugin cleanup, but a
+	// current-plugin health check can pass while stale entries survive (removal
+	// failed). Re-check so leftover stale keys mark the run incomplete instead of
+	// reporting "complete".
+	issues = append(issues, claudeStaleIssues()...)
+
 	fmt.Fprintln(w)
 	return agentSetupOutcome{Checks: postChecks, Issues: issues}, nil
+}
+
+// claudeStaleIssues reports leftover stale plugin entries as an issue so the
+// wizard marks the run incomplete when cleanup could not remove them.
+func claudeStaleIssues() []agentIssue {
+	if len(harness.StalePluginKeys()) == 0 {
+		return nil
+	}
+	return []agentIssue{{Agent: "Claude Code", Check: "Stale plugin entries", Hint: "Run: basecamp doctor"}}
 }
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).

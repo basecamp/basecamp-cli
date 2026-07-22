@@ -168,13 +168,52 @@ func TestShowSuccessIncomplete(t *testing.T) {
 	issues := issuesFromChecks(checks)
 
 	var buf bytes.Buffer
-	showSuccess(&buf, styles, WizardResult{Status: "incomplete", AccountID: "123"}, checks, issues)
+	showSuccess(&buf, styles, WizardResult{Status: "incomplete", AccountID: "123"}, checks, issues, false)
 	out := buf.String()
 
 	assert.NotContains(t, out, "Setup complete!")
 	assert.Contains(t, out, "Setup finished")
 	assert.Contains(t, out, "Run: basecamp setup claude") // agent-specific hint
 	assert.Contains(t, out, "basecamp doctor")
+}
+
+// TestClaudeStaleIssues verifies surviving stale plugin entries become an issue
+// (so status goes incomplete) and a clean home yields none.
+func TestClaudeStaleIssues(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	assert.Empty(t, claudeStaleIssues(), "no stale file → no issues")
+
+	pluginDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp@basecamp":[{"scope":"user","version":"0.1.0"}]}}`),
+		0o644))
+
+	issues := claudeStaleIssues()
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Claude Code", issues[0].Agent)
+	assert.Equal(t, "incomplete", statusFromOutcome(agentSetupOutcome{Issues: issues}))
+}
+
+// TestShowSuccessSkipped verifies a deliberate skip renders coherently: the
+// completion banner stays, agent setup shows as skipped (not red failing
+// checks), and there is no remediation block.
+func TestShowSuccessSkipped(t *testing.T) {
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+	// preChecks on a skip can include a failing plugin check (agent never set up).
+	checks := snapshotAgentChecks(fakeAgents())
+
+	var buf bytes.Buffer
+	showSuccess(&buf, styles, WizardResult{Status: "complete", AccountID: "123"}, checks, nil, true)
+	out := buf.String()
+
+	assert.Contains(t, out, "Setup complete!")
+	assert.Contains(t, out, "skipped")
+	assert.NotContains(t, out, "Claude Code Plugin") // no red failing check rendered
+	assert.NotContains(t, out, "basecamp doctor")    // no remediation on a deliberate skip
 }
 
 // TestShowSuccessComplete verifies the healthy path keeps the completion banner
@@ -184,7 +223,7 @@ func TestShowSuccessComplete(t *testing.T) {
 	checks := []agentCheck{{Agent: "Claude Code", Name: "Claude Code Plugin", Status: "pass"}}
 
 	var buf bytes.Buffer
-	showSuccess(&buf, styles, WizardResult{Status: "complete", AccountID: "123"}, checks, nil)
+	showSuccess(&buf, styles, WizardResult{Status: "complete", AccountID: "123"}, checks, nil, false)
 	out := buf.String()
 
 	assert.Contains(t, out, "Setup complete!")
@@ -567,11 +606,14 @@ func TestSetupClaudeNonInteractiveScopeAwareReinstall(t *testing.T) {
 	// Verify install calls preserve scopes from stale entries
 	calls, readErr := os.ReadFile(logFile)
 	require.NoError(t, readErr)
-	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope user")
 	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope project")
-	// Refresh the marketplace cache before reinstalling so a stale SSH-shorthand
-	// entry is replaced with the current HTTPS source (issue #417).
-	assert.Contains(t, string(calls), "plugin marketplace update 37signals")
+	// The reinstall path must also refresh before installing: add → update →
+	// scoped install, so a stale SSH-shorthand entry is replaced with the current
+	// HTTPS source first (issue #417).
+	assertCallOrder(t, string(calls),
+		"plugin marketplace add basecamp/claude-plugins",
+		"plugin marketplace update 37signals",
+		"plugin install basecamp@37signals --scope user")
 }
 
 // TestSetupClaudeNonInteractiveRefreshesMarketplace verifies the fresh-install
