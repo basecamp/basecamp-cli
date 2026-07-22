@@ -4055,8 +4055,12 @@ func TestEntityPresenterRendersComments(t *testing.T) {
 			require.NoError(t, err)
 
 			out := ansi.Strip(buf.String())
-			// Presenter artifact from todo.yaml schema
-			assert.Contains(t, out, "Status")
+			// Presenter artifact from todo.yaml schema: the affordance hint
+			// only the schema-driven presenter emits. (The Status section is
+			// deliberately absent — every field formats empty for this data,
+			// and empty sections are skipped, heading included.)
+			assert.Contains(t, out, "basecamp todos complete 42")
+			assert.NotContains(t, out, "Status")
 			// Comment rendered after presenter
 			assert.Contains(t, out, "Annie Bryan")
 			assert.Contains(t, out, "Great idea")

@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -18,12 +20,13 @@ func NewNotificationsCmd() *cobra.Command {
 		Short: "View and manage notifications",
 		Long: `View and manage your notifications.
 
-Shows unread, read, and memory notifications. Use 'read' to mark
-notifications as read.`,
+Shows unread and read notifications, plus resurfaced items: Bubble Ups
+(and Scheduled Bubble Ups) on Basecamp 5, Memories on Basecamp 4.
+Use 'read' to mark notifications as read.`,
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Account-wide notifications — no --in <project> needed.\n" +
-				"Returns unreads, reads, and memories sections.\n" +
+				"Returns unreads and reads sections, plus bubble_ups/scheduled_bubble_ups (BC5) or memories (BC4).\n" +
 				"Use 'read' with notification IDs to mark as read.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,10 +71,23 @@ func runNotificationsList(cmd *cobra.Command, page int32) error {
 		return convertSDKError(err)
 	}
 
-	total := len(result.Unreads) + len(result.Reads) + len(result.Memories)
+	// BC5 carries resurfaced items in BubbleUps and may also populate
+	// Memories as a compat alias of the same list; BC4 populates Memories
+	// only. Count whichever list carries them, never both.
+	resurfaced := len(result.BubbleUps)
+	if resurfaced == 0 {
+		resurfaced = len(result.Memories)
+	}
+	total := len(result.Unreads) + len(result.Reads) + resurfaced + len(result.ScheduledBubbleUps)
 	summary := fmt.Sprintf("%d notification(s)", total)
 	if len(result.Unreads) > 0 {
 		summary += fmt.Sprintf(" (%d unread)", len(result.Unreads))
+	}
+	if len(result.BubbleUps) > 0 {
+		summary += fmt.Sprintf(", %d bubble-up(s)", len(result.BubbleUps))
+	}
+	if len(result.ScheduledBubbleUps) > 0 {
+		summary += fmt.Sprintf(", %d scheduled bubble-up(s)", len(result.ScheduledBubbleUps))
 	}
 
 	nextPage := page + 1
@@ -137,19 +153,15 @@ match the page you listed (defaults to first page).
 
 			// Build ID → SGID map from all notification sections
 			sgidMap := make(map[int64]string)
-			for _, n := range result.Unreads {
-				if n.ReadableSGID != "" {
-					sgidMap[n.ID] = n.ReadableSGID
-				}
+			sections := [][]basecamp.Notification{
+				result.Unreads, result.Reads, result.Memories,
+				result.BubbleUps, result.ScheduledBubbleUps,
 			}
-			for _, n := range result.Reads {
-				if n.ReadableSGID != "" {
-					sgidMap[n.ID] = n.ReadableSGID
-				}
-			}
-			for _, n := range result.Memories {
-				if n.ReadableSGID != "" {
-					sgidMap[n.ID] = n.ReadableSGID
+			for _, section := range sections {
+				for _, n := range section {
+					if n.ReadableSGID != "" {
+						sgidMap[n.ID] = n.ReadableSGID
+					}
 				}
 			}
 

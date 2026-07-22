@@ -109,8 +109,8 @@ func TestSchemaViews(t *testing.T) {
 		t.Errorf("First list column = %q, want %q", schema.Views.List.Columns[0], "id")
 	}
 
-	if len(schema.Views.Detail.Sections) != 3 {
-		t.Errorf("Detail sections = %d, want 3", len(schema.Views.Detail.Sections))
+	if len(schema.Views.Detail.Sections) != 4 {
+		t.Errorf("Detail sections = %d, want 4", len(schema.Views.Detail.Sections))
 	}
 
 	// Markdown list view config
@@ -246,6 +246,31 @@ func TestFormatFieldPeopleEmpty(t *testing.T) {
 	if got := FormatField(spec, "assignees", nil, enUS); got != "" {
 		t.Errorf("FormatField(nil people) = %q, want empty", got)
 	}
+}
+
+func TestFormatFieldSteps(t *testing.T) {
+	spec := FieldSpec{Format: "steps"}
+
+	steps := []any{
+		map[string]any{"title": "Second", "completed": true, "position": float64(2)},
+		map[string]any{"title": "First", "completed": false, "position": float64(1)},
+	}
+	want := "[ ] First\n[x] Second"
+	assert.Equal(t, want, FormatField(spec, "steps", steps, enUS))
+
+	assert.Empty(t, FormatField(spec, "steps", []any{}, enUS))
+	assert.Empty(t, FormatField(spec, "steps", nil, enUS))
+}
+
+func TestFormatFieldStepsSanitizesTitles(t *testing.T) {
+	spec := FieldSpec{Format: "steps"}
+
+	steps := []any{
+		map[string]any{"title": "evil\x1b]8;;https://example.com\x1b\\link\ntwo lines", "completed": false},
+	}
+	got := FormatField(spec, "steps", steps, enUS)
+	assert.NotContains(t, got, "\x1b")
+	assert.Equal(t, "[ ] evillink two lines", got)
 }
 
 func TestFormatFieldText(t *testing.T) {
@@ -972,6 +997,76 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	if strings.Contains(out, "\x1b[") {
 		t.Errorf("Markdown output should contain no ANSI codes, got:\n%q", out)
 	}
+
+	// Todo without steps skips the Steps section entirely, heading included
+	if strings.Contains(out, "#### Steps") {
+		t.Errorf("Markdown detail should omit empty Steps section, got:\n%s", out)
+	}
+}
+
+func TestRenderDetailSkipsEmptySections(t *testing.T) {
+	schema := LookupByName("todo")
+	require.NotNil(t, schema)
+
+	// Incomplete todo with no due date or assignees: every Status field
+	// formats to "", so the heading must not render either.
+	data := map[string]any{
+		"id":        float64(42),
+		"content":   "Buy milk",
+		"completed": false,
+	}
+
+	t.Run("styled", func(t *testing.T) {
+		styles := NewStyles(tui.NoColorTheme(), false)
+		var buf strings.Builder
+		require.NoError(t, RenderDetail(&buf, schema, data, styles, enUS))
+		assert.NotContains(t, buf.String(), "Status")
+		assert.NotContains(t, buf.String(), "Steps")
+	})
+
+	t.Run("markdown", func(t *testing.T) {
+		var buf strings.Builder
+		require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+		assert.NotContains(t, buf.String(), "#### Status")
+		assert.NotContains(t, buf.String(), "#### Steps")
+	})
+
+	// With a due date, Status renders again in both modes.
+	data["due_on"] = "2026-01-15"
+
+	t.Run("styled_with_due_date", func(t *testing.T) {
+		styles := NewStyles(tui.NoColorTheme(), false)
+		var buf strings.Builder
+		require.NoError(t, RenderDetail(&buf, schema, data, styles, enUS))
+		assert.Contains(t, buf.String(), "Status")
+	})
+
+	t.Run("markdown_with_due_date", func(t *testing.T) {
+		var buf strings.Builder
+		require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+		assert.Contains(t, buf.String(), "#### Status")
+	})
+}
+
+func TestRenderDetailMarkdownSteps(t *testing.T) {
+	schema := LookupByName("todo")
+	require.NotNil(t, schema)
+
+	data := map[string]any{
+		"id":      float64(12345),
+		"content": "Fix the login bug",
+		"steps": []any{
+			map[string]any{"title": "Reproduce", "completed": true, "position": float64(1)},
+			map[string]any{"title": "Fix", "completed": false, "position": float64(2)},
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+	out := buf.String()
+
+	assert.Contains(t, out, "#### Steps")
+	assert.Contains(t, out, "[x] Reproduce\n[ ] Fix")
 }
 
 func TestRenderListMarkdown(t *testing.T) {
