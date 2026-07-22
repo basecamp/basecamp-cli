@@ -1,0 +1,34 @@
+hooks/hooks.json
+  s_5e51cc5fce0c0c::t_99a236ab6b469f 1-54
+AGENTS.md
+  s_5e51cc5fce0c0c::t_52dfc412a37876 38
+install.md
+  s_5e51cc5fce0c0c::t_55ff7450e1032b 123
+  s_5e51cc5fce0c0c::t_4e2e952be81500 131
+internal/commands/wizard_codex.go
+  s_5e51cc5fce0c0c::t_a05017f8377ea9 68-69,71
+  s_5e51cc5fce0c0c::t_f25095066a883b 70
+internal/commands/wizard_codex_test.go
+  s_5e51cc5fce0c0c::t_3b62dba61d279b 159-166
+.codex-plugin/plugin.json
+  s_5e51cc5fce0c0c::t_a65607f3c14c0b 17
+README.md
+  s_5e51cc5fce0c0c::t_4699ea5c237758 155
+  s_5e51cc5fce0c0c::t_a870b82abc5cb5 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "af8776a2c110548b3ec790797ffb2f4abfc5501f",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}
