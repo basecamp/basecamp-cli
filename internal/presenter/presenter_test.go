@@ -109,8 +109,8 @@ func TestSchemaViews(t *testing.T) {
 		t.Errorf("First list column = %q, want %q", schema.Views.List.Columns[0], "id")
 	}
 
-	if len(schema.Views.Detail.Sections) != 3 {
-		t.Errorf("Detail sections = %d, want 3", len(schema.Views.Detail.Sections))
+	if len(schema.Views.Detail.Sections) != 4 {
+		t.Errorf("Detail sections = %d, want 4", len(schema.Views.Detail.Sections))
 	}
 
 	// Markdown list view config

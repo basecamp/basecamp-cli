@@ -24,6 +24,11 @@ fields:
     format: text
     collapse: true
 
+  steps:
+    role: body
+    format: steps
+    collapse: true
+
   completed:
     role: detail
     emphasis: muted
@@ -64,6 +69,8 @@ views:
   detail:
     sections:
       - fields: [content, description]
+      - heading: Steps
+        fields: [steps]
       - heading: Status
         fields: [completed, due_on, assignees]
       - heading: Metadata

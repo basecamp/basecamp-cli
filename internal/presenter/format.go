@@ -28,9 +28,61 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatNumber(val, locale)
 	case "dock":
 		return formatDock(val)
+	case "steps":
+		return formatSteps(val)
 	default:
 		return formatText(val)
 	}
+}
+
+// formatSteps renders a CardStep array as a multi-line checklist.
+// Each step prefixes its title with [x] for completed, [ ] for active.
+func formatSteps(val any) string {
+	var items []map[string]any
+	switch v := val.(type) {
+	case []map[string]any:
+		items = v
+	case []any:
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				items = append(items, m)
+			}
+		}
+	}
+	if len(items) == 0 {
+		return ""
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		return stepPosition(items[i]) < stepPosition(items[j])
+	})
+
+	var lines []string
+	for _, m := range items {
+		title, _ := m["title"].(string)
+		marker := "[ ]"
+		if completed, ok := m["completed"].(bool); ok && completed {
+			marker = "[x]"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s", marker, title))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func stepPosition(m map[string]any) int {
+	switch v := m["position"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case json.Number:
+		if n, err := strconv.Atoi(v.String()); err == nil {
+			return n
+		}
+	}
+	return 1<<31 - 1
 }
 
 // formatBoolean converts a boolean to a label from the spec, or "yes"/"no".

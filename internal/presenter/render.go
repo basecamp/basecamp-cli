@@ -158,13 +158,6 @@ func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles
 }
 
 func renderDetailSection(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, styles Styles, locale Locale) {
-	// Section heading
-	if section.Heading != "" {
-		b.WriteString("\n")
-		b.WriteString(styles.Heading.Render(section.Heading))
-		b.WriteString("\n")
-	}
-
 	// Find max label length for alignment
 	maxLen := 0
 	var visibleFields []string
@@ -195,6 +188,17 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 			maxLen = len(label)
 		}
 		visibleFields = append(visibleFields, name)
+	}
+
+	// Skip the whole section (heading included) when nothing renders.
+	if len(visibleFields) == 0 {
+		return
+	}
+
+	if section.Heading != "" {
+		b.WriteString("\n")
+		b.WriteString(styles.Heading.Render(section.Heading))
+		b.WriteString("\n")
 	}
 
 	for _, name := range visibleFields {

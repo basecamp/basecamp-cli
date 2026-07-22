@@ -729,6 +729,16 @@ You can pass either a todo ID or a Basecamp URL:
 			),
 		}
 
+		if len(todo.Steps) > 0 {
+			opts = append(opts, output.WithBreadcrumbs(
+				output.Breadcrumb{
+					Action:      "steps",
+					Cmd:         "basecamp cards step complete <step-id>",
+					Description: "Complete a step (step IDs in --output json)",
+				},
+			))
+		}
+
 		data := any(todo)
 		attachmentNotice := ""
 		attachments := downloadableAttachments(richtext.ParseAttachments(todo.Description))

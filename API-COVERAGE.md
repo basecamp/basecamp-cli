@@ -26,9 +26,9 @@ The **Since** column tags each row with the Basecamp version that introduced its
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
-| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position |
+| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`; edit via `cards step`) |
 | todolists | 8 | `todolists` | ✅ | BC4 | - | list, show, create, update |
-| todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock |
+| todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
@@ -40,14 +40,14 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/delete. @mentions in content |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, create, update. @mentions in content |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete |
-| notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read |
+| notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove |
+| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
 | my_assignments | 3 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter) |
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search |
