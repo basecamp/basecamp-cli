@@ -1,0 +1,36 @@
+internal/commands/agent_hook_test.go
+  s_5e51cc5fce0c0c::t_132c0b0a07065e 21
+  s_5e51cc5fce0c0c::t_620b010f608533 351-431
+internal/commands/agent_hook.go
+  s_5e51cc5fce0c0c::t_4cb9711d232a94 8
+  s_5e51cc5fce0c0c::t_9d77fa39f663f7 168
+  s_5e51cc5fce0c0c::t_168e15eb731187 145-146
+  s_5e51cc5fce0c0c::t_b400f87125e7c3 87,94-118
+  s_5e51cc5fce0c0c::t_8d87c34fdbcb18 253-265
+  s_5e51cc5fce0c0c::t_3275127be33488 119,320-327
+  s_c9b7cecf44b5ed::t_46e288ae2fb585 120
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b2e060a9bfd28d01e2ad230beff3cda8e56e2ed6",
+  "prompts": {},
+  "sessions": {
+    "s_5e51cc5fce0c0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e59bd3a-435a-4dd5-b738-4933cdf28d49",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_c9b7cecf44b5ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab562d91-3cc7-47e1-bd7b-46f572409e16",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
