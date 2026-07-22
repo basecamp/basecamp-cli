@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -25,9 +26,13 @@ Every project has a "dock" with tools like Message Board, To-dos, Docs & Files,
 Chat, Schedule, etc. Tool IDs can be found in the project's dock array
 (see 'basecamp projects show <id>').
 
-Tools can be created by cloning existing ones (e.g., create a second Chat).
+Tools are created by type (e.g., add a second chat with --type chat).
 Disabling a tool hides it from the dock but preserves its content.`,
-		Annotations: map[string]string{"agent_notes": "Dock tools are the sidebar navigation items in a project\nEnable/disable controls visibility without deleting\nEach tool has a type (e.g., Todoset, Schedule, MessageBoard, Vault, Chat::Campfire)"},
+		Annotations: map[string]string{"agent_notes": fmt.Sprintf(
+			"Dock tools are the sidebar navigation items in a project\n"+
+				"Enable/disable controls visibility without deleting\n"+
+				"Create by type with --type: %s (create-by-type is BC5-only)",
+			strings.Join(toolTypeFriendlyNames(), ", "))},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name (for breadcrumbs)")
@@ -150,29 +155,141 @@ func newToolsShowCmd(project *string) *cobra.Command {
 	}
 }
 
+// toolTypes is the single source of truth for the closed set of dock tool
+// types create-by-type accepts. Its order is deterministic and drives three
+// things that must never drift: normalization, --type completion, and the
+// unknown-type error listing. friendly is the primary dock noun surfaced in
+// completion and errors; canonical is the Rails class-name sent to the API.
+var toolTypes = []struct {
+	canonical string   // Rails class → the tool_type posted to the API
+	friendly  string   // primary dock noun (completion + error list)
+	aliases   []string // extra accepted forms (matched after collapse)
+}{
+	{"Chat::Transcript", "chat", []string{"campfire"}},
+	{"Inbox", "inbox", []string{"forwards", "email"}},
+	{"Kanban::Board", "kanban_board", []string{"kanban", "cardtable", "cards", "card"}},
+	{"Message::Board", "message_board", []string{"messageboard", "messages", "message"}},
+	{"Questionnaire", "questionnaire", []string{"questions", "checkin", "checkins", "automaticcheckins"}},
+	{"Schedule", "schedule", []string{"calendar"}},
+	{"Todoset", "todoset", []string{"todosets", "todos", "todo", "todolist"}},
+	{"Vault", "vault", []string{"docs", "doc", "documents", "files"}},
+}
+
+// collapseToolType reduces an input to a comparison key: lowercased with all
+// separators (::, -, _, spaces) removed. This lets "Message::Board",
+// "message_board", and "message-board" all match the same entry.
+func collapseToolType(input string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(input) {
+		switch r {
+		case ':', '-', '_', ' ':
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// normalizeToolType maps a friendly noun, canonical class-name, or accepted
+// degenerate spelling to the canonical tool_type. Strict: unknown input returns
+// ok=false. The closed 8-set plus the API's opaque 400 on a bad value justify
+// rejecting rather than passing input through (unlike normalizeRecordingType).
+func normalizeToolType(input string) (canonical string, ok bool) {
+	key := collapseToolType(input)
+	if key == "" {
+		return "", false
+	}
+	for _, t := range toolTypes {
+		if key == collapseToolType(t.canonical) || key == collapseToolType(t.friendly) {
+			return t.canonical, true
+		}
+		for _, alias := range t.aliases {
+			if key == collapseToolType(alias) {
+				return t.canonical, true
+			}
+		}
+	}
+	return "", false
+}
+
+// toolTypeFriendlyNames returns the friendly nouns in stable slice order, used
+// for both --type completion and the unknown-type error listing.
+func toolTypeFriendlyNames() []string {
+	names := make([]string, len(toolTypes))
+	for i, t := range toolTypes {
+		names[i] = t.friendly
+	}
+	return names
+}
+
+// resolveToolBucketID resolves the numeric destination bucket for create.
+// Unlike the breadcrumb-only resolveToolsProject, this bucket is sent to the
+// API, so a project is required. Precedence: --in/--project > --project global
+// flag > config default > interactive. Returns the bucket ID and the resolved
+// project ID string (for breadcrumbs).
+func resolveToolBucketID(cmd *cobra.Command, app *appctx.App, project string) (int64, string, error) {
+	projectID := project
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return 0, "", err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return 0, "", err
+	}
+
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return 0, "", output.ErrUsage("Project ID must be numeric")
+	}
+	return bucketID, resolvedProjectID, nil
+}
+
 func newToolsCreateCmd(project *string) *cobra.Command {
-	var sourceID string
+	var toolType string
 
 	cmd := &cobra.Command{
 		Use:   "create [title]",
-		Short: "Create a new dock tool by cloning",
-		Long: `Create a new dock tool by cloning an existing one.
+		Short: "Create a new dock tool by type",
+		Long: fmt.Sprintf(`Create a new dock tool by type in a project's dock.
 
-For example, clone a Chat to create a second chat room in the same project.`,
+For example, add a second chat with --type chat, or a Message Board with
+--type message_board. An optional title may be given; without one, Basecamp
+assigns the default title for the type.
+
+Accepted types: %s. Create-by-type is BC5-only.`,
+			strings.Join(toolTypeFriendlyNames(), ", ")),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if sourceID == "" {
-				return output.ErrUsage("--source or --clone is required (ID of tool to clone)")
+			if toolType == "" {
+				return output.ErrUsage("--type is required")
+			}
+
+			canonicalType, ok := normalizeToolType(toolType)
+			if !ok {
+				if collapseToolType(toolType) == "board" {
+					return output.ErrUsage(fmt.Sprintf(
+						"Ambiguous --type %q — use message_board or kanban_board (accepted: %s)",
+						toolType, strings.Join(toolTypeFriendlyNames(), ", ")))
+				}
+				return output.ErrUsage(fmt.Sprintf("Unknown --type %q (accepted: %s)",
+					toolType, strings.Join(toolTypeFriendlyNames(), ", ")))
 			}
 
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			sourceToolID, err := strconv.ParseInt(sourceID, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid source tool ID")
 			}
 
 			title := ""
@@ -186,18 +303,18 @@ For example, clone a Chat to create a second chat room in the same project.`,
 				}
 			}
 
-			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
+			bucketID, resolvedProjectID, err := resolveToolBucketID(cmd, app, *project)
 			if err != nil {
 				return err
 			}
 			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
-			var cloneOpts *basecamp.CloneToolOptions
+			var opts *basecamp.CreateToolOptions
 			if title != "" {
-				cloneOpts = &basecamp.CloneToolOptions{Title: title}
+				opts = &basecamp.CreateToolOptions{Title: title}
 			}
 
-			created, err := app.Account().Tools().Create(cmd.Context(), sourceToolID, cloneOpts)
+			created, err := app.Account().Tools().Create(cmd.Context(), bucketID, canonicalType, opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -208,13 +325,11 @@ For example, clone a Chat to create a second chat room in the same project.`,
 					Cmd:         fmt.Sprintf("basecamp tools show %d%s", created.ID, inFlag),
 					Description: "View tool",
 				},
-			}
-			if resolvedProjectID != "" {
-				crumbs = append(crumbs, output.Breadcrumb{
+				{
 					Action:      "project",
 					Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
 					Description: "View project",
-				})
+				},
 			}
 
 			return app.OK(created,
@@ -224,8 +339,10 @@ For example, clone a Chat to create a second chat room in the same project.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&sourceID, "source", "s", "", "Source tool ID to clone (required)")
-	cmd.Flags().StringVar(&sourceID, "clone", "", "Source tool ID (alias for --source)")
+	cmd.Flags().StringVarP(&toolType, "type", "t", "", "Tool type to create (required)")
+	_ = cmd.RegisterFlagCompletionFunc("type", func(_ *cobra.Command, _ []string, _ string) ([]cobra.Completion, cobra.ShellCompDirective) {
+		return toolTypeFriendlyNames(), cobra.ShellCompDirectiveNoFileComp
+	})
 
 	return cmd
 }

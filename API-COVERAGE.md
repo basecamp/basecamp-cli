@@ -6,17 +6,17 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 42 | 155 |
+| ✅ Implemented | 43 | 162 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **46** | **167** |
+| **Total (docs)** | **47** | **174** |
 
-**100% coverage of in-scope API** (155/155 endpoints)
+**100% coverage of in-scope API** (162/162 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
-> Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (46 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
+> Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (47 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.7.3 — maintenance bump: API date advanced to 2026-03-23, transitive dependency updates. No new services or methods.
+**SDK version:** v0.7.4 (`f2086f5e`) — reshapes `Tools.Create` to the BC5 bucket-scoped create-by-type endpoint (`POST /buckets/{id}/dock/tools.json` with `{tool_type, title?}`), replacing the removed account-scoped clone call. API date advanced to 2026-07-22.
 
 ## Coverage by Section
 
@@ -30,6 +30,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | todolists | 8 | `todolists` | ✅ | BC4 | - | list, show, create, update |
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
+| dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition. `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
 | gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
