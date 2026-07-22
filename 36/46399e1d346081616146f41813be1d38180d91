@@ -1,0 +1,19 @@
+.github/workflows/security.yml
+  s_fd3b1277b79c58::t_2766b228155acf 94-110,112-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3646399e1d346081616146f41813be1d38180d91",
+  "prompts": {},
+  "sessions": {
+    "s_fd3b1277b79c58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ce1e0c7-c8e8-469d-b07f-2eefb70c920e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
