@@ -1,0 +1,22 @@
+SDK-GAP-342.md
+  s_60b254bfab738a::t_aadd82e993d5e3 1-190
+API-COVERAGE.md
+  s_60b254bfab738a::t_8634204fe95f34 53
+  s_60b254bfab738a::t_3a93072eb2b7b2 10,12,14-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8229e24432098f97146011c99e9a7018290d81e3",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
