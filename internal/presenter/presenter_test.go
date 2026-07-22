@@ -1004,6 +1004,50 @@ func TestRenderDetailMarkdown(t *testing.T) {
 	}
 }
 
+func TestRenderDetailSkipsEmptySections(t *testing.T) {
+	schema := LookupByName("todo")
+	require.NotNil(t, schema)
+
+	// Incomplete todo with no due date or assignees: every Status field
+	// formats to "", so the heading must not render either.
+	data := map[string]any{
+		"id":        float64(42),
+		"content":   "Buy milk",
+		"completed": false,
+	}
+
+	t.Run("styled", func(t *testing.T) {
+		styles := NewStyles(tui.NoColorTheme(), false)
+		var buf strings.Builder
+		require.NoError(t, RenderDetail(&buf, schema, data, styles, enUS))
+		assert.NotContains(t, buf.String(), "Status")
+		assert.NotContains(t, buf.String(), "Steps")
+	})
+
+	t.Run("markdown", func(t *testing.T) {
+		var buf strings.Builder
+		require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+		assert.NotContains(t, buf.String(), "#### Status")
+		assert.NotContains(t, buf.String(), "#### Steps")
+	})
+
+	// With a due date, Status renders again in both modes.
+	data["due_on"] = "2026-01-15"
+
+	t.Run("styled_with_due_date", func(t *testing.T) {
+		styles := NewStyles(tui.NoColorTheme(), false)
+		var buf strings.Builder
+		require.NoError(t, RenderDetail(&buf, schema, data, styles, enUS))
+		assert.Contains(t, buf.String(), "Status")
+	})
+
+	t.Run("markdown_with_due_date", func(t *testing.T) {
+		var buf strings.Builder
+		require.NoError(t, RenderDetailMarkdown(&buf, schema, data, enUS))
+		assert.Contains(t, buf.String(), "#### Status")
+	})
+}
+
 func TestRenderDetailMarkdownSteps(t *testing.T) {
 	schema := LookupByName("todo")
 	require.NotNil(t, schema)

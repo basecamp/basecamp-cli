@@ -157,10 +157,18 @@ func RenderList(w io.Writer, schema *EntitySchema, data []map[string]any, styles
 	return err
 }
 
-func renderDetailSection(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, styles Styles, locale Locale) {
-	// Find max label length for alignment
-	maxLen := 0
-	var visibleFields []string
+// renderedField pairs a section field with its formatted output.
+type renderedField struct {
+	name      string
+	formatted string
+}
+
+// visibleSectionFields filters a detail section to the fields that will
+// actually render: collapse rules pass and formatting yields output. Both
+// the styled and Markdown renderers section-skip from this list, so a
+// heading never prints over zero rows.
+func visibleSectionFields(schema *EntitySchema, section DetailSection, data map[string]any, locale Locale) []renderedField {
+	var fields []renderedField
 	for _, name := range section.Fields {
 		spec := schema.Fields[name]
 		val := data[name]
@@ -175,24 +183,33 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 			continue
 		}
 
-		// Body role renders as a text block, not labeled
-		if spec.Role == "body" {
-			if !isEmpty(val) {
-				visibleFields = append(visibleFields, name)
-			}
+		formatted := FormatField(spec, name, val, locale)
+		if formatted == "" {
 			continue
 		}
 
-		label := fieldLabel(name)
-		if len(label) > maxLen {
-			maxLen = len(label)
-		}
-		visibleFields = append(visibleFields, name)
+		fields = append(fields, renderedField{name: name, formatted: formatted})
 	}
+	return fields
+}
+
+func renderDetailSection(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, styles Styles, locale Locale) {
+	visible := visibleSectionFields(schema, section, data, locale)
 
 	// Skip the whole section (heading included) when nothing renders.
-	if len(visibleFields) == 0 {
+	if len(visible) == 0 {
 		return
+	}
+
+	// Find max label length for alignment
+	maxLen := 0
+	for _, f := range visible {
+		if schema.Fields[f.name].Role == "body" {
+			continue
+		}
+		if label := fieldLabel(f.name); len(label) > maxLen {
+			maxLen = len(label)
+		}
 	}
 
 	if section.Heading != "" {
@@ -201,12 +218,11 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 		b.WriteString("\n")
 	}
 
-	for _, name := range visibleFields {
-		spec := schema.Fields[name]
-		val := data[name]
-		formatted := FormatField(spec, name, val, locale)
+	for _, f := range visible {
+		spec := schema.Fields[f.name]
+		val := data[f.name]
 
-		style := resolveEmphasis(spec, name, val, styles)
+		style := resolveEmphasis(spec, f.name, val, styles)
 		// Fall back to Body style when no emphasis is specified for body fields
 		if spec.Role == "body" && spec.Emphasis == "" && spec.WhenOverdue == "" {
 			style = styles.Body
@@ -230,7 +246,7 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 
 			// Render each line individually to prevent lipgloss from
 			// padding blank lines to the width of the longest line.
-			for _, line := range strings.Split(strings.TrimRight(formatted, "\n"), "\n") {
+			for _, line := range strings.Split(strings.TrimRight(f.formatted, "\n"), "\n") {
 				if line == "" {
 					b.WriteString("\n")
 				} else {
@@ -241,14 +257,9 @@ func renderDetailSection(b *strings.Builder, schema *EntitySchema, section Detai
 			continue
 		}
 
-		// Skip empty non-collapsed fields (collapsed empties are already filtered above)
-		if formatted == "" {
-			continue
-		}
-
-		label := fieldLabel(name)
+		label := fieldLabel(f.name)
 		b.WriteString(styles.Label.Render(fmt.Sprintf("  %-*s  ", maxLen, label)))
-		b.WriteString(style.Render(formatted))
+		b.WriteString(style.Render(f.formatted))
 		b.WriteString("\n")
 	}
 }
@@ -693,31 +704,10 @@ func extractDotPath(data map[string]any, path string) string {
 }
 
 func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, section DetailSection, data map[string]any, locale Locale) {
-	// Same visible-field prepass as the styled renderDetailSection: body
-	// fields count only when non-empty, detail fields whenever present.
-	var visibleFields []string
-	for _, name := range section.Fields {
-		spec := schema.Fields[name]
-		val := data[name]
-
-		if spec.Collapse && isEmpty(val) {
-			continue
-		}
-		if spec.Role == "title" {
-			continue
-		}
-		if spec.Role == "body" {
-			if !isEmpty(val) {
-				visibleFields = append(visibleFields, name)
-			}
-			continue
-		}
-
-		visibleFields = append(visibleFields, name)
-	}
+	visible := visibleSectionFields(schema, section, data, locale)
 
 	// Skip the whole section (heading included) when nothing renders.
-	if len(visibleFields) == 0 {
+	if len(visible) == 0 {
 		return
 	}
 
@@ -725,22 +715,13 @@ func renderDetailSectionMarkdown(b *strings.Builder, schema *EntitySchema, secti
 		b.WriteString("\n#### " + section.Heading + "\n\n")
 	}
 
-	for _, name := range visibleFields {
-		spec := schema.Fields[name]
-		formatted := FormatField(spec, name, data[name], locale)
-
-		if spec.Role == "body" {
-			if formatted != "" {
-				b.WriteString("\n" + formatted + "\n")
-			}
+	for _, f := range visible {
+		if schema.Fields[f.name].Role == "body" {
+			b.WriteString("\n" + f.formatted + "\n")
 			continue
 		}
 
-		if formatted == "" {
-			continue
-		}
-
-		b.WriteString("- **" + fieldLabel(name) + ":** " + formatted + "\n")
+		b.WriteString("- **" + fieldLabel(f.name) + ":** " + f.formatted + "\n")
 	}
 }
 
