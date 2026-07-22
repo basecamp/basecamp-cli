@@ -1,0 +1,41 @@
+internal/commands/wizard_agents.go
+  s_42b3ffb6d83499::t_85aa2efd2ae7d3 214-216
+  s_42b3ffb6d83499::t_223fafedb038ff 307-309
+  s_42b3ffb6d83499::t_44be6ccc699efe 512-522
+  s_42b3ffb6d83499::t_5855c59bba4c22 187-189
+  s_42b3ffb6d83499::t_ddcb5e6212b67b 37-47,56-58,61,65-69,75-86,92-94,96
+  s_42b3ffb6d83499::t_9452e1ad52e1c8 254-257,260,266
+  s_42b3ffb6d83499::t_cb801e3265075e 335-340,343
+internal/commands/wizard.go
+  s_42b3ffb6d83499::t_50d05839267ee6 120
+  s_42b3ffb6d83499::t_84fdbdae226802 326-329
+  s_42b3ffb6d83499::t_fbda4f9468cc6d 357-358
+internal/commands/wizard_test.go
+  s_42b3ffb6d83499::t_9027c0b6b433ad 193,611-653
+  s_42b3ffb6d83499::t_e606b47a15f0dc 116-118,122-123,129-132,148-154,156,163-192
+  s_48746d2d05f949::t_e174255feb5dab 194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7aa458881856cc77292c3042feef7948e2aeb8db",
+  "prompts": {},
+  "sessions": {
+    "s_42b3ffb6d83499": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47173847-86ff-4d2d-823f-70a5d3df02ae",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_48746d2d05f949": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4548d9cb-17ff-4953-8b40-0e59280af840",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
