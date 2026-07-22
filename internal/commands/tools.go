@@ -273,6 +273,11 @@ schedule, todoset, vault. Create-by-type is BC5-only.`,
 
 			canonicalType, ok := normalizeToolType(toolType)
 			if !ok {
+				if collapseToolType(toolType) == "board" {
+					return output.ErrUsage(fmt.Sprintf(
+						"Ambiguous --type %q — use message_board or kanban_board (accepted: %s)",
+						toolType, strings.Join(toolTypeFriendlyNames(), ", ")))
+				}
 				return output.ErrUsage(fmt.Sprintf("Unknown --type %q (accepted: %s)",
 					toolType, strings.Join(toolTypeFriendlyNames(), ", ")))
 			}

@@ -93,6 +93,27 @@ func TestToolsCreateRejectsUnknownType(t *testing.T) {
 	}
 }
 
+// TestToolsCreateRejectsAmbiguousBoard verifies the bare "board" (and its
+// separator variants) get a message naming both message_board and kanban_board
+// rather than the generic "Unknown" wording.
+func TestToolsCreateRejectsAmbiguousBoard(t *testing.T) {
+	for _, ambiguous := range []string{"board", "Board", "BOARD"} {
+		app, _ := setupTestApp(t)
+		app.Config.ProjectID = "123"
+
+		project := ""
+		cmd := newToolsCreateCmd(&project)
+
+		err := executeCommand(cmd, app, "--type", ambiguous)
+		require.NotNil(t, err, "type %q should be rejected", ambiguous)
+
+		var e *output.Error
+		require.True(t, errors.As(err, &e))
+		assert.Contains(t, e.Message, "Ambiguous")
+		assert.Contains(t, e.Message, "message_board or kanban_board")
+	}
+}
+
 // TestNormalizeToolType covers the closed 8-set: each friendly noun, a
 // degenerate spelling, and the canonical class-name all map to the right
 // tool_type; bare "board" is rejected as ambiguous.
