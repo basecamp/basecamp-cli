@@ -1,0 +1,44 @@
+internal/richtext/richtext_test.go
+  s_87ab7528cc99ff::t_360cce6bb54548 1313-1320
+  s_87ab7528cc99ff::t_6f7b99cdf6f77a 219-226
+  s_87ab7528cc99ff::t_bd51aeed02cb7a 1185-1209
+  s_87ab7528cc99ff::t_fb50854d01e884 1333-1355
+  s_87ab7528cc99ff::t_6a292a734031fb 239-253
+internal/tui/workspace/views/todos.go
+  s_87ab7528cc99ff::t_658f354790414c 1045-1050
+internal/tui/workspace/views/detail_test.go
+  s_87ab7528cc99ff::t_349c897ff93e18 576-619
+internal/tui/workspace/widget/composer_test.go
+  s_87ab7528cc99ff::t_227e2f44635709 215-227
+internal/richtext/richtext.go
+  s_87ab7528cc99ff::t_30be01af90528a 23
+  s_87ab7528cc99ff::t_29a41701dada6d 132-141
+  s_87ab7528cc99ff::t_ea91d84e7d67ce 114
+  s_87ab7528cc99ff::t_a42b2bb8d184b1 936-955,969
+  s_87ab7528cc99ff::t_f00fcc0681e368 1395-1406
+internal/tui/workspace/views/detail.go
+  s_87ab7528cc99ff::t_88dbaf9c989c41 760-763
+  s_87ab7528cc99ff::t_834b71cd01d023 1081-1085
+internal/tui/workspace/views/todos_test.go
+  s_87ab7528cc99ff::t_ad4e434e920d6b 969
+  s_87ab7528cc99ff::t_1ac6e5c8af3449 945-968,970-979
+skills/basecamp/SKILL.md
+  s_87ab7528cc99ff::t_aba5e62e36406e 88,95-100
+  s_87ab7528cc99ff::t_dbdfa3ba499468 101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "601b272d3f29965e0101435ccf4d7d465e2b074d",
+  "prompts": {},
+  "sessions": {
+    "s_87ab7528cc99ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f713a78-6868-4b1e-8dc8-0fdcf8e1bfa2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
