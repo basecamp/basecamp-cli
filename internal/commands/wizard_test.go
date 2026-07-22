@@ -113,22 +113,23 @@ func TestSuccessHeadline(t *testing.T) {
 	assert.Equal(t, "Setup finished — 2 steps need attention", successHeadline("incomplete", 2))
 }
 
-// TestStatusFromOutcome verifies a deliberate skip stays complete while real
-// issues mark the run incomplete.
+// TestStatusFromOutcome verifies issues are authoritative: any observed failure
+// marks the run incomplete, and Skipped never suppresses one. A deliberate skip
+// records no issues, so it stays complete.
 func TestStatusFromOutcome(t *testing.T) {
 	assert.Equal(t, "complete", statusFromOutcome(agentSetupOutcome{}))
 	assert.Equal(t, "complete", statusFromOutcome(agentSetupOutcome{Skipped: true}))
-	assert.Equal(t, "complete",
+	// Skipped must not suppress a real failure.
+	assert.Equal(t, "incomplete",
 		statusFromOutcome(agentSetupOutcome{Skipped: true, Issues: []agentIssue{{Check: "x"}}}))
 	assert.Equal(t, "incomplete",
 		statusFromOutcome(agentSetupOutcome{Issues: []agentIssue{{Check: "Claude Code Plugin"}}}))
 }
 
-// TestCollectAgentIssues verifies non-passing checks become issues carrying the
-// agent name and the check's own hint, and passing checks are ignored. Agents
-// are supplied directly so the test never mutates the global registry.
-func TestCollectAgentIssues(t *testing.T) {
-	agents := []harness.AgentInfo{
+// fakeAgents builds a detected-agent set with one failing Claude plugin check,
+// supplied directly so tests never mutate the global registry.
+func fakeAgents() []harness.AgentInfo {
+	return []harness.AgentInfo{
 		{
 			Name: "Claude Code",
 			Checks: func() []*harness.StatusCheck {
@@ -144,12 +145,51 @@ func TestCollectAgentIssues(t *testing.T) {
 		},
 		{Name: "NoChecks", Checks: nil},
 	}
+}
 
-	issues := collectAgentIssues(agents)
+// TestSnapshotAndIssues verifies one snapshot captures every check, and
+// issuesFromChecks keeps only the non-passing ones with their agent + hint.
+func TestSnapshotAndIssues(t *testing.T) {
+	checks := snapshotAgentChecks(fakeAgents())
+	require.Len(t, checks, 3) // skill(pass) + plugin(fail) + codex(pass); NoChecks contributes none
+
+	issues := issuesFromChecks(checks)
 	require.Len(t, issues, 1)
 	assert.Equal(t, "Claude Code", issues[0].Agent)
 	assert.Equal(t, "Claude Code Plugin", issues[0].Check)
 	assert.Equal(t, "Run: basecamp setup claude", issues[0].Hint)
+}
+
+// TestShowSuccessIncomplete renders the real summary and proves it does not claim
+// completion, surfaces the failing check's own hint, and points to doctor.
+func TestShowSuccessIncomplete(t *testing.T) {
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+	checks := snapshotAgentChecks(fakeAgents())
+	issues := issuesFromChecks(checks)
+
+	var buf bytes.Buffer
+	showSuccess(&buf, styles, WizardResult{Status: "incomplete", AccountID: "123"}, checks, issues)
+	out := buf.String()
+
+	assert.NotContains(t, out, "Setup complete!")
+	assert.Contains(t, out, "Setup finished")
+	assert.Contains(t, out, "Run: basecamp setup claude") // agent-specific hint
+	assert.Contains(t, out, "basecamp doctor")
+}
+
+// TestShowSuccessComplete verifies the healthy path keeps the completion banner
+// and prints no remediation block.
+func TestShowSuccessComplete(t *testing.T) {
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+	checks := []agentCheck{{Agent: "Claude Code", Name: "Claude Code Plugin", Status: "pass"}}
+
+	var buf bytes.Buffer
+	showSuccess(&buf, styles, WizardResult{Status: "complete", AccountID: "123"}, checks, nil)
+	out := buf.String()
+
+	assert.Contains(t, out, "Setup complete!")
+	assert.NotContains(t, out, "Some steps need attention")
+	assert.NotContains(t, out, "basecamp doctor")
 }
 
 // TestWizardBreadcrumbs verifies breadcrumb generation based on wizard outcome.
@@ -568,9 +608,49 @@ func TestSetupClaudeNonInteractiveRefreshesMarketplace(t *testing.T) {
 
 	calls, readErr := os.ReadFile(logFile)
 	require.NoError(t, readErr)
-	assert.Contains(t, string(calls), "plugin marketplace update 37signals",
-		"fresh install should refresh the marketplace cache before installing")
-	assert.Contains(t, string(calls), "plugin install basecamp@37signals")
+	// The refresh must land between registering and installing: add → update →
+	// install. `add` no-ops on a stale cache, so only the update refreshes it to
+	// the HTTPS source before install (issue #417).
+	assertCallOrder(t, string(calls),
+		"plugin marketplace add basecamp/claude-plugins",
+		"plugin marketplace update 37signals",
+		"plugin install basecamp@37signals")
+}
+
+// TestRunClaudeSetupInteractiveRefreshOrder covers the interactive install path
+// (runClaudeSetup) — a separate set of call sites from the non-interactive path —
+// and asserts the same add → update → install ordering (issue #417).
+func TestRunClaudeSetupInteractiveRefreshOrder(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// ~/.claude exists (Claude detected), no plugin installed → fresh install.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+
+	binDir := filepath.Join(home, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	logFile := filepath.Join(home, "claude-calls.log")
+	stubScript := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + logFile + "\"\n" +
+		"exit 0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(stubScript), 0o755)) //nolint:gosec // G306: test helper
+	t.Setenv("PATH", binDir)
+
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	require.NoError(t, runClaudeSetup(cmd, styles))
+
+	calls, readErr := os.ReadFile(logFile)
+	require.NoError(t, readErr)
+	assertCallOrder(t, string(calls),
+		"plugin marketplace add basecamp/claude-plugins",
+		"plugin marketplace update 37signals",
+		"plugin install basecamp@37signals")
 }
 
 // TestJoinNames verifies name joining with commas and "and".

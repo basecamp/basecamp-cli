@@ -34,6 +34,17 @@ type agentSetupError struct {
 
 func (e *agentSetupError) Error() string { return e.Summary }
 
+// agentCheck is one agent health check captured in a single post-setup snapshot.
+// Both the completion status and the rendered checklist derive from the same
+// snapshot so they can never disagree (e.g. a transient check flipping between
+// two independent scans).
+type agentCheck struct {
+	Agent  string
+	Name   string
+	Status string
+	Hint   string
+}
+
 // agentIssue is a single unresolved problem after agent setup ran. Hint carries
 // the failing check's own remediation so reporting stays agent-specific.
 type agentIssue struct {
@@ -42,36 +53,47 @@ type agentIssue struct {
 	Hint  string
 }
 
-// agentSetupOutcome reports what happened during the agent-setup step so the
-// wizard can tell a deliberate skip (still "complete") apart from a real
-// failure ("incomplete").
+// agentSetupOutcome reports what happened during the agent-setup step. Issues are
+// authoritative for the wizard's completion status; Skipped is metadata only (a
+// deliberate skip records no issues, so it stays "complete").
 type agentSetupOutcome struct {
 	Skipped bool
+	Checks  []agentCheck
 	Issues  []agentIssue
 }
 
-// collectAgentIssues returns one issue per non-passing check across the given
-// agents. It takes agents as a parameter (rather than reading the global
-// registry) so it stays pure and testable without RegisterAgent side effects.
-func collectAgentIssues(agents []harness.AgentInfo) []agentIssue {
-	var issues []agentIssue
+// snapshotAgentChecks captures every check across the given agents in one pass.
+// It takes agents as a parameter (rather than reading the global registry) so it
+// stays pure and testable without RegisterAgent side effects.
+func snapshotAgentChecks(agents []harness.AgentInfo) []agentCheck {
+	var out []agentCheck
 	for _, a := range agents {
 		if a.Checks == nil {
 			continue
 		}
 		for _, c := range a.Checks() {
-			if c.Status != "pass" {
-				issues = append(issues, agentIssue{Agent: a.Name, Check: c.Name, Hint: c.Hint})
-			}
+			out = append(out, agentCheck{Agent: a.Name, Name: c.Name, Status: c.Status, Hint: c.Hint})
+		}
+	}
+	return out
+}
+
+// issuesFromChecks returns one issue per non-passing check in the snapshot.
+func issuesFromChecks(checks []agentCheck) []agentIssue {
+	var issues []agentIssue
+	for _, c := range checks {
+		if c.Status != "pass" {
+			issues = append(issues, agentIssue{Agent: c.Agent, Check: c.Name, Hint: c.Hint})
 		}
 	}
 	return issues
 }
 
-// statusFromOutcome maps an agent-setup outcome to a WizardResult status. A
-// deliberate skip is not a failure, so it stays "complete".
+// statusFromOutcome maps an agent-setup outcome to a WizardResult status. Issues
+// are authoritative: any observed failure means "incomplete", and Skipped never
+// suppresses one. A deliberate skip records no issues, so it stays "complete".
 func statusFromOutcome(o agentSetupOutcome) string {
-	if !o.Skipped && len(o.Issues) > 0 {
+	if len(o.Issues) > 0 {
 		return "incomplete"
 	}
 	return "complete"
@@ -162,9 +184,9 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 		if claudePath == "" {
 			fmt.Fprintln(w, styles.Muted.Render("  Claude Code detected but binary not found in PATH."))
 			fmt.Fprintln(w, styles.Muted.Render("  Install the plugin manually:"))
-			line1, line2 := claudeManualInstallHint(styles)
-			fmt.Fprintln(w, line1)
-			fmt.Fprintln(w, line2)
+			for _, line := range claudeManualInstallHint(styles) {
+				fmt.Fprintln(w, line)
+			}
 		} else {
 			ctx := cmd.Context()
 
@@ -189,9 +211,9 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 			if err := installCmd.Run(); err != nil {
 				fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Plugin install failed: %s", err)))
 				fmt.Fprintln(w, styles.Muted.Render("  Try manually:"))
-				line1, line2 := claudeManualInstallHint(styles)
-				fmt.Fprintln(w, line1)
-				fmt.Fprintln(w, line2)
+				for _, line := range claudeManualInstallHint(styles) {
+					fmt.Fprintln(w, line)
+				}
 			} else {
 				verify := harness.CheckClaudePlugin()
 				if verify.Status == "pass" {
@@ -229,32 +251,19 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 
 	w := cmd.OutOrStdout()
 
+	// One pre-setup snapshot drives both the all-good gate below and the checklist
+	// rendered in the summary for the paths that do not run setup.
+	preChecks := snapshotAgentChecks(agents)
+
 	// Check if all detected agents are already fully set up
 	// (agent checks pass AND baseline skill is installed)
-	allGood := baselineSkillInstalled() && len(harness.StalePluginKeys()) == 0
-	if allGood {
-		for _, a := range agents {
-			if a.Checks == nil {
-				continue
-			}
-			for _, c := range a.Checks() {
-				if c.Status != "pass" {
-					allGood = false
-					break
-				}
-			}
-			if !allGood {
-				break
-			}
-		}
-	}
-
+	allGood := baselineSkillInstalled() && len(harness.StalePluginKeys()) == 0 && len(issuesFromChecks(preChecks)) == 0
 	if allGood {
 		for _, a := range agents {
 			fmt.Fprintln(w, styles.RenderStatus(true, a.Name+" plugin installed"))
 		}
 		fmt.Fprintln(w)
-		return agentSetupOutcome{}, nil
+		return agentSetupOutcome{Checks: preChecks}, nil
 	}
 
 	fmt.Fprintln(w, styles.Heading.Render("  Step 5: Coding Agent Setup"))
@@ -295,7 +304,9 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 			}
 		}
 		fmt.Fprintln(w)
-		return agentSetupOutcome{Skipped: true}, nil //nolint:nilerr // Treat confirm error as skip (user canceled)
+		// Skipped carries the current snapshot for the checklist but records no
+		// issues, so a deliberate skip stays "complete".
+		return agentSetupOutcome{Skipped: true, Checks: preChecks}, nil //nolint:nilerr // Treat confirm error as skip (user canceled)
 	}
 
 	fmt.Fprintln(w)
@@ -321,12 +332,15 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 		}
 	}
 
-	// Re-check the agents after setup ran so failed installs (e.g. a plugin that
-	// could not be cloned) surface as issues rather than a silent "complete".
-	issues = append(issues, collectAgentIssues(agents)...)
+	// Re-snapshot the agents after setup ran so failed installs (e.g. a plugin
+	// that could not be cloned) surface as issues rather than a silent "complete".
+	// The same snapshot renders the summary checklist, so status and checklist
+	// can never disagree.
+	postChecks := snapshotAgentChecks(agents)
+	issues = append(issues, issuesFromChecks(postChecks)...)
 
 	fmt.Fprintln(w)
-	return agentSetupOutcome{Issues: issues}, nil
+	return agentSetupOutcome{Checks: postChecks, Issues: issues}, nil
 }
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).
@@ -495,10 +509,17 @@ func validPluginScope(scope string) bool {
 	}
 }
 
-// claudeManualInstallHint returns the two-line manual install instructions.
-func claudeManualInstallHint(styles *tui.Styles) (string, string) {
-	return styles.Bold.Render(fmt.Sprintf("    claude plugin marketplace add %s", harness.ClaudeMarketplaceSource)),
-		styles.Bold.Render(fmt.Sprintf("    claude plugin install %s", harness.ClaudeExpectedPluginKey))
+// claudeManualInstallHint returns the manual install instructions. The
+// `marketplace update` step is essential: `marketplace add` no-ops on an
+// already-registered marketplace, so without the update a stale SSH-shorthand
+// entry would survive and the manual install would clone over SSH and fail the
+// same way (issue #417).
+func claudeManualInstallHint(styles *tui.Styles) []string {
+	return []string{
+		styles.Bold.Render(fmt.Sprintf("    claude plugin marketplace add %s", harness.ClaudeMarketplaceSource)),
+		styles.Bold.Render(fmt.Sprintf("    claude plugin marketplace update %s", harness.ClaudeMarketplaceName)),
+		styles.Bold.Render(fmt.Sprintf("    claude plugin install %s", harness.ClaudeExpectedPluginKey)),
+	}
 }
 
 // newSetupAgentCmds generates `setup <agent>` subcommands from the registry.

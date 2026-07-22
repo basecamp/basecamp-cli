@@ -13,7 +13,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
-	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
@@ -118,7 +117,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// Interactive mode shows the rich checklist directly; non-interactive
 	// or machine-output mode delegates to app.OK which renders the structured envelope.
 	if app.IsInteractive() && !app.IsMachineOutput() {
-		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Issues)
+		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues)
 		return nil
 	}
 
@@ -324,8 +323,10 @@ func successHeadline(status string, issueCount int) string {
 	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
 }
 
-// showSuccess displays the completion summary with example commands.
-func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, issues []agentIssue) {
+// showSuccess displays the completion summary with example commands. checks and
+// issues come from one post-setup snapshot so the headline, checklist, and
+// remediation are always consistent.
+func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue) {
 	divider := styles.Muted.Render("─────────────────────────────────")
 
 	headlineStyle := styles.Success
@@ -353,13 +354,8 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, issues []
 	if result.ConfigScope != "" {
 		fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Config saved (%s)", result.ConfigScope)))
 	}
-	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks == nil {
-			continue
-		}
-		for _, check := range agent.Checks() {
-			fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
-		}
+	for _, check := range checks {
+		fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
 	}
 	fmt.Fprintln(w)
 
