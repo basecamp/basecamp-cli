@@ -116,14 +116,6 @@ jobs:
           jq '.runs[].tool.driver.name = "Golang security checks by gosec"
               | .runs[].results[] |= (.ruleId = ((.message.text // "" | capture("^(?<g>G[0-9]{3}):").g) // .ruleId))' \
             gosec-results.sarif > tmp.sarif && mv tmp.sarif gosec-results.sarif
-          echo "Driver name after rewrite:"
-          jq '.runs[].tool.driver.name' gosec-results.sarif
-
-      - name: Save uploaded SARIF for inspection
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: gosec-sarif-debug
-          path: gosec-results.sarif
 
       - name: Upload gosec scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
