@@ -17,6 +17,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 )
 
 const (
@@ -41,14 +43,50 @@ type agentHookInput struct {
 
 // NewAgentHookCmd creates the hidden command group used by the plugin hooks
 // shared between Claude Code and Codex.
+//
+// The group declares its own persistent lifecycle, which replaces the root
+// command's for this subtree (Cobra runs only the innermost declaration).
+// The root lifecycle validates config, resolves profiles, and enforces
+// base_url HTTPS — any of which can fail with a nonzero exit, breaking the
+// hooks' never-block contract. Hooks tolerate every config problem instead:
+// they fall back to defaults, which still supports BASECAMP_TOKEN and
+// stored-credential auth detection plus the cache-directory fallback.
 func NewAgentHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "agent-hook",
 		Short:  "Run agent plugin hooks",
 		Hidden: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if appctx.FromContext(cmd.Context()) != nil {
+				return nil
+			}
+			cmd.SetContext(appctx.WithApp(cmd.Context(), newAgentHookApp()))
+			return nil
+		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			if app := appctx.FromContext(cmd.Context()); app != nil {
+				app.Close()
+			}
+			return nil
+		},
 	}
 	cmd.AddCommand(newAgentHookSessionStartCmd(), newAgentHookPreCommitSnapshotCmd(), newAgentHookPostCommitCmd())
 	return cmd
+}
+
+// newAgentHookApp builds the hook app from whatever config is usable. An
+// insecure base_url must be neutralized before NewApp: the SDK client
+// constructor panics on a non-localhost http URL, and root's HTTPS gate —
+// which normally catches it first — is bypassed by the hook lifecycle.
+func newAgentHookApp() *appctx.App {
+	cfg, err := config.Load(config.FlagOverrides{})
+	if err != nil || cfg == nil {
+		cfg = config.Default()
+	}
+	if hostutil.RequireSecureURL(cfg.BaseURL) != nil {
+		cfg.BaseURL = config.Default().BaseURL
+	}
+	return appctx.NewApp(cfg)
 }
 
 func newAgentHookSessionStartCmd() *cobra.Command {
@@ -104,12 +142,19 @@ func newAgentHookPostCommitCmd() *cobra.Command {
 			if dir == "" {
 				return nil
 			}
+			// Claim the snapshot with an atomic rename before reading so
+			// concurrent deliveries (PostToolUse and PostToolUseFailure can
+			// both fire for one tool call) produce exactly one nudge.
 			path := filepath.Join(dir, agentHookSnapshotName(input))
-			data, err := os.ReadFile(path) //nolint:gosec // G304: path is a hash inside our own state directory
-			if err != nil {
-				return nil //nolint:nilerr // no snapshot means no commit to prove — stay silent
+			claimed := path + ".claim"
+			if err := os.Rename(path, claimed); err != nil {
+				return nil //nolint:nilerr // no snapshot (or already claimed) means nothing to prove — stay silent
 			}
-			_ = os.Remove(path)
+			data, err := os.ReadFile(claimed) //nolint:gosec // G304: path is a hash inside our own state directory
+			_ = os.Remove(claimed)
+			if err != nil {
+				return nil //nolint:nilerr // unreadable snapshot — stay silent
+			}
 
 			reference, revision, ok := agentHookCommitReference(cmd.Context(), input.CWD, strings.TrimSpace(string(data)))
 			if !ok {
@@ -168,11 +213,21 @@ func agentHookHead(ctx context.Context, cwd string) (string, bool) {
 	if inside, err := gitOutput(ctx, cwd, "rev-parse", "--is-inside-work-tree"); err != nil || inside != "true" {
 		return "", false
 	}
-	head, err := gitOutput(ctx, cwd, "rev-parse", "HEAD")
-	if err != nil {
+	// ^{commit} verifies HEAD resolves to an existing commit object — a
+	// detached HEAD at a missing object "resolves" textually but must not
+	// be recorded as known state.
+	head, err := gitOutput(ctx, cwd, "rev-parse", "--verify", "HEAD^{commit}")
+	if err == nil {
+		return head, true
+	}
+	// HEAD did not verify. Claim EMPTY only for a proven unborn branch —
+	// HEAD is still a symbolic ref to a branch with no commits. Any other
+	// failure (transient git error, broken HEAD) stays silent rather than
+	// risk a later nudge against state the snapshot never established.
+	if _, symErr := gitOutput(ctx, cwd, "symbolic-ref", "-q", "HEAD"); symErr == nil {
 		return unbornHeadSnapshot, true
 	}
-	return head, true
+	return "", false
 }
 
 // agentHookCommitReference proves a commit happened (HEAD moved and the last
@@ -182,7 +237,7 @@ func agentHookCommitReference(ctx context.Context, cwd, before string) (string, 
 	if cwd == "" {
 		cwd = "."
 	}
-	head, err := gitOutput(ctx, cwd, "rev-parse", "HEAD")
+	head, err := gitOutput(ctx, cwd, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || head == before {
 		return "", "", false
 	}
@@ -264,17 +319,17 @@ func atomicWriteAgentHookFile(path string, data []byte) error {
 	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	if err := tmpFile.Chmod(0600); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
@@ -283,7 +338,7 @@ func atomicWriteAgentHookFile(path string, data []byte) error {
 			_ = os.Remove(path)
 			return os.Rename(tmpPath, path)
 		}
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	return nil

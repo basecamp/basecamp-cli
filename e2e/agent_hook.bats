@@ -6,6 +6,7 @@ load test_helper
 setup_extra() {
   export CLAUDE_PLUGIN_DATA="$TEST_TEMP_DIR/plugin-data"
   export GIT_CONFIG_NOSYSTEM=1
+  export GIT_CONFIG_GLOBAL=/dev/null
   # Git wrappers (e.g. git-ai) write into .git after commit, racing teardown
   export GIT_AI_SKIP_ALL_HOOKS=1
 
@@ -25,6 +26,16 @@ hook_payload() {
     "$event" "$REPO"
 }
 
+assert_hook_context_contains() {
+  local needle="$1"
+  local context
+  context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+  if [[ "$context" != *"$needle"* ]]; then
+    echo "additionalContext missing '$needle': $context"
+    return 1
+  fi
+}
+
 @test "agent-hook is hidden from help" {
   run basecamp --help
   assert_success
@@ -35,8 +46,35 @@ hook_payload() {
   run bash -c 'echo "{}" | basecamp agent-hook session-start'
   assert_success
   is_valid_json
-  assert_output_contains "hookSpecificOutput"
-  assert_output_contains "SessionStart"
+  assert_json_value ".hookSpecificOutput.hookEventName" "SessionStart"
+  assert_json_not_null ".hookSpecificOutput.additionalContext"
+  assert_hook_context_contains "Basecamp is active"
+}
+
+@test "agent-hook tolerates invalid config (exit 0, still emits)" {
+  # Non-localhost http base_url fails the root command's HTTPS enforcement
+  # with exit 7 — the hook lifecycle must bypass that and stay non-blocking.
+  run bash -c 'echo "{}" | BASECAMP_BASE_URL=http://example.test basecamp agent-hook session-start'
+  assert_success
+  is_valid_json
+  assert_json_value ".hookSpecificOutput.hookEventName" "SessionStart"
+}
+
+@test "agent-hook tolerates multiple profiles without a default (exit 0)" {
+  # Multiple profiles and no default_profile make the root lifecycle fail
+  # with a profile-resolution error — hooks must not inherit that.
+  cat > "$TEST_HOME/.config/basecamp/config.json" <<'EOF'
+{
+  "profiles": {
+    "work": {"base_url": "https://3.basecampapi.com", "account_id": "111"},
+    "personal": {"base_url": "https://3.basecampapi.com", "account_id": "222"}
+  }
+}
+EOF
+  run bash -c 'echo "{}" | basecamp agent-hook session-start'
+  assert_success
+  is_valid_json
+  assert_json_value ".hookSpecificOutput.hookEventName" "SessionStart"
 }
 
 @test "agent-hook nudges after a referenced commit" {
@@ -51,8 +89,9 @@ hook_payload() {
   run bash -c "echo '$(hook_payload PostToolUse)' | basecamp agent-hook post-commit"
   assert_success
   is_valid_json
-  assert_output_contains "BC-123"
-  assert_output_contains "Nothing was posted"
+  assert_json_value ".hookSpecificOutput.hookEventName" "PostToolUse"
+  assert_hook_context_contains "BC-123"
+  assert_hook_context_contains "Nothing was posted"
 }
 
 @test "agent-hook stays silent when no commit happened" {

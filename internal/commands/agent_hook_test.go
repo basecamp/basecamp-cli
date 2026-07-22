@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +270,83 @@ func TestAgentHookNudgesOnFirstCommitFromUnbornHead(t *testing.T) {
 	assert.Contains(t, context, "BC-9")
 }
 
+func TestAgentHookNudgesExactlyOnceUnderConcurrentDelivery(t *testing.T) {
+	repo := newGitRepo(t, "main", "initial")
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	assert.Empty(t, runAgentHook(t, "pre-commit-snapshot", agentHookPayload("PreToolUse", "s", "t", "git commit -m ship"), repo))
+	commitFile(t, repo, "feature.txt", "BC-123 ship")
+
+	// PostToolUse and PostToolUseFailure can both fire for one tool call;
+	// the atomic snapshot claim must allow exactly one to nudge.
+	app := appctx.NewApp(config.Default())
+	t.Cleanup(app.Close)
+	events := []string{"PostToolUse", "PostToolUseFailure"}
+	outputs := make([]string, len(events))
+	var wg sync.WaitGroup
+	for i, event := range events {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var payload map[string]any
+			if !assert.NoError(t, json.Unmarshal([]byte(agentHookPayload(event, "s", "t", "git commit -m ship")), &payload)) {
+				return
+			}
+			payload["cwd"] = repo
+			encoded, err := json.Marshal(payload)
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			cmd := NewAgentHookCmd()
+			var stdout bytes.Buffer
+			cmd.SetIn(bytes.NewReader(encoded))
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&bytes.Buffer{})
+			cmd.SetArgs([]string{"post-commit"})
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			assert.NoError(t, cmd.Execute())
+			outputs[i] = strings.TrimSpace(stdout.String())
+		}()
+	}
+	wg.Wait()
+
+	var nudges []string
+	for _, output := range outputs {
+		if output != "" {
+			nudges = append(nudges, output)
+		}
+	}
+	require.Len(t, nudges, 1, "exactly one delivery must nudge")
+	assert.Contains(t, nudges[0], "BC-123")
+}
+
+func TestAgentHookDoesNotClaimEmptyForBrokenHead(t *testing.T) {
+	repo := newGitRepo(t, "main", "initial")
+	data := t.TempDir()
+	t.Setenv("CLAUDE_PLUGIN_DATA", data)
+
+	// Detach HEAD onto a nonexistent object: HEAD^{commit} fails to verify,
+	// and the repository is not unborn (symbolic-ref fails too). The
+	// snapshot must stay silent instead of recording EMPTY — otherwise a
+	// later commit would nudge against state the snapshot never established.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".git", "HEAD"),
+		[]byte(strings.Repeat("0", 40)+"\n"), 0o644))
+
+	assert.Empty(t, runAgentHook(t, "pre-commit-snapshot", agentHookPayload("PreToolUse", "s", "t", "git commit -m ship"), repo))
+
+	entries, err := os.ReadDir(filepath.Join(data, "commit-snapshots"))
+	if err == nil {
+		assert.Empty(t, entries)
+	} else {
+		assert.ErrorIs(t, err, os.ErrNotExist)
+	}
+}
+
 func TestAgentHookIgnoresMalformedInput(t *testing.T) {
 	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
 
@@ -383,9 +461,14 @@ func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "git", args...)
 	cmd.Dir = dir
-	// Git wrappers (e.g. git-ai) spawn background work that writes into .git
-	// after a commit returns, racing t.TempDir cleanup.
-	cmd.Env = append(os.Environ(), "GIT_AI_SKIP_ALL_HOOKS=1")
+	// Isolate from user/system git config (gpgsign, hooks) so tests pass on
+	// any developer machine, and from git wrappers (e.g. git-ai) whose
+	// background work writes into .git after a commit returns, racing
+	// t.TempDir cleanup.
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_AI_SKIP_ALL_HOOKS=1")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 }
