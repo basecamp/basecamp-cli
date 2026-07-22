@@ -42,7 +42,10 @@ for file in "$COMMANDS_DIR"/*.go; do
     body=$(sed -n "/^func ${func_name}(/,/^func /p" "$file" | sed '$d')
 
     has_addcommand=$(echo "$body" | grep -Ec 'AddCommand|cmd\.AddCommand' || true)
-    has_rune=$(echo "$body" | grep -c 'RunE:' || true)
+    # Match RunE: only when not preceded by an identifier character, so
+    # PersistentPreRunE:/PersistentPostRunE: (lifecycle hooks, allowed on
+    # groups) don't count as a bare-invocation handler.
+    has_rune=$(echo "$body" | grep -Ec '(^|[^[:alnum:]_])RunE:' || true)
 
     if [[ "$has_addcommand" -gt 0 && "$has_rune" -gt 0 ]]; then
       if ! is_allowed "$func_name"; then
