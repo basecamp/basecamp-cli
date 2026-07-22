@@ -1,0 +1,39 @@
+e2e/smoke/smoke_tools.bats
+  s_41e2ae999367a0::t_23db9ce8732025 21
+.surface-breaking
+  s_41e2ae999367a0::t_114aa91a2de595 742-743
+.surface
+  s_41e2ae999367a0::t_67728687796b46 13505
+go.mod
+  s_41e2ae999367a0::t_1514a3b75655fb 9
+internal/version/sdk-provenance.json
+  s_41e2ae999367a0::t_1514a3b75655fb 4-6,10-11
+internal/commands/tools_test.go
+  s_41e2ae999367a0::t_47aa07b6ca89a6 11,18-56
+  s_41e2ae999367a0::t_708b2957872963 58-62,67,69,71-138,142-144,151-186,191-247,250-257
+  s_41e2ae999367a0::t_dd9c166b88b364 248-249
+  s_41e2ae999367a0::t_197c902e1cdf27 340,357
+  s_41e2ae999367a0::t_71a94e411914b9 57
+internal/commands/tools.go
+  s_41e2ae999367a0::t_b6764810e5772b 6
+  s_41e2ae999367a0::t_456c492b3dff2c 29,31
+  s_41e2ae999367a0::t_e77a142cf664dd 154-253,255,259-264,266-268,270-277,297,303,305,308,319,323,333-336
+go.sum
+  s_41e2ae999367a0::t_d6d5cbf9a63dd9 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4260129143f064748e8afb5c28646bd35cf9d70c",
+  "prompts": {},
+  "sessions": {
+    "s_41e2ae999367a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a79f404d-7161-44f2-a4a6-499af48d19b9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
