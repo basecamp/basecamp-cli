@@ -485,6 +485,10 @@ func runAgentHook(t *testing.T, subcommand, input, cwd string) string {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	// The hook's git subprocesses inherit this env: keep wrappers (git-ai)
+	// out of them too, or their overhead can blow the hook's per-command
+	// git timeout under load.
+	t.Setenv("GIT_AI_SKIP_ALL_HOOKS", "1")
 
 	app := appctx.NewApp(config.Default())
 	t.Cleanup(app.Close)
