@@ -231,7 +231,13 @@ function Invoke-PostInstallSetup([string]$Binary) {
 
   $selector = $env:BASECAMP_SETUP_AGENT
   if ($selector -in @('claude', 'codex')) {
-    try { & $Binary setup $selector } catch { }
+    # Capability-check first: an old `setup` parent accepts an unadvertised agent
+    # id as a stray arg and launches the INTERACTIVE wizard. Degrade to the skill.
+    if ($help -match "(?m)^\s+$selector\s") {
+      try { & $Binary setup $selector } catch { }
+    } else {
+      try { & $Binary skill install } catch { }
+    }
   } elseif ($selector -eq 'all') {
     $ranAgent = $false
     foreach ($agent in @('claude', 'codex')) {

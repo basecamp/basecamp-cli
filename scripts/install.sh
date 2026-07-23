@@ -510,7 +510,14 @@ post_install_setup() {
 
   case "${BASECAMP_SETUP_AGENT:-}" in
     claude|codex)
-      "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+      # Capability-check first: an old `setup` parent accepts an unadvertised
+      # agent id as a stray positional arg and launches the INTERACTIVE wizard,
+      # violating the non-interactive contract. Degrade to the shared skill.
+      if binary_supports_setup_agent "$bin" "${BASECAMP_SETUP_AGENT}"; then
+        "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+      else
+        "$bin" skill install || true
+      fi
       ;;
     all)
       # Explicit "every agent": dispatch each per-agent setup the binary knows,

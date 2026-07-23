@@ -38,7 +38,10 @@ write_stub() {
     echo '  exit 0'
     echo 'fi'
     if [[ "$mode" == "old" ]]; then
-      echo 'if [[ "$1 $2" == "setup agents" ]]; then echo "unknown command \"agents\"" >&2; exit 1; fi'
+      # A pre-`setup agents` binary advertises only `setup claude`. Reject every
+      # OTHER `setup <sub>`: the real old parent would swallow it as a stray arg
+      # and launch the interactive wizard — the exact bug the installer must avoid.
+      echo 'if [[ "$1" == "setup" && "$2" != "claude" && "$2" != "--help" ]]; then echo "unknown command \"$2\"" >&2; exit 1; fi'
     fi
     echo 'exit 0'
   } > "$STUB_DIR/basecamp"
@@ -105,6 +108,18 @@ run_post_install_setup() {
   run_post_install_setup "export BASECAMP_SETUP_AGENT=all"
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"setup claude"* ]]
+  [[ "$output" != *"setup codex"* ]]  # codex unadvertised → never invoked
+}
+
+# Explicit `codex` on an old binary that lacks `setup codex` must NOT run the
+# unknown subcommand (which would launch the interactive wizard) — it degrades
+# to the shared skill.
+@test "old binary + BASECAMP_SETUP_AGENT=codex degrades to 'skill install', never 'setup codex'" {
+  write_stub old
+  run_post_install_setup "export BASECAMP_SETUP_AGENT=codex"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"skill install"* ]]
+  [[ "$output" != *"setup codex"* ]]
 }
 
 @test "install.sh has no residual 'setup claude' dispatch" {
@@ -130,4 +145,7 @@ run_post_install_setup() {
   grep -q 'setup agents' "$INSTALL_PS1"
   grep -q 'skill install' "$INSTALL_PS1"
   grep -q 'catch {' "$INSTALL_PS1"
+  # Explicit claude|codex selectors must be capability-checked before dispatch,
+  # so an old binary never gets an unadvertised subcommand as a stray arg.
+  grep -qF 'match "(?m)^\s+$selector\s"' "$INSTALL_PS1"
 }
