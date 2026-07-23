@@ -1338,6 +1338,7 @@ func TestHasTableHTML(t *testing.T) {
 	}{
 		{name: "lowercase table tag", input: "<table><tr><td>x</td></tr></table>", expected: true},
 		{name: "uppercase table tag with attrs", input: `<TABLE class="x"><tr></tr></TABLE>`, expected: true},
+		{name: "self-closing table tag", input: "<table/>", expected: true},
 		{name: "wrapped table", input: "<figure><table></table></figure>", expected: true},
 		{name: "plain text", input: "just some text", expected: false},
 		{name: "pipe markdown", input: "| a | b |\n| --- | --- |\n| 1 | 2 |", expected: false},

@@ -1392,9 +1392,11 @@ func IsHTML(s string) bool {
 	return false
 }
 
-// reTableHTML matches a real <table> tag (open tag or self-closing), distinct
-// from the Markdown table detector. Used to gate the fail-closed TUI edit paths.
-var reTableHTML = regexp.MustCompile(`(?i)<table[\s>]`)
+// reTableHTML matches a real <table> tag — with attributes (`<table …>`), bare
+// (`<table>`), or self-closing (`<table/>`) — distinct from the Markdown table
+// detector. The trailing class requires a boundary after the name so longer
+// tags like <tablefoo> don't match. Used to gate the fail-closed TUI edit paths.
+var reTableHTML = regexp.MustCompile(`(?i)<table[\s/>]`)
 
 // HasTableHTML reports whether s contains an HTML table element. The TUI in-place
 // editors use this to refuse table-bearing content: HTMLToMarkdown has no table
