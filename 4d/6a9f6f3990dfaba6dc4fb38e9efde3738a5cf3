@@ -1,0 +1,25 @@
+scripts/install.sh
+  s_e655a660e9dd25::t_d3114ee9cb0a41 513-520
+scripts/install.ps1
+  s_e655a660e9dd25::t_ff9a8fee7f9f28 234-240
+e2e/installer.bats
+  s_e655a660e9dd25::t_ff7be005b62c9a 41-44
+  s_e655a660e9dd25::t_f4f83f1b506348 111-122
+  s_e655a660e9dd25::t_67cd1924c834da 148-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4d6a9f6f3990dfaba6dc4fb38e9efde3738a5cf3",
+  "prompts": {},
+  "sessions": {
+    "s_e655a660e9dd25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69453502-1952-42fc-8bb9-c34a8d94d478",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
