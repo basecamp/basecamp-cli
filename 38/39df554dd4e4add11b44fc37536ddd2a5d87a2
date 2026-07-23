@@ -1,0 +1,38 @@
+scripts/install.ps1
+  s_e655a660e9dd25::t_23393cbc57016d 221-223,225-240,242-244
+internal/commands/setup_agents_test.go
+  s_e655a660e9dd25::t_e5d6457efa5554 92-108
+e2e/installer.bats
+  s_e655a660e9dd25::t_7e4ef3e6e93679 101-109
+scripts/install.sh
+  s_e655a660e9dd25::t_a1abe607f30ced 499-501,515-525
+  s_e655a660e9dd25::t_20c126b959eeab 487,489-492
+  s_e655a660e9dd25::t_3fecc6fd16f6fb 488
+  s_1d78d24e94e323::t_673c71400d834a 526
+internal/commands/wizard_agents.go
+  s_e655a660e9dd25::t_59176b683b7e1e 564-566
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3839df554dd4e4add11b44fc37536ddd2a5d87a2",
+  "prompts": {},
+  "sessions": {
+    "s_1d78d24e94e323": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8beb-7b09-7472-8372-204394dcaf6f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_e655a660e9dd25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69453502-1952-42fc-8bb9-c34a8d94d478",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
