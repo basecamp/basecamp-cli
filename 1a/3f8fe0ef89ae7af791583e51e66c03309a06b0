@@ -1,0 +1,24 @@
+API-COVERAGE.md
+  s_60b254bfab738a::t_3a93072eb2b7b2 10,12
+  s_60b254bfab738a::t_089cd1cad28e6c 25
+  s_60b254bfab738a::t_4a3a3fe352cd2d 14-21
+  s_60b254bfab738a::t_06350c1ceeed4e 58
+SDK-GAP-342.md
+  s_60b254bfab738a::t_aadd82e993d5e3 1-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1a3f8fe0ef89ae7af791583e51e66c03309a06b0",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
