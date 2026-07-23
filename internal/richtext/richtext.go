@@ -941,6 +941,16 @@ var tableDetectParser = goldmark.New(goldmark.WithExtensions(extension.Table)).P
 
 // hasMarkdownTable parses s and reports whether it contains a GFM table node.
 func hasMarkdownTable(s string) bool {
+	// Cheap-out before the full goldmark parse: a GFM table needs cell-delimiting
+	// pipes and a delimiter row on its own line, so it can't exist without both a
+	// '|' and a '\n'. IsMarkdown calls this on every input that matches none of the
+	// regex patterns — typically plain text on TUI submit/editor return — so
+	// skipping the parse in that common case avoids the cost. This matches
+	// goldmark's own behavior exactly (it likewise treats a CR-only "table" with
+	// no '\n' as not a table), so the guard introduces no false negatives.
+	if !strings.Contains(s, "|") || !strings.Contains(s, "\n") {
+		return false
+	}
 	doc := tableDetectParser.Parse(text.NewReader([]byte(s)))
 	found := false
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
