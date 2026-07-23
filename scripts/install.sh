@@ -484,14 +484,21 @@ binary_supports_setup_agents() {
   "$1" setup --help 2>/dev/null | grep -qE '^[[:space:]]+agents[[:space:]]'
 }
 
+# binary_supports_setup_agent reports whether the binary exposes a per-agent
+# `setup <id>` subcommand for the given agent id (claude or codex).
+binary_supports_setup_agent() {
+  "$1" setup --help 2>/dev/null | grep -qE "^[[:space:]]+$2[[:space:]]"
+}
+
 # post_install_setup installs the baseline skill and connects coding agents
 # without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|all|none;
 # unset = auto-detect). Never runs the interactive wizard.
 #
 # Cross-version: newer binaries get the intent-neutral `setup agents`. Older
 # release binaries (no `setup agents`) fall back WITHOUT reintroducing the
-# Claude-first bug — only an explicitly selected agent is connected; an unset,
-# auto, or ambiguous selector installs the shared skill only (`skill install`).
+# Claude-first bug — only an *explicitly* selected agent is connected. `all`
+# runs every per-agent setup the binary supports; an unset, auto, or ambiguous
+# selector installs the shared skill only (`skill install`).
 post_install_setup() {
   local binary_name="$1"
   local bin="$BIN_DIR/$binary_name"
@@ -504,6 +511,18 @@ post_install_setup() {
   case "${BASECAMP_SETUP_AGENT:-}" in
     claude|codex)
       "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+      ;;
+    all)
+      # Explicit "every agent": dispatch each per-agent setup the binary knows,
+      # falling back to the shared skill if it supports none of them.
+      local ran_agent=0 agent
+      for agent in claude codex; do
+        if binary_supports_setup_agent "$bin" "$agent"; then
+          "$bin" setup "$agent" || true
+          ran_agent=1
+        fi
+      done
+      [[ "$ran_agent" -eq 1 ]] || "$bin" skill install || true
       ;;
     *)
       # Intent-neutral on old binaries: install the shared skill, never pick an

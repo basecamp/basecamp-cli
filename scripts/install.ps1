@@ -218,20 +218,30 @@ function Test-InteractiveSession {
 # Cross-version: newer binaries expose the intent-neutral `setup agents`. Older
 # release binaries (the hosted install.ps1 from main can outrun the latest
 # release) fall back WITHOUT reintroducing the Claude-first bug — only an
-# explicitly selected agent is connected; unset/auto/ambiguous installs the
-# shared skill only.
+# *explicitly* selected agent is connected. `all` runs every per-agent setup the
+# binary supports; unset/auto/ambiguous installs the shared skill only. Each
+# native call is individually guarded so a nonzero exit never aborts the install.
 function Invoke-PostInstallSetup([string]$Binary) {
-  try {
-    $help = & $Binary setup --help 2>$null
-    if ($help -match '(?m)^\s+agents\s') {
-      & $Binary setup agents
-    } elseif ($env:BASECAMP_SETUP_AGENT -in @('claude', 'codex')) {
-      & $Binary setup $env:BASECAMP_SETUP_AGENT
-    } else {
-      & $Binary skill install
+  try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
+
+  if ($help -match '(?m)^\s+agents\s') {
+    try { & $Binary setup agents } catch { }
+    return
+  }
+
+  $selector = $env:BASECAMP_SETUP_AGENT
+  if ($selector -in @('claude', 'codex')) {
+    try { & $Binary setup $selector } catch { }
+  } elseif ($selector -eq 'all') {
+    $ranAgent = $false
+    foreach ($agent in @('claude', 'codex')) {
+      if ($help -match "(?m)^\s+$agent\s") {
+        try { & $Binary setup $agent; $ranAgent = $true } catch { }
+      }
     }
-  } catch {
-    # Best-effort — swallow any failure from the agent/skill setup step.
+    if (-not $ranAgent) { try { & $Binary skill install } catch { } }
+  } else {
+    try { & $Binary skill install } catch { }
   }
 }
 

@@ -89,6 +89,23 @@ func TestNewSetupCmdHasAgentsSubcommand(t *testing.T) {
 	assert.NotNil(t, findSubcommand(NewSetupCmd(), "agents"))
 }
 
+// TestSetupAgentsRejectsPositionalArgs: selection is env-driven, so stray args
+// (typos, or confusion with `setup <id>`) are rejected rather than ignored.
+func TestSetupAgentsRejectsPositionalArgs(t *testing.T) {
+	emptyHome(t)
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+	t.Cleanup(app.Close)
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"agents", "codex"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	assert.Error(t, cmd.Execute(), "unexpected positional arg should be rejected")
+}
+
 // TestSetupAgentsStyledSurfacesFailure is the styled-output regression guard:
 // a per-agent failure must reach the human-facing output via a top-level flat
 // field, since the styled renderer skips the nested `agents` array.

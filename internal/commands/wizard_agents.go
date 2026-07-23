@@ -561,6 +561,9 @@ func newSetupAgentsCmd() *cobra.Command {
 			"Selection is controlled by " + agentSetupEnv + ": claude, codex, all, or none. When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
 			"guessed — the per-agent `basecamp setup <id>` commands are surfaced instead.",
+		// Selection is env-driven; positional args are always a mistake (typo,
+		// or confusion with `setup <id>`). Reject them rather than silently ignore.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

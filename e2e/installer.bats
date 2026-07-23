@@ -98,6 +98,15 @@ run_post_install_setup() {
   [[ "$output" != *"skill install"* ]]
 }
 
+# Explicit `all` intent must dispatch every per-agent setup the old binary
+# supports (here the stub advertises only `claude`), never collapse to skill-only.
+@test "old binary + BASECAMP_SETUP_AGENT=all runs the supported per-agent setups" {
+  write_stub old
+  run_post_install_setup "export BASECAMP_SETUP_AGENT=all"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup claude"* ]]
+}
+
 @test "install.sh has no residual 'setup claude' dispatch" {
   # `setup claude` may appear only inside the explicit-selector fallback case.
   run grep -n 'setup claude' "$INSTALL_SH"
