@@ -1,0 +1,19 @@
+internal/richtext/richtext.go
+  s_87ab7528cc99ff::t_02da03aded4e92 944-953
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5b5903acb3f3b9aa7abd30d75030ddb8b0f63c26",
+  "prompts": {},
+  "sessions": {
+    "s_87ab7528cc99ff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f713a78-6868-4b1e-8dc8-0fdcf8e1bfa2",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
