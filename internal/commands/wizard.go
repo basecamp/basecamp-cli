@@ -45,6 +45,7 @@ func NewSetupCmd() *cobra.Command {
 	for _, sub := range newSetupAgentCmds() {
 		cmd.AddCommand(sub)
 	}
+	cmd.AddCommand(newSetupAgentsCmd())
 	return cmd
 }
 

@@ -2,6 +2,8 @@
 
 Install the Basecamp CLI and connect it to your AI agent. Execute all steps autonomously.
 
+The piped installer (Step 1) already installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent. The optional "Connect Your Agent" section below is for forcing a specific agent, handling multiple detected agents, or verifying the connection.
+
 **DONE WHEN:** `basecamp --version && basecamp auth status` both succeed.
 
 ---
@@ -10,7 +12,7 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 - [ ] Install Basecamp CLI
 - [ ] Authenticate with Basecamp
-- [ ] Connect agent (optional)
+- [ ] Connect agent (optional — the piped installer already attempts one detected agent)
 
 ---
 
@@ -28,7 +30,11 @@ curl -fsSL https://basecamp.com/install-cli | bash
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
-> **Note:** The install scripts auto-detect non-interactive environments (CI, piped input, coding agents) and skip the interactive setup wizard. You can also explicitly skip it with `BASECAMP_SKIP_SETUP=1`.
+> **Note:** The install scripts auto-detect non-interactive environments (CI, piped input, coding agents) and skip the interactive setup wizard. In that case they still run `basecamp setup agents`, which installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping the wizard with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`.
+>
+> Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `all`, or `none`). Set it for the interpreter, not the fetch:
+> - Bash: `curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash`
+> - PowerShell: `$env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex`
 >
 > **Windows note:** if `curl` fails with a `schannel` / `CRYPT_E_NO_REVOCATION_CHECK` TLS error, prefer the PowerShell installer, Scoop, or Git Bash's `/usr/bin/curl` instead of the system `curl.exe`.
 
@@ -112,7 +118,7 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
 
-Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
+The piped installer (Step 1) already installs the baseline skill and attempts to connect a single detected agent. Run the commands here to force a specific agent, connect a second one, or when several agents were detected and the installer connected none. Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
 
 ### Claude Code
 

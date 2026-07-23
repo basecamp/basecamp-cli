@@ -6,6 +6,15 @@ try {
   # Ignore when the runtime manages TLS defaults.
 }
 
+# Environment options:
+#   BASECAMP_VERSION      Specific version to install (default: latest)
+#   BASECAMP_BIN_DIR      Where to install the binary
+#   BASECAMP_SKIP_SETUP   Set to 1 to skip the interactive wizard (still runs
+#                         `basecamp setup agents`)
+#   BASECAMP_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
+#                         claude | codex | all | none. Unset = auto-detect.
+#                         Piped install sets it for the interpreter, not the fetch:
+#                           $env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 $Repo = 'basecamp/basecamp-cli'
 $Version = $env:BASECAMP_VERSION
 $SkipSetup = $env:BASECAMP_SKIP_SETUP
@@ -199,6 +208,52 @@ function Test-InteractiveSession {
   }
 }
 
+# Invoke-PostInstallSetup installs the baseline skill and connects coding agents
+# without prompting, honoring BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# unset = auto-detect). It is strictly best-effort: agent setup must never fail
+# an otherwise-successful install, so every native call is wrapped so a nonzero
+# exit (amplified by $ErrorActionPreference='Stop' +
+# $PSNativeCommandUseErrorActionPreference) cannot terminate the installer.
+#
+# Cross-version: newer binaries expose the intent-neutral `setup agents`. Older
+# release binaries (the hosted install.ps1 from main can outrun the latest
+# release) fall back WITHOUT reintroducing the Claude-first bug — only an
+# *explicitly* selected agent is connected. `all` runs every per-agent setup the
+# binary supports; unset/auto/ambiguous installs the shared skill only. Each
+# native call is individually guarded so a nonzero exit never aborts the install.
+function Invoke-PostInstallSetup([string]$Binary) {
+  try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
+
+  if ($help -match '(?m)^\s+agents\s') {
+    try { & $Binary setup agents } catch { }
+    return
+  }
+
+  $selector = $env:BASECAMP_SETUP_AGENT
+  if ($selector -in @('claude', 'codex')) {
+    # Capability-check first: an old `setup` parent accepts an unadvertised agent
+    # id as a stray arg and launches the INTERACTIVE wizard. Degrade to the skill.
+    if ($help -match "(?m)^\s+$selector\s") {
+      try { & $Binary setup $selector } catch { }
+    } else {
+      try { & $Binary skill install } catch { }
+    }
+  } elseif ($selector -eq 'all') {
+    $ranAgent = $false
+    foreach ($agent in @('claude', 'codex')) {
+      if ($help -match "(?m)^\s+$agent\s") {
+        # Mark attempted (not succeeded) — matches install.sh's `ran_agent=1`,
+        # which is set regardless of the setup call's exit status.
+        $ranAgent = $true
+        try { & $Binary setup $agent } catch { }
+      }
+    }
+    if (-not $ranAgent) { try { & $Binary skill install } catch { } }
+  } else {
+    try { & $Binary skill install } catch { }
+  }
+}
+
 function Main {
   $arch = Get-PlatformArch
   if (-not $BinDir) {
@@ -260,6 +315,8 @@ function Main {
     Write-Host ''
     if ($SkipSetup -eq '1') {
       Step 'Skipping setup wizard (BASECAMP_SKIP_SETUP=1)'
+      # Still install the baseline skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
       Write-Host ''
       Write-Host '  Next steps:'
       Write-Host '    basecamp auth login        Authenticate with Basecamp'
@@ -273,6 +330,8 @@ function Main {
       Write-Host ''
     } else {
       Info 'Skipping interactive setup because PowerShell is running non-interactively.'
+      # Install the baseline skill and connect coding agents (best-effort).
+      Invoke-PostInstallSetup $installedBinary
       Write-Host ''
       Write-Host '  Installed executable:'
       Write-Host "    $installedBinary"

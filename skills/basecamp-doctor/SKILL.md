@@ -22,6 +22,7 @@ Report failures and warnings with their `hint` fields. Also inspect the top-leve
 
 - Basecamp authentication: `basecamp auth login`
 - Agent plugin installation or version: `basecamp setup`
+- Skill + all detected agents, non-interactively: `basecamp setup agents` (honors `BASECAMP_SETUP_AGENT`)
 - Codex plugin specifically: `basecamp setup codex`
 - Claude Code plugin specifically: `basecamp setup claude`
 

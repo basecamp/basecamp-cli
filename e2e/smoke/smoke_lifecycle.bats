@@ -32,6 +32,10 @@ load smoke_helper
   mark_out_of_scope "Modifies Claude Code config"
 }
 
+@test "setup agents is out of scope" {
+  mark_out_of_scope "Modifies coding-agent config"
+}
+
 @test "quick-start is out of scope" {
   mark_out_of_scope "Interactive onboarding wizard"
 }
