@@ -1,0 +1,19 @@
+scripts/install.ps1
+  s_e655a660e9dd25::t_e2e90318491994 245-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5cdc4ec99a0c2bd2c2fbce3f18870951973c55f8",
+  "prompts": {},
+  "sessions": {
+    "s_e655a660e9dd25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "69453502-1952-42fc-8bb9-c34a8d94d478",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
