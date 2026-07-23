@@ -242,7 +242,10 @@ function Invoke-PostInstallSetup([string]$Binary) {
     $ranAgent = $false
     foreach ($agent in @('claude', 'codex')) {
       if ($help -match "(?m)^\s+$agent\s") {
-        try { & $Binary setup $agent; $ranAgent = $true } catch { }
+        # Mark attempted (not succeeded) — matches install.sh's `ran_agent=1`,
+        # which is set regardless of the setup call's exit status.
+        $ranAgent = $true
+        try { & $Binary setup $agent } catch { }
       }
     }
     if (-not $ranAgent) { try { & $Binary skill install } catch { } }
