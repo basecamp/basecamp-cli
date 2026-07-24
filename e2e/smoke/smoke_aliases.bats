@@ -223,6 +223,16 @@ load smoke_helper
   mark_out_of_scope "Alias for todos position — tested via canonical form"
 }
 
+# --- todolists ---
+
+@test "todolists move is out of scope" {
+  mark_out_of_scope "Alias for todolists position — tested via canonical form"
+}
+
+@test "todolists reorder is out of scope" {
+  mark_out_of_scope "Alias for todolists position — tested via canonical form"
+}
+
 # --- todolistgroups ---
 
 @test "todolistgroups move is out of scope" {

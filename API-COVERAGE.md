@@ -6,17 +6,17 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 43 | 162 |
+| ✅ Implemented | 43 | 163 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **47** | **174** |
+| **Total (docs)** | **47** | **175** |
 
-**100% coverage of in-scope API** (162/162 endpoints)
+**100% coverage of in-scope API** (163/163 endpoints)
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (47 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.8.0 — adds `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295), consumed by `chat update`; also carries the BC5 `Tools.Create` create-by-type reshape. API date advanced to 2026-07-22.
+**SDK version:** v0.8.1-0.20260723015714-93ace8d569b5 — adds `Todolists.Reposition` (`PUT /todosets/todolists/{id}/position.json`, basecamp/basecamp-sdk#398), consumed by `todolists position`; also carries `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295), consumed by `chat update`, and the BC5 `Tools.Create` create-by-type reshape. API date 2026-07-22.
 
 ## Coverage by Section
 
@@ -27,7 +27,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
 | todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`; edit via `cards step`) |
-| todolists | 8 | `todolists` | ✅ | BC4 | - | list, show, create, update |
+| todolists | 9 | `todolists` | ✅ | BC4 | - | list, show, create, update, position |
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
 | dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition. `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call |

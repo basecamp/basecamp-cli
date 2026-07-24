@@ -558,7 +558,12 @@ basecamp todolists show <id> --in <project>                # Show details
 basecamp todolists create "Name" --in <project> --json     # Create
 basecamp todolists create "Name" --description "Desc" --in <project>
 basecamp todolists update <id> --name "New" --in <project> # Update
+basecamp todolists position <id> --to 1                     # Reorder one list (1 = top)
+basecamp todolists position <id> <id> <id>                  # Order incomplete lists, top→bottom
 ```
+
+Bulk `position` sets the visible order in one command: pass incomplete lists from
+the same todoset, top to bottom. It always places them at the top.
 
 ### Cards (Kanban)
 
