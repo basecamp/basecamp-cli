@@ -1,0 +1,79 @@
+.surface
+  s_68fb2483e203ea::t_58da0adea85b3f 11355-11357,11372,11377
+skills/basecamp/SKILL.md
+  s_68fb2483e203ea::t_b3ed761212668b 919-926
+  s_68fb2483e203ea::t_9503d280b3644c 927
+  s_d807adeb4ab6ea::t_d149e708d7fd4d 917-918
+internal/commands/search_test.go
+  s_d807adeb4ab6ea::t_838c0e7c0db535 11-12
+  s_68fb2483e203ea::t_1cf3d686a8222e 38-42,50-51,58-67
+  s_d807adeb4ab6ea::t_b55132b491b5ee 29-37,46-49,73-103,105,156-166,180
+  s_1b437abfa07167::t_07bb1dc5d9dd05 68
+  s_d807adeb4ab6ea::t_7a3a343319404d 188,264-276,279,283-287,290-299,302,306-310,313-365,369,374-376,383-384,411-418,424-429,433-437,564-571
+  s_68fb2483e203ea::t_80fd16c1009c12 377-382,385-410,419-423,430-432,438-563,572-582
+  s_68fb2483e203ea::t_334e48c6e66dad 135-154,173
+  s_68fb2483e203ea::t_c2fed0bae363d1 228-229,231-233,235-237,240-244,249,252-253,256,261
+  s_cbeadd4a90db32::t_3d22bc02692a6e 181-187,189
+  s_d807adeb4ab6ea::t_b37b783a7ba52f 155,167-172,174-179
+e2e/smoke/smoke_misc_read.bats
+  s_d807adeb4ab6ea::t_743850e9a5cbee 31-33
+internal/commands/search.go
+  s_d807adeb4ab6ea::t_5ecb644e92657d 345
+  s_d807adeb4ab6ea::t_3a01511e1c3e08 435-436,446,455-457
+  s_d807adeb4ab6ea::t_28e49327fc24a6 18-24,42,48,73-74,86-91,95-105,110
+  s_d807adeb4ab6ea::t_7b10e2fe751ba9 188-189,213-215,220-228
+  s_68fb2483e203ea::t_5a7ed0dbc5c877 239-261
+  s_68fb2483e203ea::t_7b10bfc58c64ef 5,14,30-34,43-46,50-51,70-72,75-85,111-133,135-151,191-206,231-238,262-338,343-344,346-347,439-444,451-452,458-469
+  s_d807adeb4ab6ea::t_0877ab05fd9953 216-219
+  s_12f38d49bacd84::t_7999f93ad0680f 229-230
+API-COVERAGE.md
+  s_68fb2483e203ea::t_92a1f83e9284f3 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "e20689e16f398cebf866da6e9da737eaf93016af",
+  "prompts": {},
+  "sessions": {
+    "s_12f38d49bacd84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f55a9c2-4bb1-4397-abd9-1bf435f183ea",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_1b437abfa07167": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cda71db0-eea3-4445-8ffe-bf40bead5715",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_68fb2483e203ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "783556f9-5db7-4d65-bc06-ab6ad72d3368",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_cbeadd4a90db32": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8ba2-bfcb-7c73-8d02-c7f50e7abf69",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d807adeb4ab6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdfc597e-6eed-4fda-b3eb-bb247065df5f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
