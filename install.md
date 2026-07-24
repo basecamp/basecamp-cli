@@ -126,7 +126,7 @@ The piped installer (Step 1) already installs the baseline skill and attempts to
 basecamp setup claude
 ```
 
-This registers the marketplace and installs the plugin with skills and agent workflow support.
+This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
 
 ### Codex
 
@@ -134,7 +134,7 @@ This registers the marketplace and installs the plugin with skills and agent wor
 basecamp setup codex
 ```
 
-This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. Start a new Codex thread after setup to load the skills.
+This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. After setup, review and trust the plugin hooks with `/hooks` (Codex lists untrusted hooks but does not run them until trusted), then start a new Codex thread to load the skills and hooks.
 
 For a manual install:
 

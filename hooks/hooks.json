@@ -1,0 +1,54 @@
+{
+  "description": "Basecamp agent hooks: session context and commit-reference nudges.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "basecamp agent-hook session-start",
+            "timeout": 5,
+            "statusMessage": "Checking Basecamp status"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "basecamp agent-hook pre-commit-snapshot",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "basecamp agent-hook post-commit",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "basecamp agent-hook post-commit",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
