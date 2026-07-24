@@ -914,9 +914,17 @@ basecamp people remove <id> --project <project>    # Remove from project
 ### Search
 
 ```bash
-basecamp search "query" --json                    # Full-text search
-basecamp search "query" --sort updated_at --limit 20
-basecamp search metadata --json                   # Available search scopes
+basecamp search "query" --json                    # Full-text search (capped at 20; --all for every match)
+basecamp search "query" --sort recency --limit 20
+basecamp search "query" --project Marketing       # Scope to one project (--in also works)
+basecamp search "query" --type todo               # Filter by type: todo, message, document, comment,
+                                                  #   card, file, ping, chat, check-in, event, folder,
+                                                  #   forward, client
+basecamp search "query" --creator me              # Filter by creator (name, email, ID, or 'me')
+basecamp search "query" --since last_30_days      # last_7_days|last_30_days|last_90_days|last_12_months|forever
+basecamp search "query" --file-type pdf           # Filter attachments: image, audio, video, pdf
+basecamp search "query" --exclude-chat            # Drop chat/campfire results
+basecamp search metadata --json                   # Recording and file types the API accepts as filters
 ```
 
 ### Generic Show

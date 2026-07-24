@@ -51,7 +51,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
 | my_assignments | 3 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter) |
-| search | 2 | `search` | ✅ | BC4 | - | Full-text search |
+| search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
 | uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show |
