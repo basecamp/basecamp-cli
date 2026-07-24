@@ -7,14 +7,22 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
 | ✅ Implemented | 43 | 162 |
+| ❌ Uncovered | 1 | 3 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total (docs)** | **47** | **174** |
+| **Total tracked** | **48** | **177** |
 
-**100% coverage of in-scope API** (162/162 endpoints)
+Coverage is no longer 100%: one tracked in-scope section —
+`card_table_wormholes` (3 endpoints) — is uncovered pending SDK support (see
+[SDK-GAP-342.md](SDK-GAP-342.md)). An exact endpoint percentage is intentionally
+omitted here: the per-row `Endpoints` counts don't reconcile with the Summary
+totals (see the note below), so any precise figure would be unsupported until the
+matrix is reconciled — separate pre-existing maintenance. These totals are also
+not complete bc-api parity; the other five BC5 sections introduced by bc-api#410
+remain untracked and outside this PR.
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
-> Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (47 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
+> Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
 **SDK version:** v0.8.0 — adds `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295), consumed by `chat update`; also carries the BC5 `Tools.Create` create-by-type reshape. API date advanced to 2026-07-22.
 
@@ -47,6 +55,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards |
+| card_table_wormholes | 3 | - | ❌ | BC5 | - | create/update/delete + `wormholes[]` on card table; cross-project card teleport; blocked on SDK — see [SDK-GAP-342.md](SDK-GAP-342.md) |
 | **People** |
 | people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
