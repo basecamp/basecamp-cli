@@ -326,8 +326,10 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				Description: description,
 			}
 
-			// Set client visibility only when the flag was provided; omitting it
-			// leaves the server's default (team-only for a top-level todolist).
+			// Set client visibility only when the flag was provided. Omitting it
+			// uses the server's default: team-only when posting as a team member,
+			// but a client-authenticated caller always creates client-visible
+			// records (an explicit false is overridden server-side).
 			if cmd.Flags().Changed("visible-to-clients") {
 				req.VisibleToClients = &visibleToClients
 			}
@@ -361,7 +363,7 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
-	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (default: team-only)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
 
 	return cmd
 }

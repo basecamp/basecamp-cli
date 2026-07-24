@@ -111,8 +111,8 @@ func newSearchMetadataCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "metadata",
 		Aliases: []string{"types"},
-		Short:   "Show available search scopes",
-		Long:    "Display available projects for search scope filtering.",
+		Short:   "Show available search filters",
+		Long:    "Display the available recording-type and file-type filters for scoping a search.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			return runSearchMetadata(cmd, app)

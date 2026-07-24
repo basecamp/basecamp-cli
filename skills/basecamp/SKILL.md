@@ -614,7 +614,7 @@ basecamp messages unpin <id>                  # Unpin
 
 **Archived/trashed messages:** `messages list` only returns active messages. For archived or trashed messages, use `basecamp recordings messages --status archived --in <project>` or `--status trashed`.
 
-**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for team-only)
+**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for the server default)
 
 ```bash
 basecamp messages create "Bot update" "Done" --no-subscribe --in <project>
@@ -624,9 +624,13 @@ basecamp messages create "For the client" "..." --visible-to-clients --in <proje
 
 **Client visibility at create time:** `messages create`, `todolists create`,
 `schedule create`, and `checkins question create` accept `--visible-to-clients`
-to post a client-visible recording in one call. Omitting the flag leaves the
-server default (team-only for these top-level posts). To change visibility on an
-already-created recording, use `recordings visibility <id> --visible`.
+to post a client-visible recording in one call. Omitting the flag uses the
+server default, which is context-dependent: **team-only when you post as a team
+member**, but a **client-authenticated caller always creates client-visible
+records** (an explicit `--visible-to-clients=false` is overridden server-side for
+client callers). Passing `--visible-to-clients` posts client-visible in every
+case. To change visibility on an already-created recording, use
+`recordings visibility <id> --visible`.
 
 ### Comments
 
@@ -677,7 +681,7 @@ basecamp schedule update <id> --summary "New title" --starts-at "..."
 basecamp schedule settings --include-due --in <project>  # Include todos/cards due dates
 ```
 
-**Flags:** `--all-day`, `--notify`, `--participants <ids>`, `--no-subscribe`, `--subscribe "people"` (mutually exclusive), `--status` (active/archived/trashed), `--visible-to-clients` (make visible to clients; omit for team-only)
+**Flags:** `--all-day`, `--notify`, `--participants <ids>`, `--no-subscribe`, `--subscribe "people"` (mutually exclusive), `--status` (active/archived/trashed), `--visible-to-clients` (make visible to clients; omit for the server default)
 
 ### Check-ins
 
@@ -697,7 +701,7 @@ basecamp checkins answer update <id> "Updated" --in <project>
 
 **Schedule options:** `--frequency` (every_day, every_week, every_other_week, every_month, on_certain_days), `--days 1,2,3,4,5` (0=Sun), `--time "5:00pm"`
 
-**Client visibility:** `checkins question create` accepts `--visible-to-clients` to make the question visible to clients (omit for team-only).
+**Client visibility:** `checkins question create` accepts `--visible-to-clients` to make the question visible to clients (omit for the server default; see the note under Messages for the context-dependent rule).
 
 ### Timeline
 

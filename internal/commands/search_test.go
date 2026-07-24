@@ -109,6 +109,77 @@ func executeSearchCommand(cmd *cobra.Command, app *appctx.App, args ...string) e
 	return cmd.Execute()
 }
 
+// searchMetadataTransport serves the search metadata endpoint. A nil body
+// simulates an empty (no-filters) response.
+type searchMetadataTransport struct {
+	body string
+}
+
+func (s searchMetadataTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if !strings.Contains(req.URL.Path, "/searches/metadata") {
+		return nil, errors.New("unexpected request: " + req.URL.Path)
+	}
+	body := s.body
+	if body == "" {
+		body = `{"recording_search_types":[],"file_search_types":[]}`
+	}
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+		Request:    req,
+	}, nil
+}
+
+const searchMetadataBody = `{
+	"recording_search_types": [
+		{"key": null, "value": "Everything"},
+		{"key": "Message", "value": "Messages"},
+		{"key": "Todo", "value": "To-dos"}
+	],
+	"file_search_types": [
+		{"key": null, "value": "All files"},
+		{"key": "image", "value": "Images"}
+	],
+	"default_creator_label": "Anyone",
+	"default_bucket_label": "All projects",
+	"default_circle_label": "All pings",
+	"default_file_type_label": "All files",
+	"default_type_label": "Everything"
+}`
+
+// TestSearchMetadataReturnsFilterTypes verifies the metadata command reports the
+// recording/file filter counts from the reshaped SearchMetadata response.
+func TestSearchMetadataReturnsFilterTypes(t *testing.T) {
+	app, buf := setupSearchTestApp(t, searchMetadataTransport{body: searchMetadataBody})
+
+	cmd := NewSearchCmd()
+	err := executeSearchCommand(cmd, app, "metadata")
+	require.NoError(t, err)
+
+	var envelope output.Response
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Contains(t, envelope.Summary, "3 recording types")
+	assert.Contains(t, envelope.Summary, "2 file types")
+}
+
+// TestSearchMetadataEmptyIsUsageError verifies an empty metadata response
+// surfaces a usage hint rather than an empty success envelope.
+func TestSearchMetadataEmptyIsUsageError(t *testing.T) {
+	app, _ := setupSearchTestApp(t, searchMetadataTransport{})
+
+	cmd := NewSearchCmd()
+	err := executeSearchCommand(cmd, app, "metadata")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, "Search metadata not available", e.Message)
+}
+
 func TestSearchTruncationNoticePresent(t *testing.T) {
 	app, buf := setupSearchTestApp(t, searchTransport{resultCount: 5, totalCount: 20})
 
