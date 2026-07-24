@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -36,6 +37,7 @@ to disambiguate when needed.`,
 		newTodolistsShowCmd(&project),
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
+		newTodolistsPositionCmd(&project),
 		newRecordableTrashCmd("todolist"),
 		newRecordableArchiveCmd("todolist"),
 		newRecordableRestoreCmd("todolist"),
@@ -444,6 +446,196 @@ You can pass either a todolist ID or a Basecamp URL:
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
+
+	return cmd
+}
+
+func newTodolistsPositionCmd(project *string) *cobra.Command {
+	var position int
+
+	cmd := &cobra.Command{
+		Use:     "position <id|url>...",
+		Aliases: []string{"move", "reorder"},
+		Short:   "Change todolist position",
+		Long: `Reorder a todolist within its todoset. Position is 1-based (1 = top).
+
+  basecamp todolists position 789 --to 1
+  basecamp todolists position https://3.basecamp.com/1/buckets/2/todolists/789 --to 1
+
+Pass several todolists to set their order, top to bottom. Bulk reordering always
+places them at the top of the todoset; every list must live in the same todoset
+and be incomplete (completed lists are positioned separately by Basecamp):
+
+  basecamp todolists position 701 702 703 704 705
+
+Positioning is relative and cascades: sibling lists shift to make room, and the
+server translates the position for loose to-dos and hidden completed lists.
+Confirm with ` + "`basecamp todolists list`" + `.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// ExtractIDs drops empty segments, so a bare "," yields zero IDs.
+			ids := extractIDs(args)
+			if len(ids) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+
+			// Distinguish an omitted flag from an explicit --to 0.
+			supplied := cmd.Flags().Changed("to") || cmd.Flags().Changed("position")
+			if supplied && position < 1 {
+				return output.ErrUsage("--to must be at least 1 (1 = top)")
+			}
+			switch {
+			case len(ids) == 1 && !supplied:
+				return output.ErrUsage("--to is required (1 = top)")
+			case len(ids) > 1 && supplied && position != 1:
+				return output.ErrUsage("Reordering multiple todolists is only supported at position 1; " +
+					"drop --to or pass --to 1")
+			case !supplied:
+				position = 1 // bulk default
+			}
+
+			// Validate every ID and reject duplicates before mutating anything.
+			parsed := make([]int64, 0, len(ids))
+			seen := make(map[int64]bool, len(ids))
+			for _, idStr := range ids {
+				id, err := strconv.ParseInt(idStr, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid todolist ID")
+				}
+				if seen[id] {
+					return output.ErrUsage(fmt.Sprintf("Duplicate todolist ID %d", id))
+				}
+				seen[id] = true
+				parsed = append(parsed, id)
+			}
+
+			// Sibling preflight (bulk only): every list must belong to the same
+			// todoset and bucket, and be incomplete, before any PUT is issued.
+			var bucketID, parentID int64
+			if len(parsed) > 1 {
+				for _, id := range parsed {
+					tl, err := app.Account().Todolists().Get(cmd.Context(), id)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					if tl.Parent == nil || tl.Bucket == nil {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d is missing its todoset or project context.", id),
+							"Reorder one todoset at a time.",
+						)
+					}
+					if tl.Completed {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d (%s) is completed; bulk reordering accepts incomplete lists only.", id, tl.Name),
+							"Basecamp positions completed lists separately — reorder the incomplete lists on their own.",
+						)
+					}
+					if parentID == 0 {
+						parentID = tl.Parent.ID
+						bucketID = tl.Bucket.ID
+					} else if tl.Parent.ID != parentID || tl.Bucket.ID != bucketID {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d belongs to a different todoset (#%d) than the others.", id, tl.Parent.ID),
+							"Reorder one todoset at a time.",
+						)
+					}
+				}
+			}
+
+			// Apply in reverse so the typed order lands top→bottom onto position 1.
+			// Stop at the first failure: a half-applied reorder is a wrong order.
+			applied := 0
+			for i := len(parsed) - 1; i >= 0; i-- {
+				if err := app.Account().Todolists().Reposition(cmd.Context(), parsed[i], position); err != nil {
+					converted := convertSDKError(err)
+					msg := fmt.Sprintf("Reordered %d of %d todolists; failed at #%d", applied, len(parsed), parsed[i])
+					hint := "Rerun the whole command once the cause is fixed; the todoset is now in an intermediate order."
+					var outErr *output.Error
+					if errors.As(converted, &outErr) {
+						return &output.Error{
+							Code:       outErr.Code,
+							Message:    fmt.Sprintf("%s: %s", msg, outErr.Message),
+							Hint:       hint,
+							HTTPStatus: outErr.HTTPStatus,
+							Retryable:  outErr.Retryable,
+							Cause:      outErr,
+						}
+					}
+					return output.ErrUsageHint(fmt.Sprintf("%s: %s", msg, converted.Error()), hint)
+				}
+				applied++
+			}
+
+			var summary string
+			var breadcrumbs []output.Breadcrumb
+			if len(parsed) == 1 {
+				summary = fmt.Sprintf("Moved todolist #%d to position %d", parsed[0], position)
+				// No preflight Get in single mode: resolve project from ambient
+				// context (URL > group flag > flags > config) for the breadcrumbs.
+				_, urlProjectID := extractWithProject(args[0])
+				proj := urlProjectID
+				if proj == "" {
+					proj = *project
+				}
+				if proj == "" {
+					proj = app.Flags.Project
+				}
+				if proj == "" {
+					proj = app.Config.ProjectID
+				}
+				if proj != "" {
+					breadcrumbs = []output.Breadcrumb{
+						{
+							Action:      "show",
+							Cmd:         fmt.Sprintf("basecamp todolists show %d --in %s", parsed[0], proj),
+							Description: "View todolist",
+						},
+						{
+							Action:      "list",
+							Cmd:         fmt.Sprintf("basecamp todolists list --in %s", proj),
+							Description: "List todolists",
+						},
+					}
+				}
+			} else {
+				summary = fmt.Sprintf("Reordered %d todolists to the top of the todoset", len(parsed))
+				// Build from authoritative preflight data, not ambient project.
+				breadcrumbs = []output.Breadcrumb{
+					{
+						Action:      "list",
+						Cmd:         fmt.Sprintf("basecamp todolists list --in %d --todoset %d", bucketID, parentID),
+						Description: "List todolists",
+					},
+				}
+			}
+
+			opts := []output.ResponseOption{output.WithSummary(summary)}
+			if len(breadcrumbs) > 0 {
+				opts = append(opts, output.WithBreadcrumbs(breadcrumbs...))
+			}
+
+			return app.OK(map[string]any{
+				"repositioned": true,
+				"position":     position,
+				"todolist_ids": parsed,
+			}, opts...)
+		},
+	}
+
+	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
+	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 
 	return cmd
 }

@@ -308,6 +308,9 @@ ARG basecamp tlgroups update 00 <id>
 ARG basecamp tlgroups update 01 <name>
 ARG basecamp todolist archive 00 <id|url>
 ARG basecamp todolist create 00 <name>
+ARG basecamp todolist move 00 <id|url>...
+ARG basecamp todolist position 00 <id|url>...
+ARG basecamp todolist reorder 00 <id|url>...
 ARG basecamp todolist restore 00 <id|url>
 ARG basecamp todolist show 00 <id|url>
 ARG basecamp todolist trash 00 <id|url>
@@ -330,6 +333,9 @@ ARG basecamp todolistgroups update 00 <id>
 ARG basecamp todolistgroups update 01 <name>
 ARG basecamp todolists archive 00 <id|url>
 ARG basecamp todolists create 00 <name>
+ARG basecamp todolists move 00 <id|url>...
+ARG basecamp todolists position 00 <id|url>...
+ARG basecamp todolists reorder 00 <id|url>...
 ARG basecamp todolists restore 00 <id|url>
 ARG basecamp todolists show 00 <id|url>
 ARG basecamp todolists trash 00 <id|url>
@@ -896,6 +902,9 @@ CMD basecamp todolist
 CMD basecamp todolist archive
 CMD basecamp todolist create
 CMD basecamp todolist list
+CMD basecamp todolist move
+CMD basecamp todolist position
+CMD basecamp todolist reorder
 CMD basecamp todolist restore
 CMD basecamp todolist show
 CMD basecamp todolist trash
@@ -920,6 +929,9 @@ CMD basecamp todolists
 CMD basecamp todolists archive
 CMD basecamp todolists create
 CMD basecamp todolists list
+CMD basecamp todolists move
+CMD basecamp todolists position
+CMD basecamp todolists reorder
 CMD basecamp todolists restore
 CMD basecamp todolists show
 CMD basecamp todolists trash
@@ -12476,6 +12488,75 @@ FLAG basecamp todolist list --styled type=bool
 FLAG basecamp todolist list --todolist type=string
 FLAG basecamp todolist list --todoset type=string
 FLAG basecamp todolist list --verbose type=count
+FLAG basecamp todolist move --account type=string
+FLAG basecamp todolist move --agent type=bool
+FLAG basecamp todolist move --cache-dir type=string
+FLAG basecamp todolist move --count type=bool
+FLAG basecamp todolist move --help type=bool
+FLAG basecamp todolist move --hints type=bool
+FLAG basecamp todolist move --ids-only type=bool
+FLAG basecamp todolist move --in type=string
+FLAG basecamp todolist move --jq type=string
+FLAG basecamp todolist move --json type=bool
+FLAG basecamp todolist move --markdown type=bool
+FLAG basecamp todolist move --md type=bool
+FLAG basecamp todolist move --no-hints type=bool
+FLAG basecamp todolist move --no-stats type=bool
+FLAG basecamp todolist move --position type=int
+FLAG basecamp todolist move --profile type=string
+FLAG basecamp todolist move --project type=string
+FLAG basecamp todolist move --quiet type=bool
+FLAG basecamp todolist move --stats type=bool
+FLAG basecamp todolist move --styled type=bool
+FLAG basecamp todolist move --to type=int
+FLAG basecamp todolist move --todolist type=string
+FLAG basecamp todolist move --verbose type=count
+FLAG basecamp todolist position --account type=string
+FLAG basecamp todolist position --agent type=bool
+FLAG basecamp todolist position --cache-dir type=string
+FLAG basecamp todolist position --count type=bool
+FLAG basecamp todolist position --help type=bool
+FLAG basecamp todolist position --hints type=bool
+FLAG basecamp todolist position --ids-only type=bool
+FLAG basecamp todolist position --in type=string
+FLAG basecamp todolist position --jq type=string
+FLAG basecamp todolist position --json type=bool
+FLAG basecamp todolist position --markdown type=bool
+FLAG basecamp todolist position --md type=bool
+FLAG basecamp todolist position --no-hints type=bool
+FLAG basecamp todolist position --no-stats type=bool
+FLAG basecamp todolist position --position type=int
+FLAG basecamp todolist position --profile type=string
+FLAG basecamp todolist position --project type=string
+FLAG basecamp todolist position --quiet type=bool
+FLAG basecamp todolist position --stats type=bool
+FLAG basecamp todolist position --styled type=bool
+FLAG basecamp todolist position --to type=int
+FLAG basecamp todolist position --todolist type=string
+FLAG basecamp todolist position --verbose type=count
+FLAG basecamp todolist reorder --account type=string
+FLAG basecamp todolist reorder --agent type=bool
+FLAG basecamp todolist reorder --cache-dir type=string
+FLAG basecamp todolist reorder --count type=bool
+FLAG basecamp todolist reorder --help type=bool
+FLAG basecamp todolist reorder --hints type=bool
+FLAG basecamp todolist reorder --ids-only type=bool
+FLAG basecamp todolist reorder --in type=string
+FLAG basecamp todolist reorder --jq type=string
+FLAG basecamp todolist reorder --json type=bool
+FLAG basecamp todolist reorder --markdown type=bool
+FLAG basecamp todolist reorder --md type=bool
+FLAG basecamp todolist reorder --no-hints type=bool
+FLAG basecamp todolist reorder --no-stats type=bool
+FLAG basecamp todolist reorder --position type=int
+FLAG basecamp todolist reorder --profile type=string
+FLAG basecamp todolist reorder --project type=string
+FLAG basecamp todolist reorder --quiet type=bool
+FLAG basecamp todolist reorder --stats type=bool
+FLAG basecamp todolist reorder --styled type=bool
+FLAG basecamp todolist reorder --to type=int
+FLAG basecamp todolist reorder --todolist type=string
+FLAG basecamp todolist reorder --verbose type=count
 FLAG basecamp todolist restore --account type=string
 FLAG basecamp todolist restore --agent type=bool
 FLAG basecamp todolist restore --cache-dir type=string
@@ -13018,6 +13099,75 @@ FLAG basecamp todolists list --styled type=bool
 FLAG basecamp todolists list --todolist type=string
 FLAG basecamp todolists list --todoset type=string
 FLAG basecamp todolists list --verbose type=count
+FLAG basecamp todolists move --account type=string
+FLAG basecamp todolists move --agent type=bool
+FLAG basecamp todolists move --cache-dir type=string
+FLAG basecamp todolists move --count type=bool
+FLAG basecamp todolists move --help type=bool
+FLAG basecamp todolists move --hints type=bool
+FLAG basecamp todolists move --ids-only type=bool
+FLAG basecamp todolists move --in type=string
+FLAG basecamp todolists move --jq type=string
+FLAG basecamp todolists move --json type=bool
+FLAG basecamp todolists move --markdown type=bool
+FLAG basecamp todolists move --md type=bool
+FLAG basecamp todolists move --no-hints type=bool
+FLAG basecamp todolists move --no-stats type=bool
+FLAG basecamp todolists move --position type=int
+FLAG basecamp todolists move --profile type=string
+FLAG basecamp todolists move --project type=string
+FLAG basecamp todolists move --quiet type=bool
+FLAG basecamp todolists move --stats type=bool
+FLAG basecamp todolists move --styled type=bool
+FLAG basecamp todolists move --to type=int
+FLAG basecamp todolists move --todolist type=string
+FLAG basecamp todolists move --verbose type=count
+FLAG basecamp todolists position --account type=string
+FLAG basecamp todolists position --agent type=bool
+FLAG basecamp todolists position --cache-dir type=string
+FLAG basecamp todolists position --count type=bool
+FLAG basecamp todolists position --help type=bool
+FLAG basecamp todolists position --hints type=bool
+FLAG basecamp todolists position --ids-only type=bool
+FLAG basecamp todolists position --in type=string
+FLAG basecamp todolists position --jq type=string
+FLAG basecamp todolists position --json type=bool
+FLAG basecamp todolists position --markdown type=bool
+FLAG basecamp todolists position --md type=bool
+FLAG basecamp todolists position --no-hints type=bool
+FLAG basecamp todolists position --no-stats type=bool
+FLAG basecamp todolists position --position type=int
+FLAG basecamp todolists position --profile type=string
+FLAG basecamp todolists position --project type=string
+FLAG basecamp todolists position --quiet type=bool
+FLAG basecamp todolists position --stats type=bool
+FLAG basecamp todolists position --styled type=bool
+FLAG basecamp todolists position --to type=int
+FLAG basecamp todolists position --todolist type=string
+FLAG basecamp todolists position --verbose type=count
+FLAG basecamp todolists reorder --account type=string
+FLAG basecamp todolists reorder --agent type=bool
+FLAG basecamp todolists reorder --cache-dir type=string
+FLAG basecamp todolists reorder --count type=bool
+FLAG basecamp todolists reorder --help type=bool
+FLAG basecamp todolists reorder --hints type=bool
+FLAG basecamp todolists reorder --ids-only type=bool
+FLAG basecamp todolists reorder --in type=string
+FLAG basecamp todolists reorder --jq type=string
+FLAG basecamp todolists reorder --json type=bool
+FLAG basecamp todolists reorder --markdown type=bool
+FLAG basecamp todolists reorder --md type=bool
+FLAG basecamp todolists reorder --no-hints type=bool
+FLAG basecamp todolists reorder --no-stats type=bool
+FLAG basecamp todolists reorder --position type=int
+FLAG basecamp todolists reorder --profile type=string
+FLAG basecamp todolists reorder --project type=string
+FLAG basecamp todolists reorder --quiet type=bool
+FLAG basecamp todolists reorder --stats type=bool
+FLAG basecamp todolists reorder --styled type=bool
+FLAG basecamp todolists reorder --to type=int
+FLAG basecamp todolists reorder --todolist type=string
+FLAG basecamp todolists reorder --verbose type=count
 FLAG basecamp todolists restore --account type=string
 FLAG basecamp todolists restore --agent type=bool
 FLAG basecamp todolists restore --cache-dir type=string
@@ -16538,6 +16688,9 @@ SUB basecamp todolist
 SUB basecamp todolist archive
 SUB basecamp todolist create
 SUB basecamp todolist list
+SUB basecamp todolist move
+SUB basecamp todolist position
+SUB basecamp todolist reorder
 SUB basecamp todolist restore
 SUB basecamp todolist show
 SUB basecamp todolist trash
@@ -16562,6 +16715,9 @@ SUB basecamp todolists
 SUB basecamp todolists archive
 SUB basecamp todolists create
 SUB basecamp todolists list
+SUB basecamp todolists move
+SUB basecamp todolists position
+SUB basecamp todolists reorder
 SUB basecamp todolists restore
 SUB basecamp todolists show
 SUB basecamp todolists trash
