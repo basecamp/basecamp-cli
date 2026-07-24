@@ -570,10 +570,26 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 			for i := len(parsed) - 1; i >= 0; i-- {
 				if err := app.Account().Todolists().Reposition(cmd.Context(), parsed[i], position); err != nil {
 					converted := convertSDKError(err)
+					// No PUT has landed yet (single-list mode always takes this
+					// path): the todoset is untouched. Surface the underlying
+					// error unchanged — keep its code/category/hint and don't
+					// claim an intermediate order that doesn't exist.
+					if applied == 0 {
+						return converted
+					}
+					// A partial reorder has landed: the todoset is now in an
+					// intermediate order. Add applied-count accounting and a
+					// rerun hint while preserving the underlying error's
+					// classification (never reclassify a transport/runtime
+					// failure as a usage error).
 					msg := fmt.Sprintf("Reordered %d of %d todolists; failed at #%d", applied, len(parsed), parsed[i])
-					hint := "Rerun the whole command once the cause is fixed; the todoset is now in an intermediate order."
+					const rerun = "Rerun the whole command once the cause is fixed; the todoset is now in an intermediate order."
 					var outErr *output.Error
 					if errors.As(converted, &outErr) {
+						hint := rerun
+						if outErr.Hint != "" {
+							hint = outErr.Hint + " " + rerun
+						}
 						return &output.Error{
 							Code:       outErr.Code,
 							Message:    fmt.Sprintf("%s: %s", msg, outErr.Message),
@@ -583,7 +599,7 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 							Cause:      outErr,
 						}
 					}
-					return output.ErrUsageHint(fmt.Sprintf("%s: %s", msg, converted.Error()), hint)
+					return fmt.Errorf("%s: %w", msg, converted)
 				}
 				applied++
 			}

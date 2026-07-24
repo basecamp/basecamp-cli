@@ -251,7 +251,9 @@ func newTodolistsPositionServer(t *testing.T, rec *requestRecorder, getResponses
 			}
 			w.WriteHeader(status)
 			if status >= 400 {
-				fmt.Fprintf(w, `{"error":"boom"}`)
+				// error_description becomes the SDK error Hint — lets tests
+				// assert the underlying hint is preserved, not overwritten.
+				fmt.Fprint(w, `{"error":"denied","error_description":"check your role"}`)
 			}
 			return
 		}
@@ -491,11 +493,63 @@ func TestTodolistsPositionPartialFailureAccounting(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	// One applied (703) before failing at 702.
 	assert.Contains(t, e.Message, "Reordered 1 of 3 todolists; failed at #702")
-	assert.Contains(t, e.Hint, "Rerun the whole command")
+	// Underlying error classification is preserved, not reclassified as usage.
+	assert.Equal(t, "forbidden", e.Code)
 	assert.Equal(t, http.StatusForbidden, e.HTTPStatus)
+	// Both the original SDK hint and the rerun hint survive.
+	assert.Contains(t, e.Hint, "check your role")
+	assert.Contains(t, e.Hint, "Rerun the whole command")
 
 	// Exactly two PUTs recorded: it stopped instead of continuing to 701.
 	assert.Len(t, rec.puts(), 2)
+}
+
+// A single-list PUT failure means zero mutations: the error is surfaced with
+// its own classification, with no accounting prefix and no false claim that the
+// todoset is in an intermediate order.
+func TestTodolistsPositionSingleFailureSurfacesUnderlyingError(t *testing.T) {
+	rec := &requestRecorder{}
+	server := newTodolistsPositionServer(t, rec, nil, map[int64]int{789: http.StatusNotFound})
+	app, _ := newRequestLevelApp(t, server.URL)
+
+	project := ""
+	cmd := newTodolistsPositionCmd(&project)
+	err := executeCommand(cmd, app, "789", "--to", "3")
+
+	require.NotNil(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "not_found", e.Code, "must not be reclassified as usage")
+	assert.Equal(t, http.StatusNotFound, e.HTTPStatus)
+	assert.NotContains(t, e.Message, "Reordered")
+	assert.NotContains(t, e.Hint, "intermediate order")
+	assert.Len(t, rec.puts(), 1)
+}
+
+// When the very first applied PUT in a bulk run fails, nothing has been
+// mutated yet — the error is surfaced directly, with no accounting prefix and
+// no intermediate-order claim, and exactly one PUT is recorded.
+func TestTodolistsPositionBulkFirstPutFailureMeansZeroApplied(t *testing.T) {
+	rec := &requestRecorder{}
+	gets := map[int64]todolistGetResponse{
+		701: {parentID: 10, bucketID: 20},
+		702: {parentID: 10, bucketID: 20},
+	}
+	// Apply order is 702 then 701; fail on the first PUT (702).
+	server := newTodolistsPositionServer(t, rec, gets, map[int64]int{702: http.StatusNotFound})
+	app, _ := newRequestLevelApp(t, server.URL)
+
+	project := ""
+	cmd := newTodolistsPositionCmd(&project)
+	err := executeCommand(cmd, app, "701", "702")
+
+	require.NotNil(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, "not_found", e.Code)
+	assert.NotContains(t, e.Message, "Reordered")
+	assert.NotContains(t, e.Hint, "intermediate order")
+	assert.Len(t, rec.puts(), 1, "stopped after the first failing PUT")
 }
 
 func TestTodolistsPositionBulkBreadcrumbUsesPreflightData(t *testing.T) {
