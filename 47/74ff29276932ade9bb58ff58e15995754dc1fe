@@ -1,0 +1,38 @@
+internal/commands/checkins.go
+  s_8c5aeeb8eaf115::t_db605d382bff0f 405
+  s_8c5aeeb8eaf115::t_0099843f1ed4e3 370-373
+internal/commands/search.go
+  s_8c5aeeb8eaf115::t_17ea0ccc4d7530 114-115
+internal/commands/todolists.go
+  s_8c5aeeb8eaf115::t_1014c128bf64f1 366
+  s_8c5aeeb8eaf115::t_9dae7765fa8d68 329-332
+internal/commands/search_test.go
+  s_8c5aeeb8eaf115::t_197478c9323216 112-182
+internal/commands/schedule.go
+  s_8c5aeeb8eaf115::t_4473b39aafeb55 461
+  s_8c5aeeb8eaf115::t_53394cd355241d 539-542
+internal/commands/messages.go
+  s_8c5aeeb8eaf115::t_bcc451a90342e5 429
+  s_8c5aeeb8eaf115::t_5e73abc1f7553f 388-391
+skills/basecamp/SKILL.md
+  s_8c5aeeb8eaf115::t_52f8287e365531 704
+  s_8c5aeeb8eaf115::t_7b96fa7a18288a 627-633
+  s_8c5aeeb8eaf115::t_0225f3838c24bf 617
+  s_8c5aeeb8eaf115::t_41feeb6b1d4c77 684
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4774ff29276932ade9bb58ff58e15995754dc1fe",
+  "prompts": {},
+  "sessions": {
+    "s_8c5aeeb8eaf115": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15586d32-8e58-43c3-b5fb-1604a41a55bc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
