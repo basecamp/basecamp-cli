@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewTodolistsCmd creates the todolists command group.
@@ -493,6 +495,24 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// A pasted URL for a different recording type (a todo, card, or a
+			// collection URL) still extracts a trailing numeric ID, which would
+			// silently reposition an unrelated todolist. Require any URL arg to
+			// be a non-collection todolists URL before trusting its ID.
+			for _, arg := range args {
+				for _, token := range strings.Split(arg, ",") {
+					token = strings.TrimSpace(token)
+					if token == "" {
+						continue
+					}
+					if parsed := urlarg.Parse(token); parsed != nil {
+						if parsed.RecordingID == "" || parsed.Type != "todolists" || parsed.IsCollection {
+							return output.ErrUsage("Expected a todolist URL (.../todolists/<id>), or pass a todolist ID.")
+						}
+					}
+				}
 			}
 
 			// ExtractIDs drops empty segments, so a bare "," yields zero IDs.

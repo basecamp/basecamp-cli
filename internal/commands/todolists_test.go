@@ -182,6 +182,32 @@ func TestTodolistsPositionURLArgPassesValidation(t *testing.T) {
 	}
 }
 
+func TestTodolistsPositionRejectsWrongURLType(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"todo URL", "https://3.basecamp.com/99999/buckets/2/todos/789"},
+		{"card URL", "https://3.basecamp.com/99999/buckets/2/card_tables/cards/789"},
+		{"todolists collection URL", "https://3.basecamp.com/99999/buckets/2/todolists"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, _ := setupTestApp(t)
+			project := ""
+			cmd := newTodolistsPositionCmd(&project)
+			err := executeCommand(cmd, app, tc.url, "--to", "1")
+
+			require.NotNil(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e))
+			assert.Contains(t, e.Message, "Expected a todolist URL")
+		})
+	}
+}
+
 // --- B. Request-level tests (httptest server records methods/paths/bodies) ---
 
 type recordedRequest struct {
