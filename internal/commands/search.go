@@ -202,7 +202,7 @@ func runSearchMetadata(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	// Handle empty response
-	if metadata == nil || len(metadata.RecordingSearchTypes) == 0 && len(metadata.FileSearchTypes) == 0 {
+	if metadata == nil || (len(metadata.RecordingSearchTypes) == 0 && len(metadata.FileSearchTypes) == 0) {
 		return output.ErrUsageHint(
 			"Search metadata not available",
 			"No search filters available",

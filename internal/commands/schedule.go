@@ -439,7 +439,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return output.ErrUsage("--ends-at required (ISO 8601 datetime)")
 			}
 
-			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, participants, subscribe, noSubscribe, attachFiles)
+			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
 		},
 	}
 
@@ -463,7 +463,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
 	// Resolve subscription flags early (fail fast on bad input)
 	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 	if err != nil {
@@ -541,7 +541,6 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	// client-authenticated caller always creates client-visible records (an
 	// explicit false is overridden server-side).
 	if cmd.Flags().Changed("visible-to-clients") {
-		visibleToClients, _ := cmd.Flags().GetBool("visible-to-clients")
 		req.VisibleToClients = &visibleToClients
 	}
 

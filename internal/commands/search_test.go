@@ -109,7 +109,7 @@ func executeSearchCommand(cmd *cobra.Command, app *appctx.App, args ...string) e
 	return cmd.Execute()
 }
 
-// searchMetadataTransport serves the search metadata endpoint. A nil body
+// searchMetadataTransport serves the search metadata endpoint. An empty body
 // simulates an empty (no-filters) response.
 type searchMetadataTransport struct {
 	body string
