@@ -1,0 +1,51 @@
+internal/commands/messages.go
+  s_8c5aeeb8eaf115::t_acd50347f60a8d 266
+  s_8c5aeeb8eaf115::t_a9467497801db1 388-393
+  s_8c5aeeb8eaf115::t_3cfac84b904510 427
+internal/commands/checkins.go
+  s_8c5aeeb8eaf115::t_55096c0e0ae23e 403
+  s_8c5aeeb8eaf115::t_8ae0409f588680 271
+  s_8c5aeeb8eaf115::t_b14ae71fb4f5fe 370-375
+internal/commands/messages_test.go
+  s_8c5aeeb8eaf115::t_752bdd22296470 304-369
+skills/basecamp/SKILL.md
+  s_8c5aeeb8eaf115::t_78721b8b75f629 553
+  s_8c5aeeb8eaf115::t_7687d9b23cce2f 680
+  s_8c5aeeb8eaf115::t_bb5744c54c6651 617,622,625-629
+  s_8c5aeeb8eaf115::t_3edffc8cad822c 700
+  s_8c5aeeb8eaf115::t_1b6b9517a57dd5 630
+  s_8c5aeeb8eaf115::t_93f70a48fc85c4 701
+internal/commands/todolists.go
+  s_8c5aeeb8eaf115::t_da79727ba318d8 329-334
+  s_8c5aeeb8eaf115::t_1782fdddc06b7f 268
+  s_8c5aeeb8eaf115::t_31ca056c978cce 364
+internal/commands/checkins_test.go
+  s_8c5aeeb8eaf115::t_3a066cd81e07c8 149-237
+internal/commands/todolists_test.go
+  s_8c5aeeb8eaf115::t_ae44184ccdbb94 1-112
+internal/commands/schedule_test.go
+  s_8c5aeeb8eaf115::t_029fe5b39ba4af 156-220
+.surface
+  s_8c5aeeb8eaf115::t_4922a1f05ed749 3506,3776,9572,9983,11212,12434,12977
+internal/commands/schedule.go
+  s_8c5aeeb8eaf115::t_f7cd38c18c4178 412
+  s_8c5aeeb8eaf115::t_d4c289d7641848 461
+  s_8c5aeeb8eaf115::t_25ab57032c39be 539-543
+  s_8c5aeeb8eaf115::t_d1bc9983f3254e 544-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "927bbca6c4c2d4feb018c16d880feacc893dbdff",
+  "prompts": {},
+  "sessions": {
+    "s_8c5aeeb8eaf115": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15586d32-8e58-43c3-b5fb-1604a41a55bc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
