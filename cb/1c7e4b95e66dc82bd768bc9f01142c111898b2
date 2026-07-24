@@ -1,0 +1,24 @@
+internal/commands/schedule.go
+  s_8c5aeeb8eaf115::t_c3b4dd77dc30dd 442
+  s_8c5aeeb8eaf115::t_b71982c644041f 466
+internal/commands/search.go
+  s_8c5aeeb8eaf115::t_66e6b35a9122fb 205
+internal/commands/search_test.go
+  s_8c5aeeb8eaf115::t_0cce7874dfd5c2 112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "cb1c7e4b95e66dc82bd768bc9f01142c111898b2",
+  "prompts": {},
+  "sessions": {
+    "s_8c5aeeb8eaf115": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "15586d32-8e58-43c3-b5fb-1604a41a55bc",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
