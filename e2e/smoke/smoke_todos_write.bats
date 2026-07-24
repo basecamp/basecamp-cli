@@ -237,6 +237,18 @@ setup_file() {
   echo "$tl_id" > "$BATS_FILE_TMPDIR/todolist_target_id"
 }
 
+@test "todolists position repositions a todolist" {
+  local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
+  local tl_id
+  tl_id=$(<"$id_file")
+
+  # Runs before archive/trash so the target list is still active.
+  run_smoke basecamp todolists position "$tl_id" --to 1 -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "todolists archive archives a todolist" {
   local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
