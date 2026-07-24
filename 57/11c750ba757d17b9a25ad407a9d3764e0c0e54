@@ -1,0 +1,22 @@
+internal/commands/todolists_test.go
+  s_1b437abfa07167::t_51851cf95d76fb 185-210
+internal/commands/todolists.go
+  s_1b437abfa07167::t_ae7a2d2f4c10ec 7,15
+  s_1b437abfa07167::t_139bba81531a51 500-517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "5711c750ba757d17b9a25ad407a9d3764e0c0e54",
+  "prompts": {},
+  "sessions": {
+    "s_1b437abfa07167": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cda71db0-eea3-4445-8ffe-bf40bead5715",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
