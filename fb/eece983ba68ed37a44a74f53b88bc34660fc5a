@@ -1,0 +1,46 @@
+skills/basecamp/SKILL.md
+  s_68fb2483e203ea::t_9503d280b3644c 913
+  s_68fb2483e203ea::t_b3ed761212668b 905-912
+internal/commands/search_test.go
+  s_68fb2483e203ea::t_334e48c6e66dad 135-154,173
+  s_68fb2483e203ea::t_1cf3d686a8222e 38-42,50-51,58-67
+  s_68fb2483e203ea::t_80fd16c1009c12 377-382,385-410,419-423,430-432,438-563,572-582
+  s_1b437abfa07167::t_07bb1dc5d9dd05 68
+.surface
+  s_68fb2483e203ea::t_58da0adea85b3f 11350-11352,11367,11372
+go.mod
+  s_68fb2483e203ea::t_b8b0ee99bcba84 9
+internal/version/sdk-provenance.json
+  s_68fb2483e203ea::t_b8b0ee99bcba84 4-6,10-11
+internal/commands/search.go
+  s_68fb2483e203ea::t_7b10bfc58c64ef 5,14,30-34,43-46,50-51,70-72,75-85,111-151,191-206,231-238,262-338,343-344,346-347,439-444,451-452,459-470
+  s_68fb2483e203ea::t_5a7ed0dbc5c877 239-261
+API-COVERAGE.md
+  s_68fb2483e203ea::t_92a1f83e9284f3 54
+go.sum
+  s_68fb2483e203ea::t_6dd698a1e7f6ae 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "fbeece983ba68ed37a44a74f53b88bc34660fc5a",
+  "prompts": {},
+  "sessions": {
+    "s_1b437abfa07167": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cda71db0-eea3-4445-8ffe-bf40bead5715",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_68fb2483e203ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "783556f9-5db7-4d65-bc06-ab6ad72d3368",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
