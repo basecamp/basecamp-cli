@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -260,9 +261,15 @@ type todolistGetResponse struct {
 	nilBucket bool
 }
 
+// putHijack is a sentinel putStatus value that makes the server drop the
+// connection mid-request, forcing a raw transport error.
+const putHijack = -1
+
 // newTodolistsPositionServer builds an httptest server. getResponses maps a
 // todolist ID to its Get response; putStatus maps a todolist ID to the status
-// its reposition PUT returns (defaults to 204 when absent).
+// its reposition PUT returns (defaults to 204 when absent). A putStatus value of
+// putHijack simulates a transport failure by dropping the connection before any
+// response, so the SDK surfaces a raw (non-*basecamp.Error) error.
 func newTodolistsPositionServer(t *testing.T, rec *requestRecorder, getResponses map[int64]todolistGetResponse, putStatus map[int64]int) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +281,16 @@ func newTodolistsPositionServer(t *testing.T, rec *requestRecorder, getResponses
 			status := http.StatusNoContent
 			if s, ok := putStatus[id]; ok {
 				status = s
+			}
+			if status == putHijack {
+				// Drop the connection mid-request → client sees a transport
+				// error, not an HTTP status.
+				hj, ok := w.(http.Hijacker)
+				require.True(t, ok, "test server must support hijacking")
+				conn, _, err := hj.Hijack()
+				require.NoError(t, err)
+				_ = conn.Close()
+				return
 			}
 			w.WriteHeader(status)
 			if status >= 400 {
@@ -357,6 +374,10 @@ func newRequestLevelApp(t *testing.T, serverURL string) (*appctx.App, *bytes.Buf
 		&basecamp.Config{BaseURL: serverURL},
 		&testTokenProvider{},
 		basecamp.WithMaxRetries(1),
+		// Keep any retry backoff near-instant so transport-failure tests
+		// don't stall on exponential waits.
+		basecamp.WithBaseDelay(time.Millisecond),
+		basecamp.WithMaxJitter(0),
 	)
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
 
@@ -576,6 +597,43 @@ func TestTodolistsPositionBulkFirstPutFailureMeansZeroApplied(t *testing.T) {
 	assert.NotContains(t, e.Message, "Reordered")
 	assert.NotContains(t, e.Hint, "intermediate order")
 	assert.Len(t, rec.puts(), 1, "stopped after the first failing PUT")
+}
+
+// A raw transport failure after a successful PUT must still warn that the
+// todoset is partially reordered: non-usage code, applied-count accounting, the
+// rerun hint, and the raw cause preserved.
+func TestTodolistsPositionPartialTransportFailureWarnsIntermediate(t *testing.T) {
+	rec := &requestRecorder{}
+	gets := map[int64]todolistGetResponse{
+		701: {parentID: 10, bucketID: 20},
+		702: {parentID: 10, bucketID: 20},
+		703: {parentID: 10, bucketID: 20},
+	}
+	// Apply order is 703, 702, 701. 703 succeeds; 702's connection is dropped.
+	server := newTodolistsPositionServer(t, rec, gets, map[int64]int{702: putHijack})
+	app, _ := newRequestLevelApp(t, server.URL)
+
+	project := ""
+	cmd := newTodolistsPositionCmd(&project)
+	err := executeCommand(cmd, app, "701", "702", "703")
+
+	require.NotNil(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.NotEqual(t, "usage", e.Code, "transport failure must not be classified as usage")
+	assert.Contains(t, e.Message, "Reordered 1 of 3 todolists; failed at #702")
+	assert.Contains(t, e.Hint, "intermediate order", "operator must be warned of the partial reorder")
+	assert.NotNil(t, e.Cause, "raw transport cause preserved")
+	// The transport failure may be retried, so assert on which lists were
+	// touched rather than a raw request count: 703 applied, 702 attempted,
+	// and 701 never reached (the loop stopped).
+	touched := map[int64]bool{}
+	for _, p := range rec.puts() {
+		touched[idFromPositionPath(p.path)] = true
+	}
+	assert.True(t, touched[703], "703 should have been repositioned")
+	assert.True(t, touched[702], "702 should have been attempted")
+	assert.False(t, touched[701], "701 must not be attempted after the failure")
 }
 
 func TestTodolistsPositionBulkBreadcrumbUsesPreflightData(t *testing.T) {

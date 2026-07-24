@@ -619,7 +619,17 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 							Cause:      outErr,
 						}
 					}
-					return fmt.Errorf("%s: %w", msg, converted)
+					// Raw transport/runtime failure (e.g. a dropped connection or
+					// a canceled context): no *output.Error to preserve, but the
+					// partial reorder still demands the rerun warning. Wrap it in
+					// a non-usage structured error that carries the hint and the
+					// raw cause (Unwrap keeps errors.Is/As working).
+					return &output.Error{
+						Code:    output.CodeAPI,
+						Message: fmt.Sprintf("%s: %s", msg, converted.Error()),
+						Hint:    rerun,
+						Cause:   converted,
+					}
 				}
 				applied++
 			}
