@@ -268,6 +268,7 @@ func newCheckinsQuestionCreateCmd(project *string) *cobra.Command {
 	var frequency string
 	var timeOfDay string
 	var days string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <title>",
@@ -366,6 +367,12 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				},
 			}
 
+			// Set client visibility only when the flag was provided; omitting it
+			// leaves the server's default (team-only for a top-level question).
+			if cmd.Flags().Changed("visible-to-clients") {
+				req.VisibleToClients = &visibleToClients
+			}
+
 			question, err := app.Account().Checkins().CreateQuestion(cmd.Context(), qID, req)
 			if err != nil {
 				return convertSDKError(err)
@@ -393,6 +400,7 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 	cmd.Flags().StringVarP(&frequency, "frequency", "f", "", "Schedule frequency (default: every_day)")
 	cmd.Flags().StringVar(&timeOfDay, "time", "", "Time to ask (default: 5:00pm)")
 	cmd.Flags().StringVarP(&days, "days", "d", "", "Days to ask, comma-separated (default: 1,2,3,4,5)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the question visible to clients on the project (default: team-only)")
 
 	return cmd
 }

@@ -265,6 +265,7 @@ You can pass either a todolist ID or a Basecamp URL:
 
 func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -325,6 +326,12 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				Description: description,
 			}
 
+			// Set client visibility only when the flag was provided; omitting it
+			// leaves the server's default (team-only for a top-level todolist).
+			if cmd.Flags().Changed("visible-to-clients") {
+				req.VisibleToClients = &visibleToClients
+			}
+
 			// Create todolist via SDK
 			todolist, err := app.Account().Todolists().Create(cmd.Context(), tsID, req)
 			if err != nil {
@@ -354,6 +361,7 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (default: team-only)")
 
 	return cmd
 }

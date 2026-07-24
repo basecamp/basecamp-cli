@@ -409,6 +409,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <summary>",
@@ -457,6 +458,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (default: team-only)")
 
 	return cmd
 }
@@ -532,6 +534,13 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		AllDay:        &allDay,
 		Notify:        notify,
 		Subscriptions: subs,
+	}
+
+	// Set client visibility only when the flag was provided; omitting it leaves
+	// the server's default (team-only for a top-level schedule entry).
+	if cmd.Flags().Changed("visible-to-clients") {
+		visibleToClients, _ := cmd.Flags().GetBool("visible-to-clients")
+		req.VisibleToClients = &visibleToClients
 	}
 
 	if participants != "" {
