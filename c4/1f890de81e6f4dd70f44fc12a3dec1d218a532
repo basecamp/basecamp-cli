@@ -1,0 +1,66 @@
+.surface
+  s_1b437abfa07167::t_98f9e8727547e9 311-313,336-338,905-907,932-934,12491-12559,13102-13170,16691-16693,16718-16720
+e2e/errors.bats
+  s_1b437abfa07167::t_526f9ae786cb1d 351-388
+internal/version/sdk-provenance.json
+  s_1b437abfa07167::t_91b6bbcec24d4e 4-6
+internal/commands/todolists_test.go
+  s_1b437abfa07167::t_ccf665e2df4a80 342
+  s_1b437abfa07167::t_c7d00afcb057b8 1-5,7-38,40-63,65-81,83-97,99-116,118-134,136-148,150-162,164-179,181-341,343-410,412-430,432-450,452-490,492-603
+  s_1b437abfa07167::t_046e9a871ee25b 6
+  s_1b437abfa07167::t_654de6f9eb10e7 39,64,82,98,117,135,149,163,180,411,431,451,491
+go.mod
+  s_1b437abfa07167::t_91b6bbcec24d4e 9
+e2e/smoke/smoke_aliases.bats
+  s_1b437abfa07167::t_d66bc064e84ee5 224,226-233
+  s_bb82041c492c28::t_e6d83902e3725e 225
+internal/commands/todolists.go
+  s_1b437abfa07167::t_4b9da1ed4cb794 4
+  s_1b437abfa07167::t_8693651159f128 40
+  s_1b437abfa07167::t_a3623f11a76724 452-641
+e2e/smoke/smoke_todos_write.bats
+  s_1b437abfa07167::t_e0874612a571ec 240-251
+skills/basecamp/SKILL.md
+  s_1b437abfa07167::t_3ecd0afac4565e 561-562,565-566
+  s_e5adc1de14d606::t_07f539466f59b1 567
+API-COVERAGE.md
+  s_1b437abfa07167::t_00ff699d5a2136 30
+  s_1b437abfa07167::t_f2af02ba7f1f65 9,11,13
+  s_1b437abfa07167::t_6708a9b92381ca 19
+internal/commands/commands.go
+  s_1b437abfa07167::t_5027fe61c8373c 39
+go.sum
+  s_1b437abfa07167::t_762eb343bdc87a 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c41f890de81e6f4dd70f44fc12a3dec1d218a532",
+  "prompts": {},
+  "sessions": {
+    "s_1b437abfa07167": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cda71db0-eea3-4445-8ffe-bf40bead5715",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_bb82041c492c28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "68c4f952-eca0-4ff1-9469-585c68890592",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_e5adc1de14d606": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10f71c84-ce1f-44f5-9033-158ad2b14ba0",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
