@@ -16,7 +16,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (47 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.8.1-0.20260723015714-93ace8d569b5 — adds `Todolists.Reposition` (`PUT /todosets/todolists/{id}/position.json`, basecamp/basecamp-sdk#398), consumed by `todolists position`; also carries `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295), consumed by `chat update`, and the BC5 `Tools.Create` create-by-type reshape. API date 2026-07-22.
+**SDK version:** v0.8.1-0.20260724184307-e2c1abea4aea — adds `Todolists.Reposition` (`PUT /todosets/todolists/{id}/position.json`, basecamp/basecamp-sdk#398), consumed by `todolists position`; also carries the create-time `visible_to_clients` support behind `todolists create --visible-to-clients`, `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295), consumed by `chat update`, and the BC5 `Tools.Create` create-by-type reshape. API date 2026-07-24.
 
 ## Coverage by Section
 
