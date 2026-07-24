@@ -216,6 +216,14 @@ func TestMarkdownToHTML(t *testing.T) {
 			input:    "intro\n\n```\n<div>hello</div>\n```",
 			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;\n</code></pre>",
 		},
+		{
+			// Issue #405: a GFM table renders as a bare <table> (BC3's
+			// WrapTablesFilter supplies the figure wrapper). Doubles as the
+			// heading+table regression.
+			name:     "gfm table with heading (issue #405)",
+			input:    "# Report\n\n| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+			expected: "<h1>Report</h1>\n<table>\n<thead>\n<tr>\n<th>Foo</th>\n<th>Bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Baz</td>\n<td>Qux</td>\n</tr>\n</tbody>\n</table>",
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +233,21 @@ func TestMarkdownToHTML(t *testing.T) {
 				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestMarkdownToHTMLTableAlignment(t *testing.T) {
+	// Column alignment must survive BC3's sanitizer, which whitelists the `align`
+	// attribute but strips inline `style` (only color/background-color survive).
+	got := MarkdownToHTML("| a | b |\n|:--|--:|\n| 1 | 2 |")
+	if !strings.Contains(got, `align="left"`) {
+		t.Errorf("expected align=\"left\" in %q", got)
+	}
+	if !strings.Contains(got, `align="right"`) {
+		t.Errorf("expected align=\"right\" in %q", got)
+	}
+	if strings.Contains(got, "style=") {
+		t.Errorf("expected no style= (stripped by BC3 sanitizer) in %q", got)
 	}
 }
 
@@ -1159,6 +1182,31 @@ func TestIsMarkdown(t *testing.T) {
 			input:    "> Quote",
 			expected: true,
 		},
+		{
+			name:     "multi-column table",
+			input:    "| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+			expected: true,
+		},
+		{
+			name:     "single-column table",
+			input:    "| value |\n| --- |\n| item |",
+			expected: true,
+		},
+		{
+			name:     "table with CRLF line endings",
+			input:    "| Foo | Bar |\r\n| --- | --- |\r\n| Baz | Qux |",
+			expected: true,
+		},
+		{
+			name:     "lone delimiter line is not a table",
+			input:    "---|---",
+			expected: false,
+		},
+		{
+			name:     "prose containing pipes is not a table",
+			input:    "run foo | grep bar to filter the output",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1262,6 +1310,14 @@ func TestIsHTML(t *testing.T) {
 			input:    `\<bc-attachment sgid="x">\</bc-attachment>`,
 			expected: false,
 		},
+		{
+			// A plain BC3 table response carries no other formatting tags, so
+			// IsHTML must recognize <table> itself, or the raw markup would leak
+			// to the reader instead of being converted for display.
+			name:     "bc3-wrapped table",
+			input:    "<figure><table><thead><tr><th>Foo</th></tr></thead><tbody><tr><td>Baz</td></tr></tbody></table></figure>",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1269,6 +1325,30 @@ func TestIsHTML(t *testing.T) {
 			result := IsHTML(tt.input)
 			if result != tt.expected {
 				t.Errorf("IsHTML(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHasTableHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "lowercase table tag", input: "<table><tr><td>x</td></tr></table>", expected: true},
+		{name: "uppercase table tag with attrs", input: `<TABLE class="x"><tr></tr></TABLE>`, expected: true},
+		{name: "self-closing table tag", input: "<table/>", expected: true},
+		{name: "wrapped table", input: "<figure><table></table></figure>", expected: true},
+		{name: "plain text", input: "just some text", expected: false},
+		{name: "pipe markdown", input: "| a | b |\n| --- | --- |\n| 1 | 2 |", expected: false},
+		{name: "word starting with table", input: "the tablet is here", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasTableHTML(tt.input); got != tt.expected {
+				t.Errorf("HasTableHTML(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
 		})
 	}

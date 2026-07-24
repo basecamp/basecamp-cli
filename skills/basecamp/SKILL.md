@@ -85,12 +85,19 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks) for rich content. Four mention syntaxes are available (prefer deterministic for agents):
+5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks, tables) for rich content. Four mention syntaxes are available (prefer deterministic for agents):
    - **`[@Name](mention:SGID)`** — zero API calls, embeds SGID directly (preferred for agents)
    - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+
+   **Table boundary:** GFM tables render in message/comment bodies, but the TUI
+   in-place editors **refuse to open** table-bearing content (edit it on Basecamp
+   web, or replace the whole field via `messages update` / `comments update` /
+   `todos update --description`, which take fresh content and are unaffected), and
+   human-readable CLI/TUI **display** of such content may lose table structure —
+   both pending server-side Markdown support (BC3 #11986).
 
    **Multiline / non-ASCII content:** do not rely on bash ANSI-C quoting (`$'...\n...'`) — it is a bash/zsh extension. Under a POSIX `/bin/sh` (dash, busybox-ash, common in sandboxes) the `$` is passed through literally and posts a stray leading `$`, and `\n` stays a literal backslash-n. Pipe the content via stdin instead, using `-` as the content argument:
    ```bash

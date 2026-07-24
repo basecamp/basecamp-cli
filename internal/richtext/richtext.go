@@ -20,6 +20,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	east "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -110,7 +111,7 @@ var reSGIDMention = regexp.MustCompile(`(^|[\s>(\["'])(@sgid:([\w+=/-]+))`)
 
 // Pre-compiled regexes for IsHTML detection
 var (
-	reSafeTag     = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|bc-attachment)\b[^>]*>`)
+	reSafeTag     = regexp.MustCompile(`<(p|div|span|a|strong|b|em|i|code|pre|ul|ol|li|h[1-6]|blockquote|br|hr|img|table|bc-attachment)\b[^>]*>`)
 	reFencedBlock = regexp.MustCompile("(?m)^```[^\n]*\n[\\s\\S]*?^```")
 )
 
@@ -128,7 +129,16 @@ var reMarkdownPatterns = []*regexp.Regexp{
 
 // mdConverter is the goldmark Markdown-to-HTML converter configured for Trix compatibility.
 var mdConverter = goldmark.New(
-	goldmark.WithExtensions(extension.Strikethrough),
+	goldmark.WithExtensions(
+		extension.Strikethrough,
+		// Emit the whitelisted `align` attribute rather than a `style` attribute:
+		// BC3's sanitizer keeps `align` but strips inline `style` (only color and
+		// background-color survive), so GFM column alignment is preserved through
+		// sanitization. Bare <table> is correct — BC3's WrapTablesFilter wraps it.
+		extension.NewTable(
+			extension.WithTableCellAlignMethod(extension.TableCellAlignAttribute),
+		),
+	),
 	goldmark.WithRendererOptions(gmhtml.WithUnsafe()),
 	goldmark.WithParserOptions(
 		parser.WithInlineParsers(
@@ -923,6 +933,36 @@ func unescapeHTML(s string) string {
 	return s
 }
 
+// tableDetectParser parses input with the GFM table extension so table
+// detection matches what MarkdownToHTML actually renders. Using the parser
+// (rather than a regex) authoritatively handles single-column tables, CRLF
+// line endings, and other pipe-row edge cases without pattern drift.
+var tableDetectParser = goldmark.New(goldmark.WithExtensions(extension.Table)).Parser()
+
+// hasMarkdownTable parses s and reports whether it contains a GFM table node.
+func hasMarkdownTable(s string) bool {
+	// Cheap-out before the full goldmark parse: a GFM table needs cell-delimiting
+	// pipes and a delimiter row on its own line, so it can't exist without both a
+	// '|' and a '\n'. IsMarkdown calls this on every input that matches none of the
+	// regex patterns — typically plain text on TUI submit/editor return — so
+	// skipping the parse in that common case avoids the cost. This matches
+	// goldmark's own behavior exactly (it likewise treats a CR-only "table" with
+	// no '\n' as not a table), so the guard introduces no false negatives.
+	if !strings.Contains(s, "|") || !strings.Contains(s, "\n") {
+		return false
+	}
+	doc := tableDetectParser.Parse(text.NewReader([]byte(s)))
+	found := false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering && n.Kind() == east.KindTable {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
+}
+
 // IsMarkdown attempts to detect if the input string is Markdown rather than plain text or HTML.
 // This is a heuristic and may not be 100% accurate.
 func IsMarkdown(s string) bool {
@@ -936,7 +976,7 @@ func IsMarkdown(s string) bool {
 		}
 	}
 
-	return false
+	return hasMarkdownTable(s)
 }
 
 // AttachmentRef holds the metadata needed to embed a <bc-attachment> in HTML.
@@ -1360,6 +1400,20 @@ func IsHTML(s string) bool {
 	}
 
 	return false
+}
+
+// reTableHTML matches a real <table> tag — with attributes (`<table …>`), bare
+// (`<table>`), or self-closing (`<table/>`) — distinct from the Markdown table
+// detector. The trailing class requires a boundary after the name so longer
+// tags like <tablefoo> don't match. Used to gate the fail-closed TUI edit paths.
+var reTableHTML = regexp.MustCompile(`(?i)<table[\s/>]`)
+
+// HasTableHTML reports whether s contains an HTML table element. The TUI in-place
+// editors use this to refuse table-bearing content: HTMLToMarkdown has no table
+// handling and would strip the structure, so those edits fail closed rather than
+// silently flatten the table on resubmit.
+func HasTableHTML(s string) bool {
+	return reTableHTML.MatchString(s)
 }
 
 func isEscapedAt(s string, pos int) bool {
