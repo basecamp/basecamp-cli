@@ -146,6 +146,95 @@ func (m *mockCheckinsAnswerCreateTransport) RoundTrip(req *http.Request) (*http.
 	}
 }
 
+// mockCheckinsQuestionCreateTransport resolves the questionnaire via the project
+// dock and captures the POST body sent to create a question.
+type mockCheckinsQuestionCreateTransport struct {
+	recordedBody map[string]any
+}
+
+func (m *mockCheckinsQuestionCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	switch {
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`[{"id":123,"name":"Test Project"}]`)),
+			Header:     header,
+		}, nil
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects/"):
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(strings.NewReader(`{"id":123,"dock":[{"name":"questionnaire","id":555,"enabled":true}]}`)),
+			Header:     header,
+		}, nil
+	case req.Method == "POST" && strings.Contains(req.URL.Path, "/questions.json"):
+		if req.Body != nil {
+			defer req.Body.Close()
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &m.recordedBody); err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: 201,
+			Body:       io.NopCloser(strings.NewReader(`{"id":789,"title":"How are you?","type":"Question"}`)),
+			Header:     header,
+		}, nil
+	default:
+		return &http.Response{
+			StatusCode: 404,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"Not Found"}`)),
+			Header:     header,
+		}, nil
+	}
+}
+
+func runCheckinsQuestionCreate(t *testing.T, args ...string) *mockCheckinsQuestionCreateTransport {
+	t.Helper()
+	transport := &mockCheckinsQuestionCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newCheckinsQuestionCreateCmd(&project)
+
+	err := executeCommand(cmd, app, args...)
+	require.NoError(t, err)
+	require.NotNil(t, transport.recordedBody, "expected request body to be captured")
+	return transport
+}
+
+func TestCheckinsQuestionCreateHasVisibleToClientsFlag(t *testing.T) {
+	project := ""
+	cmd := newCheckinsQuestionCreateCmd(&project)
+
+	flag := cmd.Flags().Lookup("visible-to-clients")
+	require.NotNil(t, flag, "expected --visible-to-clients flag on check-in question create")
+}
+
+func TestCheckinsQuestionCreateDefaultOmitsVisibleToClients(t *testing.T) {
+	transport := runCheckinsQuestionCreate(t, "How are you?")
+	_, ok := transport.recordedBody["visible_to_clients"]
+	assert.False(t, ok, "expected visible_to_clients to be omitted when flag is not set")
+}
+
+func TestCheckinsQuestionCreateVisibleToClientsTrue(t *testing.T) {
+	transport := runCheckinsQuestionCreate(t, "How are you?", "--visible-to-clients")
+	assert.Equal(t, true, transport.recordedBody["visible_to_clients"])
+}
+
+func TestCheckinsQuestionCreateVisibleToClientsFalse(t *testing.T) {
+	transport := runCheckinsQuestionCreate(t, "How are you?", "--visible-to-clients=false")
+	val, ok := transport.recordedBody["visible_to_clients"]
+	require.True(t, ok, "expected visible_to_clients present for explicit --visible-to-clients=false")
+	assert.Equal(t, false, val)
+}
+
 func TestCheckinsAnswerCreateDefaultsDateToToday(t *testing.T) {
 	originalNow := checkinsNow
 	checkinsNow = func() time.Time {

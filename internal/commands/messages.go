@@ -263,6 +263,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
@@ -384,6 +385,12 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				req.Status = "active"
 			}
 
+			// Set client visibility only when the flag was provided; omitting it
+			// leaves the server's default (team-only for a top-level message).
+			if cmd.Flags().Changed("visible-to-clients") {
+				req.VisibleToClients = &visibleToClients
+			}
+
 			message, err := app.Account().Messages().Create(cmd.Context(), boardID, req)
 			if err != nil {
 				return convertSDKError(err)
@@ -417,6 +424,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (default: team-only)")
 
 	return cmd
 }

@@ -301,6 +301,72 @@ func TestMessagesCreateSubscribeEmptyIsError(t *testing.T) {
 	assert.Contains(t, e.Message, "at least one person")
 }
 
+// TestMessagesCreateHasVisibleToClientsFlag tests that messages create has the --visible-to-clients flag.
+func TestMessagesCreateHasVisibleToClientsFlag(t *testing.T) {
+	cmd := NewMessagesCmd()
+	createCmd, _, err := cmd.Find([]string{"create"})
+	require.NoError(t, err)
+
+	flag := createCmd.Flags().Lookup("visible-to-clients")
+	require.NotNil(t, flag, "expected --visible-to-clients flag on messages create")
+}
+
+// TestMessagesCreateDefaultOmitsVisibleToClients verifies that without the flag,
+// visible_to_clients is omitted so the server applies its own default.
+func TestMessagesCreateDefaultOmitsVisibleToClients(t *testing.T) {
+	transport := &mockMessageCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "Normal post")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	_, ok := body["visible_to_clients"]
+	assert.False(t, ok, "expected visible_to_clients to be omitted when flag is not set")
+}
+
+// TestMessagesCreateVisibleToClientsTrue verifies --visible-to-clients sends true.
+func TestMessagesCreateVisibleToClientsTrue(t *testing.T) {
+	transport := &mockMessageCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "Client post", "--visible-to-clients")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	assert.Equal(t, true, body["visible_to_clients"])
+}
+
+// TestMessagesCreateVisibleToClientsFalse verifies --visible-to-clients=false
+// sends an explicit false rather than dropping the field.
+func TestMessagesCreateVisibleToClientsFalse(t *testing.T) {
+	transport := &mockMessageCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewMessagesCmd()
+
+	err := executeMessagesCommand(cmd, app, "create", "Team post", "--visible-to-clients=false")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	val, ok := body["visible_to_clients"]
+	require.True(t, ok, "expected visible_to_clients present for explicit --visible-to-clients=false")
+	assert.Equal(t, false, val)
+}
+
 // mockMessageUpdateTransport handles PUT requests and captures the body.
 type mockMessageUpdateTransport struct {
 	capturedBody []byte
