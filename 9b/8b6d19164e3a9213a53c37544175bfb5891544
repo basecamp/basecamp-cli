@@ -1,0 +1,59 @@
+internal/commands/show.go
+  s_c220ffcc9acf8b::t_85e3f54247bc29 359-377
+internal/commands/comment_thread_test.go
+  s_c220ffcc9acf8b::t_30bf29ba6137b6 19
+  s_c220ffcc9acf8b::t_f669b5d1a86738 347-348,350
+  s_c220ffcc9acf8b::t_7680911bce49b5 1-8,10-18,20-26,29-30,32,36-37,39,42-43,45-47,49-217,226,238-253,256-257,259,261-284,286-296,323-346,349,351-384,386-490,570-626,637-666
+  s_c220ffcc9acf8b::t_e94c42b418e360 627-636
+  s_c220ffcc9acf8b::t_339954afd7d804 27-28,31,33-35,38,40-41,44,48
+  s_c220ffcc9acf8b::t_0b50905417b775 285
+  s_c220ffcc9acf8b::t_c2592a443aa622 9
+  s_c220ffcc9acf8b::t_c9daa6aaf2c1b9 385
+  s_c220ffcc9acf8b::t_5ceacb642f4097 491-569
+  s_c220ffcc9acf8b::t_8429815c8716b1 254-255,258,260
+  s_c220ffcc9acf8b::t_b2716b8d5d3640 218-225,227-237
+  s_c220ffcc9acf8b::t_4faf7bd2ca3b14 297-322
+skills/basecamp/SKILL.md
+  s_c220ffcc9acf8b::t_c4ee95247df8e4 240-246
+  s_c220ffcc9acf8b::t_673102fc0565e6 679-681
+e2e/smoke/smoke_comments.bats
+  s_c220ffcc9acf8b::t_6791f90dfa4922 43-63
+.surface
+  s_c220ffcc9acf8b::t_e6fcaa725f8a68 103,562,4208-4230,16586
+internal/commands/commands.go
+  s_c220ffcc9acf8b::t_05c2b3ae25eb5e 95
+API-COVERAGE.md
+  s_c220ffcc9acf8b::t_2b6cc6a8d9296d 44
+internal/presenter/schemas/comment_thread.yaml
+  s_c220ffcc9acf8b::t_0243b51a8da5dc 1-63
+e2e/comments.bats
+  s_c220ffcc9acf8b::t_de269b9a1e679f 1-56,67-99
+  s_c220ffcc9acf8b::t_fc599abe771609 57-66
+internal/commands/comment.go
+  s_c220ffcc9acf8b::t_89973a225fa52d 609-612,615,621
+  s_c220ffcc9acf8b::t_93b2b571021912 356-362,366,369,372,374
+  s_c220ffcc9acf8b::t_7fb0de629896a6 252,255-262
+  s_c220ffcc9acf8b::t_0ae6e34f0dbabb 335
+  s_c220ffcc9acf8b::t_c92f6de363c5b5 201-251,253-254,263-334,336-355,363-365,367-368,370-371,373,375-603,605-608,613-614,616-620,622-661
+  s_c220ffcc9acf8b::t_cd6f1e40ddc245 604
+  s_c220ffcc9acf8b::t_9ee8f99cdc51d4 44
+  s_c220ffcc9acf8b::t_545472c5325628 4-5,9,11,14,24
+internal/commands/show_test.go
+  s_c220ffcc9acf8b::t_34054e036d6b53 247-248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "9b8b6d19164e3a9213a53c37544175bfb5891544",
+  "prompts": {},
+  "sessions": {
+    "s_c220ffcc9acf8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b290aff-e387-4bc6-aec3-25e11bd8556d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
