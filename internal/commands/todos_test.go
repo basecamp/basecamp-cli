@@ -2922,3 +2922,121 @@ func TestTodosListAggregateSortGuard(t *testing.T) {
 	errA := executeTodosCommand(NewTodosCmd(), appA, "list", "--in", "123", "--assignee", "Alice", "--sort", "title")
 	require.NoError(t, errA)
 }
+
+// populatedTodoTransport serves a single fully-populated todo from the GET
+// endpoint so that todos show exercises every field #449 reported as missing.
+// The description carries no bc-attachment markup, so no download path fires;
+// description_attachments rides along as SDK metadata independent of the
+// rich-text body.
+type populatedTodoTransport struct{}
+
+func (populatedTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Fail closed: this transport only knows how to answer the todo GET. Any
+	// other route or method means `todos show` took an unexpected path, which
+	// should fail the test rather than silently pass on the canned body.
+	if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/todos/999") {
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	body := `{
+		"id": 999,
+		"status": "active",
+		"title": "Populated todo",
+		"type": "Todo",
+		"content": "Populated todo",
+		"description": "<div>Plain description, no attachments</div>",
+		"completed": false,
+		"position": 1,
+		"starts_on": "2026-08-01",
+		"due_on": "2026-08-15",
+		"comments_count": 4,
+		"boosts_count": 3,
+		"completion_subscribers": [
+			{"id": 5551, "name": "Reviewer One"},
+			{"id": 5552, "name": "Reviewer Two"}
+		],
+		"description_attachments": [
+			{
+				"id": 8801,
+				"sgid": "sgid-abc",
+				"filename": "spec.pdf",
+				"content_type": "application/pdf",
+				"byte_size": 2048,
+				"download_url": "https://example.com/spec.pdf",
+				"previewable": false,
+				"preview_url": "",
+				"thumbnail_url": ""
+			}
+		]
+	}`
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosShowJSONSurfacesSDKFields is a regression guard for #449: the
+// fields that report (due_on, starts_on, comments_count, boosts_count,
+// completion_subscribers, description_attachments) must all surface in the
+// --json output of todos show. The fix landed on main via the SDK model
+// (SDK #375/#400) absorbed by CLI #552/#554; this test keeps the omitempty
+// date/count fields exercised with nonzero values so a future SDK bump can't
+// silently drop them.
+func TestTodosShowJSONSurfacesSDKFields(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, populatedTodoTransport{})
+
+	err := executeTodosCommand(NewTodosCmd(), app, "show", "999")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	// Every reported field must be present as a key in the emitted JSON.
+	for _, key := range []string{
+		"due_on", "starts_on", "comments_count", "boosts_count",
+		"completion_subscribers", "description_attachments",
+	} {
+		require.Contains(t, resp.Data, key, "todos show --json must surface %q (#449)", key)
+	}
+
+	var dueOn, startsOn string
+	require.NoError(t, json.Unmarshal(resp.Data["due_on"], &dueOn))
+	require.NoError(t, json.Unmarshal(resp.Data["starts_on"], &startsOn))
+	assert.Equal(t, "2026-08-15", dueOn)
+	assert.Equal(t, "2026-08-01", startsOn)
+
+	var commentsCount, boostsCount int
+	require.NoError(t, json.Unmarshal(resp.Data["comments_count"], &commentsCount))
+	require.NoError(t, json.Unmarshal(resp.Data["boosts_count"], &boostsCount))
+	assert.Equal(t, 4, commentsCount)
+	assert.Equal(t, 3, boostsCount)
+
+	var subscribers []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Data["completion_subscribers"], &subscribers))
+	require.Len(t, subscribers, 2)
+	assert.Equal(t, int64(5551), subscribers[0].ID)
+	assert.Equal(t, "Reviewer One", subscribers[0].Name)
+	assert.Equal(t, int64(5552), subscribers[1].ID)
+	assert.Equal(t, "Reviewer Two", subscribers[1].Name)
+
+	var attachments []struct {
+		ID          int64  `json:"id"`
+		Filename    string `json:"filename"`
+		DownloadURL string `json:"download_url"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Data["description_attachments"], &attachments))
+	require.Len(t, attachments, 1)
+	assert.Equal(t, int64(8801), attachments[0].ID)
+	assert.Equal(t, "spec.pdf", attachments[0].Filename)
+	assert.Equal(t, "https://example.com/spec.pdf", attachments[0].DownloadURL)
+}
