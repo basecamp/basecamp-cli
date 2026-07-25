@@ -2311,3 +2311,47 @@ func TestParseColumnID(t *testing.T) {
 	_, err = parseColumnID("https://3.basecamp.com/99999/buckets/999/card_tables/cards/456")
 	require.Error(t, err)
 }
+
+// TestCardsMoveToWormholeRootProjectConflict verifies a root-level --project
+// (which lands in app.Flags.Project, not the card command's own flag) that
+// contradicts the card's project is still rejected before the destructive move.
+func TestCardsMoveToWormholeRootProjectConflict(t *testing.T) {
+	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	app.Flags.Project = "999" // e.g. `basecamp --project 999 cards move …`
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+	err := executeCommand(cmd, app, "456", "--to-wormhole", "111")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "points at project 999")
+}
+
+// TestCardsMoveToWormholeEmptyValue verifies --to-wormhole= (present but empty)
+// errors explicitly instead of falling back to the normal move path.
+func TestCardsMoveToWormholeEmptyValue(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", "456", "--to-wormhole=")
+	assert.Contains(t, e.Message, "requires a wormhole ID or destination-column URL")
+}
+
+// TestCardsWormholesUpdateRejectsNonPositiveID verifies update rejects id <= 0.
+func TestCardsWormholesUpdateRejectsNonPositiveID(t *testing.T) {
+	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	project := ""
+	err := executeCommand(newCardsWormholesUpdateCmd(&project), app, "0", "--to-column", "888")
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "Invalid wormhole ID")
+}
+
+// TestCardsWormholesDeleteRejectsNonPositiveID verifies delete rejects id <= 0.
+func TestCardsWormholesDeleteRejectsNonPositiveID(t *testing.T) {
+	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	project := ""
+	err := executeCommand(newCardsWormholesDeleteCmd(&project), app, "0")
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "Invalid wormhole ID")
+}

@@ -744,11 +744,14 @@ original card 404s once the server finishes filing it away.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
-			wormholeSet := toWormhole != ""
+			wormholeSet := cmd.Flags().Changed("to-wormhole")
 
 			if wormholeSet {
 				if targetColumn != "" || onHold || positionSet {
 					return output.ErrUsage("--to-wormhole cannot be combined with --to, --on-hold, or --position")
+				}
+				if toWormhole == "" {
+					return output.ErrUsage("--to-wormhole requires a wormhole ID or destination-column URL")
 				}
 			} else {
 				if targetColumn == "" && !onHold {
@@ -913,8 +916,11 @@ original card 404s once the server finishes filing it away.`,
 }
 
 // moveCardThroughWormhole teleports a card across projects through a wormhole to
-// a column on another card table. wormholeRef is either a numeric wormhole ID or
-// a destination-column ID/URL.
+// a column on another card table. wormholeRef is either an all-digits value —
+// always interpreted as a wormhole ID — or a Basecamp column URL identifying the
+// wormhole's destination column. (A bare numeric destination-column ID is not
+// accepted: it is indistinguishable from a wormhole ID, so a column must be given
+// as a URL.)
 //
 // The teleport is destructive and asynchronous: Cards().Move returns once it is
 // accepted, then the server copies the card into the destination column under a
@@ -1046,6 +1052,13 @@ func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProj
 		return nil
 	}
 	if err := check(flagProject, "--in/--project"); err != nil {
+		return err
+	}
+	// app.Flags.Project carries a root-level --project (e.g.
+	// `basecamp --project 999 cards move …`), which lands here rather than in the
+	// card command's own flag — check it too so a root-level conflict can't slip
+	// past into a destructive move.
+	if err := check(app.Flags.Project, "--project"); err != nil {
 		return err
 	}
 	return check(urlProjectID, "the card URL")
@@ -2142,7 +2155,7 @@ func newCardsWormholesUpdateCmd(project *string) *cobra.Command {
 
 			wormholeIDStr, urlProjectID := extractWithProject(args[0])
 			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
-			if err != nil {
+			if err != nil || wormholeID <= 0 {
 				return output.ErrUsage("Invalid wormhole ID")
 			}
 
@@ -2193,7 +2206,7 @@ func newCardsWormholesDeleteCmd(project *string) *cobra.Command {
 
 			wormholeIDStr, urlProjectID := extractWithProject(args[0])
 			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
-			if err != nil {
+			if err != nil || wormholeID <= 0 {
 				return output.ErrUsage("Invalid wormhole ID")
 			}
 
