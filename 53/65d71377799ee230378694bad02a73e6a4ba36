@@ -1,0 +1,49 @@
+.surface
+  s_20c69161b1ea93::t_b2f4e8f8f1cb72 4497,4577,4657,5031,5108,5405,5485,5565,5939,6016,6316,6396,6476,6850,6927,7203,7283,7363,7737,7814,8090,8170,8250,8624,8701,14049,14097,14293,14373,14453,14827,14904,15180,15260,15340,15714,15791
+API-COVERAGE.md
+  s_20c69161b1ea93::t_cc9033243c3b95 57
+  s_20c69161b1ea93::t_cec48d1fef0bc7 59
+skills/basecamp/SKILL.md
+  s_20c69161b1ea93::t_fa8943d7011e4c 667,672,680-690
+  s_70ea5a80b3efd3::t_96340a10840269 691
+internal/commands/files.go
+  s_20c69161b1ea93::t_2f6a1532668e97 732-734
+  s_20c69161b1ea93::t_c71f1910c65393 607
+  s_20c69161b1ea93::t_0de653439849c7 914
+  s_20c69161b1ea93::t_d5f9982651f058 634-661
+  s_20c69161b1ea93::t_7f9002a78d4fd8 579,592,597
+  s_20c69161b1ea93::t_219f63ccfe76aa 977-983
+  s_20c69161b1ea93::t_3dda56974b1436 1004-1007
+  s_20c69161b1ea93::t_25d53bafa7a479 1042
+  s_20c69161b1ea93::t_2f4d28d453568f 708-714
+  s_20c69161b1ea93::t_8ffb99191d2430 620,629
+internal/commands/files_test.go
+  s_20c69161b1ea93::t_ddd927da1d119d 573-878,888-891,894-905,908-913
+  s_20c69161b1ea93::t_e769c15d893603 11-12
+  s_20c69161b1ea93::t_18f7987320dfb9 879-887,892-893,906-907
+  s_20c69161b1ea93::t_eba89245ae9e1c 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "5365d71377799ee230378694bad02a73e6a4ba36",
+  "prompts": {},
+  "sessions": {
+    "s_20c69161b1ea93": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "649fc5a9-6fbe-4157-8851-aab0e7b97f32",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_70ea5a80b3efd3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8c1d-a0af-7e91-a3a4-2bd35bdff875",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
