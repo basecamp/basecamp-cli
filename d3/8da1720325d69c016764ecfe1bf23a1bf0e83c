@@ -1,0 +1,22 @@
+internal/commands/cards_test.go
+  s_60b254bfab738a::t_0cc2d36c8a9991 2387-2406,2408,2411-2412,2415-2418,2426
+  s_60b254bfab738a::t_de95b5be8e5757 1962
+  s_60b254bfab738a::t_c8a2c13340230e 2407,2409-2410,2413-2414,2419-2425
+  s_60b254bfab738a::t_362ce6b46f03de 1998-2002
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d38da1720325d69c016764ecfe1bf23a1bf0e83c",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
