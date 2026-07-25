@@ -1,0 +1,21 @@
+internal/commands/todos_test.go
+  s_5ae620d561e42c::t_8d5828749fb0ff 2925-2933,2941-3021,3024-3027,3031-3032,3036-3038,3040,3042
+  s_5ae620d561e42c::t_b3fe0deeee5625 2934-2940
+  s_5ae620d561e42c::t_ba73f00337113b 3022-3023,3028-3030,3033-3035,3039,3041
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "98fe6e006852ddea4bd4efd9233007b590de3339",
+  "prompts": {},
+  "sessions": {
+    "s_5ae620d561e42c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3580b500-f005-4142-9d81-251424c4f2fb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
