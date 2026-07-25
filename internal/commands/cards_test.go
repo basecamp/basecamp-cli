@@ -1959,6 +1959,7 @@ type mockWormholeTransport struct {
 	destinationURL string
 	linked         *bool
 	secondTable    bool
+	cardNoParent   bool // card 456 comes back without a parent column
 	method         string
 	path           string
 	body           []byte
@@ -1994,7 +1995,11 @@ func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, er
 				body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`
 			}
 		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
-			body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}, "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+			if t.cardNoParent {
+				body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}}`
+			} else {
+				body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}, "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+			}
 		case strings.Contains(req.URL.Path, "/card_tables/555"):
 			body = `{"id": 555, "lists": [{"id": 777, "title": "Developing", "position": 1}], "wormholes": [` + t.wormholeJSON() + `]}`
 		case strings.Contains(req.URL.Path, "/card_tables/666"):
@@ -2378,4 +2383,44 @@ func TestCardsWormholesDeleteRejectsNonPositiveID(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "Invalid wormhole ID")
+}
+
+// TestCardsMoveToWormholeUnverifiableTableRejected verifies that when the card's
+// parent column is unavailable (so its table placement can't be confirmed) the
+// teleport fails closed at the command level with no mutation.
+func TestCardsMoveToWormholeUnverifiableTableRejected(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{cardNoParent: true}, "", "456", "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "Could not verify which card table")
+}
+
+// TestCardsMoveToWormholeURLProjectConflict verifies a project encoded in the
+// card URL that contradicts the card's own project is rejected (urlProjectID
+// path, distinct from the --in flag and root --project paths).
+func TestCardsMoveToWormholeURLProjectConflict(t *testing.T) {
+	cardURL := "https://3.basecamp.com/99999/buckets/777/card_tables/cards/456"
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", cardURL, "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "the card URL")
+	assert.Contains(t, e.Message, "777")
+}
+
+// TestCardsWormholesUpdateBreadcrumbPinsCardTable verifies the follow-up
+// breadcrumb emitted by the update command (not just the helper) pins
+// --card-table from the wormhole's parent, so command wiring can't regress
+// unnoticed. Flags.Hints keeps breadcrumbs in the envelope (app.OK strips them
+// otherwise).
+func TestCardsWormholesUpdateBreadcrumbPinsCardTable(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+
+	project := ""
+	err := executeCommand(newCardsWormholesUpdateCmd(&project), app, "111", "--to-column", "888")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Contains(t, envelope.Breadcrumbs[0].Cmd, "cards wormholes list --in 123 --card-table 555")
 }
