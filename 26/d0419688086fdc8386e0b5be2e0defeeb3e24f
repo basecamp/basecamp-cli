@@ -1,0 +1,92 @@
+go.sum
+  s_68fb2483e203ea::t_05fcced46dae64 26-27
+go.mod
+  s_68fb2483e203ea::t_42e6120656322a 9
+e2e/smoke/smoke_misc_read.bats
+  s_d807adeb4ab6ea::t_743850e9a5cbee 31-33
+internal/version/sdk-provenance.json
+  s_68fb2483e203ea::t_42e6120656322a 4-6
+.surface
+  s_68fb2483e203ea::t_58da0adea85b3f 11355-11357,11372,11377
+internal/commands/search.go
+  s_d807adeb4ab6ea::t_3a01511e1c3e08 439-440,452,461-463
+  s_68fb2483e203ea::t_5a7ed0dbc5c877 242-264
+  s_d807adeb4ab6ea::t_28e49327fc24a6 18-24,42,48,76-77,89-94,98-108,113
+  s_d807adeb4ab6ea::t_5ecb644e92657d 348
+  s_12f38d49bacd84::t_7999f93ad0680f 232-233
+  s_68fb2483e203ea::t_6111b3d05be938 54-57
+  s_d807adeb4ab6ea::t_7b10e2fe751ba9 191-192,216-218,223-231
+  s_68fb2483e203ea::t_d13290ee4a5d0e 351
+  s_68fb2483e203ea::t_8972a6cfc32e9e 448-450
+  s_68fb2483e203ea::t_7b10bfc58c64ef 5,14,30-34,43-46,50-51,73-75,78-88,114-136,138-154,194-209,234-241,265-341,346-347,349-350,443-447,457-458,464-475
+  s_d807adeb4ab6ea::t_0877ab05fd9953 219-222
+skills/basecamp/SKILL.md
+  s_d807adeb4ab6ea::t_d149e708d7fd4d 917-918
+  s_68fb2483e203ea::t_9503d280b3644c 927
+  s_68fb2483e203ea::t_b3ed761212668b 919-926
+internal/commands/search_test.go
+  s_68fb2483e203ea::t_80fd16c1009c12 400-405,408-433,442-446,453-455,461-586,595-597,601-605
+  s_68fb2483e203ea::t_5699893b701e27 387,391-396,398-399
+  s_68fb2483e203ea::t_47832b218c28b7 598-600
+  s_d807adeb4ab6ea::t_b37b783a7ba52f 155,167-172,174-179
+  s_68fb2483e203ea::t_1cf3d686a8222e 38-42,50-51,58-67
+  s_68fb2483e203ea::t_836b6f9e489669 377-386
+  s_d807adeb4ab6ea::t_838c0e7c0db535 11-12
+  s_d807adeb4ab6ea::t_b55132b491b5ee 29-37,46-49,73-103,105,156-166,180
+  s_1b437abfa07167::t_07bb1dc5d9dd05 68
+  s_68fb2483e203ea::t_334e48c6e66dad 135-154,173
+  s_cbeadd4a90db32::t_3d22bc02692a6e 181-187,189
+  s_d807adeb4ab6ea::t_7a3a343319404d 188,264-276,279,283-287,290-299,302,306-310,313-365,369,374-376,406-407,434-441,447-452,456-460,587-594
+  s_68fb2483e203ea::t_c2fed0bae363d1 228-229,231-233,235-237,240-244,249,252-253,256,261
+  s_68fb2483e203ea::t_918daa9cd384ff 388-390,397
+API-COVERAGE.md
+  s_68fb2483e203ea::t_92a1f83e9284f3 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "26d0419688086fdc8386e0b5be2e0defeeb3e24f",
+  "prompts": {},
+  "sessions": {
+    "s_12f38d49bacd84": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f55a9c2-4bb1-4397-abd9-1bf435f183ea",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_1b437abfa07167": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cda71db0-eea3-4445-8ffe-bf40bead5715",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_68fb2483e203ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "783556f9-5db7-4d65-bc06-ab6ad72d3368",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_cbeadd4a90db32": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8ba2-bfcb-7c73-8d02-c7f50e7abf69",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d807adeb4ab6ea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdfc597e-6eed-4fda-b3eb-bb247065df5f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
