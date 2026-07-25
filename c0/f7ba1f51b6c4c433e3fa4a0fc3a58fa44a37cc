@@ -1,0 +1,57 @@
+internal/commands/cards_test.go
+  s_60b254bfab738a::t_43038b4512a8cb 1945-2160,2165-2180,2182-2194
+  s_60b254bfab738a::t_9a483a76fc9d0b 2161-2164,2181
+.surface
+  s_60b254bfab738a::t_9ef63e46be3566 63-65,515-521,2813,2840,3125-3280,16478-16484
+internal/commands/commands.go
+  s_60b254bfab738a::t_138d26e378507c 46
+e2e/smoke/smoke_cards_wormhole.bats
+  s_60b254bfab738a::t_24b0d63c41090e 1-35
+e2e/smoke/smoke_aliases.bats
+  s_60b254bfab738a::t_d72e4c7a1849b3 182-189
+go.mod
+  s_60b254bfab738a::t_9a565c29a41e83 9
+skills/basecamp/SKILL.md
+  s_60b254bfab738a::t_4735492be907b4 184
+  s_60b254bfab738a::t_398302772f795c 590-609
+internal/version/sdk-provenance.json
+  s_60b254bfab738a::t_9a565c29a41e83 4-6
+API-COVERAGE.md
+  s_60b254bfab738a::t_ae3dafe2b4d5a5 52
+  s_60b254bfab738a::t_1cf73938f9ced9 9,13-15
+  s_60b254bfab738a::t_4f97331aacbc77 21
+internal/commands/cards.go
+  s_60b254bfab738a::t_e279cd0b09ca51 46
+  s_60b254bfab738a::t_4f70ab531ee03e 804-808
+  s_60b254bfab738a::t_854cad15408aa6 715,727-734,740-742,746-761
+  s_60b254bfab738a::t_a1f00c79a997d7 1859-2108
+  s_60b254bfab738a::t_e09dc9f9283087 1027,2562-2586
+  s_60b254bfab738a::t_cbf43ef459886d 907,912-1026
+  s_f5b18c0fd5e7bf::t_75b97f665134c5 1028
+go.sum
+  s_60b254bfab738a::t_f17d2699a26764 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c0f7ba1f51b6c4c433e3fa4a0fc3a58fa44a37cc",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_f5b18c0fd5e7bf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9575-0219-79f1-b4fc-471c8469181a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
