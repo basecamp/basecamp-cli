@@ -1974,7 +1974,8 @@ func (t *mockWormholeTransport) wormholeJSON() string {
 		linked = *t.linked
 	}
 	return fmt.Sprintf(`{"id":111,"status":"active","title":"Anniversary › Card Table › Triage",`+
-		`"type":"Kanban::Wormhole","color":null,"linked":%t,"destination_url":"%s"}`, linked, dest)
+		`"type":"Kanban::Wormhole","color":null,"linked":%t,"destination_url":"%s",`+
+		`"parent":{"id":555,"title":"Board","type":"Kanban::Board"}}`, linked, dest)
 }
 
 func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -2112,6 +2113,8 @@ func TestCardsMoveToWormholeSiblingBoardRejected(t *testing.T) {
 func TestCardsMoveToWormholeUnlinkedRejected(t *testing.T) {
 	e := wormholeMoveError(t, &mockWormholeTransport{linked: wormholePtr(false)}, "", "456", "--to-wormhole", "111")
 	assert.Contains(t, e.Message, "unlinked")
+	// The fix-it hint must be copy/pasteable — include --in with the source project.
+	assert.Contains(t, e.Hint, "--in 123")
 }
 
 // TestCardsMoveToWormholeNoMatch verifies a destination-column URL that no
@@ -2296,6 +2299,18 @@ func TestWormholeMoveBreadcrumbs(t *testing.T) {
 	assert.Contains(t, crumbs[0].Cmd, "--in 123")
 	assert.Contains(t, crumbs[0].Cmd, "--card-table 555")
 	assert.NotContains(t, crumbs[0].Cmd, "cards show")
+}
+
+// TestWormholeListBreadcrumb verifies the list follow-up pins --card-table from
+// the wormhole's parent, and omits it when the parent is unknown.
+func TestWormholeListBreadcrumb(t *testing.T) {
+	withParent := wormholeListBreadcrumb(123, &basecamp.Wormhole{ID: 111, Parent: &basecamp.Parent{ID: 555}})
+	assert.Contains(t, withParent.Cmd, "--in 123")
+	assert.Contains(t, withParent.Cmd, "--card-table 555")
+
+	noParent := wormholeListBreadcrumb(123, &basecamp.Wormhole{ID: 111})
+	assert.Contains(t, noParent.Cmd, "--in 123")
+	assert.NotContains(t, noParent.Cmd, "--card-table")
 }
 
 // TestParseColumnID covers numeric IDs, column URLs, and rejections.

@@ -995,7 +995,7 @@ func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, 
 	if !wormhole.Linked {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Wormhole %d is unlinked — its destination column no longer exists", wormhole.ID),
-			fmt.Sprintf("Point it at a live column with: basecamp cards wormholes update %d --to-column <id|url>", wormhole.ID),
+			fmt.Sprintf("Point it at a live column with: basecamp cards wormholes update %d --to-column <id|url> --in %s", wormhole.ID, sourceProjectID),
 		)
 	}
 
@@ -1015,6 +1015,17 @@ func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, 
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(wormholeMoveBreadcrumbs(sourceProjectID, cardTableID)...),
 	)
+}
+
+// wormholeListBreadcrumb builds the "list wormholes" follow-up. A wormhole's
+// parent is the card table it lives on, so it pins --card-table when known,
+// keeping the follow-up unambiguous on multi-table projects.
+func wormholeListBreadcrumb(bucketID int64, wormhole *basecamp.Wormhole) output.Breadcrumb {
+	cmd := fmt.Sprintf("basecamp cards wormholes list --in %d", bucketID)
+	if wormhole != nil && wormhole.Parent != nil && wormhole.Parent.ID != 0 {
+		cmd += fmt.Sprintf(" --card-table %d", wormhole.Parent.ID)
+	}
+	return output.Breadcrumb{Action: "list", Cmd: cmd, Description: "List wormholes"}
 }
 
 // wormholeMoveBreadcrumbs points at the source card table's wormhole list. It
@@ -2181,11 +2192,7 @@ func newCardsWormholesUpdateCmd(project *string) *cobra.Command {
 
 			return app.OK(wormhole,
 				output.WithSummary(fmt.Sprintf("Updated wormhole: %s", wormhole.Title)),
-				output.WithBreadcrumbs(output.Breadcrumb{
-					Action:      "list",
-					Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %d", bucketID),
-					Description: "List wormholes",
-				}),
+				output.WithBreadcrumbs(wormholeListBreadcrumb(bucketID, wormhole)),
 			)
 		},
 	}
@@ -2682,9 +2689,6 @@ type projectCardTable struct {
 	Title string
 }
 
-// getCardTableID retrieves the card table ID from a project's dock.
-// If the project has multiple card tables and no explicit cardTableID is provided,
-// an error is returned with the available card table IDs.
 // resolveCardsProjectID resolves the project for a card command from the
 // flagProject value with the standard flag > env > config > interactive
 // precedence, then maps it to a numeric project ID via the name resolver.
@@ -2710,6 +2714,9 @@ func resolveCardsProjectID(cmd *cobra.Command, app *appctx.App, flagProject stri
 	return resolvedProjectID, nil
 }
 
+// getCardTableID retrieves the card table ID from a project's dock.
+// If the project has multiple card tables and no explicit cardTableID is provided,
+// an error is returned with the available card table IDs.
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
 	cardTables, err := listProjectCardTables(cmd, app, projectID)
 	if err != nil {
