@@ -1066,10 +1066,15 @@ func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProj
 
 // requireCardInTable confirms the card's parent column belongs to the resolved
 // card table, so an explicit --card-table can't point the wormhole search at a
-// table the card isn't on.
+// table the card isn't on. The teleport is irreversible, so it fails closed: if
+// the card's parent column or the table's columns are unavailable, the placement
+// can't be verified and the move is refused rather than trusted.
 func requireCardInTable(card *basecamp.Card, table *basecamp.CardTable) error {
 	if card.Parent == nil || card.Parent.ID == 0 || table == nil {
-		return nil
+		return output.ErrUsageHint(
+			"Could not verify which card table the card is on before teleporting",
+			"Re-run without --card-table so the card's own table is resolved, and check the card ID",
+		)
 	}
 	if cardTableContainsColumn(table.Lists, card.Parent.ID) {
 		return nil

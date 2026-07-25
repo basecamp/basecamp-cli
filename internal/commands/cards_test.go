@@ -1997,7 +1997,8 @@ func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, er
 		case strings.Contains(req.URL.Path, "/card_tables/555"):
 			body = `{"id": 555, "lists": [{"id": 777, "title": "Developing", "position": 1}], "wormholes": [` + t.wormholeJSON() + `]}`
 		case strings.Contains(req.URL.Path, "/card_tables/666"):
-			body = `{"id": 666, "lists": [{"id": 888, "title": "Elsewhere", "position": 1}], "wormholes": []}`
+			// A real wormhole (222) that lives on a sibling board, not the card's table.
+			body = `{"id": 666, "lists": [{"id": 888, "title": "Elsewhere", "position": 1}], "wormholes": [{"id":222,"status":"active","title":"Sibling › Board › Col","type":"Kanban::Wormhole","color":null,"linked":true,"destination_url":"https://3.basecampapi.com/99999/buckets/999/card_tables/columns/321.json"}]}`
 		default:
 			body = `{}`
 		}
@@ -2026,9 +2027,10 @@ func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 }
 
-// wormholeMoveError runs `cards move <card> --to-wormhole ...` and returns the
-// *output.Error it produced (failing the test if it didn't error).
-func wormholeMoveError(t *testing.T, transport http.RoundTripper, project string, args ...string) *output.Error {
+// wormholeMoveError runs `cards move <card> --to-wormhole ...`, asserts it failed
+// with an *output.Error, and asserts no mutating request was issued — a rejected
+// teleport must never touch the server, since the move is irreversible.
+func wormholeMoveError(t *testing.T, transport *mockWormholeTransport, project string, args ...string) *output.Error {
 	t.Helper()
 	app, _ := newTestAppWithTransport(t, transport)
 	cardTable := ""
@@ -2036,6 +2038,7 @@ func wormholeMoveError(t *testing.T, transport http.RoundTripper, project string
 	err := executeCommand(cmd, app, args...)
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
 	return e
 }
 
@@ -2094,10 +2097,12 @@ func TestCardsMoveToWormholeByDestinationURL(t *testing.T) {
 	assert.Equal(t, float64(111), body["column_id"])
 }
 
-// TestCardsMoveToWormholeSiblingBoardRejected verifies a wormhole id that is not
-// on the card's own card table is rejected (fail-closed) rather than moved.
+// TestCardsMoveToWormholeSiblingBoardRejected verifies that a real wormhole (222)
+// which exists on a sibling board — not the card's own card table — is rejected
+// (fail-closed) with no move issued. The server would otherwise honor it, since
+// it resolves column_id against the whole project bucket.
 func TestCardsMoveToWormholeSiblingBoardRejected(t *testing.T) {
-	e := wormholeMoveError(t, &mockWormholeTransport{}, "", "456", "--to-wormhole", "222")
+	e := wormholeMoveError(t, &mockWormholeTransport{secondTable: true}, "", "456", "--to-wormhole", "222")
 	assert.Contains(t, e.Message, "Wormhole 222 is not on this card's card table")
 	assert.Contains(t, e.Hint, "#111")
 }
@@ -2129,7 +2134,8 @@ func TestCardsMoveToWormholeProjectConflict(t *testing.T) {
 // TestCardsMoveToWormholeTableConflict verifies an explicit --card-table that
 // doesn't contain the card is rejected.
 func TestCardsMoveToWormholeTableConflict(t *testing.T) {
-	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{secondTable: true})
+	transport := &mockWormholeTransport{secondTable: true}
+	app, _ := newTestAppWithTransport(t, transport)
 	project := ""
 	cardTable := "666"
 	cmd := newCardsMoveCmd(&project, &cardTable)
@@ -2137,6 +2143,7 @@ func TestCardsMoveToWormholeTableConflict(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "not on the specified card table")
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
 }
 
 // TestCardsMoveToWormholeRejectsNonColumnURL verifies a non-column Basecamp URL
@@ -2316,7 +2323,8 @@ func TestParseColumnID(t *testing.T) {
 // (which lands in app.Flags.Project, not the card command's own flag) that
 // contradicts the card's project is still rejected before the destructive move.
 func TestCardsMoveToWormholeRootProjectConflict(t *testing.T) {
-	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
 	app.Flags.Project = "999" // e.g. `basecamp --project 999 cards move …`
 
 	project := ""
@@ -2327,6 +2335,7 @@ func TestCardsMoveToWormholeRootProjectConflict(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Contains(t, e.Message, "points at project 999")
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
 }
 
 // TestCardsMoveToWormholeEmptyValue verifies --to-wormhole= (present but empty)
