@@ -1,12 +1,17 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +21,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/editor"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewCommentsCmd creates the comments command group (list/show/update).
@@ -35,6 +41,7 @@ func NewCommentsCmd() *cobra.Command {
 	cmd.AddCommand(
 		newCommentsListCmd(),
 		newCommentsShowCmd(),
+		newCommentsThreadCmd(),
 		newCommentsCreateCmd(),
 		newCommentsUpdateCmd(),
 		newRecordableTrashCmd("comment"),
@@ -189,6 +196,467 @@ You can pass either a comment ID or a Basecamp URL:
 		},
 	}
 	return cmd
+}
+
+// defaultCommentThreadWindow is the default maximum number of comments returned
+// by `comments thread` when neither --all nor --window is given. Focus-centered:
+// (N-1)/2 older, the focus, and the remainder newer.
+const defaultCommentThreadWindow = 41
+
+func newCommentsThreadCmd() *cobra.Command {
+	var all bool
+	var window int
+
+	cmd := &cobra.Command{
+		Use:   "thread <comment-id|comment-url>",
+		Short: "Show a comment with its discussion, ready to reply",
+		Long: `Show a comment together with its parent recording and the surrounding
+discussion, plus a ready-to-use reply target and author @mention.
+
+The argument must identify a specific comment — a bare comment ID, a comment
+fragment URL (…#__recording_789), or a direct comment URL. A plain recording
+URL is rejected; use ` + "`basecamp show`" + ` for the recording itself.
+
+By default the discussion is a window of up to 41 comments centered on the
+focus. Use --window N to change the size or --all to return every fetched
+comment. Selection bounds the output, never the fetch.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCommentsThread(cmd, args[0], all, window)
+		},
+	}
+
+	cmd.Flags().BoolVar(&all, "all", false, "Return every fetched comment instead of a window")
+	cmd.Flags().IntVar(&window, "window", 0, "Maximum comments to return, centered on the focus (default 41)")
+
+	return cmd
+}
+
+func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) error {
+	app := appctx.FromContext(cmd.Context())
+
+	windowSet := cmd.Flags().Changed("window")
+	if all && windowSet {
+		return output.ErrUsage("--all and --window are mutually exclusive")
+	}
+	if windowSet && window <= 0 {
+		return output.ErrUsage("--window must be a positive number")
+	}
+	effectiveWindow := defaultCommentThreadWindow
+	if windowSet {
+		effectiveWindow = window
+	}
+
+	// Require an exact comment trigger before any API call — a plain recording
+	// URL or collection is rejected with a pointer to `basecamp show`.
+	triggerIDStr, urlAccountID, err := commentTriggerID(arg)
+	if err != nil {
+		return err
+	}
+
+	// Guard against resolving a same-numbered comment in the wrong account: a
+	// URL names its account, and if it disagrees with the configured one the
+	// safe move is to stop rather than silently target a different account (and
+	// build a reply target that points elsewhere). Rejects before any API call.
+	if urlAccountID != "" && app.Config.AccountID != "" && urlAccountID != app.Config.AccountID {
+		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	triggerID, err := strconv.ParseInt(triggerIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid comment ID")
+	}
+
+	// Step 1 — resolve the focus comment.
+	trigger, err := app.Account().Comments().Get(cmd.Context(), triggerID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// Step 2 — reply target + parent safety. A reply routes to the parent
+	// recording, never to the comment; without a parent it cannot be built.
+	if trigger.Parent == nil || trigger.Parent.ID == 0 {
+		return &output.Error{
+			Code:    output.CodeAPI,
+			Message: fmt.Sprintf("Comment #%d has no parent recording; cannot build a reply target", triggerID),
+			Hint:    "This usually means the comment was returned without its parent. Try `basecamp comments show`.",
+		}
+	}
+	parentID := trigger.Parent.ID
+	parentIDStr := strconv.FormatInt(parentID, 10)
+
+	// Step 3 — full parent recording, via a server-derived endpoint (never the
+	// parent's URL field, which could point off-origin).
+	recording, recordingFull, err := fetchThreadParent(cmd, app, trigger.Parent)
+	if err != nil {
+		return err
+	}
+
+	// Step 4 — truthful discussion window over the active comments.
+	listResult, err := app.Account().Comments().List(cmd.Context(), parentID, &basecamp.CommentListOptions{Limit: -1})
+	if err != nil {
+		return convertSDKError(err)
+	}
+	fetched := sortCommentsChronologically(listResult.Comments)
+	focusIdx := commentIndexByID(fetched, trigger.ID)
+	selected, selection := selectCommentWindow(fetched, focusIdx, all, effectiveWindow)
+
+	meta := buildCommentsMeta(len(fetched), len(selected), selection, focusIdx >= 0, listResult.Meta)
+
+	// Step 5 — reply-ready, escaped author handle.
+	author := buildFocusAuthor(trigger.Creator)
+
+	focus := map[string]any{
+		"comment_id": trigger.ID,
+		"created_at": trigger.CreatedAt.Format(time.RFC3339),
+		"content":    trigger.Content,
+		"author":     author,
+	}
+
+	data := map[string]any{
+		"recording_full": recordingFull,
+		"focus":          focus,
+		"comments":       selected,
+		"comments_meta":  meta,
+		"reply_target":   map[string]any{"recording_id": parentID},
+	}
+	// A fully-fetched parent is `recording`; a sparse ref (unmapped type) is
+	// `recording_ref` so consumers can tell the two apart.
+	if recordingFull {
+		data["recording"] = recording
+	} else {
+		data["recording_ref"] = recording
+	}
+
+	display := threadDisplayProjection(recording, recordingFull, trigger)
+
+	respOpts := []output.ResponseOption{
+		output.WithEntity("comment_thread"),
+		output.WithDisplayData(display),
+		output.WithSummary(threadSummary(trigger, author, len(selected))),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "reply",
+			Cmd:         fmt.Sprintf("basecamp comments create %s <text>", parentIDStr),
+			Description: "Reply on the parent recording",
+		}),
+	}
+	if listResult.Meta.Truncated {
+		respOpts = append(respOpts, output.WithNotice(
+			"Discussion truncated: more comments exist on the server than were fetched. "+
+				"\"all\"/\"most recent\" cover the fetched subset only."))
+	}
+
+	return app.OK(data, respOpts...)
+}
+
+// commentTriggerID classifies the argument and returns an exact comment ID plus
+// the account named by the URL (empty for a bare ID). It accepts a bare comment
+// ID, a comment fragment URL (…#__recording_789), or a direct comment URL
+// (/comments/789). A plain recording URL or collection URL is rejected — the
+// plain-URL extractor would silently collapse it to a recording ID, which is
+// exactly the mistake this command must not make.
+func commentTriggerID(arg string) (id, accountID string, err error) {
+	parsed := urlarg.Parse(arg)
+	if parsed == nil {
+		// Not a URL — treat as a bare comment ID (validated by ParseInt later).
+		return arg, "", nil
+	}
+	if parsed.CommentID != "" {
+		return parsed.CommentID, parsed.AccountID, nil
+	}
+	if parsed.Type == "comments" && parsed.RecordingID != "" && !parsed.IsCollection {
+		return parsed.RecordingID, parsed.AccountID, nil
+	}
+	return "", "", output.ErrUsageHint(
+		"That URL points to a recording, not a comment",
+		"Pass a comment ID or a comment URL (with a #__recording_… fragment). "+
+			"For the recording itself, use: basecamp show <url>",
+	)
+}
+
+// fetchThreadParent loads the full parent recording using a type-derived
+// endpoint. A mapped type that then fails to fetch, returns 204, or fails to
+// decode is a hard error — never a silent degrade. Only an unmapped or
+// contextual-without-parent type (endpoint "") returns a sparse ref built from
+// the parent fields, with recordingFull=false.
+func fetchThreadParent(cmd *cobra.Command, app *appctx.App, parent *basecamp.Parent) (map[string]any, bool, error) {
+	parentIDStr := strconv.FormatInt(parent.ID, 10)
+	parentData := map[string]any{
+		"type": parent.Type,
+		"id":   parent.ID,
+		"url":  parent.URL,
+	}
+	endpoint := recordingTypeEndpoint(parentData, parentIDStr)
+	if endpoint == "" {
+		ref := map[string]any{
+			"id":   parent.ID,
+			"type": parent.Type,
+			"url":  parent.URL,
+		}
+		if parent.Title != "" {
+			ref["title"] = parent.Title
+		}
+		return ref, false, nil
+	}
+
+	resp, err := app.Account().Get(cmd.Context(), endpoint)
+	if err != nil {
+		return nil, false, convertSDKError(err)
+	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, false, &output.Error{
+			Code:       output.CodeAPI,
+			Message:    fmt.Sprintf("Parent recording %s returned no content", parentIDStr),
+			HTTPStatus: resp.StatusCode,
+		}
+	}
+
+	// UseNumber preserves int64 IDs (> 2^53) through the map round-trip.
+	var recording map[string]any
+	dec := json.NewDecoder(bytes.NewReader(resp.Data))
+	dec.UseNumber()
+	if err := dec.Decode(&recording); err != nil {
+		return nil, false, &output.Error{
+			Code:    output.CodeAPI,
+			Message: fmt.Sprintf("Could not decode parent recording %s: %v", parentIDStr, err),
+		}
+	}
+	return recording, true, nil
+}
+
+// sortCommentsChronologically returns the comments sorted by created_at
+// ascending, then id ascending. The API guarantees no order, so we never trust
+// the received sequence.
+func sortCommentsChronologically(comments []basecamp.Comment) []basecamp.Comment {
+	sorted := make([]basecamp.Comment, len(comments))
+	copy(sorted, comments)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].CreatedAt.Equal(sorted[j].CreatedAt) {
+			return sorted[i].ID < sorted[j].ID
+		}
+		return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+	})
+	return sorted
+}
+
+// commentIndexByID returns the index of the comment with the given ID, or -1.
+func commentIndexByID(comments []basecamp.Comment, id int64) int {
+	for i := range comments {
+		if comments[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// selectCommentWindow chooses which comments to return. --all returns every
+// fetched comment. Otherwise it returns a window of at most `window` comments:
+// centered on the focus when present ((N-1)/2 older, the focus, the rest newer,
+// with unused capacity shifted toward the other side at either boundary), or the
+// most-recent N when the focus is absent from the fetched set.
+func selectCommentWindow(comments []basecamp.Comment, focusIdx int, all bool, window int) ([]basecamp.Comment, string) {
+	if all {
+		return comments, "all_fetched"
+	}
+
+	n := window
+	if n > len(comments) {
+		n = len(comments)
+	}
+	if n <= 0 {
+		return []basecamp.Comment{}, "focus_window"
+	}
+
+	// Focus absent → most-recent N (the tail of the chronological list).
+	if focusIdx < 0 {
+		return comments[len(comments)-n:], "focus_window"
+	}
+
+	before := (n - 1) / 2
+	after := n - 1 - before
+	start := focusIdx - before
+	end := focusIdx + after // inclusive
+
+	// Shift unused capacity toward the other side at each boundary.
+	if start < 0 {
+		end += -start
+		start = 0
+	}
+	if last := len(comments) - 1; end > last {
+		start -= end - last
+		end = last
+	}
+	if start < 0 {
+		start = 0
+	}
+	return comments[start : end+1], "focus_window"
+}
+
+// buildCommentsMeta assembles the facts-only comments_meta object.
+func buildCommentsMeta(fetched, returned int, selection string, focusPresent bool, meta basecamp.ListMeta) map[string]any {
+	m := map[string]any{
+		"scope":                    "active",
+		"fetched":                  fetched,
+		"returned":                 returned,
+		"selection":                selection,
+		"order":                    "created_at_asc_id_asc",
+		"focus_in_active_comments": focusPresent,
+		"fetch_complete":           !meta.Truncated,
+		"api_truncated":            meta.Truncated,
+	}
+	// TotalCount is 0 when the X-Total-Count header was absent — never treat 0
+	// as an authoritative total.
+	if meta.TotalCount > 0 {
+		m["total"] = meta.TotalCount
+		m["total_known"] = true
+	} else {
+		m["total"] = nil
+		m["total_known"] = false
+	}
+	return m
+}
+
+// buildFocusAuthor builds the reply-ready author handle. The @mention label is
+// SanitizeSingleLine'd first (drops newlines/terminal controls) then
+// Markdown-escaped, so a hostile name can neither break the terminal nor the
+// [@name](scheme:value) link syntax.
+func buildFocusAuthor(creator *basecamp.Person) map[string]any {
+	if creator == nil {
+		return map[string]any{
+			"id":      nil,
+			"name":    "",
+			"mention": unavailableMention(),
+		}
+	}
+
+	author := map[string]any{
+		"id":   creator.ID,
+		"name": creator.Name,
+	}
+
+	label := markdownEscape(richtext.SanitizeSingleLine(creator.Name))
+	switch {
+	case label == "":
+		author["mention"] = unavailableMention()
+	case creator.AttachableSGID != "":
+		author["mention"] = map[string]any{
+			"syntax":          fmt.Sprintf("[@%s](mention:%s)", label, creator.AttachableSGID),
+			"resolution":      "embedded_sgid",
+			"requires_lookup": false,
+		}
+	case creator.ID > 0:
+		// A positive person ID with no embedded SGID resolves via one lookup at
+		// reply time — not labeled non-pingable, which we don't verify here.
+		author["mention"] = map[string]any{
+			"syntax":          fmt.Sprintf("[@%s](person:%d)", label, creator.ID),
+			"resolution":      "person_lookup",
+			"requires_lookup": true,
+		}
+	default:
+		author["mention"] = unavailableMention()
+	}
+	return author
+}
+
+func unavailableMention() map[string]any {
+	return map[string]any{
+		"syntax":          nil,
+		"resolution":      "unavailable",
+		"requires_lookup": false,
+	}
+}
+
+// markdownEscape backslash-escapes Markdown metacharacters so an author name is
+// safe inside a [@name](scheme:value) mention link and cannot inject emphasis,
+// links, or raw HTML. Newlines/terminal controls are handled separately by
+// SanitizeSingleLine, which must run first.
+func markdownEscape(s string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		"`", "\\`",
+		"*", "\\*",
+		"_", "\\_",
+		"{", "\\{",
+		"}", "\\}",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"<", "\\<",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		"!", "\\!",
+		"|", "\\|",
+		"~", "\\~",
+	)
+	return replacer.Replace(s)
+}
+
+// threadDisplayProjection builds the flat projection consumed by the
+// comment_thread schema. Presenter schemas read direct keys, not nested
+// recording.*/focus.*, so this is distinct from the structured .data.
+func threadDisplayProjection(recording map[string]any, recordingFull bool, trigger *basecamp.Comment) map[string]any {
+	authorName := ""
+	if trigger.Creator != nil {
+		authorName = trigger.Creator.Name
+	}
+	// The projection feeds the human renderer, so single-line detail fields
+	// (author, type) are collapsed to one line here — the presenter's text
+	// format strips terminal escapes but preserves newlines, which would break
+	// the row layout. The machine contract keeps these values raw.
+	return map[string]any{
+		"recording_id":          stringField(recording["id"]),
+		"recording_type":        richtext.SanitizeSingleLine(stringField(recording["type"])),
+		"recording_title":       recordingTitleField(recording),
+		"recording_content":     stringField(recording["content"]),
+		"recording_description": stringField(recording["description"]),
+		"recording_full":        recordingFull,
+		"focus_comment_id":      trigger.ID,
+		"focus_author":          richtext.SanitizeSingleLine(authorName),
+		"focus_created_at":      trigger.CreatedAt.Format(time.RFC3339),
+		"focus_content":         trigger.Content,
+	}
+}
+
+// recordingTitleField extracts a human title from a recording, trying the usual
+// title-bearing fields in order.
+func recordingTitleField(recording map[string]any) string {
+	for _, key := range []string{"title", "name", "subject"} {
+		if v := stringField(recording[key]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// stringField renders a decoded JSON value as a string. IDs decoded with
+// UseNumber arrive as json.Number; everything else is best-effort.
+func stringField(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return val
+	case json.Number:
+		return val.String()
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+// threadSummary is the one-line human summary for the thread response.
+func threadSummary(trigger *basecamp.Comment, author map[string]any, returned int) string {
+	name, _ := author["name"].(string)
+	if name == "" {
+		name = "unknown"
+	}
+	return fmt.Sprintf("Comment #%d by %s — %d in discussion", trigger.ID, name, returned)
 }
 
 func newCommentsUpdateCmd() *cobra.Command {

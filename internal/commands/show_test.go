@@ -244,6 +244,8 @@ func (t *showTrackingTransport) RoundTrip(req *http.Request) (*http.Response, er
 		StatusCode: status,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     header,
+		// Request is required by the SDK's same-origin pagination guard.
+		Request: req,
 	}, nil
 }
 

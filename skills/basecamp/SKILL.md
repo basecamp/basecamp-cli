@@ -237,6 +237,13 @@ Returns: `account_id`, `project_id`, `type`, `recording_id`, `comment_id` (from 
 basecamp url parse "https://...messages/123#__recording_456" --json
 # Returns recording_id: 123 (parent), comment_id: 456 (fragment) - comment on 123, not 456
 basecamp comments create 123 "Reply" --in <project>
+
+# Or get the whole reply-ready context deterministically in one call:
+basecamp comments thread "https://...messages/123#__recording_456" --json
+# .data.reply_target.recording_id  → where to post the reply
+# .data.focus.author.mention.syntax → paste-ready [@Name](mention:SGID)
+# .data.comments                   → surrounding discussion (default window of 41)
+# --all returns every fetched comment; --window N sets the window size
 ```
 
 ## Decision Trees
@@ -669,6 +676,9 @@ case. To change visibility on an already-created recording, use
 
 ```bash
 basecamp comments list <recording_id> --in <project> --json
+basecamp comments thread <comment-id|comment-url> --json          # Reply-ready: parent + focus + discussion + @mention
+basecamp comments thread <comment-id> --all --json                # Every fetched comment instead of a window
+basecamp comments thread <comment-id> --window 11 --json          # Focus-centered window of 11
 basecamp comments create <recording_id> "Text" --in <project>
 basecamp comments create <recording_id> "@Jane.Smith, looks good!" --in <project>  # With @mention
 basecamp comments update <id> "Updated" --in <project>

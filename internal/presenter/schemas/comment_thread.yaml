@@ -1,0 +1,63 @@
+entity: comment_thread
+kind: recording
+
+# Rendered over the flat display projection built by `comments thread`
+# (recording_*/focus_* direct keys), NOT the nested structured .data. The
+# envelope appends the discussion under its built-in "Comments:" header and the
+# reply command as the last breadcrumb.
+
+identity:
+  id: recording_id
+
+headline:
+  default:
+    template: "{{.recording_title}}"
+
+fields:
+  recording_type:
+    role: detail
+    format: text
+
+  recording_id:
+    role: meta
+    emphasis: muted
+
+  recording_content:
+    role: body
+    format: text
+    collapse: true
+
+  recording_description:
+    role: body
+    format: text
+    collapse: true
+
+  recording_full:
+    role: meta
+    format: boolean
+    emphasis: muted
+
+  focus_author:
+    role: detail
+    format: text
+
+  focus_created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  focus_comment_id:
+    role: meta
+    emphasis: muted
+
+  focus_content:
+    role: body
+    format: text
+
+views:
+  detail:
+    sections:
+      - heading: Recording
+        fields: [recording_type, recording_id, recording_full, recording_content, recording_description]
+      - heading: Focus
+        fields: [focus_author, focus_created_at, focus_comment_id, focus_content]

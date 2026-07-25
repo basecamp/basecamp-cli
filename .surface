@@ -100,6 +100,7 @@ ARG basecamp comments create 01 <content>
 ARG basecamp comments list 00 <id|url>
 ARG basecamp comments restore 00 <id|url>
 ARG basecamp comments show 00 <id|url>
+ARG basecamp comments thread 00 <comment-id|comment-url>
 ARG basecamp comments trash 00 <id|url>
 ARG basecamp comments update 00 <id|url>
 ARG basecamp comments update 01 <content>
@@ -558,6 +559,7 @@ CMD basecamp comments create
 CMD basecamp comments list
 CMD basecamp comments restore
 CMD basecamp comments show
+CMD basecamp comments thread
 CMD basecamp comments trash
 CMD basecamp comments update
 CMD basecamp completion
@@ -4203,6 +4205,29 @@ FLAG basecamp comments show --stats type=bool
 FLAG basecamp comments show --styled type=bool
 FLAG basecamp comments show --todolist type=string
 FLAG basecamp comments show --verbose type=count
+FLAG basecamp comments thread --account type=string
+FLAG basecamp comments thread --agent type=bool
+FLAG basecamp comments thread --all type=bool
+FLAG basecamp comments thread --cache-dir type=string
+FLAG basecamp comments thread --count type=bool
+FLAG basecamp comments thread --help type=bool
+FLAG basecamp comments thread --hints type=bool
+FLAG basecamp comments thread --ids-only type=bool
+FLAG basecamp comments thread --in type=string
+FLAG basecamp comments thread --jq type=string
+FLAG basecamp comments thread --json type=bool
+FLAG basecamp comments thread --markdown type=bool
+FLAG basecamp comments thread --md type=bool
+FLAG basecamp comments thread --no-hints type=bool
+FLAG basecamp comments thread --no-stats type=bool
+FLAG basecamp comments thread --profile type=string
+FLAG basecamp comments thread --project type=string
+FLAG basecamp comments thread --quiet type=bool
+FLAG basecamp comments thread --stats type=bool
+FLAG basecamp comments thread --styled type=bool
+FLAG basecamp comments thread --todolist type=string
+FLAG basecamp comments thread --verbose type=count
+FLAG basecamp comments thread --window type=int
 FLAG basecamp comments trash --account type=string
 FLAG basecamp comments trash --agent type=bool
 FLAG basecamp comments trash --cache-dir type=string
@@ -16558,6 +16583,7 @@ SUB basecamp comments create
 SUB basecamp comments list
 SUB basecamp comments restore
 SUB basecamp comments show
+SUB basecamp comments thread
 SUB basecamp comments trash
 SUB basecamp comments update
 SUB basecamp completion
