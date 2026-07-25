@@ -664,16 +664,30 @@ basecamp files download <id> --out ./dir                # Download to specific d
 basecamp files download "https://storage.../download/f" # Download from storage URL
 basecamp files uploads create <file> --in <project>      # Upload file to root
 basecamp files uploads create <file> --vault <folder_id> --in <project>  # Upload to folder
+basecamp files uploads create <file> --visible-to-clients --in <project>  # Client-visible (root folder only)
 basecamp files folder create "Folder" --in <project>
 basecamp files doc create "Doc" "Body" --in <project>
 basecamp files doc create "Draft" --draft --in <project>
 basecamp files doc create "Notes" "..." --no-subscribe --in <project>
+basecamp files doc create "For client" "..." --visible-to-clients --in <project>  # Client-visible (root folder only)
 basecamp files update <document_id> --title "New" --content "Updated"
 basecamp files update <document_id> --title "New" --in <project>      # Preserves existing document content
 basecamp files update <document_id> --content "Updated" --in <project> # Preserves existing document title
 ```
 
 **Document update semantics:** `basecamp files update <document_id>` is safe for partial updates in the CLI: when you pass only `--title` or only `--content`, the CLI first fetches the current document and preserves the untouched field.
+
+**Client visibility at create time:** `doc create` and `uploads create` accept
+`--visible-to-clients`, but the server only honors it in the project's **root
+Docs & Files folder**. Targeting a nested folder (`--vault`/`--folder`) with the
+flag is a hard error raised before anything is uploaded — a nested item inherits
+its folder's visibility, and that can't be changed per-item afterward (the
+visibility endpoint rejects nested docs/uploads). To make a nested item
+client-visible, create it in the root folder, or change the eligible top-level
+ancestor that controls the folder's visibility first. Omitting the flag uses the
+server default; as with Messages, a **client-authenticated caller always creates
+client-visible records** regardless. `recordings visibility` is **not** a
+remediation for nested docs/uploads.
 
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
 

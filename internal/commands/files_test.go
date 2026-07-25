@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -566,4 +569,345 @@ func TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription(t *test
 	assert.Equal(t, "Quarterly report", body["description"])
 	_, hasBaseName := body["base_name"]
 	assert.False(t, hasBaseName, "base_name must not be sent for whitespace-only --title")
+}
+
+// mockFilesCreateTransport backs the docs/uploads create client-visibility tests.
+// It switches on method+path, counts every POST (so tests can prove a rejection
+// stages nothing), and records whether the vault-inspection GET fired.
+type mockFilesCreateTransport struct {
+	vaultParent    bool     // GET /vaults/<id> returns a parent (nested) when true
+	vaultGetCalled bool     // set when GET /vaults/<id> is hit
+	postPaths      []string // every POST path, in order
+	uploadBody     []byte   // captured POST /vaults/<id>/uploads.json body
+	docBody        []byte   // captured POST /vaults/<id>/documents.json body
+}
+
+func (t *mockFilesCreateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	respond := func(code int, body string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: code,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+	path := req.URL.Path
+
+	switch {
+	case req.Method == http.MethodGet && strings.HasSuffix(path, "/projects.json"):
+		return respond(200, `[{"id":123,"name":"Test Project"}]`)
+	case req.Method == http.MethodGet && strings.Contains(path, "/projects/"):
+		// Dock payload with a single enabled vault tool, consumed by getVaultID
+		// on the root/default (no --vault) path.
+		return respond(200, `{"id":123,"name":"Test Project","dock":[{"id":555,"name":"vault","title":"Docs & Files","enabled":true}]}`)
+	case req.Method == http.MethodGet && strings.Contains(path, "/vaults/"):
+		t.vaultGetCalled = true
+		if t.vaultParent {
+			return respond(200, `{"id":600,"title":"Sub folder","parent":{"id":555,"title":"Docs & Files"}}`)
+		}
+		return respond(200, `{"id":555,"title":"Docs & Files"}`)
+	case req.Method == http.MethodPost && strings.Contains(path, "/attachments.json"):
+		t.postPaths = append(t.postPaths, path)
+		return respond(201, `{"attachable_sgid":"sgid-abc"}`)
+	case req.Method == http.MethodPost && strings.Contains(path, "/uploads.json"):
+		t.postPaths = append(t.postPaths, path)
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading upload body: %w", err)
+		}
+		t.uploadBody = body
+		return respond(201, `{"id":789,"title":"report","filename":"report.pdf"}`)
+	case req.Method == http.MethodPost && strings.Contains(path, "/documents.json"):
+		t.postPaths = append(t.postPaths, path)
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading document body: %w", err)
+		}
+		t.docBody = body
+		return respond(201, `{"id":999,"title":"For client"}`)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, path)
+	}
+}
+
+// writeTempUpload creates a real file so richtext.ValidateFile (which runs before
+// the visibility gate in runUploadFile) passes.
+func writeTempUpload(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.pdf")
+	require.NoError(t, os.WriteFile(path, []byte("PDF-bytes"), 0o644))
+	return path
+}
+
+// --- docs create ------------------------------------------------------------
+
+func TestDocsCreateHasVisibleToClientsFlag(t *testing.T) {
+	cmd := NewFilesCmd()
+
+	docsCmd, _, err := cmd.Find([]string{"documents", "create"})
+	require.NoError(t, err)
+
+	assert.NotNil(t, docsCmd.Flags().Lookup("visible-to-clients"),
+		"expected --visible-to-clients flag on docs create")
+}
+
+func TestDocsCreateDefaultOmitsVisibleToClients(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.docBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.docBody, &body))
+	_, present := body["visible_to_clients"]
+	assert.False(t, present, "visible_to_clients must be omitted when the flag is not passed")
+}
+
+func TestDocsCreateRootVisibleToClientsTrue(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--visible-to-clients")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.docBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.docBody, &body))
+	assert.Equal(t, true, body["visible_to_clients"])
+	assert.False(t, transport.vaultGetCalled, "root target must not inspect the vault")
+}
+
+func TestDocsCreateRootVisibleToClientsFalse(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--visible-to-clients=false")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.docBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.docBody, &body))
+	assert.Equal(t, false, body["visible_to_clients"], "explicit false must reach the wire")
+}
+
+func TestDocsCreateExplicitRootVaultVisibleToClientsTrue(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: false}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--vault", "555", "--visible-to-clients")
+	require.NoError(t, err)
+	require.True(t, transport.vaultGetCalled, "explicit vault must be inspected")
+	require.NotEmpty(t, transport.docBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.docBody, &body))
+	assert.Equal(t, true, body["visible_to_clients"])
+}
+
+func TestDocsCreateNestedVaultVisibleToClientsRejected(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--vault", "600", "--visible-to-clients")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "root Docs & Files folder")
+	assert.Empty(t, transport.postPaths, "a rejected nested target must stage no POSTs")
+}
+
+func TestDocsCreateNestedVaultVisibleToClientsFalseRejected(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--vault", "600", "--visible-to-clients=false")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Empty(t, transport.postPaths, "a nested target is rejected even for false")
+}
+
+func TestDocsCreateNestedVaultWithoutFlagSucceeds(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "documents", "create", "For client", "Body", "--vault", "600")
+	require.NoError(t, err)
+	assert.False(t, transport.vaultGetCalled, "resolver must short-circuit before inspecting the vault")
+	require.NotEmpty(t, transport.docBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.docBody, &body))
+	_, present := body["visible_to_clients"]
+	assert.False(t, present, "unchanged nested path must omit visible_to_clients")
+}
+
+// --- uploads create ---------------------------------------------------------
+
+func TestUploadsCreateHasVisibleToClientsFlag(t *testing.T) {
+	cmd := NewFilesCmd()
+
+	upCmd, _, err := cmd.Find([]string{"uploads", "create"})
+	require.NoError(t, err)
+
+	assert.NotNil(t, upCmd.Flags().Lookup("visible-to-clients"),
+		"expected --visible-to-clients flag on uploads create")
+}
+
+func TestUploadsCreateDefaultOmitsVisibleToClients(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t))
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	_, present := body["visible_to_clients"]
+	assert.False(t, present, "visible_to_clients must be omitted when the flag is not passed")
+}
+
+func TestUploadsCreateRootVisibleToClientsTrue(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--visible-to-clients")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	assert.Equal(t, true, body["visible_to_clients"])
+	assert.False(t, transport.vaultGetCalled, "root target must not inspect the vault")
+}
+
+func TestUploadsCreateRootVisibleToClientsFalse(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--visible-to-clients=false")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	assert.Equal(t, false, body["visible_to_clients"], "explicit false must reach the wire")
+}
+
+func TestUploadsCreateExplicitRootVaultVisibleToClientsTrue(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: false}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--vault", "555", "--visible-to-clients")
+	require.NoError(t, err)
+	require.True(t, transport.vaultGetCalled, "explicit vault must be inspected")
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	assert.Equal(t, true, body["visible_to_clients"])
+}
+
+func TestUploadsCreateNestedVaultVisibleToClientsRejected(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--vault", "600", "--visible-to-clients")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "root Docs & Files folder")
+	assert.Empty(t, transport.postPaths, "a rejected nested target must stage no attachment or upload POST")
+}
+
+func TestUploadsCreateNestedVaultVisibleToClientsFalseRejected(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--vault", "600", "--visible-to-clients=false")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Empty(t, transport.postPaths, "a nested target is rejected even for false")
+}
+
+func TestUploadsCreateNestedVaultWithoutFlagSucceeds(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "uploads", "create", writeTempUpload(t), "--vault", "600")
+	require.NoError(t, err)
+	assert.False(t, transport.vaultGetCalled, "resolver must short-circuit before inspecting the vault")
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	_, present := body["visible_to_clients"]
+	assert.False(t, present, "unchanged nested path must omit visible_to_clients")
+}
+
+// --- top-level upload shortcut ----------------------------------------------
+
+func TestUploadShortcutHasVisibleToClientsFlag(t *testing.T) {
+	cmd := NewUploadCmd()
+	assert.NotNil(t, cmd.Flags().Lookup("visible-to-clients"),
+		"expected --visible-to-clients flag on the upload shortcut")
+}
+
+// newUploadShortcutRoot mounts the top-level `upload` shortcut under a root
+// command so its breadcrumb logic (which dereferences cmd.Parent()) matches real
+// invocation.
+func newUploadShortcutRoot() *cobra.Command {
+	root := &cobra.Command{Use: "basecamp"}
+	root.AddCommand(NewUploadCmd())
+	return root
+}
+
+func TestUploadShortcutRootVisibleToClientsTrue(t *testing.T) {
+	transport := &mockFilesCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := newUploadShortcutRoot()
+	err := executeMessagesCommand(cmd, app, "upload", writeTempUpload(t), "--visible-to-clients")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.uploadBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.uploadBody, &body))
+	assert.Equal(t, true, body["visible_to_clients"])
+}
+
+func TestUploadShortcutNestedVaultVisibleToClientsRejected(t *testing.T) {
+	transport := &mockFilesCreateTransport{vaultParent: true}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := newUploadShortcutRoot()
+	err := executeMessagesCommand(cmd, app, "upload", writeTempUpload(t), "--vault", "600", "--visible-to-clients")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Empty(t, transport.postPaths, "the shortcut must also stage no POSTs on rejection")
 }

@@ -54,9 +54,9 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show |
+| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show, create. Create supports `--visible-to-clients` (root vault only) |
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
-| documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe` |
+| documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |

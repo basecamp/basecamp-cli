@@ -576,6 +576,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 
 func newUploadsCreateCmd(project, vaultID *string) *cobra.Command {
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <file>",
@@ -588,11 +589,12 @@ as an upload in the target folder (vault).`,
   basecamp uploads create ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadFile(cmd, *project, *vaultID, args[0], description)
+			return runUploadFile(cmd, *project, *vaultID, args[0], description, visibleToClients)
 		},
 	}
 
 	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
 
 	return cmd
 }
@@ -602,6 +604,7 @@ func NewUploadCmd() *cobra.Command {
 	var project string
 	var vaultID string
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "upload <file>",
@@ -614,7 +617,7 @@ attachment and then created as an upload in the target folder.`,
   basecamp upload ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadFile(cmd, project, vaultID, args[0], description)
+			return runUploadFile(cmd, project, vaultID, args[0], description, visibleToClients)
 		},
 	}
 
@@ -623,11 +626,39 @@ attachment and then created as an upload in the target folder.`,
 	cmd.Flags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
 	cmd.Flags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
 	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
 
 	return cmd
 }
 
-func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string) error {
+// resolveVaultClientVisibility returns the *bool to assign to a create request's
+// VisibleToClients field. It is nil when --visible-to-clients was not passed
+// (server default preserved). When passed, create-time client visibility is only
+// honored in the docked/root vault; for a nested folder (Vault.Parent != nil) it
+// returns a usage error, because the server would silently inherit folder
+// visibility and the visibility endpoint 403s for nested docs/uploads afterward.
+// Must be called before any mutating request so a rejection stages nothing.
+// vaultFlag is the raw --vault/--folder string ("" = default root, no fetch needed).
+func resolveVaultClientVisibility(cmd *cobra.Command, app *appctx.App, vaultFlag string, vaultIDNum int64, value bool) (*bool, error) {
+	if !cmd.Flags().Changed("visible-to-clients") {
+		return nil, nil
+	}
+	if vaultFlag != "" { // explicit folder targeted — confirm it's the root vault
+		v, err := app.Account().Vaults().Get(cmd.Context(), vaultIDNum)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		if v.Parent != nil {
+			return nil, output.ErrUsageHint(
+				"--visible-to-clients is only supported when creating in the root Docs & Files folder",
+				"A nested folder inherits its visibility, which can't be changed per-item afterward. Create in the root folder (omit --vault/--folder), or change the eligible top-level ancestor that controls this folder's visibility before creating.",
+			)
+		}
+	}
+	return &value, nil
+}
+
+func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string, visibleToClients bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -674,6 +705,13 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		return output.ErrUsage("Invalid folder ID")
 	}
 
+	// Resolve client visibility before any mutating request: a nested-folder
+	// target with --visible-to-clients is rejected here so nothing is staged.
+	vis, err := resolveVaultClientVisibility(cmd, app, vaultID, vaultIDNum, visibleToClients)
+	if err != nil {
+		return err
+	}
+
 	// Step 1: Upload attachment
 	contentType := richtext.DetectMIME(filePath)
 	filename := filepath.Base(filePath)
@@ -691,8 +729,9 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 
 	// Step 2: Create upload in vault
 	req := &basecamp.CreateUploadRequest{
-		AttachableSGID: resp.AttachableSGID,
-		BaseName:       strings.TrimSuffix(filename, filepath.Ext(filename)),
+		AttachableSGID:   resp.AttachableSGID,
+		BaseName:         strings.TrimSuffix(filename, filepath.Ext(filename)),
+		VisibleToClients: vis,
 	}
 	if description != "" {
 		descHTML := richtext.MarkdownToHTML(description)
@@ -872,6 +911,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [content]",
@@ -934,6 +974,13 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return output.ErrUsage("Invalid folder ID")
 			}
 
+			// Resolve client visibility before any mutating request: a nested-folder
+			// target with --visible-to-clients is rejected here so nothing is staged.
+			vis, err := resolveVaultClientVisibility(cmd, app, *vaultID, vaultIDNum, visibleToClients)
+			if err != nil {
+				return err
+			}
+
 			// Create document using SDK
 			// Convert Markdown content to HTML
 			html := richtext.MarkdownToHTML(content)
@@ -954,9 +1001,10 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 			}
 
 			req := &basecamp.CreateDocumentRequest{
-				Title:         title,
-				Content:       html,
-				Subscriptions: subs,
+				Title:            title,
+				Content:          html,
+				Subscriptions:    subs,
+				VisibleToClients: vis,
 			}
 			if draft {
 				req.Status = "drafted"
@@ -991,6 +1039,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the document visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
 
 	return cmd
 }
