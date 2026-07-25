@@ -1,0 +1,29 @@
+internal/commands/cards_test.go
+  s_60b254bfab738a::t_a7803ed06e3f79 2100-2103,2105
+  s_60b254bfab738a::t_92c168eb0f163d 2000-2001
+  s_60b254bfab738a::t_5c2b52889b807e 2326-2327,2338
+  s_60b254bfab738a::t_9935e6f53bc417 2030-2033,2041
+  s_60b254bfab738a::t_4678a118c04ea8 2137-2138,2146
+e2e/smoke/smoke_cards_wormhole.bats
+  s_60b254bfab738a::t_c2a259b5eebc57 8-9,19,26,30,38
+e2e/smoke/.qa-allowlist
+  s_60b254bfab738a::t_75ab2a0b1eab93 34-41
+internal/commands/cards.go
+  s_60b254bfab738a::t_daa7c79aefc0d3 1069-1071,1074-1077
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "73136bec87459dcb97afc61636214fec7eb42b56",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
