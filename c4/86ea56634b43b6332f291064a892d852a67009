@@ -1,0 +1,34 @@
+internal/commands/cards.go
+  s_60b254bfab738a::t_051f564fa9a8dc 1057-1063
+  s_60b254bfab738a::t_666dab9c1dd938 747,753-754
+  s_60b254bfab738a::t_bf293380853fe9 919-923
+  s_60b254bfab738a::t_a7a5113933453a 2158,2209
+  s_9eca23009ab5d2::t_10d3730b09dbd6 755
+internal/commands/cards_test.go
+  s_60b254bfab738a::t_da7f5a3f6a13a5 2353
+  s_60b254bfab738a::t_39dfdcd9e85c36 2314-2352,2354-2357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "c486ea56634b43b6332f291064a892d852a67009",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_9eca23009ab5d2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8b6b-05c1-7923-b8c1-e6cbbba0f73c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
