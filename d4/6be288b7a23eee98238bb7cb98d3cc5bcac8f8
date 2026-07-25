@@ -1,0 +1,66 @@
+go.mod
+  s_60b254bfab738a::t_9a565c29a41e83 9
+.surface
+  s_60b254bfab738a::t_9ef63e46be3566 63-65,515-521,2813,2840,3125-3280,16478-16484
+skills/basecamp/SKILL.md
+  s_60b254bfab738a::t_398302772f795c 590-609
+  s_60b254bfab738a::t_4735492be907b4 184
+e2e/smoke/smoke_cards_wormhole.bats
+  s_60b254bfab738a::t_f66d83fdf94a7c 36-39
+  s_60b254bfab738a::t_24b0d63c41090e 1-35
+internal/version/sdk-provenance.json
+  s_60b254bfab738a::t_9a565c29a41e83 4-6
+internal/commands/commands.go
+  s_60b254bfab738a::t_138d26e378507c 46
+internal/commands/cards_test.go
+  s_60b254bfab738a::t_f9cb5e8fc7fdec 1945-2080,2082-2281,2292-2313
+  s_60b254bfab738a::t_a0c4f385e15c51 2081,2282-2291
+internal/commands/cards.go
+  s_f5b18c0fd5e7bf::t_75b97f665134c5 1136
+  s_60b254bfab738a::t_a372f1eb74d953 1010-1023
+  s_60b254bfab738a::t_4640a0ec11459b 2104
+  s_60b254bfab738a::t_e279cd0b09ca51 47
+  s_60b254bfab738a::t_36d9123789cae3 916-917,919-937,939,941,945-946,948-961,963-982,984,989-994,996,1001-1004,1006,1026-1079,1098,1108,1111-1114,1116,1119,1121-1132
+  s_60b254bfab738a::t_a1f00c79a997d7 1967-2029,2031-2103,2105-2216
+  s_60b254bfab738a::t_a426aac1d02356 2030
+  s_60b254bfab738a::t_cbf43ef459886d 910,915,918,938,940,942-944,947,962,983,985-987,995,997-1000,1005,1007-1009,1080-1097,1099-1107,1109-1110,1115,1117-1118,1120,1133-1134
+  s_60b254bfab738a::t_e09dc9f9283087 988,1024,1135,2670-2694
+  s_60b254bfab738a::t_2f25db5f17eb76 19
+  s_60b254bfab738a::t_854cad15408aa6 716,728-735,741-743,747-762
+  s_60b254bfab738a::t_a821b68e466f1c 778-784
+  s_60b254bfab738a::t_b095ef7b1be668 1025
+e2e/smoke/run_smoke.sh
+  s_60b254bfab738a::t_801a8aac691773 105
+e2e/smoke/smoke_aliases.bats
+  s_60b254bfab738a::t_d72e4c7a1849b3 182-189
+API-COVERAGE.md
+  s_60b254bfab738a::t_4f97331aacbc77 21
+  s_60b254bfab738a::t_1cf73938f9ced9 9,13-15
+  s_60b254bfab738a::t_ae3dafe2b4d5a5 52
+go.sum
+  s_60b254bfab738a::t_f17d2699a26764 26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d46be288b7a23eee98238bb7cb98d3cc5bcac8f8",
+  "prompts": {},
+  "sessions": {
+    "s_60b254bfab738a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf61ecb-b9ae-4891-8ccd-0cc675658e44",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    },
+    "s_f5b18c0fd5e7bf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9575-0219-79f1-b4fc-471c8469181a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
