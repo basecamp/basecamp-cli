@@ -181,6 +181,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Complete card | `basecamp cards done <id|url> --in <project> --json` |
 | Move card | `basecamp cards move <id> --to <column> [--position N] --in <project> --json` |
 | Move card to on-hold | `basecamp cards move <id> --on-hold --in <project> --json` |
+| Move card to another project | `basecamp cards move <id> --to-wormhole <wormhole_id> --in <project> --json` (async teleport) |
 | Post message | `basecamp messages create "Title" "Body" --in <project> --json` |
 | Post with @mention | `basecamp messages create "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp messages create "Title" "Body" --no-subscribe --in <project> --json` |
@@ -585,6 +586,26 @@ basecamp cards move <id> --to "Done" --position 1 --card-table <table_id>  # Mov
 basecamp cards move <id> --on-hold                    # Move to on-hold of current column
 basecamp cards move <id> --to <column_id> --on-hold   # Move to on-hold of target column
 ```
+
+**Cross-project card move (wormholes):** the only way to move a card to another
+project is to teleport it through a *wormhole* — a portal on the card table that
+sends cards to a preconfigured column on another project's card table (max 4 per
+table). The teleport is **asynchronous and mints a new card id**: after the move
+is accepted, the server copies the card into the destination and deletes the
+original, so the **original id 404s** — do not reuse it.
+
+```bash
+basecamp cards wormholes list --in <project>          # Discover wormholes (id, destination, linked)
+basecamp cards wormholes create --to-column <id|url> --in <project>   # Link to a column on another table (≤4)
+basecamp cards wormholes update <id> --to-column <id|url> --in <project>
+basecamp cards wormholes delete <id> --in <project>
+basecamp cards move <card_id> --to-wormhole <wormhole_id> --in <project>          # Teleport (async)
+basecamp cards move <card_id> --to-wormhole <destination_column_url> --in <project>  # Match by destination column
+```
+
+`--to-wormhole` is mutually exclusive with `--to`/`--on-hold`/`--position`. Pass
+a numeric wormhole id to route directly, or a destination-column URL to match it
+against the source table's wormholes.
 
 **Archived/trashed cards:** `cards list` only returns active cards. For archived or trashed cards, use `basecamp recordings cards --status archived --in <project>` or `--status trashed`.
 

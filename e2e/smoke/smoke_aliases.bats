@@ -179,6 +179,14 @@ load smoke_helper
   mark_out_of_scope "Alias for cards move — tested via canonical form"
 }
 
+@test "cards wormholes ls is out of scope" {
+  mark_out_of_scope "Alias for cards wormholes list — tested via canonical form"
+}
+
+@test "cards wormholes rm is out of scope" {
+  mark_out_of_scope "Alias for cards wormholes delete — tested via canonical form"
+}
+
 # --- recordings ---
 
 @test "recordings active is out of scope" {

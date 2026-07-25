@@ -60,6 +60,9 @@ ARG basecamp cards step update 01 [title]
 ARG basecamp cards steps 00 <card-id|url>
 ARG basecamp cards trash 00 <id|url>
 ARG basecamp cards update 00 <id|url>
+ARG basecamp cards wormholes delete 00 <id>
+ARG basecamp cards wormholes rm 00 <id>
+ARG basecamp cards wormholes update 00 <id>
 ARG basecamp chat delete 00 <id|url>
 ARG basecamp chat line 00 <id|url>
 ARG basecamp chat post 00 <message>
@@ -509,6 +512,13 @@ CMD basecamp cards step update
 CMD basecamp cards steps
 CMD basecamp cards trash
 CMD basecamp cards update
+CMD basecamp cards wormholes
+CMD basecamp cards wormholes create
+CMD basecamp cards wormholes delete
+CMD basecamp cards wormholes list
+CMD basecamp cards wormholes ls
+CMD basecamp cards wormholes rm
+CMD basecamp cards wormholes update
 CMD basecamp chat
 CMD basecamp chat delete
 CMD basecamp chat line
@@ -2800,6 +2810,7 @@ FLAG basecamp cards move --quiet type=bool
 FLAG basecamp cards move --stats type=bool
 FLAG basecamp cards move --styled type=bool
 FLAG basecamp cards move --to type=string
+FLAG basecamp cards move --to-wormhole type=string
 FLAG basecamp cards move --todolist type=string
 FLAG basecamp cards move --verbose type=count
 FLAG basecamp cards mv --account type=string
@@ -2826,6 +2837,7 @@ FLAG basecamp cards mv --quiet type=bool
 FLAG basecamp cards mv --stats type=bool
 FLAG basecamp cards mv --styled type=bool
 FLAG basecamp cards mv --to type=string
+FLAG basecamp cards mv --to-wormhole type=string
 FLAG basecamp cards mv --todolist type=string
 FLAG basecamp cards mv --verbose type=count
 FLAG basecamp cards restore --account type=string
@@ -3110,6 +3122,162 @@ FLAG basecamp cards update --styled type=bool
 FLAG basecamp cards update --title type=string
 FLAG basecamp cards update --todolist type=string
 FLAG basecamp cards update --verbose type=count
+FLAG basecamp cards wormholes --account type=string
+FLAG basecamp cards wormholes --agent type=bool
+FLAG basecamp cards wormholes --cache-dir type=string
+FLAG basecamp cards wormholes --card-table type=string
+FLAG basecamp cards wormholes --count type=bool
+FLAG basecamp cards wormholes --help type=bool
+FLAG basecamp cards wormholes --hints type=bool
+FLAG basecamp cards wormholes --ids-only type=bool
+FLAG basecamp cards wormholes --in type=string
+FLAG basecamp cards wormholes --jq type=string
+FLAG basecamp cards wormholes --json type=bool
+FLAG basecamp cards wormholes --markdown type=bool
+FLAG basecamp cards wormholes --md type=bool
+FLAG basecamp cards wormholes --no-hints type=bool
+FLAG basecamp cards wormholes --no-stats type=bool
+FLAG basecamp cards wormholes --profile type=string
+FLAG basecamp cards wormholes --project type=string
+FLAG basecamp cards wormholes --quiet type=bool
+FLAG basecamp cards wormholes --stats type=bool
+FLAG basecamp cards wormholes --styled type=bool
+FLAG basecamp cards wormholes --todolist type=string
+FLAG basecamp cards wormholes --verbose type=count
+FLAG basecamp cards wormholes create --account type=string
+FLAG basecamp cards wormholes create --agent type=bool
+FLAG basecamp cards wormholes create --cache-dir type=string
+FLAG basecamp cards wormholes create --card-table type=string
+FLAG basecamp cards wormholes create --count type=bool
+FLAG basecamp cards wormholes create --help type=bool
+FLAG basecamp cards wormholes create --hints type=bool
+FLAG basecamp cards wormholes create --ids-only type=bool
+FLAG basecamp cards wormholes create --in type=string
+FLAG basecamp cards wormholes create --jq type=string
+FLAG basecamp cards wormholes create --json type=bool
+FLAG basecamp cards wormholes create --markdown type=bool
+FLAG basecamp cards wormholes create --md type=bool
+FLAG basecamp cards wormholes create --no-hints type=bool
+FLAG basecamp cards wormholes create --no-stats type=bool
+FLAG basecamp cards wormholes create --profile type=string
+FLAG basecamp cards wormholes create --project type=string
+FLAG basecamp cards wormholes create --quiet type=bool
+FLAG basecamp cards wormholes create --stats type=bool
+FLAG basecamp cards wormholes create --styled type=bool
+FLAG basecamp cards wormholes create --to-column type=string
+FLAG basecamp cards wormholes create --todolist type=string
+FLAG basecamp cards wormholes create --verbose type=count
+FLAG basecamp cards wormholes delete --account type=string
+FLAG basecamp cards wormholes delete --agent type=bool
+FLAG basecamp cards wormholes delete --cache-dir type=string
+FLAG basecamp cards wormholes delete --card-table type=string
+FLAG basecamp cards wormholes delete --count type=bool
+FLAG basecamp cards wormholes delete --help type=bool
+FLAG basecamp cards wormholes delete --hints type=bool
+FLAG basecamp cards wormholes delete --ids-only type=bool
+FLAG basecamp cards wormholes delete --in type=string
+FLAG basecamp cards wormholes delete --jq type=string
+FLAG basecamp cards wormholes delete --json type=bool
+FLAG basecamp cards wormholes delete --markdown type=bool
+FLAG basecamp cards wormholes delete --md type=bool
+FLAG basecamp cards wormholes delete --no-hints type=bool
+FLAG basecamp cards wormholes delete --no-stats type=bool
+FLAG basecamp cards wormholes delete --profile type=string
+FLAG basecamp cards wormholes delete --project type=string
+FLAG basecamp cards wormholes delete --quiet type=bool
+FLAG basecamp cards wormholes delete --stats type=bool
+FLAG basecamp cards wormholes delete --styled type=bool
+FLAG basecamp cards wormholes delete --todolist type=string
+FLAG basecamp cards wormholes delete --verbose type=count
+FLAG basecamp cards wormholes list --account type=string
+FLAG basecamp cards wormholes list --agent type=bool
+FLAG basecamp cards wormholes list --cache-dir type=string
+FLAG basecamp cards wormholes list --card-table type=string
+FLAG basecamp cards wormholes list --count type=bool
+FLAG basecamp cards wormholes list --help type=bool
+FLAG basecamp cards wormholes list --hints type=bool
+FLAG basecamp cards wormholes list --ids-only type=bool
+FLAG basecamp cards wormholes list --in type=string
+FLAG basecamp cards wormholes list --jq type=string
+FLAG basecamp cards wormholes list --json type=bool
+FLAG basecamp cards wormholes list --markdown type=bool
+FLAG basecamp cards wormholes list --md type=bool
+FLAG basecamp cards wormholes list --no-hints type=bool
+FLAG basecamp cards wormholes list --no-stats type=bool
+FLAG basecamp cards wormholes list --profile type=string
+FLAG basecamp cards wormholes list --project type=string
+FLAG basecamp cards wormholes list --quiet type=bool
+FLAG basecamp cards wormholes list --stats type=bool
+FLAG basecamp cards wormholes list --styled type=bool
+FLAG basecamp cards wormholes list --todolist type=string
+FLAG basecamp cards wormholes list --verbose type=count
+FLAG basecamp cards wormholes ls --account type=string
+FLAG basecamp cards wormholes ls --agent type=bool
+FLAG basecamp cards wormholes ls --cache-dir type=string
+FLAG basecamp cards wormholes ls --card-table type=string
+FLAG basecamp cards wormholes ls --count type=bool
+FLAG basecamp cards wormholes ls --help type=bool
+FLAG basecamp cards wormholes ls --hints type=bool
+FLAG basecamp cards wormholes ls --ids-only type=bool
+FLAG basecamp cards wormholes ls --in type=string
+FLAG basecamp cards wormholes ls --jq type=string
+FLAG basecamp cards wormholes ls --json type=bool
+FLAG basecamp cards wormholes ls --markdown type=bool
+FLAG basecamp cards wormholes ls --md type=bool
+FLAG basecamp cards wormholes ls --no-hints type=bool
+FLAG basecamp cards wormholes ls --no-stats type=bool
+FLAG basecamp cards wormholes ls --profile type=string
+FLAG basecamp cards wormholes ls --project type=string
+FLAG basecamp cards wormholes ls --quiet type=bool
+FLAG basecamp cards wormholes ls --stats type=bool
+FLAG basecamp cards wormholes ls --styled type=bool
+FLAG basecamp cards wormholes ls --todolist type=string
+FLAG basecamp cards wormholes ls --verbose type=count
+FLAG basecamp cards wormholes rm --account type=string
+FLAG basecamp cards wormholes rm --agent type=bool
+FLAG basecamp cards wormholes rm --cache-dir type=string
+FLAG basecamp cards wormholes rm --card-table type=string
+FLAG basecamp cards wormholes rm --count type=bool
+FLAG basecamp cards wormholes rm --help type=bool
+FLAG basecamp cards wormholes rm --hints type=bool
+FLAG basecamp cards wormholes rm --ids-only type=bool
+FLAG basecamp cards wormholes rm --in type=string
+FLAG basecamp cards wormholes rm --jq type=string
+FLAG basecamp cards wormholes rm --json type=bool
+FLAG basecamp cards wormholes rm --markdown type=bool
+FLAG basecamp cards wormholes rm --md type=bool
+FLAG basecamp cards wormholes rm --no-hints type=bool
+FLAG basecamp cards wormholes rm --no-stats type=bool
+FLAG basecamp cards wormholes rm --profile type=string
+FLAG basecamp cards wormholes rm --project type=string
+FLAG basecamp cards wormholes rm --quiet type=bool
+FLAG basecamp cards wormholes rm --stats type=bool
+FLAG basecamp cards wormholes rm --styled type=bool
+FLAG basecamp cards wormholes rm --todolist type=string
+FLAG basecamp cards wormholes rm --verbose type=count
+FLAG basecamp cards wormholes update --account type=string
+FLAG basecamp cards wormholes update --agent type=bool
+FLAG basecamp cards wormholes update --cache-dir type=string
+FLAG basecamp cards wormholes update --card-table type=string
+FLAG basecamp cards wormholes update --count type=bool
+FLAG basecamp cards wormholes update --help type=bool
+FLAG basecamp cards wormholes update --hints type=bool
+FLAG basecamp cards wormholes update --ids-only type=bool
+FLAG basecamp cards wormholes update --in type=string
+FLAG basecamp cards wormholes update --jq type=string
+FLAG basecamp cards wormholes update --json type=bool
+FLAG basecamp cards wormholes update --markdown type=bool
+FLAG basecamp cards wormholes update --md type=bool
+FLAG basecamp cards wormholes update --no-hints type=bool
+FLAG basecamp cards wormholes update --no-stats type=bool
+FLAG basecamp cards wormholes update --profile type=string
+FLAG basecamp cards wormholes update --project type=string
+FLAG basecamp cards wormholes update --quiet type=bool
+FLAG basecamp cards wormholes update --stats type=bool
+FLAG basecamp cards wormholes update --styled type=bool
+FLAG basecamp cards wormholes update --to-column type=string
+FLAG basecamp cards wormholes update --todolist type=string
+FLAG basecamp cards wormholes update --verbose type=count
 FLAG basecamp chat --account type=string
 FLAG basecamp chat --agent type=bool
 FLAG basecamp chat --cache-dir type=string
@@ -16307,6 +16475,13 @@ SUB basecamp cards step update
 SUB basecamp cards steps
 SUB basecamp cards trash
 SUB basecamp cards update
+SUB basecamp cards wormholes
+SUB basecamp cards wormholes create
+SUB basecamp cards wormholes delete
+SUB basecamp cards wormholes list
+SUB basecamp cards wormholes ls
+SUB basecamp cards wormholes rm
+SUB basecamp cards wormholes update
 SUB basecamp chat
 SUB basecamp chat delete
 SUB basecamp chat line

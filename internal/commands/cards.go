@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewCardsCmd creates the cards command group.
@@ -43,6 +44,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
+		newCardsWormholesCmd(&project, &cardTable),
 		newCardsStepsCmd(&project),
 		newCardsStepCmd(&project),
 		newRecordableTrashCmd("card"),
@@ -711,6 +713,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var targetColumn string
 	var position int
 	var onHold bool
+	var toWormhole string
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
@@ -722,25 +725,41 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"
   basecamp cards move 789 --to "Done" --position 1 --in my-project
   basecamp cards move 789 --on-hold --in my-project
-  basecamp cards move 789 --to 456 --on-hold --in my-project`,
+  basecamp cards move 789 --to 456 --on-hold --in my-project
+
+Move a card to a different project by teleporting it through a wormhole. Pass a
+wormhole ID, or the URL of the destination column it targets:
+  basecamp cards move 789 --to-wormhole 1069480287 --in my-project
+  basecamp cards move 789 --to-wormhole https://3.basecamp.com/123/buckets/456/card_tables/columns/999
+This is asynchronous: a new card appears in the destination project and the
+original card 404s once the server finishes filing it away.`,
 		Args:    cobra.ExactArgs(1),
 		Aliases: []string{"mv"},
 		Annotations: map[string]string{
 			"agent_notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
-				"--position cannot be combined with --on-hold.",
+				"--position cannot be combined with --on-hold. " +
+				"--to-wormhole teleports the card to a column on another project's card table; it is mutually exclusive with --to/--on-hold/--position. " +
+				"The teleport is asynchronous and mints a new card id — the original id 404s afterward, so do not reuse it.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if targetColumn == "" && !onHold {
-				return missingArg(cmd, "--to")
-			}
-
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
-			if positionSet && position <= 0 {
-				return output.ErrUsage("--position must be a positive integer (1-indexed)")
-			}
-			if positionSet && onHold {
-				return output.ErrUsage("--position cannot be used with --on-hold")
+			wormholeSet := toWormhole != ""
+
+			if wormholeSet {
+				if targetColumn != "" || onHold || positionSet {
+					return output.ErrUsage("--to-wormhole cannot be combined with --to, --on-hold, or --position")
+				}
+			} else {
+				if targetColumn == "" && !onHold {
+					return missingArg(cmd, "--to")
+				}
+				if positionSet && position <= 0 {
+					return output.ErrUsage("--position must be a positive integer (1-indexed)")
+				}
+				if positionSet && onHold {
+					return output.ErrUsage("--position cannot be used with --on-hold")
+				}
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -754,6 +773,13 @@ You can pass either a card ID or a Basecamp URL:
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
+			}
+
+			// --to-wormhole: teleport across projects. Self-contained — it derives
+			// the source project and card table from the fetched card, so it runs
+			// before (and instead of) the generic project resolution below.
+			if wormholeSet {
+				return moveCardThroughWormhole(cmd, app, cardID, cardIDStr, *project, urlProjectID, *cardTable, toWormhole)
 			}
 
 			isNumericColumn := targetColumn != "" && isNumericID(targetColumn)
@@ -881,8 +907,231 @@ You can pass either a card ID or a Basecamp URL:
 	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
+	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Teleport the card across projects through a wormhole (wormhole ID or destination-column URL)")
 
 	return cmd
+}
+
+// moveCardThroughWormhole teleports a card across projects through a wormhole to
+// a column on another card table. wormholeRef is either a numeric wormhole ID or
+// a destination-column ID/URL.
+//
+// The teleport is destructive and asynchronous: Cards().Move returns once it is
+// accepted, then the server copies the card into the destination column under a
+// new id and deletes the original — so the original id 404s once filing
+// completes. The move endpoint resolves the column_id against the whole project
+// bucket, so a sibling board's wormhole would happily teleport the card
+// elsewhere. Because that is irreversible, this fails closed: it always fetches
+// the card, derives the source project and table from the card itself, rejects
+// conflicting caller context, and requires the referenced wormhole to be present
+// and linked on that exact table before issuing the move. The output reports the
+// source under source_id (not id) and omits a same-id "view card" breadcrumb,
+// because that id is about to 404.
+func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, flagProject, urlProjectID, cardTableFlag, wormholeRef string) error {
+	// Validate the reference before any network call.
+	byID := isNumericID(wormholeRef)
+	var wantWormholeID, wantDestColumnID int64
+	if byID {
+		id, err := strconv.ParseInt(wormholeRef, 10, 64)
+		if err != nil || id <= 0 {
+			return output.ErrUsage("--to-wormhole must be a positive wormhole ID or a destination-column URL")
+		}
+		wantWormholeID = id
+	} else {
+		id, err := parseColumnID(wormholeRef)
+		if err != nil {
+			return err
+		}
+		wantDestColumnID = id
+	}
+
+	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if card.Bucket == nil || card.Bucket.ID == 0 {
+		return output.ErrNotFound("card", cardIDStr)
+	}
+	sourceProjectID := strconv.FormatInt(card.Bucket.ID, 10)
+
+	// Reject an explicit project (flag or card URL) that contradicts the card's
+	// own project — the card's bucket is authoritative for a cross-project move.
+	if err := rejectWormholeProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
+		return err
+	}
+
+	cardTableID, cardTableData, err := resolveCardTableForCard(cmd, app, sourceProjectID, cardTableFlag, card)
+	if err != nil {
+		return err
+	}
+	// resolveCardTableForCard trusts an explicit --card-table; confirm the card
+	// actually lives on the resolved table before searching its wormholes.
+	if err := requireCardInTable(card, cardTableData); err != nil {
+		return err
+	}
+
+	var wormhole *basecamp.Wormhole
+	if byID {
+		if wormhole = findWormholeByID(cardTableData.Wormholes, wantWormholeID); wormhole == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("Wormhole %d is not on this card's card table", wantWormholeID),
+				wormholeHint(cardTableData.Wormholes),
+			)
+		}
+	} else {
+		if wormhole = findWormholeByDestinationColumn(cardTableData.Wormholes, wantDestColumnID); wormhole == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("No wormhole on this card's card table teleports to column %d", wantDestColumnID),
+				wormholeHint(cardTableData.Wormholes),
+			)
+		}
+	}
+	if !wormhole.Linked {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Wormhole %d is unlinked — its destination column no longer exists", wormhole.ID),
+			fmt.Sprintf("Point it at a live column with: basecamp cards wormholes update %d --to-column <id|url>", wormhole.ID),
+		)
+	}
+
+	if err := app.Account().Cards().Move(cmd.Context(), cardID, wormhole.ID, nil); err != nil {
+		return convertSDKError(err)
+	}
+
+	result := map[string]any{
+		"source_id":   cardIDStr,
+		"status":      "teleporting",
+		"wormhole":    wormhole.ID,
+		"destination": wormhole.Title,
+	}
+	summary := fmt.Sprintf("Teleporting card #%s through wormhole %d (%s) — asynchronous; a new card appears in the destination and the original 404s once filing completes", cardIDStr, wormhole.ID, wormhole.Title)
+
+	return app.OK(result,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(wormholeMoveBreadcrumbs(sourceProjectID, cardTableID)...),
+	)
+}
+
+// wormholeMoveBreadcrumbs points at the source card table's wormhole list. It
+// pins --card-table (the resolved table id) so the follow-up is unambiguous on
+// multi-table projects, and deliberately offers no same-id "view card" action —
+// that id is about to 404.
+func wormholeMoveBreadcrumbs(sourceProjectID, cardTableID string) []output.Breadcrumb {
+	return []output.Breadcrumb{{
+		Action:      "wormholes",
+		Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %s --card-table %s", sourceProjectID, cardTableID),
+		Description: "List wormholes on this card table",
+	}}
+}
+
+// rejectWormholeProjectConflict fails when an explicitly supplied project (the
+// --in/--project flag or a card URL's bucket) resolves to a different project
+// than the card's own bucket. Config/interactive defaults are not checked — only
+// explicit caller context can conflict.
+func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProject, urlProjectID string, cardBucketID int64) error {
+	want := strconv.FormatInt(cardBucketID, 10)
+	check := func(value, label string) error {
+		if value == "" {
+			return nil
+		}
+		resolved, _, err := app.Names.ResolveProject(cmd.Context(), value)
+		if err != nil {
+			return err
+		}
+		if resolved != want {
+			return output.ErrUsageHint(
+				fmt.Sprintf("The card is in project %s, but %s points at project %s", want, label, resolved),
+				"Omit the conflicting project — a wormhole move always uses the card's own project",
+			)
+		}
+		return nil
+	}
+	if err := check(flagProject, "--in/--project"); err != nil {
+		return err
+	}
+	return check(urlProjectID, "the card URL")
+}
+
+// requireCardInTable confirms the card's parent column belongs to the resolved
+// card table, so an explicit --card-table can't point the wormhole search at a
+// table the card isn't on.
+func requireCardInTable(card *basecamp.Card, table *basecamp.CardTable) error {
+	if card.Parent == nil || card.Parent.ID == 0 || table == nil {
+		return nil
+	}
+	if cardTableContainsColumn(table.Lists, card.Parent.ID) {
+		return nil
+	}
+	return output.ErrUsageHint(
+		"The card is not on the specified card table",
+		"Omit --card-table (the card's own table is used) or pass the table that contains the card",
+	)
+}
+
+// findWormholeByID returns the wormhole with the given id, or nil.
+func findWormholeByID(wormholes []basecamp.Wormhole, id int64) *basecamp.Wormhole {
+	for i := range wormholes {
+		if wormholes[i].ID == id {
+			return &wormholes[i]
+		}
+	}
+	return nil
+}
+
+// findWormholeByDestinationColumn returns the wormhole whose destination_url
+// resolves to columnID, or nil. Unlinked wormholes (nil destination_url) never
+// match.
+func findWormholeByDestinationColumn(wormholes []basecamp.Wormhole, columnID int64) *basecamp.Wormhole {
+	for i := range wormholes {
+		wormhole := &wormholes[i]
+		if wormhole.DestinationURL == nil {
+			continue
+		}
+		id := extractID(*wormhole.DestinationURL)
+		if parsed, err := strconv.ParseInt(id, 10, 64); err == nil && parsed == columnID {
+			return wormhole
+		}
+	}
+	return nil
+}
+
+// wormholeHint builds a usage hint listing a card table's wormholes by ID and
+// title, so a failed match points at the reachable options.
+func wormholeHint(wormholes []basecamp.Wormhole) string {
+	if len(wormholes) == 0 {
+		return "This card table has no wormholes — create one with: basecamp cards wormholes create --to-column <id|url>"
+	}
+	parts := make([]string, 0, len(wormholes))
+	for i := range wormholes {
+		wormhole := &wormholes[i]
+		parts = append(parts, fmt.Sprintf("#%d (%s)", wormhole.ID, wormhole.Title))
+	}
+	return "Target one of the wormholes on this card table: " + strings.Join(parts, ", ")
+}
+
+// parseColumnID resolves a destination-column reference — a positive numeric ID
+// or a Basecamp column URL (.../card_tables/columns/{id}) — to a positive column
+// ID. Any other Basecamp URL (a card, a project, a cards collection) is rejected
+// rather than silently accepting its trailing numeric id.
+func parseColumnID(ref string) (int64, error) {
+	invalid := func() (int64, error) {
+		return 0, output.ErrUsageHint(
+			fmt.Sprintf("Invalid destination column %q", ref),
+			"Pass a positive column ID or a Basecamp column URL (.../card_tables/columns/{id})",
+		)
+	}
+	idStr := ref
+	if urlarg.IsURL(ref) {
+		parsed := urlarg.Parse(ref)
+		if parsed == nil || parsed.Type != "columns" || parsed.IsCollection {
+			return invalid()
+		}
+		idStr = parsed.RecordingID
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return invalid()
+	}
+	return id, nil
 }
 
 func newCardsDoneCmd(project, cardTable *string) *cobra.Command {
@@ -1715,6 +1964,256 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
+// newCardsWormholesCmd creates the wormhole management group. A wormhole is a
+// portal on a card table that teleports any card dropped into it to a column on
+// another project's card table — the only way to move a card across projects.
+func newCardsWormholesCmd(project, cardTable *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wormholes",
+		Short: "Manage card-table wormholes",
+		Long: `Manage wormholes — portals that teleport cards to a column on another project's card table.
+
+A wormhole is the only way to move a card across projects. Drop a card into one
+(with "cards move --to-wormhole") and the server teleports it to the wormhole's
+destination column, minting a new card and deleting the original. A card table
+holds at most four wormholes.`,
+	}
+
+	cmd.AddCommand(
+		newCardsWormholesListCmd(project, cardTable),
+		newCardsWormholesCreateCmd(project, cardTable),
+		newCardsWormholesUpdateCmd(project),
+		newCardsWormholesDeleteCmd(project),
+	)
+
+	return cmd
+}
+
+func newCardsWormholesListCmd(project, cardTable *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "list",
+		Short:   "List wormholes",
+		Long:    "List the wormholes on a project's card table with their IDs, destinations, and linked status.",
+		Aliases: []string{"ls"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			resolvedProjectID, err := resolveCardsProjectID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+			if err != nil {
+				return err
+			}
+
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card table ID")
+			}
+
+			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(cardTableData.Wormholes,
+				output.WithSummary(fmt.Sprintf("%d wormholes", len(cardTableData.Wormholes))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "create",
+						Cmd:         fmt.Sprintf("basecamp cards wormholes create --to-column <id|url> --in %s --card-table %s", resolvedProjectID, cardTableID),
+						Description: "Create a wormhole",
+					},
+					output.Breadcrumb{
+						Action:      "move",
+						Cmd:         "basecamp cards move <card> --to-wormhole <id>",
+						Description: "Teleport a card through a wormhole",
+					},
+				),
+			)
+		},
+	}
+	return cmd
+}
+
+func newCardsWormholesCreateCmd(project, cardTable *string) *cobra.Command {
+	var toColumn string
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a wormhole",
+		Long: `Create a wormhole on this project's card table that teleports cards to a column on another project's card table.
+
+Pass the destination column as an ID or a Basecamp column URL:
+  basecamp cards wormholes create --to-column 1069480051 --in my-project
+  basecamp cards wormholes create --to-column https://3.basecamp.com/123/buckets/456/card_tables/columns/789
+
+A card table holds at most four wormholes.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toColumn == "" {
+				return missingArg(cmd, "--to-column")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			resolvedProjectID, err := resolveCardsProjectID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Project ID must be numeric")
+			}
+
+			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+			if err != nil {
+				return err
+			}
+
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card table ID")
+			}
+
+			destColumnID, err := parseColumnID(toColumn)
+			if err != nil {
+				return err
+			}
+
+			wormhole, err := app.Account().Wormholes().Create(cmd.Context(), bucketID, cardTableIDInt, destColumnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(wormhole,
+				output.WithSummary(fmt.Sprintf("Created wormhole: %s", wormhole.Title)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "list",
+						Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %s --card-table %s", resolvedProjectID, cardTableID),
+						Description: "List wormholes",
+					},
+					output.Breadcrumb{
+						Action:      "move",
+						Cmd:         fmt.Sprintf("basecamp cards move <card> --to-wormhole %d", wormhole.ID),
+						Description: "Teleport a card through this wormhole",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&toColumn, "to-column", "", "Destination column ID or URL (required)")
+
+	return cmd
+}
+
+func newCardsWormholesUpdateCmd(project *string) *cobra.Command {
+	var toColumn string
+
+	cmd := &cobra.Command{
+		Use:   "update <id>",
+		Short: "Update a wormhole's destination",
+		Long: `Point an existing wormhole at a new destination column.
+
+  basecamp cards wormholes update 1069480287 --to-column 1069480051 --in my-project`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toColumn == "" {
+				return missingArg(cmd, "--to-column")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid wormhole ID")
+			}
+
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			destColumnID, err := parseColumnID(toColumn)
+			if err != nil {
+				return err
+			}
+
+			wormhole, err := app.Account().Wormholes().Update(cmd.Context(), bucketID, wormholeID, destColumnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(wormhole,
+				output.WithSummary(fmt.Sprintf("Updated wormhole: %s", wormhole.Title)),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "list",
+					Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %d", bucketID),
+					Description: "List wormholes",
+				}),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&toColumn, "to-column", "", "New destination column ID or URL (required)")
+
+	return cmd
+}
+
+func newCardsWormholesDeleteCmd(project *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a wormhole",
+		Long:    "Remove a wormhole from a card table. Cards already teleported are unaffected.",
+		Args:    cobra.ExactArgs(1),
+		Aliases: []string{"rm"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid wormhole ID")
+			}
+
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			if err := app.Account().Wormholes().Delete(cmd.Context(), bucketID, wormholeID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"id": wormholeIDStr, "status": "deleted"},
+				output.WithSummary(fmt.Sprintf("Deleted wormhole #%s", wormholeIDStr)),
+			)
+		},
+	}
+	return cmd
+}
+
 // newCardsStepsCmd creates the steps listing subcommand.
 func newCardsStepsCmd(project *string) *cobra.Command {
 	var cardID string
@@ -2168,6 +2667,31 @@ type projectCardTable struct {
 // getCardTableID retrieves the card table ID from a project's dock.
 // If the project has multiple card tables and no explicit cardTableID is provided,
 // an error is returned with the available card table IDs.
+// resolveCardsProjectID resolves the project for a card command from the
+// flagProject value with the standard flag > env > config > interactive
+// precedence, then maps it to a numeric project ID via the name resolver.
+func resolveCardsProjectID(cmd *cobra.Command, app *appctx.App, flagProject string) (string, error) {
+	projectID := flagProject
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return "", err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolvedProjectID, nil
+}
+
 func getCardTableID(cmd *cobra.Command, app *appctx.App, projectID, explicitCardTableID string) (string, error) {
 	cardTables, err := listProjectCardTables(cmd, app, projectID)
 	if err != nil {
