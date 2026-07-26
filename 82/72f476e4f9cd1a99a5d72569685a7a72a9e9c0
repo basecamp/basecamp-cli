@@ -1,0 +1,54 @@
+skills/basecamp/SKILL.md
+  s_de30de6315efa1::t_0b582a07a3085c 193
+  s_de30de6315efa1::t_bfedc3406f7fc5 283-287
+  s_de30de6315efa1::t_3ff3104577c5c1 271
+  s_de30de6315efa1::t_03bc30fdcc45d9 687,696-703
+  s_de30de6315efa1::t_3bc5cb476c33bc 217-219
+  s_8d633484dc870e::t_78825f0385fd53 704
+internal/commands/comment.go
+  s_de30de6315efa1::t_b9acb728320e24 423-453
+  s_de30de6315efa1::t_d77926918cc19e 316-320
+  s_de30de6315efa1::t_50379f4cf6c5d0 338-365,370-385,388-392
+  s_de30de6315efa1::t_3ecb5ca4a2ca41 685
+  s_de30de6315efa1::t_fddc506dcc7b34 163-166,168,181-208,210-211
+  s_de30de6315efa1::t_57f01379ecd8db 703
+  s_de30de6315efa1::t_40dbdee8d3863f 735-740,745-762
+  s_de30de6315efa1::t_6579ca0c248414 267-271
+  s_de30de6315efa1::t_3039fae779f422 501-508
+internal/presenter/schemas/comment_thread.yaml
+  s_de30de6315efa1::t_495edea380abce 68
+  s_de30de6315efa1::t_95dea07eff2fce 44-48
+internal/commands/comment_thread_test.go
+  s_de30de6315efa1::t_533b09f100d1fa 667-887
+internal/commands/comment_test.go
+  s_de30de6315efa1::t_79bd0903f4b929 5
+  s_de30de6315efa1::t_f130d89db7a82f 193-334
+API-COVERAGE.md
+  s_de30de6315efa1::t_02862df28d634e 44
+e2e/comments.bats
+  s_de30de6315efa1::t_0dac6c289303c6 87-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "8272f476e4f9cd1a99a5d72569685a7a72a9e9c0",
+  "prompts": {},
+  "sessions": {
+    "s_8d633484dc870e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4052bd49-3f11-461f-9cd9-d20e1314433d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_de30de6315efa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71154d4b-1560-49da-b82b-c4cc593910ff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
