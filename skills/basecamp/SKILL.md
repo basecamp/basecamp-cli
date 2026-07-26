@@ -190,6 +190,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Read ping thread | `basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent` |
 | Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>"}' --json` |
 | Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
+| Inspect comment / reply atoms | `basecamp comments show <url> --jq '.data \| {reply_target, mention}'` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
 | Show + download | `basecamp todos show <id> --download-attachments --json` |
@@ -213,7 +214,13 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## URL Parsing
 
-**Always parse URLs before acting on them:**
+**Parse URLs before acting on them — unless you're handing the URL to a command
+that accepts a URL directly** (`show`, `comments show`, `comments thread`,
+`attachments …`), which extract the IDs for you. Only `comments show` and
+`comments thread` verify the URL's host and account before any fetch. For other
+URL-accepting commands, only pass URLs from a trusted Basecamp host: `basecamp url
+parse` extracts IDs but does **not** validate the URL's origin, so parsing an
+attacker-controlled path yields trusted-looking IDs.
 
 ```bash
 basecamp url parse "https://3.basecamp.com/2914079/buckets/41746046/messages/9478142982#__recording_9488783598" --json
@@ -265,6 +272,7 @@ Need to find something?
 │   Note: Defaults to active status; use --status archived for archived items
 │   ⚠ No assignee data — cannot filter by person; use reports assigned instead
 ├── Full-text search? → basecamp search "query" --json
+├── Have a comment URL, or a notification link targeting a comment? → basecamp comments thread <url> --json
 └── Have a URL? → basecamp url parse "<url>" --json
 ```
 
@@ -276,7 +284,11 @@ Want to change something?
 ├── Have ID? → basecamp <resource> update <id> --field value
 ├── Change status? → basecamp recordings trash|archive|restore <id>
 ├── Complete todo? → basecamp todos complete <id>
-└── Complete card? → basecamp cards done <id|url> --in <project>
+├── Complete card? → basecamp cards done <id|url> --in <project>
+└── Reply to a comment? → basecamp comments show <url> --jq '.data | {reply_target, mention}'
+    (one call, cheap atoms — the mention is machine-only, so use --jq/--json, not plain show)
+    or basecamp comments thread <url> when you need the surrounding discussion;
+    then basecamp comments create <reply_target.recording_id> <text>
 ```
 
 ## Common Workflows
@@ -676,6 +688,7 @@ case. To change visibility on an already-created recording, use
 
 ```bash
 basecamp comments list <recording_id> --in <project> --json
+basecamp comments show <comment-id|comment-url> --json            # Now returns reply_target + paste-ready mention (JSON)
 basecamp comments thread <comment-id|comment-url> --json          # Reply-ready: parent + focus + discussion + @mention
 basecamp comments thread <comment-id> --all --json                # Every fetched comment instead of a window
 basecamp comments thread <comment-id> --window 11 --json          # Focus-centered window of 11
@@ -683,6 +696,15 @@ basecamp comments create <recording_id> "Text" --in <project>
 basecamp comments create <recording_id> "@Jane.Smith, looks good!" --in <project>  # With @mention
 basecamp comments update <id> "Updated" --in <project>
 ```
+
+**Cheap atoms vs. deep context (choose by need):**
+- `comments show <url> --jq '.data | {reply_target, mention}'` — one API call. Returns
+  `reply_target.recording_id` (where a reply is posted — comments are flat) and a
+  paste-ready author `mention` (JSON only; human output shows a reply breadcrumb). Use
+  this for the exact-comment reply atoms.
+- `comments thread <url>` — two extra calls. Adds the full parent recording, the
+  surrounding discussion (windowed, truncation-honest), and focus attachments. Use this
+  when the surrounding discussion matters.
 
 ### Files & Documents
 

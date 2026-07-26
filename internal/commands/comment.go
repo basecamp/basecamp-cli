@@ -19,6 +19,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/editor"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -159,17 +160,13 @@ You can pass either a comment ID or a Basecamp URL:
 			}
 
 			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
 
-			// Extract comment ID from URL if provided
-			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, _ := extractCommentWithProject(args[0])
-
-			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
+			// Same safe front door as `thread`: classify, guard the account, and
+			// validate the ID — so a plain recording URL or wrong-account URL is
+			// rejected here instead of 404ing or silently targeting elsewhere.
+			commentID, err := resolveCommentTrigger(cmd, app, args[0])
 			if err != nil {
-				return output.ErrUsage("Invalid comment ID")
+				return err
 			}
 
 			comment, err := app.Account().Comments().Get(cmd.Context(), commentID)
@@ -182,16 +179,42 @@ You can pass either a comment ID or a Basecamp URL:
 				creatorName = comment.Creator.Name
 			}
 
-			return app.OK(comment,
+			// Enrich with the two cheap reply atoms — both pure functions of this
+			// single Get, no extra API call. reply_target routes to the parent
+			// recording (comments are flat); mention is a paste-ready author
+			// handle with the same escaped/round-tripping contract as `thread`.
+			// These ride in machine .data only (comment.yaml is untouched); the
+			// reply breadcrumb is the human-output affordance.
+			m, ok := output.NormalizeData(comment).(map[string]any)
+			if !ok || m == nil {
+				// Fail closed — never emit an empty "successful" comment if the
+				// normalized shape is unexpectedly not a map.
+				return &output.Error{
+					Code:    output.CodeAPI,
+					Message: fmt.Sprintf("Could not render comment #%d", commentID),
+				}
+			}
+			m["mention"] = buildFocusAuthor(comment.Creator)["mention"]
+
+			breadcrumbs := make([]output.Breadcrumb, 0, 2)
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "update",
+				Cmd:         fmt.Sprintf("basecamp comments update %d <text>", commentID),
+				Description: "Update comment",
+			})
+			if comment.Parent != nil && comment.Parent.ID != 0 {
+				m["reply_target"] = map[string]any{"recording_id": comment.Parent.ID}
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "reply",
+					Cmd:         fmt.Sprintf("basecamp comments create %d <text>", comment.Parent.ID),
+					Description: "Reply on the parent recording",
+				})
+			}
+
+			return app.OK(m,
 				output.WithEntity("comment"),
-				output.WithSummary(fmt.Sprintf("Comment #%s by %s", commentIDStr, creatorName)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp comments update %s <text>", commentIDStr),
-						Description: "Update comment",
-					},
-				),
+				output.WithSummary(fmt.Sprintf("Comment #%d by %s", commentID, creatorName)),
+				output.WithBreadcrumbs(breadcrumbs...),
 			)
 		},
 	}
@@ -247,28 +270,13 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 		effectiveWindow = window
 	}
 
-	// Require an exact comment trigger before any API call — a plain recording
-	// URL or collection is rejected with a pointer to `basecamp show`.
-	triggerIDStr, urlAccountID, err := commentTriggerID(arg)
+	// Classify + guard + validate through the one shared front door, so `thread`
+	// and `comments show` are equally safe: a plain recording URL / collection is
+	// rejected toward `basecamp show`, a wrong-account URL and a non-positive ID
+	// are rejected before any API call.
+	triggerID, err := resolveCommentTrigger(cmd, app, arg)
 	if err != nil {
 		return err
-	}
-
-	// Guard against resolving a same-numbered comment in the wrong account: a
-	// URL names its account, and if it disagrees with the configured one the
-	// safe move is to stop rather than silently target a different account (and
-	// build a reply target that points elsewhere). Rejects before any API call.
-	if urlAccountID != "" && app.Config.AccountID != "" && urlAccountID != app.Config.AccountID {
-		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
-	}
-
-	if err := ensureAccount(cmd, app); err != nil {
-		return err
-	}
-
-	triggerID, err := strconv.ParseInt(triggerIDStr, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid comment ID")
 	}
 
 	// Step 1 — resolve the focus comment.
@@ -311,10 +319,11 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	author := buildFocusAuthor(trigger.Creator)
 
 	focus := map[string]any{
-		"comment_id": trigger.ID,
-		"created_at": trigger.CreatedAt.Format(time.RFC3339),
-		"content":    trigger.Content,
-		"author":     author,
+		"comment_id":          trigger.ID,
+		"created_at":          trigger.CreatedAt.Format(time.RFC3339),
+		"content":             trigger.Content,
+		"author":              author,
+		"content_attachments": trigger.ContentAttachments,
 	}
 
 	data := map[string]any{
@@ -332,22 +341,61 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 		data["recording_ref"] = recording
 	}
 
-	display := threadDisplayProjection(recording, recordingFull, trigger)
+	focusPresent := focusIdx >= 0
+	fetchComplete := !listResult.Meta.Truncated
+
+	focusMention := ""
+	if m, ok := author["mention"].(map[string]any); ok {
+		if s, ok := m["syntax"].(string); ok {
+			focusMention = s
+		}
+	}
+	display := threadDisplayProjection(recording, recordingFull, trigger, focusMention)
+
+	// Breadcrumbs: a type-safe attachment download (when the focus carries
+	// files) comes first; the reply target is always last. The typed
+	// `--type comment` form is built inline — the generic attachmentBreadcrumb
+	// omits it, and a bare recording lookup 204/404s for comments.
+	breadcrumbs := make([]output.Breadcrumb, 0, 2)
+	if len(trigger.ContentAttachments) > 0 {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "download",
+			Cmd:         fmt.Sprintf("basecamp attachments download %d --type comment", trigger.ID),
+			Description: "Download comment attachments",
+		})
+	}
+	breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+		Action:      "reply",
+		Cmd:         fmt.Sprintf("basecamp comments create %s <text>", parentIDStr),
+		Description: "Reply on the parent recording",
+	})
 
 	respOpts := []output.ResponseOption{
 		output.WithEntity("comment_thread"),
 		output.WithDisplayData(display),
-		output.WithSummary(threadSummary(trigger, author, len(selected))),
-		output.WithBreadcrumbs(output.Breadcrumb{
-			Action:      "reply",
-			Cmd:         fmt.Sprintf("basecamp comments create %s <text>", parentIDStr),
-			Description: "Reply on the parent recording",
-		}),
+		output.WithSummary(threadSummary(trigger, author, len(selected), len(fetched), selection, fetchComplete, focusPresent)),
+		output.WithBreadcrumbs(breadcrumbs...),
+	}
+
+	// One combined notice: WithNotice overwrites, so collect fragments and emit
+	// them together. States facts only — focus absence and truncation — never
+	// speculation about archived/trashed/deleted comments.
+	var notices []string
+	if !focusPresent {
+		if all {
+			notices = append(notices, fmt.Sprintf(
+				"Focus comment is not present in the fetched active discussion; showing all %d fetched comments.", len(selected)))
+		} else {
+			notices = append(notices, fmt.Sprintf(
+				"Focus comment is not present in the fetched active discussion; showing the most recent %d fetched comments.", len(selected)))
+		}
 	}
 	if listResult.Meta.Truncated {
-		respOpts = append(respOpts, output.WithNotice(
-			"Discussion truncated: more comments exist on the server than were fetched. "+
-				"\"all\"/\"most recent\" cover the fetched subset only."))
+		notices = append(notices, "Discussion truncated: more comments exist on the server than were fetched. "+
+			"\"all\"/\"most recent\" cover the fetched subset only.")
+	}
+	if len(notices) > 0 {
+		respOpts = append(respOpts, output.WithNotice(strings.Join(notices, " ")))
 	}
 
 	return app.OK(data, respOpts...)
@@ -376,6 +424,53 @@ func commentTriggerID(arg string) (id, accountID string, err error) {
 		"Pass a comment ID or a comment URL (with a #__recording_… fragment). "+
 			"For the recording itself, use: basecamp show <url>",
 	)
+}
+
+// resolveCommentTrigger is the single safe front door both `comments thread` and
+// `comments show` use to turn an argument into a validated comment ID. It
+// enforces every trust-boundary check before any API call — trusted host,
+// exact-comment classification, a positive ID, and URL/account identity — so the
+// cheaper `show` is no less trustworthy than the deep `thread`.
+func resolveCommentTrigger(cmd *cobra.Command, app *appctx.App, arg string) (int64, error) {
+	// A URL-shaped trigger must live on a trusted Basecamp host. The URL router
+	// is host-agnostic, so without this a look-alike on an attacker-controlled
+	// host (evil.example/…/comments/456) would be parsed into a fetch of an
+	// internal comment — the confused-deputy case hostutil exists to prevent.
+	// Bare IDs are not URLs and skip the check.
+	if urlarg.IsURL(arg) && !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
+		return 0, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+	}
+
+	triggerIDStr, urlAccountID, err := commentTriggerID(arg)
+	if err != nil {
+		return 0, err
+	}
+
+	// Validate the ID before any account resolution, so a bad ID fails as
+	// "Invalid comment ID" with zero requests even when no account is configured
+	// (ensureAccount would otherwise demand --account first).
+	id, err := strconv.ParseInt(triggerIDStr, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, output.ErrUsage("Invalid comment ID")
+	}
+
+	// Reconcile the URL's account with configuration before ensureAccount, so the
+	// URL's identity governs the fetch rather than an interactively-selected
+	// account: adopt it when nothing is configured, reject a configured mismatch
+	// rather than silently fetch a same-numbered comment elsewhere.
+	if urlAccountID != "" {
+		switch {
+		case app.Config.AccountID == "":
+			app.Config.AccountID = urlAccountID
+		case urlAccountID != app.Config.AccountID:
+			return 0, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
+		}
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // fetchThreadParent loads the full parent recording using a type-derived
@@ -423,6 +518,14 @@ func fetchThreadParent(cmd *cobra.Command, app *appctx.App, parent *basecamp.Par
 		return nil, false, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("Could not decode parent recording %s: %v", parentIDStr, err),
+		}
+	}
+	// A JSON null or {} decodes to an empty map — never claim recording_full over
+	// nothing. Hard-error instead of emitting an empty recording.
+	if len(recording) == 0 {
+		return nil, false, &output.Error{
+			Code:    output.CodeAPI,
+			Message: fmt.Sprintf("Parent recording %s returned an empty body", parentIDStr),
 		}
 	}
 	return recording, true, nil
@@ -601,7 +704,7 @@ func markdownEscape(s string) string {
 // threadDisplayProjection builds the flat projection consumed by the
 // comment_thread schema. Presenter schemas read direct keys, not nested
 // recording.*/focus.*, so this is distinct from the structured .data.
-func threadDisplayProjection(recording map[string]any, recordingFull bool, trigger *basecamp.Comment) map[string]any {
+func threadDisplayProjection(recording map[string]any, recordingFull bool, trigger *basecamp.Comment, focusMention string) map[string]any {
 	authorName := ""
 	if trigger.Creator != nil {
 		authorName = trigger.Creator.Name
@@ -619,6 +722,7 @@ func threadDisplayProjection(recording map[string]any, recordingFull bool, trigg
 		"recording_full":        recordingFull,
 		"focus_comment_id":      trigger.ID,
 		"focus_author":          richtext.SanitizeSingleLine(authorName),
+		"focus_mention":         focusMention,
 		"focus_created_at":      trigger.CreatedAt.Format(time.RFC3339),
 		"focus_content":         trigger.Content,
 	}
@@ -650,13 +754,34 @@ func stringField(v any) string {
 	}
 }
 
-// threadSummary is the one-line human summary for the thread response.
-func threadSummary(trigger *basecamp.Comment, author map[string]any, returned int) string {
+// threadSummary is the one-line human summary for the thread response. It is a
+// pure function of the discussion facts (selection, returned, fetched,
+// fetch_complete, focus_present) over the full fetch_complete × focus_present ×
+// selection cube, so it never asserts a server-side total the fetch did not
+// confirm and never claims to center "around the focus" when the focus is absent.
+func threadSummary(trigger *basecamp.Comment, author map[string]any, returned, fetched int, selection string, fetchComplete, focusPresent bool) string {
 	name, _ := author["name"].(string)
 	if name == "" {
 		name = "unknown"
 	}
-	return fmt.Sprintf("Comment #%d by %s — %d in discussion", trigger.ID, name, returned)
+	prefix := fmt.Sprintf("Comment #%d by %s — ", trigger.ID, name)
+
+	var body string
+	switch {
+	case selection == "all_fetched" && fetchComplete:
+		body = fmt.Sprintf("all %d active comments", fetched)
+	case selection == "all_fetched":
+		body = fmt.Sprintf("all %d fetched active comments; fetch incomplete", fetched)
+	case focusPresent && fetchComplete:
+		body = fmt.Sprintf("showing %d of %d active comments around the focus", returned, fetched)
+	case focusPresent:
+		body = fmt.Sprintf("showing %d around the focus from %d fetched active comments; more exist on server", returned, fetched)
+	case fetchComplete:
+		body = fmt.Sprintf("showing the %d most recent of %d active comments", returned, fetched)
+	default:
+		body = fmt.Sprintf("showing the %d most recent within the fetched subset (%d fetched)", returned, fetched)
+	}
+	return prefix + body
 }
 
 func newCommentsUpdateCmd() *cobra.Command {

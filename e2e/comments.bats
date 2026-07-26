@@ -84,6 +84,70 @@ load test_helper
   assert_output_contains "positive"
 }
 
+@test "comments thread rejects a non-positive id" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments thread 0 --json
+  assert_failure
+  assert_json_value '.error' 'Invalid comment ID'
+  assert_json_value '.code' 'usage'
+}
+
+@test "comments thread rejects an untrusted host in the URL" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments thread "https://evil.example/99999/buckets/1/comments/456" --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "untrusted host"
+}
+
+
+# show — shared resolver safety (mirrors thread)
+
+@test "comments show rejects a plain recording URL and points at show" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments show "https://3.basecamp.com/99999/buckets/1/todos/123" --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "not a comment"
+  assert_output_contains "basecamp show"
+}
+
+@test "comments show rejects a URL whose account differs from the configured one" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments show "https://3.basecamp.com/88888/buckets/1/todos/123#__recording_456" --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "does not match"
+}
+
+@test "comments show rejects a non-positive id" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments show 0 --json
+  assert_failure
+  assert_json_value '.error' 'Invalid comment ID'
+  assert_json_value '.code' 'usage'
+}
+
+@test "comments show rejects an untrusted host in the URL" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp comments show "https://evil.example/99999/buckets/1/comments/456" --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "untrusted host"
+}
+
 
 # Help
 

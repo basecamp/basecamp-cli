@@ -41,6 +41,11 @@ fields:
     role: detail
     format: text
 
+  focus_mention:
+    role: detail
+    format: text
+    collapse: true
+
   focus_created_at:
     role: meta
     emphasis: muted
@@ -60,4 +65,4 @@ views:
       - heading: Recording
         fields: [recording_type, recording_id, recording_full, recording_content, recording_description]
       - heading: Focus
-        fields: [focus_author, focus_created_at, focus_comment_id, focus_content]
+        fields: [focus_author, focus_mention, focus_created_at, focus_comment_id, focus_content]

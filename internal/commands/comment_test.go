@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -188,4 +189,212 @@ func (t *mockCommentWriteTransport) RoundTrip(req *http.Request) (*http.Response
 		Body:       io.NopCloser(strings.NewReader(`{"id":1234,"content":"ok","status":"active"}`)),
 		Header:     header,
 	}, nil
+}
+
+// --- Iteration 2: comments show reply-atom enrichment -----------------------
+
+// runCommentsShow executes `comments show` against a tracking transport and
+// returns stdout/stderr plus the run error, mirroring runThreadCmd.
+func runCommentsShow(t *testing.T, transport *showTrackingTransport, format output.Format, args ...string) (string, string, error) {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, format, stdout, stderr)
+	app.Flags.Hints = true
+	cmd := NewCommentsCmd()
+	full := append([]string{"show"}, args...)
+	cmd.SetArgs(full)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
+func showCommentResponder(commentJSON string) func(path string) (int, string, http.Header) {
+	return func(_ string) (int, string, http.Header) {
+		return 200, commentJSON, nil
+	}
+}
+
+func TestCommentsShowEnrichesReplyAtoms(t *testing.T) {
+	comment := map[string]any{
+		"id": 456, "type": "Comment", "content": "<p>hi</p>",
+		"created_at": "2026-07-20T10:05:00Z",
+		"parent":     map[string]any{"id": 123, "type": "Todo", "url": "https://x/y"},
+		"creator":    map[string]any{"id": 7, "name": "Jane Doe", "attachable_sgid": "SGID123"},
+	}
+	cb, _ := json.Marshal(comment)
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(string(cb))}
+
+	stdout, _, err := runCommentsShow(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+
+	var env threadEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env))
+
+	// reply_target.recording_id == parent.id — the smoke invariant.
+	replyTarget := env.Data["reply_target"].(map[string]any)
+	parent := env.Data["parent"].(map[string]any)
+	assert.EqualValues(t, parent["id"], replyTarget["recording_id"])
+	assert.EqualValues(t, 123, replyTarget["recording_id"])
+
+	// Paste-ready mention rides in machine .data.
+	mention := env.Data["mention"].(map[string]any)
+	assert.Equal(t, "[@Jane Doe](mention:SGID123)", mention["syntax"])
+
+	// Exactly one request — no parent or list fetch.
+	assert.Len(t, transport.getRequests(), 1)
+
+	// The reply breadcrumb is the human-output affordance: update first, reply
+	// last, targeting the parent recording.
+	require.Len(t, env.Breadcrumbs, 2)
+	assert.Equal(t, "update", env.Breadcrumbs[0].Action)
+	assert.Equal(t, "reply", env.Breadcrumbs[1].Action)
+	assert.Equal(t, "basecamp comments create 123 <text>", env.Breadcrumbs[1].Cmd)
+}
+
+func TestCommentsShowNilParentOmitsReplyTarget(t *testing.T) {
+	comment := map[string]any{
+		"id": 456, "type": "Comment", "content": "<p>hi</p>",
+		"created_at": "2026-07-20T10:05:00Z",
+		"creator":    map[string]any{"id": 7, "name": "Jane Doe"},
+	}
+	cb, _ := json.Marshal(comment)
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(string(cb))}
+
+	stdout, _, err := runCommentsShow(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+
+	var env threadEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env))
+
+	_, hasReplyTarget := env.Data["reply_target"]
+	assert.False(t, hasReplyTarget, "no reply_target without a parent")
+	for _, b := range env.Breadcrumbs {
+		assert.NotEqual(t, "reply", b.Action, "no reply breadcrumb without a parent")
+	}
+	// Mention still resolves (person lookup) — enrichment is graceful, not fatal.
+	mention := env.Data["mention"].(map[string]any)
+	assert.Equal(t, "person_lookup", mention["resolution"])
+}
+
+func TestCommentsShowSharedResolverSafety(t *testing.T) {
+	comment := `{"id":456,"type":"Comment","content":"<p>hi</p>","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
+
+	t.Run("plain recording URL rejected, zero requests", func(t *testing.T) {
+		transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+		_, _, err := runCommentsShow(t, transport, output.FormatJSON, "https://3.basecamp.com/99999/buckets/1/todos/123")
+		require.Error(t, err)
+		var outErr *output.Error
+		require.True(t, errors.As(err, &outErr))
+		assert.Equal(t, output.CodeUsage, outErr.Code)
+		assert.Empty(t, transport.getRequests())
+	})
+
+	t.Run("account mismatch rejected, zero requests", func(t *testing.T) {
+		transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+		url := "https://3.basecamp.com/88888/buckets/1/todos/123#__recording_456"
+		_, _, err := runCommentsShow(t, transport, output.FormatJSON, url)
+		require.Error(t, err)
+		var outErr *output.Error
+		require.True(t, errors.As(err, &outErr))
+		assert.Equal(t, output.CodeUsage, outErr.Code)
+		assert.Contains(t, outErr.Message, "does not match")
+		assert.Empty(t, transport.getRequests())
+	})
+
+	t.Run("non-positive id rejected, zero requests", func(t *testing.T) {
+		transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+		_, _, err := runCommentsShow(t, transport, output.FormatJSON, "0")
+		require.Error(t, err)
+		var outErr *output.Error
+		require.True(t, errors.As(err, &outErr))
+		assert.Equal(t, output.CodeUsage, outErr.Code)
+		assert.Empty(t, transport.getRequests())
+	})
+
+	t.Run("three valid forms resolve the same comment", func(t *testing.T) {
+		forms := []string{
+			"456",
+			"https://3.basecamp.com/99999/buckets/1/todos/123#__recording_456",
+			"https://3.basecamp.com/99999/buckets/1/comments/456",
+		}
+		for _, form := range forms {
+			transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+			stdout, _, err := runCommentsShow(t, transport, output.FormatJSON, form)
+			require.NoError(t, err, form)
+			var env threadEnvelope
+			require.NoError(t, json.Unmarshal([]byte(stdout), &env))
+			assert.EqualValues(t, 456, env.Data["id"])
+			assert.Len(t, transport.getRequests(), 1, form)
+		}
+	})
+}
+
+// runCommentsShowAccount runs `comments show` with an explicit configured account
+// (use "" to simulate an unconfigured run).
+func runCommentsShowAccount(t *testing.T, transport *showTrackingTransport, accountID string, args ...string) (string, error) {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, output.FormatJSON, stdout, stderr)
+	app.Flags.Hints = true
+	app.Config.AccountID = accountID
+	app.Names.SetAccountID(accountID)
+	cmd := NewCommentsCmd()
+	full := append([]string{"show"}, args...)
+	cmd.SetArgs(full)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return stdout.String(), err
+}
+
+func TestCommentsShowRejectsUntrustedHostNoAPICall(t *testing.T) {
+	comment := `{"id":456,"type":"Comment","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
+	cases := map[string]string{
+		"direct comment URL": "https://evil.example/99999/buckets/1/comments/456",
+		"fragment URL":       "https://evil.example/99999/buckets/1/todos/123#__recording_456",
+	}
+	for name, url := range cases {
+		t.Run(name, func(t *testing.T) {
+			transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+			_, _, err := runCommentsShow(t, transport, output.FormatJSON, url)
+			require.Error(t, err)
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr))
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Message, "untrusted host")
+			assert.Empty(t, transport.getRequests())
+		})
+	}
+}
+
+func TestCommentsShowInvalidIDBeforeAccountResolution(t *testing.T) {
+	comment := `{"id":456,"type":"Comment","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+	stdout, err := runCommentsShowAccount(t, transport, "", "0")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Equal(t, "Invalid comment ID", outErr.Message)
+	assert.NotContains(t, stdout, "account is required")
+	assert.Empty(t, transport.getRequests())
+}
+
+func TestCommentsShowAdoptsURLAccountWhenUnconfigured(t *testing.T) {
+	comment := `{"id":456,"type":"Comment","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+	url := "https://3.basecamp.com/77777/buckets/1/comments/456"
+	_, err := runCommentsShowAccount(t, transport, "", url)
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.Len(t, reqs, 1, "one Get, no extra calls")
+	assert.Contains(t, reqs[0], "/77777/", "the fetch must target the URL's account")
 }

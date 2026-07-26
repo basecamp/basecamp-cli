@@ -664,3 +664,306 @@ func TestThreadSanitizesHostileHTMLBody(t *testing.T) {
 	assert.NotContains(t, stdout, "\x1b[31m")
 	assert.NotContains(t, stdout, "<script>")
 }
+
+// --- Iteration 2: trust-contract completeness -------------------------------
+
+// attachmentFocusFixture builds a focus whose Get carries a content attachment
+// but whose parent's active-comments list omits the focus entirely — proving the
+// attachment data rides on the Get, not the list.
+func attachmentFocusFixture(t *testing.T) threadFixture {
+	t.Helper()
+	fx := defaultThreadFixture()
+	focus := map[string]any{
+		"id": 456, "type": "Comment", "content": "<p>see attached</p>",
+		"created_at": "2026-07-20T10:05:00Z",
+		"parent":     map[string]any{"id": 123, "type": "Todo", "url": "https://x/y"},
+		"creator":    map[string]any{"id": 7, "name": "Jane Doe", "attachable_sgid": "SGID123"},
+		"content_attachments": []map[string]any{
+			{"id": 999, "sgid": "AT", "filename": "spec.pdf", "content_type": "application/pdf", "byte_size": 2048, "download_url": "https://x/dl"},
+		},
+	}
+	// List that does NOT contain the focus (456).
+	list := []map[string]any{
+		{"id": 455, "content": "<p>c0</p>", "created_at": "2026-07-20T10:00:00Z", "creator": map[string]any{"name": "Amy"}},
+		{"id": 457, "content": "<p>c2</p>", "created_at": "2026-07-20T10:07:00Z", "creator": map[string]any{"name": "Bob"}},
+	}
+	fb, _ := json.Marshal(focus)
+	lb, _ := json.Marshal(list)
+	fx.focusJSON = string(fb)
+	fx.listJSON = string(lb)
+	return fx
+}
+
+func TestThreadSurfacesFocusAttachmentEvenWhenAbsentFromList(t *testing.T) {
+	fx := attachmentFocusFixture(t)
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+
+	// The attachment survives from the Get though the list omits the focus.
+	focusOut := env.Data["focus"].(map[string]any)
+	atts, ok := focusOut["content_attachments"].([]any)
+	require.True(t, ok, "focus.content_attachments should be a non-nil array")
+	require.Len(t, atts, 1)
+	assert.Equal(t, "spec.pdf", atts[0].(map[string]any)["filename"])
+
+	// A type-safe download breadcrumb fires even though the focus is absent.
+	dlIdx, replyIdx := -1, -1
+	for i, b := range env.Breadcrumbs {
+		if b.Action == "download" {
+			dlIdx = i
+			assert.Equal(t, "basecamp attachments download 456 --type comment", b.Cmd)
+		}
+		if b.Action == "reply" {
+			replyIdx = i
+		}
+	}
+	require.GreaterOrEqual(t, dlIdx, 0, "download breadcrumb should be present")
+	require.GreaterOrEqual(t, replyIdx, 0, "reply breadcrumb should be present")
+	assert.Less(t, dlIdx, replyIdx, "download breadcrumb must come before reply (reply last)")
+}
+
+func TestThreadNoAttachmentBreadcrumbWhenNone(t *testing.T) {
+	fx := defaultThreadFixture() // no content_attachments on the focus
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+
+	for _, b := range env.Breadcrumbs {
+		assert.NotEqual(t, "download", b.Action, "no download breadcrumb without attachments")
+	}
+	// Reply is still the last breadcrumb.
+	last := env.Breadcrumbs[len(env.Breadcrumbs)-1]
+	assert.Equal(t, "reply", last.Action)
+}
+
+func TestThreadFocusAbsentNoticeWindowSelectionAware(t *testing.T) {
+	fx := attachmentFocusFixture(t) // list omits focus; 2 fetched
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+
+	assert.Contains(t, env.Notice, "not present in the fetched active discussion")
+	assert.Contains(t, env.Notice, "most recent 2 fetched comments")
+	assert.NotContains(t, env.Notice, "all 2 fetched")
+}
+
+func TestThreadFocusAbsentNoticeAllSelectionAware(t *testing.T) {
+	fx := attachmentFocusFixture(t)
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatJSON, "456", "--all")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+
+	assert.Contains(t, env.Notice, "not present in the fetched active discussion")
+	assert.Contains(t, env.Notice, "all 2 fetched comments")
+	assert.NotContains(t, env.Notice, "most recent")
+}
+
+func TestThreadFocusAbsentNoticeComposesWithTruncation(t *testing.T) {
+	fx := attachmentFocusFixture(t)
+	fx.listHeaders = map[string]string{
+		"Link": `<https://3.basecampapi.com/99999/recordings/123/comments.json?page=2>; rel="next"`,
+	}
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmdMaxPages(t, transport, output.FormatJSON, 1, "456")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+
+	// Both fragments compose into one combined notice.
+	assert.Contains(t, env.Notice, "most recent")
+	assert.Contains(t, env.Notice, "truncated")
+}
+
+func TestThreadSummaryMatrix(t *testing.T) {
+	trigger := &basecamp.Comment{ID: 123}
+	author := map[string]any{"name": "Jane"}
+	cases := []struct {
+		name              string
+		returned, fetched int
+		selection         string
+		fetchComplete     bool
+		focusPresent      bool
+		want              string
+	}{
+		{"all complete", 50, 50, "all_fetched", true, true,
+			"Comment #123 by Jane — all 50 active comments"},
+		{"all truncated", 40, 40, "all_fetched", false, true,
+			"Comment #123 by Jane — all 40 fetched active comments; fetch incomplete"},
+		{"window focus present complete", 41, 50, "focus_window", true, true,
+			"Comment #123 by Jane — showing 41 of 50 active comments around the focus"},
+		{"window focus present truncated", 41, 60, "focus_window", false, true,
+			"Comment #123 by Jane — showing 41 around the focus from 60 fetched active comments; more exist on server"},
+		{"window focus absent complete", 41, 50, "focus_window", true, false,
+			"Comment #123 by Jane — showing the 41 most recent of 50 active comments"},
+		{"window focus absent truncated", 41, 60, "focus_window", false, false,
+			"Comment #123 by Jane — showing the 41 most recent within the fetched subset (60 fetched)"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := threadSummary(trigger, author, c.returned, c.fetched, c.selection, c.fetchComplete, c.focusPresent)
+			assert.Equal(t, c.want, got)
+			assert.NotContains(t, got, "in discussion")
+			if !c.focusPresent && c.selection != "all_fetched" {
+				assert.NotContains(t, got, "around the focus")
+			}
+		})
+	}
+}
+
+func TestThreadSummary41Of50Integration(t *testing.T) {
+	fx := defaultThreadFixture()
+	base := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	list := make([]map[string]any, 0, 50)
+	for i := 0; i < 50; i++ {
+		id := 1000 + i
+		if i == 25 {
+			id = 456 // focus present in the fetched set
+		}
+		list = append(list, map[string]any{
+			"id":         id,
+			"content":    "<p>c</p>",
+			"created_at": base.Add(time.Duration(i) * time.Minute).Format(time.RFC3339),
+			"creator":    map[string]any{"name": "Bob"},
+		})
+	}
+	lb, _ := json.Marshal(list)
+	fx.listJSON = string(lb)
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.NoError(t, err)
+	env := decodeThread(t, stdout)
+	assert.Contains(t, env.Summary, "41 of 50")
+	assert.NotContains(t, env.Summary, "in discussion")
+}
+
+func TestThreadRendersMentionInHumanOutput(t *testing.T) {
+	for _, format := range []output.Format{output.FormatStyled, output.FormatMarkdown} {
+		fx := defaultThreadFixture() // creator Jane Doe with attachable_sgid SGID123
+		transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+		stdout, _, err := runThreadCmd(t, transport, format, "456")
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "[@Jane Doe](mention:SGID123)",
+			"human format %v must render the paste-ready mention", format)
+	}
+}
+
+func TestThreadParentNullBodyHardErrors(t *testing.T) {
+	fx := defaultThreadFixture()
+	fx.parentJSON = "null"
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	_, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty body")
+}
+
+func TestThreadResolverRejectsBeforeAnyRequest(t *testing.T) {
+	cases := []struct{ name, arg string }{
+		{"plain recording URL", "https://3.basecamp.com/99999/buckets/1/todos/123"},
+		{"non-positive id", "0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := defaultThreadFixture()
+			transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+			_, _, err := runThreadCmd(t, transport, output.FormatJSON, c.arg)
+			require.Error(t, err)
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr))
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Empty(t, transport.getRequests(), "must reject before any API call")
+		})
+	}
+}
+
+// runThreadCmdAccount runs `thread` with an explicit configured account (use ""
+// to simulate an unconfigured run), so URL-account adoption and pre-API ID
+// validation can be exercised without a configured account masking them.
+func runThreadCmdAccount(t *testing.T, transport *showTrackingTransport, accountID string, args ...string) (string, error) {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, output.FormatJSON, stdout, stderr)
+	app.Flags.Hints = true
+	app.Config.AccountID = accountID
+	app.Names.SetAccountID(accountID)
+	cmd := NewCommentsCmd()
+	full := append([]string{"thread"}, args...)
+	cmd.SetArgs(full)
+	ctx := appctx.WithApp(context.Background(), app)
+	cmd.SetContext(ctx)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := cmd.Execute()
+	return stdout.String(), err
+}
+
+func TestThreadRejectsUntrustedHostNoAPICall(t *testing.T) {
+	cases := map[string]string{
+		"direct comment URL":  "https://evil.example/99999/buckets/1/comments/456",
+		"fragment URL":        "https://evil.example/99999/buckets/1/todos/123#__recording_456",
+		"api look-alike host": "https://3.basecampapi.evil.com/99999/buckets/1/comments/456",
+	}
+	for name, url := range cases {
+		t.Run(name, func(t *testing.T) {
+			fx := defaultThreadFixture()
+			transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+			_, _, err := runThreadCmd(t, transport, output.FormatJSON, url)
+			require.Error(t, err)
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr))
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Message, "untrusted host")
+			assert.Empty(t, transport.getRequests(), "untrusted host must be rejected before any API call")
+		})
+	}
+}
+
+func TestThreadInvalidIDBeforeAccountResolution(t *testing.T) {
+	// Empty configuration + non-positive id → Invalid comment ID, not
+	// "--account is required", and zero requests (no account/content fetch).
+	fx := defaultThreadFixture()
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+	stdout, err := runThreadCmdAccount(t, transport, "", "0")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Equal(t, "Invalid comment ID", outErr.Message)
+	assert.NotContains(t, stdout, "account is required")
+	assert.Empty(t, transport.getRequests())
+}
+
+func TestThreadAdoptsURLAccountWhenUnconfigured(t *testing.T) {
+	// Empty configuration + trusted URL → the fetch targets the URL's account,
+	// not an interactively-selected one.
+	fx := defaultThreadFixture()
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+	url := "https://3.basecamp.com/77777/buckets/1/comments/456"
+	stdout, err := runThreadCmdAccount(t, transport, "", url)
+	require.NoError(t, err)
+
+	reqs := transport.getRequests()
+	require.NotEmpty(t, reqs)
+	targetedURLAccount := false
+	for _, p := range reqs {
+		assert.Contains(t, p, "/77777/", "every request must target the URL's account")
+		if strings.Contains(p, "/77777/") {
+			targetedURLAccount = true
+		}
+	}
+	assert.True(t, targetedURLAccount)
+
+	env := decodeThread(t, stdout)
+	assert.EqualValues(t, 456, env.Data["focus"].(map[string]any)["comment_id"])
+}
