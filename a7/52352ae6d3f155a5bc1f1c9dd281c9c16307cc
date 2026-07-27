@@ -1,0 +1,19 @@
+skills/basecamp/SKILL.md
+  s_de30de6315efa1::t_c532f41f675f77 193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a752352ae6d3f155a5bc1f1c9dd281c9c16307cc",
+  "prompts": {},
+  "sessions": {
+    "s_de30de6315efa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71154d4b-1560-49da-b82b-c4cc593910ff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
