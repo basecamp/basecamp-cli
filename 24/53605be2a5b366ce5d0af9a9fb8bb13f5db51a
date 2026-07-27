@@ -1,0 +1,23 @@
+.github/workflows/installer-smoke.yml
+  s_27ecef0f9aeb7f::t_d9b3197286bff5 1-72
+e2e/installer.bats
+  s_27ecef0f9aeb7f::t_9060972d6feeab 71-72
+scripts/install.sh
+  s_27ecef0f9aeb7f::t_8cf643ea85e6f4 544-546
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "2453605be2a5b366ce5d0af9a9fb8bb13f5db51a",
+  "prompts": {},
+  "sessions": {
+    "s_27ecef0f9aeb7f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a5450fb-b225-4499-8d5f-5f4abf456d13",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
