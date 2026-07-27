@@ -81,7 +81,9 @@ func TestNotificationsListLimitBubbleUpsNextBreadcrumbKeepsFlag(t *testing.T) {
 		method: http.MethodGet,
 		path:   "/99999/my/readings.json",
 		status: http.StatusOK,
-		body:   `{"unreads":[],"reads":[]}`,
+		body: `{"unreads":[{"id":1,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}],` +
+			`"reads":[],"bubble_ups":[{"id":2,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}],` +
+			`"bubble_ups_count":5,"scheduled_bubble_ups_count":3}`,
 	})
 	buf := &bytes.Buffer{}
 	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
@@ -91,12 +93,18 @@ func TestNotificationsListLimitBubbleUpsNextBreadcrumbKeepsFlag(t *testing.T) {
 	require.NoError(t, err)
 
 	var envelope struct {
+		Summary     string `json:"summary"`
 		Breadcrumbs []struct {
 			Action string `json:"action"`
 			Cmd    string `json:"cmd"`
 		} `json:"breadcrumbs"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	// The headline total must come from the uncapped count fields
+	// (1 unread + 5 bubble-ups + 3 scheduled), not the capped arrays.
+	assert.Contains(t, envelope.Summary, "9 notification(s)")
+	assert.Contains(t, envelope.Summary, "1 of 5 bubble-up(s)")
 
 	var nextCmd string
 	for _, bc := range envelope.Breadcrumbs {

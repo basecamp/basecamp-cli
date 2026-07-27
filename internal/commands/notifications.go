@@ -88,12 +88,20 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 
 	// BC5 carries resurfaced items in BubbleUps and may also populate
 	// Memories as a compat alias of the same list; BC4 populates Memories
-	// only. Count whichever list carries them, never both.
+	// only. Count whichever list carries them, never both. When the
+	// bubble-up arrays are capped/omitted by --limit-bubble-ups, the count
+	// fields carry the true totals — use them so the headline total matches
+	// the non-limited mode.
 	resurfaced := len(result.BubbleUps)
+	scheduled := len(result.ScheduledBubbleUps)
+	if limitBubbleUps {
+		resurfaced = int(result.BubbleUpsCount)
+		scheduled = int(result.ScheduledBubbleUpsCount)
+	}
 	if resurfaced == 0 {
 		resurfaced = len(result.Memories)
 	}
-	total := len(result.Unreads) + len(result.Reads) + resurfaced + len(result.ScheduledBubbleUps)
+	total := len(result.Unreads) + len(result.Reads) + resurfaced + scheduled
 	summary := fmt.Sprintf("%d notification(s)", total)
 	if len(result.Unreads) > 0 {
 		summary += fmt.Sprintf(" (%d unread)", len(result.Unreads))
