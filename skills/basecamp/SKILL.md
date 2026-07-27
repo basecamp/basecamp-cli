@@ -218,9 +218,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 that accepts a URL directly** (`show`, `comments show`, `comments thread`,
 `attachments …`), which extract the IDs for you. Only `comments show` and
 `comments thread` verify the URL's host and account before any fetch. For other
-URL-accepting commands, only pass URLs from a trusted Basecamp host: `basecamp url
-parse` extracts IDs but does **not** validate the URL's origin, so parsing an
-attacker-controlled path yields trusted-looking IDs.
+URL-accepting commands, only pass URLs from a trusted Basecamp host:
+`basecamp url parse` extracts IDs but does **not** validate the URL's origin, so
+parsing an attacker-controlled path yields trusted-looking IDs.
 
 ```bash
 basecamp url parse "https://3.basecamp.com/2914079/buckets/41746046/messages/9478142982#__recording_9488783598" --json

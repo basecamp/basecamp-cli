@@ -979,3 +979,18 @@ func TestThreadAdoptsURLAccountWhenUnconfigured(t *testing.T) {
 	}
 	assert.Contains(t, replyCmd, "--account 77777")
 }
+
+func TestThreadRejectsZeroFocusComment(t *testing.T) {
+	// A nil/all-zero focus Get must fail as empty_response before dereferencing
+	// trigger.Parent — never panic, never misreport it as "no parent recording".
+	fx := defaultThreadFixture()
+	fx.focusJSON = `{}`
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	_, _, err := runThreadCmd(t, transport, output.FormatJSON, "456")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, "empty_response", outErr.Code)
+	assert.NotContains(t, outErr.Message, "no parent recording")
+}

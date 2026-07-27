@@ -313,6 +313,18 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 		return convertSDKError(err)
 	}
 
+	// Guard an empty/zero focus before dereferencing it — a nil or all-zero
+	// comment (empty API response or a deserialization regression) would panic on
+	// trigger.Parent or misreport the zero value as a real comment missing its
+	// parent. A real comment always has a positive ID. Mirrors `comments show`.
+	if trigger == nil || trigger.ID == 0 {
+		return &output.Error{
+			Code:    "empty_response",
+			Message: "API returned empty data",
+			Hint:    "The response contained no comment. This may indicate a deserialization issue.",
+		}
+	}
+
 	// Step 2 — reply target + parent safety. A reply routes to the parent
 	// recording, never to the comment; without a parent it cannot be built.
 	if trigger.Parent == nil || trigger.Parent.ID == 0 {
