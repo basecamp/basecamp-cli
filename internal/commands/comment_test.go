@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -421,4 +422,59 @@ func TestCommentsShowRejectsZeroComment(t *testing.T) {
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, "empty_response", outErr.Code)
+}
+
+// --- Iteration 2: account provenance in reply breadcrumbs -------------------
+
+func TestHasPersistentAccount(t *testing.T) {
+	mk := func(id, src string) *config.Config {
+		c := &config.Config{AccountID: id, Sources: map[string]string{}}
+		if src != "" {
+			c.Sources["account_id"] = src
+		}
+		return c
+	}
+	// No account → not persistent.
+	assert.False(t, hasPersistentAccount(mk("", "")))
+	// Process-local sources → not persistent (follow-ups must echo --account).
+	assert.False(t, hasPersistentAccount(mk("99999", string(config.SourceFlag))))
+	assert.False(t, hasPersistentAccount(mk("99999", string(config.SourcePrompt))))
+	// On-disk / exported-env sources → persistent (follow-ups inherit it).
+	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceGlobal))))
+	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceLocal))))
+	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceEnv))))
+}
+
+func TestReplyAccountArg(t *testing.T) {
+	assert.Equal(t, "", replyAccountArg(true, "99999"))                  // persistent → no echo
+	assert.Equal(t, "", replyAccountArg(false, ""))                      // nothing to echo
+	assert.Equal(t, " --account 99999", replyAccountArg(false, "99999")) // process-local → echo
+}
+
+func TestCommentsShowFlagAccountEchoedInBreadcrumb(t *testing.T) {
+	// An account supplied solely via the process-local --account flag is not
+	// persistent, so the reply breadcrumb must spell out --account.
+	comment := `{"id":456,"type":"Comment","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
+	stdout := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, output.FormatJSON, stdout, &bytes.Buffer{})
+	app.Flags.Hints = true
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+
+	cmd := NewCommentsCmd()
+	cmd.SetArgs([]string{"show", "456"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var env threadEnvelope
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &env))
+	var replyCmd string
+	for _, b := range env.Breadcrumbs {
+		if b.Action == "reply" {
+			replyCmd = b.Cmd
+		}
+	}
+	assert.Contains(t, replyCmd, "--account 99999")
 }

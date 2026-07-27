@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/editor"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -161,11 +162,12 @@ You can pass either a comment ID or a Basecamp URL:
 
 			app := appctx.FromContext(cmd.Context())
 
-			// Whether the account was already in persistent config (flag/env/file)
-			// before resolution. When it wasn't — adopted from the URL or resolved
-			// interactively — the advertised follow-ups must spell out --account so
-			// they remain runnable in a fresh process.
-			hadConfiguredAccount := app.Config.AccountID != ""
+			// Whether the account is persistently available (on-disk config or env)
+			// before resolution. When it isn't — adopted from the URL, resolved
+			// interactively, or passed via the process-local --account flag — the
+			// advertised follow-ups must spell out --account so they remain runnable
+			// in a fresh process.
+			persistentAccount := hasPersistentAccount(app.Config)
 
 			// Same safe front door as `thread`: classify, guard the account, and
 			// validate the ID — so a plain recording URL or wrong-account URL is
@@ -174,7 +176,7 @@ You can pass either a comment ID or a Basecamp URL:
 			if err != nil {
 				return err
 			}
-			accountArg := replyAccountArg(hadConfiguredAccount, app.Config.AccountID)
+			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
 
 			comment, err := app.Account().Comments().Get(cmd.Context(), commentID)
 			if err != nil {
@@ -294,15 +296,16 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	// and `comments show` are equally safe: a plain recording URL / collection is
 	// rejected toward `basecamp show`, a wrong-account URL and a non-positive ID
 	// are rejected before any API call.
-	hadConfiguredAccount := app.Config.AccountID != ""
+	persistentAccount := hasPersistentAccount(app.Config)
 	triggerID, err := resolveCommentTrigger(cmd, app, arg)
 	if err != nil {
 		return err
 	}
-	// When the account was adopted from the URL (or resolved interactively) rather
-	// than already configured, the advertised follow-ups must carry --account so
-	// they stay runnable in a fresh process.
-	accountArg := replyAccountArg(hadConfiguredAccount, app.Config.AccountID)
+	// When the account isn't persistently available (adopted from the URL,
+	// resolved interactively, or passed via the process-local --account flag), the
+	// advertised follow-ups must carry --account so they stay runnable in a fresh
+	// process.
+	accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
 
 	// Step 1 — resolve the focus comment.
 	trigger, err := app.Account().Comments().Get(cmd.Context(), triggerID)
@@ -498,13 +501,32 @@ func resolveCommentTrigger(cmd *cobra.Command, app *appctx.App, arg string) (int
 	return id, nil
 }
 
+// hasPersistentAccount reports whether the account is available to a fresh
+// process without re-specifying it — i.e. backed by an on-disk config layer or
+// an exported env var. A flag- or prompt-sourced account is process-local: it
+// lives only for this invocation, so an advertised follow-up copied into a new
+// process would fail to resolve it. Call this BEFORE resolveCommentTrigger, so a
+// URL-adopted / interactively-resolved account (AccountID empty at entry) also
+// reads as non-persistent.
+func hasPersistentAccount(cfg *config.Config) bool {
+	if cfg.AccountID == "" {
+		return false
+	}
+	switch cfg.Sources["account_id"] {
+	case string(config.SourceFlag), string(config.SourcePrompt):
+		return false
+	default:
+		return true
+	}
+}
+
 // replyAccountArg returns " --account <id>" to append to an advertised
-// follow-up command when the account was not already in persistent config
-// (adopted from the URL or resolved interactively this run), so the command
-// stays runnable in a fresh process; otherwise "". A persistent account needs no
-// echo — the follow-up inherits it.
-func replyAccountArg(hadConfiguredAccount bool, accountID string) string {
-	if hadConfiguredAccount || accountID == "" {
+// follow-up command when the account is not persistently available (adopted from
+// the URL, resolved interactively, or passed via the process-local --account
+// flag this run), so the command stays runnable in a fresh process; otherwise
+// "". A persistent account needs no echo — the follow-up inherits it.
+func replyAccountArg(persistentAccount bool, accountID string) string {
+	if persistentAccount || accountID == "" {
 		return ""
 	}
 	return " --account " + accountID
