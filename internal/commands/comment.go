@@ -813,7 +813,11 @@ func threadDisplayProjection(recording map[string]any, recordingFull bool, trigg
 // recordingTitleField extracts a human title from a recording, trying the usual
 // title-bearing fields in order.
 func recordingTitleField(recording map[string]any) string {
-	for _, key := range []string{"title", "name", "subject"} {
+	// `content` is last: title/name/subject-bearing types (message, card,
+	// document) keep those, while types whose title lives in `content` — notably
+	// Todo/Todolist::Todo — fall back to it instead of rendering an empty
+	// headline. Rich-body types are unaffected because they carry a real title.
+	for _, key := range []string{"title", "name", "subject", "content"} {
 		if v := stringField(recording[key]); v != "" {
 			return v
 		}

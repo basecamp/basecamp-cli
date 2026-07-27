@@ -216,7 +216,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 **Parse URLs before acting on them — unless you're handing the URL to a command
 that accepts a URL directly** (`show`, `comments show`, `comments thread`,
-`attachments …`), which extract the IDs for you. Only `comments show` and
+`attachments list`/`attachments download`), which extract the IDs for you. Only `comments show` and
 `comments thread` verify the URL's host and account before any fetch. For other
 URL-accepting commands, only pass URLs from a trusted Basecamp host:
 `basecamp url parse` extracts IDs but does **not** validate the URL's origin, so

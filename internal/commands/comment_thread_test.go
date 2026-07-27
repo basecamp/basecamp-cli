@@ -994,3 +994,27 @@ func TestThreadRejectsZeroFocusComment(t *testing.T) {
 	assert.Equal(t, "empty_response", outErr.Code)
 	assert.NotContains(t, outErr.Message, "no parent recording")
 }
+
+func TestRecordingTitleFieldFallsBackToContent(t *testing.T) {
+	// Todo-like parent: title/name/subject absent, content holds the title.
+	assert.Equal(t, "Buy milk", recordingTitleField(map[string]any{"content": "Buy milk"}))
+	// A real title still wins over content (rich-body types keep their title).
+	assert.Equal(t, "Weekly update", recordingTitleField(map[string]any{"title": "Weekly update", "content": "<p>long body</p>"}))
+	// subject (messages) beats content too.
+	assert.Equal(t, "Kickoff", recordingTitleField(map[string]any{"subject": "Kickoff", "content": "<p>body</p>"}))
+	// Nothing title-bearing → empty.
+	assert.Equal(t, "", recordingTitleField(map[string]any{"id": 1}))
+}
+
+func TestThreadTodoParentHeadlineUsesContent(t *testing.T) {
+	// A Todo parent (content-as-title) must not render an empty headline.
+	fx := defaultThreadFixture()
+	parent := map[string]any{"id": 123, "type": "Todo", "content": "Ship the release"}
+	pb, _ := json.Marshal(parent)
+	fx.parentJSON = string(pb)
+	transport := &showTrackingTransport{responderWithHeaders: fx.responder()}
+
+	stdout, _, err := runThreadCmd(t, transport, output.FormatStyled, "456")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Ship the release")
+}
