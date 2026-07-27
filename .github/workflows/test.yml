@@ -246,6 +246,70 @@ jobs:
           fi
           make skill-eval
 
+  installer-bash32:
+    name: Installer (bash 3.2)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check for installer changes
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          # test.yml is in its own filter so the job proves itself on the PR
+          # that introduces or edits it.
+          filters: |
+            installer:
+              - 'scripts/install.sh'
+              - 'e2e/installer.bats'
+              - '.github/workflows/test.yml'
+
+      - name: Assert /bin/bash is Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # Same guard as the installer-smoke canary: honest 3.2 coverage
+          # instead of silently degrading if a future runner image changes
+          # /bin/bash. The e2e bats suite cannot provide this — bats 1.11.0
+          # execs `env bash` at every layer, so the interpreter is not
+          # pinnable through it.
+          /bin/bash -c '[[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" == "3.2" ]]' \
+            || { echo "/bin/bash is not Bash 3.2:" >&2; /bin/bash --version >&2; exit 1; }
+
+      - name: Syntax-check installer under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: /bin/bash -n scripts/install.sh
+
+      - name: Piped execution under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # PATH=/nonexistent forces the curl guard: the run must fail with
+          # the guard's own message, never with an unbound-variable error
+          # (the #558 regression class). A bare out=$(...) assignment of the
+          # failing pipeline would exit this step immediately under the
+          # runner's `bash -e -o pipefail`, so capture via if-else.
+          status=0
+          if out=$(cat scripts/install.sh | PATH=/nonexistent /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "expected the curl guard to fail without curl on PATH" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'curl is required but not installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest

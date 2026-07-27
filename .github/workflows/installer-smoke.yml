@@ -13,12 +13,14 @@ on:
     branches: [main]
     paths:
       - scripts/install.sh
+      - scripts/install.ps1
 
 permissions: {}
 
 # The post-install skill step reaches for the OS keyring; on a headless macOS
 # runner the `security` tool blocks forever on the locked keychain (caught by
-# this canary's first run). Same escape hatch the Test workflow uses.
+# this canary's first run). Also keeps the Windows legs out of Credential
+# Manager. Same escape hatch the Test workflow uses.
 env:
   BASECAMP_NO_KEYRING: "1"
 
@@ -77,3 +79,81 @@ jobs:
           curl -fsSL "https://basecamp.com/install-cli?sha=${GITHUB_SHA}" | /bin/bash
 
           "$BASECAMP_BIN_DIR/basecamp" version
+
+  windows:
+    name: Windows (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell (5.1) is the stock interpreter the README's `irm | iex`
+        # shape targets and exercises install.ps1's 5.1-specific branches;
+        # pwsh covers PowerShell 7.
+        shell: [powershell, pwsh]
+    steps:
+      - name: Install from the published endpoint
+        # GitHub Actions does not evaluate expressions in steps[*].shell, so a
+        # pwsh launcher step invokes the matrix interpreter explicitly. The
+        # documented `irm | iex` shape — fetch and execution both — runs
+        # entirely inside the target interpreter; the launcher only sets env
+        # (inherited by the child) and asserts afterwards.
+        shell: pwsh
+        env:
+          SMOKE_SHELL: ${{ matrix.shell }}
+        run: |
+          # Scratch USERPROFILE + explicit BASECAMP_BIN_DIR contain the
+          # installer's and the child basecamp.exe's writes (Go os.UserHomeDir
+          # reads USERPROFILE). Ensure-UserPath's HKCU PATH write is
+          # unavoidable but disposable on ephemeral runners.
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'installer-smoke'
+          New-Item -ItemType Directory -Force -Path (Join-Path $smokeRoot 'home') | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $smokeRoot 'bin') | Out-Null
+          $env:USERPROFILE = Join-Path $smokeRoot 'home'
+          $env:BASECAMP_BIN_DIR = Join-Path $smokeRoot 'bin'
+          $env:BASECAMP_SKIP_SETUP = '1'
+          $env:BASECAMP_SETUP_AGENT = 'none'
+
+          # Documented Quick Start shape, cache-busted: raw.githubusercontent.com
+          # varies its cache key on unknown query params, so ?sha= keeps each
+          # commit's request cache-distinct (no basecamp.com endpoint exists
+          # for the PowerShell installer). Single-quoted so the inner
+          # interpreter expands $env:GITHUB_SHA itself.
+          & $env:SMOKE_SHELL -NoProfile -Command 'irm "https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1?sha=$env:GITHUB_SHA" | iex'
+          if ($LASTEXITCODE -ne 0) { throw "installer exited $LASTEXITCODE under $env:SMOKE_SHELL" }
+
+          & "$env:BASECAMP_BIN_DIR\basecamp.exe" version
+          if ($LASTEXITCODE -ne 0) { throw "basecamp version exited $LASTEXITCODE" }
+
+  notify:
+    name: Notify on failure
+    needs: [linux, macos, windows]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: File or update canary failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          LINUX_RESULT: ${{ needs.linux.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          TITLE="Installer canary failure"
+          BODY="The installer canary failed (event: ${EVENT_NAME}). Legs: linux=${LINUX_RESULT}, macos=${MACOS_RESULT}, windows=${WINDOWS_RESULT}. See ${RUN_URL} for details."
+
+          # Check for existing open issue before creating a new one
+          existing=$(gh issue list --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$BODY" || true
+          else
+            gh issue create --title "$TITLE" --body "$BODY" || true
+          fi
+
+          # Always emit annotation so the failure is visible in the workflow summary
+          echo "::error::Installer canary failed. See ${RUN_URL}"
