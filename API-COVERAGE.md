@@ -6,11 +6,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 44 | 166 |
+| ✅ Implemented | 45 | 167 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **48** | **178** |
+| **Total tracked** | **49** | **179** |
 
-**100% coverage of tracked in-scope API** (166/166 endpoints). This is not a
+**100% coverage of tracked in-scope API** (167/167 endpoints). This is not a
 complete bc-api parity figure; the other five BC5 sections introduced by
 bc-api#410 remain untracked and outside this coverage matrix.
 
@@ -18,7 +18,7 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.8.1-0.20260725044648-3d4ec395922c — adds the `Wormholes` service (`Create`/`Update`/`Delete`) and decodes `CardTable.Wormholes` (`card_table_wormholes`, basecamp/basecamp-sdk#397), consumed by `cards wormholes` and `cards move --to-wormhole`; also carries `Todolists.Reposition` (`PUT /todosets/todolists/{id}/position.json`, basecamp/basecamp-sdk#398) behind `todolists position`, create-time `visible_to_clients` support behind `todolists create --visible-to-clients`, `Campfires.UpdateLine` (`PUT /chats/{c}/lines/{l}`, basecamp/basecamp-sdk#295) behind `chat update`, and the BC5 `Tools.Create` create-by-type reshape. API date 2026-07-24.
+**SDK version:** v0.9.1-0.20260727173625-bb363c847b92 — reshapes `MessageTypes` to the bucket-scoped categories API (`/buckets/{id}/categories…`, basecamp/basecamp-sdk#393), consumed by the now project-scoped `messagetypes` commands; adds the Bubble Ups successor surface (`MyNotifications.BubbleUps` via `GET /my/readings/bubble_ups.json` + `GetWithOptions`/`WithLimitBubbleUps`, basecamp/basecamp-sdk#426) behind `notifications bubbleups` and `notifications list --limit-bubble-ups`; adds create-time `visible_to_clients` on `Tools.Create` (basecamp/basecamp-sdk#419) behind `tools create --visible-to-clients`; and carries model-only Door fields on Recording (basecamp/basecamp-sdk#431) and activity-timeline event fields (basecamp/basecamp-sdk#424) that flow through `--json`. API date 2026-07-26.
 
 ## Coverage by Section
 
@@ -32,18 +32,19 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | todolists | 9 | `todolists` | ✅ | BC4 | - | list, show, create, update, position |
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
-| dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition. `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call |
+| dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition. `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call; create-time `visible_to_clients` behind `tools create --visible-to-clients` (chat/kanban only) |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
 | gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active |
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
-| message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete |
+| message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete. Bucket-scoped (`/buckets/{id}/categories…`); commands are project-scoped via `--in`/`--project` |
 | campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/update/delete. @mentions in content |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, create, update. @mentions in content |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
+| bubble_ups | 1 | `notifications bubbleups` | ✅ | BC5 | - | Dedicated Bubble Ups list (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups` |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |

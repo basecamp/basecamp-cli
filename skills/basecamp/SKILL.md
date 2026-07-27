@@ -205,6 +205,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Completed assignments | `basecamp assignments completed --json` |
 | Notifications | `basecamp notifications --json` |
 | Mark notification read | `basecamp notifications read <id> --json` |
+| All bubble-ups (BC5) | `basecamp notifications bubbleups --json` |
 | Gauges (account-wide) | `basecamp gauges list --json` |
 | Gauge needles | `basecamp gauges needles --in <project> --json` |
 | Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |
@@ -656,8 +657,10 @@ basecamp messages create "For the client" "..." --visible-to-clients --in <proje
 ```
 
 **Client visibility at create time:** `messages create`, `todolists create`,
-`schedule create`, and `checkins question create` accept `--visible-to-clients`
-to post a client-visible recording in one call. Omitting the flag uses the
+`schedule create`, `checkins question create`, and `tools create` accept
+`--visible-to-clients` to post a client-visible recording in one call (for
+`tools create`, only chat and kanban_board tool types honor it — other types
+inherit the project default). Omitting the flag uses the
 server default, which is context-dependent: **team-only when you post as a team
 member**, but a **client-authenticated caller always creates client-visible
 records** (an explicit `--visible-to-clients=false` is overridden server-side for
@@ -881,9 +884,16 @@ basecamp notifications --json                         # List (page 1)
 basecamp notifications list --page 2 --json           # Page 2
 basecamp notifications read <id> --json               # Mark as read
 basecamp notifications read <id> <id> --page 2 --json # Mark from page 2
+basecamp notifications bubbleups --json               # All bubble-ups (BC5)
+basecamp notifications list --limit-bubble-ups --json # Cap inline bubble-ups at 2
 ```
 
 **Note:** `read` resolves notification IDs from the specified page. Use `--page` to match the page you listed.
+
+**Bubble Ups (BC5):** `bubbleups` lists all current and scheduled bubble-ups
+(paginated; `--page` fetches a single page). `list --limit-bubble-ups` keeps the
+notification feed compact: at most 2 inline bubble-ups, scheduled ones omitted,
+with the uncapped counts still reported.
 
 ### Accounts
 
