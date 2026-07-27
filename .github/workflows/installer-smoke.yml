@@ -56,9 +56,6 @@ jobs:
           # Assert the deterministic installed path, not ambient PATH.
           "$BASECAMP_BIN_DIR/basecamp" version
 
-          # TEMPORARY notify drill — reverted before review.
-          exit 1
-
   macos:
     name: macOS (stock bash 3.2)
     runs-on: macos-latest
