@@ -1,0 +1,20 @@
+e2e/installer.bats
+  s_e482278ba88739::t_14d784910995eb 259-263
+  s_e482278ba88739::t_7f87e8ea4eb99c 275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d539249e6dd28224da0e2452375f726117298438",
+  "prompts": {},
+  "sessions": {
+    "s_e482278ba88739": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1b82ec-bfac-4598-92d4-84af692fce2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
