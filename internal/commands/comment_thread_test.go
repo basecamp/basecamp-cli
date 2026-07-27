@@ -966,4 +966,16 @@ func TestThreadAdoptsURLAccountWhenUnconfigured(t *testing.T) {
 
 	env := decodeThread(t, stdout)
 	assert.EqualValues(t, 456, env.Data["focus"].(map[string]any)["comment_id"])
+
+	// The reply contract stays runnable in a fresh process: reply_target names
+	// the adopted account, and the reply breadcrumb spells out --account.
+	replyTarget := env.Data["reply_target"].(map[string]any)
+	assert.Equal(t, "77777", replyTarget["account_id"])
+	var replyCmd string
+	for _, b := range env.Breadcrumbs {
+		if b.Action == "reply" {
+			replyCmd = b.Cmd
+		}
+	}
+	assert.Contains(t, replyCmd, "--account 77777")
 }

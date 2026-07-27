@@ -391,10 +391,34 @@ func TestCommentsShowAdoptsURLAccountWhenUnconfigured(t *testing.T) {
 	comment := `{"id":456,"type":"Comment","parent":{"id":123,"type":"Todo"},"creator":{"id":7,"name":"Jane"}}`
 	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(comment)}
 	url := "https://3.basecamp.com/77777/buckets/1/comments/456"
-	_, err := runCommentsShowAccount(t, transport, "", url)
+	stdout, err := runCommentsShowAccount(t, transport, "", url)
 	require.NoError(t, err)
 
 	reqs := transport.getRequests()
 	require.Len(t, reqs, 1, "one Get, no extra calls")
 	assert.Contains(t, reqs[0], "/77777/", "the fetch must target the URL's account")
+
+	// The reply contract stays runnable in a fresh process: reply_target names
+	// the adopted account, and the reply breadcrumb spells out --account.
+	var env threadEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env))
+	assert.Equal(t, "77777", env.Data["reply_target"].(map[string]any)["account_id"])
+	var replyCmd string
+	for _, b := range env.Breadcrumbs {
+		if b.Action == "reply" {
+			replyCmd = b.Cmd
+		}
+	}
+	assert.Contains(t, replyCmd, "--account 77777")
+}
+
+func TestCommentsShowRejectsZeroComment(t *testing.T) {
+	// An all-zero comment ({}) must fail as empty_response, not a bogus success
+	// masked by the non-empty enrichment mention map.
+	transport := &showTrackingTransport{responderWithHeaders: showCommentResponder(`{}`)}
+	_, _, err := runCommentsShow(t, transport, output.FormatJSON, "456")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, "empty_response", outErr.Code)
 }

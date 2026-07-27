@@ -161,6 +161,12 @@ You can pass either a comment ID or a Basecamp URL:
 
 			app := appctx.FromContext(cmd.Context())
 
+			// Whether the account was already in persistent config (flag/env/file)
+			// before resolution. When it wasn't — adopted from the URL or resolved
+			// interactively — the advertised follow-ups must spell out --account so
+			// they remain runnable in a fresh process.
+			hadConfiguredAccount := app.Config.AccountID != ""
+
 			// Same safe front door as `thread`: classify, guard the account, and
 			// validate the ID — so a plain recording URL or wrong-account URL is
 			// rejected here instead of 404ing or silently targeting elsewhere.
@@ -168,10 +174,24 @@ You can pass either a comment ID or a Basecamp URL:
 			if err != nil {
 				return err
 			}
+			accountArg := replyAccountArg(hadConfiguredAccount, app.Config.AccountID)
 
 			comment, err := app.Account().Comments().Get(cmd.Context(), commentID)
 			if err != nil {
 				return convertSDKError(err)
+			}
+
+			// Guard an empty/zero comment before enrichment. app.OK's checkZeroData
+			// rejects an all-zero recording, but the non-empty mention map we add
+			// below would mask it — reporting a bogus success (comment #0, empty
+			// content) instead of empty_response. A real comment always has a
+			// positive ID.
+			if comment == nil || comment.ID == 0 {
+				return &output.Error{
+					Code:    "empty_response",
+					Message: "API returned empty data",
+					Hint:    "The response contained no comment. This may indicate a deserialization issue.",
+				}
 			}
 
 			creatorName := ""
@@ -199,14 +219,14 @@ You can pass either a comment ID or a Basecamp URL:
 			breadcrumbs := make([]output.Breadcrumb, 0, 2)
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("basecamp comments update %d <text>", commentID),
+				Cmd:         fmt.Sprintf("basecamp comments update %d <text>%s", commentID, accountArg),
 				Description: "Update comment",
 			})
 			if comment.Parent != nil && comment.Parent.ID != 0 {
-				m["reply_target"] = map[string]any{"recording_id": comment.Parent.ID}
+				m["reply_target"] = replyTarget(comment.Parent.ID, app.Config.AccountID)
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "reply",
-					Cmd:         fmt.Sprintf("basecamp comments create %d <text>", comment.Parent.ID),
+					Cmd:         fmt.Sprintf("basecamp comments create %d <text>%s", comment.Parent.ID, accountArg),
 					Description: "Reply on the parent recording",
 				})
 			}
@@ -274,10 +294,15 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	// and `comments show` are equally safe: a plain recording URL / collection is
 	// rejected toward `basecamp show`, a wrong-account URL and a non-positive ID
 	// are rejected before any API call.
+	hadConfiguredAccount := app.Config.AccountID != ""
 	triggerID, err := resolveCommentTrigger(cmd, app, arg)
 	if err != nil {
 		return err
 	}
+	// When the account was adopted from the URL (or resolved interactively) rather
+	// than already configured, the advertised follow-ups must carry --account so
+	// they stay runnable in a fresh process.
+	accountArg := replyAccountArg(hadConfiguredAccount, app.Config.AccountID)
 
 	// Step 1 — resolve the focus comment.
 	trigger, err := app.Account().Comments().Get(cmd.Context(), triggerID)
@@ -331,7 +356,7 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 		"focus":          focus,
 		"comments":       selected,
 		"comments_meta":  meta,
-		"reply_target":   map[string]any{"recording_id": parentID},
+		"reply_target":   replyTarget(parentID, app.Config.AccountID),
 	}
 	// A fully-fetched parent is `recording`; a sparse ref (unmapped type) is
 	// `recording_ref` so consumers can tell the two apart.
@@ -360,13 +385,13 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	if len(trigger.ContentAttachments) > 0 {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "download",
-			Cmd:         fmt.Sprintf("basecamp attachments download %d --type comment", trigger.ID),
+			Cmd:         fmt.Sprintf("basecamp attachments download %d --type comment%s", trigger.ID, accountArg),
 			Description: "Download comment attachments",
 		})
 	}
 	breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 		Action:      "reply",
-		Cmd:         fmt.Sprintf("basecamp comments create %s <text>", parentIDStr),
+		Cmd:         fmt.Sprintf("basecamp comments create %s <text>%s", parentIDStr, accountArg),
 		Description: "Reply on the parent recording",
 	})
 
@@ -471,6 +496,29 @@ func resolveCommentTrigger(cmd *cobra.Command, app *appctx.App, arg string) (int
 		return 0, err
 	}
 	return id, nil
+}
+
+// replyAccountArg returns " --account <id>" to append to an advertised
+// follow-up command when the account was not already in persistent config
+// (adopted from the URL or resolved interactively this run), so the command
+// stays runnable in a fresh process; otherwise "". A persistent account needs no
+// echo — the follow-up inherits it.
+func replyAccountArg(hadConfiguredAccount bool, accountID string) string {
+	if hadConfiguredAccount || accountID == "" {
+		return ""
+	}
+	return " --account " + accountID
+}
+
+// replyTarget builds the machine reply-target contract: the parent recording to
+// reply on, plus the account it belongs to so a consumer can construct a
+// fully-qualified reply regardless of its own configuration.
+func replyTarget(recordingID int64, accountID string) map[string]any {
+	rt := map[string]any{"recording_id": recordingID}
+	if accountID != "" {
+		rt["account_id"] = accountID
+	}
+	return rt
 }
 
 // fetchThreadParent loads the full parent recording using a type-derived
