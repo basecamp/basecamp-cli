@@ -16,6 +16,12 @@ on:
 
 permissions: {}
 
+# The post-install skill step reaches for the OS keyring; on a headless macOS
+# runner the `security` tool blocks forever on the locked keychain (caught by
+# this canary's first run). Same escape hatch the Test workflow uses.
+env:
+  BASECAMP_NO_KEYRING: "1"
+
 concurrency:
   group: installer-smoke-${{ github.ref }}
   cancel-in-progress: false
