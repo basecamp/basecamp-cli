@@ -17,13 +17,13 @@ on:
 
 permissions: {}
 
-# The post-install skill step reaches for the OS keyring; on a headless macOS
-# runner the `security` tool blocks forever on the locked keychain (caught by
-# this canary's first run). Also keeps the Windows legs out of Credential
-# Manager. Same escape hatch the Test workflow uses.
-env:
-  BASECAMP_NO_KEYRING: "1"
-
+# Deliberately NO workflow-level BASECAMP_NO_KEYRING: the deployed installer
+# sets it per-command for its own best-effort children (the belt for release
+# binaries <= v0.7.2, whose eager startup keyring probe hangs on a locked
+# headless keychain), and the canary must exercise that deployed belt — on the
+# macOS leg a missing belt means a hung `security` child, a 10-minute timeout,
+# and a notify. The direct `basecamp version` asserts don't need the var:
+# help/version skip the CLI's PersistentPreRunE and never reach the probe.
 concurrency:
   group: installer-smoke-${{ github.ref }}
   cancel-in-progress: false

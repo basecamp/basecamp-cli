@@ -499,12 +499,18 @@ binary_supports_setup_agent() {
 # Claude-first bug — only an *explicitly* selected agent is connected. `all`
 # runs every per-agent setup the binary supports; an unset, auto, or ambiguous
 # selector installs the shared skill only (`skill install`).
+#
+# Every real invocation carries BASECAMP_NO_KEYRING=1, per-command rather than
+# exported: these calls never touch credentials, but release binaries up to
+# v0.7.2 probe the OS keyring on startup for every command, and on a locked
+# headless keychain (CI, ssh) that probe blocks forever. The `setup --help`
+# capability probes stay bare — help short-circuits before the probe.
 post_install_setup() {
   local binary_name="$1"
   local bin="$BIN_DIR/$binary_name"
 
   if binary_supports_setup_agents "$bin"; then
-    "$bin" setup agents || true
+    BASECAMP_NO_KEYRING=1 "$bin" setup agents || true
     return 0
   fi
 
@@ -514,9 +520,9 @@ post_install_setup() {
       # agent id as a stray positional arg and launches the INTERACTIVE wizard,
       # violating the non-interactive contract. Degrade to the shared skill.
       if binary_supports_setup_agent "$bin" "${BASECAMP_SETUP_AGENT}"; then
-        "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+        BASECAMP_NO_KEYRING=1 "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
       else
-        "$bin" skill install || true
+        BASECAMP_NO_KEYRING=1 "$bin" skill install || true
       fi
       ;;
     all)
@@ -525,16 +531,16 @@ post_install_setup() {
       local ran_agent=0 agent
       for agent in claude codex; do
         if binary_supports_setup_agent "$bin" "$agent"; then
-          "$bin" setup "$agent" || true
+          BASECAMP_NO_KEYRING=1 "$bin" setup "$agent" || true
           ran_agent=1
         fi
       done
-      [[ "$ran_agent" -eq 1 ]] || "$bin" skill install || true
+      [[ "$ran_agent" -eq 1 ]] || BASECAMP_NO_KEYRING=1 "$bin" skill install || true
       ;;
     *)
       # Intent-neutral on old binaries: install the shared skill, never pick an
       # agent. The user connects one via the printed "Next steps".
-      "$bin" skill install || true
+      BASECAMP_NO_KEYRING=1 "$bin" skill install || true
       ;;
   esac
 }

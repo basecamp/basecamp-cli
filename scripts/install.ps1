@@ -222,35 +222,45 @@ function Test-InteractiveSession {
 # binary supports; unset/auto/ambiguous installs the shared skill only. Each
 # native call is individually guarded so a nonzero exit never aborts the install.
 function Invoke-PostInstallSetup([string]$Binary) {
-  try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
+  # None of these calls touch credentials, but release binaries up to v0.7.2
+  # probe the OS keyring on startup for every command, and a locked headless
+  # keychain blocks that probe forever. Set the escape hatch for the duration
+  # of setup only, restoring the caller's value (or absence) on the way out.
+  $savedNoKeyring = $env:BASECAMP_NO_KEYRING
+  $env:BASECAMP_NO_KEYRING = '1'
+  try {
+    try { $help = & $Binary setup --help 2>$null } catch { $help = '' }
 
-  if ($help -match '(?m)^\s+agents\s') {
-    try { & $Binary setup agents } catch { }
-    return
-  }
+    if ($help -match '(?m)^\s+agents\s') {
+      try { & $Binary setup agents } catch { }
+      return
+    }
 
-  $selector = $env:BASECAMP_SETUP_AGENT
-  if ($selector -in @('claude', 'codex')) {
-    # Capability-check first: an old `setup` parent accepts an unadvertised agent
-    # id as a stray arg and launches the INTERACTIVE wizard. Degrade to the skill.
-    if ($help -match "(?m)^\s+$selector\s") {
-      try { & $Binary setup $selector } catch { }
+    $selector = $env:BASECAMP_SETUP_AGENT
+    if ($selector -in @('claude', 'codex')) {
+      # Capability-check first: an old `setup` parent accepts an unadvertised agent
+      # id as a stray arg and launches the INTERACTIVE wizard. Degrade to the skill.
+      if ($help -match "(?m)^\s+$selector\s") {
+        try { & $Binary setup $selector } catch { }
+      } else {
+        try { & $Binary skill install } catch { }
+      }
+    } elseif ($selector -eq 'all') {
+      $ranAgent = $false
+      foreach ($agent in @('claude', 'codex')) {
+        if ($help -match "(?m)^\s+$agent\s") {
+          # Mark attempted (not succeeded) — matches install.sh's `ran_agent=1`,
+          # which is set regardless of the setup call's exit status.
+          $ranAgent = $true
+          try { & $Binary setup $agent } catch { }
+        }
+      }
+      if (-not $ranAgent) { try { & $Binary skill install } catch { } }
     } else {
       try { & $Binary skill install } catch { }
     }
-  } elseif ($selector -eq 'all') {
-    $ranAgent = $false
-    foreach ($agent in @('claude', 'codex')) {
-      if ($help -match "(?m)^\s+$agent\s") {
-        # Mark attempted (not succeeded) — matches install.sh's `ran_agent=1`,
-        # which is set regardless of the setup call's exit status.
-        $ranAgent = $true
-        try { & $Binary setup $agent } catch { }
-      }
-    }
-    if (-not $ranAgent) { try { & $Binary skill install } catch { } }
-  } else {
-    try { & $Binary skill install } catch { }
+  } finally {
+    $env:BASECAMP_NO_KEYRING = $savedNoKeyring
   }
 }
 

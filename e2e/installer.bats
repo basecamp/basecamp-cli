@@ -48,6 +48,25 @@ write_stub() {
   chmod +x "$STUB_DIR/basecamp"
 }
 
+# write_nk_stub emits a stub that logs BASECAMP_NO_KEYRING alongside argv, for
+# asserting the escape-hatch belt. Separate from write_stub so the existing
+# argv-shape assertions stay byte-exact. mode mirrors write_stub's new/old.
+write_nk_stub() {
+  local mode="$1"
+  {
+    echo '#!/usr/bin/env bash'
+    echo "echo \"nk=\${BASECAMP_NO_KEYRING:-unset} \$@\" >> \"$LOG\""
+    echo 'if [[ "$1 $2" == "setup --help" ]]; then'
+    if [[ "$mode" == "new" ]]; then
+      echo '  echo "  agents  Install the Basecamp skill and connect detected coding agents"'
+    fi
+    echo '  exit 0'
+    echo 'fi'
+    echo 'exit 0'
+  } > "$STUB_DIR/basecamp"
+  chmod +x "$STUB_DIR/basecamp"
+}
+
 run_post_install_setup() {
   run bash -c "
     set -euo pipefail
@@ -157,4 +176,96 @@ run_post_install_setup() {
   # Explicit claude|codex selectors must be capability-checked before dispatch,
   # so an old binary never gets an unadvertised subcommand as a stray arg.
   grep -qF 'match "(?m)^\s+$selector\s"' "$INSTALL_PS1"
+  # The keyring escape hatch belt (see the BASECAMP_NO_KEYRING tests below).
+  grep -q 'BASECAMP_NO_KEYRING' "$INSTALL_PS1"
+}
+
+# Release binaries up to v0.7.2 probe the OS keyring on startup for every
+# command, and a locked headless keychain blocks that probe forever (#568
+# canary discovery). The installer's best-effort children never touch
+# credentials, so they must carry BASECAMP_NO_KEYRING=1 — per-command, not
+# blanket: the `setup --help` capability probe stays bare (help
+# short-circuits before the probe). e2e/run.sh exports BASECAMP_NO_KEYRING
+# suite-wide, so the test shell must unset it first or the stub would see
+# nk=1 even without the installer's belt.
+@test "new binary: real setup calls carry BASECAMP_NO_KEYRING=1, capability probe does not" {
+  write_nk_stub new
+  run bash -c "
+    set -euo pipefail
+    unset BASECAMP_NO_KEYRING
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    post_install_setup basecamp
+    cat '$LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"nk=unset setup --help"* ]]
+  [[ "$output" == *"nk=1 setup agents"* ]]
+}
+
+@test "old binary: skill install fallback carries BASECAMP_NO_KEYRING=1" {
+  write_nk_stub old
+  run bash -c "
+    set -euo pipefail
+    unset BASECAMP_NO_KEYRING
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    post_install_setup basecamp
+    cat '$LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"nk=unset setup --help"* ]]
+  [[ "$output" == *"nk=1 skill install"* ]]
+}
+
+# The Windows canary can never prove the ps1 belt — Credential Manager works
+# headlessly with or without it — so pin the behavior here. The function under
+# test is extracted from install.ps1's AST and evaluated alone: Main never
+# runs, and the installer needs no test hooks.
+@test "install.ps1 Invoke-PostInstallSetup sets and restores BASECAMP_NO_KEYRING" {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    if [[ -n "${CI:-}" ]]; then
+      # Fail closed: a runner image dropping pwsh must surface as a failure,
+      # not silent coverage loss.
+      echo "pwsh is required in CI for install.ps1 belt coverage" >&2
+      return 1
+    fi
+    skip "pwsh not installed"
+  fi
+
+  PS_LOG="$STUB_DIR/ps-calls.log"
+
+  cat > "$STUB_DIR/basecamp-stub.ps1" <<'EOF'
+$rest = $args -join ' '
+$nk = if ($null -eq $env:BASECAMP_NO_KEYRING) { 'unset' } else { $env:BASECAMP_NO_KEYRING }
+Add-Content -LiteralPath $env:PS_LOG "nk=$nk $rest"
+if ($rest -eq 'setup --help') {
+  '  agents  Install the Basecamp skill and connect detected coding agents'
+}
+EOF
+
+  cat > "$STUB_DIR/driver.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALL_PS1_PATH, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "install.ps1 parse errors: $($parseErrors -join '; ')" }
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-PostInstallSetup' }, $true)
+if (-not $fn) { throw 'Invoke-PostInstallSetup not found in install.ps1' }
+# Evaluate only the function definition — the installer's Main never runs.
+. ([scriptblock]::Create($fn.Extent.Text))
+Invoke-PostInstallSetup $env:PS_STUB
+if ($null -ne $env:BASECAMP_NO_KEYRING) { throw "BASECAMP_NO_KEYRING not restored: '$env:BASECAMP_NO_KEYRING'" }
+'restored-ok'
+EOF
+
+  run bash -c "
+    set -euo pipefail
+    unset BASECAMP_NO_KEYRING
+    export PS_LOG='$PS_LOG' PS_STUB='$STUB_DIR/basecamp-stub.ps1' INSTALL_PS1_PATH='$INSTALL_PS1'
+    pwsh -NoProfile -File '$STUB_DIR/driver.ps1'
+    cat '$PS_LOG'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"restored-ok"* ]]
+  [[ "$output" == *"nk=1 setup agents"* ]]
 }
