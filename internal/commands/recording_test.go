@@ -56,6 +56,7 @@ type recordingTransport struct {
 func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	body := ""
 	if req.Body != nil {
+		defer req.Body.Close()
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
