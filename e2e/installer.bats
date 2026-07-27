@@ -256,6 +256,11 @@ if (-not $fn) { throw 'Invoke-PostInstallSetup not found in install.ps1' }
 Invoke-PostInstallSetup $env:PS_STUB
 if ($null -ne $env:BASECAMP_NO_KEYRING) { throw "BASECAMP_NO_KEYRING not restored: '$env:BASECAMP_NO_KEYRING'" }
 'restored-ok'
+# Second pass: a caller-set value must survive, not just absence.
+$env:BASECAMP_NO_KEYRING = '0'
+Invoke-PostInstallSetup $env:PS_STUB
+if ($env:BASECAMP_NO_KEYRING -ne '0') { throw "existing BASECAMP_NO_KEYRING value not restored: '$env:BASECAMP_NO_KEYRING'" }
+'restored-value-ok'
 EOF
 
   run bash -c "
@@ -267,5 +272,6 @@ EOF
   "
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"restored-ok"* ]]
+  [[ "$output" == *"restored-value-ok"* ]]
   [[ "$output" == *"nk=1 setup agents"* ]]
 }
