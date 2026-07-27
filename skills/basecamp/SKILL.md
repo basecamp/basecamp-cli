@@ -190,7 +190,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Read ping thread | `basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent` |
 | Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>"}' --json` |
 | Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
-| Inspect comment / reply atoms | `basecamp comments show <url> --jq '.data \| {reply_target, mention}'` |
+| Inspect comment / reply atoms | `basecamp comments show <url> --json` → `reply_target` + `mention` in `.data` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
 | Show + download | `basecamp todos show <id> --download-attachments --json` |
