@@ -67,6 +67,15 @@ run_post_install_setup() {
   [[ "$output" != *"Basecamp CLI"* ]]  # banner would print if main ran
 }
 
+@test "install.sh runs main when piped to bash" {
+  # Keep PATH empty so main stops at its curl prerequisite without downloading
+  # anything or modifying the test environment.
+  run bash -c "cat '$INSTALL_SH' | PATH='$BATS_TEST_TMPDIR' /bin/bash"
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"curl is required but not installed"* ]]
+  [[ "$output" != *"BASH_SOURCE[0]: unbound variable"* ]]
+}
+
 @test "new binary: post_install_setup dispatches to 'setup agents', never 'setup claude'" {
   run_post_install_setup
   [[ "$status" -eq 0 ]]
