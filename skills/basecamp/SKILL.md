@@ -248,9 +248,11 @@ basecamp comments create 123 "Reply" --in <project>
 # Or get the whole reply-ready context deterministically in one call:
 basecamp comments thread "https://...messages/123#__recording_456" --json
 # .data.reply_target.recording_id  → where to post the reply
+# .data.reply_target.account_id    → the account that reply belongs to (build a fully-qualified command)
 # .data.focus.author.mention.syntax → paste-ready [@Name](mention:SGID)
 # .data.comments                   → surrounding discussion (default window of 41)
 # --all returns every fetched comment; --window N sets the window size
+# When the account came from the URL (none configured), the reply breadcrumb carries --account
 ```
 
 ## Decision Trees
@@ -699,9 +701,9 @@ basecamp comments update <id> "Updated" --in <project>
 
 **Cheap atoms vs. deep context (choose by need):**
 - `comments show <url> --jq '.data | {reply_target, mention}'` — one API call. Returns
-  `reply_target.recording_id` (where a reply is posted — comments are flat) and a
-  paste-ready author `mention` (JSON only; human output shows a reply breadcrumb). Use
-  this for the exact-comment reply atoms.
+  `reply_target` (`recording_id` — where a reply is posted, comments are flat — plus
+  `account_id`) and a paste-ready author `mention` (JSON only; human output shows a reply
+  breadcrumb). Use this for the exact-comment reply atoms.
 - `comments thread <url>` — two extra calls. Adds the full parent recording, the
   surrounding discussion (windowed, truncation-honest), and focus attachments. Use this
   when the surrounding discussion matters.
