@@ -1,0 +1,61 @@
+internal/commands/tools_test.go
+  s_665515bfa28bba::t_1c37fc12a6e2d8 600-649
+internal/commands/tools.go
+  s_665515bfa28bba::t_0a25cba8063ddf 351
+  s_665515bfa28bba::t_5f353d0f70cf16 318,320-322
+  s_665515bfa28bba::t_b1ece70755ed59 260,271-273
+  s_8d633484dc870e::t_df63e070d710bc 274
+e2e/tools.bats
+  s_665515bfa28bba::t_aea120a07d6493 34-44
+internal/commands/commands.go
+  s_665515bfa28bba::t_ec02d67b45e3b9 97
+.surface
+  s_665515bfa28bba::t_c7f4b8b38e75ba 815,10399-10420,10431,13962,16840
+e2e/smoke/smoke_notifications.bats
+  s_665515bfa28bba::t_d1cd734f544da4 21-27
+internal/commands/notifications_test.go
+  s_665515bfa28bba::t_2d568e5ab47001 1-58
+internal/commands/notifications.go
+  s_665515bfa28bba::t_0efcdb4819c1f5 50,55-59,61,66,71,78-84
+  s_665515bfa28bba::t_22b3440aab8915 25-26,31-32,35,42
+  s_665515bfa28bba::t_b96e7c2e3d307e 246-275,278-298
+  s_665515bfa28bba::t_e1d11c44a65e0e 276
+  s_665515bfa28bba::t_0925c81050132b 277
+  s_665515bfa28bba::t_d1d8f5d4f48ad8 101-116
+  s_665515bfa28bba::t_c0bf2f384c09f0 139-145
+  s_bed25e9efe7247::t_875f50b15fa6b6 299-301
+e2e/smoke/.qa-allowlist
+  s_665515bfa28bba::t_aeb6ba6eb3fb20 42-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "40eecb50b704a7751f638a8bc5b6e18e4887784d",
+  "prompts": {},
+  "sessions": {
+    "s_665515bfa28bba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "edcdec74-3ead-4c8b-bc98-c89da103e5ec",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_8d633484dc870e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4052bd49-3f11-461f-9cd9-d20e1314433d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_bed25e9efe7247": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8ee519f-e357-41ec-a393-104a907543b7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
