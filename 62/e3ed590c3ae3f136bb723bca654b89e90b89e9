@@ -1,0 +1,19 @@
+internal/commands/recording_test.go
+  s_665515bfa28bba::t_fab2415491970b 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "62e3ed590c3ae3f136bb723bca654b89e90b89e9",
+  "prompts": {},
+  "sessions": {
+    "s_665515bfa28bba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "edcdec74-3ead-4c8b-bc98-c89da103e5ec",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
