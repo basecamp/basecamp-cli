@@ -1,0 +1,48 @@
+.github/workflows/installer-smoke.yml
+  s_e482278ba88739::t_049dd9b271f8b9 16
+  s_e482278ba88739::t_3dae56b6e1e7cf 82-95,104-119,124-159
+  s_e482278ba88739::t_b2b2709a68fa23 96-103,120-123
+  s_e482278ba88739::t_6bcf088b3ae495 20-26
+internal/auth/keyring.go
+  s_e482278ba88739::t_c0e7001ea07e38 25-30,32-35,38-42,44-56,58,63,65,73,91,95,98,101
+e2e/installer.bats
+  s_7cd130483cb0ba::t_be2b742e237e85 51-69,179-270
+scripts/install.ps1
+  s_4b0e7357e2c0fe::t_da022ada356b08 225-232,234-237,239-258,262-263
+internal/auth/keyring_test.go
+  s_e482278ba88739::t_95af1289f7380c 1-46
+scripts/install.sh
+  s_e482278ba88739::t_d1b8375572ef90 502-507,513,523,525,534,538,543
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "640869be4acf890070fd150ff942b1eb76615693",
+  "prompts": {},
+  "sessions": {
+    "s_4b0e7357e2c0fe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5919a1e2-b689-433b-b4e7-dc3c8266a5d9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_7cd130483cb0ba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e70042f8-3788-4966-bca1-06b7839d136b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_e482278ba88739": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1b82ec-bfac-4598-92d4-84af692fce2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
