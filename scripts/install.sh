@@ -541,7 +541,9 @@ post_install_setup() {
 
 # Guard so sourcing the script (e.g. from tests) doesn't run the installer.
 # The if-form is required: `[[ … ]] && main` returns 1 when sourced, which
-# trips `set -e` in the sourcing shell.
+# trips `set -e` in the sourcing shell. The `:-$0` fallback is also
+# required: bash executing from stdin (curl | bash) or -c leaves BASH_SOURCE
+# unset, and the bare expansion aborts under `set -u` (#568).
 if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
   main "$@"
 fi
