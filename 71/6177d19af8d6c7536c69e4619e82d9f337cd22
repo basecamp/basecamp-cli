@@ -1,0 +1,19 @@
+internal/auth/keyring.go
+  s_e482278ba88739::t_c0e7001ea07e38 25-30,32-35,38-42,44-56,58,63,65,73,91,95,98,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "716177d19af8d6c7536c69e4619e82d9f337cd22",
+  "prompts": {},
+  "sessions": {
+    "s_e482278ba88739": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1b82ec-bfac-4598-92d4-84af692fce2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
