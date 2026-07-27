@@ -1,0 +1,25 @@
+internal/commands/notifications_test.go
+  s_665515bfa28bba::t_c1101562474ea8 31-61
+internal/commands/recording_test.go
+  s_665515bfa28bba::t_792136c8e02979 1-170
+internal/commands/messagetypes.go
+  s_665515bfa28bba::t_fe0663983b442f 36
+internal/commands/notifications.go
+  s_665515bfa28bba::t_35c0ae67aecb90 284-286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "47753cb873195abab9bfa459310c2274e58c6050",
+  "prompts": {},
+  "sessions": {
+    "s_665515bfa28bba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "edcdec74-3ead-4c8b-bc98-c89da103e5ec",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
