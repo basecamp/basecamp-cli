@@ -70,7 +70,7 @@ run_post_install_setup() {
 @test "install.sh runs main when piped to bash" {
   # Keep PATH empty so main stops at its curl prerequisite without downloading
   # anything or modifying the test environment.
-  run bash -c "cat '$INSTALL_SH' | PATH='$BATS_TEST_TMPDIR' /bin/bash"
+  run bash -c "cat '$INSTALL_SH' | PATH='$BATS_TEST_TMPDIR' '$BASH'"
   [[ "$status" -ne 0 ]]
   [[ "$output" == *"curl is required but not installed"* ]]
   [[ "$output" != *"BASH_SOURCE[0]: unbound variable"* ]]
