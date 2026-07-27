@@ -13,6 +13,30 @@ load test_helper
 }
 
 
+# Missing project errors
+
+@test "messagetypes list without project shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp messagetypes list
+  assert_failure
+  assert_output_contains "project"
+}
+
+
+# Flag parsing errors
+
+@test "messagetypes --project without value shows error" {
+  create_credentials
+  create_global_config '{}'
+
+  run basecamp messagetypes list --project
+  assert_failure
+  assert_output_contains "--project requires a value"
+}
+
+
 # Missing context errors
 
 @test "messagetypes show without id shows error" {

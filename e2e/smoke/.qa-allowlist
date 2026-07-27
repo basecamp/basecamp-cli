@@ -4,7 +4,7 @@
 #
 # Format: <test name> # <reason> — <owner>
 
-# Message types — account-wide feature, no create command in scope
+# Message types — per-project categories, no create command in scope
 test_messagetypes_list_returns_message_types # not_found on some servers — smoke
 test_messagetypes_show_returns_message_type_detail # depends on messagetypes list — smoke
 
