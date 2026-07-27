@@ -1,0 +1,23 @@
+internal/commands/comment.go
+  s_de30de6315efa1::t_24a612a48a1d11 316-327
+internal/commands/comment_thread_test.go
+  s_de30de6315efa1::t_1459e428d1d0a8 982-996
+skills/basecamp/SKILL.md
+  s_de30de6315efa1::t_be460380405ea1 221-223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "0d629d3cdeac606c92ce70cfeb1530c71aa9281f",
+  "prompts": {},
+  "sessions": {
+    "s_de30de6315efa1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71154d4b-1560-49da-b82b-c4cc593910ff",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
