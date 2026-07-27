@@ -812,6 +812,7 @@ CMD basecamp msgs trash
 CMD basecamp msgs unpin
 CMD basecamp msgs update
 CMD basecamp notifications
+CMD basecamp notifications bubbleups
 CMD basecamp notifications list
 CMD basecamp notifications read
 CMD basecamp people
@@ -10395,6 +10396,28 @@ FLAG basecamp notifications --stats type=bool
 FLAG basecamp notifications --styled type=bool
 FLAG basecamp notifications --todolist type=string
 FLAG basecamp notifications --verbose type=count
+FLAG basecamp notifications bubbleups --account type=string
+FLAG basecamp notifications bubbleups --agent type=bool
+FLAG basecamp notifications bubbleups --cache-dir type=string
+FLAG basecamp notifications bubbleups --count type=bool
+FLAG basecamp notifications bubbleups --help type=bool
+FLAG basecamp notifications bubbleups --hints type=bool
+FLAG basecamp notifications bubbleups --ids-only type=bool
+FLAG basecamp notifications bubbleups --in type=string
+FLAG basecamp notifications bubbleups --jq type=string
+FLAG basecamp notifications bubbleups --json type=bool
+FLAG basecamp notifications bubbleups --markdown type=bool
+FLAG basecamp notifications bubbleups --md type=bool
+FLAG basecamp notifications bubbleups --no-hints type=bool
+FLAG basecamp notifications bubbleups --no-stats type=bool
+FLAG basecamp notifications bubbleups --page type=int32
+FLAG basecamp notifications bubbleups --profile type=string
+FLAG basecamp notifications bubbleups --project type=string
+FLAG basecamp notifications bubbleups --quiet type=bool
+FLAG basecamp notifications bubbleups --stats type=bool
+FLAG basecamp notifications bubbleups --styled type=bool
+FLAG basecamp notifications bubbleups --todolist type=string
+FLAG basecamp notifications bubbleups --verbose type=count
 FLAG basecamp notifications list --account type=string
 FLAG basecamp notifications list --agent type=bool
 FLAG basecamp notifications list --cache-dir type=string
@@ -10405,6 +10428,7 @@ FLAG basecamp notifications list --ids-only type=bool
 FLAG basecamp notifications list --in type=string
 FLAG basecamp notifications list --jq type=string
 FLAG basecamp notifications list --json type=bool
+FLAG basecamp notifications list --limit-bubble-ups type=bool
 FLAG basecamp notifications list --markdown type=bool
 FLAG basecamp notifications list --md type=bool
 FLAG basecamp notifications list --no-hints type=bool
@@ -13935,6 +13959,7 @@ FLAG basecamp tools create --styled type=bool
 FLAG basecamp tools create --todolist type=string
 FLAG basecamp tools create --type type=string
 FLAG basecamp tools create --verbose type=count
+FLAG basecamp tools create --visible-to-clients type=bool
 FLAG basecamp tools delete --account type=string
 FLAG basecamp tools delete --agent type=bool
 FLAG basecamp tools delete --cache-dir type=string
@@ -16812,6 +16837,7 @@ SUB basecamp msgs trash
 SUB basecamp msgs unpin
 SUB basecamp msgs update
 SUB basecamp notifications
+SUB basecamp notifications bubbleups
 SUB basecamp notifications list
 SUB basecamp notifications read
 SUB basecamp people

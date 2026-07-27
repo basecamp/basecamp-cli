@@ -257,6 +257,7 @@ func resolveToolBucketID(cmd *cobra.Command, app *appctx.App, project string) (i
 
 func newToolsCreateCmd(project *string) *cobra.Command {
 	var toolType string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create [title]",
@@ -266,6 +267,10 @@ func newToolsCreateCmd(project *string) *cobra.Command {
 For example, add a second chat with --type chat, or a Message Board with
 --type message_board. An optional title may be given; without one, Basecamp
 assigns the default title for the type.
+
+Use --visible-to-clients to set client visibility at create time. Only chat
+and kanban_board tools manage their own visibility; other types ignore the
+flag and inherit the project default.
 
 Accepted types: %s. Create-by-type is BC5-only.`,
 			strings.Join(toolTypeFriendlyNames(), ", ")),
@@ -310,8 +315,11 @@ Accepted types: %s. Create-by-type is BC5-only.`,
 			inFlag := toolBreadcrumbFlag(resolvedProjectID)
 
 			var opts *basecamp.CreateToolOptions
-			if title != "" {
+			if title != "" || cmd.Flags().Changed("visible-to-clients") {
 				opts = &basecamp.CreateToolOptions{Title: title}
+				if cmd.Flags().Changed("visible-to-clients") {
+					opts.VisibleToClients = &visibleToClients
+				}
 			}
 
 			created, err := app.Account().Tools().Create(cmd.Context(), bucketID, canonicalType, opts)
@@ -340,6 +348,7 @@ Accepted types: %s. Create-by-type is BC5-only.`,
 	}
 
 	cmd.Flags().StringVarP(&toolType, "type", "t", "", "Tool type to create (required)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the tool visible to clients (chat and kanban_board only)")
 	_ = cmd.RegisterFlagCompletionFunc("type", func(_ *cobra.Command, _ []string, _ string) ([]cobra.Completion, cobra.ShellCompDirective) {
 		return toolTypeFriendlyNames(), cobra.ShellCompDirectiveNoFileComp
 	})

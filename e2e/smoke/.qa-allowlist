@@ -39,3 +39,6 @@ test_cards_wormholes_create_needs_a_destination_table_on_another_board # no seco
 test_cards_wormholes_update_needs_an_existing_wormhole_and_destination # depends on wormhole create — smoke
 test_cards_wormholes_delete_needs_an_existing_wormhole # depends on wormhole create — smoke
 test_cards_move_to_wormhole_needs_a_linked_wormhole_and_is_destructive # needs linked wormhole + destructive async — smoke
+
+# Bubble Ups — BC5-added endpoint, may not exist on all QA environments
+test_notifications_bubbleups_lists_bubble_ups # endpoint not available on some servers — smoke

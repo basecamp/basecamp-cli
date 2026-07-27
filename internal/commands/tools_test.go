@@ -597,3 +597,53 @@ func TestToolsShowBreadcrumbsWithoutProject(t *testing.T) {
 		assert.NotEqual(t, "project", bc.Action)
 	}
 }
+
+// The visible_to_clients wire contract is tri-state: the key must be absent
+// when the flag is not given, and an explicit true or false must reach the
+// wire verbatim when it is.
+
+func TestToolsCreateVisibleToClientsOmittedByDefault(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "chat")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	_, hasVisibility := transport.capturedBody["visible_to_clients"]
+	assert.False(t, hasVisibility, "visible_to_clients should be omitted when flag not given")
+}
+
+func TestToolsCreateVisibleToClientsTrue(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "chat", "--visible-to-clients")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	assert.Equal(t, true, transport.capturedBody["visible_to_clients"])
+}
+
+func TestToolsCreateVisibleToClientsExplicitFalse(t *testing.T) {
+	transport := &mockToolCreateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	cmd := newToolsCreateCmd(&project)
+
+	err := executeCommand(cmd, app, "--type", "kanban_board", "--visible-to-clients=false")
+	require.NoError(t, err)
+
+	require.True(t, transport.createCalled)
+	assert.Equal(t, false, transport.capturedBody["visible_to_clients"])
+}
