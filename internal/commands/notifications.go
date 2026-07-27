@@ -281,6 +281,9 @@ to fetch a single page (50 per page).
 				summary = fmt.Sprintf("%d of %d bubble-up(s)", len(bubbleUps), result.Meta.TotalCount)
 			}
 
+			// No "read" breadcrumb: notifications read resolves IDs from
+			// the notification feed, not this dedicated endpoint, so it
+			// cannot find bubble-ups that only appear here.
 			return app.OK(bubbleUps,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
@@ -288,11 +291,6 @@ to fetch a single page (50 per page).
 						Action:      "notifications",
 						Cmd:         "basecamp notifications",
 						Description: "View notifications",
-					},
-					output.Breadcrumb{
-						Action:      "read",
-						Cmd:         "basecamp notifications read <id>",
-						Description: "Mark as read",
 					},
 				),
 			)

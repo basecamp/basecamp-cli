@@ -33,7 +33,7 @@ are per-project: every command takes --in/--project to pick the project.
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
-	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
+	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID or name (alias for --project)")
 
 	cmd.AddCommand(
 		newMessagetypesListCmd(&project),

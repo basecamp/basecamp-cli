@@ -28,6 +28,37 @@ func TestNotificationsBubbleupsHitsDedicatedEndpoint(t *testing.T) {
 	assert.Equal(t, "/99999/my/readings/bubble_ups.json", last.Path)
 }
 
+// notifications read resolves IDs from the notification feed, not the
+// dedicated Bubble Ups endpoint, so bubbleups must not advertise a read
+// breadcrumb — it would fail for any bubble-up not on the feed's first page.
+func TestNotificationsBubbleupsOffersNoReadBreadcrumb(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/my/readings/bubble_ups.json",
+		status: http.StatusOK,
+		body:   `[{"id":1,"title":"Bubbled up","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]`,
+	})
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+	app.Flags.Hints = true
+
+	err := executeRecordingCommand(NewNotificationsCmd(), app, "bubbleups")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.NotEmpty(t, envelope.Breadcrumbs)
+
+	for _, bc := range envelope.Breadcrumbs {
+		assert.NotEqual(t, "read", bc.Action,
+			"read cannot resolve IDs from the dedicated bubble-ups endpoint")
+	}
+}
+
 func TestNotificationsListLimitBubbleUpsSendsQueryParam(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
