@@ -124,6 +124,10 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 	if page > 0 {
 		readCmd = fmt.Sprintf("basecamp notifications read <id> --page %d", page)
 	}
+	nextCmd := fmt.Sprintf("basecamp notifications list --page %d", nextPage)
+	if limitBubbleUps {
+		nextCmd += " --limit-bubble-ups"
+	}
 	breadcrumbs := []output.Breadcrumb{
 		{
 			Action:      "read",
@@ -132,7 +136,7 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 		},
 		{
 			Action:      "next",
-			Cmd:         fmt.Sprintf("basecamp notifications list --page %d", nextPage),
+			Cmd:         nextCmd,
 			Description: "Next page",
 		},
 	}
