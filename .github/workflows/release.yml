@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.4.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           go-version-file: 'go.mod'
 
@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache BATS
         id: cache-bats
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.5 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           path: ~/.local
           key: bats-1.11.0-home
@@ -127,7 +127,7 @@ jobs:
           permission-contents: write
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.4.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           go-version-file: 'go.mod'
 
