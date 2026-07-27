@@ -50,8 +50,8 @@ load test_helper
   run basecamp comments thread "https://3.basecamp.com/99999/buckets/1/todos/123" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "not a comment"
-  assert_output_contains "basecamp show"
+  assert_json_value '.error' 'That URL points to a recording, not a comment'
+  assert_json_value '.hint | contains("basecamp show")' 'true'
 }
 
 @test "comments thread rejects a URL whose account differs from the configured one" {
@@ -61,7 +61,7 @@ load test_helper
   run basecamp comments thread "https://3.basecamp.com/88888/buckets/1/todos/123#__recording_456" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "does not match"
+  assert_json_value '.error' 'URL account 88888 does not match the configured account 99999'
 }
 
 @test "comments thread rejects --all with --window" {
@@ -71,7 +71,7 @@ load test_helper
   run basecamp comments thread 456 --all --window 5 --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "mutually exclusive"
+  assert_json_value '.error' '--all and --window are mutually exclusive'
 }
 
 @test "comments thread rejects a non-positive --window" {
@@ -81,7 +81,7 @@ load test_helper
   run basecamp comments thread 456 --window 0 --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "positive"
+  assert_json_value '.error' '--window must be a positive number'
 }
 
 @test "comments thread rejects a non-positive id" {
@@ -101,7 +101,7 @@ load test_helper
   run basecamp comments thread "https://evil.example/99999/buckets/1/comments/456" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "untrusted host"
+  assert_json_value '.error' 'refusing untrusted host in URL — expected a Basecamp URL'
 }
 
 
@@ -114,8 +114,8 @@ load test_helper
   run basecamp comments show "https://3.basecamp.com/99999/buckets/1/todos/123" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "not a comment"
-  assert_output_contains "basecamp show"
+  assert_json_value '.error' 'That URL points to a recording, not a comment'
+  assert_json_value '.hint | contains("basecamp show")' 'true'
 }
 
 @test "comments show rejects a URL whose account differs from the configured one" {
@@ -125,7 +125,7 @@ load test_helper
   run basecamp comments show "https://3.basecamp.com/88888/buckets/1/todos/123#__recording_456" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "does not match"
+  assert_json_value '.error' 'URL account 88888 does not match the configured account 99999'
 }
 
 @test "comments show rejects a non-positive id" {
@@ -145,7 +145,7 @@ load test_helper
   run basecamp comments show "https://evil.example/99999/buckets/1/comments/456" --json
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "untrusted host"
+  assert_json_value '.error' 'refusing untrusted host in URL — expected a Basecamp URL'
 }
 
 
