@@ -310,6 +310,81 @@ jobs:
             exit 1
           fi
 
+      - name: Offline full install under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # The curl-guard step above never gets past the prerequisite check,
+          # and `bash -n` only checks grammar — neither catches Bash-4-only
+          # constructs (declare -A, mapfile, 4.x expansions) in the download,
+          # checksum, extract, or post-install code. Run one complete install
+          # under real 3.2: a fixture curl serves a local release from disk,
+          # and a pinned BASECAMP_VERSION skips version resolution. PATH is
+          # restricted to fixture + system dirs so Homebrew tools (bash 4+,
+          # cosign) cannot leak in.
+          fixture_root=$(mktemp -d)
+          mkdir -p "$fixture_root/bin" "$fixture_root/release" "$fixture_root/home" "$fixture_root/install"
+
+          cat > "$fixture_root/release/basecamp" <<'STUB'
+          #!/bin/bash
+          if [ "$1" = "--version" ]; then echo "basecamp version 9.9.9"; fi
+          exit 0
+          STUB
+          chmod +x "$fixture_root/release/basecamp"
+          for arch in arm64 amd64; do
+            tar -czf "$fixture_root/release/basecamp_9.9.9_darwin_${arch}.tar.gz" -C "$fixture_root/release" basecamp
+          done
+          (cd "$fixture_root/release" && shasum -a 256 ./*.tar.gz | sed 's|\./||' > checksums.txt)
+
+          cat > "$fixture_root/bin/curl" <<'STUB'
+          #!/bin/bash
+          # Fixture curl: serves the local release dir. Handles the two shapes
+          # install.sh uses: `--version` and `[-flags] <url> -o <dest>`.
+          out=""; url=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --version) echo "curl 8.0.0 (fixture)"; exit 0 ;;
+              -o) out="$2"; shift ;;
+              http://*|https://*) url="$1" ;;
+            esac
+            shift
+          done
+          name="${url##*/}"
+          if [ -n "$out" ] && [ -f "$FIXTURE_RELEASE_DIR/$name" ]; then
+            cp "$FIXTURE_RELEASE_DIR/$name" "$out"
+            exit 0
+          fi
+          echo "fixture curl: no fixture for: $url" >&2
+          exit 22
+          STUB
+          chmod +x "$fixture_root/bin/curl"
+
+          status=0
+          if out=$(cat scripts/install.sh | \
+              HOME="$fixture_root/home" \
+              FIXTURE_RELEASE_DIR="$fixture_root/release" \
+              BASECAMP_BIN_DIR="$fixture_root/install" \
+              BASECAMP_VERSION=9.9.9 \
+              BASECAMP_SKIP_SETUP=1 \
+              BASECAMP_SETUP_AGENT=none \
+              PATH="$fixture_root/bin:/usr/bin:/bin" \
+              /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -ne 0 ]; then
+            echo "offline install failed under Bash 3.2 (exit $status)" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'Installed basecamp to'
+          printf '%s\n' "$out" | grep -q 'version 9.9.9 installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+          "$fixture_root/install/basecamp" --version
+
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
