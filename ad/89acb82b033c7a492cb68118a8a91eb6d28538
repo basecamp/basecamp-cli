@@ -1,0 +1,28 @@
+API-COVERAGE.md
+  s_665515bfa28bba::t_8afb3228986817 9,11,13
+  s_665515bfa28bba::t_91a7c69a4e7be6 42
+  s_665515bfa28bba::t_d1784da499f2b0 47
+  s_665515bfa28bba::t_02ae86d929c64e 21
+  s_665515bfa28bba::t_c9b313b5b73f06 35
+skills/basecamp/SKILL.md
+  s_665515bfa28bba::t_7b94f7320f62c5 208
+  s_665515bfa28bba::t_bde68ed7f02bf0 887-888,893-896
+  s_665515bfa28bba::t_e6fba17358136c 660-663
+  s_665515bfa28bba::t_77aeafef3f0687 897
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ad89acb82b033c7a492cb68118a8a91eb6d28538",
+  "prompts": {},
+  "sessions": {
+    "s_665515bfa28bba": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "edcdec74-3ead-4c8b-bc98-c89da103e5ec",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
