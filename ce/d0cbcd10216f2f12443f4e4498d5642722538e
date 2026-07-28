@@ -1,0 +1,25 @@
+internal/auth/session_other_test.go
+  s_e482278ba88739::t_e20f00210c96f2 1-18
+internal/auth/keyring.go
+  s_e482278ba88739::t_cd92e72a55da4e 43-49,53-54
+internal/auth/session_darwin.go
+  s_e482278ba88739::t_50f060a8412ce0 1-23
+internal/auth/session_other.go
+  s_e482278ba88739::t_f54b92a17d2dde 1-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ced0cbcd10216f2f12443f4e4498d5642722538e",
+  "prompts": {},
+  "sessions": {
+    "s_e482278ba88739": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1b82ec-bfac-4598-92d4-84af692fce2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
