@@ -1,0 +1,31 @@
+internal/auth/session_other.go
+  s_e482278ba88739::t_d574781a755aae 1,8
+internal/auth/session_other_test.go
+  s_e482278ba88739::t_0172c200d0aa06 1,18-21
+internal/auth/session_windows.go
+  s_4bad1d45a93fd3::t_99702be1eba615 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4eb07792bfe03bc6996c0f1f00ad30b39f0c65b5",
+  "prompts": {},
+  "sessions": {
+    "s_4bad1d45a93fd3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ce21cb6f-f277-486f-ba27-4c06a2910712",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_e482278ba88739": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1b82ec-bfac-4598-92d4-84af692fce2e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
