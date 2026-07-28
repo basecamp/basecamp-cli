@@ -719,10 +719,16 @@ func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*discove
 }
 
 // resourceOrigin reduces the configured base URL to a bare scheme://host[:port]
-// origin for RFC 9728 protected-resource discovery. Only the path is stripped;
-// every other deviation is rejected rather than laundered. Validation failures
-// never echo the raw URL: userinfo, query strings, and fragments can carry
-// secrets, and parse errors can reproduce their input.
+// origin for RFC 9728 protected-resource discovery, CANONICALIZED: lowercase
+// scheme and host, explicit default ports stripped. The SDK binds the
+// protected-resource metadata's resource identifier to this string code-point
+// exact, so an equivalent spelling (HTTPS://3.BasecampAPI.com,
+// https://3.basecampapi.com:443) would otherwise mismatch the advertised
+// identifier and silently soft-fall back to Launchpad. Only the path is
+// stripped and case/default-port normalized; every other deviation is rejected
+// rather than laundered. Validation failures never echo the raw URL: userinfo,
+// query strings, and fragments can carry secrets, and parse errors can
+// reproduce their input.
 func resourceOrigin(baseURL string) (string, error) {
 	fail := func(rule string) (string, error) {
 		return "", output.ErrUsage("invalid base URL: " + rule)
@@ -738,7 +744,9 @@ func resourceOrigin(baseURL string) (string, error) {
 	if u.Hostname() == "" {
 		return fail("must include a hostname")
 	}
-	if u.Scheme != "https" && (u.Scheme != "http" || !hostutil.IsLocalhost(u.Host)) {
+	// The localhost carve-out checks the LOWERCASED host: DNS names are
+	// case-insensitive, so http://LocalHost is as local as http://localhost.
+	if u.Scheme != "https" && (u.Scheme != "http" || !hostutil.IsLocalhost(strings.ToLower(u.Host))) {
 		return fail("scheme must be https (or http on localhost)")
 	}
 	if u.User != nil {
@@ -752,14 +760,29 @@ func resourceOrigin(baseURL string) (string, error) {
 	if u.Fragment != "" {
 		return fail("fragment is not allowed")
 	}
+	// url.Parse lowercases the scheme; the host keeps its input case and must
+	// be lowered here (DNS names are case-insensitive, the code-point binding
+	// is not). Hostname() strips IPv6 brackets — restore them so the origin
+	// stays a parseable URL.
+	hostname := strings.ToLower(u.Hostname())
+	if strings.Contains(hostname, ":") {
+		hostname = "[" + hostname + "]"
+	}
+	host := hostname
 	if port := u.Port(); port != "" {
 		// url.Parse requires a numeric port but does not range-check it.
-		if n, portErr := strconv.Atoi(port); portErr != nil || n < 1 || n > 65535 {
+		n, portErr := strconv.Atoi(port)
+		if portErr != nil || n < 1 || n > 65535 {
 			return fail("port must be between 1 and 65535")
+		}
+		// Strip an explicit default port (the canonical origin form) and
+		// normalize leading zeros; any other port is kept numerically.
+		if (u.Scheme != "https" || n != 443) && (u.Scheme != "http" || n != 80) {
+			host += ":" + strconv.Itoa(n)
 		}
 	}
 
-	return u.Scheme + "://" + u.Host, nil
+	return u.Scheme + "://" + host, nil
 }
 
 func (m *Manager) launchpadURL() (string, error) {

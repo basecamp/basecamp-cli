@@ -779,6 +779,16 @@ func TestResourceOrigin(t *testing.T) {
 		"https://host.example.com:8443/deep/p": "https://host.example.com:8443",
 		"http://3.basecamp.localhost:3001":     "http://3.basecamp.localhost:3001",
 		"http://127.0.0.1:3001/path":           "http://127.0.0.1:3001",
+		// Canonicalization: the SDK binds the protected-resource identifier to
+		// this string code-point exact, so equivalent spellings must reduce to
+		// the canonical origin — else discovery silently soft-falls back to
+		// Launchpad.
+		"HTTPS://3.BasecampAPI.com":        "https://3.basecampapi.com",
+		"https://3.basecampapi.com:443":    "https://3.basecampapi.com",
+		"https://3.basecampapi.com:0443/x": "https://3.basecampapi.com",
+		"https://Host.Example.com:08443":   "https://host.example.com:8443",
+		"http://LocalHost:80/path":         "http://localhost",
+		"http://[::1]:3001/path":           "http://[::1]:3001",
 	}
 	for input, want := range valid {
 		t.Run("strips "+input, func(t *testing.T) {
