@@ -45,17 +45,17 @@ func TestNewStoreIsLazy(t *testing.T) {
 	assert.Equal(t, 1, calls, "construction happens once")
 }
 
-// swapStderrIsTerminal replaces the interactivity seam for the test.
-func swapStderrIsTerminal(t *testing.T, interactive bool) {
+// swapSessionIsHeadless replaces the interactivity seam for the test.
+func swapSessionIsHeadless(t *testing.T, headless bool) {
 	t.Helper()
-	orig := stderrIsTerminal
-	stderrIsTerminal = func() bool { return interactive }
-	t.Cleanup(func() { stderrIsTerminal = orig })
+	orig := sessionIsHeadless
+	sessionIsHeadless = func() bool { return headless }
+	t.Cleanup(func() { sessionIsHeadless = orig })
 }
 
 // ensureOptions constructs a store's credstore through the seams and returns
 // the options it was built with.
-func ensureOptions(t *testing.T, interactive bool) credstore.StoreOptions {
+func ensureOptions(t *testing.T, headless bool) credstore.StoreOptions {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1") // keep the delegated construction off the real keyring
 
@@ -64,7 +64,7 @@ func ensureOptions(t *testing.T, interactive bool) credstore.StoreOptions {
 		got = opts
 		return credstore.NewStore(opts)
 	})
-	swapStderrIsTerminal(t, interactive)
+	swapSessionIsHeadless(t, headless)
 
 	NewStore(t.TempDir()).UsingKeyring()
 	return got
@@ -75,6 +75,6 @@ func ensureOptions(t *testing.T, interactive bool) credstore.StoreOptions {
 // the unbounded probe so a legitimate unlock prompt is never cut off
 // mid-answer (which would silently degrade to plaintext file storage).
 func TestEnsureBoundsProbeOnlyWhenHeadless(t *testing.T) {
-	assert.Equal(t, headlessProbeTimeout, ensureOptions(t, false).ProbeTimeout)
-	assert.Zero(t, ensureOptions(t, true).ProbeTimeout)
+	assert.Equal(t, headlessProbeTimeout, ensureOptions(t, true).ProbeTimeout)
+	assert.Zero(t, ensureOptions(t, false).ProbeTimeout)
 }

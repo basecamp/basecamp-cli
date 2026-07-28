@@ -40,21 +40,25 @@ type Store struct {
 // newCredStore is replaceable in tests to avoid real keyring access.
 var newCredStore = credstore.NewStore
 
-// stderrIsTerminal reports whether a human is attached. Stderr, not stdout:
-// interactive use routinely pipes stdout (JSON to jq) while prompts and
-// warnings still reach the terminal. Replaceable in tests.
-var stderrIsTerminal = func() bool {
-	return term.IsTerminal(os.Stderr.Fd())
+// sessionIsHeadless reports that no human is attached: stdin, stdout, and
+// stderr are all non-terminals. Any one being a terminal counts as
+// interactive — redirecting a stream or two (`2>auth.log`, `| jq`) is
+// routine interactive use where a keychain unlock prompt can still be
+// answered, on the controlling terminal or the GUI. Replaceable in tests.
+var sessionIsHeadless = func() bool {
+	return !term.IsTerminal(os.Stdin.Fd()) &&
+		!term.IsTerminal(os.Stdout.Fd()) &&
+		!term.IsTerminal(os.Stderr.Fd())
 }
 
 // headlessProbeTimeout bounds the keyring availability probe when no
-// terminal is attached. A headless session (CI, piped installers, ssh
-// without a TTY) can never answer a keychain unlock prompt, so an
-// unavailable keyring must fall back to file storage instead of hanging
-// forever in an uncancellable `security` child — the #568 incident class.
-// Interactive sessions keep the unbounded probe: a locked keychain there
-// raises an unlock prompt, and cutting it off mid-answer would silently
-// degrade the user to plaintext file storage.
+// terminal is attached to any standard stream. A headless session (CI,
+// piped installers, ssh without a TTY) can never answer a keychain unlock
+// prompt, so an unavailable keyring must fall back to file storage instead
+// of hanging forever in an uncancellable `security` child — the #568
+// incident class. Interactive sessions keep the unbounded probe: a locked
+// keychain there raises an unlock prompt, and cutting it off mid-answer
+// would silently degrade the user to plaintext file storage.
 const headlessProbeTimeout = 10 * time.Second
 
 // NewStore creates a credential store. The OS keyring is not touched until
@@ -73,7 +77,7 @@ func (s *Store) ensure() *credstore.Store {
 			DisableEnvVar: "BASECAMP_NO_KEYRING",
 			FallbackDir:   s.fallbackDir,
 		}
-		if !stderrIsTerminal() {
+		if sessionIsHeadless() {
 			opts.ProbeTimeout = headlessProbeTimeout
 		}
 		s.inner = newCredStore(opts)
