@@ -23,5 +23,24 @@
           default = self.packages.${system}.basecamp;
         }
       );
+
+      devShells = forAllSystems (system:
+        let pkgs = nixpkgsFor.${system};
+        in {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              actionlint
+              bats
+              git
+              go_1_26
+              golangci-lint
+              goreleaser
+              gnumake
+              jq
+              zizmor
+            ];
+          };
+        }
+      );
     };
 }

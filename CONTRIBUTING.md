@@ -10,6 +10,16 @@ make build            # Build
 bin/ci                # Verify everything passes
 ```
 
+### Nix
+
+As an alternative to `bin/setup`, contributors with Nix can enter the development environment with:
+
+```bash
+nix develop
+```
+
+The development shell provides Go and the tools required by `bin/ci`.
+
 ## SDK Development
 
 When developing against a local copy of [basecamp-sdk](https://github.com/basecamp/basecamp-sdk), use Go workspaces instead of `replace` directives in go.mod:
