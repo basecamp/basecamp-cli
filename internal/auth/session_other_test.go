@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 package auth
 
@@ -15,4 +15,8 @@ func TestGUISessionAvailableTracksDisplayEnv(t *testing.T) {
 
 	t.Setenv("DISPLAY", ":0")
 	assert.True(t, guiSessionAvailable())
+
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+	assert.True(t, guiSessionAvailable(), "Wayland-only sessions have no DISPLAY")
 }

@@ -1,13 +1,11 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 package auth
 
 import "os"
 
 // guiSessionAvailable reports a display server the keyring's unlock prompt
-// could use even with every standard stream detached. On Windows this is
-// always false: Credential Manager operates without prompting, so a bounded
-// probe cannot cut off an interaction there.
+// could use even with every standard stream detached.
 func guiSessionAvailable() bool {
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }
