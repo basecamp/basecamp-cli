@@ -339,11 +339,12 @@ func TestCredentialsJSON(t *testing.T) {
 
 func TestOAuthConfigJSON(t *testing.T) {
 	authz := "https://auth.example.com/authorize"
+	register := "https://auth.example.com/register"
 	cfg := &oauth.Config{
 		Issuer:                "https://issuer.example.com",
 		AuthorizationEndpoint: &authz,
 		TokenEndpoint:         "https://auth.example.com/token",
-		RegistrationEndpoint:  "https://auth.example.com/register",
+		RegistrationEndpoint:  &register,
 		ScopesSupported:       []string{"read", "write"},
 	}
 

@@ -818,3 +818,56 @@ func TestResourceOrigin(t *testing.T) {
 		})
 	}
 }
+
+// TestLoginDevice_ResourceEchoEndToEnd proves the RFC 8707 multi-account
+// contract end to end: a device login stores the token response's resource
+// indicator, a later refresh echoes it as the resource form parameter, and the
+// rotated credentials still carry it when the refresh response omits it —
+// without any of which a BC5 device login dies at its first token expiry.
+func TestLoginDevice_ResourceEchoEndToEnd(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(call int) (int, string) {
+		if call == 0 {
+			// The device-grant response binds the token to an account.
+			return http.StatusOK, `{"access_token":"dev-tok","refresh_token":"dev-ref","token_type":"bearer","expires_in":3600,"scope":"read","resource":"urn:bc:account:42"}`
+		}
+		// The refresh response rotates tokens but OMITS resource — the stored
+		// binding must survive the rotation.
+		return http.StatusOK, `{"access_token":"dev-tok-2","refresh_token":"dev-ref-2","token_type":"bearer","expires_in":3600}`
+	}
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	_, err := m.Login(context.Background(), LoginOptions{
+		Logger:        (&collectLogger{}).log,
+		NoBrowser:     true,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+
+	origin := config.NormalizeBaseURL(resource.URL)
+	creds, err := m.store.Load(origin)
+	require.NoError(t, err)
+	assert.Equal(t, "urn:bc:account:42", creds.Resource, "device login must persist the resource binding")
+
+	// Simulate expiry so the next refresh is forced.
+	creds.ExpiresAt = 1
+	require.NoError(t, m.store.Save(origin, creds))
+
+	require.NoError(t, m.Refresh(context.Background()))
+
+	tokenCalls := as.tokenCalls()
+	require.Len(t, tokenCalls, 2)
+	refreshForm := tokenCalls[1]
+	assert.Equal(t, "refresh_token", refreshForm.Get("grant_type"))
+	assert.Equal(t, "urn:bc:account:42", refreshForm.Get("resource"), "refresh must echo the stored resource")
+	assert.Equal(t, "basecamp-cli", refreshForm.Get("client_id"))
+	_, hasSecret := refreshForm["client_secret"]
+	assert.False(t, hasSecret, "the public client sends no secret")
+
+	rotated, err := m.store.Load(origin)
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok-2", rotated.AccessToken)
+	assert.Equal(t, "dev-ref-2", rotated.RefreshToken)
+	assert.Equal(t, "urn:bc:account:42", rotated.Resource, "an omitted resource must preserve the stored binding")
+}

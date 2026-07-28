@@ -241,10 +241,13 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	exchanger := oauth.NewExchanger(m.httpClient)
 
 	req := oauth.RefreshRequest{
-		TokenEndpoint:   tokenEndpoint,
-		RefreshToken:    creds.RefreshToken,
-		ClientID:        clientID,
-		ClientSecret:    clientSecret,
+		TokenEndpoint: tokenEndpoint,
+		RefreshToken:  creds.RefreshToken,
+		ClientID:      clientID,
+		ClientSecret:  clientSecret,
+		// Echo the stored RFC 8707 resource indicator (sent only when set):
+		// BC5 multi-account refresh tokens are rejected without it.
+		Resource:        creds.Resource,
 		UseLegacyFormat: creds.OAuthType == oauthTypeLaunchpad,
 	}
 
@@ -256,6 +259,11 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	creds.AccessToken = token.AccessToken
 	if token.RefreshToken != "" {
 		creds.RefreshToken = token.RefreshToken
+	}
+	// An omitted resource preserves the stored binding (carry-forward, like an
+	// omitted rotated refresh token); a present one replaces it.
+	if token.Resource != "" {
+		creds.Resource = token.Resource
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
@@ -560,7 +568,10 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		// Validate the raw server-supplied URIs before printing or launching
 		// anything: browser target is the code-embedding URI when valid,
 		// falling back to the plain verification URI.
-		target := validVerificationURL(devAuth.VerificationURIComplete)
+		target := ""
+		if devAuth.VerificationURIComplete != nil {
+			target = validVerificationURL(*devAuth.VerificationURIComplete)
+		}
 		if target == "" {
 			target = validVerificationURL(devAuth.VerificationURI)
 		}
@@ -623,6 +634,11 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		OAuthType:     oauthTypeBC5,
 		TokenEndpoint: oauthCfg.TokenEndpoint,
 		Scope:         effectiveScope,
+		// The RFC 8707 account binding: a trusted-client device login mints a
+		// multi-account refresh token, and refreshing one without echoing this
+		// is rejected (400 invalid_request) — losing it here would strand the
+		// login at first token expiry.
+		Resource: token.Resource,
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()

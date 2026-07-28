@@ -21,6 +21,13 @@ type Credentials struct {
 	TokenEndpoint string `json:"token_endpoint"`
 	UserID        string `json:"user_id,omitempty"`
 	UserEmail     string `json:"user_email,omitempty"`
+
+	// Resource is the RFC 8707 resource indicator the tokens are bound to
+	// (BC5: urn:bc:account:<id>). BC5 device logins as the trusted
+	// basecamp-cli client mint MULTI-ACCOUNT refresh tokens, and the refresh
+	// grant rejects them without this echo — refresh sends it when set and
+	// preserves it when a refresh response omits it.
+	Resource string `json:"resource,omitempty"`
 }
 
 // Store wraps credstore.Store with typed Credentials marshaling.
