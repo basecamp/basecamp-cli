@@ -38,8 +38,9 @@ github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728203819-b63b12e94d0c/go.mod 
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728210058-e421ea9f5f0d/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728212114-329d227813ac/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728214753-e3e0ea5c32fa/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
-github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728223259-0bdb14ac4a7b h1:owC4eQieiylIAXVSwb63fOKqZNt0m/vMTLhLNnuwcsM=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728223259-0bdb14ac4a7b/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
+github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728224706-05cc9f78a8a5 h1:TixmrJzzLfbAEgBoGfNt4bsYEx+yZMsi484eJWCfueo=
+github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728224706-05cc9f78a8a5/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=
