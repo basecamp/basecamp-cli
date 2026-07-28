@@ -1,0 +1,44 @@
+internal/auth/keyring.go
+  s_86d0793371d0f3::t_c5e7c4deed7528 22-28
+internal/sdk/store.go
+  s_86d0793371d0f3::t_946853b8837d00 12-16
+internal/auth/auth_test.go
+  s_86d0793371d0f3::t_f2a72c26fec90a 342,347
+internal/auth/auth.go
+  s_86d0793371d0f3::t_68a751cf3547af 637-641
+  s_86d0793371d0f3::t_eb9ca5de20cabc 244-250,263-266
+  s_86d0793371d0f3::t_9bb247b55c3789 571-574
+  s_effaf9ebecb0f4::t_0227784b151548 267
+go.mod
+  s_86d0793371d0f3::t_e0b3c4b112034b 9
+go.sum
+  s_86d0793371d0f3::t_c9495b73906878 26-27
+internal/auth/device_test.go
+  s_86d0793371d0f3::t_6921f141027a52 821-873
+internal/version/sdk-provenance.json
+  s_86d0793371d0f3::t_48e28f59fc7128 4-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "b0959fc421d4e3295c134c4323f1888571dc68fc",
+  "prompts": {},
+  "sessions": {
+    "s_86d0793371d0f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a2b9cb3-4f1e-4edb-91b2-3d486f097400",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_effaf9ebecb0f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b9d6aa32-1196-4ab5-8699-c047b7e5bbb5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
