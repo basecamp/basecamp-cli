@@ -32,8 +32,9 @@ github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728052640-819c0b86fff8/go.mod 
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728112802-e9469832f102/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728175210-298ad8e46d45/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728182729-fd2ff9345c49/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
-github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728193617-5645f897f0f2 h1:3qPmavLZLM+kXN0DbaFFySt3/RD9AiLM1ZsXf0tzYUg=
 github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728193617-5645f897f0f2/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
+github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728195858-9c4cc6d6f8b1 h1:Zj8TjsndlbTGg8VxQAlC7FxgAjdkUGoBva60gnNn/LA=
+github.com/basecamp/basecamp-sdk/go v0.9.1-0.20260728195858-9c4cc6d6f8b1/go.mod h1:r83ralDQ0q9vbAby5qQ5x9hgCgUdJLDLHYpiU6jaFjE=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/catppuccin/go v0.3.0 h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=
 github.com/catppuccin/go v0.3.0/go.mod h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=
