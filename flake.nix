@@ -37,6 +37,7 @@
               goreleaser
               gnumake
               jq
+              ripgrep
               zizmor
             ];
           };
