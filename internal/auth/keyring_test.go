@@ -44,3 +44,37 @@ func TestNewStoreIsLazy(t *testing.T) {
 	store.UsingKeyring()
 	assert.Equal(t, 1, calls, "construction happens once")
 }
+
+// swapStderrIsTerminal replaces the interactivity seam for the test.
+func swapStderrIsTerminal(t *testing.T, interactive bool) {
+	t.Helper()
+	orig := stderrIsTerminal
+	stderrIsTerminal = func() bool { return interactive }
+	t.Cleanup(func() { stderrIsTerminal = orig })
+}
+
+// ensureOptions constructs a store's credstore through the seams and returns
+// the options it was built with.
+func ensureOptions(t *testing.T, interactive bool) credstore.StoreOptions {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1") // keep the delegated construction off the real keyring
+
+	var got credstore.StoreOptions
+	swapNewCredStore(t, func(opts credstore.StoreOptions) *credstore.Store {
+		got = opts
+		return credstore.NewStore(opts)
+	})
+	swapStderrIsTerminal(t, interactive)
+
+	NewStore(t.TempDir()).UsingKeyring()
+	return got
+}
+
+// Headless sessions can never answer a keychain unlock prompt, so the probe
+// must be bounded there — the #568 incident class. Interactive sessions keep
+// the unbounded probe so a legitimate unlock prompt is never cut off
+// mid-answer (which would silently degrade to plaintext file storage).
+func TestEnsureBoundsProbeOnlyWhenHeadless(t *testing.T) {
+	assert.Equal(t, headlessProbeTimeout, ensureOptions(t, false).ProbeTimeout)
+	assert.Zero(t, ensureOptions(t, true).ProbeTimeout)
+}

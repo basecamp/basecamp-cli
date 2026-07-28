@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/basecamp/cli/credstore"
+	"github.com/charmbracelet/x/term"
 )
 
 // Credentials holds OAuth tokens and metadata.
@@ -38,6 +40,23 @@ type Store struct {
 // newCredStore is replaceable in tests to avoid real keyring access.
 var newCredStore = credstore.NewStore
 
+// stderrIsTerminal reports whether a human is attached. Stderr, not stdout:
+// interactive use routinely pipes stdout (JSON to jq) while prompts and
+// warnings still reach the terminal. Replaceable in tests.
+var stderrIsTerminal = func() bool {
+	return term.IsTerminal(os.Stderr.Fd())
+}
+
+// headlessProbeTimeout bounds the keyring availability probe when no
+// terminal is attached. A headless session (CI, piped installers, ssh
+// without a TTY) can never answer a keychain unlock prompt, so an
+// unavailable keyring must fall back to file storage instead of hanging
+// forever in an uncancellable `security` child — the #568 incident class.
+// Interactive sessions keep the unbounded probe: a locked keychain there
+// raises an unlock prompt, and cutting it off mid-answer would silently
+// degrade the user to plaintext file storage.
+const headlessProbeTimeout = 10 * time.Second
+
 // NewStore creates a credential store. The OS keyring is not touched until
 // the first credential operation.
 func NewStore(fallbackDir string) *Store {
@@ -49,11 +68,15 @@ func NewStore(fallbackDir string) *Store {
 // sync.Once provides the synchronization.
 func (s *Store) ensure() *credstore.Store {
 	s.initOnce.Do(func() {
-		s.inner = newCredStore(credstore.StoreOptions{
+		opts := credstore.StoreOptions{
 			ServiceName:   "basecamp",
 			DisableEnvVar: "BASECAMP_NO_KEYRING",
 			FallbackDir:   s.fallbackDir,
-		})
+		}
+		if !stderrIsTerminal() {
+			opts.ProbeTimeout = headlessProbeTimeout
+		}
+		s.inner = newCredStore(opts)
 	})
 	return s.inner
 }
