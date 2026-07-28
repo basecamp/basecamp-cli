@@ -40,15 +40,18 @@ type Store struct {
 // newCredStore is replaceable in tests to avoid real keyring access.
 var newCredStore = credstore.NewStore
 
-// sessionIsHeadless reports that no human is attached: stdin, stdout, and
-// stderr are all non-terminals. Any one being a terminal counts as
-// interactive — redirecting a stream or two (`2>auth.log`, `| jq`) is
-// routine interactive use where a keychain unlock prompt can still be
-// answered, on the controlling terminal or the GUI. Replaceable in tests.
+// sessionIsHeadless reports that no human can answer a keyring unlock
+// prompt: stdin, stdout, and stderr are all non-terminals AND no GUI
+// session is available. Any attached stream counts as interactive —
+// redirecting a stream or two (`2>auth.log`, `| jq`) is routine interactive
+// use — and a GUI session (an app or IDE task runner launching the CLI with
+// all streams detached) can still present the unlock dialog. Replaceable in
+// tests.
 var sessionIsHeadless = func() bool {
 	return !term.IsTerminal(os.Stdin.Fd()) &&
 		!term.IsTerminal(os.Stdout.Fd()) &&
-		!term.IsTerminal(os.Stderr.Fd())
+		!term.IsTerminal(os.Stderr.Fd()) &&
+		!guiSessionAvailable()
 }
 
 // headlessProbeTimeout bounds the keyring availability probe when no
