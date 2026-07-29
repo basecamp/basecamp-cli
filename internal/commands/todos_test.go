@@ -98,19 +98,17 @@ func TestTodosShowsHelp(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestTodosListRequiresProject tests that todos list requires --project.
-func TestTodosListRequiresProject(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	// No project in config
+// TestTodosListWithoutProjectListsAcrossProjects tests that todos list with no
+// project anywhere lists account-wide instead of prompting for one.
+func TestTodosListWithoutProjectListsAcrossProjects(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(todosAccountWideDefaultLimit)))
 
-	cmd := NewTodosCmd()
+	err := executeRecordingCommand(NewTodosCmd(), app, "list")
+	require.NoError(t, err)
 
-	err := executeTodosCommand(cmd, app, "list")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
+	require.Len(t, transport.recorded(), 1, "the default cap of 100 is met by the first page")
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
 }
 
 // TestTodosCreateRequiresContent tests that todos create requires content.
@@ -433,21 +431,21 @@ func TestTodosListAssigneeWithoutProjectErrors(t *testing.T) {
 
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
-	assert.Contains(t, e.Message, "--assignee requires a project")
+	assert.Contains(t, e.Message, "--assignee has no account-wide equivalent")
 	assert.Contains(t, e.Hint, "reports assigned")
 }
 
-func TestTodosListOverdueWithoutProjectErrors(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
+// TestTodosListOverdueWithoutProjectListsAcrossProjects covers the behavior
+// change: --overdue without a project used to redirect to reports overdue, and
+// now answers from the account-wide overdue listing.
+func TestTodosListOverdueWithoutProjectListsAcrossProjects(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/overdue.json", `[{"id":1,"title":"Late","due_on":"2020-01-01"}]`))
 
-	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "list", "--overdue")
-	require.Error(t, err)
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue")
+	require.NoError(t, err)
 
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Contains(t, e.Message, "--overdue requires a project")
-	assert.Contains(t, e.Hint, "reports overdue")
+	assert.Equal(t, "/99999/todos/overdue.json", transport.last(t).Path)
 }
 
 func TestTodosListAssigneeWithConfigDefaultProceeds(t *testing.T) {
@@ -3039,4 +3037,317 @@ func TestTodosShowJSONSurfacesSDKFields(t *testing.T) {
 	assert.Equal(t, int64(8801), attachments[0].ID)
 	assert.Equal(t, "spec.pdf", attachments[0].Filename)
 	assert.Equal(t, "https://example.com/spec.pdf", attachments[0].DownloadURL)
+}
+
+// --- account-wide listings ---------------------------------------------------
+
+// accountWideTodosRoute stubs one of the account-wide todo aggregate endpoints.
+func accountWideTodosRoute(path, body string) stubRoute {
+	return stubRoute{method: http.MethodGet, path: path, status: http.StatusOK, body: body}
+}
+
+// todosGroupsBody builds a project-grouped aggregate payload with todosPerGroup
+// todos in each named project (one "Test Project" group by default).
+func todosGroupsBody(todosPerGroup int, projects ...string) string {
+	if len(projects) == 0 {
+		projects = []string{"Test Project"}
+	}
+
+	id := 0
+	groups := make([]string, 0, len(projects))
+	for i, name := range projects {
+		todos := make([]string, 0, todosPerGroup)
+		for range todosPerGroup {
+			id++
+			todos = append(todos, fmt.Sprintf(
+				`{"id":%d,"title":"Todo %d","due_on":"2026-01-01","completed":false}`, id, id))
+		}
+		groups = append(groups, fmt.Sprintf(
+			`{"bucket":{"id":%d,"name":%q,"type":"Project"},"todos":[%s]}`, 100+i, name, strings.Join(todos, ",")))
+	}
+	return "[" + strings.Join(groups, ",") + "]"
+}
+
+// requireTodosListUsageError runs todos list and asserts it failed with a usage
+// error naming the flag, rather than silently ignoring it. The app is stubbed
+// with no matching routes, so a flag that leaks through to the network fails too.
+func requireTodosListUsageError(t *testing.T, app *appctx.App, wantMessage string, args ...string) {
+	t.Helper()
+
+	err := executeRecordingCommand(NewTodosCmd(), app, append([]string{"list"}, args...)...)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, wantMessage)
+}
+
+// decodeTodosEnvelope decodes the JSON response envelope a list command wrote.
+func decodeTodosEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	return envelope
+}
+
+// setupAccountWideTodosApp stubs the given routes and captures output in the
+// requested format.
+func setupAccountWideTodosApp(t *testing.T, format output.Format, routes ...stubRoute) (*appctx.App, *recordingTransport, *bytes.Buffer) {
+	t.Helper()
+
+	app, transport := setupRecordingTestApp(t, routes...)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: format, Writer: buf})
+	return app, transport, buf
+}
+
+func TestTodosListWithProjectStaysProjectScoped(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{method: http.MethodGet, path: "/99999/projects/123.json", status: http.StatusOK,
+			body: `{"id":123,"name":"Test Project","dock":[{"name":"todoset","id":700,"enabled":true}]}`},
+		stubRoute{method: http.MethodGet, path: "/99999/todosets/700/todolists.json", status: http.StatusOK,
+			body: `[{"id":456,"name":"My List"}]`},
+		stubRoute{method: http.MethodGet, path: "/99999/todolists/456/groups.json", status: http.StatusOK, body: `[]`},
+		stubRoute{method: http.MethodGet, path: "/99999/todolists/456/todos.json", status: http.StatusOK,
+			body: `[{"id":9,"title":"In a list"}]`},
+	)
+	app.Config.ProjectID = "123"
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--list", "456")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/todolists/456/todos.json", transport.last(t).Path)
+	for _, req := range transport.recorded() {
+		assert.NotContains(t, req.Path, "/todos/open.json")
+	}
+}
+
+func TestTodosListAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(todosAccountWideDefaultLimit)))
+	app.Config.ProjectID = "123"
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--all-projects")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+}
+
+func TestTodosListAllProjectsConflictsWithExplicitProject(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, app, "--all-projects cannot be combined with a project", "--all-projects", "--in", "123")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Project = "123"
+	requireTodosListUsageError(t, rootFlagApp, "--all-projects cannot be combined with a project", "--all-projects")
+}
+
+func TestTodosListAccountWideSelectsEndpointPerFilter(t *testing.T) {
+	assertEndpoint := func(path string, args ...string) {
+		t.Helper()
+
+		app, transport := setupRecordingTestApp(t, accountWideTodosRoute(path, todosGroupsBody(todosAccountWideDefaultLimit)))
+		require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, append([]string{"list"}, args...)...))
+		assert.Equal(t, path, transport.last(t).Path)
+	}
+
+	assertEndpoint("/99999/todos/open.json")
+	assertEndpoint("/99999/todos/open.json", "--status", "incomplete")
+	assertEndpoint("/99999/todos/completed.json", "--completed")
+	assertEndpoint("/99999/todos/completed.json", "--status", "completed")
+	assertEndpoint("/99999/todos/unassigned.json", "--unassigned")
+	assertEndpoint("/99999/todos/no_due_date.json", "--no-due-date")
+}
+
+func TestTodosListAccountWideRejectsTodolistScope(t *testing.T) {
+	flagApp, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, flagApp, "--list names a todolist inside one project", "--list", "456")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Todolist = "456"
+	requireTodosListUsageError(t, rootFlagApp, "--todolist names a todolist inside one project")
+
+	configApp, _ := setupRecordingTestApp(t)
+	configApp.Config.TodolistID = "456"
+	requireTodosListUsageError(t, configApp, "a default todolist is configured")
+}
+
+func TestTodosListAccountWideRejectsProjectOnlyFilters(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--todoset names a todoset inside one project", "--todoset", "789")
+	requireTodosListUsageError(t, app, "--assignee has no account-wide equivalent", "--assignee", "me")
+	requireTodosListUsageError(t, app, "--status archived has no account-wide equivalent", "--status", "archived")
+	requireTodosListUsageError(t, app, "--status trashed has no account-wide equivalent", "--status", "trashed")
+	requireTodosListUsageError(t, app, `unknown --status value "nonsense"`, "--status", "nonsense")
+}
+
+func TestTodosListAccountWideOnlyFiltersRejectedWithProject(t *testing.T) {
+	configApp, _ := setupRecordingTestApp(t)
+	configApp.Config.ProjectID = "123"
+	requireTodosListUsageError(t, configApp, "--unassigned lists across all projects", "--unassigned")
+	requireTodosListUsageError(t, configApp, "--no-due-date lists across all projects", "--no-due-date")
+
+	flagApp, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, flagApp, "--unassigned lists across all projects", "--in", "123", "--unassigned")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Project = "123"
+	requireTodosListUsageError(t, rootFlagApp, "--no-due-date lists across all projects", "--no-due-date")
+}
+
+func TestTodosListAccountWideRejectsCombinedSelectors(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--unassigned and --no-due-date are mutually exclusive", "--unassigned", "--no-due-date")
+	requireTodosListUsageError(t, app, "--completed and --overdue are mutually exclusive", "--completed", "--overdue")
+	requireTodosListUsageError(t, app, "--status completed and --unassigned are mutually exclusive", "--status", "completed", "--unassigned")
+}
+
+func TestTodosListAccountWideRejectsSorting(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--sort is not supported when listing across all projects", "--sort", "title")
+	requireTodosListUsageError(t, app, "--reverse requires --sort", "--reverse")
+}
+
+func TestTodosListAccountWideRejectsInvalidPagination(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--page must be 1 or greater", "--page", "0")
+	requireTodosListUsageError(t, app, "--page must be 1 or greater", "--page=-2")
+	requireTodosListUsageError(t, app, "--limit cannot be negative", "--limit=-5")
+}
+
+func TestTodosListAccountWideAcceptsAnyPositivePage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--page", "3")
+	require.NoError(t, err)
+
+	require.Len(t, transport.recorded(), 1)
+	assert.Contains(t, transport.last(t).Query, "page=3")
+}
+
+func TestTodosListAccountWideAllFetchesEveryPage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--all")
+	require.NoError(t, err)
+
+	require.Len(t, transport.recorded(), 1)
+	assert.Empty(t, transport.last(t).Query, "--all maps to page 0, which sends no page parameter")
+}
+
+func TestTodosListAccountWideLimitCountsTodosNotGroups(t *testing.T) {
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2, "Alpha", "Beta")))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "3")
+	require.NoError(t, err)
+
+	// The single page carried 4 todos, so the walk stopped there and capped at
+	// 3 — keeping both project groups rather than dropping a whole project.
+	require.Len(t, transport.recorded(), 1)
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "3 todos across 2 projects", envelope["summary"])
+	assert.Contains(t, envelope["notice"], "Showing the first 3 todos")
+
+	groups, ok := envelope["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 2)
+	assert.Len(t, groups[0].(map[string]any)["todos"], 2)
+	assert.Len(t, groups[1].(map[string]any)["todos"], 1)
+}
+
+func TestTodosListAccountWideWalksPagesUntilLimitIsMet(t *testing.T) {
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "4")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	require.Len(t, requests, 2, "two todos per page, so a limit of 4 needs a second page")
+	assert.Contains(t, requests[0].Query, "page=1")
+	assert.Contains(t, requests[1].Query, "page=2")
+
+	assert.Equal(t, "4 todos across 2 projects", decodeTodosEnvelope(t, buf)["summary"])
+}
+
+func TestTodosListAccountWideKeepsGroupingForMachineFormats(t *testing.T) {
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "1")
+	require.NoError(t, err)
+
+	groups, ok := decodeTodosEnvelope(t, buf)["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 1)
+
+	group, ok := groups[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Test Project", group["bucket"].(map[string]any)["name"])
+	assert.Len(t, group["todos"], 1)
+}
+
+func TestTodosListAccountWideFlattensForStyledOutput(t *testing.T) {
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatStyled,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "1")
+	require.NoError(t, err)
+
+	rendered := buf.String()
+	assert.Contains(t, rendered, "Test Project")
+	assert.Contains(t, rendered, "Todo 1")
+	assert.NotContains(t, rendered, "bucket", "styled output renders flat rows, not the nested groups")
+}
+
+func TestFlattenAccountWideTodosCarriesProjectAndStatus(t *testing.T) {
+	rows := flattenAccountWideTodos([]basecamp.BucketTodosGroup{{
+		Bucket: basecamp.Bucket{ID: 1, Name: "Alpha"},
+		Todos: []basecamp.Todo{
+			{ID: 7, Title: "Open one", DueOn: "2026-02-01"},
+			{ID: 8, Title: "Done one", Completed: true},
+		},
+	}})
+
+	require.Len(t, rows, 2)
+	assert.Equal(t, map[string]any{
+		"project": "Alpha", "id": int64(7), "title": "Open one", "status": "incomplete", "due": "2026-02-01",
+	}, rows[0])
+	assert.Equal(t, "completed", rows[1]["status"])
+}
+
+func TestTodosListAccountWideOverdueIsUnpaginated(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--page is not supported with --overdue", "--overdue", "--page", "2")
+	requireTodosListUsageError(t, app, "--all is not supported with --overdue", "--overdue", "--all")
+}
+
+func TestTodosListAccountWideOverdueSortsBeforeTruncating(t *testing.T) {
+	body := `[{"id":1,"title":"Bravo","due_on":"2020-03-01"},
+		{"id":2,"title":"Alpha","due_on":"2020-01-01"},
+		{"id":3,"title":"Charlie","due_on":"2020-02-01"}]`
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/overdue.json", body))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue", "--sort", "title", "--limit", "2")
+	require.NoError(t, err)
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "2 overdue todos across all projects", envelope["summary"])
+	assert.Contains(t, envelope["notice"], "Showing 2 of 3 overdue todos")
+
+	todos, ok := envelope["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, todos, 2)
+	assert.Equal(t, "Alpha", todos[0].(map[string]any)["title"])
+	assert.Equal(t, "Bravo", todos[1].(map[string]any)["title"])
 }

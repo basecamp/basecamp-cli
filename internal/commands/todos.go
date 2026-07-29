@@ -23,18 +23,21 @@ import (
 
 // todosListFlags holds the flags for the todos list command.
 type todosListFlags struct {
-	project   string
-	todolist  string
-	todoset   string
-	assignee  string
-	status    string
-	completed bool
-	overdue   bool
-	limit     int
-	page      int
-	all       bool
-	sortField string
-	reverse   bool
+	project     string
+	allProjects bool
+	todolist    string
+	todoset     string
+	assignee    string
+	status      string
+	completed   bool
+	overdue     bool
+	unassigned  bool
+	noDueDate   bool
+	limit       int
+	page        int
+	all         bool
+	sortField   string
+	reverse     bool
 }
 
 // NewTodosCmd creates the todos command group.
@@ -43,7 +46,7 @@ func NewTodosCmd() *cobra.Command {
 		Use:         "todos",
 		Short:       "Manage todos",
 		Long:        "List, show, create, and manage Basecamp todos.",
-		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp todos complete accepts multiple IDs: basecamp todos complete 1 2 3\n--assignee and --overdue require a project (--in, global flag, or config default); for cross-project use basecamp reports assigned/overdue"},
+		Annotations: map[string]string{"agent_notes": "--assignee only works on todos, not cards or other content types\nbasecamp todos complete accepts multiple IDs: basecamp todos complete 1 2 3\nbasecamp todos list without a project lists every project's todos; --all-projects forces that over a configured default\n--assignee requires a project (--in, global flag, or config default); for cross-project use basecamp reports assigned"},
 	}
 
 	cmd.AddCommand(
@@ -69,7 +72,12 @@ func newTodosListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List todos",
-		Long:  "List todos in a project or todolist.",
+		Long: `List todos in a project or todolist.
+
+With no project in scope, todos are listed across every project you can see.
+--all-projects forces that listing over a configured default project, and
+--unassigned/--no-due-date select account-wide filters that have no
+project-scoped equivalent.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTodosList(cmd, flags)
 		},
@@ -77,12 +85,15 @@ func newTodosListCmd() *cobra.Command {
 
 	// Note: can't use -a for assignee since it conflicts with global -a for account
 	cmd.Flags().StringVar(&flags.project, "in", "", "Project ID or name")
+	cmd.Flags().BoolVar(&flags.allProjects, "all-projects", false, "List todos across every project (overrides a configured project)")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, incomplete, archived, trashed)")
 	cmd.Flags().BoolVar(&flags.completed, "completed", false, "Show completed todos (shorthand for --status completed)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
+	cmd.Flags().BoolVar(&flags.unassigned, "unassigned", false, "Unassigned todos (across all projects only)")
+	cmd.Flags().BoolVar(&flags.noDueDate, "no-due-date", false, "Todos with no due date (across all projects only)")
 	cmd.Flags().IntVarP(&flags.limit, "limit", "n", 0, "Maximum number of todos to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all todos (no limit)")
 	cmd.Flags().IntVar(&flags.page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -103,7 +114,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Validate flag combinations
+	// Validate the flag combinations that hold under either scope.
 	if flags.completed && flags.status != "" {
 		return output.ErrUsage("--completed and --status are mutually exclusive")
 	}
@@ -116,13 +127,41 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	if flags.page > 0 && (flags.all || flags.limit > 0) {
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
-	if flags.page > 1 {
-		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
-	}
 	if flags.sortField != "" {
 		if err := validateSortField(flags.sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
 			return err
 		}
+	}
+
+	// Pick the scope before validating against it: the account-wide endpoints
+	// take any positive page, while the project path only permits page 1.
+	if flags.allProjects && (flags.project != "" || app.Flags.Project != "") {
+		return output.ErrUsage("--all-projects cannot be combined with a project (--in/--project)")
+	}
+	accountWide := flags.allProjects || !projectKnown(app, flags.project)
+
+	// Resolve account (enables interactive prompt if needed)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	if accountWide {
+		return listTodosAcrossProjects(cmd, app, flags)
+	}
+
+	// Project scope from here down.
+	if flags.unassigned {
+		return output.ErrUsageHint(
+			"--unassigned lists across all projects and has no project-scoped equivalent",
+			"Drop the project to list unassigned todos across every project")
+	}
+	if flags.noDueDate {
+		return output.ErrUsageHint(
+			"--no-due-date lists across all projects and has no project-scoped equivalent",
+			"Drop the project to list todos with no due date across every project")
+	}
+	if flags.page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	sdkStatus, sdkCompleted, err := resolveStatusFilter(flags.status)
@@ -130,43 +169,14 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return err
 	}
 
-	// Resolve account (enables interactive prompt if needed)
-	if err := ensureAccount(cmd, app); err != nil {
-		return err
-	}
-
-	// --assignee and --overdue filter within a single project. When no
-	// project is set anywhere (flag, global flag, config), the interactive
-	// picker would silently scope results to one arbitrary project. Error
-	// early and point to the Reports API for cross-project queries.
-	projectKnown := flags.project != "" || app.Flags.Project != "" || app.Config.ProjectID != ""
-	if !projectKnown {
-		if flags.assignee != "" {
-			return output.ErrUsageHint(
-				"--assignee requires a project (--in or default config)",
-				"For cross-project assigned todos: basecamp reports assigned")
-		}
-		if flags.overdue {
-			return output.ErrUsageHint(
-				"--overdue requires a project (--in or default config)",
-				"For cross-project overdue todos: basecamp reports overdue")
-		}
-	}
-
-	// Use project from flag or config, with interactive fallback
+	// Use project from flag, global flag, or config. One of the three is set —
+	// otherwise the account-wide branch above answered the listing, so there is
+	// nothing left to prompt for.
 	project := flags.project
 	if project == "" {
 		project = app.Flags.Project
 	}
 	if project == "" {
-		project = app.Config.ProjectID
-	}
-
-	// If no project specified, try interactive resolution
-	if project == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
 		project = app.Config.ProjectID
 	}
 
@@ -199,6 +209,360 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// Otherwise, get all todos from project's todoset
 	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, sdkStatus, sdkCompleted, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
+}
+
+// todosAccountWideFilter names the account-wide todo aggregate a listing maps
+// onto. Each is a distinct endpoint, so exactly one can be selected per run.
+type todosAccountWideFilter int
+
+const (
+	todosFilterOpen todosAccountWideFilter = iota
+	todosFilterCompleted
+	todosFilterUnassigned
+	todosFilterNoDueDate
+	todosFilterOverdue
+)
+
+// todosAccountWideDefaultLimit mirrors the project-scoped default: 100 todos
+// unless --limit or --all says otherwise.
+const todosAccountWideDefaultLimit = 100
+
+// listTodosAcrossProjects answers `todos list` from the account-wide aggregates
+// when no project is in scope, or when --all-projects overrides a configured
+// one. Flags that only mean something inside one project are rejected here
+// rather than quietly dropped.
+func listTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags) error {
+	if err := rejectProjectScopedTodosFlags(app, flags); err != nil {
+		return err
+	}
+
+	filter, err := selectAccountWideTodosFilter(flags)
+	if err != nil {
+		return err
+	}
+
+	if flags.limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+	if flags.reverse && flags.sortField == "" {
+		return output.ErrUsage("--reverse requires --sort")
+	}
+
+	if filter == todosFilterOverdue {
+		return listOverdueTodosAcrossProjects(cmd, app, flags)
+	}
+
+	// An explicit --page 0 means "unset" to Cobra but "every page" to the API;
+	// --all is the spelling for that.
+	if cmd.Flags().Changed("page") && flags.page < 1 {
+		return output.ErrUsage("--page must be 1 or greater; use --all to fetch every page")
+	}
+	if flags.sortField != "" {
+		return output.ErrUsageHint(
+			"--sort is not supported when listing across all projects (results are grouped by project)",
+			fmt.Sprintf("Sort within one project: basecamp todos list --in <project> --sort %s", flags.sortField))
+	}
+
+	return listGroupedTodosAcrossProjects(cmd, app, flags, filter)
+}
+
+// rejectProjectScopedTodosFlags returns a usage error for each flag that names
+// something inside a single project. A configured todolist is treated the same
+// as one passed on the command line: silently ignoring it would hand back a
+// listing the user did not ask for.
+func rejectProjectScopedTodosFlags(app *appctx.App, flags todosListFlags) error {
+	switch {
+	case flags.todolist != "":
+		return output.ErrUsageHint(
+			"--list names a todolist inside one project, which has no meaning across all projects",
+			fmt.Sprintf("List that todolist: basecamp todos list --in <project> --list %s", flags.todolist))
+	case app.Flags.Todolist != "":
+		return output.ErrUsageHint(
+			"--todolist names a todolist inside one project, which has no meaning across all projects",
+			"Drop --todolist to list todos across every project")
+	case app.Config.TodolistID != "":
+		return output.ErrUsageHint(
+			"a default todolist is configured, which has no meaning across all projects",
+			"Clear it with: basecamp config unset todolist_id")
+	case flags.todoset != "":
+		return output.ErrUsageHint(
+			"--todoset names a todoset inside one project, which has no meaning across all projects",
+			fmt.Sprintf("List that todoset: basecamp todos list --in <project> --todoset %s", flags.todoset))
+	case flags.assignee != "":
+		return output.ErrUsageHint(
+			"--assignee has no account-wide equivalent",
+			"For cross-project assigned todos: basecamp reports assigned")
+	}
+	return nil
+}
+
+// selectAccountWideTodosFilter maps the endpoint selectors onto the aggregate
+// they pick. The selectors are mutually exclusive — no endpoint combines two.
+func selectAccountWideTodosFilter(flags todosListFlags) (todosAccountWideFilter, error) {
+	completedSpelling := "--status completed"
+	if flags.completed {
+		completedSpelling = "--completed"
+	}
+
+	switch flags.status {
+	case "", "incomplete", "completed":
+	case "archived", "trashed":
+		return todosFilterOpen, output.ErrUsageHint(
+			fmt.Sprintf("--status %s has no account-wide equivalent", flags.status),
+			fmt.Sprintf("List them in one project: basecamp todos list --in <project> --status %s", flags.status))
+	default:
+		return todosFilterOpen, output.ErrUsage(
+			fmt.Sprintf("unknown --status value %q (expected completed, incomplete, archived, or trashed)", flags.status))
+	}
+
+	selectors := []struct {
+		name     string
+		selected bool
+		filter   todosAccountWideFilter
+	}{
+		{completedSpelling, flags.status == "completed", todosFilterCompleted},
+		{"--unassigned", flags.unassigned, todosFilterUnassigned},
+		{"--no-due-date", flags.noDueDate, todosFilterNoDueDate},
+		{"--overdue", flags.overdue, todosFilterOverdue},
+	}
+
+	filter := todosFilterOpen
+	chosen := ""
+	for _, s := range selectors {
+		if !s.selected {
+			continue
+		}
+		if chosen != "" {
+			return todosFilterOpen, output.ErrUsage(
+				fmt.Sprintf("%s and %s are mutually exclusive (each selects a different listing)", chosen, s.name))
+		}
+		chosen, filter = s.name, s.filter
+	}
+
+	return filter, nil
+}
+
+// listGroupedTodosAcrossProjects fetches one of the paginated aggregates, whose
+// payload is nested by project.
+func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags, filter todosAccountWideFilter) error {
+	limit := flags.limit
+	if limit == 0 {
+		limit = todosAccountWideDefaultLimit
+	}
+
+	var groups []basecamp.BucketTodosGroup
+	capped := false
+
+	if flags.all || flags.page > 0 {
+		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, accountWidePage(flags.page, flags.all))
+		if err != nil {
+			return convertSDKError(err)
+		}
+		groups = page.Groups
+	} else {
+		collected, more, err := collectAccountWideTodoGroups(cmd.Context(), app, filter, limit)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		groups, capped = truncateAccountWideTodoGroups(collected, limit), more
+	}
+
+	// Meta.TotalCount counts project groups rather than todos, so the item
+	// total and its notice are computed here instead of from the SDK's meta.
+	count := countAccountWideTodos(groups)
+
+	var data any = groups
+	if app.Output.EffectiveFormat() == output.FormatStyled {
+		data = flattenAccountWideTodos(groups)
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%d todos across %d projects", count, len(groups))),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         "basecamp todos show <id>",
+				Description: "Show todo details",
+			},
+			output.Breadcrumb{
+				Action:      "list",
+				Cmd:         "basecamp todos list --in <project>",
+				Description: "List one project's todos",
+			},
+		),
+	}
+	if capped {
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d todos; more may exist (use --all for every page, or --limit to raise the cap)", count)))
+	}
+
+	return app.OK(data, respOpts...)
+}
+
+// listOverdueTodosAcrossProjects fetches the overdue aggregate, which is a flat
+// oldest-due-first array rather than a paginated, project-grouped listing.
+func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags) error {
+	if cmd.Flags().Changed("page") {
+		return output.ErrUsageHint(
+			"--page is not supported with --overdue (the overdue listing is not paginated)",
+			"Cap the results instead: basecamp todos list --overdue --limit <n>")
+	}
+	if flags.all {
+		return output.ErrUsageHint(
+			"--all is not supported with --overdue (the overdue listing is already complete)",
+			"Raise the cap instead: basecamp todos list --overdue --limit <n>")
+	}
+	if flags.sortField == "position" {
+		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
+	}
+
+	todos, err := app.Account().Everything().OverdueTodos(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+	total := len(todos)
+
+	// Sort before truncating — truncating first would sort only the survivors.
+	if flags.sortField != "" {
+		sortTodos(todos, flags.sortField, flags.reverse)
+	}
+
+	limit := flags.limit
+	if limit == 0 {
+		limit = todosAccountWideDefaultLimit
+	}
+	if len(todos) > limit {
+		todos = todos[:limit]
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithEntity("todo"),
+		output.WithSummary(fmt.Sprintf("%d overdue todos across all projects", len(todos))),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         "basecamp todos show <id>",
+				Description: "Show todo details",
+			},
+			output.Breadcrumb{
+				Action:      "complete",
+				Cmd:         "basecamp todos complete <id>",
+				Description: "Complete a todo",
+			},
+		),
+	}
+	if total > len(todos) {
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing %d of %d overdue todos (use --limit to raise the cap)", len(todos), total)))
+	}
+
+	return app.OK(todos, respOpts...)
+}
+
+// collectAccountWideTodoGroups walks positive pages until it has collected the
+// requested number of todos, which is cheaper than fetching every page only to
+// truncate. The second return reports that collection stopped at the cap rather
+// than at the end of the listing.
+func collectAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, limit int) ([]basecamp.BucketTodosGroup, bool, error) {
+	var groups []basecamp.BucketTodosGroup
+	count := 0
+
+	for page := int32(1); ; page++ {
+		result, err := fetchAccountWideTodoGroups(ctx, app, filter, page)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(result.Groups) == 0 {
+			return groups, false, nil
+		}
+
+		groups = append(groups, result.Groups...)
+		fetched := countAccountWideTodos(groups)
+		if fetched == count {
+			// A page of empty groups makes no progress toward the cap;
+			// stop rather than request the same page shape forever.
+			return groups, false, nil
+		}
+		count = fetched
+
+		if count >= limit {
+			return groups, true, nil
+		}
+		// TotalCount counts groups, so it bounds the walk even though it
+		// cannot bound the todos.
+		if result.Meta.TotalCount > 0 && len(groups) >= result.Meta.TotalCount {
+			return groups, false, nil
+		}
+	}
+}
+
+// fetchAccountWideTodoGroups calls the aggregate the filter selects. Page 0
+// follows the Link header across every page.
+func fetchAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, page int32) (*basecamp.BucketTodosGroupsPage, error) {
+	everything := app.Account().Everything()
+	switch filter {
+	case todosFilterCompleted:
+		return everything.CompletedTodos(ctx, page)
+	case todosFilterUnassigned:
+		return everything.UnassignedTodos(ctx, page)
+	case todosFilterNoDueDate:
+		return everything.NoDueDateTodos(ctx, page)
+	default:
+		return everything.OpenTodos(ctx, page)
+	}
+}
+
+// truncateAccountWideTodoGroups caps a grouped listing at limit todos. The cap
+// counts todos rather than groups — truncating groups would drop whole projects
+// from the listing.
+func truncateAccountWideTodoGroups(groups []basecamp.BucketTodosGroup, limit int) []basecamp.BucketTodosGroup {
+	kept := make([]basecamp.BucketTodosGroup, 0, len(groups))
+	remaining := limit
+
+	for _, group := range groups {
+		if remaining <= 0 {
+			break
+		}
+		if len(group.Todos) > remaining {
+			group.Todos = group.Todos[:remaining]
+		}
+		remaining -= len(group.Todos)
+		kept = append(kept, group)
+	}
+
+	return kept
+}
+
+// countAccountWideTodos totals the todos inside a grouped listing.
+func countAccountWideTodos(groups []basecamp.BucketTodosGroup) int {
+	count := 0
+	for _, group := range groups {
+		count += len(group.Todos)
+	}
+	return count
+}
+
+// flattenAccountWideTodos turns the project-grouped payload into flat rows for
+// styled output, which renders nested groups as unreadable cells. Machine
+// formats keep the grouping.
+func flattenAccountWideTodos(groups []basecamp.BucketTodosGroup) []map[string]any {
+	rows := make([]map[string]any, 0, countAccountWideTodos(groups))
+	for _, group := range groups {
+		for _, todo := range group.Todos {
+			status := "incomplete"
+			if todo.Completed {
+				status = "completed"
+			}
+			rows = append(rows, map[string]any{
+				"project": group.Bucket.Name,
+				"id":      todo.ID,
+				"title":   todo.Title,
+				"status":  status,
+				"due":     todo.DueOn,
+			})
+		}
+	}
+	return rows
 }
 
 // resolveStatusFilter maps the user-facing --status value to the SDK's
