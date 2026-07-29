@@ -922,6 +922,8 @@ func filesAccountWideRoute(body string) stubRoute {
 		path:   "/99999/files.json",
 		status: http.StatusOK,
 		body:   body,
+		// The bounded default walks positive pages until one comes back empty.
+		pages: []string{body},
 	}
 }
 
@@ -930,12 +932,12 @@ func filesAccountWideRoute(body string) stubRoute {
 func filesProjectScopedRoutes() []stubRoute {
 	return []stubRoute{
 		projectsRoute(),
-		{http.MethodGet, "/99999/projects/123.json", http.StatusOK,
-			`{"id":123,"name":"Test Project","dock":[{"id":555,"name":"vault","title":"Docs & Files","enabled":true}]}`},
-		{http.MethodGet, "/99999/vaults/555", http.StatusOK, `{"id":555,"title":"Docs & Files"}`},
-		{http.MethodGet, "/99999/vaults/555/vaults.json", http.StatusOK, `[]`},
-		{http.MethodGet, "/99999/vaults/555/uploads.json", http.StatusOK, `[]`},
-		{http.MethodGet, "/99999/vaults/555/documents.json", http.StatusOK, `[]`},
+		{method: http.MethodGet, path: "/99999/projects/123.json", status: http.StatusOK,
+			body: `{"id":123,"name":"Test Project","dock":[{"id":555,"name":"vault","title":"Docs & Files","enabled":true}]}`},
+		{method: http.MethodGet, path: "/99999/vaults/555", status: http.StatusOK, body: `{"id":555,"title":"Docs & Files"}`},
+		{method: http.MethodGet, path: "/99999/vaults/555/vaults.json", status: http.StatusOK, body: `[]`},
+		{method: http.MethodGet, path: "/99999/vaults/555/uploads.json", status: http.StatusOK, body: `[]`},
+		{method: http.MethodGet, path: "/99999/vaults/555/documents.json", status: http.StatusOK, body: `[]`},
 	}
 }
 
@@ -1068,8 +1070,7 @@ func TestFilesListKindReachesTheQuery(t *testing.T) {
 func TestFilesListPersonResolvesAndReachesTheQuery(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		filesAccountWideRoute(`[]`),
-		stubRoute{http.MethodGet, "/99999/people.json", http.StatusOK,
-			`[{"id":77,"name":"Ann Perkins"},{"id":88,"name":"Bo Diaz"}]`},
+		stubRoute{method: http.MethodGet, path: "/99999/people.json", status: http.StatusOK, body: `[{"id":77,"name":"Ann Perkins"},{"id":88,"name":"Bo Diaz"}]`},
 	)
 
 	require.NoError(t, runFilesListCmd(t, app, "--person", "Ann Perkins", "--person", "88"))
@@ -1078,20 +1079,71 @@ func TestFilesListPersonResolvesAndReachesTheQuery(t *testing.T) {
 	assert.Contains(t, query, "88")
 }
 
-func TestFilesListAccountWideFollowsEveryPage(t *testing.T) {
+// The old default asked for page 0 — the full-account crawl — and that is the
+// request that returned a 500 mid-listing with no flag available to step around
+// it. The default is now a bounded walk over positive pages.
+func TestFilesListAccountWideDefaultWalksBoundedPages(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
 
 	require.NoError(t, runFilesListCmd(t, app))
-	assert.NotContains(t, transport.last(t).Query, "page=",
-		"bare files list is pinned at every page, so it sends no page argument")
+	assert.Equal(t, []string{"page=1"}, transport.queriesFor("/99999/files.json"),
+		"an empty first page ends the walk immediately")
 }
 
-func TestFilesListGainsNoPaginationFlags(t *testing.T) {
-	listCmd, _, err := NewFilesCmd().Find([]string{"list"})
-	require.NoError(t, err)
+// --all is the one spelling that still asks for the whole account.
+func TestFilesListAccountWideAllFollowsEveryPage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
 
-	for _, name := range []string{"limit", "page", "all"} {
-		assert.Nil(t, listCmd.Flags().Lookup(name), "files list must not grow --%s", name)
+	require.NoError(t, runFilesListCmd(t, app, "--all"))
+	assert.Equal(t, []string{""}, transport.queriesFor("/99999/files.json"),
+		"the endpoint spells the full crawl as an absent page")
+}
+
+func TestFilesListAccountWidePageAsksForExactlyThatPage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	require.NoError(t, runFilesListCmd(t, app, "--page", "4"))
+	assert.Equal(t, []string{"page=4"}, transport.queriesFor("/99999/files.json"))
+}
+
+// Every account-wide listing needs a bounded default and a way to ask for more.
+// files list had neither, so a 500 mid-crawl left no way to step around the bad
+// page. The three group constructors share newFilesListCmd, so the flags have
+// to be present under all six spellings, not just the one they were added for.
+func TestFilesListHasPaginationFlagsUnderEverySpelling(t *testing.T) {
+	spellings := map[string]func() *cobra.Command{
+		"files":  NewFilesCmd,
+		"vaults": NewVaultsCmd,
+		"docs":   NewDocsCmd,
+	}
+
+	for spelling, ctor := range spellings {
+		t.Run(spelling, func(t *testing.T) {
+			listCmd, _, err := ctor().Find([]string{"list"})
+			require.NoError(t, err)
+
+			for _, name := range []string{"limit", "page", "all"} {
+				assert.NotNil(t, listCmd.Flags().Lookup(name), "%s list must carry --%s", spelling, name)
+			}
+			assert.Equal(t, "n", listCmd.Flags().Lookup("limit").Shorthand)
+		})
+	}
+}
+
+// The flags are account-wide only: a project's folder listing is three
+// unpaginated SDK calls with nowhere to put a page number. Accepting a cap and
+// then ignoring it is precisely the defect the contract forbids.
+func TestFilesListProjectScopedRejectsPaginationFlags(t *testing.T) {
+	for _, flag := range []string{"--limit=5", "--page=2", "--all"} {
+		t.Run(flag, func(t *testing.T) {
+			app, _ := setupMessagesTestApp(t)
+			cmd := NewFilesCmd()
+
+			err := executeMessagesCommand(cmd, app, "list", "--in", "123", flag)
+
+			require.Error(t, err, "a project-scoped folder listing has no pagination to thread")
+			assert.Contains(t, err.Error(), "does not apply to a project's folder listing")
+		})
 	}
 }
 

@@ -226,10 +226,6 @@ const (
 	todosFilterOverdue
 )
 
-// todosAccountWideDefaultLimit mirrors the project-scoped default: 100 todos
-// unless --limit or --all says otherwise.
-const todosAccountWideDefaultLimit = 100
-
 // listTodosAcrossProjects answers `todos list` from the account-wide aggregates
 // when no project is in scope, or when --all-projects overrides a configured
 // one. Flags that only mean something inside one project are rejected here
@@ -356,7 +352,7 @@ func selectAccountWideTodosFilter(flags todosListFlags) (todosAccountWideFilter,
 func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags, filter todosAccountWideFilter) error {
 	limit := flags.limit
 	if limit == 0 {
-		limit = todosAccountWideDefaultLimit
+		limit = accountWideDefaultLimit
 	}
 
 	var groups []basecamp.BucketTodosGroup
@@ -427,11 +423,6 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 			"--page is not supported with --overdue (the overdue listing is not paginated)",
 			"Cap the results instead: basecamp todos list --overdue --limit <n>")
 	}
-	if flags.all {
-		return output.ErrUsageHint(
-			"--all is not supported with --overdue (the overdue listing is already complete)",
-			"Raise the cap instead: basecamp todos list --overdue --limit <n>")
-	}
 	if flags.sortField == "position" {
 		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
@@ -447,11 +438,13 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		sortTodos(todos, flags.sortField, flags.reverse)
 	}
 
+	// The endpoint is unpaginated, so the complete array is already in hand and
+	// --all costs nothing beyond skipping the cap. --limit trims locally.
 	limit := flags.limit
 	if limit == 0 {
-		limit = todosAccountWideDefaultLimit
+		limit = accountWideDefaultLimit
 	}
-	if len(todos) > limit {
+	if !flags.all && len(todos) > limit {
 		todos = todos[:limit]
 	}
 
@@ -477,7 +470,8 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 	}
 	if total > len(todos) {
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
-			"Showing %d of %d overdue todos (use --limit to raise the cap)", len(todos), total)))
+			"Showing %d of %d overdue todos (use --all for the complete list, or --limit to raise the cap)",
+			len(todos), total)))
 	}
 
 	return app.OK(todos, respOpts...)
@@ -488,36 +482,18 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 // truncate. The second return reports that collection stopped at the cap rather
 // than at the end of the listing.
 func collectAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, limit int) ([]basecamp.BucketTodosGroup, bool, error) {
-	var groups []basecamp.BucketTodosGroup
-	count := 0
-
-	for page := int32(1); ; page++ {
-		result, err := fetchAccountWideTodoGroups(ctx, app, filter, page)
-		if err != nil {
-			return nil, false, err
-		}
-		if len(result.Groups) == 0 {
-			return groups, false, nil
-		}
-
-		groups = append(groups, result.Groups...)
-		fetched := countAccountWideTodos(groups)
-		if fetched == count {
-			// A page of empty groups makes no progress toward the cap;
-			// stop rather than request the same page shape forever.
-			return groups, false, nil
-		}
-		count = fetched
-
-		if count >= limit {
-			return groups, true, nil
-		}
-		// TotalCount counts groups, so it bounds the walk even though it
-		// cannot bound the todos.
-		if result.Meta.TotalCount > 0 && len(groups) >= result.Meta.TotalCount {
-			return groups, false, nil
-		}
-	}
+	groups, capped, _, err := accountWideCollect(
+		func(page int32) ([]basecamp.BucketTodosGroup, basecamp.ListMeta, error) {
+			result, err := fetchAccountWideTodoGroups(ctx, app, filter, page)
+			if err != nil {
+				return nil, basecamp.ListMeta{}, err
+			}
+			return result.Groups, result.Meta, nil
+		},
+		countAccountWideTodos,
+		limit,
+	)
+	return groups, capped, err
 }
 
 // fetchAccountWideTodoGroups calls the aggregate the filter selects. Page 0

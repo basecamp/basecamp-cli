@@ -105,6 +105,8 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    ```
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the eight list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, `boost list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
+   Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected), `--page N` for exactly one page, or `--all` for everything.
+   `boost list --all-projects` is the exception: it returns only the first page by default, because that feed is slow server-side (a single page measured ~93s on a large account). Its `--page`/`--limit`/`--all` work normally, but expect them to be slow.
 
 ### Output Modes
 
@@ -720,6 +722,10 @@ basecamp comments update <id> "Updated" --in <project>
 ```bash
 basecamp files list --in <project> --json               # List all (folders, files, docs)
 basecamp files list --vault <folder_id> --in <project>  # List folder contents
+basecamp files list --all-projects --json               # Across every project (first 100)
+basecamp files list --all-projects --limit 500          # Walk pages until 500 collected
+basecamp files list --all-projects --page 2             # Exactly page 2
+basecamp files list --all-projects --all                # Every page (slow on big accounts)
 basecamp files show <id> --in <project>                 # Show item (auto-detects type)
 basecamp files download <id> --in <project>             # Download file
 basecamp files download <id> --out ./dir                # Download to specific dir

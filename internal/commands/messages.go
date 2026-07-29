@@ -197,11 +197,6 @@ func messagesListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
 	}
 }
 
-// messagesAccountWideLimit is the account-wide default cap. It matches what the
-// project-scoped list already returns by default, so dropping the project does
-// not quietly change how much a caller gets back.
-const messagesAccountWideLimit = 100
-
 // runMessagesListAccountWide lists every message across all accessible
 // projects. The feed is flat []Recording, and each item carries its own
 // bucket — which the generic renderers skip by name, so human-facing output
@@ -232,7 +227,7 @@ func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoar
 	capped := !all && page == 0
 	wanted := limit
 	if wanted == 0 {
-		wanted = messagesAccountWideLimit
+		wanted = accountWideDefaultLimit
 	}
 
 	recordings, meta, err := messagesAccountWideFetch(cmd.Context(), app, wanted, page, all, sortField != "")
@@ -249,7 +244,7 @@ func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoar
 		recordings = recordings[:wanted]
 	}
 
-	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, "--all", limit > 0)
+	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, limit > 0)
 	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(recordings)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(messagesAccountWideBreadcrumbs()...))
 
@@ -286,20 +281,9 @@ func messagesAccountWideFetch(ctx context.Context, app *appctx.App, wanted, page
 		return fetch(0)
 	}
 
-	var recordings []basecamp.Recording
-	var meta basecamp.ListMeta
-	for p := int32(1); len(recordings) < wanted; p++ {
-		pageRecordings, pageMeta, err := fetch(p)
-		if err != nil {
-			return nil, basecamp.ListMeta{}, err
-		}
-		if p == 1 {
-			meta = pageMeta
-		}
-		if len(pageRecordings) == 0 {
-			break
-		}
-		recordings = append(recordings, pageRecordings...)
+	recordings, _, meta, err := accountWideCollect(fetch, accountWideFlatCount[basecamp.Recording], wanted)
+	if err != nil {
+		return nil, basecamp.ListMeta{}, err
 	}
 	return recordings, meta, nil
 }

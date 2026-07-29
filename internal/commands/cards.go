@@ -276,10 +276,13 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 	}
 
 	if selector == cardsSelectorOverdue {
-		if opts.pageSet || opts.all {
+		// --page has nothing to address on an unpaginated endpoint, but --all
+		// does: the listing is capped by default, and --all is how you reach
+		// past the cap. Rejecting both would leave card 101 unreachable.
+		if opts.pageSet {
 			return output.ErrUsageHint(
-				"--overdue returns every overdue card in one unpaginated list",
-				"Drop --page/--all; use --limit to cap the result.",
+				"--page is not supported with --overdue (the overdue listing is not paginated)",
+				"Cap the results instead: basecamp cards list --overdue --limit <n>",
 			)
 		}
 		return runCardsListOverdue(cmd, app, opts)
@@ -294,55 +297,77 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 		)
 	}
 
-	// `cards list` fetches everything by default, so the account-wide default
-	// follows every page. accountWidePage is not used here: it defaults to page
-	// 1, which would silently cap a listing documented as unbounded.
-	apiPage := int32(0)
-	if opts.page > 0 {
-		apiPage = int32(opts.page) //nolint:gosec // bounded above by the --page range check
+	// Account-wide "all" is the whole account, not one project's cards, so the
+	// default is bounded and --all is how you ask for the rest. Walking pages
+	// to the cap beats fetching every page and discarding most of it.
+	limit := opts.limit
+	if limit == 0 {
+		limit = accountWideDefaultLimit
 	}
 
 	everything := app.Account().Everything()
-	var (
-		groupsPage *basecamp.BucketCardsGroupsPage
-		err        error
-	)
-	switch selector {
-	case cardsSelectorCompleted:
-		groupsPage, err = everything.CompletedCards(cmd.Context(), apiPage)
-	case cardsSelectorUnassigned:
-		groupsPage, err = everything.UnassignedCards(cmd.Context(), apiPage)
-	case cardsSelectorNoDueDate:
-		groupsPage, err = everything.NoDueDateCards(cmd.Context(), apiPage)
-	case cardsSelectorNotNow:
-		groupsPage, err = everything.NotNowCards(cmd.Context(), apiPage)
-	default:
-		groupsPage, err = everything.OpenCards(cmd.Context(), apiPage)
-	}
-	if err != nil {
-		return convertSDKError(err)
+	fetch := func(page int32) ([]basecamp.BucketCardsGroup, basecamp.ListMeta, error) {
+		var (
+			groupsPage *basecamp.BucketCardsGroupsPage
+			err        error
+		)
+		switch selector {
+		case cardsSelectorCompleted:
+			groupsPage, err = everything.CompletedCards(cmd.Context(), page)
+		case cardsSelectorUnassigned:
+			groupsPage, err = everything.UnassignedCards(cmd.Context(), page)
+		case cardsSelectorNoDueDate:
+			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page)
+		case cardsSelectorNotNow:
+			groupsPage, err = everything.NotNowCards(cmd.Context(), page)
+		default:
+			groupsPage, err = everything.OpenCards(cmd.Context(), page)
+		}
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return groupsPage.Groups, groupsPage.Meta, nil
 	}
 
-	// --limit counts cards, not project groups: truncating groups would drop
-	// whole projects. Meta.TotalCount counts groups, so the item total is ours
-	// to compute.
-	groups := groupsPage.Groups
-	total := countAccountWideCards(groups)
-	shown := total
-	if opts.limit > 0 && total > opts.limit {
-		groups = truncateAccountWideCards(groups, opts.limit)
-		shown = opts.limit
+	var (
+		groups    []basecamp.BucketCardsGroup
+		capped    bool
+		truncated bool
+	)
+	if opts.all || opts.page > 0 {
+		sdkPage, err := accountWidePage(opts.page, opts.all)
+		if err != nil {
+			return err
+		}
+		pageGroups, meta, err := fetch(sdkPage)
+		if err != nil {
+			return err
+		}
+		groups, truncated = pageGroups, meta.Truncated
+	} else {
+		// --limit counts cards, not project groups: truncating groups would
+		// drop whole projects. The walk stops at a page boundary, so trim to
+		// the exact cap afterwards.
+		collected, more, _, err := accountWideCollect(fetch, countAccountWideCards, limit)
+		if err != nil {
+			return err
+		}
+		groups, capped = truncateAccountWideCards(collected, limit), more
 	}
+
+	// Meta.TotalCount counts project groups rather than cards, so the item
+	// total is ours to compute.
+	count := countAccountWideCards(groups)
 
 	respOpts := []output.ResponseOption{
-		output.WithSummary(fmt.Sprintf("%d %s cards across %d projects", shown, selector, len(groups))),
+		output.WithSummary(fmt.Sprintf("%d %s cards across %d projects", count, selector, len(groups))),
 		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
 	}
 	switch {
-	case shown < total:
+	case capped:
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
-			"Showing the first %d of %d cards; drop --limit to see them all", shown, total)))
-	case groupsPage.Meta.Truncated:
+			"Showing the first %d cards; more may exist (use --all for every page, or --limit to raise the cap)", count)))
+	case truncated:
 		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
 	}
 
@@ -373,9 +398,15 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 		sortCards(cards, opts.sortField, opts.reverse)
 	}
 
+	// The endpoint is unpaginated, so the complete array is already in hand and
+	// --all costs nothing beyond skipping the cap. --limit trims locally.
 	total := len(cards)
-	if opts.limit > 0 && total > opts.limit {
-		cards = cards[:opts.limit]
+	limit := opts.limit
+	if limit == 0 {
+		limit = accountWideDefaultLimit
+	}
+	if !opts.all && total > limit {
+		cards = cards[:limit]
 	}
 
 	respOpts := []output.ResponseOption{
@@ -385,7 +416,8 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 	}
 	if len(cards) < total {
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
-			"Showing the first %d of %d cards; drop --limit to see them all", len(cards), total)))
+			"Showing the first %d of %d overdue cards (use --all for the complete list, or --limit to raise the cap)",
+			len(cards), total)))
 	}
 
 	return app.OK(cards, respOpts...)

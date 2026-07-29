@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -135,6 +136,8 @@ func newFilesListCmd(project, vaultID *string) *cobra.Command {
 	var allProjects bool
 	var kind string
 	var people []string
+	var limit, page int
+	var all bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -146,23 +149,31 @@ instead of asking which project to use. Pass --all-projects to list
 account-wide even when a project is configured.
 
 --kind and --person filter the account-wide listing only; the project-scoped
-folder listing has no equivalent for them.`,
+folder listing has no equivalent for them.
+
+--limit/--page/--all page through the account-wide listing, which returns
+the first 100 files by default. A project's folder listing is a single
+unpaginated response, so it rejects all three.`,
 		Example: `  basecamp files list --in my-project
   basecamp files list --all-projects --kind images
-  basecamp files list --all-projects --person me`,
+  basecamp files list --all-projects --person me
+  basecamp files list --all-projects --limit 500`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd, *project, *vaultID, allProjects, kind, people)
+			return runFilesList(cmd, *project, *vaultID, allProjects, kind, people, limit, page, all)
 		},
 	}
 
 	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List files across every accessible project")
 	cmd.Flags().StringVar(&kind, "kind", "", fmt.Sprintf("Account-wide only: filter by file kind (%s)", strings.Join(filesAccountWideKinds, ", ")))
 	cmd.Flags().StringArrayVar(&people, "person", nil, "Account-wide only: filter by creator (name, email, ID, or \"me\"; repeatable)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Account-wide only: maximum files to fetch (0 = default 100)")
+	cmd.Flags().IntVar(&page, "page", 0, "Account-wide only: fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&all, "all", false, "Account-wide only: fetch every page")
 
 	return cmd
 }
 
-func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool, kind string, people []string) error {
+func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool, kind string, people []string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	// Scope is settled before any scope-specific validation, and an explicit
@@ -184,7 +195,16 @@ func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool,
 	// any layer keeps the folder listing. With nothing to scope to, list
 	// account-wide rather than prompting.
 	if allProjects || !projectKnown(app, project) {
-		return runFilesListAccountWide(cmd, app, vaultID, kind, people)
+		return runFilesListAccountWide(cmd, app, vaultID, kind, people, limit, page, all)
+	}
+
+	// A project's folder listing is three unpaginated calls — Vaults, Uploads,
+	// and Documents each get a nil options struct, so there is no page number
+	// to thread. Accepting a cap here and ignoring it is the defect these
+	// scope rules exist to prevent.
+	if err := rejectScopedPaginationFlags(cmd, "a project's folder listing",
+		"Drop --project/--in (and pass --all-projects if a project is configured) to page through files across every project."); err != nil {
+		return err
 	}
 
 	// The account-wide filters have no project-scoped equivalent, so a project
@@ -320,7 +340,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool,
 // runFilesListAccountWide lists every file across all accessible projects.
 // The bare files listing has no --limit/--page/--all project-scoped and gains
 // none here, so it always follows the Link header across every page.
-func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind string, people []string) error {
+func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind string, people []string, limit, page int, all bool) error {
 	if err := rejectAccountWideTodolist(app, "file"); err != nil {
 		return err
 	}
@@ -354,21 +374,77 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 		)
 	}
 
+	if limit < 0 {
+		return output.ErrUsage("--limit must be zero or positive")
+	}
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if cmd.Flags().Changed("page") && page < 1 {
+		return output.ErrUsageHint(
+			"--page must be a positive page number",
+			"Omit --page, or pass --all, to follow every page")
+	}
+	if page > math.MaxInt32 {
+		return output.ErrUsage("--page is out of range")
+	}
+
 	opts, err := filesAccountWideOptions(cmd, app, kind, people)
 	if err != nil {
 		return err
 	}
 
-	page, err := app.Account().Everything().Files(cmd.Context(), 0, opts)
-	if err != nil {
-		return convertSDKError(err)
+	fetch := func(p int32) ([]basecamp.EverythingFile, basecamp.ListMeta, error) {
+		result, err := app.Account().Everything().Files(cmd.Context(), p, opts)
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return result.Files, result.Meta, nil
+	}
+
+	// The default used to follow the Link header across the whole account,
+	// which on a large one is both slow and fragile: a single failing page
+	// takes down the entire listing, and before these flags existed there was
+	// no way to step around it. Bound the default and let --page/--all reach
+	// the rest.
+	var (
+		files  []basecamp.EverythingFile
+		meta   basecamp.ListMeta
+		capped bool
+	)
+	if all || page > 0 {
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
+			return err
+		}
+		if files, meta, err = fetch(sdkPage); err != nil {
+			return err
+		}
+	} else {
+		effectiveLimit := limit
+		if effectiveLimit == 0 {
+			effectiveLimit = accountWideDefaultLimit
+		}
+		if files, capped, meta, err = accountWideCollect(fetch, accountWideFlatCount[basecamp.EverythingFile], effectiveLimit); err != nil {
+			return err
+		}
+		// The walk stops at a page boundary, so trim to the exact cap.
+		if len(files) > effectiveLimit {
+			files = files[:effectiveLimit]
+		}
 	}
 
 	// EverythingFile is an all-pointer superset far too wide to render raw, and
 	// its bucket is nested, so every consumer but --json and --agent reads the
 	// flat rows.
-	respOpts := accountWideRespOpts(len(page.Files), "file", "files", page.Meta, "", false)
-	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideFiles(page.Files)))
+	respOpts := accountWideRespOpts(len(files), "file", "files", meta, limit > 0)
+	if notice := accountWideCapNotice(capped, meta, len(files), "files"); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideFiles(files)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(
 		output.Breadcrumb{
 			Action:      "kind",
@@ -382,7 +458,7 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 		},
 	))
 
-	return app.OK(page.Files, respOpts...)
+	return app.OK(files, respOpts...)
 }
 
 // filesAccountWideOptions validates --kind and resolves --person into the

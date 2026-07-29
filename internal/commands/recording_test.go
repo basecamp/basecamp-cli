@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,28 @@ type stubRoute struct {
 	path   string
 	status int
 	body   string
+
+	// pages, when set, makes the route page-aware: page=N serves pages[N-1]
+	// and anything past the end serves an empty array, while an absent or zero
+	// page serves body — the whole listing, which is what the real endpoints
+	// return for the "follow every page" form.
+	//
+	// Account-wide fixtures need this. The bounded walk stops on the first
+	// empty page, so a route that served the same body for every page number
+	// would walk all the way to the cap and hide the behavior under test.
+	pages []string
+}
+
+// pagedBody picks the response for a page-aware route.
+func pagedBody(route stubRoute, rawPage string) string {
+	if rawPage == "" || rawPage == "0" {
+		return route.body
+	}
+	n, err := strconv.Atoi(rawPage)
+	if err != nil || n < 1 || n > len(route.pages) {
+		return "[]"
+	}
+	return route.pages[n-1]
 }
 
 // recordingTransport is an http.RoundTripper that records every request and
@@ -75,10 +98,14 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	for _, route := range t.routes {
 		if route.method == req.Method && route.path == req.URL.Path {
+			responseBody := route.body
+			if route.pages != nil {
+				responseBody = pagedBody(route, req.URL.Query().Get("page"))
+			}
 			return &http.Response{
 				StatusCode: route.status,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(route.body)),
+				Body:       io.NopCloser(strings.NewReader(responseBody)),
 				Request:    req,
 			}, nil
 		}
@@ -98,6 +125,20 @@ func (t *recordingTransport) recorded() []recordedCall {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]recordedCall(nil), t.requests...)
+}
+
+// queriesFor returns the raw query string of every recorded request to path, in
+// order. The account-wide tests assert on the whole sequence rather than the
+// last call: the request count, and whether any request omitted page= at all,
+// are exactly what separates a bounded walk from a full-account crawl.
+func (t *recordingTransport) queriesFor(path string) []string {
+	queries := []string{}
+	for _, call := range t.recorded() {
+		if call.Path == path {
+			queries = append(queries, call.Query)
+		}
+	}
+	return queries
 }
 
 // last returns the most recent request, failing the test if none were made.

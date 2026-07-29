@@ -102,7 +102,7 @@ func TestTodosShowsHelp(t *testing.T) {
 // project anywhere lists account-wide instead of prompting for one.
 func TestTodosListWithoutProjectListsAcrossProjects(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
-		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(todosAccountWideDefaultLimit)))
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(accountWideDefaultLimit)))
 
 	err := executeRecordingCommand(NewTodosCmd(), app, "list")
 	require.NoError(t, err)
@@ -3126,7 +3126,7 @@ func TestTodosListWithProjectStaysProjectScoped(t *testing.T) {
 
 func TestTodosListAllProjectsOverridesConfiguredProject(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
-		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(todosAccountWideDefaultLimit)))
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(accountWideDefaultLimit)))
 	app.Config.ProjectID = "123"
 
 	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--all-projects")
@@ -3148,7 +3148,7 @@ func TestTodosListAccountWideSelectsEndpointPerFilter(t *testing.T) {
 	assertEndpoint := func(path string, args ...string) {
 		t.Helper()
 
-		app, transport := setupRecordingTestApp(t, accountWideTodosRoute(path, todosGroupsBody(todosAccountWideDefaultLimit)))
+		app, transport := setupRecordingTestApp(t, accountWideTodosRoute(path, todosGroupsBody(accountWideDefaultLimit)))
 		require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, append([]string{"list"}, args...)...))
 		assert.Equal(t, path, transport.last(t).Path)
 	}
@@ -3340,7 +3340,24 @@ func TestTodosListAccountWideOverdueIsUnpaginated(t *testing.T) {
 	app, _ := setupRecordingTestApp(t)
 
 	requireTodosListUsageError(t, app, "--page is not supported with --overdue", "--overdue", "--page", "2")
-	requireTodosListUsageError(t, app, "--all is not supported with --overdue", "--overdue", "--all")
+}
+
+// --all is a different question from --page. The overdue listing caps at 100 by
+// default, so refusing --all too would leave todo 101 unreachable. The endpoint
+// is unpaginated, so honoring it costs nothing: the array is already in hand.
+func TestTodosListAccountWideOverdueAcceptsAll(t *testing.T) {
+	body := `[{"id":1,"title":"Bravo","due_on":"2020-03-01"},
+		{"id":2,"title":"Alpha","due_on":"2020-01-01"}]`
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/overdue.json", body))
+
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue", "--all"))
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "2 overdue todos across all projects", envelope["summary"])
+	assert.Empty(t, envelope["notice"], "nothing was withheld, so there is nothing to warn about")
+	assert.Len(t, transport.queriesFor("/99999/todos/overdue.json"), 1,
+		"--all costs no extra request on an unpaginated endpoint")
 }
 
 func TestTodosListAccountWideOverdueSortsBeforeTruncating(t *testing.T) {

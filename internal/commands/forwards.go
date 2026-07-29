@@ -211,31 +211,50 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 		return err
 	}
 
-	// The endpoint spells "follow every page" as page 0, which is where both
-	// --all and the default land: this command's project-scoped default is
-	// already "0 = all", so listing account-wide does not silently start
-	// capping. Only an explicit positive --page narrows to a single page.
-	var sdkPage int32
-	if page > 0 {
-		var err error
-		if sdkPage, err = accountWidePage(page, all); err != nil {
+	fetch := func(p int32) ([]basecamp.Recording, basecamp.ListMeta, error) {
+		result, err := app.Account().Everything().Forwards(cmd.Context(), p)
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return result.Recordings, result.Meta, nil
+	}
+
+	// The endpoint spells "follow every page" as page 0, which is where --all
+	// lands. The default no longer goes there: one project's inbox and every
+	// project's inboxes are different amounts of work, so the account-wide
+	// default is bounded and --all is how you ask for the rest.
+	var (
+		forwards []basecamp.Recording
+		meta     basecamp.ListMeta
+		capped   bool
+	)
+	if all || page > 0 {
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
 			return err
+		}
+		if forwards, meta, err = fetch(sdkPage); err != nil {
+			return err
+		}
+	} else {
+		effectiveLimit := limit
+		if effectiveLimit == 0 {
+			effectiveLimit = accountWideDefaultLimit
+		}
+		var err error
+		if forwards, capped, meta, err = accountWideCollect(fetch, accountWideFlatCount[basecamp.Recording], effectiveLimit); err != nil {
+			return err
+		}
+		// The walk stops at a page boundary, so trim to the exact cap.
+		if len(forwards) > effectiveLimit {
+			forwards = forwards[:effectiveLimit]
 		}
 	}
 
-	result, err := app.Account().Everything().Forwards(cmd.Context(), sdkPage)
-	if err != nil {
-		return convertSDKError(err)
+	respOpts := accountWideRespOpts(len(forwards), "forward", "forwards", meta, limit > 0)
+	if notice := accountWideCapNotice(capped, meta, len(forwards), "forwards"); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
 	}
-
-	// --limit truncates client-side; accountWideRespOpts reports the shortfall
-	// against the server's total so the trim is visible.
-	forwards := result.Recordings
-	if limit > 0 && len(forwards) > limit {
-		forwards = forwards[:limit]
-	}
-
-	respOpts := accountWideRespOpts(len(forwards), "forward", "forwards", result.Meta, "--all", limit > 0)
 	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(forwards)))
 	respOpts = append(respOpts,
 		output.WithBreadcrumbs(

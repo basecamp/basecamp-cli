@@ -105,10 +105,15 @@ values) are rejected, pointing at the command that does answer the question
 (e.g. `reports assigned`).
 
 **No new flags** beyond `--all-projects`, the endpoint selectors the method
-matrix names, and one recorded exception. The account-wide path reuses the
-filter, sort, and pagination flags a command already has; it does not grow a
-parallel flag surface. The exception is `files list`, which today has no filters
-at all and gains two account-wide-only ones — see I5.
+matrix names, the `files list` filters, and the pagination flags the two
+flagless commands needed. The account-wide path reuses the filter and sort flags
+a command already has; it does not grow a parallel flag surface for its own
+sake.
+
+Pagination is the one place where "reuse only" turned out to be wrong. A command
+with no `--limit`/`--page`/`--all` has no way to recover from a server error
+mid-crawl and no way to reach past a bounded default, so `boost list` and bare
+`files list` gained all three — see I5.
 
 #### Endpoint selectors
 
@@ -127,6 +132,8 @@ flags added by this work — anything not listed here is reuse:
 | `cards list` | `--not-now` | `NotNowCards` | account-wide only |
 | `cards list` | `--overdue` | `OverdueCards` | account-wide only |
 | `files list` | `--kind`, `--person` | filters on `Files` | account-wide only — see I5 |
+| `files list` | `--limit`/`-n`, `--page`, `--all` | pagination on `Files` | account-wide only — see I5 |
+| `boost list` | `--limit`/`-n`, `--page`, `--all` | pagination on `Boosts` | account-wide only — see I5 |
 
 **Account-wide only** means exactly what it means for the `files list` filters:
 the project-scoped path has no equivalent, so passing one with a project in
@@ -167,36 +174,85 @@ exactly page `N`.
 
 | Flag | Mapping |
 |---|---|
-| `--all` | page 0 |
+| `--all` | page 0 — the whole account |
 | `--page N` | page N (any positive N) |
-| `--limit N` | client-side truncation to N, with an honest truncation notice |
-| default | the command's documented default, per the table below |
+| `--limit N` | **bounds the fetch**: walks positive pages until N items are collected, then trims to exactly N |
+| default | a bounded cap, per the table below |
+
+`--limit` bounding the fetch is the point. Fetching page 0 and then truncating
+is correct and useless: it downloads the entire account to keep the first
+hundred rows, which is what made `cards list --limit 3` take 16s while
+`todos list --limit 3` took none. `accountWideCollect` is the shared walk.
+
+**Three deliberate exceptions**, each with a reason that is not "we didn't get
+to it":
+
+1. **Sorted `messages list`** fetches every page before capping. The cap applies
+   after the sort (I4), so every page has to be in hand first. Pinned by
+   `TestMessagesListAccountWideSortsBeforeTruncating`.
+2. **The overdue endpoints** (`todos list --overdue`, `cards list --overdue`)
+   are unpaginated — one request returns everything — so `--limit` trims
+   locally. There is no walk to bound.
+3. **`boost list`** keeps a first-page default rather than the cap. Its flags
+   still walk normally; only the default differs. See below.
 
 #### Per-command defaults
 
-"The command's documented default" is not left to interpretation. Each
-command's account-wide default matches what it already does project-scoped:
+Pinning each account-wide default to its project-scoped default was a mistake,
+and it is the mistake this section exists to correct. Project-scoped "all" is
+one project's items; account-wide "all" is the whole account. The same word
+describes two very different amounts of work, and on a ~80-project account the
+account-wide reading of it timed out.
 
-| Command | Existing default | Account-wide contract |
+**The default is a uniform cap of 100** (`accountWideDefaultLimit`), with two
+rows that differ for stated reasons. `--all` is how you ask for the account.
+
+| Command | Account-wide default | Notes |
 |---|---|---|
-| `messages list` | 100 | cap 100 |
-| `comments list` | 100 | cap 100 |
-| `checkins answers` | all | all |
-| `forwards list` | all | all |
-| `boost list` | no paging flags | first page only |
-| `files list` | no paging flags | all pages |
-| `todos list` | 100 | cap 100 |
-| `cards list` | all | all |
+| `messages list` | cap 100 | unchanged |
+| `comments list` | cap 100 | unchanged |
+| `todos list` | cap 100 | unchanged |
+| `cards list` | cap 100 | **changed** from "all pages" |
+| `checkins answers` | cap 100 | **changed** from "all pages" |
+| `forwards list` | cap 100 | **changed** from "all pages" |
+| `files list` | cap 100 | **changed** from "all pages" |
+| `todos list --overdue` | cap 100 | unpaginated endpoint; accepts `--all`, rejects `--page` |
+| `cards list --overdue` | cap 100 | **changed** from uncapped; same rules as above |
+| `boost list` | **first page only** | the explicit exception — see below |
 
-The default must remain the documented default. Degrading a documented cap to
-"one raw SDK page" is a silent contract change; so is promoting an unpaged
-command to a capped one.
+Project-scoped defaults are untouched throughout.
+
+**The two overdue rows.** Both endpoints are unpaginated, so `--page` has
+nothing to address and stays an error. `--all` is a different question: it means
+"skip the cap", and since the complete array is already in hand it costs no
+extra request. Previously `todos --overdue` capped at 100 *and* rejected `--all`,
+which left item 101 unreachable by any flag combination — capped with no escape
+hatch. `cards --overdue` was uncapped and also rejected `--all`.
+
+**Changing a default is allowed when the old one was wrong.** The earlier
+version of this section forbade moving a default in either direction. That rule
+protected a contract that could not be honored at scale. What must not happen is
+a default changing *silently*: each row marked **changed** above is a documented
+behavior change and belongs in the release notes.
 
 #### Rules
 
-- **No new pagination flags where none exist.** `boost list` and bare
-  `files list` have no `--limit`/`--page`/`--all` today and gain none. Their
-  account-wide behavior is fixed by the table above.
+- **Every account-wide listing needs a bounded default and a way to ask for
+  more.** A listing with no escape hatch cannot recover from a server error
+  mid-crawl: when `files list --all-projects` returned a 500 partway through the
+  full-account crawl, there was no flag that could step around the failing page,
+  because the command had none. A bounded default without a way past it is the
+  same defect from the other side.
+- **A registered flag must work on every path that accepts it.** Where a path
+  genuinely has no pagination, it rejects all three by name rather than
+  accepting and ignoring them (`rejectScopedPaginationFlags`):
+  - **Project-scoped `files list`** rejects `--limit`/`--page`/`--all`. That
+    path passes `nil` to `Vaults().List`, `Uploads().List`, and
+    `Documents().List` — three unpaginated calls with nowhere to put a page.
+  - **Item-scoped `boost list <id>` and `--event`** reject all three. The SDK
+    documents `BoostListOptions.Page` as not honoring the page number at all:
+    setting `Page=2` does not fetch page 2. Rejecting is honest; implementing
+    would lie.
 - **`--limit N` on grouped todo/card responses counts inner todos/cards, not
   outer project groups.** Truncating groups would silently drop whole projects.
 - **`Meta.TotalCount` counts groups, not items,** for the grouped responses.
@@ -208,6 +264,56 @@ command to a capped one.
   crawl they did not ask for, and that is the same no-silent-flags defect I3
   names. `--all` is the spelling for every page.
 
+#### `boost list` — the default exception, and its server-side cause
+
+`boost list` is the one account-wide listing exempt from the cap-100 row. It
+returns **exactly the first page** when no pagination flag is given.
+
+The reason is measured, not stylistic: `/boosts.json?page=1` — one page, no
+crawling — took **93s** against a large production account. A default that
+walked toward 100 items would multiply an already unacceptable wait.
+
+**The exemption covers the default only.** Once a flag is passed, `boost list`
+behaves like every other bounded listing. The four modes are exhaustive:
+
+| Invocation | Fetch behavior |
+|---|---|
+| no pagination flag | exactly page 1 — one request, no walk |
+| `--page N` | exactly page N — one request |
+| `--limit N` | bounded walk over positive page numbers, then exact trim |
+| `--all` | full traversal (page 0 / omit `page=`) |
+
+`--limit` walks **positive** pages (1, 2, 3, …). It must never fall back to the
+page-0 full-crawl form, which is the behavior this whole section exists to
+remove.
+
+**Notices are mode-specific.** "Showing first page" is false for `--page 2`, so
+a single fixed string would state something untrue. Every mode keeps the
+account-wide total: now that `--page` and `--all` make the rest of the feed
+genuinely reachable — just slow — suppressing the total would understate what
+exists.
+
+| Mode | Notice |
+|---|---|
+| default | `Showing first page, N of M; additional pages may be slow on large accounts` |
+| `--page P` | `Showing page P, N of M; additional pages may be slow on large accounts` |
+| `--limit` | the standard truncation notice used by the other bounded listings |
+| `--all` | none — the traversal is complete |
+
+When the response is the whole listing there is no notice at all; there are no
+additional pages to be slow.
+
+**The slowness is server-side and is not fixed here.** The CLI cannot make this
+feed fast; the flags make its data reachable. `Everything::BoostsController#index`
+already preloads the booster and boostable associations and uses `UNION ALL`
+deliberately, so the obvious N+1 hypothesis is wrong. The remaining suspect —
+**unconfirmed** — is that it wraps that union in
+`Boost.from("(...) AS boosts").order(created_at: :desc, id: :desc)`; ordering a
+derived table cannot use an index, which would force MySQL to materialize and
+sort every accessible boost before `OFFSET`/`LIMIT` applies, making page 1 cost
+the same as page N. That needs an `EXPLAIN` to confirm and is tracked
+server-side, not here.
+
 #### The `files list` filter exception
 
 `EverythingFilesOptions` carries filters the project-scoped path has no
@@ -218,15 +324,15 @@ kind nor a creator. Rather than leave adopted SDK surface unreachable, bare
 | Flag | Value | Maps to |
 |---|---|---|
 | `--kind` | `all`, `images`, `pdfs`, `documents`, `videos` | `EverythingFilesOptions.Kind` |
-| `--person` | repeatable; name, email, ID, or `me`, resolved via `resolveAssigneeID` | `EverythingFilesOptions.PeopleIDs` |
+| `--person` | repeatable; name, email, ID, or `me`, resolved via `resolvePersonRoleID(ctx, app, person, "Person")` | `EverythingFilesOptions.PeopleIDs` |
 
 Both are **account-wide-only**. Passing either with a project in scope —
 explicit, configured, or via `--vault`/`--folder` — is `ErrUsage`, because the
 project-scoped path would have to ignore them, and I3 forbids that. An
 unrecognized `--kind` value is `ErrUsage` listing the accepted set.
 
-This is the one deliberate exception to I3's "no new flags"; it is recorded here
-so it stays an exception rather than a precedent.
+These filters are account-wide-only by nature rather than by policy: the
+project-scoped path has nothing to map them onto.
 
 #### The `files` group's alias spellings
 
@@ -241,17 +347,11 @@ therefore gets its own account-wide meaning:
 
 | Spelling | Account-wide behavior |
 |---|---|
-| `files list` | the whole feed, `--kind` free |
+| `files list` | the feed, `--kind` free, bounded by the cap and its pagination flags |
 | `vaults` / `folders list` | **ErrUsage** — folders have no account-wide listing; points at the project-scoped form and at `files list --all-projects` |
 | `docs` / `documents list` | the feed pinned to `--kind documents`; an explicit `--kind` is ErrUsage, since the command name already chose |
 
 The project-scoped behavior of all three is unchanged.
-
-**Accepted tradeoff.** Honoring a 100-item cap by fetching page 0 downloads
-every page before truncating, which is correct but potentially expensive on
-large accounts. Where sorting is not in play, a bounded loop over positive pages
-that stops once the limit is collected is the cheaper equivalent and is
-preferred. Recorded here so the cost is a decision rather than an accident.
 
 ### I6 — Output contract
 

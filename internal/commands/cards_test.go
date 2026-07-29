@@ -2446,7 +2446,17 @@ func cardsAggregateRoute(name, body string) stubRoute {
 		path:   fmt.Sprintf("/99999/cards/%s.json", name),
 		status: http.StatusOK,
 		body:   body,
+		// The whole fixture is page 1; page 2 is where the listing runs out.
+		// Without a page-aware route the bounded walk would never see an empty
+		// page and would keep asking until it hit the cap.
+		pages: []string{body},
 	}
+}
+
+// cardsAggregatePath is the path cardsAggregateRoute serves, for tests that
+// assert on the request sequence.
+func cardsAggregatePath(name string) string {
+	return fmt.Sprintf("/99999/cards/%s.json", name)
 }
 
 func cardsOpenRoute() stubRoute { return cardsAggregateRoute("open", cardsGroupsFixture) }
@@ -2489,7 +2499,7 @@ func cardsUsageError(t *testing.T, err error) *output.Error {
 func TestCardsListProjectScopedUnchanged(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
-		stubRoute{http.MethodGet, "/99999/card_tables/lists/12345/cards.json", http.StatusOK, `[]`},
+		stubRoute{method: http.MethodGet, path: "/99999/card_tables/lists/12345/cards.json", status: http.StatusOK, body: `[]`},
 	)
 
 	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--project", "123", "--column", "12345"))
@@ -2613,22 +2623,44 @@ func TestCardsListAccountWideRejectsScopeChildren(t *testing.T) {
 	}
 }
 
-// TestCardsListAccountWidePagination tests the page mapping: the default and
-// --all follow every page, --page N asks for exactly N.
+// TestCardsListAccountWidePagination pins the request sequence, not just the
+// last call. The old default asked for page 0 — one request that made the
+// server walk the whole account — and --limit did the same before throwing most
+// of the result away. Both now walk positive pages and stop as soon as they
+// can, so the sequence is the behavior under test.
 func TestCardsListAccountWidePagination(t *testing.T) {
 	cases := []struct {
-		args  []string
-		query string
+		name    string
+		args    []string
+		queries []string
 	}{
-		{[]string{"--all-projects"}, ""},
-		{[]string{"--all-projects", "--all"}, ""},
-		{[]string{"--all-projects", "--page", "3"}, "page=3"},
-		{[]string{"--all-projects", "--limit", "2"}, ""},
+		{
+			"the default walks positive pages until the listing runs out",
+			[]string{"--all-projects"},
+			[]string{"page=1", "page=2"},
+		},
+		{
+			"--all is the only spelling that asks for the full crawl",
+			[]string{"--all-projects", "--all"},
+			[]string{""},
+		},
+		{
+			"--page N asks for exactly N",
+			[]string{"--all-projects", "--page", "3"},
+			[]string{"page=3"},
+		},
+		{
+			"--limit stops at the first page that satisfies it",
+			[]string{"--all-projects", "--limit", "2"},
+			[]string{"page=1"},
+		},
 	}
 	for _, tc := range cases {
-		app, transport := setupRecordingTestApp(t, cardsOpenRoute())
-		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...), tc.args)
-		assert.Equal(t, tc.query, transport.last(t).Query, tc.args)
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, cardsOpenRoute())
+			require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...))
+			assert.Equal(t, tc.queries, transport.queriesFor(cardsAggregatePath("open")))
+		})
 	}
 }
 
@@ -2652,17 +2684,32 @@ func TestCardsListAccountWideRejectsBadPaging(t *testing.T) {
 	}
 }
 
-// TestCardsListOverdueRejectsPaging tests that the unpaginated endpoint refuses
-// page flags instead of accepting and dropping them.
-func TestCardsListOverdueRejectsPaging(t *testing.T) {
-	for _, args := range [][]string{
-		{"--all-projects", "--overdue", "--page", "1"},
-		{"--all-projects", "--overdue", "--all"},
-	} {
-		app, _ := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
-		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, args...)...)
-		assert.Contains(t, cardsUsageError(t, err).Message, "one unpaginated list", args)
+// TestCardsListOverdueRejectsPage tests that --page is refused rather than
+// accepted and dropped: there is no page to address on an unpaginated endpoint.
+func TestCardsListOverdueRejectsPage(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--page", "1")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--page is not supported with --overdue")
+}
+
+// --all is a different question from --page. The overdue listing is capped at
+// 100 by default, so rejecting --all as well would leave card 101 unreachable —
+// capped with no escape hatch is the defect, not the fix. The endpoint is
+// unpaginated, so honoring --all costs nothing: the complete array is already
+// in hand.
+func TestCardsListOverdueAcceptsAll(t *testing.T) {
+	app, transport, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsAllAggregateRoutes()...)
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--all"))
+
+	var envelope struct {
+		Data   []basecamp.Card `json:"data"`
+		Notice string          `json:"notice"`
 	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Len(t, envelope.Data, 2, "--all returns the complete array")
+	assert.Empty(t, envelope.Notice, "nothing was withheld, so there is nothing to warn about")
+	assert.Len(t, transport.queriesFor(cardsAggregatePath("overdue")), 1,
+		"--all costs no extra request on an unpaginated endpoint")
 }
 
 // TestCardsListAccountWideSorting tests that sorting is rejected for the
@@ -2716,7 +2763,10 @@ func TestCardsListAccountWideLimitCountsCards(t *testing.T) {
 	assert.Equal(t, "Alpha", envelope.Data[0].Bucket.Name)
 	assert.Len(t, envelope.Data[1].Cards, 1)
 	assert.Contains(t, envelope.Summary, "3 open cards across 2 projects")
-	assert.Contains(t, envelope.Notice, "first 3 of 4")
+	// The walk stops at the cap, so the account-wide total is unknown by
+	// construction — claiming "of 4" would be reporting the size of the one
+	// page that happened to be fetched.
+	assert.Contains(t, envelope.Notice, "Showing the first 3 cards; more may exist")
 }
 
 // TestCardsListAccountWideOutputBranches tests that machine formats keep the

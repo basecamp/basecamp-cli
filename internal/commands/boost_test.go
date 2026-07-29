@@ -223,12 +223,17 @@ func accountWideBoostsRoute() stubRoute {
 		method: http.MethodGet,
 		path:   "/99999/boosts.json",
 		status: http.StatusOK,
-		body: `[{"id":1,"content":"🎉","created_at":"2024-01-01T00:00:00Z",
-			"booster":{"id":10,"name":"Alice"},
-			"recording":{"id":456,"title":"Ship it","type":"Todo",
-				"bucket":{"id":123,"name":"Test Project","type":"Project"}}}]`,
+		body:   accountWideBoostsBody,
+		// --limit walks positive pages; the fixture needs an end so the walk
+		// can stop somewhere other than the cap.
+		pages: []string{accountWideBoostsBody},
 	}
 }
+
+const accountWideBoostsBody = `[{"id":1,"content":"🎉","created_at":"2024-01-01T00:00:00Z",
+	"booster":{"id":10,"name":"Alice"},
+	"recording":{"id":456,"title":"Ship it","type":"Todo",
+		"bucket":{"id":123,"name":"Test Project","type":"Project"}}}]`
 
 // recordingBoostsRoute serves the item-scoped boost listing.
 func recordingBoostsRoute() stubRoute {
@@ -279,7 +284,52 @@ func TestBoostListWithoutIDListsAccountWide(t *testing.T) {
 
 	last := transport.last(t)
 	assert.Equal(t, "/99999/boosts.json", last.Path)
-	assert.Equal(t, "page=1", last.Query, "boost list has no paging flags, so it stays on the first page")
+	assert.Equal(t, "page=1", last.Query, "the default is exactly the first page — this feed is slow enough that walking it by default is not viable")
+}
+
+// The four account-wide modes are exhaustive and each maps to exactly one fetch
+// shape. Boost keeps a first-page default because /boosts.json?page=1 alone
+// measured 93s on a large account — but the default being an exception does not
+// make the flags one, and --limit walks here exactly as it does everywhere else.
+func TestBoostListAccountWideFourModes(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		queries []string
+	}{
+		{"no pagination flag is exactly page 1", nil, []string{"page=1"}},
+		{"--page N is exactly page N", []string{"--page", "3"}, []string{"page=3"}},
+		{"--limit walks positive pages", []string{"--limit", "5"}, []string{"page=1", "page=2"}},
+		{"--all is the full traversal", []string{"--all"}, []string{""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, app, transport := setupBoostListTest(t, nil)
+
+			require.NoError(t, executeBoostCommand(cmd, app, append([]string{"list"}, tc.args...)...))
+			assert.Equal(t, tc.queries, transport.queriesFor("/99999/boosts.json"))
+		})
+	}
+}
+
+// "Showing first page" is simply false for --page 2, so the notice is
+// mode-specific. Every mode keeps the total: with --page and --all registered
+// the rest of the feed is genuinely reachable, just slow, so suppressing it
+// would understate what exists.
+func TestBoostListAccountWideNoticeIsModeSpecific(t *testing.T) {
+	assert.Equal(t,
+		"Showing first page, 1 of 40; additional pages may be slow on large accounts",
+		boostAccountWideNotice(boostListFirstPage, 0, 1, 40))
+	assert.Equal(t,
+		"Showing page 2, 1 of 40; additional pages may be slow on large accounts",
+		boostAccountWideNotice(boostListPage, 2, 1, 40))
+	assert.Equal(t,
+		"Showing 1 of 40 results (raise or drop --limit for more)",
+		boostAccountWideNotice(boostListLimit, 0, 1, 40))
+	assert.Empty(t, boostAccountWideNotice(boostListAll, 0, 40, 40),
+		"a complete traversal has nothing to warn about")
+	assert.Empty(t, boostAccountWideNotice(boostListFirstPage, 0, 40, 40),
+		"when the first page is the whole listing there are no additional pages to be slow")
 }
 
 // TestBoostListIgnoresConfiguredProject verifies that a configured project —
@@ -356,12 +406,33 @@ func TestBoostListAccountWideRejectsEvent(t *testing.T) {
 
 // TestBoostListHasNoPaginationFlags verifies that the account-wide path did not
 // grow a parallel pagination surface.
-func TestBoostListHasNoPaginationFlags(t *testing.T) {
+// The account-wide boost feed is slow, not unaddressable. Keeping it flagless
+// meant the only reachable data was page 1; the flags do not make it fast, they
+// make the rest of it reachable at all.
+func TestBoostListHasPaginationFlags(t *testing.T) {
 	list, _, err := NewBoostsCmd().Find([]string{"list"})
 	require.NoError(t, err)
 
 	for _, name := range []string{"limit", "page", "all"} {
-		assert.Nil(t, list.Flags().Lookup(name), "boost list must not gain --%s", name)
+		assert.NotNil(t, list.Flags().Lookup(name), "boost list must carry --%s", name)
+	}
+	assert.Equal(t, "n", list.Flags().Lookup("limit").Shorthand)
+}
+
+// An item's boosts arrive in one unpaginated response, and the SDK documents
+// BoostListOptions.Page as not honoring the page number at all — setting Page=2
+// does not fetch page 2. Rejecting is honest; implementing would lie.
+func TestBoostListItemScopedRejectsPaginationFlags(t *testing.T) {
+	for _, flag := range []string{"--limit=5", "--page=2", "--all"} {
+		t.Run(flag, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			cmd, app, _ := setupBoostListTest(t, buf)
+
+			err := executeBoostCommand(cmd, app, "list", "789", "--project", "123", flag)
+
+			require.Error(t, err, "an item's boosts have no page to address")
+			assert.Contains(t, err.Error(), "does not apply to an item's boosts")
+		})
 	}
 }
 

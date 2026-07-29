@@ -298,6 +298,10 @@ func checkinsAccountWideRoute() stubRoute {
 		path:   checkinsAccountWidePath,
 		status: http.StatusOK,
 		body:   checkinsAccountWideBody,
+		// The bounded default walks positive pages until one comes back empty,
+		// so the fixture has to have an end. Serving the same body for every
+		// page would walk to the cap instead.
+		pages: []string{checkinsAccountWideBody},
 	}
 }
 
@@ -338,9 +342,10 @@ func TestCheckinsAnswersWithoutQuestionListsAccountWide(t *testing.T) {
 	transport, err := runCheckinsAnswersAccountWideCmd(t)
 	require.NoError(t, err)
 
-	last := transport.last(t)
-	assert.Equal(t, checkinsAccountWidePath, last.Path)
-	assert.Empty(t, last.Query, "the default follows every page, which sends no page param")
+	// The default used to send no page param at all, which asked the server to
+	// crawl the whole account — the shape that timed out in production. It now
+	// walks positive pages and stops at the first empty one.
+	assert.Equal(t, []string{"page=1", "page=2"}, transport.queriesFor(checkinsAccountWidePath))
 }
 
 // A configured project cannot scope a question's answers, so it is ignored
@@ -479,7 +484,10 @@ func TestCheckinsAnswersAccountWideLimitTruncatesWithNotice(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
 	assert.Len(t, resp.Data, 1)
 	assert.Equal(t, "1 check-in answer across all projects", resp.Summary)
-	assert.Contains(t, resp.Notice, "Showing 1 of 2 fetched check-in answers")
+	// "of 2 fetched" was an artifact of fetching everything and then trimming.
+	// The walk now stops at the cap, so what it can honestly report is that
+	// more may exist — not a total it never saw.
+	assert.Contains(t, resp.Notice, "Showing the first 1 check-in answers; more may exist")
 }
 
 // []Recording is what `recordings list` already hands the styled renderer, so

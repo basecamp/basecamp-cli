@@ -42,6 +42,8 @@ func forwardsAccountWideRoute(n int) stubRoute {
 		path:   forwardsAccountWidePath,
 		status: http.StatusOK,
 		body:   forwardsFeedBody(n),
+		// The bounded default walks positive pages until one comes back empty.
+		pages: []string{forwardsFeedBody(n)},
 	}
 }
 
@@ -92,9 +94,9 @@ func TestForwardsListWithoutProjectListsAccountWide(t *testing.T) {
 	err := executeRecordingCommand(NewForwardsCmd(), app, "list")
 
 	require.NoError(t, err)
-	last := transport.last(t)
-	assert.Equal(t, forwardsAccountWidePath, last.Path)
-	assert.Empty(t, last.Query, "the default follows every page, which the endpoint spells as an absent page")
+	// The default is bounded now: one project's inbox and every project's
+	// inboxes are different amounts of work, so only --all asks for the latter.
+	assert.Equal(t, []string{"page=1", "page=2"}, transport.queriesFor(forwardsAccountWidePath))
 }
 
 func TestForwardsListAllProjectsOverridesConfiguredProject(t *testing.T) {

@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -161,4 +163,161 @@ func TestAccountWidePageRejectsOutOfRange(t *testing.T) {
 	all, err := accountWidePage(9999999999, true)
 	require.NoError(t, err, "--all wins before the range check")
 	assert.Equal(t, int32(0), all)
+}
+
+// --- accountWideCollect -------------------------------------------------
+//
+// The bounded walk is the whole reason the account-wide listings are usable at
+// account scale, so each guard gets its own test. The request count is asserted
+// as often as the payload: "stopped early" and "returned the right items" are
+// different claims, and only the first one is what makes these commands fast.
+
+// collectGroup stands in for the project-grouped payloads, where the top-level
+// element is a project and the items nest inside it.
+type collectGroup struct{ items []int }
+
+func countCollectGroups(groups []collectGroup) int {
+	total := 0
+	for _, g := range groups {
+		total += len(g.items)
+	}
+	return total
+}
+
+// collectPager serves canned pages and records how many were asked for.
+type collectPager[T any] struct {
+	pages    [][]T
+	metas    []basecamp.ListMeta
+	err      error
+	errOn    int32
+	requests int
+	asked    []int32
+}
+
+func (p *collectPager[T]) fetch(page int32) ([]T, basecamp.ListMeta, error) {
+	p.requests++
+	p.asked = append(p.asked, page)
+	if p.err != nil && page == p.errOn {
+		return nil, basecamp.ListMeta{}, p.err
+	}
+	idx := int(page - 1)
+	var meta basecamp.ListMeta
+	if idx < len(p.metas) {
+		meta = p.metas[idx]
+	}
+	if idx >= len(p.pages) {
+		return nil, meta, nil
+	}
+	return p.pages[idx], meta, nil
+}
+
+func TestAccountWideCollectStopsOnEmptyPage(t *testing.T) {
+	pager := &collectPager[int]{pages: [][]int{{1, 2, 3}, {}}}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 2, 3}, items)
+	assert.False(t, capped, "running out of listing is not hitting the cap")
+	assert.Equal(t, 2, pager.requests, "stops at the empty page rather than walking on")
+}
+
+// A page can be non-empty at the top level while adding no items, when every
+// group on it is empty. Counting groups would call that progress and loop.
+func TestAccountWideCollectStopsWhenAPageAddsNoItems(t *testing.T) {
+	pager := &collectPager[collectGroup]{pages: [][]collectGroup{
+		{{items: []int{1, 2}}},
+		{{items: nil}},
+		{{items: []int{3}}},
+	}}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, countCollectGroups, 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, countCollectGroups(items))
+	assert.False(t, capped)
+	assert.Equal(t, 2, pager.requests, "the no-progress page ends the walk; page 3 is never asked for")
+}
+
+// The helper deliberately does not trim: it stops at the first page boundary at
+// or past the cap and leaves the exact cut to the caller.
+func TestAccountWideCollectOvershootsToThePageBoundary(t *testing.T) {
+	pager := &collectPager[int]{pages: [][]int{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 4)
+
+	require.NoError(t, err)
+	assert.True(t, capped)
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6}, items, "overshoots by up to one page; the caller trims")
+	assert.Equal(t, 2, pager.requests, "stops as soon as the cap is met")
+}
+
+func TestAccountWideCollectStopsExactlyAtAPageBoundary(t *testing.T) {
+	pager := &collectPager[int]{pages: [][]int{{1, 2, 3, 4, 5}, {6, 7, 8, 9, 10}}}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 5)
+
+	require.NoError(t, err)
+	assert.True(t, capped)
+	assert.Len(t, items, 5)
+	assert.Equal(t, 1, pager.requests, "a cap met by page 1 must not fetch page 2")
+}
+
+// TotalCount bounds the walk against len(items) — the top-level elements. On a
+// grouped feed those are groups, not the todos or cards inside them. Comparing
+// it against the inner counter would end the walk on the first page here.
+func TestAccountWideCollectBoundsTotalCountAgainstTopLevelLength(t *testing.T) {
+	meta := basecamp.ListMeta{TotalCount: 2}
+	pager := &collectPager[collectGroup]{
+		pages: [][]collectGroup{
+			{{items: []int{1, 2, 3, 4, 5}}},
+			{{items: []int{6, 7, 8, 9, 10}}},
+			{{items: []int{11}}},
+		},
+		metas: []basecamp.ListMeta{meta, meta, meta},
+	}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, countCollectGroups, 100)
+
+	require.NoError(t, err)
+	assert.False(t, capped, "exhausting the listing is not hitting the cap")
+	assert.Len(t, items, 2, "two groups is the whole listing TotalCount promised")
+	assert.Equal(t, 10, countCollectGroups(items))
+	assert.Equal(t, 2, pager.requests,
+		"TotalCount counts groups; comparing it against the 5 items on page 1 would stop a page early")
+}
+
+// X-Total-Count is the account-wide total on every page, so the first page's
+// meta is what the truncation notice should report.
+func TestAccountWideCollectReportsFirstPageMeta(t *testing.T) {
+	pager := &collectPager[int]{
+		pages: [][]int{{1, 2, 3}, {}},
+		metas: []basecamp.ListMeta{{TotalCount: 42}, {TotalCount: 7}},
+	}
+
+	_, _, meta, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, 42, meta.TotalCount, "later pages must not overwrite the account-wide total")
+}
+
+func TestAccountWideCollectWalksPositivePagesOnly(t *testing.T) {
+	pager := &collectPager[int]{pages: [][]int{{1}, {2}, {3}, {}}}
+
+	_, _, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, []int32{1, 2, 3, 4}, pager.asked,
+		"page 0 is the full-account crawl this helper exists to avoid")
+}
+
+func TestAccountWideCollectPropagatesFetchError(t *testing.T) {
+	boom := errors.New("boom")
+	pager := &collectPager[int]{pages: [][]int{{1, 2, 3}, {4}}, err: boom, errOn: 2}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.ErrorIs(t, err, boom)
+	assert.Nil(t, items)
+	assert.False(t, capped)
 }

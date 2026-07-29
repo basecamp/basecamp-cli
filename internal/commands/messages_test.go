@@ -658,10 +658,8 @@ func requireMessagesUsageError(t *testing.T, err error, want string) {
 func TestMessagesListProjectScopedUnchanged(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
-		stubRoute{http.MethodGet, "/99999/projects/123.json", http.StatusOK,
-			`{"id":123,"dock":[{"name":"message_board","id":777,"enabled":true}]}`},
-		stubRoute{http.MethodGet, "/99999/message_boards/777/messages.json", http.StatusOK,
-			`[{"id":1,"subject":"Board message"}]`},
+		stubRoute{method: http.MethodGet, path: "/99999/projects/123.json", status: http.StatusOK, body: `{"id":123,"dock":[{"name":"message_board","id":777,"enabled":true}]}`},
+		stubRoute{method: http.MethodGet, path: "/99999/message_boards/777/messages.json", status: http.StatusOK, body: `[{"id":1,"subject":"Board message"}]`},
 	)
 	app.Config.ProjectID = "123"
 
@@ -674,11 +672,11 @@ func TestMessagesListProjectScopedUnchanged(t *testing.T) {
 // TestMessagesListAccountWideWithoutAnyProject verifies that with no project
 // anywhere the list goes account-wide instead of prompting for one (I7).
 func TestMessagesListAccountWideWithoutAnyProject(t *testing.T) {
-	app, transport := setupRecordingTestApp(t, messagesFeedRouteOfSize(messagesAccountWideLimit))
+	app, transport := setupRecordingTestApp(t, messagesFeedRouteOfSize(accountWideDefaultLimit))
 
 	data := runMessagesListJSON(t, app)
 
-	require.Len(t, data, messagesAccountWideLimit)
+	require.Len(t, data, accountWideDefaultLimit)
 	require.Len(t, messagesRequestsTo(transport, messagesAccountWidePath), 1)
 	assert.Empty(t, messagesRequestsTo(transport, "/99999/projects.json"),
 		"account-wide listing should not resolve a project")
@@ -687,12 +685,12 @@ func TestMessagesListAccountWideWithoutAnyProject(t *testing.T) {
 // TestMessagesListAllProjectsOverridesConfiguredProject verifies --all-projects
 // wins over ambient config rather than being ignored.
 func TestMessagesListAllProjectsOverridesConfiguredProject(t *testing.T) {
-	app, transport := setupRecordingTestApp(t, projectsRoute(), messagesFeedRouteOfSize(messagesAccountWideLimit))
+	app, transport := setupRecordingTestApp(t, projectsRoute(), messagesFeedRouteOfSize(accountWideDefaultLimit))
 	app.Config.ProjectID = "123"
 
 	data := runMessagesListJSON(t, app, "--all-projects")
 
-	require.Len(t, data, messagesAccountWideLimit)
+	require.Len(t, data, accountWideDefaultLimit)
 	require.Len(t, messagesRequestsTo(transport, messagesAccountWidePath), 1)
 	assert.Empty(t, messagesRequestsTo(transport, "/99999/projects/123.json"),
 		"--all-projects should override the configured project")
@@ -801,7 +799,7 @@ func TestMessagesListAccountWideDefaultCapsAt100(t *testing.T) {
 
 	data := runMessagesListJSON(t, app)
 
-	assert.Len(t, data, messagesAccountWideLimit)
+	assert.Len(t, data, accountWideDefaultLimit)
 	calls := messagesRequestsTo(transport, messagesAccountWidePath)
 	require.Len(t, calls, 2, "expected the cap to be filled from two pages")
 	assert.Contains(t, calls[0].Query, "page=1")
