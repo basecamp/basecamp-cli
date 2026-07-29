@@ -11,8 +11,11 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 | **Total tracked** | **49** | **179** |
 
 **100% coverage of tracked in-scope API** (167/167 endpoints). This is not a
-complete bc-api parity figure; the other five BC5 sections introduced by
-bc-api#410 remain untracked and outside this coverage matrix.
+complete bc-api parity figure, and it is not an SDK-parity figure either. The
+other five BC5 sections introduced by bc-api#410 remain untracked and outside
+this coverage matrix, and the pinned SDK currently exposes 17 `EverythingService`
+methods that no CLI command reaches — see [Known uncovered SDK
+surface](#known-uncovered-sdk-surface).
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
@@ -22,16 +25,55 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 basecamp/basecamp-sdk#435 and #438), a 17-method account-wide aggregate family
 covering cross-project messages, comments, checkins, forwards, boosts, files, and
 the open/completed/unassigned/overdue/no-due-date todo and card rollups. **No CLI
-commands surface it yet** — the family is untracked in the matrix below and
-excluded from the parity totals, on the same footing as the other untracked BC5
-sections. Also reshapes `UpdateCardRequest` to pointer fields for merge-safe
-partial updates (#489); makes `SearchResult.Content`/`.Description` nullable and
-always-null in favor of `PlainTextContent`/`PlainTextDescription`, which carry the
-server's highlighted excerpts (#487); and changes transport behavior — HTTP 400
-now maps to the `validation` error code rather than `api_error` (#482, moving a
-400's exit code from 7 to 9), per-operation `retry.max` is honored as a ceiling
-(#483), `*WithBody` request bodies replay across retries (#481), and the declared
-`retry_on` status set is honored (#486). API date 2026-07-28.
+commands surface it yet, so the tracked totals above do not include it** — see the
+"Known uncovered SDK surface" section below, which exists specifically so this gap
+is stated rather than implied by omission. Design tracked in basecamp/basecamp-cli#585.
+
+Model and transport changes riding along:
+
+- `UpdateCardRequest.Title`/`.Content`/`.DueOn` became `*string`, nil meaning
+  "leave unchanged", for merge-safe partial updates (#489).
+- `SearchResult.Content`/`.Description` became `*string` and always arrive null;
+  the excerpt moved to `PlainTextContent`/`PlainTextDescription` (#487). Those two
+  are **HTML fragments despite the name** — BC3 wraps each query match in
+  `<mark class="circled-text">` — so any consumer must strip markup before
+  display.
+- `BubbleUpURL` spread to `Recording`, `SearchResult`, `Todolist`, and
+  `TodolistGroup` (#488); it previously existed only on `BubbleUp`. On `Todolist`
+  and `TodolistGroup` the tag carries no `omitempty`, so the key is always
+  present in machine output.
+- HTTP 400 now maps to the `validation` error code rather than `api_error` (#482).
+  Since `convertSDKError` passes the SDK code straight through, **a 400's exit
+  code moves from 7 to 9**; 422 was already validation.
+- Retry behavior: per-operation `retry.max` is honored as a ceiling (#483),
+  `*WithBody` request bodies replay across retries (#481), and the declared
+  `retry_on` status set is honored (#486).
+- Provenance repinned to current bc3 HEAD, pinning the `participant_ids`
+  contract (#491).
+
+**Machine-output contract change.** `search` serializes raw SDK structs for
+`--json`/`--agent`/`--md` (only the styled path is humanized), so these model
+changes reach users directly: `content` and `description` now serialize as
+explicit `null` (the pointer fields carry no `omitempty`, where the old empty
+strings were omitted), and `plain_text_content`/`plain_text_description` plus
+`bubble_up_url` appear when populated. Styled output is unaffected.
+
+API date 2026-07-28.
+
+## Known uncovered SDK surface
+
+Operations the pinned SDK exposes that no CLI command reaches. These are **not**
+counted in the totals above — neither as covered nor as tracked endpoints — so
+the percentages describe the tracked matrix, not SDK parity.
+
+| SDK surface | Methods | Reachable via | Status | Tracking |
+|-------------|---------|---------------|--------|----------|
+| `EverythingService` | 17 | `AccountClient.Everything()` | ❌ No CLI command | basecamp/basecamp-cli#585 |
+
+`EverythingService` methods: `Messages`, `Comments`, `Checkins`, `Forwards`,
+`Boosts`, `Files`, `OpenTodos`, `CompletedTodos`, `UnassignedTodos`,
+`NoDueDateTodos`, `OverdueTodos`, `OpenCards`, `CompletedCards`,
+`UnassignedCards`, `NoDueDateCards`, `NotNowCards`, `OverdueCards`.
 
 ## Coverage by Section
 
