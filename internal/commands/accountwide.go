@@ -95,10 +95,14 @@ func rejectAccountWideTodolist(app *appctx.App, noun string) error {
 // one-item account-wide listing is common enough that "1 boosts" shows up.
 //
 // moreFlag names the flag that widens the listing, or is empty for the
-// commands I5 gives no pagination flags at all. The shared truncation notice
-// recommends --all unconditionally, which on those commands points at a flag
-// they deliberately do not have.
-func accountWideRespOpts(count int, singular, plural string, meta basecamp.ListMeta, moreFlag string) []output.ResponseOption {
+// commands I5 gives no pagination flags at all — recommending --all to a
+// command that has no --all is worse than saying nothing.
+//
+// explicitLimit reports whether the user asked for the cap. It changes the
+// recovery advice rather than the fact: these commands reject --all alongside
+// --limit, so telling someone who passed --limit to add --all names a
+// combination the command refuses.
+func accountWideRespOpts(count int, singular, plural string, meta basecamp.ListMeta, moreFlag string, explicitLimit bool) []output.ResponseOption {
 	noun := plural
 	if count == 1 {
 		noun = singular
@@ -108,7 +112,10 @@ func accountWideRespOpts(count int, singular, plural string, meta basecamp.ListM
 	}
 	if meta.TotalCount > count {
 		notice := fmt.Sprintf("Showing %d of %d results", count, meta.TotalCount)
-		if moreFlag != "" {
+		switch {
+		case explicitLimit:
+			notice += " (raise or drop --limit for more)"
+		case moreFlag != "":
 			notice += fmt.Sprintf(" (use %s for the complete list)", moreFlag)
 		}
 		respOpts = append(respOpts, output.WithNotice(notice))

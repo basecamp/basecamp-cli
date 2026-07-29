@@ -228,6 +228,25 @@ unrecognized `--kind` value is `ErrUsage` listing the accepted set.
 This is the one deliberate exception to I3's "no new flags"; it is recorded here
 so it stays an exception rather than a precedent.
 
+#### The `files` group's alias spellings
+
+`vaults` (aliases `vault`, `folders`) and `docs` (alias `documents`) are
+`NewFilesCmd` under different names, so they share this leaf. The account-wide feed
+is not the same listing the project-scoped path returns: it carries Uploads,
+Documents, and Attachments, and **no folder variant at all**.
+
+Sharing the leaf unchanged would make `folders list --all-projects` return a
+listing containing none of the thing the command is named for. Each spelling
+therefore gets its own account-wide meaning:
+
+| Spelling | Account-wide behavior |
+|---|---|
+| `files list` | the whole feed, `--kind` free |
+| `vaults` / `folders list` | **ErrUsage** — folders have no account-wide listing; points at the project-scoped form and at `files list --all-projects` |
+| `docs` / `documents list` | the feed pinned to `--kind documents`; an explicit `--kind` is ErrUsage, since the command name already chose |
+
+The project-scoped behavior of all three is unchanged.
+
 **Accepted tradeoff.** Honoring a 100-item cap by fetching page 0 downloads
 every page before truncating, which is correct but potentially expensive on
 large accounts. Where sorting is not in play, a bounded loop over positive pages

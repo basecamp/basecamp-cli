@@ -1095,14 +1095,6 @@ func TestFilesListGainsNoPaginationFlags(t *testing.T) {
 	}
 }
 
-func TestFilesListAccountWideReachesVaultsAndDocsAliases(t *testing.T) {
-	for _, newGroup := range []func() *cobra.Command{NewVaultsCmd, NewDocsCmd} {
-		app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
-		require.NoError(t, executeRecordingCommand(newGroup(), app, "list"))
-		assert.Equal(t, "/99999/files.json", transport.last(t).Path)
-	}
-}
-
 func TestFilesListMachineFormatKeepsRawPayload(t *testing.T) {
 	buf := &bytes.Buffer{}
 	app, _ := setupRecordingTestApp(t, filesAccountWideRoute(filesAccountWideFixture))
@@ -1147,4 +1139,48 @@ func TestFlattenAccountWideFilesFallsBackToFilename(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "pasted.png", rows[0]["name"])
 	assert.Equal(t, "17b", rows[0]["size"])
+}
+
+// vaults/folders and docs/documents share files list's leaf, but the
+// account-wide feed carries no folder variant, so the folder spellings must
+// say so rather than return a folder-less listing under a folder name.
+func TestFilesGroupSpellingsGetHonestAccountWideSemantics(t *testing.T) {
+	t.Run("folders refuse account-wide", func(t *testing.T) {
+		for _, args := range [][]string{{"list", "--all-projects"}, {"list"}} {
+			app, transport := setupRecordingTestApp(t)
+			err := executeRecordingCommand(NewVaultsCmd(), app, args...)
+			require.Error(t, err)
+
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "expected *output.Error, got %T", err)
+			assert.Contains(t, e.Message, "folders have no account-wide listing")
+			assert.Empty(t, transport.recorded(), "must refuse before any request")
+		}
+	})
+
+	t.Run("docs pin the documents kind", func(t *testing.T) {
+		app, transport := setupRecordingTestApp(t, stubRoute{
+			method: http.MethodGet, path: "/99999/files.json", status: http.StatusOK, body: `[]`,
+		})
+		require.NoError(t, executeRecordingCommand(NewDocsCmd(), app, "list", "--all-projects"))
+		assert.Contains(t, transport.last(t).Query, "kind=documents")
+	})
+
+	t.Run("docs reject a contradicting kind", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t)
+		err := executeRecordingCommand(NewDocsCmd(), app, "list", "--all-projects", "--kind", "images")
+		require.Error(t, err)
+
+		var e *output.Error
+		require.True(t, errors.As(err, &e), "expected *output.Error, got %T", err)
+		assert.Contains(t, e.Message, "--kind cannot narrow an account-wide document listing")
+	})
+
+	t.Run("files stays unfiltered", func(t *testing.T) {
+		app, transport := setupRecordingTestApp(t, stubRoute{
+			method: http.MethodGet, path: "/99999/files.json", status: http.StatusOK, body: `[]`,
+		})
+		require.NoError(t, executeRecordingCommand(NewFilesCmd(), app, "list", "--all-projects"))
+		assert.NotContains(t, transport.last(t).Query, "kind=")
+	})
 }

@@ -232,7 +232,7 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 		forwards = forwards[:limit]
 	}
 
-	respOpts := accountWideRespOpts(len(forwards), "forward", "forwards", result.Meta, "--all")
+	respOpts := accountWideRespOpts(len(forwards), "forward", "forwards", result.Meta, "--all", limit > 0)
 	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(forwards)))
 	respOpts = append(respOpts,
 		output.WithBreadcrumbs(

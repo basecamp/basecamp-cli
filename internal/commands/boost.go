@@ -204,12 +204,12 @@ func runBoostListAccountWide(cmd *cobra.Command, app *appctx.App, eventID string
 		return convertSDKError(err)
 	}
 
-	var data any = result.Boosts
-	if app.Output.EffectiveFormat() == output.FormatStyled {
-		data = flattenAccountWideBoosts(result.Boosts)
-	}
-
-	respOpts := accountWideRespOpts(len(result.Boosts), "boost", "boosts", result.Meta, "")
+	// The boosted recording is nested, so every consumer but --json and
+	// --agent reads the flat rows: the generic renderer skips nested maps,
+	// which would drop the project and the item title that make a boost row
+	// mean anything.
+	respOpts := accountWideRespOpts(len(result.Boosts), "boost", "boosts", result.Meta, "", false)
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideBoosts(result.Boosts)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(
 		output.Breadcrumb{
 			Action:      "show",
@@ -218,7 +218,7 @@ func runBoostListAccountWide(cmd *cobra.Command, app *appctx.App, eventID string
 		},
 	))
 
-	return app.OK(data, respOpts...)
+	return app.OK(result.Boosts, respOpts...)
 }
 
 // flattenAccountWideBoosts turns the account-wide feed into flat rows for the

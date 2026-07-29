@@ -248,7 +248,7 @@ func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoar
 		recordings = recordings[:wanted]
 	}
 
-	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, "--all")
+	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, "--all", limit > 0)
 	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(recordings)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(messagesAccountWideBreadcrumbs()...))
 

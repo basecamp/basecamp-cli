@@ -101,6 +101,36 @@ func NewUploadsCmd() *cobra.Command {
 // usage error lists it. It mirrors EverythingFilesOptions.Kind.
 var filesAccountWideKinds = []string{"all", "images", "pdfs", "documents", "videos"}
 
+const filesKindDocuments = "documents"
+
+// The three group spellings that reach this leaf. `vaults`/`folders` and
+// `docs`/`documents` are built from NewFilesCmd, so the leaf is shared and the
+// group's own name is the only thing that says which listing the user asked
+// for.
+const (
+	filesGroupFiles = iota
+	filesGroupFolders
+	filesGroupDocuments
+)
+
+// filesGroupSpelling reports which group noun invoked this list command. Name()
+// returns the group's canonical Use rather than the alias typed, so `folders`
+// and `vault` both resolve through `vaults`.
+func filesGroupSpelling(cmd *cobra.Command) int {
+	parent := cmd.Parent()
+	if parent == nil {
+		return filesGroupFiles
+	}
+	switch parent.Name() {
+	case "vaults":
+		return filesGroupFolders
+	case "docs":
+		return filesGroupDocuments
+	default:
+		return filesGroupFiles
+	}
+}
+
 func newFilesListCmd(project, vaultID *string) *cobra.Command {
 	var allProjects bool
 	var kind string
@@ -294,6 +324,26 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 	if err := rejectAccountWideTodolist(app, "file"); err != nil {
 		return err
 	}
+
+	// vaults/folders and docs/documents are the same command under different
+	// names, but the account-wide feed is not the same listing. It carries
+	// Uploads, Documents, and Attachments — no folder variant at all — so the
+	// folder spellings would return a listing with none of the thing they are
+	// named for. Answer honestly instead, and let the document spellings mean
+	// what they say by pinning the kind they already name.
+	switch filesGroupSpelling(cmd) {
+	case filesGroupFolders:
+		return output.ErrUsageHint(
+			"folders have no account-wide listing",
+			"Folders exist inside one project: basecamp folders list --in <project>. For files across every project: basecamp files list --all-projects")
+	case filesGroupDocuments:
+		if cmd.Flags().Changed("kind") {
+			return output.ErrUsageHint(
+				"--kind cannot narrow an account-wide document listing",
+				"This command already lists documents. For other kinds: basecamp files list --all-projects --kind <kind>")
+		}
+		kind = filesKindDocuments
+	}
 	// --vault/--folder names a folder inside one project. Account-wide has no
 	// such container, and ignoring the flag would hand back a listing of
 	// something else entirely.
@@ -314,14 +364,11 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 		return convertSDKError(err)
 	}
 
-	// EverythingFile is far too wide to render raw, so styled output gets
-	// flattened rows while machine formats keep the SDK payload.
-	var data any = page.Files
-	if app.Output.EffectiveFormat() == output.FormatStyled {
-		data = flattenAccountWideFiles(page.Files)
-	}
-
-	respOpts := accountWideRespOpts(len(page.Files), "file", "files", page.Meta, "")
+	// EverythingFile is an all-pointer superset far too wide to render raw, and
+	// its bucket is nested, so every consumer but --json and --agent reads the
+	// flat rows.
+	respOpts := accountWideRespOpts(len(page.Files), "file", "files", page.Meta, "", false)
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideFiles(page.Files)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(
 		output.Breadcrumb{
 			Action:      "kind",
@@ -335,7 +382,7 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 		},
 	))
 
-	return app.OK(data, respOpts...)
+	return app.OK(page.Files, respOpts...)
 }
 
 // filesAccountWideOptions validates --kind and resolves --person into the
@@ -343,6 +390,10 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 func filesAccountWideOptions(cmd *cobra.Command, app *appctx.App, kind string, people []string) (*basecamp.EverythingFilesOptions, error) {
 	opts := &basecamp.EverythingFilesOptions{}
 
+	// Presence, not value: --kind "" is still the user asking for a filter, and
+	// dropping it because the value is empty is a silent ignore. A kind the
+	// command pinned for itself (the docs spelling) arrives non-empty with the
+	// flag unchanged, so it applies without being re-validated as user input.
 	if cmd.Flags().Changed("kind") {
 		normalized := strings.ToLower(strings.TrimSpace(kind))
 		if !slices.Contains(filesAccountWideKinds, normalized) {
@@ -352,6 +403,8 @@ func filesAccountWideOptions(cmd *cobra.Command, app *appctx.App, kind string, p
 			)
 		}
 		opts.Kind = normalized
+	} else if kind != "" {
+		opts.Kind = kind
 	}
 
 	for _, person := range people {

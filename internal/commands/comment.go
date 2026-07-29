@@ -251,7 +251,7 @@ func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page
 		}
 	}
 
-	respOpts := append(accountWideRespOpts(len(comments), "comment", "comments", meta, "--all"),
+	respOpts := append(accountWideRespOpts(len(comments), "comment", "comments", meta, "--all", limit > 0),
 		output.WithDisplayData(flattenAccountWideRecordings(comments)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

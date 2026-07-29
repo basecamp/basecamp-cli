@@ -761,7 +761,7 @@ func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, question
 		answers = answers[:limit]
 	}
 
-	respOpts := accountWideRespOpts(len(answers), "check-in answer", "check-in answers", answersPage.Meta, "--all")
+	respOpts := accountWideRespOpts(len(answers), "check-in answer", "check-in answers", answersPage.Meta, "--all", limit > 0)
 	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(answers)))
 	if len(answers) < fetched {
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
