@@ -1,0 +1,25 @@
+internal/commands/accountwide.go
+  s_23603cda57bd1a::t_9b0cefe9853c8b 124-139
+internal/commands/accountwide_test.go
+  s_23603cda57bd1a::t_3e2c7f2432c5f3 324-373
+internal/commands/comment.go
+  s_23603cda57bd1a::t_db679187ead3e3 227,249,255-259,282-283,295,301
+internal/commands/messages.go
+  s_23603cda57bd1a::t_5cd7c5e1d72a33 227-231,237,247-250,255-257,272,283-285,289,291-292,295-296,299,301,303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.17",
+  "base_commit_sha": "e13bb1436db4c85e0dbafe0ae5cdc3e0ce8df723",
+  "prompts": {},
+  "sessions": {
+    "s_23603cda57bd1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d5cc4a14-3c7e-4dda-8fdf-5345ee654868",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
