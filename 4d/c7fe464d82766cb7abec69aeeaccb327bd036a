@@ -1,0 +1,19 @@
+AGENTS.md
+  s_bbb7a13d90e0a0::t_cbe759a80a5d96 62-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4dc7fe464d82766cb7abec69aeeaccb327bd036a",
+  "prompts": {},
+  "sessions": {
+    "s_bbb7a13d90e0a0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e55d3e3b-8450-42f4-a23c-ba16d849757e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremydaer@gmail.com>"
+    }
+  }
+}
