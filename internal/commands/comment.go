@@ -224,6 +224,7 @@ func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page
 	var (
 		comments []basecamp.Recording
 		meta     basecamp.ListMeta
+		capped   bool
 	)
 	switch {
 	case all || page > 0:
@@ -245,13 +246,17 @@ func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page
 			effectiveLimit = limit
 		}
 		var err error
-		comments, meta, err = fetchAccountWideComments(cmd, app, effectiveLimit)
+		comments, capped, meta, err = fetchAccountWideComments(cmd, app, effectiveLimit)
 		if err != nil {
 			return err
 		}
 	}
 
-	respOpts := append(accountWideRespOpts(len(comments), "comment", "comments", meta, limit > 0),
+	respOpts := accountWideRespOpts(len(comments), "comment", "comments", meta, limit > 0)
+	if notice := accountWideCapNotice(capped, meta, len(comments), "comments"); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+	respOpts = append(respOpts,
 		output.WithDisplayData(flattenAccountWideRecordings(comments)),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -274,8 +279,8 @@ func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page
 // Asking for page 0 would follow the Link header to the end of the account
 // before truncating — correct, but it downloads every comment to keep 100.
 // Each iteration adds at least one comment, so the walk always terminates.
-func fetchAccountWideComments(cmd *cobra.Command, app *appctx.App, limit int) ([]basecamp.Recording, basecamp.ListMeta, error) {
-	comments, _, meta, err := accountWideCollect(
+func fetchAccountWideComments(cmd *cobra.Command, app *appctx.App, limit int) ([]basecamp.Recording, bool, basecamp.ListMeta, error) {
+	comments, capped, meta, err := accountWideCollect(
 		func(page int32) ([]basecamp.Recording, basecamp.ListMeta, error) {
 			result, err := app.Account().Everything().Comments(cmd.Context(), page)
 			if err != nil {
@@ -287,13 +292,13 @@ func fetchAccountWideComments(cmd *cobra.Command, app *appctx.App, limit int) ([
 		limit,
 	)
 	if err != nil {
-		return nil, basecamp.ListMeta{}, err
+		return nil, false, basecamp.ListMeta{}, err
 	}
 	// The walk stops at a page boundary, so trim to the exact cap.
 	if len(comments) > limit {
 		comments = comments[:limit]
 	}
-	return comments, meta, nil
+	return comments, capped, meta, nil
 }
 
 func newCommentsShowCmd() *cobra.Command {

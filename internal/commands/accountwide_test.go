@@ -321,3 +321,53 @@ func TestAccountWideCollectPropagatesFetchError(t *testing.T) {
 	assert.Nil(t, items)
 	assert.False(t, capped)
 }
+
+// A listing that ends exactly at the cap is complete, not truncated. Checking
+// the cap before exhaustion reported capped=true here, and the caller turned
+// that into "more may exist" about a listing with nothing left in it.
+func TestAccountWideCollectExactCapIsNotCapped(t *testing.T) {
+	pager := &collectPager[int]{
+		pages: [][]int{{1, 2, 3, 4, 5}},
+		metas: []basecamp.ListMeta{{TotalCount: 5}},
+	}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 5)
+
+	require.NoError(t, err)
+	assert.Len(t, items, 5)
+	assert.False(t, capped, "TotalCount == limit means the cap and the end of the listing coincide")
+	assert.Equal(t, 1, pager.requests)
+}
+
+// Exhaustion still has to lose to the trim: holding the whole listing does not
+// make a result complete when the caller is about to cut it down to the cap.
+func TestAccountWideCollectExhaustedButOvershootingIsCapped(t *testing.T) {
+	pager := &collectPager[int]{
+		pages: [][]int{{1, 2, 3, 4, 5}},
+		metas: []basecamp.ListMeta{{TotalCount: 5}},
+	}
+
+	_, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 3)
+
+	require.NoError(t, err)
+	assert.True(t, capped, "the caller's trim to 3 drops two items that exist")
+}
+
+// X-Total-Count is the account-wide total on every page that carries it, but
+// not every page carries it. The bound comes from page 1 so that a later page
+// omitting the header cannot switch it off mid-walk.
+func TestAccountWideCollectBoundsOnFirstPageTotalOnly(t *testing.T) {
+	pager := &collectPager[int]{
+		pages: [][]int{{1, 2}, {3, 4}, {5, 6}, {7, 8}},
+		metas: []basecamp.ListMeta{{TotalCount: 4}, {}, {}, {}},
+	}
+
+	items, capped, meta, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, []int{1, 2, 3, 4}, items, "page 1 declared four items; the walk stops there")
+	assert.False(t, capped)
+	assert.Equal(t, 4, meta.TotalCount)
+	assert.Equal(t, 2, pager.requests,
+		"pages 3 and 4 omit the header; reading the total from them would walk past the declared end")
+}

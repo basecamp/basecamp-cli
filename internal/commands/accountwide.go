@@ -121,11 +121,24 @@ func accountWideCollect[T any](
 		}
 		collected = n
 
+		// Exhaustion is tested before the cap, and against the first page's
+		// total rather than this page's.
+		//
+		// Order matters: a listing that ends exactly at the cap is complete,
+		// not truncated, and checking the cap first would report "more may
+		// exist" about a listing with nothing left in it.
+		//
+		// The total comes from meta because the first page's is the one this
+		// helper documents as authoritative. Reading it from pageMeta let a
+		// later page that omits X-Total-Count silently switch the bound off
+		// and walk past the declared end of the listing.
+		if meta.TotalCount > 0 && len(items) >= meta.TotalCount {
+			// Everything the listing has is in hand. The caller still trims to
+			// the cap, so it is only complete if the trim drops nothing.
+			return items, collected > limit, meta, nil
+		}
 		if collected >= limit {
 			return items, true, meta, nil
-		}
-		if pageMeta.TotalCount > 0 && len(items) >= pageMeta.TotalCount {
-			return items, false, meta, nil
 		}
 	}
 }
