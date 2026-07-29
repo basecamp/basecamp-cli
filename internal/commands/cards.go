@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -55,71 +56,367 @@ func NewCardsCmd() *cobra.Command {
 	return cmd
 }
 
+// cardsListOptions carries the flags `cards list` accepts, including the
+// group's persistent --project/--card-table, so the project-scoped and
+// account-wide branches read the same values.
+type cardsListOptions struct {
+	project     string
+	column      string
+	cardTable   string
+	limit       int
+	page        int
+	pageSet     bool
+	all         bool
+	allProjects bool
+	sortField   string
+	reverse     bool
+	status      string
+	unassigned  bool
+	noDueDate   bool
+	notNow      bool
+	overdue     bool
+}
+
+// Account-wide card listings, one per Everything endpoint.
+const (
+	cardsSelectorOpen       = "open"
+	cardsSelectorCompleted  = "completed"
+	cardsSelectorUnassigned = "unassigned"
+	cardsSelectorNoDueDate  = "no-due-date"
+	cardsSelectorNotNow     = "not-now"
+	cardsSelectorOverdue    = "overdue"
+)
+
 func newCardsListCmd(project, cardTable *string) *cobra.Command {
-	var column string
-	var limit int
-	var page int
-	var all bool
-	var sortField string
-	var reverse bool
+	var opts cardsListOptions
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cards",
-		Long:  "List all cards in a project's card table.",
+		Long: "List all cards in a project's card table, or across every project with --all-projects.\n\n" +
+			"With --all-projects the listing comes from the account-wide card aggregates, grouped by\n" +
+			"project. --status completed, --unassigned, --no-due-date, --not-now, and --overdue each\n" +
+			"select a different aggregate and are account-wide only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCardsList(cmd, *project, column, *cardTable, limit, page, all, sortField, reverse)
+			opts.project = *project
+			opts.cardTable = *cardTable
+			opts.pageSet = cmd.Flags().Changed("page")
+			return runCardsList(cmd, opts)
 		},
 	}
 
-	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
-	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
-	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
+	cmd.Flags().StringVarP(&opts.column, "column", "c", "", "Filter by column ID or name")
+	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Fetch all cards (no limit)")
+	cmd.Flags().IntVar(&opts.page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&opts.sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
+	cmd.Flags().BoolVar(&opts.reverse, "reverse", false, "Reverse sort order")
+	cmd.Flags().BoolVar(&opts.allProjects, "all-projects", false, "List cards across every project")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Account-wide only: completed")
+	cmd.Flags().BoolVar(&opts.unassigned, "unassigned", false, "Account-wide only: cards with no assignee")
+	cmd.Flags().BoolVar(&opts.noDueDate, "no-due-date", false, "Account-wide only: cards with no due date")
+	cmd.Flags().BoolVar(&opts.notNow, "not-now", false, "Account-wide only: cards parked in Not now")
+	cmd.Flags().BoolVar(&opts.overdue, "overdue", false, "Account-wide only: overdue cards, oldest due date first")
 
 	return cmd
 }
 
-func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, page int, all bool, sortField string, reverse bool) error {
+func runCardsList(cmd *cobra.Command, opts cardsListOptions) error {
 	app := appctx.FromContext(cmd.Context())
 
-	// Validate flag combinations
-	if all && limit > 0 {
-		return output.ErrUsage("--all and --limit are mutually exclusive")
+	// Scope-independent flag validation. Anything that depends on the scope
+	// waits until the scope is known, because the two scopes disagree about
+	// which pages and sorts are legal.
+	if opts.reverse && opts.sortField == "" {
+		return output.ErrUsageHint("--reverse requires --sort", "Pick a field to sort by, e.g. --sort due --reverse.")
 	}
-	if page > 0 && (all || limit > 0) {
-		return output.ErrUsage("--page cannot be combined with --all or --limit")
-	}
-	if page > 1 {
-		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
-	}
-	if sortField != "" {
+	if opts.sortField != "" {
 		// Validate against the superset of all allowed fields early, before any
 		// API calls. Context-specific restrictions (e.g. no position in aggregate)
 		// are enforced at each branch below.
-		if err := validateSortField(sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
+		if err := validateSortField(opts.sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
 			return err
 		}
 	}
 
-	// Pagination flags only make sense when listing a single column
-	// When aggregating across columns, pagination is per-column which is confusing
-	if column == "" && (page > 0 || limit > 0 || all) {
+	selector, selectorFlag, err := cardsAccountWideSelector(opts)
+	if err != nil {
+		return err
+	}
+
+	// Scope precedence: an explicit project wins, then a configured one, then
+	// account-wide. --all-projects overrides a configured project and conflicts
+	// with an explicit one.
+	explicitProject := opts.project != "" || app.Flags.Project != ""
+	if opts.allProjects && explicitProject {
 		return output.ErrUsageHint(
-			"Pagination flags require --column",
-			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+			"--all-projects cannot be combined with --project",
+			"Drop one: --project scopes the listing to a project, --all-projects spans every project.",
 		)
 	}
+	accountWide := opts.allProjects || !projectKnown(app, opts.project)
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
+	if accountWide {
+		return runCardsListAccountWide(cmd, app, opts, selector)
+	}
+
+	// The endpoint selectors reach account-wide aggregates that have no
+	// project-scoped equivalent, so a project in scope makes them unanswerable
+	// rather than a no-op.
+	if selectorFlag != "" {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%s lists cards across every project and cannot be combined with a project", selectorFlag),
+			"Pass --all-projects (which overrides a configured project), or drop the flag to list this project's cards.",
+		)
+	}
+
+	return runCardsListInProject(cmd, app, opts)
+}
+
+// cardsAccountWideSelector maps the endpoint-selector flags onto the aggregate
+// each one picks. The selectors are mutually exclusive: no endpoint combines
+// two. The returned flag spelling is empty when the caller passed none.
+func cardsAccountWideSelector(opts cardsListOptions) (selector, flag string, err error) {
+	var chosen []string
+	if opts.status != "" {
+		if !strings.EqualFold(strings.TrimSpace(opts.status), cardsSelectorCompleted) {
+			return "", "", output.ErrUsageHint(
+				fmt.Sprintf("--status %s is not a card listing", opts.status),
+				"Only --status completed is supported; open cards are the default.",
+			)
+		}
+		chosen = append(chosen, "--status completed")
+	}
+	for _, sel := range []struct {
+		on   bool
+		flag string
+		name string
+	}{
+		{opts.unassigned, "--unassigned", cardsSelectorUnassigned},
+		{opts.noDueDate, "--no-due-date", cardsSelectorNoDueDate},
+		{opts.notNow, "--not-now", cardsSelectorNotNow},
+		{opts.overdue, "--overdue", cardsSelectorOverdue},
+	} {
+		if sel.on {
+			chosen = append(chosen, sel.flag)
+		}
+	}
+
+	if len(chosen) > 1 {
+		return "", "", output.ErrUsage(fmt.Sprintf(
+			"%s and %s are mutually exclusive; each selects a different card listing",
+			chosen[0], chosen[1]))
+	}
+	if len(chosen) == 0 {
+		return cardsSelectorOpen, "", nil
+	}
+
+	switch chosen[0] {
+	case "--status completed":
+		return cardsSelectorCompleted, chosen[0], nil
+	case "--unassigned":
+		return cardsSelectorUnassigned, chosen[0], nil
+	case "--no-due-date":
+		return cardsSelectorNoDueDate, chosen[0], nil
+	case "--not-now":
+		return cardsSelectorNotNow, chosen[0], nil
+	default:
+		return cardsSelectorOverdue, chosen[0], nil
+	}
+}
+
+// runCardsListAccountWide lists cards across every accessible project. The
+// paginated aggregates come back grouped by project; --overdue comes back flat
+// and unpaginated.
+func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsListOptions, selector string) error {
+	// Scope-child flags name a container inside one project, so they cannot
+	// narrow a listing that spans every project. --card-table also arrives via
+	// the group's persistent flag.
+	if opts.column != "" {
+		return output.ErrUsageHint(
+			"--column names a column in one project's card table and cannot narrow an account-wide listing",
+			"Scope the listing with --project <id> to filter by column.",
+		)
+	}
+	if opts.cardTable != "" {
+		return output.ErrUsageHint(
+			"--card-table names one project's card table and cannot narrow an account-wide listing",
+			"Scope the listing with --project <id> to pick a card table.",
+		)
+	}
+
+	if opts.limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+	if opts.pageSet && opts.page == 0 {
+		return output.ErrUsageHint(
+			"--page 0 is not a page number",
+			"Use --all to follow every page, or --page 1 for the first one.",
+		)
+	}
+	if opts.page < 0 {
+		return output.ErrUsage("--page cannot be negative")
+	}
+	if opts.page > math.MaxInt32 {
+		return output.ErrUsage("--page is out of range")
+	}
+	if opts.all && opts.limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if opts.page > 0 && (opts.all || opts.limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+
+	if selector == cardsSelectorOverdue {
+		if opts.pageSet || opts.all {
+			return output.ErrUsageHint(
+				"--overdue returns every overdue card in one unpaginated list",
+				"Drop --page/--all; use --limit to cap the result.",
+			)
+		}
+		return runCardsListOverdue(cmd, app, opts)
+	}
+
+	// The grouped payloads nest cards under their project, and raw grouped
+	// output cannot represent a globally sorted list.
+	if opts.sortField != "" {
+		return output.ErrUsageHint(
+			"--sort is not supported for grouped account-wide card listings",
+			"These aggregates are grouped by project; --overdue returns a flat, sortable list.",
+		)
+	}
+
+	// `cards list` fetches everything by default, so the account-wide default
+	// follows every page. accountWidePage is not used here: it defaults to page
+	// 1, which would silently cap a listing documented as unbounded.
+	apiPage := int32(0)
+	if opts.page > 0 {
+		apiPage = int32(opts.page) //nolint:gosec // bounded above by the --page range check
+	}
+
+	everything := app.Account().Everything()
+	var (
+		groupsPage *basecamp.BucketCardsGroupsPage
+		err        error
+	)
+	switch selector {
+	case cardsSelectorCompleted:
+		groupsPage, err = everything.CompletedCards(cmd.Context(), apiPage)
+	case cardsSelectorUnassigned:
+		groupsPage, err = everything.UnassignedCards(cmd.Context(), apiPage)
+	case cardsSelectorNoDueDate:
+		groupsPage, err = everything.NoDueDateCards(cmd.Context(), apiPage)
+	case cardsSelectorNotNow:
+		groupsPage, err = everything.NotNowCards(cmd.Context(), apiPage)
+	default:
+		groupsPage, err = everything.OpenCards(cmd.Context(), apiPage)
+	}
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// --limit counts cards, not project groups: truncating groups would drop
+	// whole projects. Meta.TotalCount counts groups, so the item total is ours
+	// to compute.
+	groups := groupsPage.Groups
+	total := countAccountWideCards(groups)
+	shown := total
+	if opts.limit > 0 && total > opts.limit {
+		groups = truncateAccountWideCards(groups, opts.limit)
+		shown = opts.limit
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%d %s cards across %d projects", shown, selector, len(groups))),
+		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
+	}
+	switch {
+	case shown < total:
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d of %d cards; drop --limit to see them all", shown, total)))
+	case groupsPage.Meta.Truncated:
+		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
+	}
+
+	// Machine formats keep the grouping; styled output would render the nested
+	// groups as unreadable cells, so it gets flattened rows.
+	var data any = groups
+	if app.Output.EffectiveFormat() == output.FormatStyled {
+		data = flattenAccountWideCards(groups)
+	}
+
+	return app.OK(data, respOpts...)
+}
+
+// runCardsListOverdue lists overdue cards across every project. The endpoint
+// returns a flat, oldest-due-first array, so it renders like the
+// project-scoped path and accepts the sort flags.
+func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOptions) error {
+	if opts.sortField == "position" {
+		return output.ErrUsage("--sort position requires --column (position is per-column)")
+	}
+
+	cards, err := app.Account().Everything().OverdueCards(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// Sort before truncating: truncating first would sort only the survivors.
+	if opts.sortField != "" {
+		sortCards(cards, opts.sortField, opts.reverse)
+	}
+
+	total := len(cards)
+	if opts.limit > 0 && total > opts.limit {
+		cards = cards[:opts.limit]
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%d overdue cards across all projects", len(cards))),
+		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
+	}
+	if len(cards) < total {
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d of %d cards; drop --limit to see them all", len(cards), total)))
+	}
+
+	return app.OK(cards, respOpts...)
+}
+
+func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOptions) error {
+	// Validate flag combinations
+	if opts.all && opts.limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if opts.page > 0 && (opts.all || opts.limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if opts.page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+	if opts.page < 0 {
+		return output.ErrUsage("--page cannot be negative")
+	}
+	if opts.limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+
+	// Pagination flags only make sense when listing a single column
+	// When aggregating across columns, pagination is per-column which is confusing
+	if opts.column == "" && (opts.page > 0 || opts.limit > 0 || opts.all) {
+		return output.ErrUsageHint(
+			"Pagination flags require --column",
+			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+		)
+	}
+
 	// Resolve project from CLI flags and config, with interactive fallback
-	projectID := project
+	projectID := opts.project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -137,7 +434,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 	// Column name (non-numeric) requires --card-table for resolution
 	// Numeric column IDs can be used directly without discovery
-	if column != "" && !isNumericID(column) && cardTable == "" {
+	if opts.column != "" && !isNumericID(opts.column) && opts.cardTable == "" {
 		return output.ErrUsage("--card-table is required when using --column with a name")
 	}
 
@@ -147,31 +444,31 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	}
 
 	// Build pagination options
-	opts := &basecamp.CardListOptions{}
-	if all {
-		opts.Limit = -1 // SDK treats -1 as "fetch all"
-	} else if limit > 0 {
-		opts.Limit = limit
+	listOpts := &basecamp.CardListOptions{}
+	if opts.all {
+		listOpts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if opts.limit > 0 {
+		listOpts.Limit = opts.limit
 	}
-	if page > 0 {
-		opts.Page = page
+	if opts.page > 0 {
+		listOpts.Page = opts.page
 	}
 
 	// Optimization: If column is a numeric ID, skip card table discovery
 	// and fetch cards directly from the column endpoint
-	if column != "" && isNumericID(column) {
-		columnID, err := strconv.ParseInt(column, 10, 64)
+	if opts.column != "" && isNumericID(opts.column) {
+		columnID, err := strconv.ParseInt(opts.column, 10, 64)
 		if err != nil {
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, listOpts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 
-		if sortField != "" {
-			sortCards(cardsResult.Cards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(cardsResult.Cards, opts.sortField, opts.reverse)
 		}
 
 		return app.OK(cardsResult.Cards,
@@ -181,7 +478,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	}
 
 	// Get card table ID from project dock
-	cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, cardTable)
+	cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, opts.cardTable)
 	if err != nil {
 		return err
 	}
@@ -199,27 +496,27 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 	// Get cards from all columns or specific column
 	var allCards []basecamp.Card
-	if column != "" {
+	if opts.column != "" {
 		// Find column by ID or name
-		columnID := resolveColumn(cardTableData.Lists, column)
+		columnID := resolveColumn(cardTableData.Lists, opts.column)
 		if columnID == 0 {
 			return output.ErrUsageHint(
-				fmt.Sprintf("Column '%s' not found", column),
+				fmt.Sprintf("Column '%s' not found", opts.column),
 				"Use column ID or exact name",
 			)
 		}
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, listOpts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 		allCards = cardsResult.Cards
 
-		if sortField != "" {
-			sortCards(allCards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(allCards, opts.sortField, opts.reverse)
 		}
 	} else {
 		// No position in aggregate — it's only meaningful within a single column
-		if sortField == "position" {
+		if opts.sortField == "position" {
 			return output.ErrUsage("--sort position requires --column (position is per-column)")
 		}
 
@@ -232,8 +529,8 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			allCards = append(allCards, cardsResult.Cards...)
 		}
 
-		if sortField != "" {
-			sortCards(allCards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(allCards, opts.sortField, opts.reverse)
 		}
 	}
 
@@ -247,6 +544,58 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			},
 		)...),
 	)
+}
+
+// countAccountWideCards totals the cards inside the project groups.
+func countAccountWideCards(groups []basecamp.BucketCardsGroup) int {
+	total := 0
+	for _, group := range groups {
+		total += len(group.Cards)
+	}
+	return total
+}
+
+// truncateAccountWideCards keeps the first limit cards, trimming groups from
+// the tail rather than dropping cards out of the middle of a project.
+func truncateAccountWideCards(groups []basecamp.BucketCardsGroup, limit int) []basecamp.BucketCardsGroup {
+	kept := make([]basecamp.BucketCardsGroup, 0, len(groups))
+	remaining := limit
+	for _, group := range groups {
+		if remaining <= 0 {
+			break
+		}
+		if len(group.Cards) > remaining {
+			group.Cards = group.Cards[:remaining]
+		}
+		remaining -= len(group.Cards)
+		kept = append(kept, group)
+	}
+	return kept
+}
+
+// flattenAccountWideCards turns the project groups into one row per card, so
+// styled output renders a flat table instead of nested cells.
+func flattenAccountWideCards(groups []basecamp.BucketCardsGroup) []map[string]any {
+	rows := make([]map[string]any, 0, countAccountWideCards(groups))
+	for _, group := range groups {
+		for _, card := range group.Cards {
+			rows = append(rows, map[string]any{
+				"id":      card.ID,
+				"title":   card.Title,
+				"project": group.Bucket.Name,
+				"status":  card.Status,
+				"due":     card.DueOn,
+			})
+		}
+	}
+	return rows
+}
+
+func cardsAccountWideBreadcrumbs() []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "show", Cmd: "basecamp cards show <id>", Description: "Show card details"},
+		{Action: "scope", Cmd: "basecamp cards list --in <project_id>", Description: "List one project's cards"},
+	}
 }
 
 func cardsListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {

@@ -325,19 +325,16 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 }
 
 // TestCardsCmdRequiresProject tests that Project ID required when not in config.
-func TestCardsCmdRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
+// TestCardsCmdWithoutProjectListsAccountWide tests that a bare `cards list`
+// with no project anywhere lists account-wide rather than prompting.
+func TestCardsCmdWithoutProjectListsAccountWide(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, cardsOpenRoute())
 	// No project in config
 
 	cmd := NewCardsCmd()
 
-	err := executeCommand(cmd, app, "list")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
+	require.NoError(t, executeRecordingCommand(cmd, app, "list"))
+	assert.Equal(t, "/99999/cards/open.json", transport.last(t).Path)
 }
 
 // TestCardsListColumnNameRequiresCardTable tests that column name requires --card-table.
@@ -2423,4 +2420,353 @@ func TestCardsWormholesUpdateBreadcrumbPinsCardTable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
 	require.Len(t, envelope.Breadcrumbs, 1)
 	assert.Contains(t, envelope.Breadcrumbs[0].Cmd, "cards wormholes list --in 123 --card-table 555")
+}
+
+// --- account-wide card listings ---
+
+// cardsGroupsFixture is a two-project grouped response, two cards each.
+const cardsGroupsFixture = `[
+	{"bucket":{"id":1,"name":"Alpha","type":"Project"},
+	 "cards":[{"id":11,"title":"Alpha one","status":"active","due_on":"2026-01-01"},
+	          {"id":12,"title":"Alpha two","status":"active"}]},
+	{"bucket":{"id":2,"name":"Beta","type":"Project"},
+	 "cards":[{"id":21,"title":"Beta one","status":"active"},
+	          {"id":22,"title":"Beta two","status":"active","due_on":"2026-03-01"}]}
+]`
+
+// cardsOverdueFixture is the flat, unpaginated overdue payload.
+const cardsOverdueFixture = `[
+	{"id":31,"title":"Zeta late","status":"active","due_on":"2025-02-01"},
+	{"id":32,"title":"Alpha late","status":"active","due_on":"2025-01-01"}
+]`
+
+func cardsAggregateRoute(name, body string) stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   fmt.Sprintf("/99999/cards/%s.json", name),
+		status: http.StatusOK,
+		body:   body,
+	}
+}
+
+func cardsOpenRoute() stubRoute { return cardsAggregateRoute("open", cardsGroupsFixture) }
+
+// cardsAllAggregateRoutes serves every account-wide card endpoint, so a test
+// that dispatches to the wrong one fails on the recorded path rather than on a
+// missing stub.
+func cardsAllAggregateRoutes() []stubRoute {
+	return []stubRoute{
+		cardsAggregateRoute("open", cardsGroupsFixture),
+		cardsAggregateRoute("completed", cardsGroupsFixture),
+		cardsAggregateRoute("unassigned", cardsGroupsFixture),
+		cardsAggregateRoute("no_due_date", cardsGroupsFixture),
+		cardsAggregateRoute("not_now", cardsGroupsFixture),
+		cardsAggregateRoute("overdue", cardsOverdueFixture),
+	}
+}
+
+// setupCardsAccountWideApp wires the recording harness to an output writer the
+// test can read back.
+func setupCardsAccountWideApp(t *testing.T, format output.Format, routes ...stubRoute) (*appctx.App, *recordingTransport, *bytes.Buffer) {
+	t.Helper()
+	app, transport := setupRecordingTestApp(t, routes...)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: format, Writer: buf})
+	return app, transport, buf
+}
+
+// cardsUsageError asserts the command failed with a usage error and returns it.
+func cardsUsageError(t *testing.T, err error) *output.Error {
+	t.Helper()
+	require.Error(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	return e
+}
+
+// TestCardsListProjectScopedUnchanged pins that a project in scope still lists
+// through the project-scoped column endpoint.
+func TestCardsListProjectScopedUnchanged(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{http.MethodGet, "/99999/card_tables/lists/12345/cards.json", http.StatusOK, `[]`},
+	)
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--project", "123", "--column", "12345"))
+	assert.Equal(t, "/99999/card_tables/lists/12345/cards.json", transport.last(t).Path)
+}
+
+// TestCardsListAllProjectsOverridesConfiguredProject tests that --all-projects
+// beats an ambient configured project rather than conflicting with it.
+func TestCardsListAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, cardsOpenRoute())
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+	assert.Equal(t, "/99999/cards/open.json", transport.last(t).Path)
+}
+
+// TestCardsListAllProjectsConflictsWithExplicitProject tests the conflict for
+// both the after-the-noun and root-level spellings of an explicit project.
+func TestCardsListAllProjectsConflictsWithExplicitProject(t *testing.T) {
+	for _, spelling := range []string{"--project", "--in"} {
+		app, _ := setupRecordingTestApp(t)
+		err := executeRecordingCommand(NewCardsCmd(), app, "list", spelling, "123", "--all-projects")
+		assert.Equal(t, "--all-projects cannot be combined with --project", cardsUsageError(t, err).Message, spelling)
+	}
+
+	app, _ := setupRecordingTestApp(t)
+	app.Flags.Project = "123" // basecamp --project 123 cards list
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects")
+	assert.Equal(t, "--all-projects cannot be combined with --project", cardsUsageError(t, err).Message)
+}
+
+// TestCardsListAccountWideSelectorEndpoints tests that each selector flag
+// reaches its own endpoint.
+func TestCardsListAccountWideSelectorEndpoints(t *testing.T) {
+	cases := []struct {
+		args []string
+		path string
+	}{
+		{[]string{"--all-projects"}, "/99999/cards/open.json"},
+		{[]string{"--all-projects", "--status", "completed"}, "/99999/cards/completed.json"},
+		{[]string{"--all-projects", "--unassigned"}, "/99999/cards/unassigned.json"},
+		{[]string{"--all-projects", "--no-due-date"}, "/99999/cards/no_due_date.json"},
+		{[]string{"--all-projects", "--not-now"}, "/99999/cards/not_now.json"},
+		{[]string{"--all-projects", "--overdue"}, "/99999/cards/overdue.json"},
+	}
+	for _, tc := range cases {
+		app, transport := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...), tc.args)
+		assert.Equal(t, tc.path, transport.last(t).Path, tc.args)
+	}
+}
+
+// TestCardsListSelectorsRejectedWithProject tests that the account-wide-only
+// selectors are a usage error whenever a project is in scope — explicit,
+// root-level, or configured.
+func TestCardsListSelectorsRejectedWithProject(t *testing.T) {
+	selectors := [][]string{
+		{"--status", "completed"},
+		{"--unassigned"},
+		{"--no-due-date"},
+		{"--not-now"},
+		{"--overdue"},
+	}
+	for _, selector := range selectors {
+		// Explicit --project after the group noun.
+		app, _ := setupRecordingTestApp(t, projectsRoute())
+		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list", "--project", "123"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+
+		// Root-level --project, which lands in app.Flags.Project.
+		app, _ = setupRecordingTestApp(t, projectsRoute())
+		app.Flags.Project = "123"
+		err = executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+
+		// Configured project.
+		app, _ = setupRecordingTestApp(t, projectsRoute())
+		app.Config.ProjectID = "123"
+		err = executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+	}
+}
+
+// TestCardsListSelectorsMutuallyExclusive tests that two selectors name the
+// conflicting pair rather than silently picking one.
+func TestCardsListSelectorsMutuallyExclusive(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--unassigned", "--overdue")
+	msg := cardsUsageError(t, err).Message
+	assert.Contains(t, msg, "--unassigned")
+	assert.Contains(t, msg, "--overdue")
+	assert.Contains(t, msg, "mutually exclusive")
+}
+
+// TestCardsListStatusRejectsUnsupportedValue tests that only completed is a
+// recognized --status.
+func TestCardsListStatusRejectsUnsupportedValue(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--status", "archived")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--status archived is not a card listing")
+}
+
+// TestCardsListAccountWideRejectsScopeChildren tests that --column and
+// --card-table are rejected account-wide, including via the shorthand and the
+// group's persistent flag.
+func TestCardsListAccountWideRejectsScopeChildren(t *testing.T) {
+	cases := []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"list", "--all-projects", "--column", "9"}, "--column names a column"},
+		{[]string{"list", "--all-projects", "-c", "9"}, "--column names a column"},
+		{[]string{"list", "--all-projects", "--card-table", "7"}, "--card-table names one project's"},
+		{[]string{"--card-table", "7", "list", "--all-projects"}, "--card-table names one project's"},
+		{[]string{"list", "--column", "9"}, "--column names a column"},
+	}
+	for _, tc := range cases {
+		app, _ := setupRecordingTestApp(t)
+		err := executeRecordingCommand(NewCardsCmd(), app, tc.args...)
+		assert.Contains(t, cardsUsageError(t, err).Message, tc.message, tc.args)
+	}
+}
+
+// TestCardsListAccountWidePagination tests the page mapping: the default and
+// --all follow every page, --page N asks for exactly N.
+func TestCardsListAccountWidePagination(t *testing.T) {
+	cases := []struct {
+		args  []string
+		query string
+	}{
+		{[]string{"--all-projects"}, ""},
+		{[]string{"--all-projects", "--all"}, ""},
+		{[]string{"--all-projects", "--page", "3"}, "page=3"},
+		{[]string{"--all-projects", "--limit", "2"}, ""},
+	}
+	for _, tc := range cases {
+		app, transport := setupRecordingTestApp(t, cardsOpenRoute())
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...), tc.args)
+		assert.Equal(t, tc.query, transport.last(t).Query, tc.args)
+	}
+}
+
+// TestCardsListAccountWideRejectsBadPaging tests that the page and limit values
+// with no account-wide meaning are usage errors rather than surprises.
+func TestCardsListAccountWideRejectsBadPaging(t *testing.T) {
+	cases := []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"--all-projects", "--page", "0"}, "--page 0 is not a page number"},
+		{[]string{"--all-projects", "--page", "-1"}, "--page cannot be negative"},
+		{[]string{"--all-projects", "--limit", "-1"}, "--limit cannot be negative"},
+		{[]string{"--all-projects", "--all", "--limit", "2"}, "--all and --limit are mutually exclusive"},
+		{[]string{"--all-projects", "--page", "2", "--limit", "2"}, "--page cannot be combined with --all or --limit"},
+	}
+	for _, tc := range cases {
+		app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...)
+		assert.Equal(t, tc.message, cardsUsageError(t, err).Message, tc.args)
+	}
+}
+
+// TestCardsListOverdueRejectsPaging tests that the unpaginated endpoint refuses
+// page flags instead of accepting and dropping them.
+func TestCardsListOverdueRejectsPaging(t *testing.T) {
+	for _, args := range [][]string{
+		{"--all-projects", "--overdue", "--page", "1"},
+		{"--all-projects", "--overdue", "--all"},
+	} {
+		app, _ := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, args...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "one unpaginated list", args)
+	}
+}
+
+// TestCardsListAccountWideSorting tests that sorting is rejected for the
+// grouped aggregates and honored for the flat overdue list.
+func TestCardsListAccountWideSorting(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--sort", "due")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--sort is not supported for grouped")
+
+	app, _ = setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+	err = executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--sort", "position")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--sort position requires --column")
+
+	// Sorting precedes truncation: the earliest-titled card survives --limit 1.
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsAllAggregateRoutes()...)
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app,
+		"list", "--all-projects", "--overdue", "--sort", "title", "--limit", "1"))
+
+	var envelope struct {
+		Data   []basecamp.Card `json:"data"`
+		Notice string          `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 1)
+	assert.Equal(t, "Alpha late", envelope.Data[0].Title)
+	assert.Contains(t, envelope.Notice, "first 1 of 2")
+}
+
+// TestCardsListReverseRequiresSort tests that --reverse alone is an error
+// rather than a no-op.
+func TestCardsListReverseRequiresSort(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--reverse")
+	assert.Equal(t, "--reverse requires --sort", cardsUsageError(t, err).Message)
+}
+
+// TestCardsListAccountWideLimitCountsCards tests that --limit truncates inner
+// cards, keeping the groups that hold them, rather than dropping projects.
+func TestCardsListAccountWideLimitCountsCards(t *testing.T) {
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--limit", "3"))
+
+	var envelope struct {
+		Data    []basecamp.BucketCardsGroup `json:"data"`
+		Summary string                      `json:"summary"`
+		Notice  string                      `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 2, "both projects survive a card-counted limit")
+	assert.Equal(t, 3, countAccountWideCards(envelope.Data))
+	assert.Equal(t, "Alpha", envelope.Data[0].Bucket.Name)
+	assert.Len(t, envelope.Data[1].Cards, 1)
+	assert.Contains(t, envelope.Summary, "3 open cards across 2 projects")
+	assert.Contains(t, envelope.Notice, "first 3 of 4")
+}
+
+// TestCardsListAccountWideOutputBranches tests that machine formats keep the
+// grouping and styled output gets flattened rows.
+func TestCardsListAccountWideOutputBranches(t *testing.T) {
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+
+	var envelope struct {
+		Data []basecamp.BucketCardsGroup `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 2)
+	assert.Equal(t, 4, countAccountWideCards(envelope.Data))
+
+	app, _, styled := setupCardsAccountWideApp(t, output.FormatStyled, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+	rendered := styled.String()
+	assert.Contains(t, rendered, "Alpha")
+	assert.Contains(t, rendered, "Beta")
+	assert.Contains(t, rendered, "Alpha one")
+	assert.NotContains(t, rendered, "bucket")
+}
+
+// TestFlattenAccountWideCards tests that flattening carries the project name
+// alongside each card.
+func TestFlattenAccountWideCards(t *testing.T) {
+	groups := []basecamp.BucketCardsGroup{
+		{Bucket: basecamp.Bucket{ID: 1, Name: "Alpha"}, Cards: []basecamp.Card{{ID: 11, Title: "One", Status: "active", DueOn: "2026-01-01"}}},
+		{Bucket: basecamp.Bucket{ID: 2, Name: "Beta"}},
+	}
+
+	rows := flattenAccountWideCards(groups)
+	require.Len(t, rows, 1)
+	assert.Equal(t, map[string]any{
+		"id": int64(11), "title": "One", "project": "Alpha", "status": "active", "due": "2026-01-01",
+	}, rows[0])
+}
+
+// TestTruncateAccountWideCards tests that truncation trims from the tail and
+// never keeps more cards than asked for.
+func TestTruncateAccountWideCards(t *testing.T) {
+	groups := []basecamp.BucketCardsGroup{
+		{Bucket: basecamp.Bucket{Name: "Alpha"}, Cards: []basecamp.Card{{ID: 1}, {ID: 2}}},
+		{Bucket: basecamp.Bucket{Name: "Beta"}, Cards: []basecamp.Card{{ID: 3}, {ID: 4}}},
+	}
+
+	assert.Equal(t, 1, countAccountWideCards(truncateAccountWideCards(groups, 1)))
+	assert.Len(t, truncateAccountWideCards(groups, 1), 1)
+	assert.Len(t, truncateAccountWideCards(groups, 2), 1)
+	assert.Len(t, truncateAccountWideCards(groups, 3), 2)
+	assert.Equal(t, 4, countAccountWideCards(truncateAccountWideCards(groups, 9)))
 }
