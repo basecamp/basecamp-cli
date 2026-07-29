@@ -883,7 +883,7 @@ func (v *Detail) setDetailDueDate(dueOn string) tea.Cmd {
 		switch rt {
 		case "card":
 			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
-				&basecamp.UpdateCardRequest{DueOn: dueOn})
+				&basecamp.UpdateCardRequest{DueOn: &dueOn})
 		default:
 			err = hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
 				&basecamp.UpdateTodoRequest{DueOn: dueOn})
@@ -1064,7 +1064,7 @@ func (v *Detail) submitEditTitle(title string) tea.Cmd {
 				&basecamp.UpdateTodoRequest{Content: title})
 		case "card":
 			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
-				&basecamp.UpdateCardRequest{Title: title})
+				&basecamp.UpdateCardRequest{Title: &title})
 		default:
 			err = fmt.Errorf("editing %s titles is not supported", recordType)
 		}

@@ -515,9 +515,11 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		title = r.Subject
 	}
 
-	excerpt := r.Description
-	if excerpt == "" && r.Content != "" {
-		excerpt = truncateExcerpt(r.Content, 120)
+	// Content and Description always arrive null; the plain-text variants carry
+	// the server's highlighted excerpt.
+	excerpt := r.PlainTextDescription
+	if excerpt == "" && r.PlainTextContent != "" {
+		excerpt = truncateExcerpt(r.PlainTextContent, 120)
 	}
 
 	return workspace.SearchResultInfo{

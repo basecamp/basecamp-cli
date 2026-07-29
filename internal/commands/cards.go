@@ -633,7 +633,7 @@ You can pass either a card ID or a Basecamp URL:
 
 			req := &basecamp.UpdateCardRequest{}
 			if title != "" {
-				req.Title = title
+				req.Title = &title
 			}
 			var mentionNotice string
 			var html string
@@ -661,10 +661,11 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			if html != "" {
-				req.Content = html
+				req.Content = &html
 			}
 			if due != "" {
-				req.DueOn = dateparse.Parse(due)
+				dueOn := dateparse.Parse(due)
+				req.DueOn = &dueOn
 			}
 			if cmd.Flags().Changed("assignee") {
 				assigneeID, err := resolveAssigneeID(cmd.Context(), app, assignee)
