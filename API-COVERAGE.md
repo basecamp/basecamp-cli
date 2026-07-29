@@ -18,7 +18,20 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.9.1-0.20260727173625-bb363c847b92 — reshapes `MessageTypes` to the bucket-scoped categories API (`/buckets/{id}/categories…`, basecamp/basecamp-sdk#393), consumed by the now project-scoped `messagetypes` commands; adds the Bubble Ups successor surface (`MyNotifications.BubbleUps` via `GET /my/readings/bubble_ups.json` + `GetWithOptions`/`WithLimitBubbleUps`, basecamp/basecamp-sdk#426) behind `notifications bubbleups` and `notifications list --limit-bubble-ups`; adds create-time `visible_to_clients` on `Tools.Create` (basecamp/basecamp-sdk#419) behind `tools create --visible-to-clients`; and carries model-only Door fields on Recording (basecamp/basecamp-sdk#431) and activity-timeline event fields (basecamp/basecamp-sdk#424) that flow through `--json`. API date 2026-07-26.
+**SDK version:** v0.10.0 — adds `EverythingService` (`AccountClient.Everything()`,
+basecamp/basecamp-sdk#435 and #438), a 17-method account-wide aggregate family
+covering cross-project messages, comments, checkins, forwards, boosts, files, and
+the open/completed/unassigned/overdue/no-due-date todo and card rollups. **No CLI
+commands surface it yet** — the family is untracked in the matrix below and
+excluded from the parity totals, on the same footing as the other untracked BC5
+sections. Also reshapes `UpdateCardRequest` to pointer fields for merge-safe
+partial updates (#489); makes `SearchResult.Content`/`.Description` nullable and
+always-null in favor of `PlainTextContent`/`PlainTextDescription`, which carry the
+server's highlighted excerpts (#487); and changes transport behavior — HTTP 400
+now maps to the `validation` error code rather than `api_error` (#482, moving a
+400's exit code from 7 to 9), per-operation `retry.max` is honored as a ceiling
+(#483), `*WithBody` request bodies replay across retries (#481), and the declared
+`retry_on` status set is honored (#486). API date 2026-07-28.
 
 ## Coverage by Section
 
