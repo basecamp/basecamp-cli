@@ -103,11 +103,39 @@ A configured todolist is subject to the same rule as a configured project.
 values) are rejected, pointing at the command that does answer the question
 (e.g. `reports assigned`).
 
-**No new flags** beyond the `--all-projects` scope selector this contract
-mandates, with one recorded exception. The account-wide path reuses the
+**No new flags** beyond `--all-projects`, the endpoint selectors the method
+matrix names, and one recorded exception. The account-wide path reuses the
 filter, sort, and pagination flags a command already has; it does not grow a
 parallel flag surface. The exception is `files list`, which today has no filters
 at all and gains two account-wide-only ones — see I5.
+
+#### Endpoint selectors
+
+The method matrix reaches eleven distinct todo/card endpoints, and the flags
+that pick among them do not all exist yet. This is the complete inventory of
+flags added by this work — anything not listed here is reuse:
+
+| Command | New flag | Selects | Scope |
+|---|---|---|---|
+| all eight | `--all-projects` | account-wide | — |
+| `todos list` | `--unassigned` | `UnassignedTodos` | account-wide only |
+| `todos list` | `--no-due-date` | `NoDueDateTodos` | account-wide only |
+| `cards list` | `--status` (only `completed`) | `CompletedCards` | account-wide only |
+| `cards list` | `--unassigned` | `UnassignedCards` | account-wide only |
+| `cards list` | `--no-due-date` | `NoDueDateCards` | account-wide only |
+| `cards list` | `--not-now` | `NotNowCards` | account-wide only |
+| `cards list` | `--overdue` | `OverdueCards` | account-wide only |
+| `files list` | `--kind`, `--person` | filters on `Files` | account-wide only — see I5 |
+
+**Account-wide only** means exactly what it means for the `files list` filters:
+the project-scoped path has no equivalent, so passing one with a project in
+scope is `ErrUsage`, not a silent no-op. `todos list --status completed`,
+`--completed`, and `--overdue` already exist project-scoped and keep working
+there; they merely gain an account-wide meaning.
+
+The selectors are **mutually exclusive** — each picks one endpoint, and there is
+no endpoint that combines two. Passing more than one is `ErrUsage` naming the
+pair.
 
 ### I4 — Sorting
 
