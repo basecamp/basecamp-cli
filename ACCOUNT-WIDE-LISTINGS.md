@@ -270,8 +270,10 @@ behavior change and belongs in the release notes.
 returns **exactly the first page** when no pagination flag is given.
 
 The reason is measured, not stylistic: `/boosts.json?page=1` — one page, no
-crawling — took **93s** against a large production account. A default that
-walked toward 100 items would multiply an already unacceptable wait.
+crawling — takes **~44s** against a large production account. (An earlier
+figure of 93s was the client giving up: three 30s attempts plus backoff.) A
+default that walked toward 100 items would multiply an already unacceptable
+wait.
 
 **The exemption covers the default only.** Once a flag is passed, `boost list`
 behaves like every other bounded listing. The four modes are exhaustive:
@@ -303,16 +305,37 @@ exists.
 When the response is the whole listing there is no notice at all; there are no
 additional pages to be slow.
 
-**The slowness is server-side and is not fixed here.** The CLI cannot make this
-feed fast; the flags make its data reachable. `Everything::BoostsController#index`
-already preloads the booster and boostable associations and uses `UNION ALL`
-deliberately, so the obvious N+1 hypothesis is wrong. The remaining suspect —
-**unconfirmed** — is that it wraps that union in
-`Boost.from("(...) AS boosts").order(created_at: :desc, id: :desc)`; ordering a
-derived table cannot use an index, which would force MySQL to materialize and
-sort every accessible boost before `OFFSET`/`LIMIT` applies, making page 1 cost
-the same as page N. That needs an `EXPLAIN` to confirm and is tracked
-server-side, not here.
+**The slowness is server-side and is not fixed here** — and as of this writing
+it is bad enough that the account-wide feed does not work at all. Measured
+against a large production account, every page takes ~44s, which exceeds the
+SDK's 30s client timeout: the request is retried three times and then fails.
+`boost list --all-projects` is therefore held out of the release rather than
+shipped broken. Tracked in **basecamp/bc3#12458** and **basecamp-cli#589**.
+
+The cause is measured, not guessed. Server-side timings for one `page=40`
+request (44,630ms total):
+
+```
+Boost Load   22,097.6ms   the paginated SELECT
+~60 preloads      <2.3ms each
+Boost Count  22,265.7ms   GearedPagination's total-count query
+Completed 200 OK in 44630ms (Views: 244.7ms | ActiveRecord: 44370.9ms, 64 queries)
+```
+
+99.5% of the request is database time, in two statements of almost exactly equal
+cost. Three things follow, and they are worth recording because two of them
+contradict what this document previously assumed:
+
+- **It is not an N+1.** `Everything::BoostsController#index` preloads booster and
+  boostable thoroughly and the log confirms it works — 60 of 64 queries are
+  trivial. That hypothesis is dead.
+- **Ordering the derived table is only half of it.** The controller wraps its
+  `UNION ALL` in `Boost.from("(...) AS boosts").order(created_at: :desc, id:
+  :desc)`; ordering a derived table cannot use an index, so MySQL materializes
+  and sorts every accessible boost before `OFFSET`/`LIMIT` applies. That
+  explains `Boost Load`, and it explains why page 1 costs the same as page 40.
+- **The count pays the same cost again**, purely for pagination metadata. Fixing
+  only the `ORDER BY` would leave roughly half the latency in place.
 
 #### The `files list` filter exception
 
