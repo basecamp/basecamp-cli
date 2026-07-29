@@ -1,0 +1,22 @@
+internal/commands/todos.go
+  s_1ed2e5b0ce1751::t_cb835ea2088b2d 271-273
+  s_1ed2e5b0ce1751::t_93ed3f077a4e44 284,287
+internal/commands/todos_test.go
+  s_1ed2e5b0ce1751::t_8b9c84a176ddbc 3177-3188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "cc84c842ad0cb113839ad36398a7a2f9c5935911",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
