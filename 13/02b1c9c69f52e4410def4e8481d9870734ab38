@@ -1,0 +1,30 @@
+internal/commands/messages.go
+  s_1ed2e5b0ce1751::t_7aa7fc5034a517 61,68-72,74,81,88,91-94,112-119,121-126,129,134-135
+  s_1ed2e5b0ce1751::t_f636586a4534cc 136,200-336
+  s_1ed2e5b0ce1751::t_3e22fc7e1d6c70 4,7-8
+  s_1ed2e5b0ce1751::t_a802beee933937 137
+internal/commands/messages_test.go
+  s_1ed2e5b0ce1751::t_3fee02fcd670e4 100-103,109
+  s_1ed2e5b0ce1751::t_b23ac9400e60a3 587-676,678-680,682-689,691-694,696,699-700,705,708,712,722-867,869-895
+  s_1ed2e5b0ce1751::t_96ad62c34a7b75 677,681
+  s_1ed2e5b0ce1751::t_3bb16d835ad16c 690,695,697-698
+  s_1ed2e5b0ce1751::t_d58a2770fa3051 8
+  s_1ed2e5b0ce1751::t_9b981374e5d192 701-704,706-707,709-711,713-721
+  s_1ed2e5b0ce1751::t_14c1f0a6a2cd18 868
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "1302b1c9c69f52e4410def4e8481d9870734ab38",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
