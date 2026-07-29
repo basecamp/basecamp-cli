@@ -1,0 +1,21 @@
+skills/basecamp/SKILL.md
+  s_23603cda57bd1a::t_929fcb687c8b3f 109
+ACCOUNT-WIDE-LISTINGS.md
+  s_23603cda57bd1a::t_929fcb687c8b3f 273-276,308-338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6fbfa7ef677ebff8fc2cc4d4e825634a1753f947",
+  "prompts": {},
+  "sessions": {
+    "s_23603cda57bd1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d5cc4a14-3c7e-4dda-8fdf-5345ee654868",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
