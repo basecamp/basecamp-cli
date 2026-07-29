@@ -591,7 +591,7 @@ on its own cannot name a question; --all-projects states that intent outright:
 					"Pass a question ID: basecamp checkins answers <question_id>")
 			}
 
-			return runCheckinsAnswersAccountWide(cmd, app, *questionnaireID, by, limit, page, all)
+			return runCheckinsAnswersAccountWide(cmd, app, *questionnaireID, limit, page, all)
 		},
 	}
 
@@ -708,7 +708,7 @@ func runCheckinsAnswers(cmd *cobra.Command, app *appctx.App, project, questionAr
 // account can reach. The listing is a flat []Recording, the same payload
 // `recordings list` already hands the styled renderer, so it needs no
 // format-dependent flattening.
-func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, questionnaireID, by string, limit, page int, all bool) error {
+func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, questionnaireID string, limit, page int, all bool) error {
 	// A questionnaire is a container inside one project and a person filter
 	// has no aggregate endpoint, so neither can narrow this feed. Accepting
 	// either would answer a different question than the one asked.
