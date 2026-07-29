@@ -876,7 +876,7 @@ func requireSecureOAuthEndpoint(name, endpoint string) error {
 		return output.ErrAuth(fmt.Sprintf("invalid %s %q: %v", name, endpoint, err))
 	}
 	if !isSecureEndpointURL(u) {
-		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback)", name, endpoint))
+		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, endpoint))
 	}
 	return nil
 }
