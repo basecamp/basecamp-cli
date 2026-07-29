@@ -516,11 +516,14 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 	}
 
 	// SDK v0.10.0 made Content and Description nullable and moved the
-	// highlighted excerpt to the plain-text variants.
+	// highlighted excerpt to the plain-text variants. Those are HTML fragments
+	// despite the name — BC3 wraps each query match in <mark> — so both
+	// branches have to go through truncateExcerpt, which strips the markup.
 	excerpt := r.PlainTextDescription
-	if excerpt == "" && r.PlainTextContent != "" {
-		excerpt = truncateExcerpt(r.PlainTextContent, 120)
+	if excerpt == "" {
+		excerpt = r.PlainTextContent
 	}
+	excerpt = truncateExcerpt(excerpt, 120)
 
 	return workspace.SearchResultInfo{
 		ID:          r.ID,
