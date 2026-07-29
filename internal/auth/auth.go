@@ -1051,7 +1051,15 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 	oauthType := m.GetOAuthType()
 	switch oauthType {
 	case "bc3", oauthTypeBC5:
-		return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
+		// resourceOrigin, not NormalizeBaseURL: the latter only trims a
+		// trailing slash, so a pathful BaseURL (https://host/api/v1 —
+		// explicitly supported by resourceOrigin) would yield a misrouted
+		// https://host/api/v1/authorization.json.
+		origin, err := resourceOrigin(m.cfg.BaseURL)
+		if err != nil {
+			return "", err
+		}
+		return origin + "/authorization.json", nil
 	case oauthTypeLaunchpad, "":
 		// "launchpad" = stored credentials; "" = no stored credentials and
 		// no env token (shouldn't normally reach here since IsAuthenticated

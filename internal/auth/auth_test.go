@@ -1534,6 +1534,27 @@ func TestAuthorizationEndpoint_StoredBC3(t *testing.T) {
 	assert.Equal(t, "https://3.basecampapi.com/authorization.json", ep)
 }
 
+func TestAuthorizationEndpoint_PathfulBaseURLUsesOrigin(t *testing.T) {
+	// resourceOrigin supports pathful BaseURLs; the authorization-info URL
+	// must come from the ORIGIN, never host/path/authorization.json.
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com/api/v1"}
+	m := NewManager(cfg, nil)
+	m.store = newTestStore(t, tmpDir)
+
+	origin := config.NormalizeBaseURL(cfg.BaseURL)
+	require.NoError(t, m.store.Save(origin, &Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc3",
+	}))
+
+	ep, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", ep)
+}
+
 func TestAuthorizationEndpoint_StoredLaunchpad(t *testing.T) {
 	t.Setenv("BASECAMP_TOKEN", "")
 
