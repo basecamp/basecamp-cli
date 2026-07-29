@@ -59,10 +59,12 @@ Run it early and often — after finishing a feature, after fixing a bug, before
 pushing. If you're about to `git push` and haven't run `bin/ci` in this
 session, stop and run it first.
 
-**Skill drift**: when you change CLI commands or flags, `make check-skill-drift`
-verifies that `skills/basecamp/SKILL.md` **and** `skills/basecamp-doctor/SKILL.md`
-still reference valid commands and flags from the `.surface` snapshot. If you add,
-rename, or remove commands/flags, update both skills to match.
+**Skill drift**: `make check-skill-drift` runs over both `skills/basecamp/SKILL.md`
+and `skills/basecamp-doctor/SKILL.md`, checking that the commands and flags each one
+*references* still exist in the `.surface` snapshot. It catches stale references, not
+missing coverage — so renaming or removing a command breaks whichever skill mentioned
+it, and adding a new one breaks neither. Update the skill the change actually affects;
+basecamp-doctor deliberately covers only doctor, setup and auth remediation.
 
 ```bash
 bin/ci                # The single command — run this
