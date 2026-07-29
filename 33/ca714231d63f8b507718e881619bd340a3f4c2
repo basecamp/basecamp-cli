@@ -1,0 +1,26 @@
+internal/commands/cards_test.go
+  s_1ed2e5b0ce1751::t_53d18bbf5bdccf 2424-2772
+  s_1ed2e5b0ce1751::t_cbd91edfd8659a 328-331,336-337
+internal/commands/cards.go
+  s_1ed2e5b0ce1751::t_9f0624af646885 265-267
+  s_1ed2e5b0ce1751::t_1756c9c88f067c 299
+  s_1ed2e5b0ce1751::t_c1ff19805eb3c6 7
+  s_1ed2e5b0ce1751::t_83962f9055b616 59-89,91,96-99,101-104,108-119,124,127-131,133,137,142-151,153-154,157,164-264,268-298,300-417,419,437,447-451,453-454,459-460,465,470-471,481,499,501,504,508,514-515,519,532-533,549-599
+  s_1ed2e5b0ce1751::t_471d20d108f747 600
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "33ca714231d63f8b507718e881619bd340a3f4c2",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

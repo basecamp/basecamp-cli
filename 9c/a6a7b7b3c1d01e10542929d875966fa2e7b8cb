@@ -1,0 +1,25 @@
+internal/commands/boost.go
+  s_1ed2e5b0ce1751::t_7eb60487f7a7f5 190-252
+  s_1ed2e5b0ce1751::t_7738c7e04ef77d 53,56-57,64-70,76-80,85,90-115
+  s_1ed2e5b0ce1751::t_940d549a00a6e7 10-11
+  s_1ed2e5b0ce1751::t_59c9725b502191 116
+internal/commands/boost_test.go
+  s_1ed2e5b0ce1751::t_586c4c9ef7e2b6 218-404,406-421
+  s_1ed2e5b0ce1751::t_c9c648e830f476 405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "9ca6a7b7b3c1d01e10542929d875966fa2e7b8cb",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

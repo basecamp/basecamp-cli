@@ -1,0 +1,71 @@
+internal/output/envelope.go
+  s_1ed2e5b0ce1751::t_ec8bb91b634f4b 471-482
+  s_1ed2e5b0ce1751::t_3b8b3531a06da8 554
+  s_1ed2e5b0ce1751::t_130312a846a771 574
+  s_1ed2e5b0ce1751::t_efc2e8a22dad7a 490
+  s_1ed2e5b0ce1751::t_45919c116a173c 527
+  s_1ed2e5b0ce1751::t_4b0bf851c9a242 457-470
+internal/commands/checkins_test.go
+  s_1ed2e5b0ce1751::t_4f88a2fd505cc9 481
+internal/commands/accountwide_test.go
+  s_1ed2e5b0ce1751::t_f11da6171d2898 1-5,7-10,12-28,30-115
+  s_1ed2e5b0ce1751::t_79b8c3cf4cc62a 6,11
+  s_1ed2e5b0ce1751::t_25a126b5ae6e13 29
+internal/commands/accountwide.go
+  s_1ed2e5b0ce1751::t_90b9cbcb2cd84d 94-105,109-113
+  s_1ed2e5b0ce1751::t_6490cdeeddf932 49-78
+  s_1ed2e5b0ce1751::t_d13b09e4648349 79-92
+internal/commands/cards.go
+  s_1ed2e5b0ce1751::t_12c3e241111a24 349-353,355
+  s_1ed2e5b0ce1751::t_0de99be25f6a32 237-239
+internal/commands/boost_test.go
+  s_1ed2e5b0ce1751::t_4f88a2fd505cc9 389
+internal/commands/comment.go
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 254
+  s_1ed2e5b0ce1751::t_fcf8ebfafcd3bf 255
+internal/commands/messages.go
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 251
+  s_1ed2e5b0ce1751::t_88778ae09de94e 252
+  s_1ed2e5b0ce1751::t_c74de6743ebbfb 210-212
+internal/commands/checkins.go
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 764
+  s_1ed2e5b0ce1751::t_cc0c786fa231fe 585-592
+  s_1ed2e5b0ce1751::t_1b1520fd471cb5 720-722
+  s_1ed2e5b0ce1751::t_88778ae09de94e 765
+internal/commands/forwards.go
+  s_1ed2e5b0ce1751::t_c74de6743ebbfb 185-187
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 235
+  s_1ed2e5b0ce1751::t_88778ae09de94e 236
+ACCOUNT-WIDE-LISTINGS.md
+  s_1ed2e5b0ce1751::t_eb1b0acab6fb32 256,262-271
+  s_1ed2e5b0ce1751::t_27667c31c0f940 272
+internal/commands/todos.go
+  s_1ed2e5b0ce1751::t_782982d01cdcbe 405-406,409-412
+  s_1ed2e5b0ce1751::t_70170ce1d13faf 385-388,390
+  s_1ed2e5b0ce1751::t_e5e74e8638c4d9 140-142,263-267,364,372
+  s_1ed2e5b0ce1751::t_75284628e96a87 415
+  s_1ed2e5b0ce1751::t_36d7e0b52f464b 7
+internal/commands/files.go
+  s_1ed2e5b0ce1751::t_a58464999a487a 161-165,346,350
+  s_1ed2e5b0ce1751::t_0de99be25f6a32 294-296
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 324
+internal/commands/boost.go
+  s_1ed2e5b0ce1751::t_1b1520fd471cb5 194-196
+  s_1ed2e5b0ce1751::t_2a31fed315bbf8 212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a8224a2359f28916f12a256aaa14627442a2be7d",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
