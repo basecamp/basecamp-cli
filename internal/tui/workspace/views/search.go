@@ -515,8 +515,8 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		title = r.Subject
 	}
 
-	// Content and Description always arrive null; the plain-text variants carry
-	// the server's highlighted excerpt.
+	// SDK v0.10.0 made Content and Description nullable and moved the
+	// highlighted excerpt to the plain-text variants.
 	excerpt := r.PlainTextDescription
 	if excerpt == "" && r.PlainTextContent != "" {
 		excerpt = truncateExcerpt(r.PlainTextContent, 120)
