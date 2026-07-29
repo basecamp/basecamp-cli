@@ -198,9 +198,10 @@ func runCommentsListForItem(cmd *cobra.Command, app *appctx.App, recordingArg st
 const defaultAccountWideCommentLimit = 100
 
 // runCommentsListAccountWide lists every comment in the account, newest first.
-// The payload is []Recording, which the styled renderer already handles as-is
-// (`recordings list` hands it the same type), so there is nothing to flatten
-// and no format branch to make.
+// The payload is []Recording, which machine formats get raw. Human-facing
+// output gets flattened rows instead: the generic renderers skip the nested
+// bucket by name, and on a cross-project listing the project is the column
+// that makes a row worth reading.
 func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page int, all bool) error {
 	// A todolist names a container inside one project, so it cannot narrow an
 	// account-wide feed any more than a project can. Reject the explicit flag
@@ -234,7 +235,11 @@ func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page
 		// accountWidePage maps --all onto page 0 ("follow the Link header") and
 		// otherwise passes the requested page straight through: the aggregate
 		// accepts any positive page, unlike the item feed.
-		result, err := app.Account().Everything().Comments(cmd.Context(), accountWidePage(page, all))
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
+			return err
+		}
+		result, err := app.Account().Everything().Comments(cmd.Context(), sdkPage)
 		if err != nil {
 			return convertSDKError(err)
 		}

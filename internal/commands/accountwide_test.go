@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -141,4 +142,23 @@ func TestAccountWideOverdueListingsNameTheirProject(t *testing.T) {
 		assert.Contains(t, buf.String(), "Beta")
 		assert.Contains(t, buf.String(), "Fix it")
 	})
+}
+
+// A page beyond int32 used to clamp, serving a different page than the one
+// asked for. I3 forbids silently altering a flag as much as dropping it.
+func TestAccountWidePageRejectsOutOfRange(t *testing.T) {
+	_, err := accountWidePage(math.MaxInt32+1, false)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, "--page is out of range")
+
+	within, err := accountWidePage(math.MaxInt32, false)
+	require.NoError(t, err)
+	assert.Equal(t, int32(math.MaxInt32), within)
+
+	all, err := accountWidePage(9999999999, true)
+	require.NoError(t, err, "--all wins before the range check")
+	assert.Equal(t, int32(0), all)
 }

@@ -364,7 +364,11 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 	truncated := false
 
 	if flags.all || flags.page > 0 {
-		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, accountWidePage(flags.page, flags.all))
+		sdkPage, err := accountWidePage(flags.page, flags.all)
+		if err != nil {
+			return err
+		}
+		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, sdkPage)
 		if err != nil {
 			return convertSDKError(err)
 		}

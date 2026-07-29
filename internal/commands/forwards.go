@@ -217,7 +217,10 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 	// capping. Only an explicit positive --page narrows to a single page.
 	var sdkPage int32
 	if page > 0 {
-		sdkPage = accountWidePage(page, all)
+		var err error
+		if sdkPage, err = accountWidePage(page, all); err != nil {
+			return err
+		}
 	}
 
 	result, err := app.Account().Everything().Forwards(cmd.Context(), sdkPage)

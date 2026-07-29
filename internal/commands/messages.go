@@ -203,9 +203,10 @@ func messagesListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
 const messagesAccountWideLimit = 100
 
 // runMessagesListAccountWide lists every message across all accessible
-// projects. The feed is flat []Recording — each item carries its own bucket —
-// so it goes to the renderer as-is, the way recordings list already hands
-// []Recording over.
+// projects. The feed is flat []Recording, and each item carries its own
+// bucket — which the generic renderers skip by name, so human-facing output
+// reads flattened rows that keep the project while machine formats get the
+// raw payload.
 func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoard string, limit, page int, all bool, sortField string, reverse bool) error {
 	if err := rejectAccountWideTodolist(app, "message"); err != nil {
 		return err
@@ -275,7 +276,11 @@ func messagesAccountWideFetch(ctx context.Context, app *appctx.App, wanted, page
 	}
 
 	if page > 0 || all {
-		return fetch(accountWidePage(page, all))
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
+			return nil, basecamp.ListMeta{}, err
+		}
+		return fetch(sdkPage)
 	}
 	if sorted {
 		return fetch(0)

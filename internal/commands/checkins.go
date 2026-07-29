@@ -750,7 +750,11 @@ func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, question
 
 	// The project-scoped default is "0 = all", so the account-wide default
 	// follows every page too. Only an explicit --page narrows it to one.
-	answersPage, err := app.Account().Everything().Checkins(cmd.Context(), accountWidePage(page, all || page == 0))
+	sdkPage, err := accountWidePage(page, all || page == 0)
+	if err != nil {
+		return err
+	}
+	answersPage, err := app.Account().Everything().Checkins(cmd.Context(), sdkPage)
 	if err != nil {
 		return convertSDKError(err)
 	}

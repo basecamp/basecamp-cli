@@ -33,17 +33,21 @@ func projectKnown(app *appctx.App, projectFlag string) bool {
 // accountWidePage maps a group's existing --page/--all pair onto the page
 // number the account-wide endpoints take. Groups that only support page 1
 // pass their validated page through unchanged.
-func accountWidePage(page int, all bool) int32 {
+//
+// A page beyond int32 is a usage error rather than a clamp. Clamping would
+// serve a different page than the one asked for, and I3 forbids silently
+// altering a flag just as much as silently dropping it.
+func accountWidePage(page int, all bool) (int32, error) {
 	if all {
-		return 0
+		return 0, nil
 	}
 	if page < 1 {
-		return 1
+		return 1, nil
 	}
 	if page > math.MaxInt32 {
-		return math.MaxInt32
+		return 0, output.ErrUsage("--page is out of range")
 	}
-	return int32(page)
+	return int32(page), nil
 }
 
 // flattenAccountWideRecordings builds the display rows for the four aggregate
