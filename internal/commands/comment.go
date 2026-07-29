@@ -41,7 +41,7 @@ func NewCommentsCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	cmd.AddCommand(
-		newCommentsListCmd(),
+		newCommentsListCmd(&project),
 		newCommentsShowCmd(),
 		newCommentsThreadCmd(),
 		newCommentsCreateCmd(),
@@ -54,45 +54,91 @@ func NewCommentsCmd() *cobra.Command {
 	return cmd
 }
 
-func newCommentsListCmd() *cobra.Command {
+func newCommentsListCmd(project *string) *cobra.Command {
 	var limit, page int
-	var all bool
+	var all, allProjects bool
 
 	cmd := &cobra.Command{
-		Use:   "list <id|url>",
-		Short: "List comments on an item",
-		Long:  "List all comments on an item.",
+		Use:   "list [id|url]",
+		Short: "List comments on an item, or across every project",
+		Long: `List all comments on an item.
+
+Without an item, lists every comment across all accessible projects,
+newest first. Comments hang off a single item rather than off a project,
+so a project cannot narrow that listing: a configured project is ignored
+and an explicit --project asks for an item instead. Pass --all-projects to
+state the account-wide intent outright.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
+			recordingArg := ""
+			if len(args) > 0 {
+				recordingArg = args[0]
 			}
-			return runCommentsList(cmd, args[0], limit, page, all)
+			return runCommentsList(cmd, recordingArg, *project, limit, page, all, allProjects)
 		},
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of comments to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all comments (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List comments across every project instead of one item")
 
 	return cmd
 }
 
-func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, all bool) error {
+// runCommentsList picks the scope before validating against it. Comments are
+// per-item, so a project alone cannot produce a listing and the usual
+// flag > config > prompt precedence does not apply: only an item ID scopes the
+// item feed, and everything else lands on the account-wide one.
+func runCommentsList(cmd *cobra.Command, recordingArg, project string, limit, page int, all, allProjects bool) error {
 	app := appctx.FromContext(cmd.Context())
 
-	// Validate flag combinations
+	// Combinations that are wrong under either scope.
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
 	}
 	if page > 0 && (all || limit > 0) {
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
 	}
+
+	// --project/-p/--in is explicit whether it is given after the group noun
+	// (bound to project here) or at the root, where it lands on app.Flags
+	// instead — so cmd.Flags().Changed would miss half the forms.
+	explicitProject := project != "" || app.Flags.Project != ""
+
+	switch {
+	case allProjects && recordingArg != "":
+		return output.ErrUsageHint(
+			"--all-projects cannot be combined with an item ID",
+			"Drop the ID to list every comment in the account, or drop --all-projects to list one item's comments.")
+	case allProjects && explicitProject:
+		return output.ErrUsageHint(
+			"--all-projects cannot be combined with --project",
+			"Account-wide comments span every project. Drop --project, or drop --all-projects and pass an item ID.")
+	case allProjects:
+		return runCommentsListAccountWide(cmd, app, limit, page, all)
+	case recordingArg != "":
+		return runCommentsListForItem(cmd, app, recordingArg, limit, page, all)
+	case explicitProject:
+		return output.ErrUsageHint(
+			"--project cannot scope a comment listing; an item ID can",
+			"Comments belong to one item: basecamp comments list <id|url>. "+
+				"To list every comment in the account, drop --project and pass --all-projects.")
+	default:
+		// No item and no explicit project. A configured project is not a scope
+		// this listing could honor even if we wanted to, so it is ignored rather
+		// than turned into an error, and the account-wide feed answers instead.
+		return runCommentsListAccountWide(cmd, app, limit, page, all)
+	}
+}
+
+func runCommentsListForItem(cmd *cobra.Command, app *appctx.App, recordingArg string, limit, page int, all bool) error {
 	if page > 1 {
 		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	// Extract recording ID from URL if provided
-	recordingID = extractID(recordingID)
+	recordingID := extractID(recordingArg)
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -144,6 +190,114 @@ func runCommentsList(cmd *cobra.Command, recordingID string, limit, page int, al
 	}
 
 	return app.OK(comments, respOpts...)
+}
+
+// defaultAccountWideCommentLimit caps the account-wide feed at the same 100
+// comments `comments list <id>` defaults to. Dropping the item must not
+// silently promote a bounded command into a full-account crawl.
+const defaultAccountWideCommentLimit = 100
+
+// runCommentsListAccountWide lists every comment in the account, newest first.
+// The payload is []Recording, which the styled renderer already handles as-is
+// (`recordings list` hands it the same type), so there is nothing to flatten
+// and no format branch to make.
+func runCommentsListAccountWide(cmd *cobra.Command, app *appctx.App, limit, page int, all bool) error {
+	// A todolist names a container inside one project, so it cannot narrow an
+	// account-wide feed any more than a project can. Reject the explicit flag
+	// rather than accept and drop it; an ambient configured todolist is ignored
+	// on the same grounds as an ambient configured project.
+	if app.Flags.Todolist != "" {
+		return output.ErrUsageHint(
+			"--todolist cannot scope an account-wide comment listing",
+			"Drop --todolist, or pass an item ID to list that item's comments.")
+	}
+	if limit < 0 {
+		return output.ErrUsage("--limit must be a positive number")
+	}
+	// --page 0 is Cobra's "unset" but the SDK's "follow every page", so an
+	// explicit 0 would hand back a full-account crawl nobody asked for. --all is
+	// the spelling for that.
+	if cmd.Flags().Changed("page") && page < 1 {
+		return output.ErrUsage("--page must be a positive page number; use --all to fetch every page")
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	var (
+		comments []basecamp.Recording
+		meta     basecamp.ListMeta
+	)
+	switch {
+	case all || page > 0:
+		// accountWidePage maps --all onto page 0 ("follow the Link header") and
+		// otherwise passes the requested page straight through: the aggregate
+		// accepts any positive page, unlike the item feed.
+		result, err := app.Account().Everything().Comments(cmd.Context(), accountWidePage(page, all))
+		if err != nil {
+			return convertSDKError(err)
+		}
+		comments, meta = result.Recordings, result.Meta
+	default:
+		effectiveLimit := defaultAccountWideCommentLimit
+		if limit > 0 {
+			effectiveLimit = limit
+		}
+		var err error
+		comments, meta, err = fetchAccountWideComments(cmd, app, effectiveLimit)
+		if err != nil {
+			return err
+		}
+	}
+
+	respOpts := append(accountWideRespOpts(len(comments), "comments", meta),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         "basecamp comments show <id>",
+				Description: "Show comment",
+			},
+			output.Breadcrumb{
+				Action:      "thread",
+				Cmd:         "basecamp comments thread <id>",
+				Description: "Show a comment with its discussion",
+			},
+		))
+
+	return app.OK(comments, respOpts...)
+}
+
+// fetchAccountWideComments collects up to limit comments by walking positive
+// pages, stopping as soon as the limit is met or a page comes back empty.
+// Asking for page 0 would follow the Link header to the end of the account
+// before truncating — correct, but it downloads every comment to keep 100.
+// Each iteration adds at least one comment, so the walk always terminates.
+func fetchAccountWideComments(cmd *cobra.Command, app *appctx.App, limit int) ([]basecamp.Recording, basecamp.ListMeta, error) {
+	var (
+		comments []basecamp.Recording
+		meta     basecamp.ListMeta
+	)
+	for page := int32(1); len(comments) < limit; page++ {
+		result, err := app.Account().Everything().Comments(cmd.Context(), page)
+		if err != nil {
+			return nil, meta, convertSDKError(err)
+		}
+		if page == 1 {
+			// X-Total-Count is the account-wide total on every page; take it
+			// from the first so the truncation notice is honest about how much
+			// this walk left behind.
+			meta = result.Meta
+		}
+		if len(result.Recordings) == 0 {
+			break
+		}
+		comments = append(comments, result.Recordings...)
+	}
+	if len(comments) > limit {
+		comments = comments[:limit]
+	}
+	return comments, meta, nil
 }
 
 func newCommentsShowCmd() *cobra.Command {
