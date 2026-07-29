@@ -268,8 +268,9 @@ func listTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosLis
 
 // rejectProjectScopedTodosFlags returns a usage error for each flag that names
 // something inside a single project. A configured todolist is treated the same
-// as one passed on the command line: silently ignoring it would hand back a
-// listing the user did not ask for.
+// way a configured project is: --all-projects overrides it, but without that
+// the user never said to ignore it, and silently dropping it would hand back a
+// listing they did not ask for.
 func rejectProjectScopedTodosFlags(app *appctx.App, flags todosListFlags) error {
 	switch {
 	case flags.todolist != "":
@@ -280,10 +281,10 @@ func rejectProjectScopedTodosFlags(app *appctx.App, flags todosListFlags) error 
 		return output.ErrUsageHint(
 			"--todolist names a todolist inside one project, which has no meaning across all projects",
 			"Drop --todolist to list todos across every project")
-	case app.Config.TodolistID != "":
+	case app.Config.TodolistID != "" && !flags.allProjects:
 		return output.ErrUsageHint(
 			"a default todolist is configured, which has no meaning across all projects",
-			"Clear it with: basecamp config unset todolist_id")
+			"Pass --all-projects to ignore it, or clear it with: basecamp config unset todolist_id")
 	case flags.todoset != "":
 		return output.ErrUsageHint(
 			"--todoset names a todoset inside one project, which has no meaning across all projects",

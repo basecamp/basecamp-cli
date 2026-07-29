@@ -3174,6 +3174,18 @@ func TestTodosListAccountWideRejectsTodolistScope(t *testing.T) {
 	requireTodosListUsageError(t, configApp, "a default todolist is configured")
 }
 
+// --all-projects overrides a configured todolist the same way it overrides a
+// configured project: the flag is the user saying to ignore ambient scope.
+func TestTodosListAllProjectsOverridesConfiguredTodolist(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+	app.Config.TodolistID = "456"
+
+	cmd := newTodosListCmd()
+	require.NoError(t, executeRecordingCommand(cmd, app, "--all-projects"))
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+}
+
 func TestTodosListAccountWideRejectsProjectOnlyFilters(t *testing.T) {
 	app, _ := setupRecordingTestApp(t)
 
