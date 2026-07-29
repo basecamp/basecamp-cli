@@ -1,0 +1,23 @@
+go.mod
+  s_86d0793371d0f3::t_ba35e6f0bd05bb 9
+go.sum
+  s_86d0793371d0f3::t_ca7ff8dd9b44d0 26-27
+internal/version/sdk-provenance.json
+  s_86d0793371d0f3::t_5b956e6536a02e 4-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "56903a30d1cd2caa41b9ff4dcead212075ea6649",
+  "prompts": {},
+  "sessions": {
+    "s_86d0793371d0f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a2b9cb3-4f1e-4edb-91b2-3d486f097400",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
