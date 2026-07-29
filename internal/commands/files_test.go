@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -910,4 +911,240 @@ func TestUploadShortcutNestedVaultVisibleToClientsRejected(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Empty(t, transport.postPaths, "the shortcut must also stage no POSTs on rejection")
+}
+
+// --- files list: account-wide -----------------------------------------------
+
+// filesAccountWideRoute serves the account-wide files feed.
+func filesAccountWideRoute(body string) stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/files.json",
+		status: http.StatusOK,
+		body:   body,
+	}
+}
+
+// filesProjectScopedRoutes serves everything the project-scoped folder listing
+// touches: the dock lookup that finds the root vault, then its three children.
+func filesProjectScopedRoutes() []stubRoute {
+	return []stubRoute{
+		projectsRoute(),
+		{http.MethodGet, "/99999/projects/123.json", http.StatusOK,
+			`{"id":123,"name":"Test Project","dock":[{"id":555,"name":"vault","title":"Docs & Files","enabled":true}]}`},
+		{http.MethodGet, "/99999/vaults/555", http.StatusOK, `{"id":555,"title":"Docs & Files"}`},
+		{http.MethodGet, "/99999/vaults/555/vaults.json", http.StatusOK, `[]`},
+		{http.MethodGet, "/99999/vaults/555/uploads.json", http.StatusOK, `[]`},
+		{http.MethodGet, "/99999/vaults/555/documents.json", http.StatusOK, `[]`},
+	}
+}
+
+func runFilesListCmd(t *testing.T, app *appctx.App, args ...string) error {
+	t.Helper()
+	return executeRecordingCommand(NewFilesCmd(), app, append([]string{"list"}, args...)...)
+}
+
+func requireFilesUsageError(t *testing.T, err error) *output.Error {
+	t.Helper()
+	require.Error(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	return e
+}
+
+func filesRequestPaths(calls []recordedCall) []string {
+	paths := make([]string, 0, len(calls))
+	for _, c := range calls {
+		paths = append(paths, c.Path)
+	}
+	return paths
+}
+
+func TestFilesListWithConfiguredProjectStaysProjectScoped(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesProjectScopedRoutes()...)
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, runFilesListCmd(t, app))
+	paths := filesRequestPaths(transport.recorded())
+	assert.NotContains(t, paths, "/99999/files.json")
+	assert.Contains(t, paths, "/99999/vaults/555/documents.json")
+}
+
+func TestFilesListWithoutProjectListsAccountWide(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	require.NoError(t, runFilesListCmd(t, app))
+	assert.Equal(t, "/99999/files.json", transport.last(t).Path)
+}
+
+func TestFilesListAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, runFilesListCmd(t, app, "--all-projects"))
+	assert.Equal(t, "/99999/files.json", transport.last(t).Path)
+}
+
+func TestFilesListAllProjectsConflictsWithExplicitProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--all-projects", "--in", "123"))
+	assert.Contains(t, e.Message, "--all-projects conflicts with --project/--in")
+	assert.Empty(t, transport.recorded(), "a scope conflict must not reach the network")
+}
+
+func TestFilesListAllProjectsConflictsWithRootLevelProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+	app.Flags.Project = "123"
+
+	requireFilesUsageError(t, runFilesListCmd(t, app, "--all-projects"))
+	assert.Empty(t, transport.recorded())
+}
+
+func TestFilesListAccountWideRejectsVault(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--vault", "555"))
+	assert.Contains(t, e.Message, "--vault/--folder")
+	assert.Empty(t, filesRequestPaths(transport.recorded()), "a rejected scope-child flag lists nothing")
+}
+
+func TestFilesListAccountWideRejectsFolderAlias(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--folder", "555"))
+	assert.Contains(t, e.Message, "--vault/--folder")
+}
+
+func TestFilesListKindRejectedWithExplicitProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesProjectScopedRoutes()...)
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--in", "123", "--kind", "images"))
+	assert.Contains(t, e.Message, "--kind only applies to the account-wide file listing")
+	assert.Empty(t, filesRequestPaths(transport.recorded()), "a rejected filter must not list the project")
+}
+
+func TestFilesListKindRejectedWithRootLevelProject(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, filesProjectScopedRoutes()...)
+	app.Flags.Project = "123"
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--kind", "images"))
+	assert.Contains(t, e.Message, "--kind")
+}
+
+func TestFilesListKindRejectedWithConfiguredProject(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, filesProjectScopedRoutes()...)
+	app.Config.ProjectID = "123"
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--kind", "images"))
+	assert.Contains(t, e.Message, "--kind")
+}
+
+func TestFilesListPersonRejectedWithConfiguredProject(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, filesProjectScopedRoutes()...)
+	app.Config.ProjectID = "123"
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--person", "me"))
+	assert.Contains(t, e.Message, "--person only applies to the account-wide file listing")
+}
+
+func TestFilesListInvalidKindListsAcceptedValues(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	e := requireFilesUsageError(t, runFilesListCmd(t, app, "--kind", "spreadsheets"))
+	assert.Contains(t, e.Message, "spreadsheets")
+	assert.Contains(t, e.Hint, "all, images, pdfs, documents, videos")
+	assert.Empty(t, filesRequestPaths(transport.recorded()))
+}
+
+func TestFilesListKindReachesTheQuery(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	require.NoError(t, runFilesListCmd(t, app, "--kind", "IMAGES"))
+	assert.Contains(t, transport.last(t).Query, "kind=images")
+}
+
+func TestFilesListPersonResolvesAndReachesTheQuery(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		filesAccountWideRoute(`[]`),
+		stubRoute{http.MethodGet, "/99999/people.json", http.StatusOK,
+			`[{"id":77,"name":"Ann Perkins"},{"id":88,"name":"Bo Diaz"}]`},
+	)
+
+	require.NoError(t, runFilesListCmd(t, app, "--person", "Ann Perkins", "--person", "88"))
+	query := transport.last(t).Query
+	assert.Contains(t, query, "77")
+	assert.Contains(t, query, "88")
+}
+
+func TestFilesListAccountWideFollowsEveryPage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+
+	require.NoError(t, runFilesListCmd(t, app))
+	assert.NotContains(t, transport.last(t).Query, "page=",
+		"bare files list is pinned at every page, so it sends no page argument")
+}
+
+func TestFilesListGainsNoPaginationFlags(t *testing.T) {
+	listCmd, _, err := NewFilesCmd().Find([]string{"list"})
+	require.NoError(t, err)
+
+	for _, name := range []string{"limit", "page", "all"} {
+		assert.Nil(t, listCmd.Flags().Lookup(name), "files list must not grow --%s", name)
+	}
+}
+
+func TestFilesListAccountWideReachesVaultsAndDocsAliases(t *testing.T) {
+	for _, newGroup := range []func() *cobra.Command{NewVaultsCmd, NewDocsCmd} {
+		app, transport := setupRecordingTestApp(t, filesAccountWideRoute(`[]`))
+		require.NoError(t, executeRecordingCommand(newGroup(), app, "list"))
+		assert.Equal(t, "/99999/files.json", transport.last(t).Path)
+	}
+}
+
+func TestFilesListMachineFormatKeepsRawPayload(t *testing.T) {
+	buf := &bytes.Buffer{}
+	app, _ := setupRecordingTestApp(t, filesAccountWideRoute(filesAccountWideFixture))
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	require.NoError(t, runFilesListCmd(t, app))
+	assert.Contains(t, buf.String(), "attachable_sgid", "machine output keeps the SDK payload")
+}
+
+func TestFilesListStyledFormatFlattensRows(t *testing.T) {
+	buf := &bytes.Buffer{}
+	app, _ := setupRecordingTestApp(t, filesAccountWideRoute(filesAccountWideFixture))
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: buf})
+
+	require.NoError(t, runFilesListCmd(t, app))
+	rendered := buf.String()
+	assert.NotContains(t, rendered, "attachable_sgid", "styled output renders flattened rows")
+	assert.Contains(t, rendered, "Test Project")
+	assert.Contains(t, rendered, "report.pdf")
+}
+
+// filesAccountWideFixture carries one file per wire variant: a full upload, a
+// document with no blob metadata, and a bare attachment with no title.
+const filesAccountWideFixture = `[
+  {"id":1,"title":"report.pdf","type":"Upload","byte_size":2048,"filename":"report.pdf","created_at":"2026-07-01T10:00:00.000Z","bucket":{"id":123,"name":"Test Project","type":"Project"}},
+  {"id":2,"title":"Spec","type":"Document","content":"<div>hi</div>","bucket":{"id":123,"name":"Test Project","type":"Project"}},
+  {"type":"Attachment","attachable_sgid":"sgid-abc","filename":"pasted.png","byte_size":17}
+]`
+
+func TestFlattenAccountWideFilesNilChecksEveryField(t *testing.T) {
+	rows := flattenAccountWideFiles([]basecamp.EverythingFile{{}})
+
+	require.Len(t, rows, 1)
+	assert.Empty(t, rows[0], "an all-nil file must fabricate no columns")
+}
+
+func TestFlattenAccountWideFilesFallsBackToFilename(t *testing.T) {
+	name := "pasted.png"
+	size := int64(17)
+	rows := flattenAccountWideFiles([]basecamp.EverythingFile{{Filename: &name, ByteSize: &size}})
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, "pasted.png", rows[0]["name"])
+	assert.Equal(t, "17b", rows[0]["size"])
 }

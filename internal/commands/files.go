@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -96,39 +97,87 @@ func NewUploadsCmd() *cobra.Command {
 	return cmd
 }
 
+// filesAccountWideKinds is the accepted --kind vocabulary, in the order the
+// usage error lists it. It mirrors EverythingFilesOptions.Kind.
+var filesAccountWideKinds = []string{"all", "images", "pdfs", "documents", "videos"}
+
 func newFilesListCmd(project, vaultID *string) *cobra.Command {
-	return &cobra.Command{
+	var allProjects bool
+	var kind string
+	var people []string
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all items in a folder",
-		Long:  "List all folders, documents, and uploads in a folder.",
+		Long: `List all folders, documents, and uploads in a folder.
+
+With no project in scope, lists every file across all accessible projects
+instead of asking which project to use. Pass --all-projects to list
+account-wide even when a project is configured.
+
+--kind and --person filter the account-wide listing only; the project-scoped
+folder listing has no equivalent for them.`,
+		Example: `  basecamp files list --in my-project
+  basecamp files list --all-projects --kind images
+  basecamp files list --all-projects --person me`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd, *project, *vaultID)
+			return runFilesList(cmd, *project, *vaultID, allProjects, kind, people)
 		},
 	}
+
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List files across every accessible project")
+	cmd.Flags().StringVar(&kind, "kind", "", fmt.Sprintf("Account-wide only: filter by file kind (%s)", strings.Join(filesAccountWideKinds, ", ")))
+	cmd.Flags().StringArrayVar(&people, "person", nil, "Account-wide only: filter by creator (name, email, ID, or \"me\"; repeatable)")
+
+	return cmd
 }
 
-func runFilesList(cmd *cobra.Command, project, vaultID string) error {
+func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool, kind string, people []string) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Scope is settled before any scope-specific validation, and an explicit
+	// project counts whether it arrived after the group noun or at the root.
+	explicitProject := project != "" || app.Flags.Project != ""
+	if allProjects && explicitProject {
+		return output.ErrUsageHint(
+			"--all-projects conflicts with --project/--in",
+			"Drop --all-projects to list that project's folder, or drop --project/--in to list every project.",
+		)
+	}
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project from CLI flags and config, with interactive fallback
+	// --all-projects overrides a configured project; otherwise a project from
+	// any layer keeps the folder listing. With nothing to scope to, list
+	// account-wide rather than prompting.
+	if allProjects || !projectKnown(app, project) {
+		return runFilesListAccountWide(cmd, app, vaultID, kind, people)
+	}
+
+	// The account-wide filters have no project-scoped equivalent, so a project
+	// in scope rejects them instead of quietly dropping them.
+	if kind != "" {
+		return output.ErrUsageHint(
+			"--kind only applies to the account-wide file listing",
+			"A project's folder listing has no kind filter. Drop --project/--in (and pass --all-projects if a project is configured) to filter across every project.",
+		)
+	}
+	if len(people) > 0 {
+		return output.ErrUsageHint(
+			"--person only applies to the account-wide file listing",
+			"A project's folder listing has no creator filter. Drop --project/--in (and pass --all-projects if a project is configured) to filter across every project.",
+		)
+	}
+
+	// Resolve project from CLI flags and config
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
 	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-
-	// If no project specified, try interactive resolution
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
 		projectID = app.Config.ProjectID
 	}
 
@@ -233,6 +282,115 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	return app.OK(items, respOpts...)
+}
+
+// runFilesListAccountWide lists every file across all accessible projects.
+// The bare files listing has no --limit/--page/--all project-scoped and gains
+// none here, so it always follows the Link header across every page.
+func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind string, people []string) error {
+	// --vault/--folder names a folder inside one project. Account-wide has no
+	// such container, and ignoring the flag would hand back a listing of
+	// something else entirely.
+	if vaultID != "" {
+		return output.ErrUsageHint(
+			"--vault/--folder names a folder inside one project, which an account-wide listing has no equivalent for",
+			"Pass --project/--in to list that folder's contents, or drop --vault/--folder to list files across every project.",
+		)
+	}
+
+	opts, err := filesAccountWideOptions(cmd, app, kind, people)
+	if err != nil {
+		return err
+	}
+
+	page, err := app.Account().Everything().Files(cmd.Context(), 0, opts)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// EverythingFile is far too wide to render raw, so styled output gets
+	// flattened rows while machine formats keep the SDK payload.
+	var data any = page.Files
+	if app.Output.EffectiveFormat() == output.FormatStyled {
+		data = flattenAccountWideFiles(page.Files)
+	}
+
+	respOpts := accountWideRespOpts(len(page.Files), "files", page.Meta)
+	respOpts = append(respOpts, output.WithBreadcrumbs(
+		output.Breadcrumb{
+			Action:      "kind",
+			Cmd:         "basecamp files list --all-projects --kind images",
+			Description: "Filter by file kind",
+		},
+		output.Breadcrumb{
+			Action:      "project",
+			Cmd:         "basecamp files list --in <project>",
+			Description: "List one project's folder",
+		},
+	))
+
+	return app.OK(data, respOpts...)
+}
+
+// filesAccountWideOptions validates --kind and resolves --person into the
+// creator IDs the files feed filters on.
+func filesAccountWideOptions(cmd *cobra.Command, app *appctx.App, kind string, people []string) (*basecamp.EverythingFilesOptions, error) {
+	opts := &basecamp.EverythingFilesOptions{}
+
+	if kind != "" {
+		normalized := strings.ToLower(strings.TrimSpace(kind))
+		if !slices.Contains(filesAccountWideKinds, normalized) {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("Invalid kind: %s", kind),
+				fmt.Sprintf("Use one of: %s", strings.Join(filesAccountWideKinds, ", ")),
+			)
+		}
+		opts.Kind = normalized
+	}
+
+	for _, person := range people {
+		id, err := resolvePersonRoleID(cmd.Context(), app, person, "Person")
+		if err != nil {
+			return nil, err
+		}
+		opts.PeopleIDs = append(opts.PeopleIDs, id)
+	}
+
+	return opts, nil
+}
+
+// flattenAccountWideFiles reduces the files feed to styled table rows.
+// EverythingFile is an all-pointer superset over the Upload, Document, and
+// Attachment variants, so every field is nil-checked and an absent one stays
+// absent rather than rendering a fabricated zero.
+func flattenAccountWideFiles(files []basecamp.EverythingFile) []map[string]any {
+	rows := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		row := map[string]any{}
+		if f.ID != nil {
+			row["id"] = *f.ID
+		}
+		if f.Bucket != nil {
+			row["project"] = f.Bucket.Name
+		}
+		switch {
+		case f.Title != nil && *f.Title != "":
+			row["name"] = *f.Title
+		case f.Filename != nil:
+			row["name"] = *f.Filename
+		}
+		if f.Type != nil {
+			row["type"] = *f.Type
+		}
+		if f.ByteSize != nil {
+			row["size"] = humanSize(*f.ByteSize)
+		}
+		if f.CreatedAt != nil {
+			row["created"] = relativeTime(*f.CreatedAt)
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func newFoldersCmd(project, vaultID *string) *cobra.Command {
