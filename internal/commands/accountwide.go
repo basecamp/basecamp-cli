@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -38,6 +39,9 @@ func accountWidePage(page int, all bool) int32 {
 	}
 	if page < 1 {
 		return 1
+	}
+	if page > math.MaxInt32 {
+		return math.MaxInt32
 	}
 	return int32(page)
 }
