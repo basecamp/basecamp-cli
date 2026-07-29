@@ -1,0 +1,22 @@
+internal/tui/workspace/views/search_test.go
+  s_be550b80f990b1::t_eb576259adf841 291-330
+  s_be550b80f990b1::t_8fa8de9c3059b6 12-13
+internal/tui/workspace/views/search.go
+  s_be550b80f990b1::t_1e5548429602bd 518-521,523-524,526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "0dae41235ce82bb4fa50f155555c4e061ab3535b",
+  "prompts": {},
+  "sessions": {
+    "s_be550b80f990b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94133dd2-4285-460d-a282-ff33beb6d527",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
