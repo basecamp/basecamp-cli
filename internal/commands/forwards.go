@@ -51,25 +51,46 @@ func newForwardsListCmd(project, inboxID *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var allProjects bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List forwards in project inbox",
-		Long:  "List all email forwards in the project inbox.",
+		Long: `List all email forwards in the project inbox.
+
+With no project in scope — none passed, none configured, or --all-projects to
+override a configured one — lists forwards across every accessible project.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runForwardsList(cmd, *project, *inboxID, limit, page, all)
+			return runForwardsList(cmd, *project, *inboxID, limit, page, all, allProjects)
 		},
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List forwards across every project")
 
 	return cmd
 }
 
-func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page int, all bool) error {
+func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page int, all, allProjects bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Select the scope before validating against it: the account-wide endpoint
+	// serves any positive page, while the project-scoped one only serves the
+	// first. --all-projects overrides a configured project and conflicts with
+	// an explicit one, which arrives either after the group noun or at the
+	// root (basecamp --project X forwards list).
+	explicitProject := project != "" || app.Flags.Project != ""
+	if allProjects && explicitProject {
+		return output.ErrUsageHint(
+			"--all-projects conflicts with --project/--in",
+			"Drop one: --all-projects lists every project, --project lists one",
+		)
+	}
+	if allProjects || !projectKnown(app, project) {
+		return runForwardsListEverywhere(cmd, app, inboxID, limit, page, all)
+	}
 
 	// Validate flag combinations
 	if all && limit > 0 {
@@ -86,18 +107,14 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 		return err
 	}
 
-	// Resolve project, with interactive fallback
+	// Resolve project. No interactive fallback: reaching here means projectKnown
+	// found one of these three sources set, and an empty scope listed
+	// account-wide instead of prompting.
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
 	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
 		projectID = app.Config.ProjectID
 	}
 
@@ -154,6 +171,76 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 				Action:      "inbox",
 				Cmd:         fmt.Sprintf("basecamp forwards inbox --in %s", resolvedProjectID),
 				Description: "View inbox details",
+			},
+		),
+	)
+
+	return app.OK(forwards, respOpts...)
+}
+
+// runForwardsListEverywhere lists forwards across every accessible project via
+// the account-wide aggregate endpoint. No project is in scope here, so every
+// flag that names something inside one project is rejected rather than ignored.
+func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID string, limit, page int, all bool) error {
+	if inboxID != "" {
+		return output.ErrUsageHint(
+			"--inbox names an inbox inside one project and has no account-wide meaning",
+			"Pass --project/--in to list that project's inbox, or drop --inbox",
+		)
+	}
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if cmd.Flags().Changed("page") && page < 1 {
+		return output.ErrUsageHint(
+			"--page must be a positive page number",
+			"Omit --page, or pass --all, to follow every page",
+		)
+	}
+	if limit < 0 {
+		return output.ErrUsage("--limit must be zero or positive")
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	// The endpoint spells "follow every page" as page 0, which is where both
+	// --all and the default land: this command's project-scoped default is
+	// already "0 = all", so listing account-wide does not silently start
+	// capping. Only an explicit positive --page narrows to a single page.
+	var sdkPage int32
+	if page > 0 {
+		sdkPage = accountWidePage(page, all)
+	}
+
+	result, err := app.Account().Everything().Forwards(cmd.Context(), sdkPage)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// --limit truncates client-side; accountWideRespOpts reports the shortfall
+	// against the server's total so the trim is visible.
+	forwards := result.Recordings
+	if limit > 0 && len(forwards) > limit {
+		forwards = forwards[:limit]
+	}
+
+	respOpts := accountWideRespOpts(len(forwards), "forwards", result.Meta)
+	respOpts = append(respOpts,
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         "basecamp forwards show <id> --in <project>",
+				Description: "View a forward",
+			},
+			output.Breadcrumb{
+				Action:      "list",
+				Cmd:         "basecamp forwards list --in <project>",
+				Description: "List one project's inbox",
 			},
 		),
 	)
