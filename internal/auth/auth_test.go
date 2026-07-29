@@ -681,6 +681,20 @@ var unsafeTokenEndpoints = []string{
 	"http://evil.com/token",        // http off loopback
 }
 
+func TestIsSecureEndpointURL_LoopbackHostIsCaseInsensitive(t *testing.T) {
+	// DNS hostnames are case-insensitive: a mixed-case loopback must pass the
+	// http-on-loopback carve-out exactly as its lowercase form does — the
+	// same normalization resourceOrigin applies.
+	for _, raw := range []string{"http://LocalHost:3001/token", "http://LOCALHOST:3001/token", "http://localhost:3001/token"} {
+		u, err := url.Parse(raw)
+		require.NoError(t, err)
+		assert.True(t, isSecureEndpointURL(u), raw)
+	}
+	u, err := url.Parse("http://Evil.com/token")
+	require.NoError(t, err)
+	assert.False(t, isSecureEndpointURL(u), "case normalization must not admit non-loopback http")
+}
+
 func TestExchangeCode_RejectsUnsafeTokenEndpoint(t *testing.T) {
 	clientCreds := &ClientCredentials{ClientID: "cid", ClientSecret: "csecret"}
 	opts := &LoginOptions{RedirectURI: "http://localhost:7777/cb"}

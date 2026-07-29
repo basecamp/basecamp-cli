@@ -860,8 +860,11 @@ func isSecureEndpointURL(u *url.URL) bool {
 			return false
 		}
 	}
-	// IsLocalhost takes the host:port form and strips the port itself.
-	return u.Scheme == "https" || (u.Scheme == "http" && hostutil.IsLocalhost(u.Host))
+	// IsLocalhost takes the host:port form and strips the port itself. DNS
+	// hostnames are case-insensitive: lowercase before matching so a
+	// mixed-case loopback (http://LocalHost:3001) is not rejected as
+	// insecure — the same normalization resourceOrigin applies.
+	return u.Scheme == "https" || (u.Scheme == "http" && hostutil.IsLocalhost(strings.ToLower(u.Host)))
 }
 
 // requireSecureOAuthEndpoint parses and validates a server-controlled OAuth
