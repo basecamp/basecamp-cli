@@ -191,6 +191,9 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 // feed takes a page number and boost list has no paging flags to map onto it,
 // so it stays on the first page rather than growing a parallel flag surface.
 func runBoostListAccountWide(cmd *cobra.Command, app *appctx.App, eventID string) error {
+	if err := rejectAccountWideTodolist(app, "boost"); err != nil {
+		return err
+	}
 	if eventID != "" {
 		return output.ErrUsageHint("--event names an event inside one item, which the account-wide feed has no equivalent for",
 			"Pass the item's ID alongside --event, or drop --event to list boosts across every project")
@@ -206,7 +209,7 @@ func runBoostListAccountWide(cmd *cobra.Command, app *appctx.App, eventID string
 		data = flattenAccountWideBoosts(result.Boosts)
 	}
 
-	respOpts := accountWideRespOpts(len(result.Boosts), "boosts", result.Meta)
+	respOpts := accountWideRespOpts(len(result.Boosts), "boost", "boosts", result.Meta, "")
 	respOpts = append(respOpts, output.WithBreadcrumbs(
 		output.Breadcrumb{
 			Action:      "show",

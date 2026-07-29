@@ -207,6 +207,9 @@ const messagesAccountWideLimit = 100
 // so it goes to the renderer as-is, the way recordings list already hands
 // []Recording over.
 func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoard string, limit, page int, all bool, sortField string, reverse bool) error {
+	if err := rejectAccountWideTodolist(app, "message"); err != nil {
+		return err
+	}
 	// --message-board names one project's board, so it cannot narrow a listing
 	// that spans every project. It reaches here from the group's persistent
 	// flag, whichever side of the subcommand it was written on.
@@ -245,7 +248,8 @@ func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoar
 		recordings = recordings[:wanted]
 	}
 
-	respOpts := accountWideRespOpts(len(recordings), "messages", meta)
+	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, "--all")
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(recordings)))
 	respOpts = append(respOpts, output.WithBreadcrumbs(messagesAccountWideBreadcrumbs()...))
 
 	return app.OK(recordings, respOpts...)

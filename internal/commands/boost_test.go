@@ -386,7 +386,7 @@ func TestBoostListAccountWideMachineOutputKeepsPayload(t *testing.T) {
 	require.Len(t, envelope.Data, 1)
 	require.NotNil(t, envelope.Data[0].Recording)
 	assert.Equal(t, "Ship it", envelope.Data[0].Recording.Title)
-	assert.Equal(t, "1 boosts across all projects", envelope.Summary)
+	assert.Equal(t, "1 boost across all projects", envelope.Summary)
 }
 
 // TestBoostListAccountWideStyledOutputFlattens verifies that styled output gets

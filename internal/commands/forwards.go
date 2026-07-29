@@ -182,6 +182,9 @@ func runForwardsList(cmd *cobra.Command, project, inboxID string, limit, page in
 // the account-wide aggregate endpoint. No project is in scope here, so every
 // flag that names something inside one project is rejected rather than ignored.
 func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID string, limit, page int, all bool) error {
+	if err := rejectAccountWideTodolist(app, "forward"); err != nil {
+		return err
+	}
 	if inboxID != "" {
 		return output.ErrUsageHint(
 			"--inbox names an inbox inside one project and has no account-wide meaning",
@@ -229,7 +232,8 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 		forwards = forwards[:limit]
 	}
 
-	respOpts := accountWideRespOpts(len(forwards), "forwards", result.Meta)
+	respOpts := accountWideRespOpts(len(forwards), "forward", "forwards", result.Meta, "--all")
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(forwards)))
 	respOpts = append(respOpts,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{

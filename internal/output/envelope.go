@@ -454,6 +454,32 @@ func (w *Writer) writeQuiet(v any) error {
 	return w.writeJSON(NormalizeData(v))
 }
 
+// displayResponse swaps DisplayData in for Data so the generic renderers see
+// the same rows the schema-aware presenters already prefer. Without this, a
+// command that sets DisplayData gets it honored only when it also sets an
+// entity the presenter recognizes, and falls back to rendering its
+// machine-shaped Data everywhere else.
+func displayResponse(resp *Response) *Response {
+	if resp == nil || resp.DisplayData == nil {
+		return resp
+	}
+	shallow := *resp
+	shallow.Data = resp.DisplayData
+	return &shallow
+}
+
+// itemData returns the rows --ids and --count should read. A command that sets
+// DisplayData is saying its Data is shaped for machines rather than for
+// enumeration — the account-wide todo and card listings nest their items inside
+// project groups, where counting Data counts projects and no group carries an
+// id at all. DisplayData is the flat, per-item view those two flags want.
+func itemData(resp *Response) any {
+	if resp.DisplayData != nil {
+		return resp.DisplayData
+	}
+	return resp.Data
+}
+
 func (w *Writer) writeIDs(v any) error {
 	resp, ok := v.(*Response)
 	if !ok {
@@ -461,7 +487,7 @@ func (w *Writer) writeIDs(v any) error {
 	}
 
 	// Normalize data to []map[string]any or map[string]any
-	data := NormalizeData(resp.Data)
+	data := NormalizeData(itemData(resp))
 
 	// Handle slice of objects with ID field
 	switch d := data.(type) {
@@ -498,7 +524,7 @@ func (w *Writer) writeCount(v any) error {
 	}
 
 	// Normalize data to a standard type
-	data := NormalizeData(resp.Data)
+	data := NormalizeData(itemData(resp))
 
 	switch d := data.(type) {
 	case []any:
@@ -525,7 +551,7 @@ func (w *Writer) writeStyled(v any) error {
 	r := NewRenderer(w.opts.Writer, true) // Force styled
 	switch resp := v.(type) {
 	case *Response:
-		return r.RenderResponse(w.opts.Writer, resp)
+		return r.RenderResponse(w.opts.Writer, displayResponse(resp))
 	case *ErrorResponse:
 		return r.RenderError(w.opts.Writer, resp)
 	default:
@@ -545,7 +571,7 @@ func (w *Writer) writeLiteralMarkdown(v any) error {
 	r := NewMarkdownRenderer(w.opts.Writer)
 	switch resp := v.(type) {
 	case *Response:
-		return r.RenderResponse(w.opts.Writer, resp)
+		return r.RenderResponse(w.opts.Writer, displayResponse(resp))
 	case *ErrorResponse:
 		return r.RenderError(w.opts.Writer, resp)
 	default:

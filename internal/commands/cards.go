@@ -234,6 +234,9 @@ func cardsAccountWideSelector(opts cardsListOptions) (selector, flag string, err
 // paginated aggregates come back grouped by project; --overdue comes back flat
 // and unpaginated.
 func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsListOptions, selector string) error {
+	if err := rejectAccountWideTodolist(app, "card"); err != nil {
+		return err
+	}
 	// Scope-child flags name a container inside one project, so they cannot
 	// narrow a listing that spans every project. --card-table also arrives via
 	// the group's persistent flag.
@@ -343,14 +346,13 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
 	}
 
-	// Machine formats keep the grouping; styled output would render the nested
-	// groups as unreadable cells, so it gets flattened rows.
-	var data any = groups
-	if app.Output.EffectiveFormat() == output.FormatStyled {
-		data = flattenAccountWideCards(groups)
-	}
+	// --json and --agent keep the grouping the SDK returned; every other
+	// consumer gets flat rows. Nested groups have no id and no title of their
+	// own, so a renderer handed them produces unreadable cells, and --ids and
+	// --count read right past the cards to count projects.
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideCards(groups)))
 
-	return app.OK(data, respOpts...)
+	return app.OK(groups, respOpts...)
 }
 
 // runCardsListOverdue lists overdue cards across every project. The endpoint

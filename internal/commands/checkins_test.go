@@ -478,7 +478,7 @@ func TestCheckinsAnswersAccountWideLimitTruncatesWithNotice(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
 	assert.Len(t, resp.Data, 1)
-	assert.Equal(t, "1 check-in answers across all projects", resp.Summary)
+	assert.Equal(t, "1 check-in answer across all projects", resp.Summary)
 	assert.Contains(t, resp.Notice, "Showing 1 of 2 fetched check-in answers")
 }
 

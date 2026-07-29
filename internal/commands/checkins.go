@@ -582,6 +582,14 @@ on its own cannot name a question; --all-projects states that intent outright:
 				return output.ErrUsageHint("--all-projects cannot be combined with a question ID",
 					"Drop the ID to list answers across every project, or drop --all-projects to list that question's answers")
 			case len(args) > 0:
+				// A question ID already names its questionnaire, so
+				// --questionnaire cannot narrow anything here. It was
+				// accepted and dropped on this branch; say so instead.
+				if *questionnaireID != "" {
+					return output.ErrUsageHint(
+						"--questionnaire cannot narrow a question's answers",
+						"The question ID already selects its questionnaire. Drop --questionnaire.")
+				}
 				return runCheckinsAnswers(cmd, app, *project, args[0], by, limit, page, all)
 			case explicitProject && allProjects:
 				return output.ErrUsageHint("--all-projects cannot be combined with --project",
@@ -709,6 +717,9 @@ func runCheckinsAnswers(cmd *cobra.Command, app *appctx.App, project, questionAr
 // `recordings list` already hands the styled renderer, so it needs no
 // format-dependent flattening.
 func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, questionnaireID string, limit, page int, all bool) error {
+	if err := rejectAccountWideTodolist(app, "check-in answer"); err != nil {
+		return err
+	}
 	// A questionnaire is a container inside one project and a person filter
 	// has no aggregate endpoint, so neither can narrow this feed. Accepting
 	// either would answer a different question than the one asked.
@@ -750,7 +761,8 @@ func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, question
 		answers = answers[:limit]
 	}
 
-	respOpts := accountWideRespOpts(len(answers), "check-in answers", answersPage.Meta)
+	respOpts := accountWideRespOpts(len(answers), "check-in answer", "check-in answers", answersPage.Meta, "--all")
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(answers)))
 	if len(answers) < fetched {
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
 			"Showing %d of %d fetched check-in answers (--limit); drop --limit for all of them", len(answers), fetched)))

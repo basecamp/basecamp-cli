@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,7 +137,9 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	// Pick the scope before validating against it: the account-wide endpoints
 	// take any positive page, while the project path only permits page 1.
 	if flags.allProjects && (flags.project != "" || app.Flags.Project != "") {
-		return output.ErrUsage("--all-projects cannot be combined with a project (--in/--project)")
+		return output.ErrUsageHint(
+			"--all-projects cannot be combined with a project (--in/--project)",
+			"Drop one: --all-projects lists every project, --in lists one.")
 	}
 	accountWide := flags.allProjects || !projectKnown(app, flags.project)
 
@@ -257,6 +260,11 @@ func listTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosLis
 	if cmd.Flags().Changed("page") && flags.page < 1 {
 		return output.ErrUsage("--page must be 1 or greater; use --all to fetch every page")
 	}
+	// The endpoints take an int32 page. Clamping a larger value would serve a
+	// page the user did not ask for, so say it is out of range instead.
+	if flags.page > math.MaxInt32 {
+		return output.ErrUsage("--page is out of range")
+	}
 	if flags.sortField != "" {
 		return output.ErrUsageHint(
 			"--sort is not supported when listing across all projects (results are grouped by project)",
@@ -353,6 +361,7 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 
 	var groups []basecamp.BucketTodosGroup
 	capped := false
+	truncated := false
 
 	if flags.all || flags.page > 0 {
 		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, accountWidePage(flags.page, flags.all))
@@ -360,6 +369,7 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 			return convertSDKError(err)
 		}
 		groups = page.Groups
+		truncated = page.Meta.Truncated
 	} else {
 		collected, more, err := collectAccountWideTodoGroups(cmd.Context(), app, filter, limit)
 		if err != nil {
@@ -372,12 +382,12 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 	// total and its notice are computed here instead of from the SDK's meta.
 	count := countAccountWideTodos(groups)
 
-	var data any = groups
-	if app.Output.EffectiveFormat() == output.FormatStyled {
-		data = flattenAccountWideTodos(groups)
-	}
-
+	// --json and --agent keep the grouping the SDK returned; every other
+	// consumer gets flat rows. Nested groups have no id and no title of their
+	// own, so a renderer handed them produces unreadable cells, and --ids and
+	// --count read right past the todos to count projects.
 	respOpts := []output.ResponseOption{
+		output.WithDisplayData(flattenAccountWideTodos(groups)),
 		output.WithSummary(fmt.Sprintf("%d todos across %d projects", count, len(groups))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -392,12 +402,17 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 			},
 		),
 	}
-	if capped {
+	switch {
+	case capped:
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
 			"Showing the first %d todos; more may exist (use --all for every page, or --limit to raise the cap)", count)))
+	case truncated:
+		// The SDK stopped following pages before the listing ran out. Saying
+		// nothing would present a partial result as a complete one.
+		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
 	}
 
-	return app.OK(data, respOpts...)
+	return app.OK(groups, respOpts...)
 }
 
 // listOverdueTodosAcrossProjects fetches the overdue aggregate, which is a flat

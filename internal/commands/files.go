@@ -158,8 +158,11 @@ func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool,
 	}
 
 	// The account-wide filters have no project-scoped equivalent, so a project
-	// in scope rejects them instead of quietly dropping them.
-	if kind != "" {
+	// in scope rejects them instead of quietly dropping them. Detection is by
+	// flag presence, not by value: --kind "" is still the user asking for a
+	// filter, and dropping it because the value is empty is the same silent
+	// ignore as dropping it because a project is set.
+	if cmd.Flags().Changed("kind") {
 		return output.ErrUsageHint(
 			"--kind only applies to the account-wide file listing",
 			"A project's folder listing has no kind filter. Drop --project/--in (and pass --all-projects if a project is configured) to filter across every project.",
@@ -288,6 +291,9 @@ func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool,
 // The bare files listing has no --limit/--page/--all project-scoped and gains
 // none here, so it always follows the Link header across every page.
 func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind string, people []string) error {
+	if err := rejectAccountWideTodolist(app, "file"); err != nil {
+		return err
+	}
 	// --vault/--folder names a folder inside one project. Account-wide has no
 	// such container, and ignoring the flag would hand back a listing of
 	// something else entirely.
@@ -315,7 +321,7 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 		data = flattenAccountWideFiles(page.Files)
 	}
 
-	respOpts := accountWideRespOpts(len(page.Files), "files", page.Meta)
+	respOpts := accountWideRespOpts(len(page.Files), "file", "files", page.Meta, "")
 	respOpts = append(respOpts, output.WithBreadcrumbs(
 		output.Breadcrumb{
 			Action:      "kind",
@@ -337,11 +343,11 @@ func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind 
 func filesAccountWideOptions(cmd *cobra.Command, app *appctx.App, kind string, people []string) (*basecamp.EverythingFilesOptions, error) {
 	opts := &basecamp.EverythingFilesOptions{}
 
-	if kind != "" {
+	if cmd.Flags().Changed("kind") {
 		normalized := strings.ToLower(strings.TrimSpace(kind))
 		if !slices.Contains(filesAccountWideKinds, normalized) {
 			return nil, output.ErrUsageHint(
-				fmt.Sprintf("Invalid kind: %s", kind),
+				fmt.Sprintf("Invalid --kind value %q", kind),
 				fmt.Sprintf("Use one of: %s", strings.Join(filesAccountWideKinds, ", ")),
 			)
 		}

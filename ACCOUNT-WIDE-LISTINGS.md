@@ -253,11 +253,22 @@ answer this differently:
 
 | Payload | Commands | Styled treatment |
 |---|---|---|
-| `[]Recording` | messages, comments, checkins answers, forwards | rendered as-is — `recordings list` already hands `[]Recording` to the styled renderer |
+| `[]Recording` | messages, comments, checkins answers, forwards | flatten — the generic renderer drops the nested `bucket`, and a project column is exactly what an account-wide row needs |
 | `[]Todo`, `[]Card` (flat overdue) | todos, cards `--overdue` | rendered as-is, like the project-scoped path |
 | `[]EverythingBoost` | boost | flatten — the boosted `*Recording` is nested |
 | `[]EverythingFile` | files | flatten — all-pointer superset, too wide to render raw |
 | `[]BucketTodosGroup`, `[]BucketCardsGroup` | todos, cards | flatten — nested groups render as unreadable cells |
+
+`recordings list` hands `[]Recording` straight to the renderer, and that is fine
+for it: it is already project-scoped, so the missing project column costs
+nothing. It is not a precedent for the aggregates.
+
+**Mechanism.** Flattening is supplied through `output.WithDisplayData`, not by
+branching on `EffectiveFormat()`. `Data` stays the raw SDK payload so `--json`
+and `--agent` keep it; `DisplayData` carries the flat rows that styled,
+`--md`, `--ids`, and `--count` all read. Branching on the format instead leaves
+the other three reading the nested payload — where `--count` counts project
+groups and `--ids` finds no ids at all, both silently.
 
 `EverythingFile` is an all-pointer superset over the Upload, Document, and
 Attachment variants — every field read during flattening must be nil-checked.
