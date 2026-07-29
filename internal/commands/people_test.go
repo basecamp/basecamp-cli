@@ -604,6 +604,49 @@ func setupPeopleMockApp(t *testing.T, server *httptest.Server) (*appctx.App, *by
 	return app, buf
 }
 
+func TestPeopleListIncludesEmailAddress(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "list")
+	require.NoError(t, err)
+
+	var result struct {
+		Data []struct {
+			ID           int64  `json:"id"`
+			EmailAddress string `json:"email_address"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+
+	emailsByID := make(map[int64]string, len(result.Data))
+	for _, person := range result.Data {
+		emailsByID[person.ID] = person.EmailAddress
+	}
+	assert.Equal(t, "alice@example.com", emailsByID[1001])
+	assert.Equal(t, "bob@example.com", emailsByID[2001])
+	assert.Equal(t, "carol@example.com", emailsByID[2002])
+}
+
+func TestPeopleListInIncludesEmailAddress(t *testing.T) {
+	server := setupPeopleMockServer(t, "99999", 55555)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "list", "--in", "55555")
+	require.NoError(t, err)
+
+	var result struct {
+		Data []struct {
+			EmailAddress string `json:"email_address"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	require.Len(t, result.Data, 1)
+	assert.Equal(t, "alice@example.com", result.Data[0].EmailAddress)
+}
+
 // TestPeopleListIn verifies that --in takes the project-scoped path and
 // returns project-specific people, not the account-wide list.
 func TestPeopleListIn(t *testing.T) {
