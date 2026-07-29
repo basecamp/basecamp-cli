@@ -113,3 +113,32 @@ func TestAccountWideRecordingFeedsCarryProject(t *testing.T) {
 	assert.True(t, strings.Contains(out, "| Project |") || strings.Contains(out, "Project"),
 		"expected a project column, got:\n%s", out)
 }
+
+// The flat overdue aggregates return items from every project with the project
+// in a nested bucket, which both generic renderers skip by name. Without
+// display rows, two otherwise identical overdue todos cannot be told apart.
+func TestAccountWideOverdueListingsNameTheirProject(t *testing.T) {
+	t.Run("todos", func(t *testing.T) {
+		body := `[{"id":11,"title":"Ship it","due_on":"2020-01-01","bucket":{"id":1,"name":"Alpha"}}]`
+		app, _ := setupRecordingTestApp(t, stubRoute{
+			method: http.MethodGet, path: "/99999/todos/overdue.json", status: http.StatusOK, body: body,
+		})
+		buf := &bytes.Buffer{}
+		app.Output = output.New(output.Options{Format: output.FormatMarkdown, Writer: buf})
+		require.NoError(t, executeRecordingCommand(newTodosListCmd(), app, "--all-projects", "--overdue"))
+		assert.Contains(t, buf.String(), "Alpha")
+		assert.Contains(t, buf.String(), "Ship it")
+	})
+
+	t.Run("cards", func(t *testing.T) {
+		body := `[{"id":21,"title":"Fix it","due_on":"2020-01-01","bucket":{"id":2,"name":"Beta"}}]`
+		app, _ := setupRecordingTestApp(t, stubRoute{
+			method: http.MethodGet, path: "/99999/cards/overdue.json", status: http.StatusOK, body: body,
+		})
+		buf := &bytes.Buffer{}
+		app.Output = output.New(output.Options{Format: output.FormatMarkdown, Writer: buf})
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue"))
+		assert.Contains(t, buf.String(), "Beta")
+		assert.Contains(t, buf.String(), "Fix it")
+	})
+}

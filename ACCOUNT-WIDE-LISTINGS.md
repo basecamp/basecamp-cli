@@ -273,14 +273,21 @@ answer this differently:
 | Payload | Commands | Styled treatment |
 |---|---|---|
 | `[]Recording` | messages, comments, checkins answers, forwards | flatten — the generic renderer drops the nested `bucket`, and a project column is exactly what an account-wide row needs |
-| `[]Todo`, `[]Card` (flat overdue) | todos, cards `--overdue` | rendered as-is, like the project-scoped path |
+| `[]Todo`, `[]Card` (flat overdue) | todos, cards `--overdue` | flatten — same reason as `[]Recording`; the items come from every project and `bucket` is skipped by name |
 | `[]EverythingBoost` | boost | flatten — the boosted `*Recording` is nested |
 | `[]EverythingFile` | files | flatten — all-pointer superset, too wide to render raw |
 | `[]BucketTodosGroup`, `[]BucketCardsGroup` | todos, cards | flatten — nested groups render as unreadable cells |
 
-`recordings list` hands `[]Recording` straight to the renderer, and that is fine
-for it: it is already project-scoped, so the missing project column costs
-nothing. It is not a precedent for the aggregates.
+**Every** account-wide payload flattens. The rule is not about nesting depth —
+it is that `internal/output/render.go` skips `bucket` by name in both generic
+renderers, so any aggregate handed over raw loses the one column that makes a
+cross-project row attributable. "Renders fine project-scoped" is never the test:
+project-scoped output needs no project column. `recordings list` hands
+`[]Recording` over raw for exactly that reason, and it is not a precedent here.
+
+The same goes for `WithEntity`. A schema that renders a task list has no column
+for a project, so the account-wide overdue todo listing drops the entity rather
+than lose the attribution.
 
 **Mechanism.** Flattening is supplied through `output.WithDisplayData`, not by
 branching on `EffectiveFormat()`. `Data` stays the raw SDK payload so `--json`

@@ -451,8 +451,12 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		todos = todos[:limit]
 	}
 
+	// No WithEntity here: the todo schema renders a task list, which has no
+	// column for a project, and the cards arrive from every project. Flat rows
+	// carrying the bucket name are what makes an account-wide overdue listing
+	// attributable — the generic renderers skip a nested bucket by name.
 	respOpts := []output.ResponseOption{
-		output.WithEntity("todo"),
+		output.WithDisplayData(flattenOverdueTodos(todos)),
 		output.WithSummary(fmt.Sprintf("%d overdue todos across all projects", len(todos))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
@@ -561,6 +565,29 @@ func countAccountWideTodos(groups []basecamp.BucketTodosGroup) int {
 // flattenAccountWideTodos turns the project-grouped payload into flat rows for
 // styled output, which renders nested groups as unreadable cells. Machine
 // formats keep the grouping.
+// flattenOverdueTodos builds display rows for the flat overdue aggregate, which
+// returns todos from every project rather than groups.
+func flattenOverdueTodos(todos []basecamp.Todo) []map[string]any {
+	rows := make([]map[string]any, 0, len(todos))
+	for _, todo := range todos {
+		status := "incomplete"
+		if todo.Completed {
+			status = "completed"
+		}
+		row := map[string]any{
+			"id":     todo.ID,
+			"title":  todo.Title,
+			"status": status,
+			"due":    todo.DueOn,
+		}
+		if todo.Bucket != nil {
+			row["project"] = todo.Bucket.Name
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 func flattenAccountWideTodos(groups []basecamp.BucketTodosGroup) []map[string]any {
 	rows := make([]map[string]any, 0, countAccountWideTodos(groups))
 	for _, group := range groups {

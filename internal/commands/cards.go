@@ -381,6 +381,7 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d overdue cards across all projects", len(cards))),
 		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
+		output.WithDisplayData(flattenOverdueCards(cards)),
 	}
 	if len(cards) < total {
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
@@ -589,6 +590,27 @@ func flattenAccountWideCards(groups []basecamp.BucketCardsGroup) []map[string]an
 				"due":     card.DueOn,
 			})
 		}
+	}
+	return rows
+}
+
+// flattenOverdueCards builds display rows for the flat overdue aggregate. The
+// cards arrive with a nested bucket, which both generic renderers skip by name,
+// so without this an account-wide overdue listing gives no way to tell which
+// project a card belongs to.
+func flattenOverdueCards(cards []basecamp.Card) []map[string]any {
+	rows := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
+		row := map[string]any{
+			"id":     card.ID,
+			"title":  card.Title,
+			"status": card.Status,
+			"due":    card.DueOn,
+		}
+		if card.Bucket != nil {
+			row["project"] = card.Bucket.Name
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
