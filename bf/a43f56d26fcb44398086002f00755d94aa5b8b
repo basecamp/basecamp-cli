@@ -1,0 +1,29 @@
+ACCOUNT-WIDE-LISTINGS.md
+  s_be550b80f990b1::t_5d3d1656eb8cc0 1-153
+internal/commands/accountwide.go
+  s_267ddb5ac82dcb::t_ceff1487ed8a61 1-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "bfa43f56d26fcb44398086002f00755d94aa5b8b",
+  "prompts": {},
+  "sessions": {
+    "s_267ddb5ac82dcb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57d110ce-5c18-4d22-aa00-30e788664981",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_be550b80f990b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94133dd2-4285-460d-a282-ff33beb6d527",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
