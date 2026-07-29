@@ -1,0 +1,21 @@
+internal/auth/auth.go
+  s_86d0793371d0f3::t_3235b2459a7a29 863-867
+internal/auth/auth_test.go
+  s_86d0793371d0f3::t_c823acf141c0cf 684-697
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "2883033e4f9284983256c63b559bc9315706983f",
+  "prompts": {},
+  "sessions": {
+    "s_86d0793371d0f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a2b9cb3-4f1e-4edb-91b2-3d486f097400",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
