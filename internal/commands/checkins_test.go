@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 type mockCheckinsAnswersByPersonTransport struct {
@@ -66,7 +70,8 @@ func TestCheckinsAnswersByPersonFlag(t *testing.T) {
 	app.Config.ProjectID = "123"
 
 	project := ""
-	cmd := newCheckinsAnswersCmd(&project)
+	questionnaire := ""
+	cmd := newCheckinsAnswersCmd(&project, &questionnaire)
 
 	err := executeCommand(cmd, app, "789", "--by", "Alice Smith")
 	require.NoError(t, err)
@@ -84,7 +89,8 @@ func TestCheckinsAnswersByBlankValue(t *testing.T) {
 			app.Config.ProjectID = "123"
 
 			project := ""
-			cmd := newCheckinsAnswersCmd(&project)
+			questionnaire := ""
+			cmd := newCheckinsAnswersCmd(&project, &questionnaire)
 
 			err := executeCommand(cmd, app, "789", "--by", blank)
 			require.Error(t, err)
@@ -271,4 +277,221 @@ func TestCheckinsAnswerCreatePreservesExplicitDate(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, transport.recordedBody)
 	assert.Equal(t, "2026-03-25", transport.recordedBody["group_on"])
+}
+
+// Account-wide check-in answers.
+//
+// `checkins answers` lists the children of one question, so a project alone
+// cannot select a listing. Dropping the question ID lists every project's
+// answers through the account-wide aggregate instead.
+
+const checkinsAccountWidePath = "/99999/checkins.json"
+
+const checkinsAccountWideBody = `[
+  {"id":1,"title":"Monday","type":"Question::Answer","bucket":{"id":123,"name":"Test Project"}},
+  {"id":2,"title":"Tuesday","type":"Question::Answer","bucket":{"id":456,"name":"Other Project"}}
+]`
+
+func checkinsAccountWideRoute() stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   checkinsAccountWidePath,
+		status: http.StatusOK,
+		body:   checkinsAccountWideBody,
+	}
+}
+
+func checkinsQuestionAnswersRoute() stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/questions/789/answers.json",
+		status: http.StatusOK,
+		body:   `[{"id":11,"content":"<p>done</p>"}]`,
+	}
+}
+
+// newCheckinsAnswersTestCmd builds the answers command with its own copies of
+// the group's persistent flag targets.
+func newCheckinsAnswersTestCmd() *cobra.Command {
+	project := ""
+	questionnaire := ""
+	return newCheckinsAnswersCmd(&project, &questionnaire)
+}
+
+// runCheckinsAnswersAccountWideCmd runs the answers command against a stub
+// serving the account-wide aggregate.
+func runCheckinsAnswersAccountWideCmd(t *testing.T, args ...string) (*recordingTransport, error) {
+	t.Helper()
+	app, transport := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+	return transport, executeRecordingCommand(newCheckinsAnswersTestCmd(), app, args...)
+}
+
+func TestCheckinsAnswersQuestionScopedStillHitsQuestionEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, projectsRoute(), checkinsQuestionAnswersRoute())
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app, "789"))
+	assert.Equal(t, "/99999/questions/789/answers.json", transport.last(t).Path)
+}
+
+func TestCheckinsAnswersWithoutQuestionListsAccountWide(t *testing.T) {
+	transport, err := runCheckinsAnswersAccountWideCmd(t)
+	require.NoError(t, err)
+
+	last := transport.last(t)
+	assert.Equal(t, checkinsAccountWidePath, last.Path)
+	assert.Empty(t, last.Query, "the default follows every page, which sends no page param")
+}
+
+// A configured project cannot scope a question's answers, so it is ignored
+// rather than turned into an error or a project lookup.
+func TestCheckinsAnswersIgnoresConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app))
+
+	for _, req := range transport.recorded() {
+		assert.NotEqual(t, "/99999/projects.json", req.Path, "must not resolve the configured project")
+	}
+	assert.Equal(t, checkinsAccountWidePath, transport.last(t).Path)
+}
+
+func TestCheckinsAnswersAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app, "--all-projects"))
+	assert.Equal(t, checkinsAccountWidePath, transport.last(t).Path)
+}
+
+func TestCheckinsAnswersExplicitProjectWithoutQuestionIsUsage(t *testing.T) {
+	assertUsage := func(t *testing.T, err error) {
+		t.Helper()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "A project alone cannot select check-in answers")
+	}
+
+	t.Run("group --in", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		assertUsage(t, executeRecordingCommand(NewCheckinsCmd(), app, "answers", "--in", "123"))
+	})
+
+	t.Run("group --project", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		assertUsage(t, executeRecordingCommand(NewCheckinsCmd(), app, "answers", "--project", "123"))
+	})
+
+	// The root-level form lands in app.Flags.Project, not cmd.Flags().Changed.
+	t.Run("root --project", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		app.Flags.Project = "123"
+		assertUsage(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app))
+	})
+}
+
+func TestCheckinsAnswersAllProjectsConflicts(t *testing.T) {
+	t.Run("with a question ID", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		err := executeRecordingCommand(newCheckinsAnswersTestCmd(), app, "789", "--all-projects")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--all-projects cannot be combined with a question ID")
+	})
+
+	t.Run("with an explicit project", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		err := executeRecordingCommand(NewCheckinsCmd(), app, "answers", "--in", "123", "--all-projects")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--all-projects cannot be combined with --project")
+	})
+
+	t.Run("with a root-level project", func(t *testing.T) {
+		app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+		app.Flags.Project = "123"
+		err := executeRecordingCommand(newCheckinsAnswersTestCmd(), app, "--all-projects")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--all-projects cannot be combined with --project")
+	})
+}
+
+func TestCheckinsAnswersAccountWideRejectsBy(t *testing.T) {
+	transport, err := runCheckinsAnswersAccountWideCmd(t, "--by", "me")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--by has no account-wide equivalent")
+	assert.Empty(t, transport.recorded(), "must not call the aggregate endpoint")
+}
+
+// --questionnaire is a persistent flag on the group, so it only reaches the
+// answers command through the parent.
+func TestCheckinsAnswersAccountWideRejectsQuestionnaire(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+
+	err := executeRecordingCommand(NewCheckinsCmd(), app, "answers", "--questionnaire", "555")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--questionnaire names a check-in container inside one project")
+	assert.Empty(t, transport.recorded(), "must not call the aggregate endpoint")
+}
+
+func TestCheckinsAnswersAccountWidePagination(t *testing.T) {
+	t.Run("--page N asks for that page", func(t *testing.T) {
+		transport, err := runCheckinsAnswersAccountWideCmd(t, "--page", "3")
+		require.NoError(t, err)
+		assert.Equal(t, "page=3", transport.last(t).Query)
+	})
+
+	t.Run("--all follows every page", func(t *testing.T) {
+		transport, err := runCheckinsAnswersAccountWideCmd(t, "--all")
+		require.NoError(t, err)
+		assert.Empty(t, transport.last(t).Query)
+	})
+
+	t.Run("explicit --page 0 is usage", func(t *testing.T) {
+		_, err := runCheckinsAnswersAccountWideCmd(t, "--page", "0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--page 0 is not a page")
+	})
+
+	t.Run("negative --page is usage", func(t *testing.T) {
+		_, err := runCheckinsAnswersAccountWideCmd(t, "--page", "-1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--page cannot be negative")
+	})
+
+	t.Run("negative --limit is usage", func(t *testing.T) {
+		_, err := runCheckinsAnswersAccountWideCmd(t, "--limit", "-1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--limit cannot be negative")
+	})
+}
+
+func TestCheckinsAnswersAccountWideLimitTruncatesWithNotice(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	require.NoError(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app, "--limit", "1"))
+
+	var resp struct {
+		Data    []map[string]any `json:"data"`
+		Summary string           `json:"summary"`
+		Notice  string           `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "1 check-in answers across all projects", resp.Summary)
+	assert.Contains(t, resp.Notice, "Showing 1 of 2 fetched check-in answers")
+}
+
+// []Recording is what `recordings list` already hands the styled renderer, so
+// the account-wide payload needs no format-dependent flattening.
+func TestCheckinsAnswersAccountWideStyledRendersRecordings(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, projectsRoute(), checkinsAccountWideRoute())
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: buf})
+
+	require.NoError(t, executeRecordingCommand(newCheckinsAnswersTestCmd(), app))
+
+	rendered := buf.String()
+	assert.Contains(t, rendered, "Monday")
+	assert.Contains(t, rendered, "Tuesday")
 }

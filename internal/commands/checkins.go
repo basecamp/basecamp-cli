@@ -39,7 +39,7 @@ on a schedule (e.g., "What did you work on today?").`,
 	cmd.AddCommand(
 		newCheckinsQuestionsCmd(&project, &questionnaireID),
 		newCheckinsQuestionCmd(&project),
-		newCheckinsAnswersCmd(&project),
+		newCheckinsAnswersCmd(&project, &questionnaireID),
 		newCheckinsAnswerCmd(&project),
 	)
 
@@ -534,15 +534,16 @@ You can pass either a question ID or a Basecamp URL:
 	return cmd
 }
 
-func newCheckinsAnswersCmd(project *string) *cobra.Command {
+func newCheckinsAnswersCmd(project, questionnaireID *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var allProjects bool
 	var by string
 
 	cmd := &cobra.Command{
-		Use:   "answers <question_id|url>",
-		Short: "List answers for a question",
+		Use:   "answers [question_id|url]",
+		Short: "List answers for a question, or across every project",
 		Long: `List answers for a check-in question.
 
 You can pass either a question ID or a Basecamp URL:
@@ -551,120 +552,223 @@ You can pass either a question ID or a Basecamp URL:
 
 Use --by to filter answers by a specific person (name, email, ID, or "me"):
   basecamp checkins answers 789 --by me --in my-project
-  basecamp checkins answers 789 --by "Alice Smith" --in my-project`,
-		Args: cobra.ExactArgs(1),
+  basecamp checkins answers 789 --by "Alice Smith" --in my-project
+
+Omit the question ID to list check-in answers across every project you can
+reach, newest first. A configured project is ignored there, because a project
+on its own cannot name a question; --all-projects states that intent outright:
+  basecamp checkins answers
+  basecamp checkins answers --all-projects`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
-			// Validate flag combinations
-			if all && limit > 0 {
-				return output.ErrUsage("--all and --limit are mutually exclusive")
-			}
-			if page > 0 && (all || limit > 0) {
-				return output.ErrUsage("--page cannot be combined with --all or --limit")
-			}
-			if page > 1 {
-				return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
-			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			questionIDStr, urlProjectID := extractWithProject(args[0])
+			// Pick the scope before validating anything against it: the
+			// account-wide feed serves any positive page, while the
+			// per-question listing only serves page 1.
+			//
+			// Answers belong to one question, so a project can never select
+			// this listing on its own. That makes an explicit project without
+			// a question ID a request we cannot answer, and a merely
+			// configured project something to ignore rather than honor.
+			explicitProject := *project != "" || app.Flags.Project != ""
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
+			switch {
+			case len(args) > 0 && allProjects:
+				return output.ErrUsageHint("--all-projects cannot be combined with a question ID",
+					"Drop the ID to list answers across every project, or drop --all-projects to list that question's answers")
+			case len(args) > 0:
+				return runCheckinsAnswers(cmd, app, *project, args[0], by, limit, page, all)
+			case explicitProject && allProjects:
+				return output.ErrUsageHint("--all-projects cannot be combined with --project",
+					"Drop --project to list answers across every project")
+			case explicitProject:
+				return output.ErrUsageHint("A project alone cannot select check-in answers",
+					"Pass a question ID: basecamp checkins answers <question_id>")
 			}
 
-			questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid question ID")
-			}
-
-			// Build pagination options
-			opts := &basecamp.AnswerListOptions{}
-			if all {
-				opts.Limit = -1 // SDK treats -1 as "fetch all"
-			} else if limit > 0 {
-				opts.Limit = limit
-			}
-			if page > 0 {
-				opts.Page = page
-			}
-
-			trimmedBy := strings.TrimSpace(by)
-			if cmd.Flags().Changed("by") && trimmedBy == "" {
-				return output.ErrUsage("--by value cannot be blank")
-			}
-
-			var answers []basecamp.QuestionAnswer
-			if trimmedBy != "" {
-				personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), trimmedBy)
-				if err != nil {
-					return err
-				}
-				personID, err := strconv.ParseInt(personIDStr, 10, 64)
-				if err != nil {
-					return output.ErrUsage("Invalid person ID")
-				}
-				answersResult, err := app.Account().Checkins().ListAnswersByPerson(cmd.Context(), questionID, personID, opts)
-				if err != nil {
-					return convertSDKError(err)
-				}
-				answers = answersResult.Answers
-			} else {
-				answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), questionID, opts)
-				if err != nil {
-					return convertSDKError(err)
-				}
-				answers = answersResult.Answers
-			}
-
-			return app.OK(answers,
-				output.WithSummary(fmt.Sprintf("%d answers", len(answers))),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "answer",
-						Cmd:         fmt.Sprintf("basecamp checkins answer <id> --in %s", resolvedProjectID),
-						Description: "View answer details",
-					},
-					output.Breadcrumb{
-						Action:      "question",
-						Cmd:         fmt.Sprintf("basecamp checkins question %s --in %s", questionIDStr, resolvedProjectID),
-						Description: "View question",
-					},
-				),
-			)
+			return runCheckinsAnswersAccountWide(cmd, app, *questionnaireID, by, limit, page, all)
 		},
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = all)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all answers (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List check-in answers across every project (no question ID)")
 	cmd.Flags().StringVar(&by, "by", "", "Filter answers by person (name, email, ID, or \"me\")")
 
 	return cmd
+}
+
+// runCheckinsAnswers lists the answers to a single question.
+func runCheckinsAnswers(cmd *cobra.Command, app *appctx.App, project, questionArg, by string, limit, page int, all bool) error {
+	// Validate flag combinations
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+
+	// Extract ID and project from URL if provided
+	questionIDStr, urlProjectID := extractWithProject(questionArg)
+
+	// Resolve project - use URL > flag > config, with interactive fallback
+	projectID := project
+	if projectID == "" && urlProjectID != "" {
+		projectID = urlProjectID
+	}
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return err
+	}
+
+	questionID, err := strconv.ParseInt(questionIDStr, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid question ID")
+	}
+
+	// Build pagination options
+	opts := &basecamp.AnswerListOptions{}
+	if all {
+		opts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if limit > 0 {
+		opts.Limit = limit
+	}
+	if page > 0 {
+		opts.Page = page
+	}
+
+	trimmedBy := strings.TrimSpace(by)
+	if cmd.Flags().Changed("by") && trimmedBy == "" {
+		return output.ErrUsage("--by value cannot be blank")
+	}
+
+	var answers []basecamp.QuestionAnswer
+	if trimmedBy != "" {
+		personIDStr, _, err := app.Names.ResolvePerson(cmd.Context(), trimmedBy)
+		if err != nil {
+			return err
+		}
+		personID, err := strconv.ParseInt(personIDStr, 10, 64)
+		if err != nil {
+			return output.ErrUsage("Invalid person ID")
+		}
+		answersResult, err := app.Account().Checkins().ListAnswersByPerson(cmd.Context(), questionID, personID, opts)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		answers = answersResult.Answers
+	} else {
+		answersResult, err := app.Account().Checkins().ListAnswers(cmd.Context(), questionID, opts)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		answers = answersResult.Answers
+	}
+
+	return app.OK(answers,
+		output.WithSummary(fmt.Sprintf("%d answers", len(answers))),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "answer",
+				Cmd:         fmt.Sprintf("basecamp checkins answer <id> --in %s", resolvedProjectID),
+				Description: "View answer details",
+			},
+			output.Breadcrumb{
+				Action:      "question",
+				Cmd:         fmt.Sprintf("basecamp checkins question %s --in %s", questionIDStr, resolvedProjectID),
+				Description: "View question",
+			},
+		),
+	)
+}
+
+// runCheckinsAnswersAccountWide lists check-in answers across every project the
+// account can reach. The listing is a flat []Recording, the same payload
+// `recordings list` already hands the styled renderer, so it needs no
+// format-dependent flattening.
+func runCheckinsAnswersAccountWide(cmd *cobra.Command, app *appctx.App, questionnaireID, by string, limit, page int, all bool) error {
+	// A questionnaire is a container inside one project and a person filter
+	// has no aggregate endpoint, so neither can narrow this feed. Accepting
+	// either would answer a different question than the one asked.
+	if questionnaireID != "" {
+		return output.ErrUsageHint("--questionnaire names a check-in container inside one project",
+			"Pass a question ID to list that question's answers, or drop --questionnaire")
+	}
+	if cmd.Flags().Changed("by") {
+		return output.ErrUsageHint("--by has no account-wide equivalent",
+			"Filter by person within one question: basecamp checkins answers <question_id> --by <person>")
+	}
+
+	if limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+	if page < 0 {
+		return output.ErrUsage("--page cannot be negative")
+	}
+	if cmd.Flags().Changed("page") && page == 0 {
+		return output.ErrUsage("--page 0 is not a page; use --all to fetch every page")
+	}
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+
+	// The project-scoped default is "0 = all", so the account-wide default
+	// follows every page too. Only an explicit --page narrows it to one.
+	answersPage, err := app.Account().Everything().Checkins(cmd.Context(), accountWidePage(page, all || page == 0))
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	answers := answersPage.Recordings
+	fetched := len(answers)
+	if limit > 0 && fetched > limit {
+		answers = answers[:limit]
+	}
+
+	respOpts := accountWideRespOpts(len(answers), "check-in answers", answersPage.Meta)
+	if len(answers) < fetched {
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing %d of %d fetched check-in answers (--limit); drop --limit for all of them", len(answers), fetched)))
+	}
+	respOpts = append(respOpts, output.WithBreadcrumbs(
+		output.Breadcrumb{
+			Action:      "answer",
+			Cmd:         "basecamp checkins answer <id>",
+			Description: "View answer details",
+		},
+		output.Breadcrumb{
+			Action:      "answers",
+			Cmd:         "basecamp checkins answers <question_id>",
+			Description: "View one question's answers",
+		},
+	))
+
+	return app.OK(answers, respOpts...)
 }
 
 func newCheckinsAnswerCmd(project *string) *cobra.Command {
