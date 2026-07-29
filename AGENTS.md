@@ -1,5 +1,3 @@
-@STYLE.md
-
 # Basecamp CLI Development Context
 
 ## Getting Started
@@ -61,10 +59,10 @@ Run it early and often — after finishing a feature, after fixing a bug, before
 pushing. If you're about to `git push` and haven't run `bin/ci` in this
 session, stop and run it first.
 
-**Skill drift**: when you change CLI commands or flags, `check-skill-drift`
-verifies that `skills/basecamp/SKILL.md` still references valid commands and
-flags from the `.surface` snapshot. If you add, rename, or remove commands/flags,
-update the skill to match.
+**Skill drift**: when you change CLI commands or flags, `make check-skill-drift`
+verifies that `skills/basecamp/SKILL.md` **and** `skills/basecamp-doctor/SKILL.md`
+still reference valid commands and flags from the `.surface` snapshot. If you add,
+rename, or remove commands/flags, update both skills to match.
 
 ```bash
 bin/ci                # The single command — run this
@@ -121,9 +119,14 @@ API revision the CLI is built against. `API-COVERAGE.md` tracks endpoint coverag
 **Completeness bar**: every new SDK service method needs:
 - Command file in `internal/commands/`
 - Catalog entry in `commands.go`
-- Registration in `root.go` + `commands_test.go`
+- Registration in `internal/cli/root.go` + `commands_test.go`
 - API-COVERAGE.md row
 
 **Andon cord**: if the SDK lacks a Go service wrapper for a generated endpoint,
 stop and open an issue on [basecamp-sdk](https://github.com/basecamp/basecamp-sdk) —
 never call the raw generated client from CLI code.
+
+## Code style
+
+See `STYLE.md` for the Go conventions used here. Read it when writing or reviewing Go;
+it is not imported, so it stays out of context for sessions that never touch Go.
