@@ -323,19 +323,22 @@ Completed 200 OK in 44630ms (Views: 244.7ms | ActiveRecord: 44370.9ms, 64 querie
 ```
 
 99.5% of the request is database time, in two statements of almost exactly equal
-cost. Three things follow, and they are worth recording because two of them
-contradict what this document previously assumed:
+cost. Separating what is measured from what is inferred:
 
-- **It is not an N+1.** `Everything::BoostsController#index` preloads booster and
-  boostable thoroughly and the log confirms it works — 60 of 64 queries are
-  trivial. That hypothesis is dead.
-- **Ordering the derived table is only half of it.** The controller wraps its
-  `UNION ALL` in `Boost.from("(...) AS boosts").order(created_at: :desc, id:
-  :desc)`; ordering a derived table cannot use an index, so MySQL materializes
-  and sorts every accessible boost before `OFFSET`/`LIMIT` applies. That
-  explains `Boost Load`, and it explains why page 1 costs the same as page 40.
-- **The count pays the same cost again**, purely for pagination metadata. Fixing
-  only the `ORDER BY` would leave roughly half the latency in place.
+**Measured.** It is not an N+1 — `Everything::BoostsController#index` preloads
+booster and boostable thoroughly and the log confirms that works, with 60 of 64
+queries trivial and views at 244.7ms. That hypothesis is dead. The cost is two
+statements: the paginated `Boost Load` and GearedPagination's `Boost Count`, at
+roughly 22s each. Page 1 costs the same as page 40. Whatever the fix is, it has
+to address **both** statements: halving one leaves ~22s behind.
+
+**Inferred, pending `EXPLAIN`.** The controller wraps its `UNION ALL` in
+`Boost.from("(...) AS boosts").order(created_at: :desc, id: :desc)`. Ordering a
+derived table cannot use an index, which would force MySQL to materialize and
+sort every accessible boost before `OFFSET`/`LIMIT` applies — consistent with
+both the flat cost curve and the count costing as much as the fetch. That is a
+coherent explanation for the numbers, not a verified query plan, and
+basecamp/bc3#12458 asks for the `EXPLAIN` rather than asserting it.
 
 #### The `files list` filter exception
 
