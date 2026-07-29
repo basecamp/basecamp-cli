@@ -1,0 +1,19 @@
+API-COVERAGE.md
+  s_be550b80f990b1::t_1006a8e8e6244e 21-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4c40a9c153ff10528913296f0a6c1ccfedec9705",
+  "prompts": {},
+  "sessions": {
+    "s_be550b80f990b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94133dd2-4285-460d-a282-ff33beb6d527",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
