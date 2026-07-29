@@ -103,7 +103,8 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    ```bash
    printf '%s\n' '海报 mockup 方向稿：' '' '<bc-attachment ...>' | basecamp comments create <recording_id> - --in <project> --json
    ```
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the eight list commands covered in item 7.
+7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, `boost list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
 
 ### Output Modes
 
@@ -160,6 +161,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 ## Quick Reference
 
 > **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`.
+>
+> Eight list commands also list account-wide: `basecamp todos list --all-projects --json`, and likewise `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, `boost list`, and `checkins answers`.
 
 | Task | Command |
 |------|---------|
@@ -167,9 +170,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | My todos (in project) | `basecamp todos list --assignee me --in <project> --json` |
 | My todos (cross-project) | `basecamp reports assigned --json` (defaults to "me") |
 | My schedule (cross-project) | `basecamp reports schedule --json` (upcoming events across all projects) |
-| All todos (cross-project) | `basecamp recordings todos --json` (no assignee data — cannot filter by person) |
+| All todos (cross-project) | `basecamp todos list --all-projects --json` (grouped by project) |
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
-| Overdue todos (cross-project) | `basecamp reports overdue --json` |
+| Overdue todos (cross-project) | `basecamp todos list --all-projects --overdue --json` (flat, oldest first) or `basecamp reports overdue --json` (bucketed by lateness) |
+| All cards (cross-project) | `basecamp cards list --all-projects --json` (grouped by project) |
 | Assign todo | `basecamp assign <id> [id...] --to <person> --in <project> --json` |
 | Assign card | `basecamp assign <id> [id...] --card --to <person> --in <project> --json` |
 | Assign card step | `basecamp assign <id> [id...] --step --to <person> --in <project> --json` |
