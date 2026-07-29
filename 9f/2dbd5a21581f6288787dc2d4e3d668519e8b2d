@@ -1,0 +1,49 @@
+internal/auth/device_test.go
+  s_86d0793371d0f3::t_4cbf5a3c3fefce 782-791
+internal/auth/auth.go
+  s_86d0793371d0f3::t_9f002df8b626ce 722-731
+  s_86d0793371d0f3::t_461092c6c10a96 747-749
+  s_86d0793371d0f3::t_0ec0cb6cbfc815 763-771,774-775,778-782,785
+  s_86d0793371d0f3::t_3235b2459a7a29 863-867
+  s_86d0793371d0f3::t_d20d8f6e546565 879
+  s_86d0793371d0f3::t_760d8dbf784fe0 1054-1062
+go.sum
+  s_86d0793371d0f3::t_2f1f6975b62abf 28-29
+internal/auth/auth_test.go
+  s_86d0793371d0f3::t_c823acf141c0cf 684-697
+  s_86d0793371d0f3::t_bca08e5b9f6124 1537-1557
+README.md
+  s_86d0793371d0f3::t_a9b8bd35b0012a 115-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "9f2dbd5a21581f6288787dc2d4e3d668519e8b2d",
+  "prompts": {},
+  "sessions": {
+    "s_2c920cb2a7c7d7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa724-7bbf-7453-a441-f84e3f0d7808",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_86d0793371d0f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a2b9cb3-4f1e-4edb-91b2-3d486f097400",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_be550b80f990b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94133dd2-4285-460d-a282-ff33beb6d527",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
