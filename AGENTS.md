@@ -62,8 +62,12 @@ session, stop and run it first.
 **Skill drift**: `make check-skill-drift` runs over both `skills/basecamp/SKILL.md`
 and `skills/basecamp-doctor/SKILL.md`, checking that the commands and flags each one
 *references* still exist in the `.surface` snapshot. It catches stale references, not
-missing coverage — so renaming or removing a command breaks whichever skill mentioned
-it, and adding a new one breaks neither. Update the skill the change actually affects;
+missing coverage, so adding a command breaks neither skill.
+
+Removal is only partly caught. `resolve_cmd` walks up to the nearest existing ancestor,
+so dropping a nested subcommand leaves the reference resolving against its parent and the
+check still passes — `basecamp setup <removed>` resolves as `basecamp setup`. Removing a
+top-level command is caught; removing a subcommand is not. Don't lean on CI for this. Update the skill the change actually affects;
 basecamp-doctor deliberately covers only doctor, setup and auth remediation.
 
 ```bash
