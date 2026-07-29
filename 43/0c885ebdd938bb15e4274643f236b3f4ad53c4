@@ -1,0 +1,39 @@
+ACCOUNT-WIDE-LISTINGS.md
+  s_be550b80f990b1::t_5d3d1656eb8cc0 1-153
+internal/commands/accountwide.go
+  s_267ddb5ac82dcb::t_ceff1487ed8a61 1-55
+internal/tui/workspace/views/search.go
+  s_1ed2e5b0ce1751::t_6d8895f8afa605 518-521
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "430c885ebdd938bb15e4274643f236b3f4ad53c4",
+  "prompts": {},
+  "sessions": {
+    "s_1ed2e5b0ce1751": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c8afbbb-5fe2-4d66-b3d5-b5fa350e924b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_267ddb5ac82dcb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57d110ce-5c18-4d22-aa00-30e788664981",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_be550b80f990b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "94133dd2-4285-460d-a282-ff33beb6d527",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
