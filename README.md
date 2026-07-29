@@ -112,9 +112,11 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 ## Authentication
 
 OAuth 2.1 with automatic token refresh. First login opens your browser.
-When the server supports it, login uses the OAuth device flow automatically:
-you approve a short code in the browser instead of a redirect. Otherwise
-login falls back to Launchpad's authorization-code flow.
+When the server advertises the OAuth device flow, login uses it
+automatically: you approve a short code in the browser instead of a
+redirect. Login falls back to Launchpad's authorization-code flow only when
+no modern OAuth issuer is advertised for the server; once a modern issuer is
+selected, login failures surface loudly rather than silently falling back.
 
 ```bash
 basecamp auth login              # Authenticate with Basecamp
