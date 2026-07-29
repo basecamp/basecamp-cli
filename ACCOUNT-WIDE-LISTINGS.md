@@ -80,6 +80,7 @@ general precedence above:
 |---|---|---|---|
 | present | any | absent | item-scoped |
 | present | any | present | **ErrUsage** (conflict) |
+| absent | present | present | **ErrUsage** (conflict) — the general I2 rule still applies |
 | absent | present | absent | **ErrUsage** — ask for an ID |
 | absent | absent (configured only) | absent | account-wide; ambient config ignored because it cannot scope this operation |
 | absent | absent | present | account-wide, intent pinned |
