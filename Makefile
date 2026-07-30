@@ -352,6 +352,7 @@ release:
 .PHONY: test-release
 test-release:
 	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
+	SM_API_KEY= SM_CLIENT_CERT_FILE= SM_CLIENT_CERT_PASSWORD= \
 	goreleaser release --snapshot --skip=publish,sign --clean
 
 # Verify the committed CLI surface snapshot (.surface) matches the command tree.

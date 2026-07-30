@@ -4,6 +4,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"debug/pe"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,6 +80,7 @@ func NewDoctorCmd() *cobra.Command {
 
 The doctor command helps troubleshoot common issues by checking:
   - CLI version (and whether updates are available)
+  - Binary signature (Windows: Authenticode presence)
   - Configuration files (existence and validity)
   - Authentication credentials
   - Token validity and expiration
@@ -131,22 +133,27 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	// 1. Version check
 	checks = append(checks, checkVersion(verbose)) //nolint:contextcheck // checkVersion uses fetchLatestVersion which creates its own bounded context intentionally
 
-	// 2. SDK provenance
+	// 2. Binary signature (Windows release builds only)
+	if sigCheck := checkBinarySignature(); sigCheck != nil {
+		checks = append(checks, *sigCheck)
+	}
+
+	// 3. SDK provenance
 	checks = append(checks, checkSDKProvenance(verbose))
 
-	// 3. Go runtime info (verbose only, always passes)
+	// 4. Go runtime info (verbose only, always passes)
 	if verbose {
 		checks = append(checks, checkRuntime())
 	}
 
-	// 4. Config files check
+	// 5. Config files check
 	checks = append(checks, checkConfigFiles(app, verbose)...)
 
-	// 5. Credentials check
+	// 6. Credentials check
 	credCheck := checkCredentials(app, verbose)
 	checks = append(checks, credCheck)
 
-	// 6. Authentication check (only if credentials exist)
+	// 7. Authentication check (only if credentials exist)
 	var canTestAPI bool
 	if credCheck.Status == "pass" || credCheck.Status == "warn" {
 		authCheck := checkAuthentication(ctx, app, verbose)
@@ -161,7 +168,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 7. API connectivity (only if authenticated)
+	// 8. API connectivity (only if authenticated)
 	if canTestAPI {
 		checks = append(checks, checkAPIConnectivity(ctx, app, verbose))
 	} else {
@@ -172,7 +179,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 8. Account access (only if API works)
+	// 9. Account access (only if API works)
 	if canTestAPI && app.Config.AccountID != "" {
 		checks = append(checks, checkAccountAccess(ctx, app, verbose))
 	} else if app.Config.AccountID == "" {
@@ -190,18 +197,18 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 9. Cache health
+	// 10. Cache health
 	checks = append(checks, checkCacheHealth(app, verbose))
 
-	// 10. Shell completion
+	// 11. Shell completion
 	checks = append(checks, checkShellCompletion(verbose))
 
-	// 11. Legacy bcq detection
+	// 12. Legacy bcq detection
 	if legacyCheck := checkLegacyInstall(); legacyCheck != nil {
 		checks = append(checks, *legacyCheck)
 	}
 
-	// 12. AI Agent integration (for each detected agent)
+	// 13. AI Agent integration (for each detected agent)
 	if baselineSkillInstalled() {
 		checks = append(checks, checkSkillVersion())
 	}
@@ -252,6 +259,86 @@ func checkVersion(verbose bool) Check {
 	}
 
 	return check
+}
+
+// checkBinarySignature reports whether the running Windows executable carries
+// an Authenticode signature. It is a signing-regression canary for pipeline
+// drift (a release that shipped unsigned), not a validity check: if doctor
+// runs at all, Smart App Control didn't block this binary, and Windows — not
+// this probe — enforces signature validity and expiry.
+func checkBinarySignature() *Check {
+	return binarySignatureCheck(runtime.GOOS)
+}
+
+// binarySignatureCheck is the platform-injectable core of
+// checkBinarySignature. Nil off-Windows and for dev builds (built from
+// source; never signed, and a warn there would be pure noise).
+func binarySignatureCheck(goos string) *Check {
+	if goos != "windows" || version.IsDev() {
+		return nil
+	}
+
+	var check Check
+	exe, err := os.Executable()
+	if err == nil {
+		var signed bool
+		if signed, err = hasAuthenticodeSignature(exe); err == nil {
+			check = signatureCheck(signed)
+		}
+	}
+	if err != nil {
+		check = Check{
+			Name:    "Binary Signature",
+			Status:  "warn",
+			Message: fmt.Sprintf("Could not inspect executable for a signature: %v", err),
+		}
+	}
+	return &check
+}
+
+// signatureCheck composes the Binary Signature result. Presence-only wording:
+// never claim the signature is valid or unexpired — the probe cannot see that.
+func signatureCheck(signed bool) Check {
+	if signed {
+		return Check{
+			Name:    "Binary Signature",
+			Status:  "pass",
+			Message: "Authenticode signature present",
+		}
+	}
+	return Check{
+		Name:    "Binary Signature",
+		Status:  "warn",
+		Message: "No Authenticode signature (unsigned executable)",
+		Hint:    "Windows can block unsigned executables (Smart App Control, SmartScreen). Run: basecamp upgrade",
+	}
+}
+
+// hasAuthenticodeSignature reports whether the PE file at path has a
+// WIN_CERTIFICATE overlay, i.e. a nonzero security data directory
+// (IMAGE_DIRECTORY_ENTRY_SECURITY). Pure debug/pe — works on any platform.
+func hasAuthenticodeSignature(path string) (bool, error) {
+	f, err := pe.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	var dirs []pe.DataDirectory
+	switch oh := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader32:
+		dirs = oh.DataDirectory[:]
+	case *pe.OptionalHeader64:
+		dirs = oh.DataDirectory[:]
+	default:
+		return false, fmt.Errorf("unrecognized PE optional header type %T", f.OptionalHeader)
+	}
+
+	if len(dirs) <= pe.IMAGE_DIRECTORY_ENTRY_SECURITY {
+		return false, nil
+	}
+	sec := dirs[pe.IMAGE_DIRECTORY_ENTRY_SECURITY]
+	return sec.VirtualAddress != 0 && sec.Size != 0, nil
 }
 
 // checkSDKProvenance reports the embedded SDK version and revision.
@@ -976,6 +1063,12 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Action:      "install",
 				Cmd:         "basecamp skill install",
 				Description: "Update installed skill",
+			})
+		case "Binary Signature":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "upgrade",
+				Cmd:         "basecamp upgrade",
+				Description: "Upgrade to a signed release",
 			})
 		case "Codex Plugin", "Codex Plugin Version":
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{

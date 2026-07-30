@@ -32,6 +32,8 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Builds binaries for all platforms (darwin, linux, windows, freebsd, openbsd × amd64/arm64)
    - Builds `.deb`, `.rpm`, `.apk` Linux packages (amd64 + arm64)
    - Signs and notarizes macOS binaries via GoReleaser's built-in notarize (embedded quill)
+   - Signs Windows binaries with Authenticode via jsign and DigiCert KeyLocker
+   - Signs a copy of the PowerShell installer and attaches it as `basecamp_installer.ps1`
    - Signs checksums with cosign (keyless via Sigstore OIDC)
    - Generates SBOM for supply chain transparency
    - Updates Homebrew cask (`basecamp-cli`) in `basecamp/homebrew-tap` for stable tags
@@ -94,6 +96,32 @@ basecamp skill install
 | `MACOS_NOTARY_KEY` | Base64-encoded App Store Connect API key (.p8) |
 | `MACOS_NOTARY_KEY_ID` | App Store Connect API key ID (10 characters) |
 | `MACOS_NOTARY_ISSUER_ID` | App Store Connect issuer UUID |
+| `SM_API_KEY` | DigiCert ONE API key for KeyLocker |
+| `SM_CLIENT_CERT_FILE_B64` | Base64-encoded DigiCert ONE mTLS client certificate (.p12) |
+| `SM_CLIENT_CERT_PASSWORD` | Client certificate unlock password |
+
+## Windows signing
+
+Windows binaries and the installer copy are Authenticode-signed from Linux CI
+via [jsign](https://ebourg.github.io/jsign/) against DigiCert KeyLocker (cloud
+HSM) — no Windows runner or hardware token involved. bc3-desktop's
+`docs/windows-signing.md` is the canonical runbook; this repo is a second
+consumer of the same certificate.
+
+- Certificate: OV code signing, `CN=37signals LLC`, expires **2027-04-30**.
+  The DigiCert ONE certificate ID is pinned once, in
+  `.github/workflows/release.yml` (`SIGN_ALIAS`) — keep it in sync with
+  bc3-desktop when the certificate is renewed.
+- jsign version and jar sha256 are pinned in the release workflow's
+  "Prepare Windows signing" step. jsign ≥ 7.5 is required — 7.1–7.3 are
+  broken against DigiCert ONE's current API.
+- Quota: KeyLocker signatures draw from a budget shared with bc3-desktop.
+  Each tag consumes 3 signatures (2 exes + the installer copy); a release
+  cycle of rc(s) + stable is ≥ 6, and workflow re-runs after post-signing
+  failures consume more. Confirm headroom with the bc3-desktop cert owner
+  before a release burst.
+- Signing failures abort the release during the build phase — nothing is
+  published. Re-run the workflow on the same tag after the outage clears.
 
 ## AUR setup (one-time)
 

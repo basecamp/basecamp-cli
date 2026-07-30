@@ -318,13 +318,29 @@ verify_install() {
     binary_name="basecamp.exe"
   fi
 
-  local installed_version
-  if installed_version=$("$BIN_DIR/$binary_name" --version 2>/dev/null); then
+  local installed_version err_file
+  err_file=$(mktemp)
+  if installed_version=$("$BIN_DIR/$binary_name" --version 2>"$err_file"); then
+    rm -f "$err_file"
     info "$(green "${installed_version} installed")"
     return 0
   fi
 
-  error "Installation failed - basecamp not working"
+  local run_error
+  run_error=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local detail="Installation failed - basecamp not working"
+  if [[ -n "$run_error" ]]; then
+    detail="$detail: $run_error"
+  fi
+  if [[ "$platform" == windows_* ]]; then
+    detail="$detail
+  Windows may have blocked the unsigned executable: Smart App Control only runs code-signed binaries.
+  Either install inside WSL2 (curl -fsSL https://basecamp.com/install-cli | bash) or see
+  https://github.com/basecamp/basecamp-cli#windows-smart-app-control-and-smartscreen"
+  fi
+  error "$detail"
 }
 
 setup_theme() {

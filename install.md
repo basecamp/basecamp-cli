@@ -37,6 +37,8 @@ irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install
 > - PowerShell: `$env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex`
 >
 > **Windows note:** if `curl` fails with a `schannel` / `CRYPT_E_NO_REVOCATION_CHECK` TLS error, prefer the PowerShell installer, Scoop, or Git Bash's `/usr/bin/curl` instead of the system `curl.exe`.
+>
+> **Windows 11 with Smart App Control:** releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`, which Smart App Control blocks. Prefer WSL2 — run `curl -fsSL https://basecamp.com/install-cli | bash` inside a WSL terminal — or see [Troubleshooting](#troubleshooting) below.
 
 Alternatively install manually:
 
@@ -188,6 +190,44 @@ basecamp auth logout && basecamp auth login
 ```bash
 basecamp auth login --scope full
 ```
+
+**Windows 11: Smart App Control blocks `basecamp.exe`:**
+
+Releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`. Smart App Control
+only runs code-signed executables — regardless of download source — and has no
+per-app exceptions, so it blocks the unsigned CLI at launch. Check whether an
+installed binary is signed with:
+
+```powershell
+Get-AuthenticodeSignature (Get-Command basecamp).Source
+```
+
+Preferred workaround — install inside WSL2, where Smart App Control doesn't
+apply and your Windows security setup is untouched:
+
+```powershell
+wsl --install
+```
+
+then inside the WSL terminal:
+
+```bash
+curl -fsSL https://basecamp.com/install-cli | bash
+```
+
+The DONE WHEN gate (`basecamp --version && basecamp auth status`) runs inside
+WSL in this setup.
+
+Alternative — turn Smart App Control off (Windows Security → App & browser
+control → Smart App Control settings) and leave it off while using the
+unsigned build: because there are no per-app exceptions, re-enabling it
+re-blocks `basecamp.exe` on its next run. Only re-enable after upgrading to a
+signed build. Windows 11 with the March/April 2026 updates can re-enable Smart
+App Control from Windows Security without a reset; on older builds re-enabling
+requires resetting Windows, so use WSL2 there instead.
+
+Plain SmartScreen (Smart App Control off) may warn on first run — choose
+"More info" → "Run anyway".
 
 **Termux / Android (`SIGSYS: bad system call` on startup):**
 

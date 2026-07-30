@@ -275,3 +275,119 @@ EOF
   [[ "$output" == *"restored-value-ok"* ]]
   [[ "$output" == *"nk=1 setup agents"* ]]
 }
+
+# Smart App Control blocks unsigned executables at process creation (releases
+# up to v0.8.0-rc.1 ship an unsigned basecamp.exe), so the install scripts
+# must surface WHY the first run failed instead of a bare "not working".
+
+@test "verify_install surfaces stderr and adds the Windows SAC hint" {
+  cat > "$STUB_DIR/basecamp.exe" <<'EOF'
+#!/usr/bin/env bash
+echo "simulated block: cannot execute" >&2
+exit 126
+EOF
+  chmod +x "$STUB_DIR/basecamp.exe"
+
+  run bash -c "
+    set -euo pipefail
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    verify_install windows_amd64
+  "
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"simulated block: cannot execute"* ]]
+  [[ "$output" == *"Smart App Control"* ]]
+  [[ "$output" == *"#windows-smart-app-control-and-smartscreen"* ]]
+}
+
+@test "verify_install on linux surfaces stderr without the Windows hint" {
+  cat > "$STUB_DIR/basecamp" <<'EOF'
+#!/usr/bin/env bash
+echo "simulated failure" >&2
+exit 1
+EOF
+  chmod +x "$STUB_DIR/basecamp"
+
+  run bash -c "
+    set -euo pipefail
+    source '$INSTALL_SH'
+    BIN_DIR='$STUB_DIR'
+    verify_install linux_amd64
+  "
+  [[ "$status" -ne 0 ]]
+  [[ "$output" == *"simulated failure"* ]]
+  [[ "$output" != *"Smart App Control"* ]]
+}
+
+@test "install.ps1 carries the Smart App Control first-run diagnosis" {
+  grep -q 'function Get-FirstRunFailureMessage' "$INSTALL_PS1"
+  grep -q 'Smart App Control' "$INSTALL_PS1"
+  grep -q 'Protection history' "$INSTALL_PS1"
+  # The first-run failure path routes through the diagnosis helper.
+  grep -qF 'Fail (Get-FirstRunFailureMessage' "$INSTALL_PS1"
+}
+
+# All three diagnosis branches, driven by shadowing the probes. Same AST
+# extraction pattern as the BASECAMP_NO_KEYRING test above: only the function
+# under test is evaluated, Main never runs.
+@test "install.ps1 Get-FirstRunFailureMessage diagnoses SAC, quarantine, and generic failures" {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    if [[ -n "${CI:-}" ]]; then
+      echo "pwsh is required in CI for install.ps1 diagnosis coverage" >&2
+      return 1
+    fi
+    skip "pwsh not installed"
+  fi
+
+  cat > "$STUB_DIR/sac-driver.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALL_PS1_PATH, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "install.ps1 parse errors: $($parseErrors -join '; ')" }
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-FirstRunFailureMessage' }, $true)
+if (-not $fn) { throw 'Get-FirstRunFailureMessage not found in install.ps1' }
+. ([scriptblock]::Create($fn.Extent.Text))
+
+# Shadow the probes the helper relies on. Advanced functions so the helper's
+# -ErrorAction Stop common parameter binds.
+$script:SigStatus = 'NotSigned'
+$script:SacState = 1
+function Get-AuthenticodeSignature { [CmdletBinding()] param([string]$FilePath) [pscustomobject]@{ Status = $script:SigStatus } }
+function Get-ItemProperty { [CmdletBinding()] param([string]$Path) [pscustomobject]@{ VerifiedAndReputablePolicyState = $script:SacState } }
+
+# Branch 1: unsigned binary, SAC on.
+$msg = Get-FirstRunFailureMessage -Binary 'C:\bin\basecamp.exe' -Reason 'boom-sac'
+if ($msg -notmatch '^Installed basecamp\.exe .+ running it failed: boom-sac') { throw "branch1 does not lead with the original failure: $msg" }
+if ($msg -notlike '*Smart App Control*') { throw 'branch1 missing SAC explanation' }
+if ($msg -notlike '*wsl --install*') { throw 'branch1 missing WSL option' }
+if ($msg -notlike '*no per-app exceptions*') { throw 'branch1 missing no-exceptions caveat' }
+if ($msg -notlike '*leave it off while using this unsigned build*') { throw 'branch1 missing stay-off caveat' }
+'branch1-ok'
+
+# Branch 2: unsigned binary, SAC off — quarantine advice, no WSL pitch.
+$script:SacState = 0
+$msg = Get-FirstRunFailureMessage -Binary 'C:\bin\basecamp.exe' -Reason 'boom-quarantine'
+if ($msg -notlike '*boom-quarantine*') { throw 'branch2 missing original failure' }
+if ($msg -notlike '*Protection history*') { throw 'branch2 missing Protection history advice' }
+if ($msg -like '*wsl --install*') { throw 'branch2 should not pitch WSL' }
+'branch2-ok'
+
+# Branch 3: signed binary — generic hint, no unsigned claim.
+$script:SigStatus = 'Valid'
+$msg = Get-FirstRunFailureMessage -Binary 'C:\bin\basecamp.exe' -Reason 'boom-generic'
+if ($msg -notlike '*boom-generic*') { throw 'branch3 missing original failure' }
+if ($msg -notlike '*Protection history*') { throw 'branch3 missing generic hint' }
+if ($msg -like '*not code-signed*') { throw 'branch3 must not claim the binary is unsigned' }
+'branch3-ok'
+EOF
+
+  run bash -c "
+    set -euo pipefail
+    export INSTALL_PS1_PATH='$INSTALL_PS1'
+    pwsh -NoProfile -File '$STUB_DIR/sac-driver.ps1'
+  "
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"branch1-ok"* ]]
+  [[ "$output" == *"branch2-ok"* ]]
+  [[ "$output" == *"branch3-ok"* ]]
+}

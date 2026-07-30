@@ -13,6 +13,7 @@ e2e/recorder/recorder
 
 # GoReleaser output
 dist/
+.release-extra/
 
 # Test coverage
 coverage.out

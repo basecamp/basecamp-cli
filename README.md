@@ -21,6 +21,8 @@ curl -fsSL https://basecamp.com/install-cli | bash
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
+On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
+
 That's it. You now have full access to Basecamp from your terminal.
 
 <details>
@@ -203,6 +205,36 @@ basecamp doctor              # Check CLI health and diagnose issues
 basecamp doctor --verbose    # Verbose output with details
 basecamp doctor --json       # Structured checks, including Claude and Codex
 ```
+
+### Windows: Smart App Control and SmartScreen
+
+Releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`. To check whether
+your installed binary is signed:
+
+```powershell
+Get-AuthenticodeSignature (Get-Command basecamp).Source
+```
+
+**Smart App Control** (Windows 11) blocks unsigned executables no matter where
+they were downloaded from, and it has no per-app exceptions — this applies to
+the PowerShell installer, Scoop installs, and manual downloads alike. If it
+blocks an unsigned `basecamp.exe`, two options:
+
+1. **Use WSL2 (preferred).** Install the Linux build inside WSL2 — Smart App
+   Control doesn't apply there and your Windows security setup is untouched:
+   `wsl --install`, then inside the WSL terminal:
+   `curl -fsSL https://basecamp.com/install-cli | bash`
+2. **Turn Smart App Control off** (Windows Security → App & browser control →
+   Smart App Control settings) **and leave it off while using the unsigned
+   build.** Because there are no per-app exceptions, turning it back on
+   re-blocks `basecamp.exe` on its next run — only re-enable after upgrading
+   to a signed build. Windows 11 with the March/April 2026 updates can
+   re-enable Smart App Control from Windows Security without a reset; on older
+   builds re-enabling requires resetting Windows, so prefer WSL2 there.
+
+**SmartScreen** (without Smart App Control) may warn on first run of an
+unrecognized executable — choose "More info" → "Run anyway" if you downloaded
+the release from this repository.
 
 ## Development
 

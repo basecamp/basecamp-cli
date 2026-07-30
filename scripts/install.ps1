@@ -143,6 +143,57 @@ function Verify-CosignSignature([string]$Version, [string]$BaseUrl, [string]$Tmp
   Info 'Signature verified'
 }
 
+# Get-FirstRunFailureMessage diagnoses why running the freshly installed
+# basecamp.exe failed. It best-effort probes the binary's Authenticode status
+# and the Smart App Control state (releases up to v0.8.0-rc.1 ship an unsigned
+# basecamp.exe, which Smart App Control blocks at process creation). Every
+# branch leads with the original failure: diagnosis augments, never masks,
+# the underlying error. PowerShell 5.1-compatible.
+function Get-FirstRunFailureMessage([string]$Binary, [string]$Reason) {
+  $sigStatus = $null
+  try {
+    $sigStatus = (Get-AuthenticodeSignature -FilePath $Binary -ErrorAction Stop).Status
+  } catch { }
+
+  # Smart App Control state: 0 = off, 1 = on, 2 = evaluation mode.
+  $sacState = $null
+  try {
+    $policy = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction Stop
+    $sacState = $policy.VerifiedAndReputablePolicyState
+  } catch { }
+
+  $lead = "Installed basecamp.exe to $Binary, but running it failed: $Reason"
+
+  if ("$sigStatus" -eq 'NotSigned' -and ($sacState -eq 1 -or $sacState -eq 2)) {
+    return @"
+$lead
+
+This build of basecamp.exe is not code-signed, and Smart App Control is enabled. Smart App Control blocks unsigned executables no matter where they were downloaded from, and it has no per-app exceptions. Two options:
+
+  1. (Preferred) Install the Linux build inside WSL2 - Smart App Control does not apply there and your Windows security setup is untouched:
+       wsl --install
+     then, inside the WSL terminal:
+       curl -fsSL https://basecamp.com/install-cli | bash
+
+  2. Turn Smart App Control off (Windows Security > App & browser control > Smart App Control settings) and leave it off while using this unsigned build. Because there are no per-app exceptions, turning it back on re-blocks basecamp.exe on its next run - only re-enable after upgrading to a signed release. Windows 11 with the March/April 2026 updates can re-enable Smart App Control from Windows Security without a reset; on older builds re-enabling requires resetting Windows, so prefer the WSL2 option there.
+"@
+  }
+
+  if ("$sigStatus" -eq 'NotSigned') {
+    return @"
+$lead
+
+This build of basecamp.exe is not code-signed, and Windows Security or SmartScreen may have blocked or quarantined it. Check Windows Security > Protection history for a block or quarantine event, restore or allow basecamp.exe, then re-run the installer.
+"@
+  }
+
+  return @"
+$lead
+
+If Windows Security or antivirus interfered, check Windows Security > Protection history, restore or allow basecamp.exe, then re-run the installer.
+"@
+}
+
 function Get-PathEntries {
   param([string]$PathValue)
 
@@ -301,7 +352,7 @@ function Main {
 
     $binaryPath = Join-Path $extractDir 'basecamp.exe'
     if (-not (Test-Path $binaryPath)) {
-      Fail 'basecamp.exe not found in archive'
+      Fail 'basecamp.exe not found in archive. If Windows Security or antivirus removed it during extraction, check Windows Security > Protection history, restore it, and re-run the installer.'
     }
 
     $installedBinary = Join-Path $BinDir 'basecamp.exe'
@@ -312,12 +363,19 @@ function Main {
     try {
       Copy-Item -Force $binaryPath $installedBinary -ErrorAction Stop
     } catch {
-      Fail "Failed to install basecamp.exe. If it is in use, close any running 'basecamp' processes and re-run the installer. (Original error: $($_.Exception.Message))"
+      Fail "Failed to install basecamp.exe. If it is in use, close any running 'basecamp' processes and re-run the installer. If Windows Security quarantined it, check Windows Security > Protection history and restore it. (Original error: $($_.Exception.Message))"
     }
     Ensure-UserPath -Dir $BinDir
     Info "Installed basecamp to $installedBinary"
 
-    $installedVersion = & $installedBinary --version
+    # Smart App Control kills CreateProcess for unsigned executables, so the
+    # first run is where a block surfaces. Generic catch per the Copy-Item
+    # precedent above.
+    try {
+      $installedVersion = & $installedBinary --version
+    } catch {
+      Fail (Get-FirstRunFailureMessage -Binary $installedBinary -Reason $_.Exception.Message)
+    }
     Info "$installedVersion installed"
 
     $isInteractive = Test-InteractiveSession

@@ -3,8 +3,11 @@ package commands
 import (
 	"bytes"
 	"context"
+	"debug/pe"
+	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -527,6 +530,128 @@ func TestCheckLegacyInstall_NilWhenAlreadyMigrated(t *testing.T) {
 
 	check := checkLegacyInstall()
 	assert.Nil(t, check, "should return nil when .migrated marker exists")
+}
+
+// writeMinimalPE synthesizes the smallest PE32+ file debug/pe can parse:
+// DOS stub, PE signature, COFF header with zero sections, and a full
+// 16-entry data directory. securityDirSet controls whether the
+// IMAGE_DIRECTORY_ENTRY_SECURITY entry is populated (i.e. whether the file
+// claims a WIN_CERTIFICATE / Authenticode overlay).
+func writeMinimalPE(t *testing.T, securityDirSet bool) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	// DOS header: "MZ" magic, e_lfanew at 0x3C pointing at the PE signature.
+	dos := make([]byte, 64)
+	dos[0], dos[1] = 'M', 'Z'
+	binary.LittleEndian.PutUint32(dos[0x3C:], 64)
+	buf.Write(dos)
+
+	buf.WriteString("PE\x00\x00")
+
+	const optHeaderSize = 112 + 16*8 // PE32+ fixed fields + 16 data directories
+
+	fh := make([]byte, 20)
+	binary.LittleEndian.PutUint16(fh[0:], 0x8664)         // Machine: amd64
+	binary.LittleEndian.PutUint16(fh[2:], 0)              // NumberOfSections
+	binary.LittleEndian.PutUint16(fh[16:], optHeaderSize) // SizeOfOptionalHeader
+	buf.Write(fh)
+
+	oh := make([]byte, optHeaderSize)
+	binary.LittleEndian.PutUint16(oh[0:], 0x20b) // PE32+ magic
+	binary.LittleEndian.PutUint32(oh[108:], 16)  // NumberOfRvaAndSizes
+	if securityDirSet {
+		secOff := 112 + 8*pe.IMAGE_DIRECTORY_ENTRY_SECURITY
+		binary.LittleEndian.PutUint32(oh[secOff:], 0x2000) // file offset of WIN_CERTIFICATE
+		binary.LittleEndian.PutUint32(oh[secOff+4:], 8)    // overlay size
+	}
+	buf.Write(oh)
+
+	path := filepath.Join(t.TempDir(), "basecamp.exe")
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0o644))
+	return path
+}
+
+func TestHasAuthenticodeSignature_Unsigned(t *testing.T) {
+	signed, err := hasAuthenticodeSignature(writeMinimalPE(t, false))
+	require.NoError(t, err)
+	assert.False(t, signed)
+}
+
+func TestHasAuthenticodeSignature_Signed(t *testing.T) {
+	signed, err := hasAuthenticodeSignature(writeMinimalPE(t, true))
+	require.NoError(t, err)
+	assert.True(t, signed)
+}
+
+func TestHasAuthenticodeSignature_NotPE(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-pe")
+	require.NoError(t, os.WriteFile(path, []byte("plain text"), 0o644))
+
+	_, err := hasAuthenticodeSignature(path)
+	assert.Error(t, err)
+}
+
+func TestSignatureCheck_PassAndWarn(t *testing.T) {
+	pass := signatureCheck(true)
+	assert.Equal(t, "Binary Signature", pass.Name)
+	assert.Equal(t, "pass", pass.Status)
+	assert.Equal(t, "Authenticode signature present", pass.Message)
+	assert.Empty(t, pass.Hint)
+
+	warn := signatureCheck(false)
+	assert.Equal(t, "Binary Signature", warn.Name)
+	assert.Equal(t, "warn", warn.Status)
+	assert.Contains(t, warn.Message, "No Authenticode signature")
+	assert.Contains(t, warn.Hint, "Smart App Control")
+	assert.Contains(t, warn.Hint, "basecamp upgrade")
+}
+
+func TestCheckBinarySignature_NilOffWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exercises the off-Windows nil guard")
+	}
+	origVersion := version.Version
+	version.Version = "1.0.0"
+	defer func() { version.Version = origVersion }()
+
+	assert.Nil(t, checkBinarySignature())
+}
+
+func TestBinarySignatureCheck_NilForDevBuild(t *testing.T) {
+	origVersion := version.Version
+	version.Version = "dev"
+	defer func() { version.Version = origVersion }()
+
+	assert.Nil(t, binarySignatureCheck("windows"))
+}
+
+func TestBinarySignatureCheck_InspectErrorWarns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on the test binary not being a PE file")
+	}
+	origVersion := version.Version
+	version.Version = "1.0.0"
+	defer func() { version.Version = origVersion }()
+
+	// Forcing the windows path on a non-Windows host makes os.Executable
+	// return a non-PE binary, driving the inspect-error composition for real.
+	check := binarySignatureCheck("windows")
+	require.NotNil(t, check)
+	assert.Equal(t, "Binary Signature", check.Name)
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "Could not inspect executable")
+}
+
+func TestBuildDoctorBreadcrumbs_BinarySignatureWarn(t *testing.T) {
+	checks := []Check{
+		{Name: "Binary Signature", Status: "warn"},
+	}
+
+	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	require.Len(t, breadcrumbs, 1)
+	assert.Equal(t, "basecamp upgrade", breadcrumbs[0].Cmd)
 }
 
 func TestCheckClaudeIntegration(t *testing.T) {
