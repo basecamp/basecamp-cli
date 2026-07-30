@@ -1,0 +1,23 @@
+ACCOUNT-WIDE-LISTINGS.md
+  s_23603cda57bd1a::t_3a0e3ea86f5e53 298-304
+API-COVERAGE.md
+  s_23603cda57bd1a::t_e430ca9abea93a 28-36
+internal/commands/boost.go
+  s_23603cda57bd1a::t_53b72cb62eee62 91-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.17",
+  "base_commit_sha": "3522e608cb8279e396f3a6002e62af56aeb6707e",
+  "prompts": {},
+  "sessions": {
+    "s_23603cda57bd1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d5cc4a14-3c7e-4dda-8fdf-5345ee654868",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
