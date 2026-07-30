@@ -225,8 +225,10 @@ func TestAccountWideCollectStopsOnEmptyPage(t *testing.T) {
 }
 
 // A page can be non-empty at the top level while adding no items, when every
-// group on it is empty. Counting groups would call that progress and loop.
-func TestAccountWideCollectStopsWhenAPageAddsNoItems(t *testing.T) {
+// group on it happens to be empty. That is sparsity, not the end of the
+// listing, and the walk used to stop dead on it — silently dropping every
+// project on every later page.
+func TestAccountWideCollectContinuesPastAPageWithNoInnerItems(t *testing.T) {
 	pager := &collectPager[collectGroup]{pages: [][]collectGroup{
 		{{items: []int{1, 2}}},
 		{{items: nil}},
@@ -236,9 +238,66 @@ func TestAccountWideCollectStopsWhenAPageAddsNoItems(t *testing.T) {
 	items, capped, _, err := accountWideCollect(pager.fetch, countCollectGroups, 100)
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, countCollectGroups(items))
+	assert.Equal(t, 3, countCollectGroups(items), "the item on page 3 survives the empty group on page 2")
+	assert.Len(t, items, 3, "all three groups are kept")
+	assert.False(t, capped, "the listing ran out; it was not truncated")
+	assert.Equal(t, 4, pager.requests, "walks to the empty page that actually ends the listing")
+}
+
+// The empty page is the only content-based stop. Everything else — cap, server
+// total, page ceiling — is a bound we impose.
+func TestAccountWideCollectStopsOnlyOnATrulyEmptyPage(t *testing.T) {
+	pager := &collectPager[collectGroup]{pages: [][]collectGroup{
+		{{items: nil}},
+		{{items: nil}},
+		{{items: []int{1}}},
+	}}
+
+	items, _, _, err := accountWideCollect(pager.fetch, countCollectGroups, 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, countCollectGroups(items),
+		"two consecutive item-less pages must not hide the third")
+}
+
+// A server that never returns an empty page must not spin forever. The ceiling
+// is a runaway backstop, and hitting it is reported as capped rather than
+// passed off as a complete listing.
+func TestAccountWideCollectStopsAtThePageCeiling(t *testing.T) {
+	pager := &endlessPager{}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 1<<30)
+
+	require.NoError(t, err)
+	assert.True(t, capped, "the walk was cut short, so more may exist")
+	assert.Equal(t, accountWideMaxPages, pager.requests)
+	assert.Len(t, items, accountWideMaxPages)
+}
+
+// endlessPager always returns one item and never an empty page.
+type endlessPager struct{ requests int }
+
+func (p *endlessPager) fetch(int32) ([]int, basecamp.ListMeta, error) {
+	p.requests++
+	return []int{p.requests}, basecamp.ListMeta{}, nil
+}
+
+// An empty first page must render as [] rather than null: the SDK-backed --all
+// path returns an empty slice, and consumers iterating .data[] should not have
+// to handle both shapes.
+func TestAccountWideCollectReturnsEmptySliceNotNil(t *testing.T) {
+	pager := &collectPager[int]{pages: [][]int{{}}}
+
+	items, capped, _, err := accountWideCollect(pager.fetch, accountWideFlatCount[int], 100)
+
+	require.NoError(t, err)
+	require.NotNil(t, items, "a nil slice marshals to null")
+	assert.Empty(t, items)
 	assert.False(t, capped)
-	assert.Equal(t, 2, pager.requests, "the no-progress page ends the walk; page 3 is never asked for")
+
+	encoded, err := json.Marshal(items)
+	require.NoError(t, err)
+	assert.Equal(t, "[]", string(encoded))
 }
 
 // The helper deliberately does not trim: it stops at the first page boundary at

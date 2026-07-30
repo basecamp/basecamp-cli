@@ -603,7 +603,7 @@ on its own cannot name a question; --all-projects states that intent outright:
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = all)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of answers to fetch (0 = all for one question, 100 account-wide; use --all for every page)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all answers (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List check-in answers across every project (no question ID)")

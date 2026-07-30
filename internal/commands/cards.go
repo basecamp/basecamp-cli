@@ -106,7 +106,7 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&opts.column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
+	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all in one project, 100 account-wide; use --all for every page)")
 	cmd.Flags().BoolVar(&opts.all, "all", false, "Fetch all cards (no limit)")
 	cmd.Flags().IntVar(&opts.page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().StringVar(&opts.sortField, "sort", "", "Sort by field (title, created, updated, position, due)")

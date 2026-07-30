@@ -63,6 +63,12 @@ func accountWidePage(page int, all bool) (int32, error) {
 // project's items and capping the whole account are not the same promise.
 const accountWideDefaultLimit = 100
 
+// accountWideMaxPages bounds the walk so a server that never returns an empty
+// page cannot spin forever. It is a runaway backstop, not a tuning knob: the
+// default cap of 100 items is met within a handful of pages, and hitting this
+// ceiling is reported as a capped result rather than a complete one.
+const accountWideMaxPages = 1000
+
 // accountWideCollect walks positive pages until it has collected at least limit
 // items, which is far cheaper than fetching every page only to throw most of it
 // away. It is the shared engine behind every bounded account-wide listing.
@@ -72,8 +78,8 @@ const accountWideDefaultLimit = 100
 // the number of items nested inside the groups, since capping groups would drop
 // whole projects from the listing.
 //
-// The walk stops on the first of: an empty page, a page that adds no items,
-// reaching the cap, or exhausting the server's reported total.
+// The walk stops on the first of: an empty page, reaching the cap, exhausting
+// the server's reported total, or the page ceiling.
 //
 // Two things callers must know:
 //
@@ -93,13 +99,13 @@ func accountWideCollect[T any](
 	count func([]T) int,
 	limit int,
 ) ([]T, bool, basecamp.ListMeta, error) {
-	var (
-		items     []T
-		meta      basecamp.ListMeta
-		collected int
-	)
+	// Non-nil so an empty first page renders as [] rather than null. The
+	// SDK-backed --all path returns an empty slice, and consumers iterating
+	// .data[] should not have to handle both.
+	items := make([]T, 0)
+	var meta basecamp.ListMeta
 
-	for page := int32(1); ; page++ {
+	for page := int32(1); page <= accountWideMaxPages; page++ {
 		pageItems, pageMeta, err := fetch(page)
 		if err != nil {
 			return nil, false, basecamp.ListMeta{}, err
@@ -107,19 +113,16 @@ func accountWideCollect[T any](
 		if page == 1 {
 			meta = pageMeta
 		}
+		// An empty page is the server saying the listing has ended. It is the
+		// only content-based stop: a page carrying groups that happen to hold
+		// no items is sparse, not terminal, and later pages may still have
+		// results. Stopping on one used to drop every project after it.
 		if len(pageItems) == 0 {
 			return items, false, meta, nil
 		}
 
 		items = append(items, pageItems...)
-
-		// A page that carries only empty groups makes no progress toward the
-		// cap; stop rather than request the same page shape forever.
-		n := count(items)
-		if n == collected {
-			return items, false, meta, nil
-		}
-		collected = n
+		collected := count(items)
 
 		// Exhaustion is tested before the cap, and against the first page's
 		// total rather than this page's.
@@ -141,6 +144,11 @@ func accountWideCollect[T any](
 			return items, true, meta, nil
 		}
 	}
+
+	// Ran out of page budget with the server still handing back items. Report
+	// it as capped: whatever remains is unreached, and saying so beats
+	// presenting a bounded walk as a complete listing.
+	return items, true, meta, nil
 }
 
 // accountWideFlatCount is the count function for the flat listings, where an
@@ -156,7 +164,10 @@ func accountWideFlatCount[T any](items []T) int { return len(items) }
 // early by design, so on the feeds that withhold X-Total-Count the count is all
 // there is to say.
 func accountWideCapNotice(capped bool, meta basecamp.ListMeta, count int, plural string) string {
-	if !capped || meta.TotalCount > count {
+	// Any server-reported total wins, not just one larger than the count.
+	// When the total equals or trails the count there is demonstrably nothing
+	// more to show, and "more may exist" would contradict the server.
+	if !capped || meta.TotalCount > 0 {
 		return ""
 	}
 	return fmt.Sprintf(
@@ -248,7 +259,9 @@ func accountWideRespOpts(count int, singular, plural string, meta basecamp.ListM
 	if meta.TotalCount > count {
 		notice := fmt.Sprintf("Showing %d of %d results", count, meta.TotalCount)
 		if explicitLimit {
-			notice += " (raise or drop --limit for more)"
+			// Not "drop --limit": with an explicit limit above the default,
+			// dropping it falls back to 100 and returns fewer.
+			notice += " (raise --limit, or use --all for the complete list)"
 		} else {
 			notice += " (use --all for the complete list)"
 		}

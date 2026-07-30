@@ -65,7 +65,7 @@ override a configured one — lists forwards across every accessible project.`,
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of forwards to fetch (0 = all in one project, 100 account-wide; use --all for every page)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all forwards (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List forwards across every project")
