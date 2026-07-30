@@ -1,0 +1,77 @@
+e2e/installer.bats
+  s_cf2f80fa76eb06::t_97d7374f2043f9 278-393
+README.md
+  s_cf2f80fa76eb06::t_e3973eb83f019a 24-25
+  s_cf2f80fa76eb06::t_0ecbda9c04d7cc 209-238
+.goreleaser.yaml
+  s_cf2f80fa76eb06::t_ec70c0b72b6cbb 95
+  s_cf2f80fa76eb06::t_13432d54d502fe 94
+  s_cf2f80fa76eb06::t_94e392e8fdacae 10-11
+  s_cf2f80fa76eb06::t_9060f973d07cd1 40-47
+  s_cf2f80fa76eb06::t_eb3b4df1b6fbf2 12-16
+  s_cf2f80fa76eb06::t_c731d4d52be292 142
+  s_cf2f80fa76eb06::t_1f8255ddad23cd 143
+scripts/install.sh
+  s_cf2f80fa76eb06::t_e3bdb690a8d9dc 321-324,329-343
+.github/workflows/release.yml
+  s_cf2f80fa76eb06::t_e0bb7d6341167b 396-473
+  s_cf2f80fa76eb06::t_32cf3366e0bd25 231-273
+  s_cf2f80fa76eb06::t_9a1a466310a72f 292-299,308-310
+  s_397e2065e2a5c3::t_5f3523475db378 311
+.gitignore
+  s_cf2f80fa76eb06::t_945e5977b8037e 16
+Makefile
+  s_cf2f80fa76eb06::t_9404e7aef75c80 355
+e2e/sign_windows.bats
+  s_cf2f80fa76eb06::t_0a236485b12621 1-145
+scripts/manage-release-env.sh
+  s_cf2f80fa76eb06::t_1fddb66e258c84 37-39
+scripts/sign-windows.sh
+  s_cf2f80fa76eb06::t_d9cf492f3265c4 1-55
+internal/commands/doctor.go
+  s_cf2f80fa76eb06::t_992c77136fda86 136-141,144,149,152,156
+  s_cf2f80fa76eb06::t_daa92c983d2317 7
+  s_cf2f80fa76eb06::t_8f33b0f892b091 83
+  s_cf2f80fa76eb06::t_36230ee45f5e39 182
+  s_cf2f80fa76eb06::t_bc82d0a574de26 200,203,206,211
+  s_cf2f80fa76eb06::t_7ae6939277b75b 171
+  s_cf2f80fa76eb06::t_3c428b8051d4b0 264-343
+  s_cf2f80fa76eb06::t_1541c825a10a47 1067-1072
+RELEASING.md
+  s_cf2f80fa76eb06::t_2d1e18b67c5738 99-124
+  s_cf2f80fa76eb06::t_dd53ff0f5d107d 35-36
+install.md
+  s_cf2f80fa76eb06::t_e40fce1ff00879 194-231
+  s_cf2f80fa76eb06::t_72413522dd2f8c 40-41
+internal/commands/doctor_test.go
+  s_cf2f80fa76eb06::t_45fe528ee0328e 6-7,10
+  s_cf2f80fa76eb06::t_a9033274c4d96e 535-656
+scripts/install.ps1
+  s_cf2f80fa76eb06::t_6872002d25deba 146-196
+  s_cf2f80fa76eb06::t_0f03e2577cd7aa 366,371-378
+  s_cf2f80fa76eb06::t_7b5aac31777f11 355
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "84cf74b9d53bb058720a2bf000693d04c56c03f7",
+  "prompts": {},
+  "sessions": {
+    "s_397e2065e2a5c3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "91dd0021-b9f4-456d-879a-f47af66f4465",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_cf2f80fa76eb06": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46bfb387-e4bb-409f-bad7-2ac8c3ca82ab",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
