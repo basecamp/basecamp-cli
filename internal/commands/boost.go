@@ -85,7 +85,12 @@ response, so there is nothing to page through either.`,
 func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, eventID string) error {
 	// Boosts hang off a single recording, so only an item ID can scope this
 	// listing — a project cannot, and there is no account-wide equivalent to
-	// fall back to.
+	// fall back to: BC5 withdrew /boosts.json (basecamp/bc3#12464) because its
+	// cost scaled with accessible recordings rather than with boosts.
+	//
+	// That withdrawal is temporary — the feed is expected back on a
+	// boost-proportional query (basecamp/bc3#12463). When it returns, this is
+	// where the account-wide branch goes back, along with --all-projects.
 	recordingID, urlProjectID := extractWithProject(recording)
 
 	projectID := project

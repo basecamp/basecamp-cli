@@ -259,7 +259,9 @@ func TestBoostListWithIDStaysItemScoped(t *testing.T) {
 
 // Boosts hang off a single item, so an ID is required. The account-wide feed
 // that used to answer a bare `boost list` was an unlinked easter egg on the
-// web side and has been withdrawn, so there is nothing to fall back to.
+// web side and BC5 has withdrawn it (basecamp/bc3#12464), so there is nothing
+// to fall back to. If it returns (basecamp/bc3#12463), this test is the one
+// that says so.
 //
 // A machine-output invocation gets a structured usage error; an interactive one
 // gets help. Either way the point is that nothing is fetched — silently listing

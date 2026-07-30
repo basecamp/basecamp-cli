@@ -271,24 +271,40 @@ behavior change and belongs in the release notes.
 
 There is **no account-wide boost listing.** `boost list` requires an item ID.
 
-The `/boosts.json` aggregate this section used to document was an easter egg:
-unlinked from the Basecamp web UI, and served by a query that spent ~44s in
-MySQL on every page regardless of depth (basecamp/bc3#12458 has the numbers).
-Rather than build a CLI contract on top of pathological database performance,
-the endpoint is being removed server-side, so the CLI stops calling it.
+The `/boosts.json` aggregate this section used to document was an easter egg —
+unlinked from the Basecamp web UI, ~2,250 requests per 30 days globally, and
+this CLI its only known consumer. BC5 has **withdrawn it** (bc3#12464); the
+path 404s on both the web and API hosts once that deploys, so the CLI stops
+calling it.
+
+The cause, from BC3's own diagnosis rather than inference: the query's cost is
+proportional to the account's **accessible recordings, not its boosts**. That
+is why it measured ~44s on the largest account and why page 40 cost the same as
+page 1 (bc3#12458 has the timings).
+
+**The withdrawal is temporary.** The feed is expected back on a
+boost-proportional query, via a `boosts.bucket_id` denormalization, with the
+design record in bc3#12463. Public notice: basecamp/bc-api#427. So this section
+describes a listing that is gone for now, not one that was judged a bad idea.
 
 What that means here:
 
 - `boost list` takes an item ID, and rejecting a bare invocation is the honest
-  answer rather than a fallback to something slower.
+  answer rather than a fallback to an endpoint that will 404.
 - It carries no `--all-projects`, `--limit`, `--page`, or `--all`. An item's
   boosts arrive in one unpaginated response, and the SDK documents
   `BoostListOptions.Page` as not honoring a page number, so there would be
   nothing for those flags to address even if the aggregate had survived.
-- The SDK still exposes `Everything().Boosts()`. The CLI simply does not call
-  it; removing it is the SDK's decision to make, not this repo's.
+- **The SDK keeps `Everything().Boosts()` on purpose.** Removing a generated
+  operation for a temporary withdrawal would churn every generated client
+  twice, so the operation stays and simply 404s until reintroduction. The CLI
+  not calling it is this repo's decision; the operation's existence is not.
 
-Seven commands list account-wide, not eight.
+Everything else is untouched: the other Everything feeds, the bucket-scoped
+boosts endpoints, and the `boosts_count`/`boosts_url` recording attributes.
+
+Seven commands list account-wide, not eight — until the feed returns, at which
+point this is the section to revisit.
 
 #### The `files list` filter exception
 
