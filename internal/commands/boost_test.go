@@ -215,25 +215,7 @@ func TestBoostCreateAcceptsMaxContent(t *testing.T) {
 	assert.Equal(t, "POST", transport.capturedMethod)
 }
 
-// --- account-wide boost listing ---
-
-// accountWideBoostsRoute serves the /boosts.json aggregate feed.
-func accountWideBoostsRoute() stubRoute {
-	return stubRoute{
-		method: http.MethodGet,
-		path:   "/99999/boosts.json",
-		status: http.StatusOK,
-		body:   accountWideBoostsBody,
-		// --limit walks positive pages; the fixture needs an end so the walk
-		// can stop somewhere other than the cap.
-		pages: []string{accountWideBoostsBody},
-	}
-}
-
-const accountWideBoostsBody = `[{"id":1,"content":"🎉","created_at":"2024-01-01T00:00:00Z",
-	"booster":{"id":10,"name":"Alice"},
-	"recording":{"id":456,"title":"Ship it","type":"Todo",
-		"bucket":{"id":123,"name":"Test Project","type":"Project"}}}]`
+// --- item-scoped boost listing ---
 
 // recordingBoostsRoute serves the item-scoped boost listing.
 func recordingBoostsRoute() stubRoute {
@@ -249,7 +231,7 @@ func recordingBoostsRoute() stubRoute {
 func setupBoostListTest(t *testing.T, buf *bytes.Buffer) (*cobra.Command, *appctx.App, *recordingTransport) {
 	t.Helper()
 
-	app, transport := setupRecordingTestApp(t, projectsRoute(), accountWideBoostsRoute(), recordingBoostsRoute())
+	app, transport := setupRecordingTestApp(t, projectsRoute(), recordingBoostsRoute())
 	if buf != nil {
 		app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
 	}
@@ -266,8 +248,8 @@ func requireBoostUsageError(t *testing.T, err error, want string) {
 	assert.Contains(t, e.Message, want)
 }
 
-// TestBoostListWithIDStaysItemScoped verifies that passing an ID still lists
-// that item's boosts, unchanged by the account-wide path.
+// TestBoostListWithIDStaysItemScoped verifies that passing an ID lists that
+// item's boosts.
 func TestBoostListWithIDStaysItemScoped(t *testing.T) {
 	cmd, app, transport := setupBoostListTest(t, nil)
 
@@ -275,219 +257,69 @@ func TestBoostListWithIDStaysItemScoped(t *testing.T) {
 	assert.Equal(t, "/99999/recordings/456/boosts.json", transport.last(t).Path)
 }
 
-// TestBoostListWithoutIDListsAccountWide verifies that a bare list with no
-// project anywhere reaches the account-wide feed instead of prompting.
-func TestBoostListWithoutIDListsAccountWide(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
+// Boosts hang off a single item, so an ID is required. The account-wide feed
+// that used to answer a bare `boost list` was an unlinked easter egg on the
+// web side and has been withdrawn, so there is nothing to fall back to.
+//
+// A machine-output invocation gets a structured usage error; an interactive one
+// gets help. Either way the point is that nothing is fetched — silently listing
+// something else is the failure mode worth pinning.
+func TestBoostListWithoutIDAsksForAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	buf := &bytes.Buffer{}
+	cmd, app, transport := setupBoostListTest(t, buf)
 
-	require.NoError(t, executeBoostCommand(cmd, app, "list"))
+	err := executeBoostCommand(cmd, app, "list")
 
-	last := transport.last(t)
-	assert.Equal(t, "/99999/boosts.json", last.Path)
-	assert.Equal(t, "page=1", last.Query, "the default is exactly the first page — this feed is slow enough that walking it by default is not viable")
+	requireBoostUsageError(t, err, "<id|url> required")
+	assert.Empty(t, transport.recorded(), "a missing argument must not reach the API")
 }
 
-// The four account-wide modes are exhaustive and each maps to exactly one fetch
-// shape. Boost keeps a first-page default because /boosts.json?page=1 alone
-// measured 93s on a large account — but the default being an exception does not
-// make the flags one, and --limit walks here exactly as it does everywhere else.
-func TestBoostListAccountWideFourModes(t *testing.T) {
-	cases := []struct {
-		name    string
-		args    []string
-		queries []string
-	}{
-		{"no pagination flag is exactly page 1", nil, []string{"page=1"}},
-		{"--page N is exactly page N", []string{"--page", "3"}, []string{"page=3"}},
-		{"--limit walks positive pages", []string{"--limit", "5"}, []string{"page=1", "page=2"}},
-		{"--all is the full traversal", []string{"--all"}, []string{""}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd, app, transport := setupBoostListTest(t, nil)
-
-			require.NoError(t, executeBoostCommand(cmd, app, append([]string{"list"}, tc.args...)...))
-			assert.Equal(t, tc.queries, transport.queriesFor("/99999/boosts.json"))
-		})
-	}
-}
-
-// "Showing first page" is simply false for --page 2, so the notice is
-// mode-specific. Every mode keeps the total: with --page and --all registered
-// the rest of the feed is genuinely reachable, just slow, so suppressing it
-// would understate what exists.
-func TestBoostListAccountWideNoticeIsModeSpecific(t *testing.T) {
-	assert.Equal(t,
-		"Showing first page, 1 of 40; additional pages may be slow on large accounts",
-		boostAccountWideNotice(boostListFirstPage, 0, 1, 40))
-	assert.Equal(t,
-		"Showing page 2, 1 of 40; additional pages may be slow on large accounts",
-		boostAccountWideNotice(boostListPage, 2, 1, 40))
-	assert.Equal(t,
-		"Showing 1 of 40 results (raise or drop --limit for more)",
-		boostAccountWideNotice(boostListLimit, 0, 1, 40))
-	assert.Empty(t, boostAccountWideNotice(boostListAll, 0, 40, 40),
-		"a complete traversal has nothing to warn about")
-	assert.Empty(t, boostAccountWideNotice(boostListFirstPage, 0, 40, 40),
-		"when the first page is the whole listing there are no additional pages to be slow")
-}
-
-// TestBoostListIgnoresConfiguredProject verifies that a configured project —
-// which cannot scope a per-item listing — is ignored rather than errored on.
-func TestBoostListIgnoresConfiguredProject(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
+// A configured project cannot scope a per-item listing, so it must not be
+// silently promoted into one.
+func TestBoostListConfiguredProjectStillNeedsAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	buf := &bytes.Buffer{}
+	cmd, app, transport := setupBoostListTest(t, buf)
 	app.Config.ProjectID = "123"
 
-	require.NoError(t, executeBoostCommand(cmd, app, "list"))
-	assert.Equal(t, "/99999/boosts.json", transport.last(t).Path)
-}
+	err := executeBoostCommand(cmd, app, "list")
 
-// TestBoostListAllProjectsOverridesConfiguredProject verifies that
-// --all-projects pins account-wide intent over ambient config.
-func TestBoostListAllProjectsOverridesConfiguredProject(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
-	app.Config.ProjectID = "123"
-
-	require.NoError(t, executeBoostCommand(cmd, app, "list", "--all-projects"))
-	assert.Equal(t, "/99999/boosts.json", transport.last(t).Path)
-}
-
-// TestBoostListExplicitProjectWithoutIDAsksForID verifies that an explicit
-// project without an ID is a usage error — through --project, its --in alias,
-// and the root-level form that lands in app.Flags.Project.
-func TestBoostListExplicitProjectWithoutIDAsksForID(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "--project", "123"),
-		"--project alone cannot list them")
-
-	cmd, app, _ = setupBoostListTest(t, nil)
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "--in", "123"),
-		"--project alone cannot list them")
-
-	cmd, app, _ = setupBoostListTest(t, nil)
-	app.Flags.Project = "123"
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list"),
-		"--project alone cannot list them")
-
-	assert.Empty(t, transport.recorded(), "a usage error must not reach the API")
-}
-
-// TestBoostListExplicitProjectWithAllProjectsConflicts verifies that
-// --all-projects conflicts with an explicitly named project.
-func TestBoostListExplicitProjectWithAllProjectsConflicts(t *testing.T) {
-	cmd, app, _ := setupBoostListTest(t, nil)
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "--project", "123", "--all-projects"),
-		"Cannot combine --all-projects with --project")
-
-	cmd, app, _ = setupBoostListTest(t, nil)
-	app.Flags.Project = "123"
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "--all-projects"),
-		"Cannot combine --all-projects with --project")
-}
-
-// TestBoostListIDWithAllProjectsConflicts verifies that an item ID and
-// --all-projects name two different listings.
-func TestBoostListIDWithAllProjectsConflicts(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
-
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "456", "--all-projects"),
-		"Cannot combine --all-projects with an item ID")
+	requireBoostUsageError(t, err, "<id|url> required")
 	assert.Empty(t, transport.recorded())
 }
 
-// TestBoostListAccountWideRejectsEvent verifies that --event, which names an
-// event inside one item, is rejected rather than silently ignored.
-func TestBoostListAccountWideRejectsEvent(t *testing.T) {
-	cmd, app, transport := setupBoostListTest(t, nil)
-
-	requireBoostUsageError(t, executeBoostCommand(cmd, app, "list", "--event", "5"), "--event")
-	assert.Empty(t, transport.recorded())
-}
-
-// TestBoostListHasNoPaginationFlags verifies that the account-wide path did not
-// grow a parallel pagination surface.
-// The account-wide boost feed is slow, not unaddressable. Keeping it flagless
-// meant the only reachable data was page 1; the flags do not make it fast, they
-// make the rest of it reachable at all.
-func TestBoostListHasPaginationFlags(t *testing.T) {
+// The pagination flags existed only for the account-wide feed. With that gone
+// they must not linger: an item's boosts arrive in one unpaginated response,
+// and the SDK documents BoostListOptions.Page as not honoring a page number.
+func TestBoostListHasNoPaginationFlags(t *testing.T) {
 	list, _, err := NewBoostsCmd().Find([]string{"list"})
 	require.NoError(t, err)
 
-	for _, name := range []string{"limit", "page", "all"} {
-		assert.NotNil(t, list.Flags().Lookup(name), "boost list must carry --%s", name)
-	}
-	assert.Equal(t, "n", list.Flags().Lookup("limit").Shorthand)
-}
-
-// An item's boosts arrive in one unpaginated response, and the SDK documents
-// BoostListOptions.Page as not honoring the page number at all — setting Page=2
-// does not fetch page 2. Rejecting is honest; implementing would lie.
-func TestBoostListItemScopedRejectsPaginationFlags(t *testing.T) {
-	for _, flag := range []string{"--limit=5", "--page=2", "--all"} {
-		t.Run(flag, func(t *testing.T) {
-			buf := &bytes.Buffer{}
-			cmd, app, _ := setupBoostListTest(t, buf)
-
-			err := executeBoostCommand(cmd, app, "list", "789", "--project", "123", flag)
-
-			require.Error(t, err, "an item's boosts have no page to address")
-			assert.Contains(t, err.Error(), "does not apply to an item's boosts")
-		})
+	for _, name := range []string{"limit", "page", "all", "all-projects"} {
+		assert.Nil(t, list.Flags().Lookup(name), "boost list must not carry --%s", name)
 	}
 }
 
-// TestBoostListAccountWideMachineOutputKeepsPayload verifies that machine
-// formats get the raw feed, nesting intact.
-func TestBoostListAccountWideMachineOutputKeepsPayload(t *testing.T) {
+// --event names an event inside the item, so it still needs that item's ID.
+func TestBoostListEventWithoutIDAsksForAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
 	buf := &bytes.Buffer{}
-	cmd, app, _ := setupBoostListTest(t, buf)
+	cmd, app, transport := setupBoostListTest(t, buf)
 
-	require.NoError(t, executeBoostCommand(cmd, app, "list"))
+	err := executeBoostCommand(cmd, app, "list", "--event", "999")
 
-	var envelope struct {
-		Data []struct {
-			ID        int64 `json:"id"`
-			Recording *struct {
-				Title string `json:"title"`
-			} `json:"recording"`
-		} `json:"data"`
-		Summary string `json:"summary"`
-	}
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
-	require.Len(t, envelope.Data, 1)
-	require.NotNil(t, envelope.Data[0].Recording)
-	assert.Equal(t, "Ship it", envelope.Data[0].Recording.Title)
-	assert.Equal(t, "1 boost across all projects", envelope.Summary)
-}
-
-// TestBoostListAccountWideStyledOutputFlattens verifies that styled output gets
-// flat rows rather than a nested recording cell.
-func TestBoostListAccountWideStyledOutputFlattens(t *testing.T) {
-	buf := &bytes.Buffer{}
-	cmd, app, _ := setupBoostListTest(t, nil)
-	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: buf})
-
-	require.NoError(t, executeBoostCommand(cmd, app, "list"))
-
-	rendered := buf.String()
-	assert.Contains(t, rendered, "Test Project")
-	assert.Contains(t, rendered, "Alice")
-	assert.Contains(t, rendered, "Ship it")
-	assert.NotContains(t, rendered, "Recording", "the nested recording must be flattened away, not rendered as a cell")
-}
-
-// TestFlattenAccountWideBoostsNilPointers verifies that a boost missing its
-// booster and recording still yields a row with every column.
-func TestFlattenAccountWideBoostsNilPointers(t *testing.T) {
-	rows := flattenAccountWideBoosts([]basecamp.EverythingBoost{{ID: 7, Content: "👍"}})
-
-	require.Len(t, rows, 1)
-	assert.Equal(t, int64(7), rows[0]["id"])
-	assert.Equal(t, "👍", rows[0]["content"])
-	assert.Equal(t, "", rows[0]["booster"])
-	assert.Equal(t, "", rows[0]["project"])
-	assert.Equal(t, "", rows[0]["title"])
-	assert.Equal(t, "", rows[0]["type"])
+	requireBoostUsageError(t, err, "<id|url> required")
+	assert.Empty(t, transport.recorded())
 }
 
 // mockBoostNilBoosterTransport returns a boost with no booster field.

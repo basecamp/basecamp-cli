@@ -1,8 +1,7 @@
-
 ARG basecamp assign 00 <id>
 ARG basecamp assign 00 <todo_id>
-ARG basecamp boost list 00 <id|url>
-ARG basecamp boosts list 00 <id|url>
+ARG basecamp boost list 00 [id|url]
+ARG basecamp boosts list 00 [id|url]
 ARG basecamp card 00 <title>
 ARG basecamp card 01 [body]
 ARG basecamp card move 00 <id|url>
@@ -134,6 +133,8 @@ CMD basecamp uploads vault list
 CMD basecamp uploads vaults
 CMD basecamp uploads vaults create
 CMD basecamp uploads vaults list
+FLAG basecamp boost list --all-projects type=bool
+FLAG basecamp boosts list --all-projects type=bool
 FLAG basecamp campfire --account type=string
 FLAG basecamp campfire --agent type=bool
 FLAG basecamp campfire --cache-dir type=string

@@ -21,6 +21,9 @@ import (
 // The root --todolist is a global, so it reaches every account-wide listing
 // whether or not the command has any notion of a todolist. I3 lists it among
 // the scope-child flags that must be rejected by name rather than dropped.
+//
+// boost list is absent: it has no account-wide listing to scope, so a bare
+// invocation asks for an item ID before any flag rejection is reached.
 func TestAccountWideListingsRejectRootTodolist(t *testing.T) {
 	cases := []struct {
 		name string
@@ -29,7 +32,6 @@ func TestAccountWideListingsRejectRootTodolist(t *testing.T) {
 	}{
 		{"messages", NewMessagesCmd, []string{"list"}},
 		{"comments", NewCommentsCmd, []string{"list"}},
-		{"boost", NewBoostsCmd, []string{"list"}},
 		{"forwards", NewForwardsCmd, []string{"list"}},
 		{"checkins", NewCheckinsCmd, []string{"answers"}},
 		{"files", NewFilesCmd, []string{"list"}},

@@ -22,7 +22,6 @@ All 17 methods, and the invocation that reaches each.
 | `comments list --all-projects` | `Comments` | `.Recordings` | yes |
 | `checkins answers --all-projects` | `Checkins` | `.Recordings` | yes |
 | `forwards list --all-projects` | `Forwards` | `.Recordings` | yes |
-| `boost list --all-projects` | `Boosts` | `.Boosts` | yes |
 | `files list --all-projects` | `Files` | `.Files` | yes |
 | `todos list --all-projects` | `OpenTodos` | `.Groups` | yes |
 | `todos list --all-projects --status completed` | `CompletedTodos` | `.Groups` | yes |
@@ -71,10 +70,10 @@ ambient config.
 
 #### Per-item dispatch
 
-The per-item groups (`comments`, `boost`, `checkins answers`) list the children
-of one recording, so a project alone cannot produce a listing — only an item ID
-can. Their dispatch is therefore its own truth table, and it overrides the
-general precedence above:
+The per-item groups (`comments`, `checkins answers`) list the children of one
+recording, so a project alone cannot produce a listing — only an item ID can.
+Their dispatch is therefore its own truth table, and it overrides the general
+precedence above:
 
 | ID/URL | Explicit project | `--all-projects` | Result |
 |---|---|---|---|
@@ -86,8 +85,13 @@ general precedence above:
 | absent | absent | present | account-wide, intent pinned |
 
 The fourth row is the deliberate exception to "a configured project selects
-project scope": for these three commands a configured project is not a scope
-that can be honored, so it is ignored rather than turned into an error.
+project scope": for these two commands a configured project is not a scope that
+can be honored, so it is ignored rather than turned into an error.
+
+`boost list` is per-item in the same way but has **no account-wide row at all**
+— the aggregate behind it is being withdrawn server-side. Every absent-ID case
+asks for an ID, and it carries no `--all-projects`. See "`boost list` —
+withdrawn" under I5.
 
 ### I3 — No flag is silently ignored
 
@@ -112,8 +116,9 @@ sake.
 
 Pagination is the one place where "reuse only" turned out to be wrong. A command
 with no `--limit`/`--page`/`--all` has no way to recover from a server error
-mid-crawl and no way to reach past a bounded default, so `boost list` and bare
-`files list` gained all three — see I5.
+mid-crawl and no way to reach past a bounded default, so bare `files list`
+gained all three — see I5. (`boost list` gained them too, then lost them along
+with the account-wide boost feed itself — see below.)
 
 #### Endpoint selectors
 
@@ -123,7 +128,7 @@ flags added by this work — anything not listed here is reuse:
 
 | Command | New flag | Selects | Scope |
 |---|---|---|---|
-| all eight | `--all-projects` | account-wide | — |
+| all seven | `--all-projects` | account-wide | — |
 | `todos list` | `--unassigned` | `UnassignedTodos` | account-wide only |
 | `todos list` | `--no-due-date` | `NoDueDateTodos` | account-wide only |
 | `cards list` | `--status` (only `completed`) | `CompletedCards` | account-wide only |
@@ -133,7 +138,6 @@ flags added by this work — anything not listed here is reuse:
 | `cards list` | `--overdue` | `OverdueCards` | account-wide only |
 | `files list` | `--kind`, `--person` | filters on `Files` | account-wide only — see I5 |
 | `files list` | `--limit`/`-n`, `--page`, `--all` | pagination on `Files` | account-wide only — see I5 |
-| `boost list` | `--limit`/`-n`, `--page`, `--all` | pagination on `Boosts` | account-wide only — see I5 |
 
 **Account-wide only** means exactly what it means for the `files list` filters:
 the project-scoped path has no equivalent, so passing one with a project in
@@ -150,7 +154,7 @@ pair.
 **Sorting flags are reused where they exist and never added.** Verified current
 state: among these commands only `messages list`, `todos list`, and `cards list`
 expose `--sort`/`--reverse`. `comments list`, `checkins answers`,
-`forwards list`, `boost list`, and bare `files list` expose neither and gain
+`forwards list`, and bare `files list` expose neither and gain
 neither — an unsorted account-wide feed is the honest result, not a gap to
 paper over.
 
@@ -193,8 +197,8 @@ to it":
 2. **The overdue endpoints** (`todos list --overdue`, `cards list --overdue`)
    are unpaginated — one request returns everything — so `--limit` trims
    locally. There is no walk to bound.
-3. **`boost list`** keeps a first-page default rather than the cap. Its flags
-   still walk normally; only the default differs. See below.
+3. ~~**`boost list`** keeps a first-page default.~~ Withdrawn — there is no
+   account-wide boost listing at all now. See below.
 
 #### Per-command defaults
 
@@ -218,7 +222,6 @@ rows that differ for stated reasons. `--all` is how you ask for the account.
 | `files list` | cap 100 | **changed** from "all pages" |
 | `todos list --overdue` | cap 100 | unpaginated endpoint; accepts `--all`, rejects `--page` |
 | `cards list --overdue` | cap 100 | **changed** from uncapped; same rules as above |
-| `boost list` | **first page only** | the explicit exception — see below |
 
 Project-scoped defaults are untouched throughout.
 
@@ -249,10 +252,10 @@ behavior change and belongs in the release notes.
   - **Project-scoped `files list`** rejects `--limit`/`--page`/`--all`. That
     path passes `nil` to `Vaults().List`, `Uploads().List`, and
     `Documents().List` — three unpaginated calls with nowhere to put a page.
-  - **Item-scoped `boost list <id>` and `--event`** reject all three. The SDK
-    documents `BoostListOptions.Page` as not honoring the page number at all:
-    setting `Page=2` does not fetch page 2. Rejecting is honest; implementing
-    would lie.
+  - **`boost list`** carries none of the three at all. The SDK documents
+    `BoostListOptions.Page` as not honoring the page number — setting `Page=2`
+    does not fetch page 2 — and the account-wide feed they were added for is
+    gone.
 - **`--limit N` on grouped todo/card responses counts inner todos/cards, not
   outer project groups.** Truncating groups would silently drop whole projects.
 - **`Meta.TotalCount` counts groups, not items,** for the grouped responses.
@@ -264,81 +267,28 @@ behavior change and belongs in the release notes.
   crawl they did not ask for, and that is the same no-silent-flags defect I3
   names. `--all` is the spelling for every page.
 
-#### `boost list` — the default exception, and its server-side cause
+#### `boost list` — withdrawn
 
-`boost list` is the one account-wide listing exempt from the cap-100 row. It
-returns **exactly the first page** when no pagination flag is given.
+There is **no account-wide boost listing.** `boost list` requires an item ID.
 
-The reason is measured, not stylistic: `/boosts.json?page=1` — one page, no
-crawling — takes **~44s** against a large production account. (An earlier
-figure of 93s was the client giving up: three 30s attempts plus backoff.) A
-default that walked toward 100 items would multiply an already unacceptable
-wait.
+The `/boosts.json` aggregate this section used to document was an easter egg:
+unlinked from the Basecamp web UI, and served by a query that spent ~44s in
+MySQL on every page regardless of depth (basecamp/bc3#12458 has the numbers).
+Rather than build a CLI contract on top of pathological database performance,
+the endpoint is being removed server-side, so the CLI stops calling it.
 
-**The exemption covers the default only.** Once a flag is passed, `boost list`
-behaves like every other bounded listing. The four modes are exhaustive:
+What that means here:
 
-| Invocation | Fetch behavior |
-|---|---|
-| no pagination flag | exactly page 1 — one request, no walk |
-| `--page N` | exactly page N — one request |
-| `--limit N` | bounded walk over positive page numbers, then exact trim |
-| `--all` | full traversal (page 0 / omit `page=`) |
+- `boost list` takes an item ID, and rejecting a bare invocation is the honest
+  answer rather than a fallback to something slower.
+- It carries no `--all-projects`, `--limit`, `--page`, or `--all`. An item's
+  boosts arrive in one unpaginated response, and the SDK documents
+  `BoostListOptions.Page` as not honoring a page number, so there would be
+  nothing for those flags to address even if the aggregate had survived.
+- The SDK still exposes `Everything().Boosts()`. The CLI simply does not call
+  it; removing it is the SDK's decision to make, not this repo's.
 
-`--limit` walks **positive** pages (1, 2, 3, …). It must never fall back to the
-page-0 full-crawl form, which is the behavior this whole section exists to
-remove.
-
-**Notices are mode-specific.** "Showing first page" is false for `--page 2`, so
-a single fixed string would state something untrue. Every mode keeps the
-account-wide total: now that `--page` and `--all` make the rest of the feed
-genuinely reachable — just slow — suppressing the total would understate what
-exists.
-
-| Mode | Notice |
-|---|---|
-| default | `Showing first page, N of M; additional pages may be slow on large accounts` |
-| `--page P` | `Showing page P, N of M; additional pages may be slow on large accounts` |
-| `--limit` | the standard truncation notice used by the other bounded listings |
-| `--all` | none — the traversal is complete |
-
-When the response is the whole listing there is no notice at all; there are no
-additional pages to be slow.
-
-**The slowness is server-side and is not fixed here** — and as of this writing
-it is bad enough that the account-wide feed does not work at all. Measured
-against a large production account, every page takes ~44s, which exceeds the
-SDK's 30s client timeout: the request is retried three times and then fails.
-`boost list --all-projects` is therefore held out of the release rather than
-shipped broken. Tracked in **basecamp/bc3#12458** and **basecamp-cli#589**.
-
-The cause is measured, not guessed. Server-side timings for one `page=40`
-request (44,630ms total):
-
-```
-Boost Load   22,097.6ms   the paginated SELECT
-~60 preloads      <2.3ms each
-Boost Count  22,265.7ms   GearedPagination's total-count query
-Completed 200 OK in 44630ms (Views: 244.7ms | ActiveRecord: 44370.9ms, 64 queries)
-```
-
-99.5% of the request is database time, in two statements of almost exactly equal
-cost. Separating what is measured from what is inferred:
-
-**Measured.** It is not an N+1 — `Everything::BoostsController#index` preloads
-booster and boostable thoroughly and the log confirms that works, with 60 of 64
-queries trivial and views at 244.7ms. That hypothesis is dead. The cost is two
-statements: the paginated `Boost Load` and GearedPagination's `Boost Count`, at
-roughly 22s each. Page 1 costs the same as page 40. Whatever the fix is, it has
-to address **both** statements: halving one leaves ~22s behind.
-
-**Inferred, pending `EXPLAIN`.** The controller wraps its `UNION ALL` in
-`Boost.from("(...) AS boosts").order(created_at: :desc, id: :desc)`. Ordering a
-derived table cannot use an index, which would force MySQL to materialize and
-sort every accessible boost before `OFFSET`/`LIMIT` applies — consistent with
-both the flat cost curve and the count costing as much as the fetch. That is a
-coherent explanation for the numbers, not a verified query plan, and
-basecamp/bc3#12458 asks for the `EXPLAIN` rather than asserting it.
+Seven commands list account-wide, not eight.
 
 #### The `files list` filter exception
 
@@ -393,14 +343,13 @@ precedent in `internal/commands/search.go`:
 - **styled**: flattened rows carrying at least project name, id, and
   title/subject, plus status and due date where applicable.
 
-Which payloads actually need flattening, so the eight commands do not each
+Which payloads actually need flattening, so the seven commands do not each
 answer this differently:
 
 | Payload | Commands | Styled treatment |
 |---|---|---|
 | `[]Recording` | messages, comments, checkins answers, forwards | flatten — the generic renderer drops the nested `bucket`, and a project column is exactly what an account-wide row needs |
 | `[]Todo`, `[]Card` (flat overdue) | todos, cards `--overdue` | flatten — same reason as `[]Recording`; the items come from every project and `bucket` is skipped by name |
-| `[]EverythingBoost` | boost | flatten — the boosted `*Recording` is nested |
 | `[]EverythingFile` | files | flatten — all-pointer superset, too wide to render raw |
 | `[]BucketTodosGroup`, `[]BucketCardsGroup` | todos, cards | flatten — nested groups render as unreadable cells |
 

@@ -23,9 +23,12 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 **SDK version:** v0.10.0 — adds `EverythingService` (`AccountClient.Everything()`,
 basecamp/basecamp-sdk#435 and #438), a 17-method account-wide aggregate family
 covering cross-project messages, comments, checkins, forwards, boosts, files, and
-the open/completed/unassigned/overdue/no-due-date todo and card rollups. All 17
-are reached from the CLI — see [Account-wide
-aggregates](#account-wide-aggregates). They are not a new command group and add
+the open/completed/unassigned/overdue/no-due-date todo and card rollups. **16 of
+the 17 are reached from the CLI** — see [Account-wide
+aggregates](#account-wide-aggregates). `Everything().Boosts()` is deliberately
+not called: the `/boosts.json` aggregate behind it was an unlinked easter egg
+served by a query costing ~44s per page (basecamp/bc3#12458), and it is being
+withdrawn server-side, so the CLI does not surface it. They are not a new command group and add
 no endpoints to the tracked totals above: each aggregate is the account-wide
 variant of a listing the CLI already owned, reached through that group's
 existing leaf command. The contract is `ACCOUNT-WIDE-LISTINGS.md`.
@@ -79,7 +82,6 @@ instead of prompting for a project.
 | `comments list --all-projects` | `Comments` | `[]Recording` |
 | `checkins answers --all-projects` | `Checkins` | `[]Recording` |
 | `forwards list --all-projects` | `Forwards` | `[]Recording` |
-| `boost list --all-projects` | `Boosts` | `[]EverythingBoost` |
 | `files list --all-projects` | `Files` | `[]EverythingFile` |
 | `todos list --all-projects` | `OpenTodos` | bucket groups |
 | `todos list --all-projects --status completed` | `CompletedTodos` | bucket groups |
@@ -126,7 +128,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete. Bucket-scoped (`/buckets/{id}/categories…`); commands are project-scoped via `--in`/`--project` |
 | campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/update/delete. @mentions in content |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, thread, create, update. @mentions in content. `show` surfaces `reply_target` + paste-ready `mention` from its single Get (no new calls). `thread` composes Get + parent recording (via type endpoint) + List into a deterministic reply-ready context (no new endpoints) |
-| boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete |
+| boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete. No account-wide listing — the `/boosts.json` aggregate is being withdrawn server-side (basecamp/bc3#12458) |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
 | bubble_ups | 1 | `notifications bubbleups` | ✅ | BC5 | - | Dedicated Bubble Ups list (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups` |
 | **Cards (Kanban)** |
