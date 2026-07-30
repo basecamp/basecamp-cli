@@ -297,6 +297,40 @@ func TestBoostListConfiguredProjectStillNeedsAnID(t *testing.T) {
 	assert.Empty(t, transport.recorded())
 }
 
+// An explicitly named project cannot stand in for the item ID either, but it
+// is a statement of intent: the hint carries it forward into the corrected
+// invocation — through --project, its --in alias, and the root-level form
+// that lands in app.Flags.Project.
+func TestBoostListExplicitProjectWithoutIDCarriesProjectIntoHint(t *testing.T) {
+	assertHintCarriesProject := func(t *testing.T, err error, transport *recordingTransport) {
+		t.Helper()
+		requireBoostUsageError(t, err, "listing them needs one")
+		var e *output.Error
+		require.True(t, errors.As(err, &e))
+		assert.Contains(t, e.Hint, "--project 123")
+		assert.Empty(t, transport.recorded(), "a usage error must not reach the API")
+	}
+
+	cmd, app, transport := setupBoostListTest(t, nil)
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list", "--project", "123"), transport)
+
+	cmd, app, transport = setupBoostListTest(t, nil)
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list", "--in", "123"), transport)
+
+	cmd, app, transport = setupBoostListTest(t, nil)
+	app.Flags.Project = "123"
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list"), transport)
+
+	// --event is explicit intent too: when the structured hint fires, it
+	// rides along rather than being silently dropped from the correction.
+	cmd, app, transport = setupBoostListTest(t, nil)
+	err := executeBoostCommand(cmd, app, "list", "--project", "123", "--event", "5")
+	assertHintCarriesProject(t, err, transport)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Hint, "--event 5")
+}
+
 // The pagination flags existed only for the account-wide feed. With that gone
 // they must not linger: an item's boosts arrive in one unpaginated response,
 // and the SDK documents BoostListOptions.Page as not honoring a page number.

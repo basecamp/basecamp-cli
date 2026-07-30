@@ -68,6 +68,21 @@ response, so there is nothing to page through either.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if len(args) == 0 {
+				// An explicitly named project cannot stand in for the item ID,
+				// but it is a statement of intent the hint can honor: carry it
+				// forward into the corrected invocation. Otherwise the generic
+				// missing-argument path answers (help when interactive).
+				explicitProject := *project
+				if explicitProject == "" {
+					explicitProject = app.Flags.Project
+				}
+				if explicitProject != "" {
+					hint := fmt.Sprintf("Pass the item's ID or URL: basecamp boost list <id> --project %s", explicitProject)
+					if eventID != "" {
+						hint = fmt.Sprintf("%s --event %s", hint, eventID)
+					}
+					return output.ErrUsageHint("Boosts belong to an item, so listing them needs one", hint)
+				}
 				return missingArg(cmd, "<id|url>")
 			}
 			if err := ensureAccount(cmd, app); err != nil {
