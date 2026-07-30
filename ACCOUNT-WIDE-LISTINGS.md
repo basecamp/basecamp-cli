@@ -295,10 +295,13 @@ What that means here:
   boosts arrive in one unpaginated response, and the SDK documents
   `BoostListOptions.Page` as not honoring a page number, so there would be
   nothing for those flags to address even if the aggregate had survived.
-- **The SDK keeps `Everything().Boosts()` on purpose.** Removing a generated
-  operation for a temporary withdrawal would churn every generated client
-  twice, so the operation stays and simply 404s until reintroduction. The CLI
-  not calling it is this repo's decision; the operation's existence is not.
+- **`Everything().Boosts()` is being removed from the SDK too.** The initial
+  brief asked that it stay — churning every generated client twice for a
+  temporary withdrawal seemed worse than letting it 404 — but the endpoint is
+  going away for real on the server, so the SDK drops it rather than ship an
+  operation that cannot work. That is the SDK's call; this repo only has to not
+  call it, which it already does. The CLI carries **zero** references to the
+  aggregate, so the SDK bump that removes it needs no CLI change.
 
 Everything else is untouched: the other Everything feeds, the bucket-scoped
 boosts endpoints, and the `boosts_count`/`boosts_url` recording attributes.
@@ -389,7 +392,6 @@ groups and `--ids` finds no ids at all, both silently.
 
 `EverythingFile` is an all-pointer superset over the Upload, Document, and
 Attachment variants — every field read during flattening must be nil-checked.
-`EverythingBoost.Booster` and `.Recording` are pointers too.
 
 ### I7 — No interactive prompt
 
