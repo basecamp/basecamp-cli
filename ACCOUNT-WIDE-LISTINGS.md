@@ -89,7 +89,7 @@ project scope": for these two commands a configured project is not a scope that
 can be honored, so it is ignored rather than turned into an error.
 
 `boost list` is per-item in the same way but has **no account-wide row at all**
-— the aggregate behind it is being withdrawn server-side. Every absent-ID case
+— the aggregate behind it was withdrawn server-side. Every absent-ID case
 asks for an ID, and it carries no `--all-projects`. See "`boost list` —
 withdrawn" under I5.
 
@@ -273,9 +273,10 @@ There is **no account-wide boost listing.** `boost list` requires an item ID.
 
 The `/boosts.json` aggregate this section used to document was an easter egg —
 unlinked from the Basecamp web UI, ~2,250 requests per 30 days globally, and
-this CLI its only known consumer. BC5 has **withdrawn it** (bc3#12464); the
-path 404s on both the web and API hosts once that deploys, so the CLI stops
-calling it.
+this CLI its only known consumer. BC5 **withdrew it** (bc3#12464), and the path
+now 404s on both the web and API hosts, so the CLI no longer calls it. The SDK
+dropped `Everything().Boosts()` to match in v0.11.0 (basecamp/basecamp-sdk#504),
+so the operation is not merely unused here — it no longer exists.
 
 The cause, from BC3's own diagnosis rather than inference: the query's cost is
 proportional to the account's **accessible recordings, not its boosts**. That

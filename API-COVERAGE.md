@@ -20,20 +20,25 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.10.0 — adds `EverythingService` (`AccountClient.Everything()`,
-basecamp/basecamp-sdk#435 and #438), a 17-method account-wide aggregate family
-covering cross-project messages, comments, checkins, forwards, boosts, files, and
-the open/completed/unassigned/overdue/no-due-date todo and card rollups. **16 of
-the 17 are reached from the CLI** — see [Account-wide
-aggregates](#account-wide-aggregates). `Everything().Boosts()` is not called:
-BC5 has withdrawn the `/boosts.json` aggregate behind it (basecamp/bc3#12464),
-because its cost was proportional to the account's accessible recordings rather
-than its boosts (~44s per page — basecamp/bc3#12458). The feed is expected back
-later on a boost-proportional query (basecamp/bc3#12463), but the endpoint is
-genuinely gone server-side in the meantime, so **the SDK is dropping the
-operation as well**. The CLI holds no references to it, so that SDK removal
-lands here as a no-op. Once the CLI pins an SDK without it, this line becomes
-16 of 16. They are not a new command group and add
+**SDK version:** v0.11.0 — carries `EverythingService`
+(`AccountClient.Everything()`, basecamp/basecamp-sdk#435 and #438), a
+16-method account-wide aggregate family covering cross-project messages,
+comments, checkins, forwards, files, and the
+open/completed/unassigned/overdue/no-due-date todo and card rollups. **All 16
+are reached from the CLI** — see [Account-wide
+aggregates](#account-wide-aggregates).
+
+The family was 17 methods through v0.10.0. `Everything().Boosts()` is gone as
+of v0.11.0 (basecamp/basecamp-sdk#504): BC5 withdrew the `/boosts.json`
+aggregate behind it (basecamp/bc3#12464), because its cost was proportional to
+the account's accessible recordings rather than its boosts (~44s per page —
+basecamp/bc3#12458). The feed is expected back later on a boost-proportional
+query (basecamp/bc3#12463), but the endpoint is genuinely gone server-side in
+the meantime, so the SDK dropped the operation rather than ship one that cannot
+work. The CLI had already stopped calling it, so the removal landed here as a
+no-op.
+
+The aggregates are not a new command group and add
 no endpoints to the tracked totals above: each aggregate is the account-wide
 variant of a listing the CLI already owned, reached through that group's
 existing leaf command. The contract is `ACCOUNT-WIDE-LISTINGS.md`.

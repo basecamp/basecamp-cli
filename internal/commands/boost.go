@@ -90,9 +90,9 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 	//
 	// The feed is expected back later on a boost-proportional query
 	// (basecamp/bc3#12463), but the endpoint is genuinely gone in the meantime
-	// and the SDK is dropping Everything().Boosts() with it. When it returns,
-	// this is where the account-wide branch goes back, along with
-	// --all-projects.
+	// and the SDK dropped Everything().Boosts() with it in v0.11.0
+	// (basecamp/basecamp-sdk#504). When it returns, this is where the
+	// account-wide branch goes back, along with --all-projects.
 	recordingID, urlProjectID := extractWithProject(recording)
 
 	projectID := project
