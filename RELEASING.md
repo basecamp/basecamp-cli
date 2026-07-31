@@ -28,7 +28,6 @@ make release VERSION=0.2.0 DRY_RUN=1
 6. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
    - Collects PGO profile from benchmarks
-   - Generates AI changelog from commit history
    - Builds binaries for all platforms (darwin, linux, windows, freebsd, openbsd × amd64/arm64)
    - Builds `.deb`, `.rpm`, `.apk` Linux packages (amd64 + arm64)
    - Signs and notarizes macOS binaries via GoReleaser's built-in notarize (embedded quill)

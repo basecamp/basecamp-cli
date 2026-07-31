@@ -142,8 +142,6 @@ release:
   extra_files:
     - glob: .release-extra/basecamp_installer.ps1
   name_template: "{{.ProjectName}} v{{.Version}}"
-  header: |
-    {{ if .Env.RELEASE_CHANGELOG }}{{ .Env.RELEASE_CHANGELOG }}{{ end }}
 
 homebrew_casks:
   - name: basecamp-cli
