@@ -14,7 +14,9 @@ group's existing leaf list command.
 
 ## Method matrix
 
-All 17 methods, and the invocation that reaches each.
+All 16 methods, and the invocation that reaches each. The family was 17 through
+SDK v0.10.0; `Boosts` was removed in v0.11.0, for the reasons under
+"`boost list` — withdrawn" below.
 
 | Command | SDK method | Payload | Paginated |
 |---|---|---|---|

@@ -77,7 +77,7 @@ API date 2026-07-28.
 ## Account-wide aggregates
 
 `EverythingService` answers, across every accessible project, the same questions
-the project-scoped listings answer within one. All 17 methods are reachable.
+the project-scoped listings answer within one. All 16 methods are reachable.
 
 These rows are **not** added to the totals above. They are not new endpoints in
 the tracked matrix — they are the account-wide variant of listings already
