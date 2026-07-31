@@ -248,12 +248,19 @@ jobs:
           SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
 
       - name: Set up Java for jsign
+        if: github.repository == 'basecamp/basecamp-cli'
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: '21'
 
+      # Guarded like the preflight above: on forks this must not run at all —
+      # decoding an empty secret would export a nonempty SM_CLIENT_CERT_FILE,
+      # which the wrapper correctly treats as partial configuration and fails.
+      # With no SM_* env exported, forks take the wrapper's skip path instead
+      # and release unsigned.
       - name: Prepare Windows signing
+        if: github.repository == 'basecamp/basecamp-cli'
         env:
           SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         run: |
