@@ -1,0 +1,19 @@
+.github/workflows/release.yml
+  s_cf2f80fa76eb06::t_b307e8f599f0c0 251,257-261,263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "6c33d4e71df3615f2be9b514e6940c4d769afd6f",
+  "prompts": {},
+  "sessions": {
+    "s_cf2f80fa76eb06": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "46bfb387-e4bb-409f-bad7-2ac8c3ca82ab",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
