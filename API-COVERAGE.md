@@ -6,24 +6,53 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 45 | 167 |
+| ✅ Implemented | 50 | 184 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **49** | **179** |
+| **Total tracked** | **54** | **196** |
 
-**100% coverage of tracked in-scope API** (167/167 endpoints). This is not a
-complete bc-api parity figure. The other five BC5 sections introduced by
-bc-api#410 remain untracked and outside this coverage matrix. The pinned SDK's
-`EverythingService` is now fully reached — see [Account-wide
+**100% coverage of tracked in-scope API** (184/184 endpoints). This is not a
+complete bc-api parity figure. The five BC5 sections introduced by bc-api#410
+that were previously untracked — `my_bookmarks`, `drafts`, `my_notes`,
+`calendars`, and `question_reminders` — are now tracked and implemented. The
+pinned SDK's `EverythingService` is fully reached — see [Account-wide
 aggregates](#account-wide-aggregates).
+
+Two corrections rode along with that count. The `questions` row claimed 5
+endpoints while listing four actions, and the section carries pause, resume,
+notification settings, and answerers besides — so the row was undercounting the
+very section the 100%-of-tracked claim rests on. It now reads 8. And
+`card_table_columns` gained `subscribe`/`unsubscribe` operations in the SDK that
+the CLI deliberately does not spell twice; see that row.
 
 Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.11.0 — carries `EverythingService`
-(`AccountClient.Everything()`, basecamp/basecamp-sdk#435 and #438), a
-16-method account-wide aggregate family covering cross-project messages,
-comments, checkins, forwards, files, and the
+**SDK version:** v0.12.0 — adds 20 exported Go methods over 13 new backend
+operations. The extra seven wrap endpoints that already existed but were
+reachable only through the raw generated client, which the andon-cord rule
+forbids the CLI from calling.
+
+Those methods land as four new command groups (`bookmarks`, `drafts`, `notes`,
+`calendars`) and three extensions (`assignments` gains the Up Next verbs,
+`todos create` gains `--loose`, `checkins` gains question pause/resume/notify/
+answerers plus an account-wide `reminders` feed).
+
+v0.12.0 also gave 11 `EverythingService` methods a trailing
+`*EverythingTaskFilters` parameter — the nine paginated todo and card selectors
+plus the two unpaginated overdue endpoints. The family is 5 unchanged + 11
+changed = 16.
+
+One v0.12.0 defect shapes a command rather than just a call: `parseErrorBody`
+reads only `error`/`error_description`, so a calendar 422 carrying
+`{"errors":{"color":[…]}}` arrives as a bare `validation error` naming neither
+field nor value. `calendars update` therefore validates its eleven colors
+client-side. The SDK fixes this past this pin (#541 returns a `fieldErrors`
+map), so a later bump could surface the server's own message.
+
+It carries `EverythingService` (`AccountClient.Everything()`,
+basecamp/basecamp-sdk#435 and #438), a 16-method account-wide aggregate family
+covering cross-project messages, comments, checkins, forwards, files, and the
 open/completed/unassigned/overdue/no-due-date todo and card rollups. **All 16
 are reached from the CLI** — see [Account-wide
 aggregates](#account-wide-aggregates).
@@ -124,7 +153,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
-| todos | 11 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`; edit via `cards step`) |
+| todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`; edit via `cards step`). `todos create --loose` creates on the to-do set, outside any list |
 | todolists | 9 | `todolists` | ✅ | BC4 | - | list, show, create, update, position |
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
@@ -144,13 +173,17 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
-| card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns |
+| card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns. SDK v0.12.0 added `Subscribe`/`Unsubscribe`; `cards column watch\|unwatch` already performs the same action through the generic recording-subscription endpoint and returns the resulting subscription details the specific endpoint does not, so the CLI keeps one spelling |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards |
 | card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects (async, new id) |
+| **Personal (My)** |
+| my_bookmarks | 4 | `bookmarks` | ✅ | BC5 | - | list, check, add, remove. Private to the authenticated user; `add`/`remove` are idempotent, and `check` returns a bool reported in the payload rather than through the exit code. Bounded like the account-wide listings |
+| drafts | 1 | `drafts` | ✅ | BC5 | - | list unpublished drafts across projects (server caps at 250). Bounded like the account-wide listings; publishing happens through the command for the draft's type |
+| my_notes | 2 | `notes` | ✅ | BC5 | - | show, set. A singleton per person, so no id and no listing. Pre-first-write the record does not exist yet and renders as empty rather than 404. `set` writes Markdown as HTML; attachments are out of scope |
 | **People** |
 | people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
-| my_assignments | 3 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter) |
+| my_assignments | 6 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter), prioritize, deprioritize, reorder. `list` surfaces `priority_recording_id`, which is the only way to address a prioritized card-table step — it appears in no URL |
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
@@ -159,6 +192,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |
+| calendars | 2 | `calendars` | ✅ | BC5 | - | show, update (color only). No index endpoint, so there is no `calendars list` — address one by id or pasted URL. The eleven colors are validated client-side, because the SDK at this pin cannot carry the server's 422 field message |
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |
 | schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
 | events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |
@@ -172,8 +206,9 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | subscriptions | 4 | `subscriptions` | ✅ | BC4 | - | show, subscribe, unsubscribe, add/remove |
 | **Check-ins (Automatic)** |
 | questionnaires | 2 | `checkins` | ✅ | BC4 | - | Container for check-in questions |
-| questions | 5 | `checkins` | ✅ | BC4 | - | list, show, create, update |
+| questions | 8 | `checkins` | ✅ | BC4 | - | list, show, create, update, pause, resume, notification settings, answerers (`checkins question notify` is tri-state per setting; `answerers` takes no `--page`, since the SDK does not honor one) |
 | question_answers | 4 | `checkins` | ✅ | BC4 | - | list, show |
+| question_reminders | 1 | `checkins reminders` | ✅ | BC5 | - | Account-wide pending-reminder feed (`GET /my/question_reminders.json`). `--limit` is a real SDK-side bound; no `--page`, since the options struct does not honor a page number |
 | **Inbox (Email Forwards)** |
 | inboxes | 1 | `forwards` | ✅ | BC4 | - | Inbox container |
 | forwards | 2 | `forwards` | ✅ | BC4 | - | list, show |

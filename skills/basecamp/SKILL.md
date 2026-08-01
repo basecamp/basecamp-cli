@@ -3,7 +3,8 @@ name: basecamp
 description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
-  subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
+  subscriptions, lineup, chat, pings, gauges, assignments, notifications, bookmarks,
+  drafts, notes, calendars, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -18,6 +19,10 @@ triggers:
   - basecamp messages
   - basecamp file
   - basecamp document
+  - basecamp bookmarks
+  - basecamp drafts
+  - basecamp notes
+  - basecamp calendars
   - basecamp schedule
   - basecamp checkin
   - basecamp check-in
@@ -176,6 +181,16 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp todos list --all-projects --overdue --json` (flat, oldest first) or `basecamp reports overdue --json` (bucketed by lateness) |
 | All cards (cross-project) | `basecamp cards list --all-projects --json` (grouped by project) |
+| My bookmarks | `basecamp bookmarks list --json` |
+| Bookmark something | `basecamp bookmarks add <id-or-url> --json` |
+| Is it bookmarked? | `basecamp bookmarks check <id-or-url> --json` (always exits 0) |
+| My unpublished drafts | `basecamp drafts list --json` |
+| Read my personal note | `basecamp notes show --json` |
+| Replace my personal note | `basecamp notes set "<content>" --json` |
+| Check-ins I owe answers to | `basecamp checkins reminders --json` |
+| Add to Up Next | `basecamp assignments prioritize <id> --json` |
+| Recolor a calendar | `basecamp calendars update <id-or-url> --color blue --json` |
+| Todo outside any list | `basecamp todos create "<content>" --loose --in <project> --json` |
 | Assign todo | `basecamp assign <id> [id...] --to <person> --in <project> --json` |
 | Assign card | `basecamp assign <id> [id...] --card --to <person> --in <project> --json` |
 | Assign card step | `basecamp assign <id> [id...] --step --to <person> --in <project> --json` |
@@ -797,6 +812,33 @@ basecamp checkins answer update <id> "Updated" --in <project>
 
 **Client visibility:** `checkins question create` accepts `--visible-to-clients` to make the question visible to clients (omit for the server default; see the note under Messages for the context-dependent rule).
 
+**Managing a question:**
+
+```bash
+basecamp checkins question pause <id> --json      # Stop asking it
+basecamp checkins question resume <id> --json     # Start asking it again
+basecamp checkins question answerers <id> --json  # Who answers it
+basecamp checkins question notify <id> --on-answer --json
+basecamp checkins question notify <id> --no-on-answer --json
+basecamp checkins question notify <id> --digest-include-unanswered --json
+```
+
+`notify` changes **your own** settings, and each one is left alone unless you
+name it — so `--on-answer` does not silently reset the digest setting. The
+`--no-...` spellings send an explicit false; passing neither setting is refused
+rather than sent as an empty update.
+
+**Your pending reminders** (account-wide, no `--in`):
+
+```bash
+basecamp checkins reminders --json
+basecamp checkins reminders --limit 10 --json
+```
+
+`reminders` and `answerers` take `--limit` but deliberately **no `--page`**: the
+API does not honor a page number on these, so the flag would accept a value it
+could not act on.
+
 ### Timeline
 
 ```bash
@@ -920,6 +962,67 @@ basecamp assignments due due_later_this_week --json   # Due later this week
 ```
 
 **Scopes:** overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, due_later.
+
+**Up Next** — reorder the priority list:
+
+```bash
+basecamp assignments prioritize <id> --json      # Add to Up Next
+basecamp assignments deprioritize <id> --json    # Remove from Up Next
+basecamp assignments reorder <id> --position 1 --json
+```
+
+**Which id to pass — three cases, not two.** A to-do or a card is addressed by
+the entry's own `id`. A step that is *not yet* prioritized is addressed by the
+step's own `id`, found in the parent card's `children`. But once a step *is*
+prioritized, the listing shows it under its parent card, so the entry's top-level
+`id` belongs to the **card**, and only `priority_recording_id` addresses the
+step.
+
+`basecamp assignments list` is the only place `priority_recording_id` appears —
+it is in no URL. Read it from there rather than guessing: `deprioritize` targets
+one exact recording and the server answers 204 either way, so a wrong id reports
+success while changing nothing. If two steps on one card are prioritized, the
+listing shows the card once with a single `priority_recording_id` and the
+siblings are not separately addressable.
+
+### Personal (bookmarks, drafts, notes)
+
+Private to you, spanning every project — no `--in <project>`.
+
+```bash
+basecamp bookmarks list --json
+basecamp bookmarks add <id-or-url> --json
+basecamp bookmarks remove <id-or-url> --json
+basecamp bookmarks check <id-or-url> --json
+basecamp drafts list --json
+basecamp notes show --json
+basecamp notes set "<content>" --json
+```
+
+`bookmarks add` and `remove` are idempotent — re-adding returns the existing
+bookmark, removing an absent one still succeeds. `check` reports
+`{"bookmarked": true|false}` and **always exits 0**: both answers are successes,
+so a nonzero exit here means the request failed, not that the answer was false.
+
+`bookmarks list` and `drafts list` are bounded like the account-wide listings:
+default 100, `--limit N`, `--page N`, `--all` for every page. Drafts are capped
+at 250 server-side.
+
+`notes` is a single private scratchpad — one per person, no id, nothing to list.
+Before your first write it renders empty rather than 404ing. `set` **replaces**
+the whole note (it does not append) and takes content from an argument,
+`--file`, or piped stdin; Markdown is converted to HTML.
+
+### Calendars
+
+```bash
+basecamp calendars show <id-or-url> --json
+basecamp calendars update <id-or-url> --color blue --json
+```
+
+**There is no `calendars list`** — the API has no index endpoint, so address a
+calendar by id or by pasting its URL. Colors: white, red, orange, yellow, green,
+blue, aqua, purple, gray, pink, brown.
 
 ### Notifications
 

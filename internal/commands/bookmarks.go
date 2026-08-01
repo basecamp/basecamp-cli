@@ -269,7 +269,7 @@ func newBookmarksCheckCmd() *cobra.Command {
 		Short: "Report whether you have bookmarked a recording",
 		Long: `Report whether you have bookmarked a recording.
 
-Reports the answer rather than signalling it through the exit code: both
+Reports the answer rather than signaling it through the exit code: both
 outcomes exit 0, and "not bookmarked" is a successful answer. Exit codes here
 mean a request failed, so reserving a nonzero code for "false" would be
 indistinguishable from a real error.
