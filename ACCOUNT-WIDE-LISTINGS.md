@@ -224,8 +224,32 @@ rows that differ for stated reasons. `--all` is how you ask for the account.
 | `files list` | cap 100 | **changed** from "all pages" |
 | `todos list --overdue` | cap 100 | unpaginated endpoint; accepts `--all`, rejects `--page` |
 | `cards list --overdue` | cap 100 | **changed** from uncapped; same rules as above |
+| `bookmarks list` | cap 100 | personal feed — see below |
+| `drafts list` | cap 100 | personal feed; server caps the full listing at 250 |
 
 Project-scoped defaults are untouched throughout.
+
+**The two personal feeds.** `bookmarks list` and `drafts list` are not
+`EverythingService` methods, and they belong to no project-scoped group — they
+are `/my/` listings, private to the authenticated user, and there is no
+`--all-projects` to pass because there is no project scope to leave.
+
+They are recorded here anyway, because the invariants are this document's. Both
+`Bookmarks().List` and `Drafts().List` take a `page int32` where **0 means the
+SDK follows the Link header across every page** — the same spelling, and so the
+same trap. A default of "fetch page 0, then trim to `--limit`" would reintroduce
+fetch-everything-then-truncate through a door the aggregates no longer have.
+
+So both reuse `accountWideCollect` unchanged, and follow the I5 flag table
+exactly: bounded walk to 100 by default, `--limit N` walks to N, `--page N` is
+exactly one request, and `--all` is the only path that reaches page 0. Leaving
+them undocumented is how the contract erodes — the next `/my/` feed would have
+no precedent to copy.
+
+`checkins reminders` is a third `/my/` feed but sits outside this table: its
+options struct does not honor a page number at all, so it takes `--limit` (a
+real SDK-side bound) and deliberately registers no `--page`. Under I3 a flag
+that cannot act on its value is worse than an absent one.
 
 **The two overdue rows.** Both endpoints are unpaginated, so `--page` has
 nothing to address and stays an error. `--all` is a different question: it means

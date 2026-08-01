@@ -189,7 +189,7 @@ func TestFlattenBookmarksCarriesTheRecording(t *testing.T) {
 }
 
 // check answers a question. Both answers are successes, so neither may be
-// signalled through the exit code — that space belongs to real failures.
+// signaled through the exit code — that space belongs to real failures.
 func TestBookmarksCheckReportsBothAnswersAsSuccess(t *testing.T) {
 	for _, tc := range []struct {
 		name string
