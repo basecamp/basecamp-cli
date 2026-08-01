@@ -21,7 +21,7 @@
           {
             "type": "command",
             "command": "basecamp agent-hook pre-commit-snapshot",
-            "timeout": 5
+            "timeout": 10
           }
         ]
       }
@@ -33,7 +33,7 @@
           {
             "type": "command",
             "command": "basecamp agent-hook post-commit",
-            "timeout": 5
+            "timeout": 12
           }
         ]
       }
@@ -45,7 +45,7 @@
           {
             "type": "command",
             "command": "basecamp agent-hook post-commit",
-            "timeout": 5
+            "timeout": 12
           }
         ]
       }

@@ -130,6 +130,11 @@ basecamp setup claude
 
 This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
 
+The hooks call the CLI's `agent-hook` command, so they need a `basecamp` new
+enough to have it. If hook errors appear after installing or refreshing the
+plugin, run `basecamp upgrade` and start a new session; `basecamp agent-hook
+--help` replying "unknown command" confirms the CLI is the old one.
+
 ### Codex
 
 ```bash

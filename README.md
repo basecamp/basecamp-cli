@@ -157,6 +157,12 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 Both plugins require the `basecamp` CLI installed and on your PATH.
 
+The plugin hooks additionally need a CLI new enough to carry the `agent-hook`
+command. If hook errors appear after installing or refreshing the plugin, the
+CLI is older than the hooks: run `basecamp upgrade`, then start a new session.
+Check with `basecamp agent-hook --help` — an "unknown command" reply means the
+CLI needs upgrading.
+
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
 **Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks.
