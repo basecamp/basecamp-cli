@@ -1,0 +1,42 @@
+internal/commands/accountwide.go
+  s_d931ffd296629c::t_21d9fb9141e882 4,7
+  s_d931ffd296629c::t_705f772623ea99 228-256
+  s_d931ffd296629c::t_191027c02a6fe5 180-227,257-278
+internal/commands/todos.go
+  s_d931ffd296629c::t_e07b07a2667e14 86,268-272,379,467,540,863,872,889,895
+  s_d931ffd296629c::t_132161da6e44d6 191-199
+  s_d931ffd296629c::t_a6c2b6dfa7aed6 526
+  s_d931ffd296629c::t_d0eff408bbc4ce 31-32,82-85,87-93,104-108,229,239,380-386,401,408,464-466,468-469,523,544,546,548,550,763,782,793-798,800,802,805-806,816,849-862,864-871,873-878,892-894,896-898,924,958-960,981
+internal/commands/accountwide_filters_test.go
+  s_d931ffd296629c::t_8ef9669f57f166 1-253
+.surface
+  s_d931ffd296629c::t_a91b734b5a5957 3049,3054,14277,14281
+.surface-breaking
+  s_d931ffd296629c::t_c997c325606cc5 747
+ACCOUNT-WIDE-LISTINGS.md
+  s_d931ffd296629c::t_70954d7eeaab4b 109-116,146-148,367-415,490-503
+e2e/smoke/smoke_core.bats
+  s_d931ffd296629c::t_8a7121c108d1b7 87-98
+internal/commands/cards.go
+  s_d931ffd296629c::t_99b59b1c96a5b7 32,78-79,101-106,126-127,177-192,328-340,354,356,358,360,362,429-439
+internal/commands/todos_test.go
+  s_d931ffd296629c::t_a63337400d7c32 425-430,432,434-435
+skills/basecamp/SKILL.md
+  s_d931ffd296629c::t_0f3eaf65b06b06 184-187,970-982
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "0d328a01c985970099a85f157bfee655e9e6d055",
+  "prompts": {},
+  "sessions": {
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
