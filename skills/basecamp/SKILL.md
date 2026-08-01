@@ -146,7 +146,7 @@ basecamp todos --agent --help
  "inherited_flags":[{"name":"json","shorthand":"j","type":"bool","default":"false","usage":"..."}]}
 ```
 
-Walk the tree: start at `basecamp --agent --help` for top-level commands, then drill into any subcommand. Commands include `notes` with domain-specific agent hints (e.g., "Cards do NOT support --assignee filtering").
+Walk the tree: start at `basecamp --agent --help` for top-level commands, then drill into any subcommand. Commands carry domain-specific agent hints (e.g., "`--assignee` filters the account-wide listing only; within a project, fetch all and filter client-side").
 
 ### Pagination
 
@@ -161,7 +161,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 ### Smart Defaults
 
 - `--assignee me` resolves to current user
-- `--due tomorrow` / `--due +3` / `--due "next week"` - natural date parsing
+- `--due tomorrow` / `--due +3` / `--due "next week"` — natural date parsing, **when setting a due date** (`todos create`, `todos update`, `cards create`, and so on)
+- `--due` on a **listing** is a different flag and does not take dates: it accepts only `with`, `without`, or `overdue`, and only account-wide. `basecamp todos list --due tomorrow` is rejected. For date-based listing use `--overdue`, `--no-due-date`, or `basecamp assignments due <scope>`
 - Project from `.basecamp/config.json` if `--in` not specified
 - Multiple identities use named profiles: `basecamp profile create <name>`, then select one with global `--profile <name>` or `BASECAMP_PROFILE=<name>`.
 
@@ -181,6 +182,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp todos list --all-projects --overdue --json` (flat, oldest first) or `basecamp reports overdue --json` (bucketed by lateness) |
 | All cards (cross-project) | `basecamp cards list --all-projects --json` (grouped by project) |
+| Someone's todos (cross-project) | `basecamp todos list --all-projects --assignee "Ann" --json` (server-side filter) |
+| Two people's todos (cross-project) | `basecamp todos list --all-projects --assignee ann --assignee bob --json` (matches either) |
+| Someone's cards (cross-project) | `basecamp cards list --all-projects --assignee "Ann" --json` |
+| Todos with no due date set (cross-project) | `basecamp todos list --all-projects --due without --json` |
 | My bookmarks | `basecamp bookmarks list --json` |
 | Bookmark something | `basecamp bookmarks add <id-or-url> --json` |
 | Is it bookmarked? | `basecamp bookmarks check <id-or-url> --json` (always exits 0) |
@@ -511,7 +516,7 @@ basecamp todos update <id> --notify-on-completion "Jane"  # Set who's notified o
 basecamp todos update <id> --no-notify-on-completion      # Clear completion notifications
 ```
 
-**Flags:** `--assignee` (todos only - not available on cards/messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due`, `--limit`, `--all`
+**Flags:** `--assignee` (repeatable; server-side account-wide, client-side within a project; also on `cards list` account-wide, but not on messages), `--status` (completed/incomplete/archived/trashed), `--overdue`, `--list`, `--due` (**listing filter: `with`/`without`/`overdue` only, account-wide only** — not a date; see Smart Defaults), `--limit`, `--all`
 
 **Completion subscribers** ("When done, notify…"): set with
 `--notify-on-completion <names or IDs, comma-separated>` on `todos create` and
@@ -612,7 +617,7 @@ the same todoset, top to bottom. It always places them at the top.
 
 ### Cards (Kanban)
 
-**Note:** Cards do NOT support `--assignee` filtering like todos. Fetch all cards and filter client-side if needed. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
+**Note:** `--assignee` on `cards list` is **account-wide only** — pass `--all-projects` (or have no project in scope) and it becomes a real server-side filter. Within a single project cards have no assignee filter: fetch all and filter client-side. `--due with|without|overdue` is account-wide only on cards too. If a project has multiple card tables, you must specify `--card-table <id>`. When you get an "Ambiguous card table" error, the hint shows available table IDs and names.
 
 ```bash
 basecamp cards list --in <project> --json             # All cards
@@ -962,6 +967,28 @@ basecamp assignments due due_later_this_week --json   # Due later this week
 ```
 
 **Scopes:** overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, due_later.
+
+**Cross-project assignee filtering:** `basecamp todos list --all-projects
+--assignee <person>` and `basecamp cards list --all-projects --assignee <person>`
+filter server-side across every project. Both are repeatable and match a task
+assigned to **any** of the named people. Assignees on nested steps are not
+considered, so a card whose step is assigned to someone does not match on that
+basis.
+
+**Always pass `--all-projects` when you mean every project.** Without it these
+listings are account-wide *only* when no project is in scope — and a configured
+default project counts as in scope. With one configured, `--assignee` silently
+degrades to a client-side filter over that single project, and `--due` is
+rejected outright as account-wide-only. `--all-projects` is what overrides a
+configured default, so a recipe that omits it returns different results
+depending on the reader's config.
+
+Within a project `--assignee` still works on todos, but there is no server-side
+filter, so it fetches everything and narrows client-side. Cards have no
+project-scoped `--assignee` at all. `--due with|without|overdue` is account-wide
+only on both, and conflicts with `--overdue` and `--no-due-date`, which select
+their own listings on the same axis. `--assignee` with `--unassigned` is refused
+— the server makes that combination necessarily empty.
 
 **Up Next** — reorder the priority list:
 

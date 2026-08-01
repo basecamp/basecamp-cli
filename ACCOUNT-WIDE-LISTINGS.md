@@ -106,9 +106,14 @@ account-wide. Reject by name, including aliases:
 `--list`/`--todolist`, `--todoset`, `--questionnaire`, `--event`, `--by`.
 A configured todolist is subject to the same rule as a configured project.
 
-**Filters with no aggregate equivalent** (`--assignee`, unsupported `--status`
-values) are rejected, pointing at the command that does answer the question
-(e.g. `reports assigned`).
+**Filters with no aggregate equivalent** (unsupported `--status` values) are
+rejected, pointing at the command that does answer the question.
+
+`--assignee` used to be the example here, and no longer is. It was rejected
+account-wide because the aggregates had no assignee parameter to map it onto;
+SDK v0.12.0 added one, so the flag is answerable in both scopes and the
+rejection is gone. What it costs differs sharply by scope — see the filter table
+below.
 
 **No new flags** beyond `--all-projects`, the endpoint selectors the method
 matrix names, the `files list` filters, and the pagination flags the two
@@ -138,6 +143,9 @@ flags added by this work — anything not listed here is reuse:
 | `cards list` | `--no-due-date` | `NoDueDateCards` | account-wide only |
 | `cards list` | `--not-now` | `NotNowCards` | account-wide only |
 | `cards list` | `--overdue` | `OverdueCards` | account-wide only |
+| `todos list` | `--due` | filter on the todo aggregates | account-wide only |
+| `cards list` | `--assignee` | filter on the card aggregates | account-wide only |
+| `cards list` | `--due` | filter on the card aggregates | account-wide only |
 | `files list` | `--kind`, `--person` | filters on `Files` | account-wide only — see I5 |
 | `files list` | `--limit`/`-n`, `--page`, `--all` | pagination on `Files` | account-wide only — see I5 |
 
@@ -356,6 +364,64 @@ unrecognized `--kind` value is `ErrUsage` listing the accepted set.
 These filters are account-wide-only by nature rather than by policy: the
 project-scoped path has nothing to map them onto.
 
+#### The task filters: `--assignee` and `--due`
+
+`EverythingTaskFilters` (SDK v0.12.0) is a trailing parameter on 11 of the 16
+aggregate methods — the nine paginated todo and card selectors plus the two
+unpaginated overdue endpoints. Two flags map onto it:
+
+| Flag | Value | Maps to |
+|---|---|---|
+| `--assignee` | repeatable, and comma-separated within a value; name, email, ID, or `me`, resolved via `resolvePersonRoleIDs(ctx, app, input, "Assignee")` | `EverythingTaskFilters.AssigneeIDs` |
+| `--due` | `with`, `without`, `overdue` | `EverythingTaskFilters.Due` |
+
+`--due` is account-wide-only on both groups, and `--assignee` is
+account-wide-only on `cards`, which had none before. On `todos`, `--assignee`
+already existed project-scoped and now works in both.
+
+**The same flag means two different things by scope, and that is worth saying
+out loud rather than papering over.** Account-wide it is a real `assignee_ids[]`
+query parameter: the server narrows the listing before it paginates, so the
+filter never turns the bounded walk into a full crawl — the walk stays bounded
+by the item cap exactly as it is unfiltered.
+
+It does not follow that the request count is identical. The cap counts *items*,
+so a narrower filter returns fewer of them per page and can need one more page
+to reach the same cap: soaked against account 2914079, `todos list
+--all-projects` took 2 requests for 100 todos and `--assignee 3` took 3 for its
+21. That is the walk working, not leaking. What must never happen is the filter
+pushing the walk toward page 0, and a test pins that.
+
+Project-scoped there is no server-side assignee parameter at all, so
+the filter runs client-side over an *unlimited* fetch — the project path already
+disables its own limit whenever an assignee is set. Same spelling, same
+semantics, very different cost.
+
+The semantics are matched deliberately: project-scoped `--assignee` now matches
+**any** of the named people, the way `assignee_ids[]` does. Before it took one
+value; widening it from `StringVar` to `StringArrayVar` changes the `.surface`
+type line, and since `TestSurfaceSnapshot` compares whole lines, the old line
+reads as a removal and is acknowledged in `.surface-breaking`.
+
+Carry the SDK's own caveat into help text: the filter matches the task's own
+assignees, and **assignees on nested steps are not considered** — a card whose
+step is assigned to someone does not match on that basis.
+
+**Two rejections, both before any request is issued:**
+
+- **`--assignee` with `--unassigned`.** The server builds that selector as
+  `todos_recordings.remaining.not_assigned` over a relation the assignee filter
+  has already narrowed
+  (`bc3:app/controllers/concerns/everything/todos/recordings.rb:24`). The
+  intersection is *necessarily* empty, so the combination would return zero rows
+  that look like a real answer. Same rule for the card selector.
+- **`--due` with `--overdue` or `--no-due-date`.** Those two each select their
+  own endpoint on the same axis `--due` narrows, so combining them asks two
+  endpoints for one answer.
+
+`internal/dateparse` is deliberately not involved: these are category tokens,
+not dates. An unrecognized `--due` value is `ErrUsage` naming the accepted set.
+
 #### The `files` group's alias spellings
 
 `vaults` (aliases `vault`, `folders`) and `docs` (alias `documents`) are
@@ -430,4 +496,17 @@ Attachment variants — every field read during flattening must be nil-checked.
 - The interactive project prompt no longer fires on these list commands when no
   project is configured; they list account-wide instead.
 - `todos list` with no project and `--overdue`/`--assignee` previously errored
-  with a redirect. `--overdue` now returns results; `--assignee` still errors.
+  with a redirect. Both now return results: `--overdue` since the bounded-walk
+  work, and `--assignee` since SDK v0.12.0 gave the aggregates an assignee
+  parameter.
+- `todos list --assignee` is now **repeatable** and matches any of the named
+  people. It was single-valued; the `.surface` type line changes from `string`
+  to `stringArray`, acknowledged in `.surface-breaking`.
+- `cards list` gains `--assignee` (account-wide only). The group's agent note
+  used to say cards do not support assignee filtering at all; that is now true
+  only of the project-scoped path.
+- Both groups gain `--due with|without|overdue`, account-wide only, rejected
+  alongside `--overdue` and `--no-due-date`.
+- `--assignee` with `--unassigned` is now a usage error on both groups. The
+  combination was previously reachable on `cards` only by not having the flag;
+  it is refused because the server makes it necessarily empty.

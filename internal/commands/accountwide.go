@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -173,6 +175,151 @@ func accountWideCapNotice(capped bool, meta basecamp.ListMeta, count int, plural
 	return fmt.Sprintf(
 		"Showing the first %d %s; more may exist (use --all for every page, or --limit to raise the cap)",
 		count, plural)
+}
+
+// Account-wide task filters (--assignee, --due).
+//
+// These map onto EverythingTaskFilters, which the todo and card aggregates
+// accept as a trailing parameter. They are genuinely server-side there: the
+// request carries assignee_ids[] and due=, and the server narrows the listing
+// before paginating.
+//
+// What that does *not* mean is a constant request count. The bounded walk's cap
+// counts items, so a narrower filter can return fewer per page and need another
+// page to reach the cap — a production soak measured 2 requests for 100
+// unfiltered todos against 3 for --assignee's 21. Filtering leaves the walk's
+// algorithm untouched; the number of requests it takes is a property of the
+// result, not of the filter.
+//
+// Project-scoped --assignee is a different animal — see the note on
+// filterTodosByAssignees.
+
+// dueFilterValues are the tokens --due accepts. These are categories, not
+// dates: internal/dateparse is deliberately not involved, since "overdue" is
+// not a date and "with" is not a date range.
+var dueFilterValues = []string{"with", "without", "overdue"}
+
+// rejectEmptyTaskFilterValues refuses an explicitly empty --due or --assignee.
+//
+// Every other check in this file tests the flag's *value*, which makes `--due=`
+// indistinguishable from never passing --due: the project-scoped guard stops
+// rejecting it, the account-wide path builds no filter, and the caller gets a
+// full unfiltered listing believing they narrowed it. Presence is what makes it
+// a request, so presence is what has to be tested — and it has to happen before
+// account resolution, which can otherwise prompt on the way to a listing that
+// was never going to be filtered.
+//
+// `--assignee=` is the same mistake in the other direction: StringArrayVar
+// appends the empty string, so len(assignees) > 0 sends a filter that names
+// nobody.
+// It also validates the --due token here rather than only in
+// validateAccountWideTaskFilters, which runs after ensureAccount. Neither the
+// token set nor the emptiness check depends on the account or the scope, so
+// leaving them late meant `todos list --due tomorrow` with no account
+// configured hit account resolution first — an interactive session got the
+// account picker and a noninteractive one got "--account is required", and the
+// real error was never shown. A usage error that needs no account should not
+// require one.
+func validateTaskFilterValues(cmd *cobra.Command, due string, assignees []string) error {
+	if cmd.Flags().Changed("due") && due == "" {
+		return output.ErrUsageHint(
+			"--due needs a value",
+			fmt.Sprintf("Pass one of: %s", strings.Join(dueFilterValues, ", ")))
+	}
+	if err := validateDueFilter(due); err != nil {
+		return err
+	}
+	for _, assignee := range assignees {
+		if strings.TrimSpace(assignee) == "" {
+			return output.ErrUsageHint(
+				"--assignee needs a value",
+				"Pass a name or id, or drop the flag to list everyone's.")
+		}
+	}
+	return nil
+}
+
+// validateDueFilter rejects an unknown --due token, naming the alternatives.
+func validateDueFilter(due string) error {
+	if due == "" {
+		return nil
+	}
+	for _, valid := range dueFilterValues {
+		if due == valid {
+			return nil
+		}
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("%q is not a valid --due filter", due),
+		"Pick one of: "+strings.Join(dueFilterValues, ", "),
+	)
+}
+
+// rejectAssigneeWithUnassigned refuses --assignee alongside the unassigned
+// selector.
+//
+// The server builds that selector as todos_recordings.remaining.not_assigned,
+// over a relation the assignee filter has already narrowed
+// (bc3:app/controllers/concerns/everything/todos/recordings.rb:24). "Assigned
+// to Ann" intersected with "assigned to nobody" is necessarily empty, so the
+// combination cannot return a row. Refusing it beats returning zero results
+// that look like a real answer.
+func rejectAssigneeWithUnassigned(noun string) error {
+	return output.ErrUsageHint(
+		"--assignee and --unassigned cannot be combined (nothing can match both)",
+		fmt.Sprintf("Drop --unassigned to see that person's %s, or drop --assignee to see unassigned ones", noun),
+	)
+}
+
+// validateAccountWideTaskFilters enforces the combinations the filters cannot
+// honor, before any request is issued.
+//
+// --due names the same axis as the dedicated due-date selectors: --overdue and
+// --no-due-date each pick their own endpoint, and --due narrows a different
+// one. Combining them asks two endpoints for one answer, so the flag that would
+// be ignored is named instead.
+func validateAccountWideTaskFilters(assignees []string, due string, unassigned, overdue, noDueDate bool, noun string) error {
+	if err := validateDueFilter(due); err != nil {
+		return err
+	}
+	if len(assignees) > 0 && unassigned {
+		return rejectAssigneeWithUnassigned(noun)
+	}
+	if due != "" {
+		switch {
+		case overdue:
+			return output.ErrUsageHint(
+				"--due and --overdue cannot be combined (each selects a different listing)",
+				"Use --overdue on its own, or --due overdue to narrow another listing")
+		case noDueDate:
+			return output.ErrUsageHint(
+				"--due and --no-due-date cannot be combined (each selects a different listing)",
+				"Use --no-due-date on its own, or --due without to narrow another listing")
+		}
+	}
+	return nil
+}
+
+// accountWideTaskFilters resolves --assignee/--due into the SDK filter struct,
+// returning nil when neither was passed so the call stays byte-identical to an
+// unfiltered one.
+func accountWideTaskFilters(ctx context.Context, app *appctx.App, assignees []string, due string) (*basecamp.EverythingTaskFilters, error) {
+	if len(assignees) == 0 && due == "" {
+		return nil, nil
+	}
+
+	filters := &basecamp.EverythingTaskFilters{Due: due}
+	for _, assignee := range assignees {
+		// Each value may itself be a comma-separated list, so --assignee is
+		// repeatable and comma-separated both, matching how the other
+		// people-taking flags already behave.
+		ids, err := resolvePersonRoleIDs(ctx, app, assignee, "Assignee")
+		if err != nil {
+			return nil, err
+		}
+		filters.AssigneeIDs = append(filters.AssigneeIDs, ids...)
+	}
+	return filters, nil
 }
 
 // validateAccountWidePaginationFlags enforces the combination rules every
