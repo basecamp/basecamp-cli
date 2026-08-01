@@ -41,9 +41,80 @@ on a schedule (e.g., "What did you work on today?").`,
 		newCheckinsQuestionCmd(&project),
 		newCheckinsAnswersCmd(&project, &questionnaireID),
 		newCheckinsAnswerCmd(&project),
+		newCheckinsRemindersCmd(),
 	)
 
 	return cmd
+}
+
+func newCheckinsRemindersCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "reminders",
+		Short: "List your pending check-in reminders",
+		Long: `List the check-in questions you are due to answer.
+
+This is your own reminder feed across every project, so it takes no
+--project.
+
+  basecamp checkins reminders
+  basecamp checkins reminders --limit 10`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if limit < 0 {
+				return output.ErrUsage("--limit must be zero or positive")
+			}
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// --limit is a real SDK-side bound rather than a local trim. There
+			// is deliberately no --page: QuestionReminderListOptions does not
+			// honor a page number, so the flag could not do what it says.
+			result, err := app.Account().Checkins().ListQuestionReminders(cmd.Context(), &basecamp.QuestionReminderListOptions{Limit: limit})
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(result.Reminders,
+				output.WithDisplayData(flattenQuestionReminders(result.Reminders)),
+				output.WithSummary(fmt.Sprintf("%d pending check-in reminders", len(result.Reminders))),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "answer",
+					Cmd:         "basecamp checkins answer <question-id> \"<content>\"",
+					Description: "Answer a check-in question",
+				}),
+			)
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum reminders to return")
+
+	return cmd
+}
+
+// flattenQuestionReminders builds the display rows for the reminder feed.
+//
+// A QuestionReminder nests the question it is about, and the renderer skips
+// nested objects — so a generic render would show a timestamp and nothing that
+// says which question is due, or where.
+func flattenQuestionReminders(reminders []basecamp.QuestionReminder) []map[string]any {
+	rows := make([]map[string]any, 0, len(reminders))
+	for _, r := range reminders {
+		row := map[string]any{
+			"question_id": r.Question.ID,
+			"question":    r.Question.Title,
+			"remind_at":   r.RemindAt,
+		}
+		if r.Question.Bucket != nil {
+			row["project"] = r.Question.Bucket.Name
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func newCheckinsQuestionsCmd(project, questionnaireID *string) *cobra.Command {
@@ -169,9 +240,231 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		newCheckinsQuestionShowCmd(project),
 		newCheckinsQuestionCreateCmd(project),
 		newCheckinsQuestionUpdateCmd(project),
+		newCheckinsQuestionPauseCmd(),
+		newCheckinsQuestionResumeCmd(),
+		newCheckinsQuestionNotifyCmd(),
+		newCheckinsQuestionAnswerersCmd(),
 	)
 
 	return cmd
+}
+
+func newCheckinsQuestionPauseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "pause <id|url>",
+		Short: "Stop a question from being asked",
+		Long: `Stop a question from being asked on its schedule.
+
+The question and its existing answers stay put; only the recurring prompt
+stops. Resume it with 'basecamp checkins question resume <id>'.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCheckinsQuestionSchedule(cmd, args[0], true)
+		},
+	}
+}
+
+func newCheckinsQuestionResumeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume <id|url>",
+		Short: "Start asking a paused question again",
+		Long:  "Start asking a paused question on its schedule again.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCheckinsQuestionSchedule(cmd, args[0], false)
+		},
+	}
+}
+
+// runCheckinsQuestionSchedule performs pause/resume, which differ only in the
+// call and the wording.
+func runCheckinsQuestionSchedule(cmd *cobra.Command, arg string, pause bool) error {
+	app := appctx.FromContext(cmd.Context())
+
+	questionID, err := checkinsQuestionID(arg)
+	if err != nil {
+		return err
+	}
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	summary := fmt.Sprintf("Resumed question %d", questionID)
+	if pause {
+		err = app.Account().Checkins().PauseQuestion(cmd.Context(), questionID)
+		summary = fmt.Sprintf("Paused question %d", questionID)
+	} else {
+		err = app.Account().Checkins().ResumeQuestion(cmd.Context(), questionID)
+	}
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(map[string]any{"id": questionID, "paused": pause},
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "show",
+			Cmd:         fmt.Sprintf("basecamp checkins question show %d", questionID),
+			Description: "View the question",
+		}),
+	)
+}
+
+func newCheckinsQuestionNotifyCmd() *cobra.Command {
+	var (
+		onAnswer          bool
+		noOnAnswer        bool
+		includeUnanswered bool
+		noIncludeUnanswer bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "notify <id|url>",
+		Short: "Change your notification settings for a question",
+		Long: `Change your own notification settings for a check-in question.
+
+Each setting is left alone unless you name it, so you can change one without
+restating the other:
+
+  basecamp checkins question notify 789 --on-answer
+  basecamp checkins question notify 789 --no-on-answer
+  basecamp checkins question notify 789 --digest-include-unanswered`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			questionID, err := checkinsQuestionID(args[0])
+			if err != nil {
+				return err
+			}
+
+			// Tri-state: an unpassed flag stays nil so the server leaves that
+			// setting alone, and an explicit --no-... sends false rather than
+			// being indistinguishable from "not mentioned".
+			req := &basecamp.UpdateQuestionNotificationSettingsRequest{}
+			if req.NotifyOnAnswer, err = checkinsTriState(cmd, "on-answer", "no-on-answer", onAnswer, noOnAnswer); err != nil {
+				return err
+			}
+			if req.DigestIncludeUnanswered, err = checkinsTriState(cmd,
+				"digest-include-unanswered", "no-digest-include-unanswered",
+				includeUnanswered, noIncludeUnanswer); err != nil {
+				return err
+			}
+			if req.NotifyOnAnswer == nil && req.DigestIncludeUnanswered == nil {
+				return output.ErrUsageHint(
+					"no notification setting was named",
+					"Pass --on-answer/--no-on-answer or --digest-include-unanswered/--no-digest-include-unanswered")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			settings, err := app.Account().Checkins().UpdateQuestionNotificationSettings(cmd.Context(), questionID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(settings,
+				output.WithSummary(fmt.Sprintf("Updated your notification settings for question %d", questionID)),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "show",
+					Cmd:         fmt.Sprintf("basecamp checkins question show %d", questionID),
+					Description: "View the question",
+				}),
+			)
+		},
+	}
+
+	cmd.Flags().BoolVar(&onAnswer, "on-answer", false, "Notify you when someone answers")
+	cmd.Flags().BoolVar(&noOnAnswer, "no-on-answer", false, "Stop notifying you when someone answers")
+	cmd.Flags().BoolVar(&includeUnanswered, "digest-include-unanswered", false, "Include unanswered questions in your digest")
+	cmd.Flags().BoolVar(&noIncludeUnanswer, "no-digest-include-unanswered", false, "Exclude unanswered questions from your digest")
+
+	return cmd
+}
+
+// checkinsTriState resolves an on/off flag pair into the SDK's *bool.
+//
+// nil means "not mentioned, leave it alone", which is why these are two flags
+// rather than one bool: a single --on-answer=false would be indistinguishable
+// from omitting it, and would silently overwrite a setting the caller never
+// asked about.
+func checkinsTriState(cmd *cobra.Command, onName, offName string, on, off bool) (*bool, error) {
+	setOn := cmd.Flags().Changed(onName) && on
+	setOff := cmd.Flags().Changed(offName) && off
+
+	switch {
+	case setOn && setOff:
+		return nil, output.ErrUsage(fmt.Sprintf("--%s and --%s are mutually exclusive", onName, offName))
+	case setOn:
+		value := true
+		return &value, nil
+	case setOff:
+		value := false
+		return &value, nil
+	default:
+		return nil, nil
+	}
+}
+
+func newCheckinsQuestionAnswerersCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "answerers <id|url>",
+		Short: "List the people who answer a question",
+		Long: `List the people who answer a check-in question.
+
+  basecamp checkins question answerers 789`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			questionID, err := checkinsQuestionID(args[0])
+			if err != nil {
+				return err
+			}
+			if limit < 0 {
+				return output.ErrUsage("--limit must be zero or positive")
+			}
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// No --page here: PeopleListOptions.Page does not honor the page
+			// number, so a flag for it could not do what it says.
+			result, err := app.Account().Checkins().ListAnswerers(cmd.Context(), questionID, &basecamp.PeopleListOptions{Limit: limit})
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(result.People,
+				output.WithSummary(fmt.Sprintf("%d people answer question %d", len(result.People), questionID)),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "answers",
+					Cmd:         fmt.Sprintf("basecamp checkins answers %d", questionID),
+					Description: "Read the answers",
+				}),
+			)
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum people to return")
+
+	return cmd
+}
+
+// checkinsQuestionID resolves the <id|url> positional the question verbs take.
+func checkinsQuestionID(arg string) (int64, error) {
+	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	if err != nil {
+		return 0, output.ErrUsageHint(
+			fmt.Sprintf("%q is not a question id or Basecamp URL", arg),
+			"Pass a numeric question id, or paste the question's Basecamp URL",
+		)
+	}
+	return id, nil
 }
 
 func newCheckinsQuestionShowCmd(project *string) *cobra.Command {

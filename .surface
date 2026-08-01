@@ -88,7 +88,11 @@ ARG basecamp checkin answer update 00 <id|url>
 ARG basecamp checkin answer update 01 <content>
 ARG basecamp checkin answers 00 [question_id|url]
 ARG basecamp checkin question 00 <id|url>
+ARG basecamp checkin question answerers 00 <id|url>
 ARG basecamp checkin question create 00 <title>
+ARG basecamp checkin question notify 00 <id|url>
+ARG basecamp checkin question pause 00 <id|url>
+ARG basecamp checkin question resume 00 <id|url>
 ARG basecamp checkin question show 00 <id|url>
 ARG basecamp checkin question update 00 <id|url>
 ARG basecamp checkin question update 01 [title]
@@ -100,7 +104,11 @@ ARG basecamp checkins answer update 00 <id|url>
 ARG basecamp checkins answer update 01 <content>
 ARG basecamp checkins answers 00 [question_id|url]
 ARG basecamp checkins question 00 <id|url>
+ARG basecamp checkins question answerers 00 <id|url>
 ARG basecamp checkins question create 00 <title>
+ARG basecamp checkins question notify 00 <id|url>
+ARG basecamp checkins question pause 00 <id|url>
+ARG basecamp checkins question resume 00 <id|url>
 ARG basecamp checkins question show 00 <id|url>
 ARG basecamp checkins question update 00 <id|url>
 ARG basecamp checkins question update 01 [title]
@@ -558,10 +566,15 @@ CMD basecamp checkin answer show
 CMD basecamp checkin answer update
 CMD basecamp checkin answers
 CMD basecamp checkin question
+CMD basecamp checkin question answerers
 CMD basecamp checkin question create
+CMD basecamp checkin question notify
+CMD basecamp checkin question pause
+CMD basecamp checkin question resume
 CMD basecamp checkin question show
 CMD basecamp checkin question update
 CMD basecamp checkin questions
+CMD basecamp checkin reminders
 CMD basecamp checkins
 CMD basecamp checkins answer
 CMD basecamp checkins answer create
@@ -569,10 +582,15 @@ CMD basecamp checkins answer show
 CMD basecamp checkins answer update
 CMD basecamp checkins answers
 CMD basecamp checkins question
+CMD basecamp checkins question answerers
 CMD basecamp checkins question create
+CMD basecamp checkins question notify
+CMD basecamp checkins question pause
+CMD basecamp checkins question resume
 CMD basecamp checkins question show
 CMD basecamp checkins question update
 CMD basecamp checkins questions
+CMD basecamp checkins reminders
 CMD basecamp cmds
 CMD basecamp commands
 CMD basecamp comments
@@ -3932,6 +3950,29 @@ FLAG basecamp checkin question --stats type=bool
 FLAG basecamp checkin question --styled type=bool
 FLAG basecamp checkin question --todolist type=string
 FLAG basecamp checkin question --verbose type=count
+FLAG basecamp checkin question answerers --account type=string
+FLAG basecamp checkin question answerers --agent type=bool
+FLAG basecamp checkin question answerers --cache-dir type=string
+FLAG basecamp checkin question answerers --count type=bool
+FLAG basecamp checkin question answerers --help type=bool
+FLAG basecamp checkin question answerers --hints type=bool
+FLAG basecamp checkin question answerers --ids-only type=bool
+FLAG basecamp checkin question answerers --in type=string
+FLAG basecamp checkin question answerers --jq type=string
+FLAG basecamp checkin question answerers --json type=bool
+FLAG basecamp checkin question answerers --limit type=int
+FLAG basecamp checkin question answerers --markdown type=bool
+FLAG basecamp checkin question answerers --md type=bool
+FLAG basecamp checkin question answerers --no-hints type=bool
+FLAG basecamp checkin question answerers --no-stats type=bool
+FLAG basecamp checkin question answerers --profile type=string
+FLAG basecamp checkin question answerers --project type=string
+FLAG basecamp checkin question answerers --questionnaire type=string
+FLAG basecamp checkin question answerers --quiet type=bool
+FLAG basecamp checkin question answerers --stats type=bool
+FLAG basecamp checkin question answerers --styled type=bool
+FLAG basecamp checkin question answerers --todolist type=string
+FLAG basecamp checkin question answerers --verbose type=count
 FLAG basecamp checkin question create --account type=string
 FLAG basecamp checkin question create --agent type=bool
 FLAG basecamp checkin question create --cache-dir type=string
@@ -3958,6 +3999,76 @@ FLAG basecamp checkin question create --time type=string
 FLAG basecamp checkin question create --todolist type=string
 FLAG basecamp checkin question create --verbose type=count
 FLAG basecamp checkin question create --visible-to-clients type=bool
+FLAG basecamp checkin question notify --account type=string
+FLAG basecamp checkin question notify --agent type=bool
+FLAG basecamp checkin question notify --cache-dir type=string
+FLAG basecamp checkin question notify --count type=bool
+FLAG basecamp checkin question notify --digest-include-unanswered type=bool
+FLAG basecamp checkin question notify --help type=bool
+FLAG basecamp checkin question notify --hints type=bool
+FLAG basecamp checkin question notify --ids-only type=bool
+FLAG basecamp checkin question notify --in type=string
+FLAG basecamp checkin question notify --jq type=string
+FLAG basecamp checkin question notify --json type=bool
+FLAG basecamp checkin question notify --markdown type=bool
+FLAG basecamp checkin question notify --md type=bool
+FLAG basecamp checkin question notify --no-digest-include-unanswered type=bool
+FLAG basecamp checkin question notify --no-hints type=bool
+FLAG basecamp checkin question notify --no-on-answer type=bool
+FLAG basecamp checkin question notify --no-stats type=bool
+FLAG basecamp checkin question notify --on-answer type=bool
+FLAG basecamp checkin question notify --profile type=string
+FLAG basecamp checkin question notify --project type=string
+FLAG basecamp checkin question notify --questionnaire type=string
+FLAG basecamp checkin question notify --quiet type=bool
+FLAG basecamp checkin question notify --stats type=bool
+FLAG basecamp checkin question notify --styled type=bool
+FLAG basecamp checkin question notify --todolist type=string
+FLAG basecamp checkin question notify --verbose type=count
+FLAG basecamp checkin question pause --account type=string
+FLAG basecamp checkin question pause --agent type=bool
+FLAG basecamp checkin question pause --cache-dir type=string
+FLAG basecamp checkin question pause --count type=bool
+FLAG basecamp checkin question pause --help type=bool
+FLAG basecamp checkin question pause --hints type=bool
+FLAG basecamp checkin question pause --ids-only type=bool
+FLAG basecamp checkin question pause --in type=string
+FLAG basecamp checkin question pause --jq type=string
+FLAG basecamp checkin question pause --json type=bool
+FLAG basecamp checkin question pause --markdown type=bool
+FLAG basecamp checkin question pause --md type=bool
+FLAG basecamp checkin question pause --no-hints type=bool
+FLAG basecamp checkin question pause --no-stats type=bool
+FLAG basecamp checkin question pause --profile type=string
+FLAG basecamp checkin question pause --project type=string
+FLAG basecamp checkin question pause --questionnaire type=string
+FLAG basecamp checkin question pause --quiet type=bool
+FLAG basecamp checkin question pause --stats type=bool
+FLAG basecamp checkin question pause --styled type=bool
+FLAG basecamp checkin question pause --todolist type=string
+FLAG basecamp checkin question pause --verbose type=count
+FLAG basecamp checkin question resume --account type=string
+FLAG basecamp checkin question resume --agent type=bool
+FLAG basecamp checkin question resume --cache-dir type=string
+FLAG basecamp checkin question resume --count type=bool
+FLAG basecamp checkin question resume --help type=bool
+FLAG basecamp checkin question resume --hints type=bool
+FLAG basecamp checkin question resume --ids-only type=bool
+FLAG basecamp checkin question resume --in type=string
+FLAG basecamp checkin question resume --jq type=string
+FLAG basecamp checkin question resume --json type=bool
+FLAG basecamp checkin question resume --markdown type=bool
+FLAG basecamp checkin question resume --md type=bool
+FLAG basecamp checkin question resume --no-hints type=bool
+FLAG basecamp checkin question resume --no-stats type=bool
+FLAG basecamp checkin question resume --profile type=string
+FLAG basecamp checkin question resume --project type=string
+FLAG basecamp checkin question resume --questionnaire type=string
+FLAG basecamp checkin question resume --quiet type=bool
+FLAG basecamp checkin question resume --stats type=bool
+FLAG basecamp checkin question resume --styled type=bool
+FLAG basecamp checkin question resume --todolist type=string
+FLAG basecamp checkin question resume --verbose type=count
 FLAG basecamp checkin question show --account type=string
 FLAG basecamp checkin question show --agent type=bool
 FLAG basecamp checkin question show --all-comments type=bool
@@ -4033,6 +4144,29 @@ FLAG basecamp checkin questions --stats type=bool
 FLAG basecamp checkin questions --styled type=bool
 FLAG basecamp checkin questions --todolist type=string
 FLAG basecamp checkin questions --verbose type=count
+FLAG basecamp checkin reminders --account type=string
+FLAG basecamp checkin reminders --agent type=bool
+FLAG basecamp checkin reminders --cache-dir type=string
+FLAG basecamp checkin reminders --count type=bool
+FLAG basecamp checkin reminders --help type=bool
+FLAG basecamp checkin reminders --hints type=bool
+FLAG basecamp checkin reminders --ids-only type=bool
+FLAG basecamp checkin reminders --in type=string
+FLAG basecamp checkin reminders --jq type=string
+FLAG basecamp checkin reminders --json type=bool
+FLAG basecamp checkin reminders --limit type=int
+FLAG basecamp checkin reminders --markdown type=bool
+FLAG basecamp checkin reminders --md type=bool
+FLAG basecamp checkin reminders --no-hints type=bool
+FLAG basecamp checkin reminders --no-stats type=bool
+FLAG basecamp checkin reminders --profile type=string
+FLAG basecamp checkin reminders --project type=string
+FLAG basecamp checkin reminders --questionnaire type=string
+FLAG basecamp checkin reminders --quiet type=bool
+FLAG basecamp checkin reminders --stats type=bool
+FLAG basecamp checkin reminders --styled type=bool
+FLAG basecamp checkin reminders --todolist type=string
+FLAG basecamp checkin reminders --verbose type=count
 FLAG basecamp checkins --account type=string
 FLAG basecamp checkins --agent type=bool
 FLAG basecamp checkins --cache-dir type=string
@@ -4203,6 +4337,29 @@ FLAG basecamp checkins question --stats type=bool
 FLAG basecamp checkins question --styled type=bool
 FLAG basecamp checkins question --todolist type=string
 FLAG basecamp checkins question --verbose type=count
+FLAG basecamp checkins question answerers --account type=string
+FLAG basecamp checkins question answerers --agent type=bool
+FLAG basecamp checkins question answerers --cache-dir type=string
+FLAG basecamp checkins question answerers --count type=bool
+FLAG basecamp checkins question answerers --help type=bool
+FLAG basecamp checkins question answerers --hints type=bool
+FLAG basecamp checkins question answerers --ids-only type=bool
+FLAG basecamp checkins question answerers --in type=string
+FLAG basecamp checkins question answerers --jq type=string
+FLAG basecamp checkins question answerers --json type=bool
+FLAG basecamp checkins question answerers --limit type=int
+FLAG basecamp checkins question answerers --markdown type=bool
+FLAG basecamp checkins question answerers --md type=bool
+FLAG basecamp checkins question answerers --no-hints type=bool
+FLAG basecamp checkins question answerers --no-stats type=bool
+FLAG basecamp checkins question answerers --profile type=string
+FLAG basecamp checkins question answerers --project type=string
+FLAG basecamp checkins question answerers --questionnaire type=string
+FLAG basecamp checkins question answerers --quiet type=bool
+FLAG basecamp checkins question answerers --stats type=bool
+FLAG basecamp checkins question answerers --styled type=bool
+FLAG basecamp checkins question answerers --todolist type=string
+FLAG basecamp checkins question answerers --verbose type=count
 FLAG basecamp checkins question create --account type=string
 FLAG basecamp checkins question create --agent type=bool
 FLAG basecamp checkins question create --cache-dir type=string
@@ -4229,6 +4386,76 @@ FLAG basecamp checkins question create --time type=string
 FLAG basecamp checkins question create --todolist type=string
 FLAG basecamp checkins question create --verbose type=count
 FLAG basecamp checkins question create --visible-to-clients type=bool
+FLAG basecamp checkins question notify --account type=string
+FLAG basecamp checkins question notify --agent type=bool
+FLAG basecamp checkins question notify --cache-dir type=string
+FLAG basecamp checkins question notify --count type=bool
+FLAG basecamp checkins question notify --digest-include-unanswered type=bool
+FLAG basecamp checkins question notify --help type=bool
+FLAG basecamp checkins question notify --hints type=bool
+FLAG basecamp checkins question notify --ids-only type=bool
+FLAG basecamp checkins question notify --in type=string
+FLAG basecamp checkins question notify --jq type=string
+FLAG basecamp checkins question notify --json type=bool
+FLAG basecamp checkins question notify --markdown type=bool
+FLAG basecamp checkins question notify --md type=bool
+FLAG basecamp checkins question notify --no-digest-include-unanswered type=bool
+FLAG basecamp checkins question notify --no-hints type=bool
+FLAG basecamp checkins question notify --no-on-answer type=bool
+FLAG basecamp checkins question notify --no-stats type=bool
+FLAG basecamp checkins question notify --on-answer type=bool
+FLAG basecamp checkins question notify --profile type=string
+FLAG basecamp checkins question notify --project type=string
+FLAG basecamp checkins question notify --questionnaire type=string
+FLAG basecamp checkins question notify --quiet type=bool
+FLAG basecamp checkins question notify --stats type=bool
+FLAG basecamp checkins question notify --styled type=bool
+FLAG basecamp checkins question notify --todolist type=string
+FLAG basecamp checkins question notify --verbose type=count
+FLAG basecamp checkins question pause --account type=string
+FLAG basecamp checkins question pause --agent type=bool
+FLAG basecamp checkins question pause --cache-dir type=string
+FLAG basecamp checkins question pause --count type=bool
+FLAG basecamp checkins question pause --help type=bool
+FLAG basecamp checkins question pause --hints type=bool
+FLAG basecamp checkins question pause --ids-only type=bool
+FLAG basecamp checkins question pause --in type=string
+FLAG basecamp checkins question pause --jq type=string
+FLAG basecamp checkins question pause --json type=bool
+FLAG basecamp checkins question pause --markdown type=bool
+FLAG basecamp checkins question pause --md type=bool
+FLAG basecamp checkins question pause --no-hints type=bool
+FLAG basecamp checkins question pause --no-stats type=bool
+FLAG basecamp checkins question pause --profile type=string
+FLAG basecamp checkins question pause --project type=string
+FLAG basecamp checkins question pause --questionnaire type=string
+FLAG basecamp checkins question pause --quiet type=bool
+FLAG basecamp checkins question pause --stats type=bool
+FLAG basecamp checkins question pause --styled type=bool
+FLAG basecamp checkins question pause --todolist type=string
+FLAG basecamp checkins question pause --verbose type=count
+FLAG basecamp checkins question resume --account type=string
+FLAG basecamp checkins question resume --agent type=bool
+FLAG basecamp checkins question resume --cache-dir type=string
+FLAG basecamp checkins question resume --count type=bool
+FLAG basecamp checkins question resume --help type=bool
+FLAG basecamp checkins question resume --hints type=bool
+FLAG basecamp checkins question resume --ids-only type=bool
+FLAG basecamp checkins question resume --in type=string
+FLAG basecamp checkins question resume --jq type=string
+FLAG basecamp checkins question resume --json type=bool
+FLAG basecamp checkins question resume --markdown type=bool
+FLAG basecamp checkins question resume --md type=bool
+FLAG basecamp checkins question resume --no-hints type=bool
+FLAG basecamp checkins question resume --no-stats type=bool
+FLAG basecamp checkins question resume --profile type=string
+FLAG basecamp checkins question resume --project type=string
+FLAG basecamp checkins question resume --questionnaire type=string
+FLAG basecamp checkins question resume --quiet type=bool
+FLAG basecamp checkins question resume --stats type=bool
+FLAG basecamp checkins question resume --styled type=bool
+FLAG basecamp checkins question resume --todolist type=string
+FLAG basecamp checkins question resume --verbose type=count
 FLAG basecamp checkins question show --account type=string
 FLAG basecamp checkins question show --agent type=bool
 FLAG basecamp checkins question show --all-comments type=bool
@@ -4304,6 +4531,29 @@ FLAG basecamp checkins questions --stats type=bool
 FLAG basecamp checkins questions --styled type=bool
 FLAG basecamp checkins questions --todolist type=string
 FLAG basecamp checkins questions --verbose type=count
+FLAG basecamp checkins reminders --account type=string
+FLAG basecamp checkins reminders --agent type=bool
+FLAG basecamp checkins reminders --cache-dir type=string
+FLAG basecamp checkins reminders --count type=bool
+FLAG basecamp checkins reminders --help type=bool
+FLAG basecamp checkins reminders --hints type=bool
+FLAG basecamp checkins reminders --ids-only type=bool
+FLAG basecamp checkins reminders --in type=string
+FLAG basecamp checkins reminders --jq type=string
+FLAG basecamp checkins reminders --json type=bool
+FLAG basecamp checkins reminders --limit type=int
+FLAG basecamp checkins reminders --markdown type=bool
+FLAG basecamp checkins reminders --md type=bool
+FLAG basecamp checkins reminders --no-hints type=bool
+FLAG basecamp checkins reminders --no-stats type=bool
+FLAG basecamp checkins reminders --profile type=string
+FLAG basecamp checkins reminders --project type=string
+FLAG basecamp checkins reminders --questionnaire type=string
+FLAG basecamp checkins reminders --quiet type=bool
+FLAG basecamp checkins reminders --stats type=bool
+FLAG basecamp checkins reminders --styled type=bool
+FLAG basecamp checkins reminders --todolist type=string
+FLAG basecamp checkins reminders --verbose type=count
 FLAG basecamp cmds --account type=string
 FLAG basecamp cmds --agent type=bool
 FLAG basecamp cmds --cache-dir type=string
@@ -14003,6 +14253,7 @@ FLAG basecamp todos create --in type=string
 FLAG basecamp todos create --jq type=string
 FLAG basecamp todos create --json type=bool
 FLAG basecamp todos create --list type=string
+FLAG basecamp todos create --loose type=bool
 FLAG basecamp todos create --markdown type=bool
 FLAG basecamp todos create --md type=bool
 FLAG basecamp todos create --no-hints type=bool
@@ -17025,10 +17276,15 @@ SUB basecamp checkin answer show
 SUB basecamp checkin answer update
 SUB basecamp checkin answers
 SUB basecamp checkin question
+SUB basecamp checkin question answerers
 SUB basecamp checkin question create
+SUB basecamp checkin question notify
+SUB basecamp checkin question pause
+SUB basecamp checkin question resume
 SUB basecamp checkin question show
 SUB basecamp checkin question update
 SUB basecamp checkin questions
+SUB basecamp checkin reminders
 SUB basecamp checkins
 SUB basecamp checkins answer
 SUB basecamp checkins answer create
@@ -17036,10 +17292,15 @@ SUB basecamp checkins answer show
 SUB basecamp checkins answer update
 SUB basecamp checkins answers
 SUB basecamp checkins question
+SUB basecamp checkins question answerers
 SUB basecamp checkins question create
+SUB basecamp checkins question notify
+SUB basecamp checkins question pause
+SUB basecamp checkins question resume
 SUB basecamp checkins question show
 SUB basecamp checkins question update
 SUB basecamp checkins questions
+SUB basecamp checkins reminders
 SUB basecamp cmds
 SUB basecamp commands
 SUB basecamp comments

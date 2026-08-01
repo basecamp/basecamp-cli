@@ -1164,11 +1164,19 @@ func newTodosCreateCmd() *cobra.Command {
 	var description string
 	var attachFiles []string
 	var notifyOnCompletion string
+	var loose bool
 
 	cmd := &cobra.Command{
 		Use:   "create <content>",
 		Short: "Create a new todo",
-		Long:  "Create a new todo in a project.",
+		Long: `Create a new todo in a project.
+
+By default a todo goes into a to-do list. --loose creates it directly on the
+project's to-do set instead, outside any list:
+
+  basecamp todos create "Call the vendor back" --loose --in <project>
+
+--loose needs no list, so it neither prompts for one nor accepts --list.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -1209,30 +1217,47 @@ func newTodosCreateCmd() *cobra.Command {
 			}
 			project = resolvedProject
 
-			// Use todolist from flag, config, or interactive prompt
-			if todolist == "" {
-				todolist = app.Flags.Todolist
-			}
-			if todolist == "" {
-				todolist = app.Config.TodolistID
-			}
-			// If still no todolist, try interactive selection (todoset-scoped)
-			if todolist == "" {
-				selectedTodolist, err := ensureTodolist(cmd, app, project, todoset)
+			// --loose creates directly on the to-do set, outside any list, so it
+			// resolves a todoset and skips todolist resolution entirely — there
+			// is no list to name, prompt for, or fall back to.
+			var resolvedTodolist, resolvedTodoset string
+			if loose {
+				if cmd.Flags().Changed("list") || app.Flags.Todolist != "" {
+					return output.ErrUsageHint(
+						"--loose creates a todo outside any list, so it cannot be combined with --list",
+						"Drop --list to create on the to-do set, or drop --loose to create in that list")
+				}
+
+				resolvedTodoset, err = ensureTodoset(cmd, app, project, todoset)
 				if err != nil {
 					return err
 				}
-				todolist = selectedTodolist
-			}
+			} else {
+				// Use todolist from flag, config, or interactive prompt
+				if todolist == "" {
+					todolist = app.Flags.Todolist
+				}
+				if todolist == "" {
+					todolist = app.Config.TodolistID
+				}
+				// If still no todolist, try interactive selection (todoset-scoped)
+				if todolist == "" {
+					selectedTodolist, err := ensureTodolist(cmd, app, project, todoset)
+					if err != nil {
+						return err
+					}
+					todolist = selectedTodolist
+				}
 
-			if todolist == "" {
-				return output.ErrUsage("--list is required (no default todolist found)")
-			}
+				if todolist == "" {
+					return output.ErrUsage("--list is required (no default todolist found)")
+				}
 
-			// Resolve todolist name to ID, scoped to --todoset when provided
-			resolvedTodolist, err := resolveTodolistInTodoset(cmd, app, todolist, project, todoset)
-			if err != nil {
-				return err
+				// Resolve todolist name to ID, scoped to --todoset when provided
+				resolvedTodolist, err = resolveTodolistInTodoset(cmd, app, todolist, project, todoset)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Build SDK request
@@ -1287,12 +1312,29 @@ func newTodosCreateCmd() *cobra.Command {
 				req.CompletionSubscriberIDs = subscriberIDs
 			}
 
-			todolistID, err := strconv.ParseInt(resolvedTodolist, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todolist ID")
-			}
+			var todo *basecamp.Todo
+			if loose {
+				projectID, parseErr := strconv.ParseInt(project, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid project ID")
+				}
+				todosetID, parseErr := strconv.ParseInt(resolvedTodoset, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid todoset ID")
+				}
 
-			todo, err := app.Account().Todos().Create(cmd.Context(), todolistID, req)
+				// Creates are not idempotent and the SDK does not retry them, so
+				// a transient failure here surfaces as a plain error rather than
+				// risking a duplicate todo.
+				todo, err = app.Account().Todos().CreateInTodoset(cmd.Context(), projectID, todosetID, req)
+			} else {
+				todolistID, parseErr := strconv.ParseInt(resolvedTodolist, 10, 64)
+				if parseErr != nil {
+					return output.ErrUsage("Invalid todolist ID")
+				}
+
+				todo, err = app.Account().Todos().Create(cmd.Context(), todolistID, req)
+			}
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1331,6 +1373,9 @@ func newTodosCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().StringVar(&notifyOnCompletion, "notify-on-completion", "", "People to notify when done (names or IDs, comma-separated)")
+	// Not --todoset: that flag already means "which to-do set", and this one
+	// means "no list at all".
+	cmd.Flags().BoolVar(&loose, "loose", false, "Create on the to-do set, outside any list")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)

@@ -56,3 +56,35 @@ setup_file() {
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
 }
+
+@test "checkins reminders lists pending reminders" {
+  run_smoke basecamp checkins reminders --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "checkins reminders honors --limit" {
+  run_smoke basecamp checkins reminders --limit 1 --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "checkins question answerers rejects a non-id" {
+  run_smoke basecamp checkins question answerers not-an-id --json
+  assert_failure
+}
+
+@test "checkins question notify requires a setting" {
+  # Naming no setting would be a no-op write, so it is refused before the
+  # request rather than sent as an empty update.
+  run_smoke basecamp checkins question notify 999999 --json
+  assert_failure
+}
+
+@test "checkins question pause is out of scope" {
+  mark_out_of_scope "Mutating - pauses a live recurring question"
+}
+
+@test "checkins question resume is out of scope" {
+  mark_out_of_scope "Mutating - resumes a live recurring question"
+}
