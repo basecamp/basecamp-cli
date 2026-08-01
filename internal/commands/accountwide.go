@@ -175,6 +175,34 @@ func accountWideCapNotice(capped bool, meta basecamp.ListMeta, count int, plural
 		count, plural)
 }
 
+// validateAccountWidePaginationFlags enforces the combination rules every
+// bounded account-wide listing shares: --all and --limit both answer "how much",
+// --page answers "which one", and mixing them asks for two different things at
+// once.
+//
+// The older listings spell these rules out inline, one copy each. New listings
+// call this instead; the existing copies are left alone rather than swept into
+// this change, since rewriting eight working call sites to prove a helper is a
+// bigger diff than the helper earns here.
+func validateAccountWidePaginationFlags(cmd *cobra.Command, limit, page int, all bool) error {
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if cmd.Flags().Changed("page") && page < 1 {
+		return output.ErrUsageHint(
+			"--page must be a positive page number",
+			"Omit --page, or pass --all, to follow every page",
+		)
+	}
+	if limit < 0 {
+		return output.ErrUsage("--limit must be zero or positive")
+	}
+	return nil
+}
+
 // rejectScopedPaginationFlags refuses --limit/--page/--all on a path that has
 // no pagination to thread them onto.
 //
