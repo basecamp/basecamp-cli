@@ -1,0 +1,39 @@
+internal/commands/calendars.go
+  s_d931ffd296629c::t_4fba635f10667c 1-188
+internal/cli/root.go
+  s_d931ffd296629c::t_4e6e021f94a172 344-345
+e2e/smoke/smoke_calendars.bats
+  s_d931ffd296629c::t_de16263ee2e13f 1-25
+internal/commands/notes.go
+  s_d931ffd296629c::t_55a75d16c880b6 1-211
+internal/commands/commands.go
+  s_d931ffd296629c::t_3b31934a199545 84
+  s_d931ffd296629c::t_d4bfea2e9c2fbc 76
+internal/commands/notes_test.go
+  s_d931ffd296629c::t_4c0a545598574f 1-164
+  s_d931ffd296629c::t_961a8f16c77fcf 165-170
+internal/commands/calendars_test.go
+  s_d931ffd296629c::t_fe5a11e4b66101 1-119
+e2e/smoke/smoke_notes.bats
+  s_d931ffd296629c::t_7578f057e82545 1-20
+internal/commands/commands_test.go
+  s_d931ffd296629c::t_6a8ffc180f87e1 116-117
+.surface
+  s_d931ffd296629c::t_66ab5e9aa5ae01 32-34,251,489-491,833-835,2340-2403,10682-10745,16889-16891,17233-17235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "30efa0753b0d1e18924147f2e71bcef56dd43a24",
+  "prompts": {},
+  "sessions": {
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
