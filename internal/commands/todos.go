@@ -28,7 +28,8 @@ type todosListFlags struct {
 	allProjects bool
 	todolist    string
 	todoset     string
-	assignee    string
+	assignees   []string
+	due         string
 	status      string
 	completed   bool
 	overdue     bool
@@ -78,7 +79,18 @@ func newTodosListCmd() *cobra.Command {
 With no project in scope, todos are listed across every project you can see.
 --all-projects forces that listing over a configured default project, and
 --unassigned/--no-due-date select account-wide filters that have no
-project-scoped equivalent.`,
+project-scoped equivalent.
+
+--assignee is repeatable and matches a todo assigned to any of the named
+people. Account-wide it is a server-side filter; within a project the API has
+no assignee parameter, so it is applied client-side over an unlimited fetch —
+same results, very different cost. Assignees on nested steps are not
+considered.
+
+--due (with, without, overdue) filters the account-wide listing only, and
+cannot be combined with --overdue or --no-due-date, which each select their own
+listing on that same axis. --assignee cannot be combined with --unassigned:
+nothing can match both.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTodosList(cmd, flags)
 		},
@@ -89,7 +101,11 @@ project-scoped equivalent.`,
 	cmd.Flags().BoolVar(&flags.allProjects, "all-projects", false, "List todos across every project (overrides a configured project)")
 	cmd.Flags().StringVarP(&flags.todolist, "list", "l", "", "Todolist ID")
 	cmd.Flags().StringVarP(&flags.todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVar(&flags.assignee, "assignee", "", "Filter by assignee")
+	// Repeatable, and account-wide it is a real server-side filter. Widening
+	// from StringVar changes the .surface type line, which reads as a removal —
+	// acknowledged in .surface-breaking.
+	cmd.Flags().StringArrayVar(&flags.assignees, "assignee", nil, "Filter by assignee (repeatable; account-wide it is server-side)")
+	cmd.Flags().StringVar(&flags.due, "due", "", "Filter by due date: with, without, overdue (account-wide only)")
 	cmd.Flags().StringVarP(&flags.status, "status", "s", "", "Filter by status (completed, incomplete, archived, trashed)")
 	cmd.Flags().BoolVar(&flags.completed, "completed", false, "Show completed todos (shorthand for --status completed)")
 	cmd.Flags().BoolVar(&flags.overdue, "overdue", false, "Filter overdue todos")
@@ -172,6 +188,15 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 		return err
 	}
 
+	// --due is a parameter on the account-wide aggregates only; the
+	// project-scoped listing has no equivalent, so it is refused rather than
+	// dropped.
+	if flags.due != "" {
+		return output.ErrUsageHint(
+			"--due filters the account-wide listing only",
+			"Drop --project/--in to filter across all projects, or use --overdue within this one")
+	}
+
 	// Use project from flag, global flag, or config. One of the three is set —
 	// otherwise the account-wide branch above answered the listing, so there is
 	// nothing left to prompt for.
@@ -201,7 +226,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 
 	// If todolist is specified, list todos in that list
 	if todolist != "" {
-		return listTodosInList(cmd, app, project, todolist, flags.assignee, sdkStatus, sdkCompleted, flags.limit, flags.all, flags.sortField, flags.reverse)
+		return listTodosInList(cmd, app, project, todolist, flags.assignees, sdkStatus, sdkCompleted, flags.limit, flags.all, flags.sortField, flags.reverse)
 	}
 
 	// --page is not meaningful when aggregating across todolists
@@ -211,7 +236,7 @@ func runTodosList(cmd *cobra.Command, flags todosListFlags) error {
 	}
 
 	// Otherwise, get all todos from project's todoset
-	return listAllTodos(cmd, app, project, flags.todoset, flags.assignee, sdkStatus, sdkCompleted, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
+	return listAllTodos(cmd, app, project, flags.todoset, flags.assignees, sdkStatus, sdkCompleted, flags.overdue, flags.limit, flags.all, flags.sortField, flags.reverse)
 }
 
 // todosAccountWideFilter names the account-wide todo aggregate a listing maps
@@ -237,6 +262,11 @@ func listTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosLis
 
 	filter, err := selectAccountWideTodosFilter(flags)
 	if err != nil {
+		return err
+	}
+
+	if err := validateAccountWideTaskFilters(flags.assignees, flags.due, flags.unassigned,
+		flags.overdue, flags.noDueDate, "todos"); err != nil {
 		return err
 	}
 
@@ -293,10 +323,6 @@ func rejectProjectScopedTodosFlags(app *appctx.App, flags todosListFlags) error 
 		return output.ErrUsageHint(
 			"--todoset names a todoset inside one project, which has no meaning across all projects",
 			fmt.Sprintf("List that todoset: basecamp todos list --in <project> --todoset %s", flags.todoset))
-	case flags.assignee != "":
-		return output.ErrUsageHint(
-			"--assignee has no account-wide equivalent",
-			"For cross-project assigned todos: basecamp reports assigned")
 	}
 	return nil
 }
@@ -350,6 +376,14 @@ func selectAccountWideTodosFilter(flags todosListFlags) (todosAccountWideFilter,
 // listGroupedTodosAcrossProjects fetches one of the paginated aggregates, whose
 // payload is nested by project.
 func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags, filter todosAccountWideFilter) error {
+	// Server-side here, unlike the project-scoped path: these become
+	// assignee_ids[] and due= on the request, so they narrow the listing before
+	// it is paginated and leave the page count untouched.
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, flags.assignees, flags.due)
+	if err != nil {
+		return err
+	}
+
 	limit := flags.limit
 	if limit == 0 {
 		limit = accountWideDefaultLimit
@@ -364,14 +398,14 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		if err != nil {
 			return err
 		}
-		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, sdkPage)
+		page, err := fetchAccountWideTodoGroups(cmd.Context(), app, filter, sdkPage, taskFilters)
 		if err != nil {
 			return convertSDKError(err)
 		}
 		groups = page.Groups
 		truncated = page.Meta.Truncated
 	} else {
-		collected, more, err := collectAccountWideTodoGroups(cmd.Context(), app, filter, limit)
+		collected, more, err := collectAccountWideTodoGroups(cmd.Context(), app, filter, limit, taskFilters)
 		if err != nil {
 			return convertSDKError(err)
 		}
@@ -427,7 +461,12 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
 
-	todos, err := app.Account().Everything().OverdueTodos(cmd.Context(), nil)
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, flags.assignees, flags.due)
+	if err != nil {
+		return err
+	}
+
+	todos, err := app.Account().Everything().OverdueTodos(cmd.Context(), taskFilters)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -481,10 +520,10 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 // requested number of todos, which is cheaper than fetching every page only to
 // truncate. The second return reports that collection stopped at the cap rather
 // than at the end of the listing.
-func collectAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, limit int) ([]basecamp.BucketTodosGroup, bool, error) {
+func collectAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, limit int, taskFilters *basecamp.EverythingTaskFilters) ([]basecamp.BucketTodosGroup, bool, error) {
 	groups, capped, _, err := accountWideCollect(
 		func(page int32) ([]basecamp.BucketTodosGroup, basecamp.ListMeta, error) {
-			result, err := fetchAccountWideTodoGroups(ctx, app, filter, page)
+			result, err := fetchAccountWideTodoGroups(ctx, app, filter, page, taskFilters)
 			if err != nil {
 				return nil, basecamp.ListMeta{}, err
 			}
@@ -498,17 +537,17 @@ func collectAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter t
 
 // fetchAccountWideTodoGroups calls the aggregate the filter selects. Page 0
 // follows the Link header across every page.
-func fetchAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, page int32) (*basecamp.BucketTodosGroupsPage, error) {
+func fetchAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter todosAccountWideFilter, page int32, taskFilters *basecamp.EverythingTaskFilters) (*basecamp.BucketTodosGroupsPage, error) {
 	everything := app.Account().Everything()
 	switch filter {
 	case todosFilterCompleted:
-		return everything.CompletedTodos(ctx, page, nil)
+		return everything.CompletedTodos(ctx, page, taskFilters)
 	case todosFilterUnassigned:
-		return everything.UnassignedTodos(ctx, page, nil)
+		return everything.UnassignedTodos(ctx, page, taskFilters)
 	case todosFilterNoDueDate:
-		return everything.NoDueDateTodos(ctx, page, nil)
+		return everything.NoDueDateTodos(ctx, page, taskFilters)
 	default:
-		return everything.OpenTodos(ctx, page, nil)
+		return everything.OpenTodos(ctx, page, taskFilters)
 	}
 }
 
@@ -721,7 +760,7 @@ func fetchTodosIncludingGroups(ctx context.Context, app *appctx.App, todolistID 
 	return result, totalCount, nil
 }
 
-func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, assignee, sdkStatus string, sdkCompleted bool, limit int, all bool, sortField string, reverse bool) error {
+func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist string, assignees []string, sdkStatus string, sdkCompleted bool, limit int, all bool, sortField string, reverse bool) error {
 	resolvedTodolist, _, err := app.Names.ResolveTodolist(cmd.Context(), todolist, project)
 	if err != nil {
 		return err
@@ -740,7 +779,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 	// When assignee filtering is active, fetch all so client-side filtering
 	// doesn't miss matches beyond the default cap.
 	sdkLimit := 0 // SDK default
-	if all || assignee != "" {
+	if all || len(assignees) > 0 {
 		sdkLimit = -1
 	} else if limit > 0 {
 		sdkLimit = limit
@@ -751,21 +790,20 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 		return convertSDKError(err)
 	}
 
-	// Filter by assignee client-side (API has no server-side assignee filter)
-	if assignee != "" {
-		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
+	// Project-scoped --assignee is a client-side filter: this endpoint has no
+	// server-side assignee parameter, which is why the fetch above is unlimited
+	// whenever one is set. Account-wide the same flag is a real assignee_ids[]
+	// query parameter — same spelling, very different cost.
+	if len(assignees) > 0 {
+		assigneeIDs, err := resolveAssigneeFilterIDs(cmd.Context(), app, assignees)
 		if err != nil {
-			return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
+			return err
 		}
-		assigneeID, _ := strconv.ParseInt(resolvedID, 10, 64)
-		if assigneeID != 0 {
+		if len(assigneeIDs) > 0 {
 			filtered := todos[:0]
 			for _, todo := range todos {
-				for _, a := range todo.Assignees {
-					if a.ID == assigneeID {
-						filtered = append(filtered, todo)
-						break
-					}
+				if todoMatchesAnyAssignee(todo, assigneeIDs) {
+					filtered = append(filtered, todo)
 				}
 			}
 			todos = filtered
@@ -775,7 +813,7 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 
 	// Apply --limit after client-side filtering so the cap reflects
 	// the filtered set, not the pre-filter fetch.
-	if assignee != "" && !all && limit > 0 && len(todos) > limit {
+	if len(assignees) > 0 && !all && limit > 0 && len(todos) > limit {
 		todos = todos[:limit]
 	}
 
@@ -808,7 +846,36 @@ func listTodosInList(cmd *cobra.Command, app *appctx.App, project, todolist, ass
 	return app.OK(todos, respOpts...)
 }
 
-func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, assignee, sdkStatus string, sdkCompleted bool, overdue bool, limit int, all bool, sortField string, reverse bool) error {
+// resolveAssigneeFilterIDs resolves the repeatable --assignee into person ids.
+// Each value may itself be comma-separated, so both spellings work.
+func resolveAssigneeFilterIDs(ctx context.Context, app *appctx.App, assignees []string) ([]int64, error) {
+	ids := make([]int64, 0, len(assignees))
+	for _, assignee := range assignees {
+		resolved, err := resolvePersonRoleIDs(ctx, app, assignee, "Assignee")
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, resolved...)
+	}
+	return ids, nil
+}
+
+// todoMatchesAnyAssignee reports whether the todo is assigned to any of the
+// given people. Any rather than all: --assignee ann --assignee bob asks for
+// what either of them is on, matching the server-side assignee_ids[] semantics
+// the account-wide path gets for free.
+func todoMatchesAnyAssignee(todo basecamp.Todo, assigneeIDs []int64) bool {
+	for _, a := range todo.Assignees {
+		for _, id := range assigneeIDs {
+			if a.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag string, assignees []string, sdkStatus string, sdkCompleted bool, overdue bool, limit int, all bool, sortField string, reverse bool) error {
 	// Position is only meaningful within a single todolist — reject before
 	// the --all check so users get the right error message.
 	if sortField == "position" {
@@ -819,17 +886,17 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// (assignee/overdue) forces an unlimited per-list fetch below. Otherwise
 	// results are sampled per-todolist using default SDK paging and a sort
 	// would be misleading.
-	if sortField != "" && !all && assignee == "" && !overdue {
+	if sortField != "" && !all && len(assignees) == 0 && !overdue {
 		return output.ErrUsage("--sort requires --all (or --assignee/--overdue) when listing across todolists (results are otherwise sampled per list)")
 	}
-	// Resolve assignee name to ID if provided
-	var assigneeID int64
-	if assignee != "" {
-		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), assignee)
-		if err != nil {
-			return fmt.Errorf("failed to resolve assignee '%s': %w", assignee, err)
+	// Resolve assignee names to IDs if provided. Client-side again: a todo
+	// matches when any one of the named people is on it.
+	var assigneeIDs []int64
+	if len(assignees) > 0 {
+		var err error
+		if assigneeIDs, err = resolveAssigneeFilterIDs(cmd.Context(), app, assignees); err != nil {
+			return err
 		}
-		assigneeID, _ = strconv.ParseInt(resolvedID, 10, 64)
 	}
 
 	// Get todoset ID from project dock (with interactive fallback for multi-todoset projects)
@@ -854,7 +921,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// doesn't miss matches beyond the default cap — mirroring the single-list
 	// path. Any explicit --limit is then applied after filtering, below.
 	sdkLimit := 0 // SDK default
-	if all || assignee != "" || overdue {
+	if all || len(assignees) > 0 || overdue {
 		sdkLimit = -1
 	} else if limit > 0 {
 		sdkLimit = limit
@@ -888,18 +955,9 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// Apply filters
 	var result []basecamp.Todo
 	for _, todo := range allTodos {
-		// Filter by assignee (using resolved ID)
-		if assigneeID != 0 {
-			found := false
-			for _, a := range todo.Assignees {
-				if a.ID == assigneeID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
+		// Filter by assignee (any of the resolved IDs)
+		if len(assigneeIDs) > 0 && !todoMatchesAnyAssignee(todo, assigneeIDs) {
+			continue
 		}
 
 		// Filter overdue - check if due date is in the past and not completed
@@ -920,7 +978,7 @@ func listAllTodos(cmd *cobra.Command, app *appctx.App, project, todosetFlag, ass
 	// When a client-side filter forced an unlimited fetch above, apply the
 	// explicit --limit after filtering so the cap reflects the filtered set
 	// rather than the pre-filter fetch (mirrors the single-list path).
-	if (assignee != "" || overdue) && !all && limit > 0 && len(result) > limit {
+	if (len(assignees) > 0 || overdue) && !all && limit > 0 && len(result) > limit {
 		result = result[:limit]
 	}
 

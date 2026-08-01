@@ -181,6 +181,10 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Overdue todos (in project) | `basecamp todos list --overdue --in <project> --json` |
 | Overdue todos (cross-project) | `basecamp todos list --all-projects --overdue --json` (flat, oldest first) or `basecamp reports overdue --json` (bucketed by lateness) |
 | All cards (cross-project) | `basecamp cards list --all-projects --json` (grouped by project) |
+| Someone's todos (cross-project) | `basecamp todos list --assignee "Ann" --json` (server-side filter) |
+| Two people's todos (cross-project) | `basecamp todos list --assignee ann --assignee bob --json` (matches either) |
+| Someone's cards (cross-project) | `basecamp cards list --all-projects --assignee "Ann" --json` |
+| Todos with no due date set | `basecamp todos list --due without --json` |
 | My bookmarks | `basecamp bookmarks list --json` |
 | Bookmark something | `basecamp bookmarks add <id-or-url> --json` |
 | Is it bookmarked? | `basecamp bookmarks check <id-or-url> --json` (always exits 0) |
@@ -962,6 +966,19 @@ basecamp assignments due due_later_this_week --json   # Due later this week
 ```
 
 **Scopes:** overdue, due_today, due_tomorrow, due_later_this_week, due_next_week, due_later.
+
+**Cross-project assignee filtering:** `basecamp todos list --assignee <person>`
+and `basecamp cards list --all-projects --assignee <person>` filter server-side
+across every project. Both are repeatable and match a task assigned to **any**
+of the named people. Assignees on nested steps are not considered, so a card
+whose step is assigned to someone does not match on that basis.
+
+Within a project `--assignee` still works on todos, but there is no server-side
+filter, so it fetches everything and narrows client-side. Cards have no
+project-scoped `--assignee` at all. `--due with|without|overdue` is account-wide
+only on both, and conflicts with `--overdue` and `--no-due-date`, which select
+their own listings on the same axis. `--assignee` with `--unassigned` is refused
+— the server makes that combination necessarily empty.
 
 **Up Next** — reorder the priority list:
 

@@ -29,7 +29,7 @@ func NewCardsCmd() *cobra.Command {
 		Use:         "cards",
 		Short:       "Manage cards in Card Tables",
 		Long:        "List, show, create, and manage cards in Card Tables (Kanban boards).",
-		Annotations: map[string]string{"agent_notes": "Cards do NOT support --assignee filtering like todos — fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
+		Annotations: map[string]string{"agent_notes": "--assignee filters the account-wide listing only; within a project, fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -75,6 +75,8 @@ type cardsListOptions struct {
 	noDueDate   bool
 	notNow      bool
 	overdue     bool
+	assignees   []string
+	due         string
 }
 
 // Account-wide card listings, one per Everything endpoint.
@@ -96,7 +98,12 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 		Long: "List all cards in a project's card table, or across every project with --all-projects.\n\n" +
 			"With --all-projects the listing comes from the account-wide card aggregates, grouped by\n" +
 			"project. --status completed, --unassigned, --no-due-date, --not-now, and --overdue each\n" +
-			"select a different aggregate and are account-wide only.",
+			"select a different aggregate and are account-wide only.\n\n" +
+			"--assignee (repeatable) and --due (with, without, overdue) filter those aggregates and are\n" +
+			"account-wide only too — the project-scoped card listing has no equivalent for either.\n" +
+			"--assignee matches a card assigned to any of the named people; assignees on nested steps\n" +
+			"are not considered. --assignee cannot be combined with --unassigned (nothing can match\n" +
+			"both), and --due cannot be combined with --overdue or --no-due-date.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.project = *project
 			opts.cardTable = *cardTable
@@ -116,6 +123,8 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.unassigned, "unassigned", false, "Account-wide only: cards with no assignee")
 	cmd.Flags().BoolVar(&opts.noDueDate, "no-due-date", false, "Account-wide only: cards with no due date")
 	cmd.Flags().BoolVar(&opts.notNow, "not-now", false, "Account-wide only: cards parked in Not now")
+	cmd.Flags().StringArrayVar(&opts.assignees, "assignee", nil, "Account-wide only: filter by assignee (repeatable)")
+	cmd.Flags().StringVar(&opts.due, "due", "", "Account-wide only: filter by due date (with, without, overdue)")
 	cmd.Flags().BoolVar(&opts.overdue, "overdue", false, "Account-wide only: overdue cards, oldest due date first")
 
 	return cmd
@@ -163,6 +172,22 @@ func runCardsList(cmd *cobra.Command, opts cardsListOptions) error {
 
 	if accountWide {
 		return runCardsListAccountWide(cmd, app, opts, selector)
+	}
+
+	// --assignee and --due are parameters on the account-wide aggregates. The
+	// project-scoped card listing has no equivalent for either, so they are
+	// refused by name rather than silently ignored.
+	if len(opts.assignees) > 0 {
+		return output.ErrUsageHint(
+			"--assignee filters the account-wide card listing only",
+			"Pass --all-projects to filter across every project, or drop --assignee to list this project's cards.",
+		)
+	}
+	if opts.due != "" {
+		return output.ErrUsageHint(
+			"--due filters the account-wide card listing only",
+			"Pass --all-projects to filter across every project, or drop --due to list this project's cards.",
+		)
 	}
 
 	// The endpoint selectors reach account-wide aggregates that have no
@@ -300,6 +325,19 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 	// Account-wide "all" is the whole account, not one project's cards, so the
 	// default is bounded and --all is how you ask for the rest. Walking pages
 	// to the cap beats fetching every page and discarding most of it.
+	if err := validateAccountWideTaskFilters(opts.assignees, opts.due, opts.unassigned,
+		opts.overdue, opts.noDueDate, "cards"); err != nil {
+		return err
+	}
+
+	// Server-side: these become assignee_ids[] and due= on the request, so they
+	// narrow the listing before it is paginated and the bounded walk issues the
+	// same number of requests it would without them.
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, opts.assignees, opts.due)
+	if err != nil {
+		return err
+	}
+
 	limit := opts.limit
 	if limit == 0 {
 		limit = accountWideDefaultLimit
@@ -313,15 +351,15 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 		)
 		switch selector {
 		case cardsSelectorCompleted:
-			groupsPage, err = everything.CompletedCards(cmd.Context(), page, nil)
+			groupsPage, err = everything.CompletedCards(cmd.Context(), page, taskFilters)
 		case cardsSelectorUnassigned:
-			groupsPage, err = everything.UnassignedCards(cmd.Context(), page, nil)
+			groupsPage, err = everything.UnassignedCards(cmd.Context(), page, taskFilters)
 		case cardsSelectorNoDueDate:
-			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page, nil)
+			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page, taskFilters)
 		case cardsSelectorNotNow:
-			groupsPage, err = everything.NotNowCards(cmd.Context(), page, nil)
+			groupsPage, err = everything.NotNowCards(cmd.Context(), page, taskFilters)
 		default:
-			groupsPage, err = everything.OpenCards(cmd.Context(), page, nil)
+			groupsPage, err = everything.OpenCards(cmd.Context(), page, taskFilters)
 		}
 		if err != nil {
 			return nil, basecamp.ListMeta{}, convertSDKError(err)
@@ -388,7 +426,17 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 		return output.ErrUsage("--sort position requires --column (position is per-column)")
 	}
 
-	cards, err := app.Account().Everything().OverdueCards(cmd.Context(), nil)
+	if err := validateAccountWideTaskFilters(opts.assignees, opts.due, opts.unassigned,
+		opts.overdue, opts.noDueDate, "cards"); err != nil {
+		return err
+	}
+
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, opts.assignees, opts.due)
+	if err != nil {
+		return err
+	}
+
+	cards, err := app.Account().Everything().OverdueCards(cmd.Context(), taskFilters)
 	if err != nil {
 		return convertSDKError(err)
 	}

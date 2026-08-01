@@ -422,17 +422,17 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 		"--notify-on-completion must map to completion_subscriber_ids")
 }
 
-func TestTodosListAssigneeWithoutProjectErrors(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
+// --assignee used to be rejected account-wide, because the aggregates had no
+// assignee parameter to map it onto. SDK v0.12.0 added one, so the flag now
+// works in both scopes and the rejection is gone.
+func TestTodosListAssigneeWithoutProjectIsAccountWide(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
 
-	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "list", "--assignee", "me")
-	require.Error(t, err)
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "list", "--assignee", "42"))
 
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Contains(t, e.Message, "--assignee has no account-wide equivalent")
-	assert.Contains(t, e.Hint, "reports assigned")
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+	assert.Contains(t, transport.last(t).Query, "assignee_ids")
 }
 
 // TestTodosListOverdueWithoutProjectListsAcrossProjects covers the behavior
@@ -3190,7 +3190,6 @@ func TestTodosListAccountWideRejectsProjectOnlyFilters(t *testing.T) {
 	app, _ := setupRecordingTestApp(t)
 
 	requireTodosListUsageError(t, app, "--todoset names a todoset inside one project", "--todoset", "789")
-	requireTodosListUsageError(t, app, "--assignee has no account-wide equivalent", "--assignee", "me")
 	requireTodosListUsageError(t, app, "--status archived has no account-wide equivalent", "--status", "archived")
 	requireTodosListUsageError(t, app, "--status trashed has no account-wide equivalent", "--status", "trashed")
 	requireTodosListUsageError(t, app, `unknown --status value "nonsense"`, "--status", "nonsense")

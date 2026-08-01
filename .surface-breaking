@@ -744,6 +744,7 @@ FLAG basecamp todos --page type=int
 FLAG basecamp todos --status type=string
 FLAG basecamp todos --todoset type=string
 FLAG basecamp todos create --content type=string
+FLAG basecamp todos list --assignee type=string
 FLAG basecamp todosets --todoset type=string
 FLAG basecamp tools create --clone type=string
 FLAG basecamp tools create --source type=string
