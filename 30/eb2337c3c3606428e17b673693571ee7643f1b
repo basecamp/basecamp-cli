@@ -1,0 +1,51 @@
+internal/commands/checkins_question_admin_test.go
+  s_d931ffd296629c::t_205d5973644560 113,120
+  s_d931ffd296629c::t_0e03979ff1f10a 1-27,29,31-112,114-119,121-190
+  s_d931ffd296629c::t_3c82c9109088b8 28,30
+internal/commands/todos_loose_test.go
+  s_d931ffd296629c::t_6651f40104bb36 89-96
+  s_d931ffd296629c::t_6384effad7d72e 14
+  s_d931ffd296629c::t_9210c651ddbc25 1-13,15-88,97-105
+internal/commands/todos.go
+  s_d931ffd296629c::t_9e30e545a0ac6b 1376-1378
+  s_d931ffd296629c::t_6261930f27df42 1167,1172-1179
+  s_d931ffd296629c::t_8632e03d4335b7 1315-1324,1326-1337
+  s_d931ffd296629c::t_85bd02c2849c2d 1220-1231,1235-1250,1252-1254,1256-1260
+internal/commands/checkins.go
+  s_d931ffd296629c::t_9ecd035f83ffa8 118,243-246,252-335,337-468
+  s_d931ffd296629c::t_583e8322700e5e 336
+  s_d931ffd296629c::t_26bb884e937a3d 44,50-117
+  s_46c38fbb28f3e9::t_4711ca9e4c09ae 119,469
+.surface
+  s_d931ffd296629c::t_a830dfa79c9ea1 91,93-95,107,109-111,569,571-573,577,585,587-589,593,3953-3975,4002-4071,4147-4169,4340-4362,4389-4458,4534-4556,14256,17279,17281-17283,17287,17295,17297-17299,17303
+e2e/smoke/smoke_checkins.bats
+  s_d931ffd296629c::t_b4d4779a15dfa3 59-90
+e2e/smoke/smoke_core.bats
+  s_d931ffd296629c::t_0f69eda00e2cbb 81-86
+internal/commands/commands.go
+  s_d931ffd296629c::t_8c91cfe7c3683e 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "30eb2337c3c3606428e17b673693571ee7643f1b",
+  "prompts": {},
+  "sessions": {
+    "s_46c38fbb28f3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "889b17e4-24ce-4e9d-a57d-f68894e16555",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
