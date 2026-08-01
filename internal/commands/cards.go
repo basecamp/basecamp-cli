@@ -313,15 +313,15 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 		)
 		switch selector {
 		case cardsSelectorCompleted:
-			groupsPage, err = everything.CompletedCards(cmd.Context(), page)
+			groupsPage, err = everything.CompletedCards(cmd.Context(), page, nil)
 		case cardsSelectorUnassigned:
-			groupsPage, err = everything.UnassignedCards(cmd.Context(), page)
+			groupsPage, err = everything.UnassignedCards(cmd.Context(), page, nil)
 		case cardsSelectorNoDueDate:
-			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page)
+			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page, nil)
 		case cardsSelectorNotNow:
-			groupsPage, err = everything.NotNowCards(cmd.Context(), page)
+			groupsPage, err = everything.NotNowCards(cmd.Context(), page, nil)
 		default:
-			groupsPage, err = everything.OpenCards(cmd.Context(), page)
+			groupsPage, err = everything.OpenCards(cmd.Context(), page, nil)
 		}
 		if err != nil {
 			return nil, basecamp.ListMeta{}, convertSDKError(err)
@@ -388,7 +388,7 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 		return output.ErrUsage("--sort position requires --column (position is per-column)")
 	}
 
-	cards, err := app.Account().Everything().OverdueCards(cmd.Context())
+	cards, err := app.Account().Everything().OverdueCards(cmd.Context(), nil)
 	if err != nil {
 		return convertSDKError(err)
 	}

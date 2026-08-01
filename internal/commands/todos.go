@@ -427,7 +427,7 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		return output.ErrUsage("--sort position requires --list (position is per-todolist)")
 	}
 
-	todos, err := app.Account().Everything().OverdueTodos(cmd.Context())
+	todos, err := app.Account().Everything().OverdueTodos(cmd.Context(), nil)
 	if err != nil {
 		return convertSDKError(err)
 	}
@@ -502,13 +502,13 @@ func fetchAccountWideTodoGroups(ctx context.Context, app *appctx.App, filter tod
 	everything := app.Account().Everything()
 	switch filter {
 	case todosFilterCompleted:
-		return everything.CompletedTodos(ctx, page)
+		return everything.CompletedTodos(ctx, page, nil)
 	case todosFilterUnassigned:
-		return everything.UnassignedTodos(ctx, page)
+		return everything.UnassignedTodos(ctx, page, nil)
 	case todosFilterNoDueDate:
-		return everything.NoDueDateTodos(ctx, page)
+		return everything.NoDueDateTodos(ctx, page, nil)
 	default:
-		return everything.OpenTodos(ctx, page)
+		return everything.OpenTodos(ctx, page, nil)
 	}
 }
 
