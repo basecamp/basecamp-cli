@@ -7,7 +7,11 @@ ARG basecamp api get 00 <path>
 ARG basecamp api post 00 <path>
 ARG basecamp api put 00 <path>
 ARG basecamp assign 00 <id|url>...
+ARG basecamp assignments deprioritize 00 <id|url>
 ARG basecamp assignments due 00 [scope]
+ARG basecamp assignments prioritize 00 <id|url>
+ARG basecamp assignments reorder 00 <id|url>
+ARG basecamp assignments reorder 01 <n>
 ARG basecamp attach 00 <file>
 ARG basecamp attach 01 [<file2]
 ARG basecamp attachments download 00 <id|url>
@@ -453,8 +457,11 @@ CMD basecamp api put
 CMD basecamp assign
 CMD basecamp assignments
 CMD basecamp assignments completed
+CMD basecamp assignments deprioritize
 CMD basecamp assignments due
 CMD basecamp assignments list
+CMD basecamp assignments prioritize
+CMD basecamp assignments reorder
 CMD basecamp attach
 CMD basecamp attachments
 CMD basecamp attachments download
@@ -1626,6 +1633,27 @@ FLAG basecamp assignments completed --stats type=bool
 FLAG basecamp assignments completed --styled type=bool
 FLAG basecamp assignments completed --todolist type=string
 FLAG basecamp assignments completed --verbose type=count
+FLAG basecamp assignments deprioritize --account type=string
+FLAG basecamp assignments deprioritize --agent type=bool
+FLAG basecamp assignments deprioritize --cache-dir type=string
+FLAG basecamp assignments deprioritize --count type=bool
+FLAG basecamp assignments deprioritize --help type=bool
+FLAG basecamp assignments deprioritize --hints type=bool
+FLAG basecamp assignments deprioritize --ids-only type=bool
+FLAG basecamp assignments deprioritize --in type=string
+FLAG basecamp assignments deprioritize --jq type=string
+FLAG basecamp assignments deprioritize --json type=bool
+FLAG basecamp assignments deprioritize --markdown type=bool
+FLAG basecamp assignments deprioritize --md type=bool
+FLAG basecamp assignments deprioritize --no-hints type=bool
+FLAG basecamp assignments deprioritize --no-stats type=bool
+FLAG basecamp assignments deprioritize --profile type=string
+FLAG basecamp assignments deprioritize --project type=string
+FLAG basecamp assignments deprioritize --quiet type=bool
+FLAG basecamp assignments deprioritize --stats type=bool
+FLAG basecamp assignments deprioritize --styled type=bool
+FLAG basecamp assignments deprioritize --todolist type=string
+FLAG basecamp assignments deprioritize --verbose type=count
 FLAG basecamp assignments due --account type=string
 FLAG basecamp assignments due --agent type=bool
 FLAG basecamp assignments due --cache-dir type=string
@@ -1668,6 +1696,49 @@ FLAG basecamp assignments list --stats type=bool
 FLAG basecamp assignments list --styled type=bool
 FLAG basecamp assignments list --todolist type=string
 FLAG basecamp assignments list --verbose type=count
+FLAG basecamp assignments prioritize --account type=string
+FLAG basecamp assignments prioritize --agent type=bool
+FLAG basecamp assignments prioritize --cache-dir type=string
+FLAG basecamp assignments prioritize --count type=bool
+FLAG basecamp assignments prioritize --help type=bool
+FLAG basecamp assignments prioritize --hints type=bool
+FLAG basecamp assignments prioritize --ids-only type=bool
+FLAG basecamp assignments prioritize --in type=string
+FLAG basecamp assignments prioritize --jq type=string
+FLAG basecamp assignments prioritize --json type=bool
+FLAG basecamp assignments prioritize --markdown type=bool
+FLAG basecamp assignments prioritize --md type=bool
+FLAG basecamp assignments prioritize --no-hints type=bool
+FLAG basecamp assignments prioritize --no-stats type=bool
+FLAG basecamp assignments prioritize --profile type=string
+FLAG basecamp assignments prioritize --project type=string
+FLAG basecamp assignments prioritize --quiet type=bool
+FLAG basecamp assignments prioritize --stats type=bool
+FLAG basecamp assignments prioritize --styled type=bool
+FLAG basecamp assignments prioritize --todolist type=string
+FLAG basecamp assignments prioritize --verbose type=count
+FLAG basecamp assignments reorder --account type=string
+FLAG basecamp assignments reorder --agent type=bool
+FLAG basecamp assignments reorder --cache-dir type=string
+FLAG basecamp assignments reorder --count type=bool
+FLAG basecamp assignments reorder --help type=bool
+FLAG basecamp assignments reorder --hints type=bool
+FLAG basecamp assignments reorder --ids-only type=bool
+FLAG basecamp assignments reorder --in type=string
+FLAG basecamp assignments reorder --jq type=string
+FLAG basecamp assignments reorder --json type=bool
+FLAG basecamp assignments reorder --markdown type=bool
+FLAG basecamp assignments reorder --md type=bool
+FLAG basecamp assignments reorder --no-hints type=bool
+FLAG basecamp assignments reorder --no-stats type=bool
+FLAG basecamp assignments reorder --position type=int
+FLAG basecamp assignments reorder --profile type=string
+FLAG basecamp assignments reorder --project type=string
+FLAG basecamp assignments reorder --quiet type=bool
+FLAG basecamp assignments reorder --stats type=bool
+FLAG basecamp assignments reorder --styled type=bool
+FLAG basecamp assignments reorder --todolist type=string
+FLAG basecamp assignments reorder --verbose type=count
 FLAG basecamp attach --account type=string
 FLAG basecamp attach --agent type=bool
 FLAG basecamp attach --cache-dir type=string
@@ -16853,8 +16924,11 @@ SUB basecamp api put
 SUB basecamp assign
 SUB basecamp assignments
 SUB basecamp assignments completed
+SUB basecamp assignments deprioritize
 SUB basecamp assignments due
 SUB basecamp assignments list
+SUB basecamp assignments prioritize
+SUB basecamp assignments reorder
 SUB basecamp attach
 SUB basecamp attachments
 SUB basecamp attachments download
