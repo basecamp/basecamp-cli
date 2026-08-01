@@ -73,6 +73,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "timeline", Category: "scheduling", Description: "View activity timelines", Actions: []string{}},
 				{Name: "reports", Category: "scheduling", Description: "View reports", Actions: []string{"assignable", "assigned", "overdue", "schedule"}},
 				{Name: "assignments", Category: "scheduling", Description: "View my assignments", Actions: []string{"list", "completed", "due"}},
+				{Name: "calendars", Category: "scheduling", Description: "View and recolor calendars", Actions: []string{"show", "update"}},
 			},
 		},
 		{
@@ -80,6 +81,7 @@ func CommandCategories() []CommandCategory {
 			Commands: []CommandInfo{
 				{Name: "bookmarks", Category: "personal", Description: "Manage your personal bookmarks", Actions: []string{"list", "add", "remove", "check"}},
 				{Name: "drafts", Category: "personal", Description: "List your unpublished drafts", Actions: []string{"list"}},
+				{Name: "notes", Category: "personal", Description: "Read and write your personal note", Actions: []string{"show", "set"}},
 			},
 		},
 		{

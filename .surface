@@ -29,6 +29,9 @@ ARG basecamp boosts create 01 <content>
 ARG basecamp boosts delete 00 <boost-id|url>
 ARG basecamp boosts list 00 <id|url>
 ARG basecamp boosts show 00 <boost-id|url>
+ARG basecamp calendars show 00 <id|url>
+ARG basecamp calendars update 00 <id|url>
+ARG basecamp calendars update 01 <color>
 ARG basecamp campfire delete 00 <id|url>
 ARG basecamp campfire line 00 <id|url>
 ARG basecamp campfire post 00 <message>
@@ -245,6 +248,7 @@ ARG basecamp msgs show 00 <id|url>
 ARG basecamp msgs trash 00 <id|url>
 ARG basecamp msgs unpin 00 <id|url>
 ARG basecamp msgs update 00 <id|url>
+ARG basecamp notes set 00 [content]
 ARG basecamp notifications read 00 <id>...
 ARG basecamp people add 00 <person-id>...
 ARG basecamp people remove 00 <person-id>...
@@ -482,6 +486,9 @@ CMD basecamp boosts create
 CMD basecamp boosts delete
 CMD basecamp boosts list
 CMD basecamp boosts show
+CMD basecamp calendars
+CMD basecamp calendars show
+CMD basecamp calendars update
 CMD basecamp campfire
 CMD basecamp campfire delete
 CMD basecamp campfire line
@@ -823,6 +830,9 @@ CMD basecamp msgs show
 CMD basecamp msgs trash
 CMD basecamp msgs unpin
 CMD basecamp msgs update
+CMD basecamp notes
+CMD basecamp notes set
+CMD basecamp notes show
 CMD basecamp notifications
 CMD basecamp notifications bubbleups
 CMD basecamp notifications list
@@ -2327,6 +2337,70 @@ FLAG basecamp boosts show --stats type=bool
 FLAG basecamp boosts show --styled type=bool
 FLAG basecamp boosts show --todolist type=string
 FLAG basecamp boosts show --verbose type=count
+FLAG basecamp calendars --account type=string
+FLAG basecamp calendars --agent type=bool
+FLAG basecamp calendars --cache-dir type=string
+FLAG basecamp calendars --count type=bool
+FLAG basecamp calendars --help type=bool
+FLAG basecamp calendars --hints type=bool
+FLAG basecamp calendars --ids-only type=bool
+FLAG basecamp calendars --in type=string
+FLAG basecamp calendars --jq type=string
+FLAG basecamp calendars --json type=bool
+FLAG basecamp calendars --markdown type=bool
+FLAG basecamp calendars --md type=bool
+FLAG basecamp calendars --no-hints type=bool
+FLAG basecamp calendars --no-stats type=bool
+FLAG basecamp calendars --profile type=string
+FLAG basecamp calendars --project type=string
+FLAG basecamp calendars --quiet type=bool
+FLAG basecamp calendars --stats type=bool
+FLAG basecamp calendars --styled type=bool
+FLAG basecamp calendars --todolist type=string
+FLAG basecamp calendars --verbose type=count
+FLAG basecamp calendars show --account type=string
+FLAG basecamp calendars show --agent type=bool
+FLAG basecamp calendars show --cache-dir type=string
+FLAG basecamp calendars show --count type=bool
+FLAG basecamp calendars show --help type=bool
+FLAG basecamp calendars show --hints type=bool
+FLAG basecamp calendars show --ids-only type=bool
+FLAG basecamp calendars show --in type=string
+FLAG basecamp calendars show --jq type=string
+FLAG basecamp calendars show --json type=bool
+FLAG basecamp calendars show --markdown type=bool
+FLAG basecamp calendars show --md type=bool
+FLAG basecamp calendars show --no-hints type=bool
+FLAG basecamp calendars show --no-stats type=bool
+FLAG basecamp calendars show --profile type=string
+FLAG basecamp calendars show --project type=string
+FLAG basecamp calendars show --quiet type=bool
+FLAG basecamp calendars show --stats type=bool
+FLAG basecamp calendars show --styled type=bool
+FLAG basecamp calendars show --todolist type=string
+FLAG basecamp calendars show --verbose type=count
+FLAG basecamp calendars update --account type=string
+FLAG basecamp calendars update --agent type=bool
+FLAG basecamp calendars update --cache-dir type=string
+FLAG basecamp calendars update --color type=string
+FLAG basecamp calendars update --count type=bool
+FLAG basecamp calendars update --help type=bool
+FLAG basecamp calendars update --hints type=bool
+FLAG basecamp calendars update --ids-only type=bool
+FLAG basecamp calendars update --in type=string
+FLAG basecamp calendars update --jq type=string
+FLAG basecamp calendars update --json type=bool
+FLAG basecamp calendars update --markdown type=bool
+FLAG basecamp calendars update --md type=bool
+FLAG basecamp calendars update --no-hints type=bool
+FLAG basecamp calendars update --no-stats type=bool
+FLAG basecamp calendars update --profile type=string
+FLAG basecamp calendars update --project type=string
+FLAG basecamp calendars update --quiet type=bool
+FLAG basecamp calendars update --stats type=bool
+FLAG basecamp calendars update --styled type=bool
+FLAG basecamp calendars update --todolist type=string
+FLAG basecamp calendars update --verbose type=count
 FLAG basecamp campfire --account type=string
 FLAG basecamp campfire --agent type=bool
 FLAG basecamp campfire --cache-dir type=string
@@ -10605,6 +10679,70 @@ FLAG basecamp msgs update --styled type=bool
 FLAG basecamp msgs update --title type=string
 FLAG basecamp msgs update --todolist type=string
 FLAG basecamp msgs update --verbose type=count
+FLAG basecamp notes --account type=string
+FLAG basecamp notes --agent type=bool
+FLAG basecamp notes --cache-dir type=string
+FLAG basecamp notes --count type=bool
+FLAG basecamp notes --help type=bool
+FLAG basecamp notes --hints type=bool
+FLAG basecamp notes --ids-only type=bool
+FLAG basecamp notes --in type=string
+FLAG basecamp notes --jq type=string
+FLAG basecamp notes --json type=bool
+FLAG basecamp notes --markdown type=bool
+FLAG basecamp notes --md type=bool
+FLAG basecamp notes --no-hints type=bool
+FLAG basecamp notes --no-stats type=bool
+FLAG basecamp notes --profile type=string
+FLAG basecamp notes --project type=string
+FLAG basecamp notes --quiet type=bool
+FLAG basecamp notes --stats type=bool
+FLAG basecamp notes --styled type=bool
+FLAG basecamp notes --todolist type=string
+FLAG basecamp notes --verbose type=count
+FLAG basecamp notes set --account type=string
+FLAG basecamp notes set --agent type=bool
+FLAG basecamp notes set --cache-dir type=string
+FLAG basecamp notes set --count type=bool
+FLAG basecamp notes set --file type=string
+FLAG basecamp notes set --help type=bool
+FLAG basecamp notes set --hints type=bool
+FLAG basecamp notes set --ids-only type=bool
+FLAG basecamp notes set --in type=string
+FLAG basecamp notes set --jq type=string
+FLAG basecamp notes set --json type=bool
+FLAG basecamp notes set --markdown type=bool
+FLAG basecamp notes set --md type=bool
+FLAG basecamp notes set --no-hints type=bool
+FLAG basecamp notes set --no-stats type=bool
+FLAG basecamp notes set --profile type=string
+FLAG basecamp notes set --project type=string
+FLAG basecamp notes set --quiet type=bool
+FLAG basecamp notes set --stats type=bool
+FLAG basecamp notes set --styled type=bool
+FLAG basecamp notes set --todolist type=string
+FLAG basecamp notes set --verbose type=count
+FLAG basecamp notes show --account type=string
+FLAG basecamp notes show --agent type=bool
+FLAG basecamp notes show --cache-dir type=string
+FLAG basecamp notes show --count type=bool
+FLAG basecamp notes show --help type=bool
+FLAG basecamp notes show --hints type=bool
+FLAG basecamp notes show --ids-only type=bool
+FLAG basecamp notes show --in type=string
+FLAG basecamp notes show --jq type=string
+FLAG basecamp notes show --json type=bool
+FLAG basecamp notes show --markdown type=bool
+FLAG basecamp notes show --md type=bool
+FLAG basecamp notes show --no-hints type=bool
+FLAG basecamp notes show --no-stats type=bool
+FLAG basecamp notes show --profile type=string
+FLAG basecamp notes show --project type=string
+FLAG basecamp notes show --quiet type=bool
+FLAG basecamp notes show --stats type=bool
+FLAG basecamp notes show --styled type=bool
+FLAG basecamp notes show --todolist type=string
+FLAG basecamp notes show --verbose type=count
 FLAG basecamp notifications --account type=string
 FLAG basecamp notifications --agent type=bool
 FLAG basecamp notifications --cache-dir type=string
@@ -16748,6 +16886,9 @@ SUB basecamp boosts create
 SUB basecamp boosts delete
 SUB basecamp boosts list
 SUB basecamp boosts show
+SUB basecamp calendars
+SUB basecamp calendars show
+SUB basecamp calendars update
 SUB basecamp campfire
 SUB basecamp campfire delete
 SUB basecamp campfire line
@@ -17089,6 +17230,9 @@ SUB basecamp msgs show
 SUB basecamp msgs trash
 SUB basecamp msgs unpin
 SUB basecamp msgs update
+SUB basecamp notes
+SUB basecamp notes set
+SUB basecamp notes show
 SUB basecamp notifications
 SUB basecamp notifications bubbleups
 SUB basecamp notifications list
