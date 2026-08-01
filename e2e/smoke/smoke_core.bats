@@ -78,3 +78,9 @@ setup_file() {
   assert_success
   assert_output_contains "USAGE"
 }
+
+@test "todos create --loose rejects --list" {
+  # --loose creates outside any list, so naming one contradicts it.
+  run_smoke basecamp todos create "smoke loose conflict" --loose --list 999999 --json
+  assert_failure
+}
