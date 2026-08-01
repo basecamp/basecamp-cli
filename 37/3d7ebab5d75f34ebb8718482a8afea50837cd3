@@ -1,0 +1,42 @@
+internal/commands/assignments_priority_test.go
+  s_d931ffd296629c::t_dab956791ba9c8 1-131
+  s_d931ffd296629c::t_a4ac3f18aadaaa 132-134
+internal/commands/commands.go
+  s_d931ffd296629c::t_50a393edb3a360 75
+internal/commands/assignments.go
+  s_d931ffd296629c::t_06759b03c3f606 204,236,253-275,282-291
+  s_d931ffd296629c::t_e933ae540c85b4 276-281
+  s_d931ffd296629c::t_cff92f1d3e2690 6,10
+  s_d931ffd296629c::t_47f0620c3a622d 40-42,48-125,129-203
+  s_d931ffd296629c::t_e8872e8b2d2986 126-128
+  s_d931ffd296629c::t_a15844ab2fd077 5
+  s_555508c40a7b3b::t_be0382a1e47540 11,205,292
+.surface
+  s_d931ffd296629c::t_e323149476d78e 10,12-14,460,463-464,1636-1656,1699-1741,16927,16930-16931
+e2e/smoke/smoke_assignments.bats
+  s_d931ffd296629c::t_8e91d0fd607f9e 27-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "373d7ebab5d75f34ebb8718482a8afea50837cd3",
+  "prompts": {},
+  "sessions": {
+    "s_555508c40a7b3b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e708032-ac78-4cef-b1cf-d589a0d95671",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
