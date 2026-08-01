@@ -16,6 +16,9 @@ ARG basecamp bonfire layout load 00 <name>
 ARG basecamp bonfire layout save 00 <name>
 ARG basecamp bonfire layout save 01 <url>...
 ARG basecamp bonfire split 00 <room-url>
+ARG basecamp bookmarks add 00 <id|url>
+ARG basecamp bookmarks check 00 <id|url>
+ARG basecamp bookmarks remove 00 <id|url>
 ARG basecamp boost create 00 <id|url>
 ARG basecamp boost create 01 <content>
 ARG basecamp boost delete 00 <boost-id|url>
@@ -464,6 +467,11 @@ CMD basecamp bonfire layout list
 CMD basecamp bonfire layout load
 CMD basecamp bonfire layout save
 CMD basecamp bonfire split
+CMD basecamp bookmarks
+CMD basecamp bookmarks add
+CMD basecamp bookmarks check
+CMD basecamp bookmarks list
+CMD basecamp bookmarks remove
 CMD basecamp boost
 CMD basecamp boost create
 CMD basecamp boost delete
@@ -648,6 +656,8 @@ CMD basecamp documents vault list
 CMD basecamp documents vaults
 CMD basecamp documents vaults create
 CMD basecamp documents vaults list
+CMD basecamp drafts
+CMD basecamp drafts list
 CMD basecamp events
 CMD basecamp file
 CMD basecamp file archive
@@ -1995,6 +2005,114 @@ FLAG basecamp bonfire split --stats type=bool
 FLAG basecamp bonfire split --styled type=bool
 FLAG basecamp bonfire split --todolist type=string
 FLAG basecamp bonfire split --verbose type=count
+FLAG basecamp bookmarks --account type=string
+FLAG basecamp bookmarks --agent type=bool
+FLAG basecamp bookmarks --cache-dir type=string
+FLAG basecamp bookmarks --count type=bool
+FLAG basecamp bookmarks --help type=bool
+FLAG basecamp bookmarks --hints type=bool
+FLAG basecamp bookmarks --ids-only type=bool
+FLAG basecamp bookmarks --in type=string
+FLAG basecamp bookmarks --jq type=string
+FLAG basecamp bookmarks --json type=bool
+FLAG basecamp bookmarks --markdown type=bool
+FLAG basecamp bookmarks --md type=bool
+FLAG basecamp bookmarks --no-hints type=bool
+FLAG basecamp bookmarks --no-stats type=bool
+FLAG basecamp bookmarks --profile type=string
+FLAG basecamp bookmarks --project type=string
+FLAG basecamp bookmarks --quiet type=bool
+FLAG basecamp bookmarks --stats type=bool
+FLAG basecamp bookmarks --styled type=bool
+FLAG basecamp bookmarks --todolist type=string
+FLAG basecamp bookmarks --verbose type=count
+FLAG basecamp bookmarks add --account type=string
+FLAG basecamp bookmarks add --agent type=bool
+FLAG basecamp bookmarks add --cache-dir type=string
+FLAG basecamp bookmarks add --count type=bool
+FLAG basecamp bookmarks add --help type=bool
+FLAG basecamp bookmarks add --hints type=bool
+FLAG basecamp bookmarks add --ids-only type=bool
+FLAG basecamp bookmarks add --in type=string
+FLAG basecamp bookmarks add --jq type=string
+FLAG basecamp bookmarks add --json type=bool
+FLAG basecamp bookmarks add --markdown type=bool
+FLAG basecamp bookmarks add --md type=bool
+FLAG basecamp bookmarks add --no-hints type=bool
+FLAG basecamp bookmarks add --no-stats type=bool
+FLAG basecamp bookmarks add --profile type=string
+FLAG basecamp bookmarks add --project type=string
+FLAG basecamp bookmarks add --quiet type=bool
+FLAG basecamp bookmarks add --stats type=bool
+FLAG basecamp bookmarks add --styled type=bool
+FLAG basecamp bookmarks add --todolist type=string
+FLAG basecamp bookmarks add --verbose type=count
+FLAG basecamp bookmarks check --account type=string
+FLAG basecamp bookmarks check --agent type=bool
+FLAG basecamp bookmarks check --cache-dir type=string
+FLAG basecamp bookmarks check --count type=bool
+FLAG basecamp bookmarks check --help type=bool
+FLAG basecamp bookmarks check --hints type=bool
+FLAG basecamp bookmarks check --ids-only type=bool
+FLAG basecamp bookmarks check --in type=string
+FLAG basecamp bookmarks check --jq type=string
+FLAG basecamp bookmarks check --json type=bool
+FLAG basecamp bookmarks check --markdown type=bool
+FLAG basecamp bookmarks check --md type=bool
+FLAG basecamp bookmarks check --no-hints type=bool
+FLAG basecamp bookmarks check --no-stats type=bool
+FLAG basecamp bookmarks check --profile type=string
+FLAG basecamp bookmarks check --project type=string
+FLAG basecamp bookmarks check --quiet type=bool
+FLAG basecamp bookmarks check --stats type=bool
+FLAG basecamp bookmarks check --styled type=bool
+FLAG basecamp bookmarks check --todolist type=string
+FLAG basecamp bookmarks check --verbose type=count
+FLAG basecamp bookmarks list --account type=string
+FLAG basecamp bookmarks list --agent type=bool
+FLAG basecamp bookmarks list --all type=bool
+FLAG basecamp bookmarks list --cache-dir type=string
+FLAG basecamp bookmarks list --count type=bool
+FLAG basecamp bookmarks list --help type=bool
+FLAG basecamp bookmarks list --hints type=bool
+FLAG basecamp bookmarks list --ids-only type=bool
+FLAG basecamp bookmarks list --in type=string
+FLAG basecamp bookmarks list --jq type=string
+FLAG basecamp bookmarks list --json type=bool
+FLAG basecamp bookmarks list --limit type=int
+FLAG basecamp bookmarks list --markdown type=bool
+FLAG basecamp bookmarks list --md type=bool
+FLAG basecamp bookmarks list --no-hints type=bool
+FLAG basecamp bookmarks list --no-stats type=bool
+FLAG basecamp bookmarks list --page type=int
+FLAG basecamp bookmarks list --profile type=string
+FLAG basecamp bookmarks list --project type=string
+FLAG basecamp bookmarks list --quiet type=bool
+FLAG basecamp bookmarks list --stats type=bool
+FLAG basecamp bookmarks list --styled type=bool
+FLAG basecamp bookmarks list --todolist type=string
+FLAG basecamp bookmarks list --verbose type=count
+FLAG basecamp bookmarks remove --account type=string
+FLAG basecamp bookmarks remove --agent type=bool
+FLAG basecamp bookmarks remove --cache-dir type=string
+FLAG basecamp bookmarks remove --count type=bool
+FLAG basecamp bookmarks remove --help type=bool
+FLAG basecamp bookmarks remove --hints type=bool
+FLAG basecamp bookmarks remove --ids-only type=bool
+FLAG basecamp bookmarks remove --in type=string
+FLAG basecamp bookmarks remove --jq type=string
+FLAG basecamp bookmarks remove --json type=bool
+FLAG basecamp bookmarks remove --markdown type=bool
+FLAG basecamp bookmarks remove --md type=bool
+FLAG basecamp bookmarks remove --no-hints type=bool
+FLAG basecamp bookmarks remove --no-stats type=bool
+FLAG basecamp bookmarks remove --profile type=string
+FLAG basecamp bookmarks remove --project type=string
+FLAG basecamp bookmarks remove --quiet type=bool
+FLAG basecamp bookmarks remove --stats type=bool
+FLAG basecamp bookmarks remove --styled type=bool
+FLAG basecamp bookmarks remove --todolist type=string
+FLAG basecamp bookmarks remove --verbose type=count
 FLAG basecamp boost --account type=string
 FLAG basecamp boost --agent type=bool
 FLAG basecamp boost --cache-dir type=string
@@ -6405,6 +6523,51 @@ FLAG basecamp documents vaults list --styled type=bool
 FLAG basecamp documents vaults list --todolist type=string
 FLAG basecamp documents vaults list --vault type=string
 FLAG basecamp documents vaults list --verbose type=count
+FLAG basecamp drafts --account type=string
+FLAG basecamp drafts --agent type=bool
+FLAG basecamp drafts --cache-dir type=string
+FLAG basecamp drafts --count type=bool
+FLAG basecamp drafts --help type=bool
+FLAG basecamp drafts --hints type=bool
+FLAG basecamp drafts --ids-only type=bool
+FLAG basecamp drafts --in type=string
+FLAG basecamp drafts --jq type=string
+FLAG basecamp drafts --json type=bool
+FLAG basecamp drafts --markdown type=bool
+FLAG basecamp drafts --md type=bool
+FLAG basecamp drafts --no-hints type=bool
+FLAG basecamp drafts --no-stats type=bool
+FLAG basecamp drafts --profile type=string
+FLAG basecamp drafts --project type=string
+FLAG basecamp drafts --quiet type=bool
+FLAG basecamp drafts --stats type=bool
+FLAG basecamp drafts --styled type=bool
+FLAG basecamp drafts --todolist type=string
+FLAG basecamp drafts --verbose type=count
+FLAG basecamp drafts list --account type=string
+FLAG basecamp drafts list --agent type=bool
+FLAG basecamp drafts list --all type=bool
+FLAG basecamp drafts list --cache-dir type=string
+FLAG basecamp drafts list --count type=bool
+FLAG basecamp drafts list --help type=bool
+FLAG basecamp drafts list --hints type=bool
+FLAG basecamp drafts list --ids-only type=bool
+FLAG basecamp drafts list --in type=string
+FLAG basecamp drafts list --jq type=string
+FLAG basecamp drafts list --json type=bool
+FLAG basecamp drafts list --limit type=int
+FLAG basecamp drafts list --markdown type=bool
+FLAG basecamp drafts list --md type=bool
+FLAG basecamp drafts list --no-hints type=bool
+FLAG basecamp drafts list --no-stats type=bool
+FLAG basecamp drafts list --page type=int
+FLAG basecamp drafts list --profile type=string
+FLAG basecamp drafts list --project type=string
+FLAG basecamp drafts list --quiet type=bool
+FLAG basecamp drafts list --stats type=bool
+FLAG basecamp drafts list --styled type=bool
+FLAG basecamp drafts list --todolist type=string
+FLAG basecamp drafts list --verbose type=count
 FLAG basecamp events --account type=string
 FLAG basecamp events --agent type=bool
 FLAG basecamp events --all type=bool
@@ -16570,6 +16733,11 @@ SUB basecamp bonfire layout list
 SUB basecamp bonfire layout load
 SUB basecamp bonfire layout save
 SUB basecamp bonfire split
+SUB basecamp bookmarks
+SUB basecamp bookmarks add
+SUB basecamp bookmarks check
+SUB basecamp bookmarks list
+SUB basecamp bookmarks remove
 SUB basecamp boost
 SUB basecamp boost create
 SUB basecamp boost delete
@@ -16754,6 +16922,8 @@ SUB basecamp documents vault list
 SUB basecamp documents vaults
 SUB basecamp documents vaults create
 SUB basecamp documents vaults list
+SUB basecamp drafts
+SUB basecamp drafts list
 SUB basecamp events
 SUB basecamp file
 SUB basecamp file archive

@@ -111,6 +111,8 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewSkillCmd())
 	root.AddCommand(commands.NewGaugesCmd())
 	root.AddCommand(commands.NewAssignmentsCmd())
+	root.AddCommand(commands.NewBookmarksCmd())
+	root.AddCommand(commands.NewDraftsCmd())
 	root.AddCommand(commands.NewNotificationsCmd())
 	root.AddCommand(commands.NewTUICmd())
 	root.AddCommand(commands.NewProfileCmd())
