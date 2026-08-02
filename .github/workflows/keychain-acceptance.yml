@@ -9,6 +9,15 @@ name: Keychain Acceptance
 #
 # Locking a keychain is why this was a manual VM ritual. A hosted runner is
 # disposable, so it can be locked without consequence.
+#
+# The command runs over `ssh localhost`, not directly in the job step. A GitHub
+# macOS runner step reports `launchctl managername: Aqua` — it has a GUI session
+# — so sessionIsHeadless() is false there and the bounded-probe path never
+# engages. Over ssh the session manager is Background with no TTY attached,
+# which is not a workaround for the runner but the actual #568 scenario: a
+# piped installer over ssh with no way to answer an unlock prompt. Remote Login
+# is already enabled on the hosted image; only an authorized_keys entry is
+# needed.
 
 on:
   workflow_call:
@@ -54,16 +63,52 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Assert the session is headless
+      - name: Build the release-shaped binary
+        run: |
+          # Deliberately not `make build`: that bakes -tags dev (Makefile:29-30).
+          # goreleaser ships -trimpath with no tags (.goreleaser.yaml:33-34), and
+          # the gate is about the artifact users actually install.
+          CGO_ENABLED=0 go build -trimpath -o ./bin/basecamp ./cmd/basecamp
+          ./bin/basecamp --version
+
+      - name: Open a headless session to localhost
+        run: |
+          # Remote Login is already On in the hosted image, so this only needs
+          # an authorized_keys entry. The key is generated per run and never
+          # leaves the runner.
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_keychain_acceptance -q
+          cat ~/.ssh/id_keychain_acceptance.pub >> ~/.ssh/authorized_keys
+          chmod 700 ~/.ssh
+          chmod 600 ~/.ssh/authorized_keys
+          ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR -o ConnectTimeout=15 localhost true
+
+      - name: Assert the ssh session is headless
         run: |
           # sessionIsHeadless() (internal/auth/keyring.go) bounds the probe only
           # when no stream is a terminal AND launchctl reports no Aqua session.
-          # If a runner image ever gains one, the probe stops being bounded and
-          # this gate must go red rather than silently green.
-          manager=$(/bin/launchctl managername 2>&1 || true)
-          echo "launchctl managername: $manager"
+          # Assert both in the session that will actually run the command — the
+          # job step itself is Aqua, which is precisely why the command does not
+          # run there.
+          manager=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR localhost /bin/launchctl managername)
+          echo "ssh session managername: $manager"
           if [ "$manager" = "Aqua" ]; then
-            echo "::error::Runner has an Aqua session — the headless probe bound never engages, so this test proves nothing."
+            echo "::error::ssh session reports an Aqua session — the headless probe bound never engages, so this test proves nothing."
+            exit 1
+          fi
+
+          # `tty` exits non-zero when stdin is not a terminal, which is the
+          # answer we want, so it must not trip `set -e`.
+          tty_state=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR localhost tty < /dev/null || true)
+          echo "ssh session tty: $tty_state"
+          if [ "$tty_state" != "not a tty" ]; then
+            echo "::error::ssh session has a TTY ($tty_state) — an interactive session keeps the unbounded probe by design."
             exit 1
           fi
 
@@ -78,24 +123,18 @@ jobs:
           #     (internal/commands/auth.go:61).
           # Both are checked for non-emptiness because that is exactly what the
           # production code tests: os.Getenv(...) != "".
-          fail=0
-          if [ -n "${BASECAMP_NO_KEYRING:-}" ]; then
-            echo "::error::BASECAMP_NO_KEYRING is set — the keyring probe would be skipped and this test would prove nothing."
-            fail=1
+          #
+          # Checked in the ssh session, not the job: the command runs there, and
+          # a login shell profile could set either independently of the job env.
+          state=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR localhost \
+              'echo "no_keyring=[${BASECAMP_NO_KEYRING:-}] token=[${BASECAMP_TOKEN:-}]"')
+          echo "ssh session: $state"
+          if [ "$state" != 'no_keyring=[] token=[]' ]; then
+            echo "::error::BASECAMP_NO_KEYRING or BASECAMP_TOKEN is non-empty in the ssh session — the credential store would be skipped and this test would prove nothing."
+            exit 1
           fi
-          if [ -n "${BASECAMP_TOKEN:-}" ]; then
-            echo "::error::BASECAMP_TOKEN is set — auth status returns before the credential store is built."
-            fail=1
-          fi
-          exit "$fail"
-
-      - name: Build the release-shaped binary
-        run: |
-          # Deliberately not `make build`: that bakes -tags dev (Makefile:29-30).
-          # goreleaser ships -trimpath with no tags (.goreleaser.yaml:33-34), and
-          # the gate is about the artifact users actually install.
-          CGO_ENABLED=0 go build -trimpath -o ./bin/basecamp ./cmd/basecamp
-          ./bin/basecamp --version
 
       - name: Resolve the keychain the probe will hit
         id: keychain
@@ -103,8 +142,11 @@ jobs:
           # The bounded probe mirrors go-keyring's darwin Set — `security -i`
           # fed add-generic-password with no -k — so it targets the *default*
           # keychain. Hosted images vary here, so resolve and assert rather
-          # than assume login.keychain-db.
-          raw=$(security default-keychain 2>&1 || true)
+          # than assume login.keychain-db. Resolved in the ssh session, since
+          # that is the securityd context the probe runs in.
+          raw=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR localhost security default-keychain 2>&1 || true)
           echo "security default-keychain: $raw"
           path=$(printf '%s\n' "$raw" | sed -n 's/^ *"\(.*\)"$/\1/p')
           if [ -z "$path" ]; then
@@ -122,22 +164,29 @@ jobs:
         env:
           KEYCHAIN: ${{ steps.keychain.outputs.path }}
         run: |
-          security lock-keychain "$KEYCHAIN"
-          echo "--- show-keychain-info (after lock) ---"
-          security show-keychain-info "$KEYCHAIN" 2>&1 || true
+          SSH="ssh -i $HOME/.ssh/id_keychain_acceptance -o BatchMode=yes"
+          SSH="$SSH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          SSH="$SSH -o LogLevel=ERROR localhost"
 
-          # All three streams redirected so sessionIsHeadless() holds and the
-          # 10s bound engages. `auth status` reaches IsAuthenticated() ->
-          # Store.ensure() -> credstore.NewStore -> the probe.
+          $SSH security lock-keychain "$KEYCHAIN"
+          echo "--- show-keychain-info (after lock) ---"
+          $SSH security show-keychain-info "$KEYCHAIN" 2>&1 || true
+
+          # `auth status` reaches IsAuthenticated() -> Store.ensure() ->
+          # credstore.NewStore -> the probe. Streams are redirected on both
+          # sides, and ssh without -t allocates no TTY, so sessionIsHeadless()
+          # holds and the 10s bound engages.
           #
-          # Watchdog via perl: alarm() survives exec and SIGALRM's default
+          # The watchdog runs on the remote side so it kills the binary itself
+          # rather than just the ssh client, which would leave the process
+          # behind. perl: alarm() survives exec and SIGALRM's default
           # disposition is restored across it, so the timer rides on the
           # binary's own PID. `timeout` is homebrew/coreutils-only and may be
           # absent; a shell background-kill would race PID recycling.
           start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
           status=0
-          perl -e 'alarm(60); exec @ARGV or die "exec: $!"' \
-            ./bin/basecamp auth status --json \
+          $SSH "perl -e 'alarm(60); exec @ARGV or die \"exec: \$!\"' \
+                  '$GITHUB_WORKSPACE/bin/basecamp' auth status --json" \
             > /tmp/keychain-stdout.txt 2> /tmp/keychain-stderr.txt < /dev/null \
             || status=$?
           end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
@@ -177,7 +226,9 @@ jobs:
           #   60s     watchdog fired — #568 regression
           echo "elapsed=${ELAPSED}s exit=${STATUS}"
 
-          if [ "$STATUS" = "142" ]; then
+          # ssh reports a signalled remote command as exit 255, so accept
+          # either that or the direct 128+SIGALRM.
+          if [ "$STATUS" = "142" ] || [ "$STATUS" = "255" ]; then
             echo "::error::Watchdog fired at 60s (SIGALRM) — the command never returned. This is the #568 hang."
             exit 1
           fi
@@ -224,8 +275,12 @@ jobs:
           echo "elapsed: ${ELAPSED:-<not measured>}"
           echo "exit code: ${STATUS:-<not measured>}"
           echo "default keychain: ${KEYCHAIN:-<unresolved>}"
-          echo "--- launchctl managername ---"
+          echo "--- launchctl managername (job step) ---"
           /bin/launchctl managername 2>&1 || true
+          echo "--- launchctl managername (ssh session) ---"
+          ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR localhost /bin/launchctl managername 2>&1 || true
           echo "--- security default-keychain ---"
           security default-keychain 2>&1 || true
           echo "--- security show-keychain-info (now) ---"
@@ -236,48 +291,3 @@ jobs:
           cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
           echo "--- stderr ---"
           cat /tmp/keychain-stderr.txt 2>/dev/null || echo "<none>"
-
-  # TEMPORARY (Phase 0 diagnostics, removed before this PR merges).
-  # macos-latest reports `launchctl managername: Aqua`, so sessionIsHeadless()
-  # is false and the bounded-probe path never engages. This job determines
-  # whether a genuinely non-Aqua session is reachable on a hosted runner at
-  # all — the difference between "this approach needs one more step" and
-  # "black-box on hosted macOS is dead".
-  session-probe:
-    name: TEMP session-context probe
-    runs-on: macos-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Probe launchctl session under several contexts
-        run: |
-          me=$(whoami)
-          echo "whoami:              $me"
-          echo "direct:              $(/bin/launchctl managername 2>&1)"
-          echo "passwordless sudo:   $(sudo -n true 2>&1 && echo yes || echo no)"
-          echo "sudo direct:         $(sudo /bin/launchctl managername 2>&1)"
-          echo "bsexec /:            $(sudo launchctl bsexec / /bin/launchctl managername 2>&1 | head -1)"
-          echo "bsexec / as $me: $(sudo launchctl bsexec / sudo -u "$me" /bin/launchctl managername 2>&1 | head -1)"
-          echo "remote login:        $(sudo systemsetup -getremotelogin 2>&1 | head -1)"
-          echo "sshd plist:          $(ls /System/Library/LaunchDaemons/ssh.plist 2>&1)"
-          echo "ssh localhost:       $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 localhost /bin/launchctl managername 2>&1 | head -1)"
-
-      - name: Try enabling Remote Login and re-probe
-        run: |
-          # ssh localhost is the real #568 scenario (piped installer over ssh)
-          # and yields a StandardIO/Background session rather than Aqua.
-          sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>&1 || \
-            sudo systemsetup -setremotelogin on 2>&1 || echo "could not enable remote login"
-          sudo systemsetup -getremotelogin 2>&1 || true
-
-          mkdir -p ~/.ssh
-          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_probe -q
-          cat ~/.ssh/id_probe.pub >> ~/.ssh/authorized_keys
-          chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys
-
-          echo "--- ssh localhost managername ---"
-          ssh -i ~/.ssh/id_probe -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-              localhost '/bin/launchctl managername; echo "tty:"; tty' 2>&1 || \
-            echo "ssh to localhost failed"
