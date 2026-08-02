@@ -1,43 +1,53 @@
 name: Keychain Acceptance
 
-# Black-box acceptance test for the #568 incident class: on headless macOS with
-# a locked login keychain, constructing the credential store used to block
-# forever in an uncancellable `security` child. Unit tests cover the pieces
-# (bounded probe kills and reaps its child; the store is lazy; headless implies
-# a 10s bound) — nothing else runs the real binary against a really blocking
-# keychain and asserts the command finishes inside the bound.
+# Composition gate for the #568 incident class: on headless macOS, a keyring
+# probe that blocks must be cut off at the deadline so the command completes
+# through the file fallback instead of hanging forever.
 #
-# Locking a keychain is why this was a manual VM ritual. A hosted runner is
-# disposable, so it can be locked without consequence.
+# Unit tests cover each piece — the bounded probe kills and reaps its child
+# (credstore probe_darwin_test.go:41), the store is lazy until the first
+# credential op, and headless implies a 10s bound. What none of them cover is
+# the composition: the real binary, on real macOS, in a real headless session,
+# against a probe that really blocks.
 #
-# The command runs over `ssh localhost`, not directly in the job step. A GitHub
-# macOS runner step reports `launchctl managername: Aqua` — it has a GUI session
-# — so sessionIsHeadless() is false there and the bounded-probe path never
-# engages. Over ssh the session manager is Background with no TTY attached,
-# which is not a workaround for the runner but the actual #568 scenario: a
-# piped installer over ssh with no way to answer an unlock prompt. Remote Login
-# is already enabled on the hosted image; only an authorized_keys entry is
-# needed.
+# Two environmental facts shape how that is reached.
+#
+# 1. A macos-latest job step is NOT headless. macos-26-arm64 reports
+#    `launchctl managername: Aqua`, so sessionIsHeadless() is false there and
+#    the bounded path never engages. Over `ssh localhost` the session manager
+#    is Background with no TTY, which is not a workaround but the actual #568
+#    scenario: a piped installer over ssh that cannot answer an unlock prompt.
+#    Remote Login is already On in the image; only an authorized_keys entry is
+#    needed.
+#
+# 2. A locked keychain on this image does not block. Measured 2026-08-02:
+#    `security` returns errSecInteractionNotAllowed in under 200ms, so the
+#    cancellation path never ran and the test proved nothing. Rather than hunt
+#    for a real keychain that blocks, substitute a command that reliably does.
+#
+# credstore's securityPath is a package-level var initialized to a constant, so
+# the linker can repoint it at `/usr/bin/caffeinate`, which hangs until killed.
+# No production change and no runtime override — the executable-path trust
+# boundary is unchanged in shipped builds. The keychain is never touched.
 
 on:
   workflow_call:
-    # The point of the design: release.yml invokes this against the exact tag
-    # SHA. workflow_dispatch cannot gate a release — a dispatch runs against
-    # the tip of the selected ref, not an arbitrary commit.
+    # The point of the design: release.yml can invoke this against the exact
+    # tag SHA. workflow_dispatch cannot gate a release — a dispatch runs
+    # against the tip of the selected ref, not an arbitrary commit.
   pull_request:
     branches: [main]
-    # The whole surface the acceptance path traverses, not just the keyring:
-    # the store and its headless detection, the command that reaches it, the
-    # app/CLI lifecycle that builds the store, the entrypoint, the release
-    # build shape, the credstore pin, and both workflow files — self-proving,
-    # the same trick installer-bash32 uses at test.yml:249.
+    # The whole surface the acceptance path traverses: the store and its
+    # headless detection, the command that reaches it, the app/CLI lifecycle
+    # that builds the store, the entrypoint, the credstore pin (which owns the
+    # securityPath symbol this job injects into), and both workflow files —
+    # self-proving, the same trick installer-bash32 uses at test.yml:249.
     paths:
       - 'internal/auth/**'
       - 'internal/appctx/**'
       - 'internal/cli/**'
       - 'internal/commands/auth.go'
       - 'cmd/basecamp/**'
-      - '.goreleaser.yaml'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/keychain-acceptance.yml'
@@ -46,9 +56,16 @@ on:
 
 permissions: {}
 
+env:
+  # Overriding this symbol is what makes the probe block deterministically.
+  # `caffeinate -i` runs until killed, matching how probeBounded invokes
+  # securityPath (`<path> -i`, fed a command on stdin it never reads).
+  SECURITY_PATH_SYMBOL: github.com/basecamp/cli/credstore.securityPath
+  HANGING_COMMAND: /usr/bin/caffeinate
+
 jobs:
   keychain:
-    name: Locked keychain (headless macOS)
+    name: Bounded probe (headless macOS)
     runs-on: macos-latest
     timeout-minutes: 15
     permissions:
@@ -63,13 +80,30 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Build the release-shaped binary
+      - name: Build the test-instrumented binary
         run: |
-          # Deliberately not `make build`: that bakes -tags dev (Makefile:29-30).
-          # goreleaser ships -trimpath with no tags (.goreleaser.yaml:33-34), and
-          # the gate is about the artifact users actually install.
-          CGO_ENABLED=0 go build -trimpath -o ./bin/basecamp ./cmd/basecamp
-          ./bin/basecamp --version
+          # Deliberately NOT called release-shaped: the linker override makes
+          # this a composition gate on the source revision, not a test of the
+          # exact shipped artifact. Everything else about the build matches
+          # goreleaser (-trimpath, no dev tag), so the code path is the
+          # shipped one.
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-X=${SECURITY_PATH_SYMBOL}=${HANGING_COMMAND}" \
+            -o ./bin/basecamp-hanging-probe ./cmd/basecamp
+          ./bin/basecamp-hanging-probe --version
+
+      - name: Assert the linker injection took
+        run: |
+          # The timing floor already catches a failed injection — the real
+          # `security` fast-fails well under 8s — but `-X` against a renamed or
+          # removed symbol is silently ignored by the linker, so assert it
+          # directly to make that failure diagnosable at a glance rather than
+          # arriving as an unexplained fast run.
+          if ! LC_ALL=C grep -qa "$HANGING_COMMAND" ./bin/basecamp-hanging-probe; then
+            echo "::error::${HANGING_COMMAND} is not embedded in the binary — the -X override against ${SECURITY_PATH_SYMBOL} did not apply. The symbol was probably renamed or removed by a credstore bump."
+            exit 1
+          fi
+          echo "Injected ${SECURITY_PATH_SYMBOL} -> ${HANGING_COMMAND}"
 
       - name: Open a headless session to localhost
         run: |
@@ -87,17 +121,16 @@ jobs:
 
       - name: Assert the ssh session is headless
         run: |
-          # sessionIsHeadless() (internal/auth/keyring.go) bounds the probe only
-          # when no stream is a terminal AND launchctl reports no Aqua session.
-          # Assert both in the session that will actually run the command — the
-          # job step itself is Aqua, which is precisely why the command does not
-          # run there.
+          # sessionIsHeadless() (internal/auth/keyring.go) sets the 10s bound
+          # only when no stream is a terminal AND launchctl reports no Aqua
+          # session. This is the real detection under test — not stubbed — so
+          # assert both in the session that will actually run the command.
           manager=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o LogLevel=ERROR localhost /bin/launchctl managername)
           echo "ssh session managername: $manager"
           if [ "$manager" = "Aqua" ]; then
-            echo "::error::ssh session reports an Aqua session — the headless probe bound never engages, so this test proves nothing."
+            echo "::error::ssh session reports an Aqua session — sessionIsHeadless() would be false, the probe would run unbounded through go-keyring, and this test would prove nothing."
             exit 1
           fi
 
@@ -136,46 +169,18 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve the keychain the probe will hit
-        id: keychain
-        run: |
-          # The bounded probe mirrors go-keyring's darwin Set — `security -i`
-          # fed add-generic-password with no -k — so it targets the *default*
-          # keychain. Hosted images vary here, so resolve and assert rather
-          # than assume login.keychain-db. Resolved in the ssh session, since
-          # that is the securityd context the probe runs in.
-          raw=$(ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
-              -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -o LogLevel=ERROR localhost security default-keychain 2>&1 || true)
-          echo "security default-keychain: $raw"
-          path=$(printf '%s\n' "$raw" | sed -n 's/^ *"\(.*\)"$/\1/p')
-          if [ -z "$path" ]; then
-            echo "::error::Could not resolve a default keychain from: $raw"
-            exit 1
-          fi
-          if [ ! -e "$path" ]; then
-            echo "::error::Default keychain does not exist on disk: $path"
-            exit 1
-          fi
-          echo "path=$path" >> "$GITHUB_OUTPUT"
-
-      - name: Lock the keychain and run a credential-touching command
+      - name: Run a credential-touching command against a blocking probe
         id: probe
-        env:
-          KEYCHAIN: ${{ steps.keychain.outputs.path }}
         run: |
           SSH="ssh -i $HOME/.ssh/id_keychain_acceptance -o BatchMode=yes"
           SSH="$SSH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           SSH="$SSH -o LogLevel=ERROR localhost"
 
-          $SSH security lock-keychain "$KEYCHAIN"
-          echo "--- show-keychain-info (after lock) ---"
-          $SSH security show-keychain-info "$KEYCHAIN" 2>&1 || true
-
           # `auth status` reaches IsAuthenticated() -> Store.ensure() ->
-          # credstore.NewStore -> the probe. Streams are redirected on both
-          # sides, and ssh without -t allocates no TTY, so sessionIsHeadless()
-          # holds and the 10s bound engages.
+          # credstore.NewStore -> probe -> probeBounded, which execs the
+          # injected hanging command. ssh without -t allocates no TTY and both
+          # streams are redirected, so sessionIsHeadless() holds and the 10s
+          # bound engages.
           #
           # The watchdog runs on the remote side so it kills the binary itself
           # rather than just the ssh client, which would leave the process
@@ -186,7 +191,7 @@ jobs:
           start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
           status=0
           $SSH "perl -e 'alarm(60); exec @ARGV or die \"exec: \$!\"' \
-                  '$GITHUB_WORKSPACE/bin/basecamp' auth status --json" \
+                  '$GITHUB_WORKSPACE/bin/basecamp-hanging-probe' auth status --json" \
             > /tmp/keychain-stdout.txt 2> /tmp/keychain-stderr.txt < /dev/null \
             || status=$?
           end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
@@ -198,44 +203,35 @@ jobs:
             echo "status=$status"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Unlock the keychain
-        if: always()
-        env:
-          KEYCHAIN: ${{ steps.keychain.outputs.path }}
-        run: |
-          # Diagnostics below read the keychain; leaving it locked would also
-          # break any later step on this runner.
-          if [ -n "${KEYCHAIN:-}" ]; then
-            security unlock-keychain -p "" "$KEYCHAIN" 2>&1 || true
-          fi
-
       - name: Assert the timeout path ran and the bound held
         env:
           ELAPSED: ${{ steps.probe.outputs.elapsed }}
           STATUS: ${{ steps.probe.outputs.status }}
         run: |
-          # The floor is what makes this a test rather than a ritual. An
-          # earlier manual attempt with a disposable HOME "passed" in 3.21s
-          # with -60006: a fast clean failure in which the cancellation path
-          # never ran. Without the floor that trap gets promoted to CI, where
-          # it would be trusted forever.
+          # The floor is what makes this a test rather than a ritual, and it is
+          # self-proving across both seams. If headless detection breaks, the
+          # store takes the unbounded probeDirect path through go-keyring and
+          # the real `security` returns in ~0.2s. If the -X injection breaks,
+          # probeBounded execs the real `security`, which also returns in
+          # ~0.2s. Either way the run lands under the floor and goes red — a
+          # broken harness cannot masquerade as a passing test.
           #
           #   >= 8s   the probe really blocked and the bound cut it off
-          #   ~3s     fast clean failure — environment did not reproduce #568
-          #   <= 25s  the bound held (10s probe + up to 5s cleanup + startup)
+          #   ~0.2s   harness broken (see above) — proves nothing
+          #   <= 25s  the bound held (10s probe + startup + ssh round-trip)
           #   60s     watchdog fired — #568 regression
           echo "elapsed=${ELAPSED}s exit=${STATUS}"
 
           # ssh reports a signalled remote command as exit 255, so accept
           # either that or the direct 128+SIGALRM.
           if [ "$STATUS" = "142" ] || [ "$STATUS" = "255" ]; then
-            echo "::error::Watchdog fired at 60s (SIGALRM) — the command never returned. This is the #568 hang."
+            echo "::error::Watchdog fired at 60s (SIGALRM) — the command never returned. The probe was not cut off at its deadline. This is the #568 hang."
             exit 1
           fi
 
           under_floor=$(perl -e 'print(($ARGV[0] < 8.0) ? 1 : 0)' "$ELAPSED")
           if [ "$under_floor" = "1" ]; then
-            echo "::error::Completed in ${ELAPSED}s, under the 8s floor — the locked keychain fast-failed instead of blocking, so the cancellation path never ran and this check proves nothing. Do not weaken the floor to make it green."
+            echo "::error::Completed in ${ELAPSED}s, under the 8s floor — the probe never blocked, so the cancellation path never ran and this check proves nothing. Check the headless assertion and the linker injection. Do not weaken the floor to make it green."
             exit 1
           fi
 
@@ -270,23 +266,19 @@ jobs:
         env:
           ELAPSED: ${{ steps.probe.outputs.elapsed }}
           STATUS: ${{ steps.probe.outputs.status }}
-          KEYCHAIN: ${{ steps.keychain.outputs.path }}
         run: |
           echo "elapsed: ${ELAPSED:-<not measured>}"
           echo "exit code: ${STATUS:-<not measured>}"
-          echo "default keychain: ${KEYCHAIN:-<unresolved>}"
           echo "--- launchctl managername (job step) ---"
           /bin/launchctl managername 2>&1 || true
           echo "--- launchctl managername (ssh session) ---"
           ssh -i ~/.ssh/id_keychain_acceptance -o BatchMode=yes \
               -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
               -o LogLevel=ERROR localhost /bin/launchctl managername 2>&1 || true
-          echo "--- security default-keychain ---"
-          security default-keychain 2>&1 || true
-          echo "--- security show-keychain-info (now) ---"
-          if [ -n "${KEYCHAIN:-}" ]; then
-            security show-keychain-info "$KEYCHAIN" 2>&1 || true
-          fi
+          echo "--- injected securityPath ---"
+          LC_ALL=C grep -oa "$HANGING_COMMAND" ./bin/basecamp-hanging-probe | head -1 || echo "<not embedded>"
+          echo "--- stray hanging children (should be none) ---"
+          pgrep -fl "$HANGING_COMMAND" || echo "<none>"
           echo "--- stdout ---"
           cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
           echo "--- stderr ---"
