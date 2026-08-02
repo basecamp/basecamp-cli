@@ -302,7 +302,13 @@ jobs:
               -o LogLevel=ERROR localhost /bin/launchctl managername 2>&1 || true
           echo "--- injected securityPath ---"
           LC_ALL=C grep -oa "$HANGING_COMMAND" ./bin/basecamp-hanging-probe | head -1 || echo "<not embedded>"
-          echo "--- stray hanging children ---"
+          # Reporting only — NOT the gate. The binding assertion is the
+          # "Assert the hung child was reaped" step above, which exits
+          # non-zero on a match. This duplicate exists because diagnostics run
+          # `if: always()`, so it still reports child state when the job failed
+          # earlier and never reached that assertion. Do not add `exit 1` here
+          # expecting it to close a hole; the hole is already closed.
+          echo "--- stray hanging children (reporting only; gated above) ---"
           pgrep -fl "^${HANGING_COMMAND} -i$" || echo "<none>"
           echo "--- stdout ---"
           cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
