@@ -20,6 +20,21 @@ jobs:
       security-events: write
       pull-requests: read
 
+  # Invoked here rather than merely run beforehand: scripts/release.sh commits
+  # and pushes a release-prep commit to main *before* tagging, so anything run
+  # ahead of time covers the wrong SHA. As a called workflow this runs against
+  # the exact tag SHA.
+  #
+  # contents: read is required and cannot be inherited — this workflow sets
+  # permissions: {} above, and a called workflow can only maintain or reduce
+  # the caller's token permissions, never elevate them. Without it,
+  # actions/checkout inside the reusable workflow has no repository access.
+  keychain:
+    name: Locked-keychain acceptance
+    uses: ./.github/workflows/keychain-acceptance.yml
+    permissions:
+      contents: read
+
   test:
     name: Test before release
     runs-on: ubuntu-latest
@@ -103,7 +118,7 @@ jobs:
 
   release:
     name: Release
-    needs: [test, security]
+    needs: [test, security, keychain]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release
