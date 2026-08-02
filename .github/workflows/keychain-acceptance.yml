@@ -236,3 +236,48 @@ jobs:
           cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
           echo "--- stderr ---"
           cat /tmp/keychain-stderr.txt 2>/dev/null || echo "<none>"
+
+  # TEMPORARY (Phase 0 diagnostics, removed before this PR merges).
+  # macos-latest reports `launchctl managername: Aqua`, so sessionIsHeadless()
+  # is false and the bounded-probe path never engages. This job determines
+  # whether a genuinely non-Aqua session is reachable on a hosted runner at
+  # all — the difference between "this approach needs one more step" and
+  # "black-box on hosted macOS is dead".
+  session-probe:
+    name: TEMP session-context probe
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Probe launchctl session under several contexts
+        run: |
+          me=$(whoami)
+          echo "whoami:              $me"
+          echo "direct:              $(/bin/launchctl managername 2>&1)"
+          echo "passwordless sudo:   $(sudo -n true 2>&1 && echo yes || echo no)"
+          echo "sudo direct:         $(sudo /bin/launchctl managername 2>&1)"
+          echo "bsexec /:            $(sudo launchctl bsexec / /bin/launchctl managername 2>&1 | head -1)"
+          echo "bsexec / as $me: $(sudo launchctl bsexec / sudo -u "$me" /bin/launchctl managername 2>&1 | head -1)"
+          echo "remote login:        $(sudo systemsetup -getremotelogin 2>&1 | head -1)"
+          echo "sshd plist:          $(ls /System/Library/LaunchDaemons/ssh.plist 2>&1)"
+          echo "ssh localhost:       $(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 localhost /bin/launchctl managername 2>&1 | head -1)"
+
+      - name: Try enabling Remote Login and re-probe
+        run: |
+          # ssh localhost is the real #568 scenario (piped installer over ssh)
+          # and yields a StandardIO/Background session rather than Aqua.
+          sudo launchctl load -w /System/Library/LaunchDaemons/ssh.plist 2>&1 || \
+            sudo systemsetup -setremotelogin on 2>&1 || echo "could not enable remote login"
+          sudo systemsetup -getremotelogin 2>&1 || true
+
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_probe -q
+          cat ~/.ssh/id_probe.pub >> ~/.ssh/authorized_keys
+          chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys
+
+          echo "--- ssh localhost managername ---"
+          ssh -i ~/.ssh/id_probe -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+              localhost '/bin/launchctl managername; echo "tty:"; tty' 2>&1 || \
+            echo "ssh to localhost failed"
