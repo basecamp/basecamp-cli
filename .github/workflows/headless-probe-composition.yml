@@ -246,13 +246,21 @@ jobs:
             exit 1
           fi
 
-      - name: Assert the hung child was reaped
+      - name: Assert no blocking probe process survived
         run: |
-          # The whole point of the bounded probe is that the child is killed
-          # AND reaped — a deadline that abandons an orphan still leaks a
-          # process per invocation. credstore proves the ESRCH property in
-          # isolation (probe_darwin_test.go:41); this observes it in
-          # composition, through the real binary.
+          # A deadline that leaves the blocking child running still leaks a
+          # process per invocation, so assert none outlives the CLI.
+          #
+          # This proves NO PERSISTENT CHILD SURVIVED. It does NOT prove the CLI
+          # parent reaped its own child, and must not be read that way: had the
+          # parent killed without waiting, the child would be a zombie,
+          # reparented to PID 1 when the CLI exits, and likely reaped by init
+          # before this pgrep runs — so this check would still pass. The
+          # authoritative parent-side reaping proof is credstore's darwin unit
+          # test, which pins ESRCH (probe_darwin_test.go:41). A composition
+          # test could only make the stronger claim by holding the CLI parent
+          # alive while inspecting child state, or by exposing a test-only wait
+          # result; neither is warranted for a release gate.
           #
           # This is a gate, not a diagnostic. It deliberately does not live in
           # the `if: always()` diagnostics step below, where `|| echo` would
@@ -261,15 +269,15 @@ jobs:
           # Matched on the exact argv the probe spawns (`<path> -i`, anchored)
           # rather than a bare substring, so an unrelated caffeinate elsewhere
           # on the runner cannot fail this, and a real survivor cannot hide
-          # behind a loose match. CommandContext kills and waits synchronously
-          # inside cmd.Run(), so by the time the binary has exited the child is
-          # already reaped — there is no race to sleep around.
+          # behind a loose match. CommandContext kills synchronously inside
+          # cmd.Run() before the binary exits, so there is no race to sleep
+          # around.
           if survivors=$(pgrep -fl "^${HANGING_COMMAND} -i$"); then
-            echo "::error::The blocking probe child survived the deadline — it was killed but not reaped, or not killed at all. This is the #568 process-leak class."
+            echo "::error::A blocking probe process outlived the CLI — the child was not killed at the deadline. This is the #568 process-leak class."
             printf '%s\n' "$survivors"
             exit 1
           fi
-          echo "No surviving ${HANGING_COMMAND} children — the probe child was killed and reaped."
+          echo "No ${HANGING_COMMAND} process survived the CLI. (Parent-side reaping is pinned separately by credstore's darwin unit test.)"
 
       - name: Assert the command completed through the fallback
         run: |
@@ -303,7 +311,7 @@ jobs:
           echo "--- injected securityPath ---"
           LC_ALL=C grep -oa "$HANGING_COMMAND" ./bin/basecamp-hanging-probe | head -1 || echo "<not embedded>"
           # Reporting only — NOT the gate. The binding assertion is the
-          # "Assert the hung child was reaped" step above, which exits
+          # "Assert no blocking probe process survived" step above, which exits
           # non-zero on a match. This duplicate exists because diagnostics run
           # `if: always()`, so it still reports child state when the job failed
           # earlier and never reached that assertion. Do not add `exit 1` here
