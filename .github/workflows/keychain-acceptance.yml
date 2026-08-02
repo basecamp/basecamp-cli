@@ -1,0 +1,238 @@
+name: Keychain Acceptance
+
+# Black-box acceptance test for the #568 incident class: on headless macOS with
+# a locked login keychain, constructing the credential store used to block
+# forever in an uncancellable `security` child. Unit tests cover the pieces
+# (bounded probe kills and reaps its child; the store is lazy; headless implies
+# a 10s bound) — nothing else runs the real binary against a really blocking
+# keychain and asserts the command finishes inside the bound.
+#
+# Locking a keychain is why this was a manual VM ritual. A hosted runner is
+# disposable, so it can be locked without consequence.
+
+on:
+  workflow_call:
+    # The point of the design: release.yml invokes this against the exact tag
+    # SHA. workflow_dispatch cannot gate a release — a dispatch runs against
+    # the tip of the selected ref, not an arbitrary commit.
+  pull_request:
+    branches: [main]
+    # The whole surface the acceptance path traverses, not just the keyring:
+    # the store and its headless detection, the command that reaches it, the
+    # app/CLI lifecycle that builds the store, the entrypoint, the release
+    # build shape, the credstore pin, and both workflow files — self-proving,
+    # the same trick installer-bash32 uses at test.yml:249.
+    paths:
+      - 'internal/auth/**'
+      - 'internal/appctx/**'
+      - 'internal/cli/**'
+      - 'internal/commands/auth.go'
+      - 'cmd/basecamp/**'
+      - '.goreleaser.yaml'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/keychain-acceptance.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  keychain:
+    name: Locked keychain (headless macOS)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Assert the session is headless
+        run: |
+          # sessionIsHeadless() (internal/auth/keyring.go) bounds the probe only
+          # when no stream is a terminal AND launchctl reports no Aqua session.
+          # If a runner image ever gains one, the probe stops being bounded and
+          # this gate must go red rather than silently green.
+          manager=$(/bin/launchctl managername 2>&1 || true)
+          echo "launchctl managername: $manager"
+          if [ "$manager" = "Aqua" ]; then
+            echo "::error::Runner has an Aqua session — the headless probe bound never engages, so this test proves nothing."
+            exit 1
+          fi
+
+      - name: Assert the void-the-test variables are disarmed
+        run: |
+          # Either of these skips the code under test entirely, and would leave
+          # a green check that proved nothing:
+          #   BASECAMP_NO_KEYRING non-empty -> credstore.NewStore returns a
+          #     file store without probing (credstore/store.go:68).
+          #   BASECAMP_TOKEN non-empty -> auth status returns before
+          #     IsAuthenticated(), so the store is never constructed
+          #     (internal/commands/auth.go:61).
+          # Both are checked for non-emptiness because that is exactly what the
+          # production code tests: os.Getenv(...) != "".
+          fail=0
+          if [ -n "${BASECAMP_NO_KEYRING:-}" ]; then
+            echo "::error::BASECAMP_NO_KEYRING is set — the keyring probe would be skipped and this test would prove nothing."
+            fail=1
+          fi
+          if [ -n "${BASECAMP_TOKEN:-}" ]; then
+            echo "::error::BASECAMP_TOKEN is set — auth status returns before the credential store is built."
+            fail=1
+          fi
+          exit "$fail"
+
+      - name: Build the release-shaped binary
+        run: |
+          # Deliberately not `make build`: that bakes -tags dev (Makefile:29-30).
+          # goreleaser ships -trimpath with no tags (.goreleaser.yaml:33-34), and
+          # the gate is about the artifact users actually install.
+          CGO_ENABLED=0 go build -trimpath -o ./bin/basecamp ./cmd/basecamp
+          ./bin/basecamp --version
+
+      - name: Resolve the keychain the probe will hit
+        id: keychain
+        run: |
+          # The bounded probe mirrors go-keyring's darwin Set — `security -i`
+          # fed add-generic-password with no -k — so it targets the *default*
+          # keychain. Hosted images vary here, so resolve and assert rather
+          # than assume login.keychain-db.
+          raw=$(security default-keychain 2>&1 || true)
+          echo "security default-keychain: $raw"
+          path=$(printf '%s\n' "$raw" | sed -n 's/^ *"\(.*\)"$/\1/p')
+          if [ -z "$path" ]; then
+            echo "::error::Could not resolve a default keychain from: $raw"
+            exit 1
+          fi
+          if [ ! -e "$path" ]; then
+            echo "::error::Default keychain does not exist on disk: $path"
+            exit 1
+          fi
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Lock the keychain and run a credential-touching command
+        id: probe
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.path }}
+        run: |
+          security lock-keychain "$KEYCHAIN"
+          echo "--- show-keychain-info (after lock) ---"
+          security show-keychain-info "$KEYCHAIN" 2>&1 || true
+
+          # All three streams redirected so sessionIsHeadless() holds and the
+          # 10s bound engages. `auth status` reaches IsAuthenticated() ->
+          # Store.ensure() -> credstore.NewStore -> the probe.
+          #
+          # Watchdog via perl: alarm() survives exec and SIGALRM's default
+          # disposition is restored across it, so the timer rides on the
+          # binary's own PID. `timeout` is homebrew/coreutils-only and may be
+          # absent; a shell background-kill would race PID recycling.
+          start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          status=0
+          perl -e 'alarm(60); exec @ARGV or die "exec: $!"' \
+            ./bin/basecamp auth status --json \
+            > /tmp/keychain-stdout.txt 2> /tmp/keychain-stderr.txt < /dev/null \
+            || status=$?
+          end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+          elapsed=$(perl -e 'printf "%.3f\n", $ARGV[1] - $ARGV[0]' "$start" "$end")
+
+          echo "elapsed=${elapsed}s exit=${status}"
+          {
+            echo "elapsed=$elapsed"
+            echo "status=$status"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Unlock the keychain
+        if: always()
+        env:
+          KEYCHAIN: ${{ steps.keychain.outputs.path }}
+        run: |
+          # Diagnostics below read the keychain; leaving it locked would also
+          # break any later step on this runner.
+          if [ -n "${KEYCHAIN:-}" ]; then
+            security unlock-keychain -p "" "$KEYCHAIN" 2>&1 || true
+          fi
+
+      - name: Assert the timeout path ran and the bound held
+        env:
+          ELAPSED: ${{ steps.probe.outputs.elapsed }}
+          STATUS: ${{ steps.probe.outputs.status }}
+        run: |
+          # The floor is what makes this a test rather than a ritual. An
+          # earlier manual attempt with a disposable HOME "passed" in 3.21s
+          # with -60006: a fast clean failure in which the cancellation path
+          # never ran. Without the floor that trap gets promoted to CI, where
+          # it would be trusted forever.
+          #
+          #   >= 8s   the probe really blocked and the bound cut it off
+          #   ~3s     fast clean failure — environment did not reproduce #568
+          #   <= 25s  the bound held (10s probe + up to 5s cleanup + startup)
+          #   60s     watchdog fired — #568 regression
+          echo "elapsed=${ELAPSED}s exit=${STATUS}"
+
+          if [ "$STATUS" = "142" ]; then
+            echo "::error::Watchdog fired at 60s (SIGALRM) — the command never returned. This is the #568 hang."
+            exit 1
+          fi
+
+          under_floor=$(perl -e 'print(($ARGV[0] < 8.0) ? 1 : 0)' "$ELAPSED")
+          if [ "$under_floor" = "1" ]; then
+            echo "::error::Completed in ${ELAPSED}s, under the 8s floor — the locked keychain fast-failed instead of blocking, so the cancellation path never ran and this check proves nothing. Do not weaken the floor to make it green."
+            exit 1
+          fi
+
+          over_ceiling=$(perl -e 'print(($ARGV[0] > 25.0) ? 1 : 0)' "$ELAPSED")
+          if [ "$over_ceiling" = "1" ]; then
+            echo "::error::Took ${ELAPSED}s, past the 25s ceiling — the headless probe bound did not hold."
+            exit 1
+          fi
+
+          if [ "$STATUS" != "0" ]; then
+            echo "::error::auth status exited $STATUS — it did not complete through the file fallback."
+            exit 1
+          fi
+
+      - name: Assert the command completed through the fallback
+        run: |
+          # Exit 0 alone would not prove the command ran to completion. The
+          # envelope does. No credentials are seeded: once the keyring is
+          # unavailable, reporting not-authenticated *is* the success path.
+          cat /tmp/keychain-stdout.txt
+          if ! grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' /tmp/keychain-stdout.txt; then
+            echo "::error::JSON envelope is not ok:true"
+            exit 1
+          fi
+          if ! grep -Eq '"authenticated"[[:space:]]*:[[:space:]]*false' /tmp/keychain-stdout.txt; then
+            echo "::error::Expected authenticated:false in the envelope"
+            exit 1
+          fi
+
+      - name: Diagnostics
+        if: always()
+        env:
+          ELAPSED: ${{ steps.probe.outputs.elapsed }}
+          STATUS: ${{ steps.probe.outputs.status }}
+          KEYCHAIN: ${{ steps.keychain.outputs.path }}
+        run: |
+          echo "elapsed: ${ELAPSED:-<not measured>}"
+          echo "exit code: ${STATUS:-<not measured>}"
+          echo "default keychain: ${KEYCHAIN:-<unresolved>}"
+          echo "--- launchctl managername ---"
+          /bin/launchctl managername 2>&1 || true
+          echo "--- security default-keychain ---"
+          security default-keychain 2>&1 || true
+          echo "--- security show-keychain-info (now) ---"
+          if [ -n "${KEYCHAIN:-}" ]; then
+            security show-keychain-info "$KEYCHAIN" 2>&1 || true
+          fi
+          echo "--- stdout ---"
+          cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
+          echo "--- stderr ---"
+          cat /tmp/keychain-stderr.txt 2>/dev/null || echo "<none>"
