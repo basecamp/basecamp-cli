@@ -1,0 +1,22 @@
+.github/workflows/headless-probe-composition.yml
+  s_dfd8ef95bb9abb::t_7141356589f095 84,96,104-105,109,123,134-135,145-146,149,159,169-170,174,184,210,218,229-230,235-236,241-242,246-247,249-273,275,282-283,286-287,294
+  s_dfd8ef95bb9abb::t_0d1a1f0eecd13f 1,53,68,305-306
+.github/workflows/release.yml
+  s_dfd8ef95bb9abb::t_6335e0d286c09c 32-34,121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "2b9b3434838b8545886bdef5c99cc4c69c864eba",
+  "prompts": {},
+  "sessions": {
+    "s_dfd8ef95bb9abb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e83a45-d158-463e-b93d-e4fd875bc30f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
