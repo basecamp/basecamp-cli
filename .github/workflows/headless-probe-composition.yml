@@ -1,4 +1,4 @@
-name: Keychain Acceptance
+name: Headless Keyring Probe
 
 # Composition gate for the #568 incident class: on headless macOS, a keyring
 # probe that blocks must be cut off at the deadline so the command completes
@@ -50,7 +50,7 @@ on:
       - 'cmd/basecamp/**'
       - 'go.mod'
       - 'go.sum'
-      - '.github/workflows/keychain-acceptance.yml'
+      - '.github/workflows/headless-probe-composition.yml'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -65,7 +65,7 @@ env:
 
 jobs:
   keychain:
-    name: Bounded probe (headless macOS)
+    name: Bounded probe under a blocking child
     runs-on: macos-latest
     timeout-minutes: 15
     permissions:
@@ -246,6 +246,31 @@ jobs:
             exit 1
           fi
 
+      - name: Assert the hung child was reaped
+        run: |
+          # The whole point of the bounded probe is that the child is killed
+          # AND reaped — a deadline that abandons an orphan still leaks a
+          # process per invocation. credstore proves the ESRCH property in
+          # isolation (probe_darwin_test.go:41); this observes it in
+          # composition, through the real binary.
+          #
+          # This is a gate, not a diagnostic. It deliberately does not live in
+          # the `if: always()` diagnostics step below, where `|| echo` would
+          # print a survivor and let the release gate stay green.
+          #
+          # Matched on the exact argv the probe spawns (`<path> -i`, anchored)
+          # rather than a bare substring, so an unrelated caffeinate elsewhere
+          # on the runner cannot fail this, and a real survivor cannot hide
+          # behind a loose match. CommandContext kills and waits synchronously
+          # inside cmd.Run(), so by the time the binary has exited the child is
+          # already reaped — there is no race to sleep around.
+          if survivors=$(pgrep -fl "^${HANGING_COMMAND} -i$"); then
+            echo "::error::The blocking probe child survived the deadline — it was killed but not reaped, or not killed at all. This is the #568 process-leak class."
+            printf '%s\n' "$survivors"
+            exit 1
+          fi
+          echo "No surviving ${HANGING_COMMAND} children — the probe child was killed and reaped."
+
       - name: Assert the command completed through the fallback
         run: |
           # Exit 0 alone would not prove the command ran to completion. The
@@ -277,8 +302,8 @@ jobs:
               -o LogLevel=ERROR localhost /bin/launchctl managername 2>&1 || true
           echo "--- injected securityPath ---"
           LC_ALL=C grep -oa "$HANGING_COMMAND" ./bin/basecamp-hanging-probe | head -1 || echo "<not embedded>"
-          echo "--- stray hanging children (should be none) ---"
-          pgrep -fl "$HANGING_COMMAND" || echo "<none>"
+          echo "--- stray hanging children ---"
+          pgrep -fl "^${HANGING_COMMAND} -i$" || echo "<none>"
           echo "--- stdout ---"
           cat /tmp/keychain-stdout.txt 2>/dev/null || echo "<none>"
           echo "--- stderr ---"
