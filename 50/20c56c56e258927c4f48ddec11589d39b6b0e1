@@ -1,0 +1,19 @@
+.github/workflows/keychain-acceptance.yml
+  s_dfd8ef95bb9abb::t_746bffeb0833ce 12-20,66-88,92-98,100-111,126-136,145-149,167-171,173,175-178,180-182,188-189,229-231,278,280-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "5020c56c56e258927c4f48ddec11589d39b6b0e1",
+  "prompts": {},
+  "sessions": {
+    "s_dfd8ef95bb9abb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e83a45-d158-463e-b93d-e4fd875bc30f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
