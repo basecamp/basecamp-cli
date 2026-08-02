@@ -1,0 +1,19 @@
+.github/workflows/headless-probe-composition.yml
+  s_dfd8ef95bb9abb::t_8615e782d8c3bd 305-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "d3e9f8e4e8a0adc2abbd55d27c9d28e997d8b01f",
+  "prompts": {},
+  "sessions": {
+    "s_dfd8ef95bb9abb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e83a45-d158-463e-b93d-e4fd875bc30f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
