@@ -1,0 +1,35 @@
+scripts/update-nix-flake.sh
+  s_0ddcb023c8f5c9::t_ecdac57d87f15c 29,32-36,38,40,42
+  s_0ddcb023c8f5c9::t_b28a372257c877 43,45-54,57-110,115
+  s_ae792ed0be3006::t_5b0f870be51e21 44,116
+Makefile
+  s_0ddcb023c8f5c9::t_03d35c5282a135 215-220
+e2e/update_nix_flake.bats
+  s_0ddcb023c8f5c9::t_db9c1e0b7e0e7d 1-122
+.github/workflows/test.yml
+  s_0ddcb023c8f5c9::t_64165ac5dd00ef 486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "70d0260db66993091d22d63e4d0ed11637f163d6",
+  "prompts": {},
+  "sessions": {
+    "s_0ddcb023c8f5c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21a29726-b85e-40eb-8286-b0881def7ba5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_ae792ed0be3006": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fd3dc2e-89cf-437b-8756-21beefe1c5f6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
