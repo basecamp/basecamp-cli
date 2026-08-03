@@ -212,8 +212,12 @@ bump-sdk:
 # Recompute Nix vendorHash via Docker and update nix/package.nix
 .PHONY: update-nix-hash
 update-nix-hash:
-	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1) && \
-	scripts/update-nix-flake.sh "$$VERSION" || true
+	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); \
+	scripts/update-nix-flake.sh "$$VERSION"; RC=$$?; \
+	if [ $$RC -ne 0 ] && [ $$RC -ne 2 ]; then exit $$RC; fi
+	@# 0 = updated, 2 = nothing to do. Anything else is a real failure and must
+	@# propagate: a blanket `|| true` here silently undid the script's own
+	@# fail-closed check, which is how v0.8.0 shipped a flake that cannot build.
 
 # Verify sdk-provenance.json matches go.mod
 # Skips when a replace directive is active (local dev with go.work or go.mod replace)
