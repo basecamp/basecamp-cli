@@ -1,0 +1,24 @@
+hooks/hooks.json
+  s_d931ffd296629c::t_a8def9dc3a326e 36,48
+  s_d931ffd296629c::t_3f9e4326e5f95a 24
+README.md
+  s_d931ffd296629c::t_a85dbf8fb912d2 160-165
+install.md
+  s_d931ffd296629c::t_889114bddb15ec 133-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "7e605ddbdd4832e34cd1b695577f1ef9ec961031",
+  "prompts": {},
+  "sessions": {
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
