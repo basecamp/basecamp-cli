@@ -42,9 +42,24 @@ jobs:
       - name: Validate tag input
         env:
           TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-            echo "::error::Invalid tag '${TAG}' — expected a v-prefixed semver tag (e.g. v0.8.0)"
+          # No prerelease suffix: the automatic sync in release.yml excludes
+          # prereleases deliberately, and this path must not smuggle prerelease
+          # content into the distribution repo's main branch.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag '${TAG}' — expected a stable v-prefixed semver tag (e.g. v0.8.0)"
+            exit 1
+          fi
+
+          # sync-skills.sh mirrors the tree wholesale, so syncing an older tag
+          # would roll basecamp/skills back. Unlike the AUR, there is no
+          # independent record of what the distribution repo currently holds, and
+          # the only reason to run this by hand is that the newest release failed
+          # to sync — so require exactly that release.
+          latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ "$TAG" != "$latest" ]; then
+            echo "::error::Refusing to sync ${TAG}: the latest stable release is ${latest}. Syncing an older tag would roll basecamp/skills back."
             exit 1
           fi
 
@@ -55,16 +70,18 @@ jobs:
           ref: ${{ inputs.tag }}
           persist-credentials: false
 
+      # Needed for dry runs too: the honest preview clones the target, so it
+      # cannot run tokenless. Dry runs get a read-only token, which is also what
+      # stops DRY_RUN=remote from pushing even if the script were wrong.
       - name: Generate token for skills repo
         id: skills-token
-        if: ${{ !inputs.dry_run }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: skills
-          permission-contents: write
+          permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
 
       # github.sha is the dispatching ref's SHA (main), not the tag's, so resolve
       # the commit actually checked out — otherwise the sync records the wrong
@@ -73,10 +90,15 @@ jobs:
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # DRY_RUN=remote, not local: the local path never clones basecamp/skills
+      # and diffs against an empty repo, so every skill reads as newly added and
+      # the deletions a real sync would make never appear. That is the opposite
+      # of what a preview is for. Remote clones the actual target and stops
+      # before the push.
       - name: Sync skills to distribution repo
         env:
           SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
-          DRY_RUN: ${{ inputs.dry_run && 'local' || '' }}
+          DRY_RUN: ${{ inputs.dry_run && 'remote' || '' }}
         run: scripts/sync-skills.sh

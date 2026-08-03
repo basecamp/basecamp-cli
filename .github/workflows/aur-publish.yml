@@ -70,14 +70,28 @@ jobs:
             exit 1
           fi
 
-          # AUR reports version as pkgver-pkgrel (e.g. 0.7.2-1); we compare pkgver.
-          current=$(printf '%s' "$body" | jq -r '.results[0].Version // empty' | sed 's/-[0-9]*$//')
-          if [ -z "$current" ]; then
+          # AUR reports version as pkgver-pkgrel (e.g. 0.7.2-1).
+          full=$(printf '%s' "$body" | jq -r '.results[0].Version // empty')
+          if [ -z "$full" ]; then
             echo "basecamp-cli is not in the AUR yet — nothing to downgrade"
             exit 0
           fi
+          if [[ "$full" == *-* ]]; then
+            current="${full%-*}"
+            currel="${full##*-}"
+          else
+            current="$full"
+            currel=1
+          fi
+
           if [ "$current" = "$VERSION" ]; then
-            echo "AUR already at ${current} — republish is a no-op unless the PKGBUILD drifted"
+            # publish-aur.sh hardcodes pkgrel=1, so republishing over a higher
+            # revision would silently discard an AUR-side packaging fix.
+            if [ "$currel" -gt 1 ] 2>/dev/null; then
+              echo "::error::AUR has ${full}; publish-aur.sh would replace it with ${VERSION}-1 and discard that packaging revision"
+              exit 1
+            fi
+            echo "AUR already at ${full} — republish is a no-op unless the PKGBUILD drifted"
             exit 0
           fi
 

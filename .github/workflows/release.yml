@@ -294,6 +294,12 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Shared with the aur-publish workflow's recovery runs. Without this, a
+    # recovery that already passed its version check could clone after a newer
+    # automatic publish landed and push the older PKGBUILD as a fast-forward.
+    concurrency:
+      group: aur-publish
+      cancel-in-progress: false
     environment: release
     permissions:
       contents: read
