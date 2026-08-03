@@ -88,7 +88,7 @@ function Get-LatestVersion {
 
 function Download-File([string]$Url, [string]$Destination) {
   # -UseBasicParsing avoids initializing IE's MSHTML parser on Windows
-  # PowerShell 5.1 — required on Server Core and locked-down installs.
+  # PowerShell 5.1 -- required on Server Core and locked-down installs.
   # No-op on PowerShell 6+, where basic parsing is the only mode.
   Invoke-WebRequest -UseBasicParsing -ErrorAction Stop `
     -Headers @{ 'User-Agent' = 'basecamp-cli-installer' } `
@@ -130,7 +130,7 @@ function Verify-CosignSignature([string]$Version, [string]$BaseUrl, [string]$Tmp
   Download-File -Url "$BaseUrl/checksums.txt.bundle" -Destination $bundlePath
 
   # Native exits don't trigger ErrorActionPreference=Stop on Windows PowerShell 5.1,
-  # so check $LASTEXITCODE explicitly — otherwise a verify failure would false-green.
+  # so check $LASTEXITCODE explicitly -- otherwise a verify failure would false-green.
   & cosign verify-blob `
     --bundle $bundlePath `
     --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v$Version" `
@@ -268,7 +268,7 @@ function Test-InteractiveSession {
 #
 # Cross-version: newer binaries expose the intent-neutral `setup agents`. Older
 # release binaries (the hosted install.ps1 from main can outrun the latest
-# release) fall back WITHOUT reintroducing the Claude-first bug — only an
+# release) fall back WITHOUT reintroducing the Claude-first bug -- only an
 # *explicitly* selected agent is connected. `all` runs every per-agent setup the
 # binary supports; unset/auto/ambiguous installs the shared skill only. Each
 # native call is individually guarded so a nonzero exit never aborts the install.
@@ -300,7 +300,7 @@ function Invoke-PostInstallSetup([string]$Binary) {
       $ranAgent = $false
       foreach ($agent in @('claude', 'codex')) {
         if ($help -match "(?m)^\s+$agent\s") {
-          # Mark attempted (not succeeded) — matches install.sh's `ran_agent=1`,
+          # Mark attempted (not succeeded) -- matches install.sh's `ran_agent=1`,
           # which is set regardless of the setup call's exit status.
           $ranAgent = $true
           try { & $Binary setup $agent } catch { }
@@ -359,7 +359,7 @@ function Main {
 
     New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
     # Windows holds an exclusive lock on running PE files; -Force doesn't help.
-    # Generic catch — typed catches miss ActionPreferenceStopException wrapping.
+    # Generic catch -- typed catches miss ActionPreferenceStopException wrapping.
     try {
       Copy-Item -Force $binaryPath $installedBinary -ErrorAction Stop
     } catch {

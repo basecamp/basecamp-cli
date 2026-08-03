@@ -12,8 +12,11 @@ before:
     # the release as basecamp_installer.ps1. Staged outside dist/ because
     # goreleaser requires dist to be empty after before-hooks run. Unsigned
     # copy when the SM_* env is absent (forks, make test-release). Raw-main
-    # install.ps1 stays unsigned.
-    - sh -c 'mkdir -p .release-extra && cp scripts/install.ps1 .release-extra/basecamp_installer.ps1 && scripts/sign-windows.sh windows .release-extra/basecamp_installer.ps1'
+    # install.ps1 stays unsigned and LF -- that is the `irm | iex` path,
+    # which needs neither. The staging step converts to CRLF and rejects
+    # non-ASCII, without which PowerShell reports HashMismatch (see the
+    # script for why both invariants are load-bearing).
+    - sh -c 'scripts/stage-installer-ps1.sh scripts/install.ps1 .release-extra/basecamp_installer.ps1 && scripts/sign-windows.sh windows .release-extra/basecamp_installer.ps1'
 
 builds:
   - id: basecamp
