@@ -54,6 +54,40 @@ jobs:
           fi
           echo "Publishing v${VERSION} to the AUR"
 
+      - name: Refuse to downgrade the AUR package
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # publish-aur.sh rewrites pkgver unconditionally, so dispatching an
+          # older-but-valid release would push every Arch user backwards. Being
+          # a published release is not enough — compare against what is actually
+          # in the AUR right now.
+          if ! body=$(curl -fsS --max-time 30 --retry 2 \
+                        'https://aur.archlinux.org/rpc/v5/info/basecamp-cli'); then
+            # Fail closed: proceeding blind here risks a silent downgrade, and a
+            # dispatch is cheap to repeat once the AUR is reachable again.
+            echo "::error::Could not reach the AUR to check the published version. Retry when it is reachable."
+            exit 1
+          fi
+
+          # AUR reports version as pkgver-pkgrel (e.g. 0.7.2-1); we compare pkgver.
+          current=$(printf '%s' "$body" | jq -r '.results[0].Version // empty' | sed 's/-[0-9]*$//')
+          if [ -z "$current" ]; then
+            echo "basecamp-cli is not in the AUR yet — nothing to downgrade"
+            exit 0
+          fi
+          if [ "$current" = "$VERSION" ]; then
+            echo "AUR already at ${current} — republish is a no-op unless the PKGBUILD drifted"
+            exit 0
+          fi
+
+          oldest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | head -1)
+          if [ "$oldest" = "$VERSION" ]; then
+            echo "::error::Refusing to downgrade the AUR from ${current} to ${VERSION}"
+            exit 1
+          fi
+          echo "AUR is at ${current}; publishing ${VERSION}"
+
       - name: Verify AUR key is configured
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
