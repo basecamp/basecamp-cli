@@ -1,0 +1,27 @@
+scripts/update-nix-flake.sh
+  s_0ddcb023c8f5c9::t_e7f8c5785fc4e8 51-86,89-101,105
+.github/workflows/release.yml
+  s_0ddcb023c8f5c9::t_1aa350a11636ae 501-504
+.github/workflows/test.yml
+  s_0ddcb023c8f5c9::t_fa804d692eb555 475-512
+flake.lock
+  s_0ddcb023c8f5c9::t_888ab426cdc64c 5-6,9
+nix/package.nix
+  s_0ddcb023c8f5c9::t_45d2b0dc977ac7 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "2e18571a4e380f5307d4b5968c811b444f6071d3",
+  "prompts": {},
+  "sessions": {
+    "s_0ddcb023c8f5c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21a29726-b85e-40eb-8286-b0881def7ba5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
