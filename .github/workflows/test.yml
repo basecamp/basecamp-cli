@@ -472,3 +472,41 @@ jobs:
           name: benchmarks
           path: benchmarks.txt
           retention-days: 30
+
+  # The flake broke on 2026-07-13 when #533 raised go.mod to 1.26.5 while
+  # flake.lock still pinned a nixpkgs carrying 1.26.4, and nothing noticed for
+  # three weeks: nix-verify only runs on tags, and the release-time hash check
+  # was reporting success on a failed build. Catch the drift where it is
+  # introduced instead — a Go bump that outpaces the lock now fails its own PR.
+  nix-build:
+    name: Nix flake builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check for flake-relevant changes
+        id: filter
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: |
+            nix:
+              - 'go.mod'
+              - 'go.sum'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'nix/**'
+
+      - name: Install Nix
+        if: steps.filter.outputs.nix == 'true'
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Build the flake
+        if: steps.filter.outputs.nix == 'true'
+        run: |
+          STORE_PATH=$(nix build --no-link --print-out-paths)
+          "$STORE_PATH/bin/basecamp" --version

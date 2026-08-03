@@ -47,35 +47,62 @@ if [[ "$NEED_HASH" == "true" ]]; then
     # Pin image digest for supply-chain integrity. Update periodically:
     #   docker pull nixos/nix && docker inspect nixos/nix:latest --format '{{index .RepoDigests 0}}'
     NIX_IMAGE="nixos/nix@sha256:b9c9611c8530fa8049a1215b20638536e1e71dcaf85212e47845112caf3adeea"
-    BUILD_OUTPUT=$(docker run --rm -v "$(pwd):/src:ro" "$NIX_IMAGE" bash -c '
-      cp -a /src /build && cd /build
-      rm -rf .git
-      git config --global --add safe.directory /build
-      git init -q && git add -A && \
-        GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci \
-        GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@ci \
-        git commit -q -m init
-      nix --extra-experimental-features "nix-command flakes" build --no-link 2>&1 || true
-    ' 2>&1)
 
-    NEW_HASH=$(echo "$BUILD_OUTPUT" | grep "got:" | awk '{print $2}' || true)
+    # Runs `nix build` and echoes a trailing NIX_BUILD_EXIT= line so the real
+    # exit status survives command substitution. Nothing here may swallow a
+    # failure: a `|| true` plus a "did it print 'building basecamp'" heuristic
+    # is what let v0.8.0 ship a flake that could not build at all — the log
+    # says `building '...basecamp-0.8.0-go-modules.drv'` while *starting* the
+    # build it then fails, so the heuristic reported success on a hard failure.
+    run_nix_build() {
+      docker run --rm -v "$(pwd):/src:ro" "$NIX_IMAGE" bash -c '
+        cp -a /src /build && cd /build
+        rm -rf .git
+        git config --global --add safe.directory /build
+        git init -q && git add -A && \
+          GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci \
+          GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@ci \
+          git commit -q -m init
+        nix --extra-experimental-features "nix-command flakes" build --no-link 2>&1
+        echo "NIX_BUILD_EXIT=$?"
+      ' 2>&1
+    }
 
-    if [[ -n "$NEW_HASH" ]]; then
-      CURRENT_HASH=$(sed -n 's/.*vendorHash = "\([^"]*\)".*/\1/p' "$NIX_PKG" | head -1)
-      if [[ "$CURRENT_HASH" != "$NEW_HASH" ]]; then
-        sed -i.bak "s|vendorHash = \"${CURRENT_HASH}\"|vendorHash = \"${NEW_HASH}\"|" "$NIX_PKG"
-        rm -f "${NIX_PKG}.bak"
-        CHANGED=true
-        echo "  vendorHash: updated"
-      else
-        echo "  vendorHash: unchanged"
+    nix_build_failed() {
+      [[ "$(echo "$1" | grep -c 'NIX_BUILD_EXIT=0')" -eq 0 ]]
+    }
+
+    BUILD_OUTPUT=$(run_nix_build)
+
+    if nix_build_failed "$BUILD_OUTPUT"; then
+      NEW_HASH=$(echo "$BUILD_OUTPUT" | grep "got:" | awk '{print $2}' || true)
+      if [[ -z "$NEW_HASH" ]]; then
+        # No hash mismatch, so the build broke for some other reason — a stale
+        # flake.lock whose Go is older than go.mod's directive is the one that
+        # has actually bitten us. Never continue from here.
+        echo "ERROR: nix build failed, and not because of the vendorHash"
+        echo "$BUILD_OUTPUT" | tail -25
+        exit 1
       fi
-    elif echo "$BUILD_OUTPUT" | grep -q "building.*basecamp" ; then
+
+      CURRENT_HASH=$(sed -n 's/.*vendorHash = "\([^"]*\)".*/\1/p' "$NIX_PKG" | head -1)
+      sed -i.bak "s|vendorHash = \"${CURRENT_HASH}\"|vendorHash = \"${NEW_HASH}\"|" "$NIX_PKG"
+      rm -f "${NIX_PKG}.bak"
+      CHANGED=true
+      echo "  vendorHash: updated"
+
+      # Prove the corrected hash actually builds. The old code trusted the
+      # hash it had just written without ever rebuilding.
+      echo "  verifying the updated vendorHash builds..."
+      BUILD_OUTPUT=$(run_nix_build)
+      if nix_build_failed "$BUILD_OUTPUT"; then
+        echo "ERROR: nix build still fails after updating the vendorHash"
+        echo "$BUILD_OUTPUT" | tail -25
+        exit 1
+      fi
       echo "  vendorHash: verified (build succeeded)"
     else
-      echo "ERROR: Could not determine vendorHash from nix build output"
-      echo "$BUILD_OUTPUT" | tail -20
-      exit 1
+      echo "  vendorHash: verified (build succeeded)"
     fi
   fi
 else
