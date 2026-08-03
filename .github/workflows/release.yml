@@ -238,6 +238,21 @@ jobs:
           version: 'v2.15.4'
           install-only: true
 
+      - name: Resolve the previous stable tag for release notes
+        run: |
+          # Stable releases must diff against the last STABLE tag, not the last
+          # rc, or the notes come out empty. Mirrors update-nix-flake.sh:32.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease — leaving previous-tag detection to goreleaser"
+            exit 0
+          fi
+          PREV=$(git tag --merged "$GITHUB_SHA" --sort=-version:refname \
+                   --list 'v[0-9]*.[0-9]*.[0-9]*' \
+                 | awk -v cur="$GITHUB_REF_NAME" '!/-/ && $0 != cur { print; exit }')
+          [ -n "$PREV" ] || { echo "::error::no previous stable tag resolved"; exit 1; }
+          echo "Release notes will diff against $PREV"
+          echo "GORELEASER_PREVIOUS_TAG=$PREV" >> "$GITHUB_ENV"
+
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
