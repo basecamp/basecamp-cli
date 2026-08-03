@@ -87,7 +87,13 @@ jobs:
           if [ "$current" = "$VERSION" ]; then
             # publish-aur.sh hardcodes pkgrel=1, so republishing over a higher
             # revision would silently discard an AUR-side packaging fix.
-            if [ "$currel" -gt 1 ] 2>/dev/null; then
+            #
+            # Compare with sort -V, not an arithmetic test: PKGBUILD(5) allows a
+            # dotted subrelease (1.1), which `[ -gt ]` rejects as a non-integer
+            # with status 2 — and a suppressed stderr would turn that error into
+            # a silent "not greater", letting the clobber through.
+            highest=$(printf '%s\n%s\n' "$currel" "1" | sort -V | tail -1)
+            if [ "$highest" != "1" ]; then
               echo "::error::AUR has ${full}; publish-aur.sh would replace it with ${VERSION}-1 and discard that packaging revision"
               exit 1
             fi
