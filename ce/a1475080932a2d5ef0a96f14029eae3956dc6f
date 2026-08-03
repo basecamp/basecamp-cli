@@ -1,0 +1,21 @@
+.claude-plugin/plugin.json
+  s_ae792ed0be3006::t_2e3f9e7ba039fe 3
+.codex-plugin/plugin.json
+  s_ae792ed0be3006::t_bf15b75f28961b 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "cea1475080932a2d5ef0a96f14029eae3956dc6f",
+  "prompts": {},
+  "sessions": {
+    "s_ae792ed0be3006": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fd3dc2e-89cf-437b-8756-21beefe1c5f6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
