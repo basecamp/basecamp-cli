@@ -1,0 +1,25 @@
+scripts/stage-installer-ps1.sh
+  s_dfd8ef95bb9abb::t_3c2648d91475a3 1-57
+e2e/installer_signing.bats
+  s_dfd8ef95bb9abb::t_c3ca55890ab4c1 1-91
+.goreleaser.yaml
+  s_dfd8ef95bb9abb::t_8691c315893164 15-19
+scripts/install.ps1
+  s_dfd8ef95bb9abb::t_22764f9e035950 91,133,271,303,362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "29be55ceff6799ba14e4de0cf9881db0aec80844",
+  "prompts": {},
+  "sessions": {
+    "s_dfd8ef95bb9abb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "92e83a45-d158-463e-b93d-e4fd875bc30f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
