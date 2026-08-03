@@ -85,11 +85,22 @@ nix_build_failed() {
 BUILD_OUTPUT=$(run_nix_build)
 
 if nix_build_failed "$BUILD_OUTPUT"; then
-  NEW_HASH=$(grep "got:" <<<"$BUILD_OUTPUT" | awk '{print $2}' || true)
+  # Two independent conditions before touching the tracked file: nix must have
+  # actually reported a fixed-output hash mismatch, and the captured value must
+  # look like an SRI hash. Matching a bare `got:` is far too loose — any failing
+  # build whose log contains one (a Go test assertion printing `got: 42`, say)
+  # would otherwise write that value straight into vendorHash and misreport the
+  # failure as a hash problem.
+  NEW_HASH=""
+  if grep -q 'hash mismatch in fixed-output derivation' <<<"$BUILD_OUTPUT"; then
+    NEW_HASH=$(grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/]+=*' <<<"$BUILD_OUTPUT" \
+                 | awk '{print $2}' | head -1)
+  fi
+
   if [[ -z "$NEW_HASH" ]]; then
-    # No hash mismatch, so the build broke for some other reason — a stale
-    # flake.lock whose Go is older than go.mod's directive is the one that has
-    # actually bitten us. Never continue from here.
+    # The build broke for some other reason — a stale flake.lock whose Go is
+    # older than go.mod's directive is the one that has actually bitten us.
+    # Never continue from here, and never write to nix/package.nix.
     echo "ERROR: nix build failed, and not because of the vendorHash"
     tail -25 <<<"$BUILD_OUTPUT"
     exit 1

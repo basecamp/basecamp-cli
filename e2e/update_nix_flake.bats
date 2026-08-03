@@ -110,6 +110,26 @@ NIX_BUILD_EXIT=1"
   [[ "$output" == *"still fails after updating the vendorHash"* ]]
 }
 
+@test "does not mistake an unrelated 'got:' line for a hash mismatch" {
+  # A failing build whose log happens to contain `got:` — a Go test assertion,
+  # say — must take the non-hash failure path. Matching a bare `got:` would
+  # capture "42" and write it into vendorHash, corrupting a tracked file while
+  # reporting the wrong kind of failure.
+  stub_docker "--- FAIL: TestSomething
+    thing_test.go:42: got: 42
+    thing_test.go:43: want: 7
+error: builder failed with exit code 1
+NIX_BUILD_EXIT=1"
+
+  run scripts/update-nix-flake.sh 0.8.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not because of the vendorHash"* ]]
+  [[ "$output" != *"vendorHash: updated"* ]]
+  # The tracked file must be untouched.
+  grep -q 'sha256-OLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDOLDA=' nix/package.nix
+  ! grep -q '"42"' nix/package.nix
+}
+
 @test "verifies the build even when dependencies did not change" {
   # DEPS_CHANGED=false must not skip the build: the Go-toolchain drift that
   # broke v0.8.0 touches neither go.mod nor go.sum.
