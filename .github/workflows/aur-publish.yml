@@ -1,0 +1,87 @@
+# Manual AUR publish, for when the release-time publish could not run.
+#
+# The AUR goes down for maintenance often enough that a release must not depend
+# on it being reachable — release.yml's aur-publish job is continue-on-error for
+# exactly that reason. This workflow is the recovery path: it republishes any
+# already-released version once the AUR is back, with no need to cut a new tag.
+#
+# scripts/publish-aur.sh derives the PKGBUILD entirely from the published GitHub
+# release assets and no-ops when the AUR copy is already current, so running this
+# against an already-published version is safe and idempotent.
+name: Publish to AUR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Released version to publish, without the v prefix (e.g. 0.8.0)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to AUR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate version input
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '${VERSION}' — expected semver with no v prefix (e.g. 0.8.0)"
+            exit 1
+          fi
+          # Only publish versions that actually exist as a stable release, so a
+          # typo cannot push a PKGBUILD pointing at assets that were never built.
+          if ! gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::No published release found for v${VERSION}"
+            exit 1
+          fi
+          echo "Publishing v${VERSION} to the AUR"
+
+      - name: Verify AUR key is configured
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::error::AUR_KEY is not configured for the release environment"
+            exit 1
+          fi
+
+      - name: Publish to AUR
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
+          git config --global user.name "37signals"
+          git config --global user.email "dev@37signals.com"
+          for attempt in 1 2 3; do
+            if scripts/publish-aur.sh "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "AUR publish attempt ${attempt} failed; retrying in $((attempt * 60))s"
+              sleep $((attempt * 60))
+            fi
+          done
+          echo "::error::AUR publish failed after 3 attempts"
+          exit 1
