@@ -1,0 +1,25 @@
+.github/workflows/aur-publish.yml
+  s_0ddcb023c8f5c9::t_a65b3f10d419eb 73-75,79-86,88-94
+.github/workflows/sync-skills.yml
+  s_0ddcb023c8f5c9::t_9c74a95c9027b1 73-75,84
+  s_0ddcb023c8f5c9::t_3f3a242c2f47bc 93-97,103
+  s_0ddcb023c8f5c9::t_c1a2398d7f8632 45,47-62
+.github/workflows/release.yml
+  s_0ddcb023c8f5c9::t_e81ebec7b7ea3f 297-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "139b1fcb0fd275b3c5cbfe718f84f351d37a824d",
+  "prompts": {},
+  "sessions": {
+    "s_0ddcb023c8f5c9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "21a29726-b85e-40eb-8286-b0881def7ba5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
