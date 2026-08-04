@@ -1,0 +1,19 @@
+e2e/update_nix_flake.bats
+  s_5db9c709885cff::t_57ee278c4bf85e 41-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "ded56b3a3b8c6f6d3b1ecee01e5b28e55ff2d941",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
