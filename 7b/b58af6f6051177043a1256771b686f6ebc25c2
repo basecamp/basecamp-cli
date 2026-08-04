@@ -1,0 +1,29 @@
+internal/commands/checkins.go
+  s_5db9c709885cff::t_25d52e4e5ab265 67-80
+internal/commands/checkins_question_admin_test.go
+  s_5db9c709885cff::t_9abdbaa4ec008d 194
+  s_5db9c709885cff::t_52ca61e4e3febe 7
+  s_5db9c709885cff::t_6617eb266c2dbb 173-193,195-200
+API-COVERAGE.md
+  s_5db9c709885cff::t_62ae013f5a1ee5 89-93
+internal/commands/notes.go
+  s_5db9c709885cff::t_c2711d8db00051 166-171,175-190,193-194,200,202-203,206-209
+internal/commands/notes_test.go
+  s_5db9c709885cff::t_aca5d973bd9eab 171-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "7bb58af6f6051177043a1256771b686f6ebc25c2",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
