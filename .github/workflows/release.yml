@@ -350,22 +350,29 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
           REF_NAME: ${{ github.ref_name }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          TITLE="AUR publish failure"
-          BODY="Publishing [${REF_NAME}](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}) to the AUR failed. The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${REF_NAME#v}\` once the AUR is reachable."
+          RUN_URL="https://github.com/${REPO_SLUG}/actions/runs/${RUN_ID}"
+          BODY="Publishing [${REF_NAME}](${RUN_URL}) to the AUR failed. The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${REF_NAME#v}\` once the AUR is reachable."
 
-          # Check for existing open issue before creating a new one
-          existing=$(gh issue list --repo ${{ github.repository }} --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
-          if [ -n "$existing" ]; then
-            gh issue comment --repo ${{ github.repository }} "$existing" --body "$BODY" || true
-          else
-            gh issue create --repo ${{ github.repository }} --title "$TITLE" --body "$BODY" || true
-          fi
+          # Dedup lives in notify-issue.sh, shared with aur-publish.yml. Both
+          # files used to carry their own title-based lookup; when the canonical
+          # issue was retitled, the release path opened a duplicate and fixing
+          # only the recovery path would have left this one broken.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label aur-publish \
+            --title "AUR publish failure" \
+            --body "$BODY" || notify_status=$?
 
-          # Always emit annotation so the failure is visible in the workflow summary
-          echo "::error::AUR publish failed for ${REF_NAME}. See https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
+          # Always emit the annotation, whatever the notifier did. It now fails
+          # closed rather than filing a duplicate, so on a lookup failure this
+          # is the only signal left.
+          echo "::error::AUR publish failed for ${REF_NAME}. See ${RUN_URL}"
+          exit "$notify_status"
 
   macos-verify:
     name: Verify macOS signing

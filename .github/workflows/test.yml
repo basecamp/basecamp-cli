@@ -478,6 +478,15 @@ jobs:
   # three weeks: nix-verify only runs on tags, and the release-time hash check
   # was reporting success on a failed build. Catch the drift where it is
   # introduced instead — a Go bump that outpaces the lock now fails its own PR.
+  #
+  # This job is *meant* to fail on a dependency bump: any go.mod or go.sum
+  # change invalidates vendorHash, and dependabot does not update it, so every
+  # weekly `gomod` PR lands here red. That is the check working. nix-build-check.sh
+  # exists so it lands red with the correct hash and `make update-nix-hash`
+  # attached, instead of a raw nix dump.
+  #
+  # The filter includes this file: a PR that changes only the job would
+  # otherwise skip the job it changed.
   nix-build:
     name: Nix flake builds
     runs-on: ubuntu-latest
@@ -501,6 +510,9 @@ jobs:
               - 'flake.nix'
               - 'flake.lock'
               - 'nix/**'
+              - 'scripts/nix-build-check.sh'
+              - 'scripts/extract-nix-vendor-hash.sh'
+              - '.github/workflows/test.yml'
 
       - name: Install Nix
         if: steps.filter.outputs.nix == 'true'
@@ -508,6 +520,4 @@ jobs:
 
       - name: Build the flake
         if: steps.filter.outputs.nix == 'true'
-        run: |
-          STORE_PATH=$(nix build --no-link --print-out-paths)
-          "$STORE_PATH/bin/basecamp" --version
+        run: scripts/nix-build-check.sh

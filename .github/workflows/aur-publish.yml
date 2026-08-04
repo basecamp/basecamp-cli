@@ -162,16 +162,25 @@ jobs:
         if: failure() && (steps.publish.outcome == 'failure' || steps.aur-state.outputs.unreachable == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          TITLE="AUR publish failure"
-          BODY="Recovery publish of \`${VERSION}\` to the AUR [failed](https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}). The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${VERSION}\` once the AUR accepts pushes again."
+          RUN_URL="https://github.com/${REPO_SLUG}/actions/runs/${RUN_ID}"
+          BODY="Recovery publish of \`${VERSION}\` to the AUR [failed](${RUN_URL}). The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${VERSION}\` once the AUR accepts pushes again."
 
-          # Check for existing open issue before creating a new one
-          existing=$(gh issue list --repo ${{ github.repository }} --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
-          if [ -n "$existing" ]; then
-            gh issue comment --repo ${{ github.repository }} "$existing" --body "$BODY" || true
-          else
-            gh issue create --repo ${{ github.repository }} --title "$TITLE" --body "$BODY" || true
-          fi
+          # Dedup lives in notify-issue.sh, shared with release.yml, and keys on
+          # the aur-publish label rather than the title. A title lookup misses
+          # the moment someone retitles the issue while triaging it — which is
+          # the normal fate of an issue that stays open across an outage.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label aur-publish \
+            --title "AUR publish failure" \
+            --body "$BODY" || notify_status=$?
+
+          # The notifier fails closed, so on a lookup failure the annotation is
+          # the only record that this dispatch went nowhere.
+          echo "::error::AUR publish failed for ${VERSION}. See ${RUN_URL}"
+          exit "$notify_status"

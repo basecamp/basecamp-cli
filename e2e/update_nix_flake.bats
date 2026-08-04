@@ -16,7 +16,10 @@ setup() {
   STUB_DIR="$WORK/bin"
   mkdir -p "$STUB_DIR" "$WORK/repo/nix" "$WORK/repo/scripts"
 
-  cp "$REPO_ROOT/scripts/update-nix-flake.sh" "$WORK/repo/scripts/"
+  # The classifier travels with it — update-nix-flake.sh resolves it relative to
+  # its own directory, and shares it with CI's nix-build-check.sh.
+  cp "$REPO_ROOT/scripts/update-nix-flake.sh" \
+     "$REPO_ROOT/scripts/extract-nix-vendor-hash.sh" "$WORK/repo/scripts/"
   cat > "$WORK/repo/nix/package.nix" <<'NIXPKG'
 {
   version = "0.8.0";

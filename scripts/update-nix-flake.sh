@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
   echo "Usage: scripts/update-nix-flake.sh VERSION"
@@ -85,17 +87,11 @@ nix_build_failed() {
 BUILD_OUTPUT=$(run_nix_build)
 
 if nix_build_failed "$BUILD_OUTPUT"; then
-  # Two independent conditions before touching the tracked file: nix must have
-  # actually reported a fixed-output hash mismatch, and the captured value must
-  # look like an SRI hash. Matching a bare `got:` is far too loose — any failing
-  # build whose log contains one (a Go test assertion printing `got: 42`, say)
-  # would otherwise write that value straight into vendorHash and misreport the
-  # failure as a hash problem.
-  NEW_HASH=""
-  if grep -q 'hash mismatch in fixed-output derivation' <<<"$BUILD_OUTPUT"; then
-    NEW_HASH=$(grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/]+=*' <<<"$BUILD_OUTPUT" \
-                 | awk '{print $2}' | head -1)
-  fi
+  # Classification lives in extract-nix-vendor-hash.sh, shared with CI's
+  # nix-build-check.sh. It requires both a fixed-output mismatch diagnostic and
+  # an SRI-shaped value before yielding anything — deliberately, because this
+  # caller writes the result into a tracked file.
+  NEW_HASH=$("$SCRIPT_DIR/extract-nix-vendor-hash.sh" <<<"$BUILD_OUTPUT" || true)
 
   if [[ -z "$NEW_HASH" ]]; then
     # The build broke for some other reason — a stale flake.lock whose Go is
