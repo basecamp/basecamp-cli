@@ -6,12 +6,29 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 184 |
+| ✅ Implemented | 49 | 183 |
+| ⚠️ Blocked | 1 | 1 |
 | ⏭️ Out of scope | 4 | 12 |
 | **Total tracked** | **54** | **196** |
 
-**100% coverage of tracked in-scope API** (184/184 endpoints). This is not a
-complete bc-api parity figure. The five BC5 sections introduced by bc-api#410
+**183 of 184 tracked in-scope endpoints.** The one gap is `GET
+/uploads/:id/versions.json` in the `uploads` section, and it is not a missing
+command — the command is written. The SDK's `UploadsService.ListVersions`
+decodes the response with the wrong type: the API returns version *events*
+(`action`, `details`, `recording_id`), the OpenAPI spec models them as
+`[]Upload`, so a caller gets Upload structs with blank `title`/`filename`/
+`status` and an `id` that is the event id and does not resolve as an upload.
+Shipping a command on that would mean shipping wrong data, so it is held. See
+[COMMUNIQUE-sdk-upload-versions-response.md](COMMUNIQUE-sdk-upload-versions-response.md).
+
+This file previously read "100% coverage of tracked in-scope API (184/184)".
+That was wrong, and the matrix had no way to say so — with only ✅ and ⏭️
+available, a partly-covered section had to be recorded as fully covered. Hence
+the third status above. It is deliberately narrow: ⚠️ means the CLI cannot
+faithfully cover an endpoint for a reason outside the CLI, and it names the
+blocker.
+
+This is not a complete bc-api parity figure. The five BC5 sections introduced by bc-api#410
 that were previously untracked — `my_bookmarks`, `drafts`, `my_notes`,
 `calendars`, and `question_reminders` — are now tracked and implemented. The
 pinned SDK's `EverythingService` is fully reached — see [Account-wide
@@ -152,6 +169,10 @@ Design discussion: basecamp/basecamp-cli#585. Contract and invariants:
 
 The **Since** column tags each row with the Basecamp version that introduced its section: `BC4` for sections that shipped before Basecamp 5, `BC5` for sections introduced in Basecamp 5. If a BC5 release adds endpoints to an existing BC4 section, split them into a new row tagged `BC5` rather than bumping the BC4 row's `Endpoints` count — that keeps the column unambiguous per row. Column dropped post-BC4 decommission.
 
+**Status** is one of ✅ implemented, ⏭️ out of scope, or ⚠️ blocked — the CLI
+cannot faithfully cover at least one endpoint for a reason outside the CLI. A
+⚠️ row must name its blocker in Notes.
+
 | Section | Endpoints | CLI Command | Status | Since | Priority | Notes |
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
@@ -190,7 +211,7 @@ The **Since** column tags each row with the Basecamp version that introduced its
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show, create. Create supports `--visible-to-clients` (root vault only) |
+| uploads | 8 | `files`, `uploads` | ⚠️ | BC4 | - | list, show, create, update, download; trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only). **Blocked:** `GET /uploads/:id/versions.json` — the SDK's `ListVersions` types the response as `[]Upload`, but the API returns version *events*, so the data comes back blank and misleading. Command is written and held on `feat/files-versions`; see [COMMUNIQUE-sdk-upload-versions-response.md](COMMUNIQUE-sdk-upload-versions-response.md). Replacing an upload's *file* is a separate BC3 gap — see [COMMUNIQUE-upload-versions-api.md](COMMUNIQUE-upload-versions-api.md) |
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
