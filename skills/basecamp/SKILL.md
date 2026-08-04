@@ -762,6 +762,8 @@ basecamp files list --all-projects --limit 500          # Walk pages until 500 c
 basecamp files list --all-projects --page 2             # Exactly page 2
 basecamp files list --all-projects --all                # Every page (slow on big accounts)
 basecamp files show <id> --in <project>                 # Show item (auto-detects type)
+basecamp files versions <upload_id> --json              # Every version of an uploaded file
+basecamp files versions <upload_id> --limit 5 --json    # Cap results (default: all)
 basecamp files download <id> --in <project>             # Download file
 basecamp files download <id> --out ./dir                # Download to specific dir
 basecamp files download "https://storage.../download/f" # Download from storage URL
@@ -791,6 +793,11 @@ ancestor that controls the folder's visibility first. Omitting the flag uses the
 server default; as with Messages, a **client-authenticated caller always creates
 client-visible records** regardless. `recordings visibility` is **not** a
 remediation for nested docs/uploads.
+
+**Upload versions:** replacing a file keeps the earlier copies under the same
+upload ID, so `basecamp files versions <upload_id>` is how you see the history of
+one file. A file that was never replaced returns its single current version, not
+an error. Only `--page 1` is accepted; use `--all` to walk every page.
 
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
 
