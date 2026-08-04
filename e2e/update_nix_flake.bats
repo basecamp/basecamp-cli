@@ -38,7 +38,23 @@ NIXPKG
 }
 
 teardown() {
-  rm -rf "$WORK"
+  # Cleanup must not decide whether the test passed. Under `bats -j` these tests
+  # each build a throwaway git repo in $TMPDIR, and on macOS `rm -rf`
+  # intermittently fails with ENOTEMPTY on .git/objects. bats treats a failing
+  # teardown as a failing test, so a green assertion was reported red — twice in
+  # six local runs, landing on a different test name each time.
+  #
+  # ENOTEMPTY says the directory was not empty when rm reached it; it does not
+  # say what refilled it, and that has not been established. Hence a fix at the
+  # teardown rather than at a presumed cause: retry briefly, then give up
+  # quietly. A leftover directory under $TMPDIR is worth less than a trustworthy
+  # signal, and the assertions have already run either way.
+  for _ in 1 2 3; do
+    rm -rf "$WORK" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  rm -rf "$WORK" 2>/dev/null || true
+  return 0
 }
 
 # Emits a canned nix log plus the sentinel the script reads for exit status.
