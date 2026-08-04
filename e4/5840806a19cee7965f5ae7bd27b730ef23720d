@@ -1,0 +1,21 @@
+COMMUNIQUE-upload-versions-api.md
+  s_569e40c54282b2::t_58c83e70b716b4 184-186
+  s_569e40c54282b2::t_5d901c4a83020c 27-40
+  s_569e40c54282b2::t_bb7895e96deb2d 168-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e45840806a19cee7965f5ae7bd27b730ef23720d",
+  "prompts": {},
+  "sessions": {
+    "s_569e40c54282b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53d5aefa-f39d-4887-8559-102f4a749d0a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
