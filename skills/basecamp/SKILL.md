@@ -221,6 +221,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Download attachments | `basecamp attachments download <id> --out /tmp/` |
 | Show + download | `basecamp todos show <id> --download-attachments --json` |
 | Stream attachment to stdout | `basecamp attachments download <id> --file <name> --out -` |
+| Change history for an item | `basecamp events <id\|url> --json` (when a card moved columns, when a todo was completed) |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
@@ -659,7 +660,11 @@ against the source table's wormholes.
 
 **Identifying completed cards:** Cards in Done columns have `parent.type: "Kanban::DoneColumn"` and `completed: true`. Use this to identify completed cards that haven't been archived.
 
-**Limitation:** Basecamp does not track when cards are moved between columns. The `updated_at` field updates on any modification and cannot reliably indicate when a card was completed.
+**When a card moved columns:** don't read `updated_at` — it changes on any
+modification. Use the event history instead: `basecamp events <card_id> --json`
+records an `adopted` event for every column move, and a card crossing into or
+out of a Done column pairs that with `completed`/`uncompleted`. See
+[Events](#events-change-history).
 
 **Card Steps (checklists):**
 ```bash
@@ -856,6 +861,27 @@ basecamp timeline --watch --interval 60           # Poll every 60 seconds
 ```
 
 Use `--limit N` to cap results or `--all` to fetch everything (default: 100 events). `--all` and `--page` cannot be combined with `--watch`.
+
+### Events (change history)
+
+`basecamp timeline` reports activity across a project or account. For the audit
+trail of one specific item — todo, card, message, document — use `basecamp
+events`:
+
+```bash
+basecamp events <id|url> --json                   # Change history for one item
+basecamp events <id> --limit 25 --json            # Cap results (default 100)
+basecamp events <id> --all --json                 # Fetch everything
+```
+
+Common `action` values: `created`, `completed`/`uncompleted`,
+`assignment_changed`, `content_changed`, `archived`/`unarchived`,
+`commented_on`, and — for cards — `adopted`, which is recorded every time a card
+moves to another column. That makes `events` the way to answer "when did this
+card move?" or "when was this actually finished?", neither of which `updated_at`
+can tell you.
+
+`--page` accepts only `1`; use `--all` to walk every page.
 
 ### Recordings (Cross-project)
 
