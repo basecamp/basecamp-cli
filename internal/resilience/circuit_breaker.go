@@ -8,6 +8,11 @@ import (
 type CircuitBreaker struct {
 	config CircuitBreakerConfig
 	store  *Store
+
+	// nowFn supplies the current time. Every time read in this type goes
+	// through now(), so tests can substitute a clock they advance by hand
+	// and drive the open/half-open timeouts without sleeping.
+	nowFn func() time.Time
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the given config.
@@ -26,12 +31,13 @@ func NewCircuitBreaker(store *Store, config CircuitBreakerConfig) *CircuitBreake
 	return &CircuitBreaker{
 		config: config,
 		store:  store,
+		nowFn:  time.Now,
 	}
 }
 
 // now returns the current time.
 func (cb *CircuitBreaker) now() time.Time {
-	return time.Now()
+	return cb.nowFn()
 }
 
 // Allow checks if a request should be allowed.
