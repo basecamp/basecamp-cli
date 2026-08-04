@@ -73,6 +73,29 @@ go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 
 </details>
 
+## Upgrading
+
+```bash
+basecamp upgrade
+```
+
+What happens depends on how the CLI was installed:
+
+- **Installer script / tarball** (a binary under your home directory, e.g. `~/bin` or `~/.local/bin`): upgrades in place. The CLI downloads the release for your platform, verifies its Sigstore signature (the keyless `checksums.txt.bundle` published by the release pipeline, identity-pinned to the release workflow and tag) and SHA-256 checksum, swaps the executable transactionally, and confirms the installed binary reports the new version. On failure the previous binary is restored; in the worst case — restoration itself fails mid-swap — the error names the preserved backup file next to the binary so you can put it back by hand.
+- **Homebrew / Scoop**: delegates to `brew upgrade --cask` / `scoop update`, then verifies the manager-installed binary actually reports the new version.
+- **System packages** (apt/dnf/apk, AUR, Nix) and **`go install` builds**: never touched. `basecamp upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. `go install`; otherwise which package manager to use).
+
+`basecamp upgrade` exits 0 only when there is no update, or the update was applied *and confirmed*. Every other outcome is a structured failure (`"ok": false` in JSON) with one of these codes:
+
+| Code | Meaning |
+|---|---|
+| `upgrade_required` | An update exists but the CLI won't apply it for this install method — the hint carries the right next step |
+| `upgrade_incomplete` | The package manager exited 0 but the binary still reports the old version |
+| `upgrade_unverified` | The upgrade may have worked, but the installed version could not be confirmed |
+| `upgrade_failed` | The update check, download, signature/checksum verification, or executable swap failed — the previous binary remains installed (or the error names the preserved backup if restoration also failed) |
+
+The install scripts verify release signatures when `cosign` is available: cosign v3 verifies the published bundle format as-is, v2.6+ is driven with `--new-bundle-format=true`, and older versions skip signature verification with a warning (SHA-256 checksums are always verified).
+
 ## Usage
 
 ```bash

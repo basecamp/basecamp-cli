@@ -109,6 +109,10 @@ signs:
     args:
       - sign-blob
       - '--bundle=${signature}'
+      # Pin the published bundle format explicitly (protobuf, v0.3+json) so it
+      # no longer depends on the CI cosign default. Installers and `basecamp
+      # upgrade` verify this format; cosign v3 defaults to it anyway.
+      - '--new-bundle-format=true'
       - '${artifact}'
       - '--yes'
     artifacts: checksum

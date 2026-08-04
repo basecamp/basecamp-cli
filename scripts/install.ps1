@@ -118,8 +118,36 @@ function Verify-Checksum([string]$ChecksumsPath, [string]$ArchivePath, [string]$
   Info 'Checksum verified'
 }
 
+# Get-CosignBundleSupport decides how to verify the release's Sigstore bundle,
+# which is the new (protobuf, v0.3+json) format:
+#   v3+          -> new-format parsing is the default; no extra flag ('')
+#   v2.6 - v2.x  -> needs '--new-bundle-format=true' (v2.x defaults it to false)
+#   < v2.6 / unparseable -> $null: cannot verify (v2.4 chokes on the bundle's
+#                  tlog key type, v2.2 lacks the flag); caller warns and skips
+function Get-CosignBundleSupport {
+  try { $versionOutput = & cosign version 2>$null } catch { return $null }
+
+  foreach ($line in @($versionOutput)) {
+    if ("$line" -match 'GitVersion:\s*v?(\d+)\.(\d+)\.') {
+      $major = [int]$Matches[1]
+      $minor = [int]$Matches[2]
+      if ($major -ge 3) { return '' }
+      if ($major -eq 2 -and $minor -ge 6) { return '--new-bundle-format=true' }
+      return $null
+    }
+  }
+
+  return $null
+}
+
 function Verify-CosignSignature([string]$Version, [string]$BaseUrl, [string]$TmpDir) {
   if (-not (Get-Command cosign -ErrorAction SilentlyContinue)) {
+    return
+  }
+
+  $bundleFlag = Get-CosignBundleSupport
+  if ($null -eq $bundleFlag) {
+    Step "Skipping signature verification: this cosign can't verify the release bundle format (need cosign >= 2.6)"
     return
   }
 
@@ -129,13 +157,19 @@ function Verify-CosignSignature([string]$Version, [string]$BaseUrl, [string]$Tmp
   $checksumsPath = Join-Path $TmpDir 'checksums.txt'
   Download-File -Url "$BaseUrl/checksums.txt.bundle" -Destination $bundlePath
 
+  $cosignArgs = @('verify-blob', '--bundle', $bundlePath)
+  if ($bundleFlag) {
+    $cosignArgs += $bundleFlag
+  }
+  $cosignArgs += @(
+    '--certificate-identity', "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v$Version",
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    $checksumsPath
+  )
+
   # Native exits don't trigger ErrorActionPreference=Stop on Windows PowerShell 5.1,
   # so check $LASTEXITCODE explicitly -- otherwise a verify failure would false-green.
-  & cosign verify-blob `
-    --bundle $bundlePath `
-    --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v$Version" `
-    --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' `
-    $checksumsPath
+  & cosign @cosignArgs
   if ($LASTEXITCODE -ne 0) {
     Fail 'Cosign signature verification failed'
   }

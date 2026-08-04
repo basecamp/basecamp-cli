@@ -194,6 +194,41 @@ get_latest_version() {
   error "Could not determine latest version. ${CURL_LAST_ERROR:+curl said: ${CURL_LAST_ERROR}. }If native Windows curl fails, try Scoop or PowerShell. If using Git Bash, try /usr/bin/curl instead."
 }
 
+# cosign_version prints the installed cosign's version (e.g. "v2.6.0"), empty
+# when it can't be determined. The trailing `|| true` is load-bearing: under
+# `set -euo pipefail` a broken cosign (nonzero `cosign version`) would
+# otherwise abort the whole installer from inside the caller's command
+# substitution — an unusable cosign must degrade to warn-and-skip, not abort.
+cosign_version() {
+  cosign version 2>/dev/null | awk -F': *' '/^GitVersion/ {print $2; exit}' || true
+}
+
+# cosign_bundle_support decides how to verify the release's Sigstore bundle,
+# which is the new (protobuf, v0.3+json) format. Prints the extra verify-blob
+# flag to use ("" for none) and returns 0 when verification can proceed:
+#   v3+          → new-format parsing is the default; no flag
+#   v2.6 – v2.x  → needs --new-bundle-format=true (v2.x defaults it to false)
+#   < v2.6       → cannot verify (v2.4 chokes on the bundle's tlog key type,
+#                  v2.2 lacks the flag entirely); caller warns and skips
+cosign_bundle_support() {
+  local version="$1" major minor
+
+  if [[ "$version" =~ ^v?([0-9]+)\.([0-9]+)\. ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+
+  if (( major >= 3 )); then
+    echo ""
+  elif (( major == 2 && minor >= 6 )); then
+    echo "--new-bundle-format=true"
+  else
+    return 1
+  fi
+}
+
 verify_checksums() {
   local version="$1"
   local tmp_dir="$2"
@@ -214,22 +249,33 @@ verify_checksums() {
 
   info "Checksum verified"
 
-  # If cosign is available, verify the signature
+  # If cosign is available and understands the bundle format, verify the signature
   if command -v cosign &>/dev/null; then
-    step "Verifying cosign signature..."
+    local cosign_ver bundle_flag
+    cosign_ver=$(cosign_version)
+    if bundle_flag=$(cosign_bundle_support "$cosign_ver"); then
+      step "Verifying cosign signature..."
 
-    if ! curl_run -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
-      error "Failed to download checksums.txt.bundle${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
+      if ! curl_run -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
+        error "Failed to download checksums.txt.bundle${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
+      fi
+
+      local -a cosign_args=(verify-blob --bundle "${tmp_dir}/checksums.txt.bundle")
+      if [[ -n "$bundle_flag" ]]; then
+        cosign_args+=("$bundle_flag")
+      fi
+      cosign_args+=( \
+        --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        "${tmp_dir}/checksums.txt")
+
+      cosign "${cosign_args[@]}" \
+        || error "Cosign signature verification failed"
+
+      info "Signature verified"
+    else
+      step "Skipping signature verification: cosign ${cosign_ver:-unknown} can't verify this release's bundle format (need cosign >= 2.6)"
     fi
-
-    cosign verify-blob \
-      --bundle "${tmp_dir}/checksums.txt.bundle" \
-      --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
-      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-      "${tmp_dir}/checksums.txt" \
-      || error "Cosign signature verification failed"
-
-    info "Signature verified"
   fi
 }
 

@@ -62,6 +62,10 @@ func NewRootCmd() *cobra.Command {
 				hardenConfigDir(cfgDir)
 			}
 
+			// Reap leftover self-update sidecars (crashed upgrade, or a
+			// Windows .old still locked when the upgrade finished).
+			commands.CleanupUpgradeSidecars()
+
 			// Start background update check early so it runs during command execution
 			updateCheck = commands.StartUpdateCheck()
 

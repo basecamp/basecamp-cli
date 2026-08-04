@@ -5,6 +5,7 @@ import (
 	"context"
 	"debug/pe"
 	"encoding/binary"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -876,4 +877,33 @@ func TestDoctorVerboseShowsBC3Scope(t *testing.T) {
 	assert.Equal(t, "pass", check.Status)
 	assert.Contains(t, check.Message, "scope: read", "BC3 scope should appear in verbose output")
 	assert.Contains(t, check.Message, "type: bc3")
+}
+
+// The release lookup attaches a GitHub token only for api.github.com — a
+// token must never be sent to any other host (tests and mirrors point
+// releasesLatestURL elsewhere), and GH_TOKEN takes precedence over
+// GITHUB_TOKEN, matching the gh CLI.
+func TestAttachGitHubAuthHostGuardAndPrecedence(t *testing.T) {
+	t.Setenv("GH_TOKEN", "gh-tok")
+	t.Setenv("GITHUB_TOKEN", "action-tok")
+
+	api, err := http.NewRequestWithContext(context.Background(), "GET", "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest", nil)
+	require.NoError(t, err)
+	attachGitHubAuth(api)
+	assert.Equal(t, "Bearer gh-tok", api.Header.Get("Authorization"))
+
+	other, err := http.NewRequestWithContext(context.Background(), "GET", "http://127.0.0.1:9999/releases/latest", nil)
+	require.NoError(t, err)
+	attachGitHubAuth(other)
+	assert.Empty(t, other.Header.Get("Authorization"))
+}
+
+func TestAttachGitHubAuthFallsBackToGithubToken(t *testing.T) {
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "action-tok")
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest", nil)
+	require.NoError(t, err)
+	attachGitHubAuth(req)
+	assert.Equal(t, "Bearer action-tok", req.Header.Get("Authorization"))
 }

@@ -396,38 +396,98 @@ func formatSDKProvenance(p *version.SDKProvenance, verbose bool) Check {
 	return check
 }
 
-// fetchLatestVersion attempts to fetch the latest release version from GitHub.
+// releaseAsset is a downloadable file attached to a GitHub release.
+type releaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+}
+
+// releaseInfo describes the latest GitHub release: its version (tag without
+// the "v" prefix) and downloadable assets.
+type releaseInfo struct {
+	Version string
+	Assets  []releaseAsset
+}
+
+// asset returns the release asset with the given exact name.
+func (r releaseInfo) asset(name string) (releaseAsset, bool) {
+	for _, a := range r.Assets {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return releaseAsset{}, false
+}
+
+// releasesLatestURL is swappable so tests can point release fetching at a
+// local httptest server.
+var releasesLatestURL = "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest"
+
+// fetchLatestRelease fetches the latest release metadata from GitHub.
 // Uses its own context since version checks are best-effort and independent of caller lifecycle.
-func fetchLatestVersion() (string, error) { //nolint:contextcheck // intentionally creates bounded context for best-effort check
+func fetchLatestRelease() (releaseInfo, error) { //nolint:contextcheck // intentionally creates bounded context for best-effort check
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", releasesLatestURL, nil)
 	if err != nil {
-		return "", err
+		return releaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", version.UserAgent())
+	attachGitHubAuth(req)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return releaseInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return releaseInfo{}, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
 	var release struct {
-		TagName string `json:"tag_name"`
+		TagName string         `json:"tag_name"`
+		Assets  []releaseAsset `json:"assets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil { // 1 MB limit
-		return "", err
+		return releaseInfo{}, err
 	}
 
 	// Strip "v" prefix if present
-	return strings.TrimPrefix(release.TagName, "v"), nil
+	return releaseInfo{
+		Version: strings.TrimPrefix(release.TagName, "v"),
+		Assets:  release.Assets,
+	}, nil
+}
+
+// attachGitHubAuth adds a bearer token to api.github.com requests when the
+// environment carries one (GH_TOKEN, then GITHUB_TOKEN — the gh CLI's
+// precedence). Anonymous requests are rate-limited per source IP, which
+// bites shared CI runner egress. Host-guarded so a token is never sent to
+// any other host (tests point releasesLatestURL at local servers).
+func attachGitHubAuth(req *http.Request) {
+	if req.URL.Host != "api.github.com" {
+		return
+	}
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := os.Getenv(name); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+			return
+		}
+	}
+}
+
+// fetchLatestVersion returns just the latest release version, for callers
+// that don't need asset metadata.
+func fetchLatestVersion() (string, error) {
+	release, err := releaseFetcher()
+	if err != nil {
+		return "", err
+	}
+	return release.Version, nil
 }
 
 // checkRuntime returns Go runtime information.

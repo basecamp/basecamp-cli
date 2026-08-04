@@ -94,6 +94,10 @@ export PATH="$HOME/bin:$PATH"          # Git Bash / Windows bash environments
 export PATH="$HOME/go/bin:$PATH"
 ```
 
+### Upgrading later
+
+Run `basecamp upgrade`. Installer-script installs upgrade in place (Sigstore-verified download, transactional executable swap, post-upgrade version confirmation). Homebrew and Scoop installs delegate to their package manager, then verify the installed binary reports the new version. System packages (apt/dnf/apk, AUR, Nix) and `go install` builds are never touched — the command exits nonzero with upgrade guidance for that install method instead. Treat any nonzero exit as **not upgraded** and follow the hint in the error (`upgrade_required`, `upgrade_incomplete`, `upgrade_unverified`, or `upgrade_failed`).
+
 ---
 
 ## Step 2: Authenticate

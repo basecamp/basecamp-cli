@@ -76,6 +76,16 @@ basecamp skill install
 - No `replace` directives in go.mod
 - `make release-check` passes (includes check, replace-check, vuln scan, race-test, surface compat)
 
+## Release size budget
+
+Stripped release binary ≤ 38 MiB; gzip-compressed binary ≤ 13 MiB (a proxy
+for release-archive size), per platform. Baseline set when in-process
+Sigstore/TUF verification landed for `basecamp upgrade` (v0.8.1 measured
+24.4 MiB stripped / 8.0 MiB gzipped; the sigstore-go tree added ~9.7 MiB
+stripped / ~3.2 MiB gzipped — accepted cost of verifying releases without a
+cosign dependency). An increase beyond either bound needs explicit review of
+what grew, not a budget bump. Enforcement is manual for now.
+
 ## CI secrets
 
 **Repository secrets** (Settings → Secrets and variables → Actions):
