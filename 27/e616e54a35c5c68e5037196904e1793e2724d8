@@ -1,0 +1,110 @@
+internal/commands/upgrade_selfupdate.go
+  s_a1e4c813ca10cb::t_684d01a540091c 575
+  s_a1e4c813ca10cb::t_a8e8cf76288dda 723-732,744-746
+  s_a1e4c813ca10cb::t_6a2d9e969edf2e 51-54
+  s_a1e4c813ca10cb::t_53efb367bc7d3b 283,295
+  s_a1e4c813ca10cb::t_9fa34d54ac474f 650,653,659
+  s_a1e4c813ca10cb::t_aa45410fc36598 590,593-595,608,613-641
+  s_a1e4c813ca10cb::t_f0012f42db95be 65-66
+  s_a1e4c813ca10cb::t_7cd9aa0ab1baa9 1-11,13-23,25-50,55-64,67-69,94-197,199-282,284-294,296-574,576-589,591-592,596-607,609-612,642-649,651-652,654-658,660-722,733-743,747
+  s_a1e4c813ca10cb::t_7037ba81dc792c 198
+  s_a1e4c813ca10cb::t_e7efecada7d5ab 12,24
+  s_a1e4c813ca10cb::t_ba5827fbbe77a6 70-93
+nix/package.nix
+  s_a1e4c813ca10cb::t_d4ef6eb2067208 11
+internal/commands/testdata/selfupdate/trusted_root.json
+  s_a1e4c813ca10cb::t_7bc91217d3cf0b 1-126
+e2e/installer.bats
+  s_a1e4c813ca10cb::t_36e08c6da8a4bc 446
+  s_a1e4c813ca10cb::t_a7534366b1eb4f 453-454
+  s_a1e4c813ca10cb::t_4d71bdc65ae217 508-531
+  s_a1e4c813ca10cb::t_c480f533989322 394-445,447-452,455-507,532-614
+internal/version/version_test.go
+  s_a1e4c813ca10cb::t_6d6062be6dc244 107-123
+internal/commands/testdata/selfupdate/checksums.txt.bundle
+  s_a1e4c813ca10cb::t_ee334e79f538ae 1
+install.md
+  s_a1e4c813ca10cb::t_add8caf68ca9ab 97-98,100
+  s_a1e4c813ca10cb::t_26ec424450a35f 99
+internal/commands/doctor.go
+  s_a1e4c813ca10cb::t_21690ca3ac6810 399-426,428,432,434,437,442,447,451-452,455,459-472
+README.md
+  s_a1e4c813ca10cb::t_25058857a37e4b 92
+  s_a1e4c813ca10cb::t_fed059d9f22b34 76-83,85,87-91,93-94,96-98
+  s_a1e4c813ca10cb::t_c18374533ed696 95
+  s_a1e4c813ca10cb::t_cb4da2630d46b8 84,86
+internal/commands/upgrade.go
+  s_a1e4c813ca10cb::t_e1a5885188a63e 36,38
+  s_a1e4c813ca10cb::t_817631e4e4f6bb 171-178,181-182
+  s_a1e4c813ca10cb::t_2781e953fc3ed4 250
+  s_a1e4c813ca10cb::t_4ed674a12ef6f2 78,83,101-102,111-112,120-124,133-170,183-214,217-218,222-249
+internal/commands/testdata/selfupdate/checksums.txt
+  s_a1e4c813ca10cb::t_ee334e79f538ae 1-27
+scripts/install.ps1
+  s_a1e4c813ca10cb::t_ea31e508581cb1 121-142,148-153,160-169,172
+internal/cli/root.go
+  s_a1e4c813ca10cb::t_a7dea39fb8a1d6 65-68
+.goreleaser.yaml
+  s_a1e4c813ca10cb::t_f5f98c1fa6351f 112-115
+scripts/install.sh
+  s_a1e4c813ca10cb::t_6e9e168e2a5f3a 197,202,204-231
+  s_a1e4c813ca10cb::t_32e9728f1b4aad 198-201,203
+  s_a1e4c813ca10cb::t_a30c1f8c571152 252,254-257,259-261,263-270,272-278
+internal/commands/upgrade_selfupdate_test.go
+  s_a1e4c813ca10cb::t_a6e06de9ae5290 722,784
+  s_a1e4c813ca10cb::t_945cada9ff41d0 82-88
+  s_a1e4c813ca10cb::t_590d0703c28284 785-841
+  s_a1e4c813ca10cb::t_dc6ce755ef03cd 1-21,23-81,89-721,768-783,842-1097
+  s_a1e4c813ca10cb::t_b8d8b2a4eebca1 723-767
+  s_a1e4c813ca10cb::t_14b5a2561df25d 22
+internal/version/version.go
+  s_a1e4c813ca10cb::t_39020b1d1dad27 24-28,33,38-41
+  s_a1e4c813ca10cb::t_37fb92e596239f 42-43
+go.sum
+  s_a1e4c813ca10cb::t_47a303fd795304 7-38,50-51,54-83,94-95,99-104,145-148,152-153,157-163,170-171,174-238,243-256,259-262,265-288,291-296,303-306,312-315,327-328,331-332,341-342,347-355,357-358,366-397,410-427,430-431,438-464,466-469,472-475,482-483,486-501,507-512
+go.mod
+  s_a1e4c813ca10cb::t_5ff9d203bea1bf 55,111,132,134
+  s_a1e4c813ca10cb::t_a286e05904fbc4 19,34,38,40-41,53,56-57,61-86,88-89,92-94,108-110,113-122,124,126-131,135-139
+.github/workflows/upgrade-smoke.yml
+  s_a1e4c813ca10cb::t_c59f1872a01a5f 138-141
+  s_a1e4c813ca10cb::t_ada9690fe586d4 1-96,98-99,101-102,104-105,107-112,114-116,118-137,142-151,153-154,156-157,159-160,162-170,172-174,176-177,181-202
+  s_a1e4c813ca10cb::t_1317a065dfcab1 97,100,103,106,113,117
+  s_a1e4c813ca10cb::t_68d534d50e1c74 152,155,158,161,171,175,178-180
+internal/commands/upgrade_test.go
+  s_a1e4c813ca10cb::t_91e477ea132c38 319
+  s_a1e4c813ca10cb::t_3c6ddd1e5a02a8 35,50-55,58-65
+  s_a1e4c813ca10cb::t_805ccec97b1ace 261-264,270
+  s_a1e4c813ca10cb::t_40e9dde9f639c9 225-226,232
+  s_5db9c709885cff::t_831a44fb742d18 66
+  s_a1e4c813ca10cb::t_405506847f07d3 274
+  s_a1e4c813ca10cb::t_8e4667d65c5636 147-150,157-158,161,163-164
+  s_a1e4c813ca10cb::t_883675f4ea8dd4 283,287
+  s_a1e4c813ca10cb::t_cd21e6083cd171 328,332
+  s_a1e4c813ca10cb::t_1a99363817f1a4 245,249-250
+  s_a1e4c813ca10cb::t_73243ddad6fb53 236
+  s_a1e4c813ca10cb::t_c680fd90a86070 307-310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "27e616e54a35c5c68e5037196904e1793e2724d8",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_a1e4c813ca10cb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3effea7c-cc47-459b-9cf6-e423d4649614",
+        "model": "claude-fable-5"
+      },
+      "human_author": null
+    }
+  }
+}
