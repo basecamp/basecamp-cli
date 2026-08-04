@@ -1,0 +1,19 @@
+nix/package.nix
+  s_5db9c709885cff::t_1ae59b9cc9a683 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "2de10d1907a530e4fe601090def2d5d4672bcec2",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
