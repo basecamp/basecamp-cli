@@ -1,0 +1,65 @@
+internal/commands/accountwide.go
+  s_d931ffd296629c::t_191027c02a6fe5 180-184,194-200,231-262,292-313
+  s_d931ffd296629c::t_705f772623ea99 193,263-291
+  s_5db9c709885cff::t_e5f563307dabb8 201
+  s_5db9c709885cff::t_5ccbc426e05dee 202-230
+  s_5db9c709885cff::t_01865ae239140b 185-192
+  s_d931ffd296629c::t_21d9fb9141e882 4,7
+internal/commands/accountwide_filters_test.go
+  s_d931ffd296629c::t_8ef9669f57f166 1-17,26-263
+  s_5db9c709885cff::t_5f787bd28cd435 18-25
+  s_5db9c709885cff::t_3b4a64a51cb4f5 264-300
+e2e/smoke/smoke_core.bats
+  s_d931ffd296629c::t_8a7121c108d1b7 87-98
+.surface
+  s_d931ffd296629c::t_a91b734b5a5957 3049,3054,14277,14281
+internal/commands/todos_test.go
+  s_d931ffd296629c::t_a63337400d7c32 425-430,432,434-435
+internal/commands/todos.go
+  s_d931ffd296629c::t_a6c2b6dfa7aed6 535
+  s_d931ffd296629c::t_d0eff408bbc4ce 31-32,51,82-85,87-93,104-108,236,246,391-395,410,417,473-475,477-478,532,553,555,557,559,772,791,802-807,809,811,814-815,825,858-871,873-880,882-887,901-903,905-907,933,967-969,990
+  s_d931ffd296629c::t_132161da6e44d6 198-206
+  s_d931ffd296629c::t_e07b07a2667e14 86,275-279,386,476,549,872,881,898,904
+  s_5db9c709885cff::t_a0071ffa1375c4 153-159
+  s_5db9c709885cff::t_fd04a826a8506f 387-390
+ACCOUNT-WIDE-LISTINGS.md
+  s_d931ffd296629c::t_70954d7eeaab4b 109-116,146-148,367-424,499-512
+skills/basecamp/SKILL.md
+  s_5db9c709885cff::t_6517f0ffb66b28 164-165
+  s_5db9c709885cff::t_0670ef7fd5828d 185-186,188
+  s_5db9c709885cff::t_878ffd392ef511 149
+  s_d931ffd296629c::t_0f3eaf65b06b06 187,985-992
+  s_5db9c709885cff::t_f6cbcd74f74fd5 519
+  s_5db9c709885cff::t_7b01a8ceb2dd68 620
+  s_5db9c709885cff::t_1ef51567db8c8c 971-984
+.surface-breaking
+  s_d931ffd296629c::t_c997c325606cc5 747
+internal/commands/cards.go
+  s_5db9c709885cff::t_2c52a6d9decb9e 151-157
+  s_d931ffd296629c::t_99b59b1c96a5b7 32,78-79,101-106,126-127,184-199,335-339,345-349,363,365,367,369,371,438-448
+  s_5db9c709885cff::t_f8ab7e2d9239e9 340-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "4c07e986e13d2a303600743c256001edf51d98a2",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
