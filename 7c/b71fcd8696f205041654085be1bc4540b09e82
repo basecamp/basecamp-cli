@@ -1,0 +1,204 @@
+go.sum
+  s_d931ffd296629c::t_21edba67d9cc27 26-27
+internal/version/sdk-provenance.json
+  s_d931ffd296629c::t_31bfe9fcf69123 4-6,10-11
+go.mod
+  s_d931ffd296629c::t_4d83cfb8734a02 9
+nix/package.nix
+  s_c4ea0d1a7e43e0::t_450f05ffbecbe1 11
+internal/commands/bookmarks.go
+  s_d931ffd296629c::t_0c630a7ea468a2 1-271,273-343
+  s_d931ffd296629c::t_8f6480f5fc2a91 272
+internal/commands/bookmarks_test.go
+  s_d931ffd296629c::t_e0b21433ebeacd 1-3,6-10,12-17,19-62,88-100,102-114,116-124,126-132,134-136,140-144,146-168,182-191,193-202,204-212,220-224,226-240,242-252,254-276,278-289
+  s_d931ffd296629c::t_3258a1226c50aa 4-5,11,18,63-87,101,115,125,133,137-139,145,169-181,203,213-219,225,241,253,277
+  s_d931ffd296629c::t_ef206db4e76f50 192
+e2e/smoke/smoke_bookmarks.bats
+  s_d931ffd296629c::t_2a780fafa5ee59 28-29,34,45-46,49-50
+  s_d931ffd296629c::t_d62ec851695c09 1-27,30-33,35-44,47-48,51
+internal/commands/drafts_test.go
+  s_d931ffd296629c::t_325105f948e872 1-147
+internal/commands/drafts.go
+  s_d931ffd296629c::t_00a66039465fff 1-178
+internal/commands/commands_test.go
+  s_d931ffd296629c::t_6c90f30b87b726 114-115
+  s_d931ffd296629c::t_6a8ffc180f87e1 116-117
+internal/commands/accountwide.go
+  s_d931ffd296629c::t_ac207417f19687 314-341
+  s_5db9c709885cff::t_01865ae239140b 185-192
+  s_d931ffd296629c::t_21d9fb9141e882 4,7
+  s_d931ffd296629c::t_191027c02a6fe5 180-184,194-200,231-262,292-313
+  s_d931ffd296629c::t_705f772623ea99 193,263-291
+  s_5db9c709885cff::t_5ccbc426e05dee 202-230
+  s_5db9c709885cff::t_e5f563307dabb8 201
+internal/cli/root.go
+  s_d931ffd296629c::t_6a72fd967b7f4f 342-343
+  s_d931ffd296629c::t_4e6e021f94a172 344-345
+e2e/smoke/smoke_drafts.bats
+  s_d931ffd296629c::t_bdf4289d24e64f 1-32
+internal/commands/commands.go
+  s_d931ffd296629c::t_4c87da264ce0d1 80-83,85-86
+  s_46c38fbb28f3e9::t_d7bde0b1914cfd 79
+  s_d931ffd296629c::t_3b31934a199545 84
+  s_d931ffd296629c::t_d4bfea2e9c2fbc 76
+  s_d931ffd296629c::t_50a393edb3a360 75
+  s_d931ffd296629c::t_8c91cfe7c3683e 48
+.surface
+  s_d931ffd296629c::t_b0a68657f9eb1d 23-25,489-493,691-692,2107-2214,6923-6967,17202-17206,17404-17405
+  s_d931ffd296629c::t_66ab5e9aa5ae01 36-38,263,504-506,858-860,2429-2492,11005-11068,17217-17219,17571-17573
+  s_d931ffd296629c::t_e323149476d78e 10,12-14,468,471-472,1654-1674,1717-1759,17181,17184-17185
+  s_d931ffd296629c::t_a830dfa79c9ea1 91,93-95,107,109-111,569,571-573,577,585,587-589,593,3955-3977,4004-4073,4149-4171,4342-4364,4391-4460,4536-4558,14258,17282,17284-17286,17290,17298,17300-17302,17306
+  s_d931ffd296629c::t_a91b734b5a5957 3049,3054,14277,14281
+internal/commands/calendars.go
+  s_d931ffd296629c::t_4fba635f10667c 1-188
+e2e/smoke/smoke_calendars.bats
+  s_d931ffd296629c::t_de16263ee2e13f 1-25
+internal/commands/notes.go
+  s_d931ffd296629c::t_55a75d16c880b6 1-121,133-175,182-184,201-202,205-209,211,214-215,220-235
+  s_5db9c709885cff::t_c2711d8db00051 176-181,185-200,203-204,210,212-213,216-219
+  s_5db9c709885cff::t_5522da43d5db4a 122-132
+internal/commands/notes_test.go
+  s_d931ffd296629c::t_4c0a545598574f 1-164
+  s_d931ffd296629c::t_961a8f16c77fcf 165-170
+  s_5db9c709885cff::t_aca5d973bd9eab 171-220
+internal/commands/calendars_test.go
+  s_d931ffd296629c::t_fe5a11e4b66101 1-119
+e2e/smoke/smoke_notes.bats
+  s_d931ffd296629c::t_7578f057e82545 1-20
+internal/commands/assignments_priority_test.go
+  s_d931ffd296629c::t_dab956791ba9c8 1-3,5-6,8-13,16-129,133-137
+  s_d931ffd296629c::t_a4ac3f18aadaaa 138,141-142
+  s_5db9c709885cff::t_d6b9575289d7b6 130-132,139-140,143-168,171-174
+  s_5db9c709885cff::t_5bd6e0f845330d 169-170
+  s_ae792ed0be3006::t_10f7480e09dd55 4,7,14-15,175
+internal/commands/assignments.go
+  s_d931ffd296629c::t_06759b03c3f606 206,238,255-277,285-287,295-296,298-302
+  s_d931ffd296629c::t_cff92f1d3e2690 6,10
+  s_d931ffd296629c::t_47f0620c3a622d 40-42,48-55,57,64-127,131-205
+  s_d931ffd296629c::t_e8872e8b2d2986 128-130
+  s_d931ffd296629c::t_a15844ab2fd077 5
+  s_555508c40a7b3b::t_be0382a1e47540 11,207,303
+  s_5db9c709885cff::t_7de7e5889f1086 56,58-63
+  s_5db9c709885cff::t_bd4a1df38a186e 278-284,288-294,297
+e2e/smoke/smoke_assignments.bats
+  s_d931ffd296629c::t_8e91d0fd607f9e 27-49
+internal/commands/checkins_question_admin_test.go
+  s_d931ffd296629c::t_205d5973644560 117,124
+  s_d931ffd296629c::t_0e03979ff1f10a 1-3,5-7,9-15,18-31,33,35-116,118-123,125-175,232-250
+  s_d931ffd296629c::t_3c82c9109088b8 32,34
+  s_5db9c709885cff::t_9abdbaa4ec008d 197
+  s_5db9c709885cff::t_52ca61e4e3febe 8
+  s_5db9c709885cff::t_6617eb266c2dbb 176-196,198-203
+  s_5db9c709885cff::t_37ea0e8d49eed0 204-231
+  s_5db9c709885cff::t_1546e5070edb04 4,16-17
+internal/commands/todos_loose_test.go
+  s_d931ffd296629c::t_6651f40104bb36 89-96
+  s_d931ffd296629c::t_6384effad7d72e 14
+  s_d931ffd296629c::t_9210c651ddbc25 1-13,15-88,97-105
+internal/commands/todos.go
+  s_d931ffd296629c::t_9e30e545a0ac6b 1443-1445
+  s_d931ffd296629c::t_6261930f27df42 1234,1239-1246
+  s_d931ffd296629c::t_8632e03d4335b7 1382-1391,1393-1404
+  s_d931ffd296629c::t_85bd02c2849c2d 1287-1298,1302-1317,1319-1321,1323-1327
+  s_d931ffd296629c::t_d0eff408bbc4ce 31-32,51,82-85,87-93,104-108,236,246,391-395,410,417,473-475,477-478,532,553,555,557,559,772,791,802-807,809,811,814-815,825,858-871,873-880,882-887,901-903,905-907,933,967-969,990
+  s_5db9c709885cff::t_a0071ffa1375c4 153-159
+  s_d931ffd296629c::t_a6c2b6dfa7aed6 535
+  s_5db9c709885cff::t_fd04a826a8506f 387-390
+  s_d931ffd296629c::t_e07b07a2667e14 86,275-279,386,476,549,872,881,898,904
+  s_d931ffd296629c::t_132161da6e44d6 198-206
+internal/commands/checkins.go
+  s_d931ffd296629c::t_9ecd035f83ffa8 142,267-270,276-359,361-492
+  s_d931ffd296629c::t_583e8322700e5e 360
+  s_d931ffd296629c::t_26bb884e937a3d 44,50-66,81-117,124-127,129-132,136-141
+  s_46c38fbb28f3e9::t_4711ca9e4c09ae 143,493
+  s_5db9c709885cff::t_25d52e4e5ab265 67-80
+  s_5db9c709885cff::t_cd28b027c15ccb 118-123,128,133-134
+  s_5db9c709885cff::t_215b4634f03114 135
+e2e/smoke/smoke_checkins.bats
+  s_d931ffd296629c::t_b4d4779a15dfa3 59-90
+e2e/smoke/smoke_core.bats
+  s_d931ffd296629c::t_0f69eda00e2cbb 81-86
+  s_d931ffd296629c::t_8a7121c108d1b7 87-98
+API-COVERAGE.md
+  s_d931ffd296629c::t_671c2ba21cd8e1 9,11,13-17,20-25
+  s_d931ffd296629c::t_eb2dd2226d0e99 212,214
+  s_d931ffd296629c::t_da9a93a735878a 31-55
+  s_d931ffd296629c::t_bdfa7ce38b7b93 26,159,179,182-185,189,198
+  s_5db9c709885cff::t_62ae013f5a1ee5 89-93
+ACCOUNT-WIDE-LISTINGS.md
+  s_d931ffd296629c::t_65195ce21112e5 235-236,240-261
+  s_d931ffd296629c::t_70954d7eeaab4b 109-116,146-148,367-424,499-512
+skills/basecamp/SKILL.md
+  s_d931ffd296629c::t_ea9b96ff6275b8 6-7,22-25,188-197,819-845,992-1052
+  s_d931ffd296629c::t_0f3eaf65b06b06 186,984-991
+  s_5db9c709885cff::t_1ef51567db8c8c 970-983
+  s_5db9c709885cff::t_0670ef7fd5828d 184-185,187
+internal/commands/accountwide_filters_test.go
+  s_d931ffd296629c::t_8ef9669f57f166 1-17,26-263
+  s_5db9c709885cff::t_5f787bd28cd435 18-25
+  s_5db9c709885cff::t_3b4a64a51cb4f5 264-300
+internal/commands/todos_test.go
+  s_d931ffd296629c::t_a63337400d7c32 425-430,432,434-435
+.surface-breaking
+  s_d931ffd296629c::t_c997c325606cc5 747
+internal/commands/cards.go
+  s_5db9c709885cff::t_f8ab7e2d9239e9 340-344
+  s_d931ffd296629c::t_99b59b1c96a5b7 32,78-79,101-106,126-127,184-199,335-339,345-349,363,365,367,369,371,438-448
+  s_5db9c709885cff::t_2c52a6d9decb9e 151-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "7cb71fcd8696f205041654085be1bc4540b09e82",
+  "prompts": {},
+  "sessions": {
+    "s_46c38fbb28f3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "889b17e4-24ce-4e9d-a57d-f68894e16555",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_555508c40a7b3b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e708032-ac78-4cef-b1cf-d589a0d95671",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_ae792ed0be3006": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fd3dc2e-89cf-437b-8756-21beefe1c5f6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_c4ea0d1a7e43e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3b223657-e482-4070-8a2c-f31a76698552",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
