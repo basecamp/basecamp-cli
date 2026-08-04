@@ -24,11 +24,20 @@ folder accumulates `basecamp-v0.8.1.exe`, `basecamp-v0.8.2.exe`, … and every
 previously published link points at a stale build.
 
 What we want instead is one durable recording whose file is replaced on each
-release — exactly what `GET /uploads/:id/versions.json` already describes:
+release. `GET /uploads/:id/versions.json` already exposes the *record* of that
+happening — the read side of this feature is public. The write side is not.
 
-> Each version event represents a file replacement.
-
-The read side of this feature is public. The write side is not.
+One clarification on that endpoint, since the rest of this document leans on it:
+it returns `version_events_since_publication`, which is every recording event,
+not only replacements. bc3-api currently describes it as "each version event
+represents a file replacement," which overstates it — the response example
+below carries an `"action": "active"` event with `"status_was": "drafted"`,
+a publication transition rather than a new file. File replacement is the
+`blob_changed` subset, emitted by `Upload#recorded_as` → `track_blob_change`
+when the new recordable's blob differs from the previous one. Whatever write
+shape you pick, please don't treat the endpoint as a list of binary revisions —
+it isn't one today, and a client filtering for replacements has to select
+`blob_changed` itself.
 
 ## What already exists (and why it isn't reachable)
 
@@ -156,20 +165,25 @@ version."
 ]
 ```
 
-The documented example in `sections/uploads.md` agrees. The OpenAPI spec behind
-the Go SDK does not — it models the response as `[]Upload`, which is a separate
-report to the SDK team. Flagging it here only because whichever write shape you
-pick, a client will want the response and the versions index to describe the
-same thing. If a version event ever carried the replaced file's `filename`,
-`byte_size` and `download_url`, "show me this file's history" would become
-answerable in one call.
+Note the `action` here is `active`, not `blob_changed` — as above, this listing
+is the full event stream since publication, and replacements are one kind of
+entry in it.
+
+The documented example in `sections/uploads.md` agrees that these are events.
+The OpenAPI spec behind the Go SDK does not — it models the response as
+`[]Upload`, which is a separate report to the SDK team. Flagging it here only
+because whichever write shape you pick, a client will want the response and the
+versions index to describe the same thing. If a `blob_changed` event carried the
+replaced file's `filename`, `byte_size` and `download_url`, "show me this file's
+history" would become answerable in one call.
 
 ## What this unblocks
 
 - **#404** — a release script that replaces a binary in place, so a published
   link keeps working across releases
-- **CLI** — `basecamp files versions` becomes a listing of changes the CLI can
-  itself produce, rather than a read-only window onto web-app activity
+- **CLI** — today `basecamp files versions` can only *observe* replacements made
+  in the web app. If this ships, it would list `blob_changed` events the CLI
+  itself caused
 - **Any integration** that mirrors an external artifact into Basecamp and wants
   one stable recording instead of a growing pile of near-duplicate uploads
 
