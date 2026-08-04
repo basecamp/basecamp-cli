@@ -644,10 +644,7 @@ func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID str
 	}
 	assigneeIDs = append(assigneeIDs, assigneeIDInt)
 
-	// The API rejects step updates without a title, so carry over the
-	// current one.
 	updated, err := app.Account().CardSteps().Update(cmd.Context(), stepID, &basecamp.UpdateStepRequest{
-		Title:       step.Title,
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {
@@ -749,10 +746,7 @@ func doUnassignStep(cmd *cobra.Command, app *appctx.App, stepIDStr string, assig
 
 	assigneeIDs := removeID(existingAssigneeIDs(step.Assignees), assigneeIDInt)
 
-	// The API rejects step updates without a title, so carry over the
-	// current one.
 	updated, err := app.Account().CardSteps().Update(cmd.Context(), stepID, &basecamp.UpdateStepRequest{
-		Title:       step.Title,
 		AssigneeIDs: assigneeIDs,
 	})
 	if err != nil {

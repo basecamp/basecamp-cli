@@ -241,10 +241,11 @@ func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}, nil
 }
 
-// TestCardsStepUpdateAssigneesOnlyCarriesTitle verifies that updating only
-// assignees fetches the current step and includes its title in the request —
-// the API rejects step updates without a title.
-func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
+// TestCardsStepUpdateAssigneesOnlySendsNoTitle verifies that updating only
+// assignees sends assignees and nothing else. The server preserves attributes
+// the request omits, so there is no title to carry over — and getCount is what
+// proves the extra read is gone, since the body alone cannot.
+func TestCardsStepUpdateAssigneesOnlySendsNoTitle(t *testing.T) {
 	transport := &mockStepUpdateTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -252,17 +253,17 @@ func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--assignees", "789")
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, transport.getCount)
+	assert.Equal(t, 0, transport.getCount, "expected no read-before-write")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Current title", body["title"])
+	assert.NotContains(t, body, "title", "must not echo back a field the caller never changed")
 	assert.Equal(t, []any{float64(789)}, body["assignee_ids"])
 }
 
-// TestCardsStepUpdateDueOnlyCarriesTitle verifies that updating only the due
-// date fetches the current step and includes its title in the request.
-func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
+// TestCardsStepUpdateDueOnlySendsNoTitle verifies the same for a due-date-only
+// update.
+func TestCardsStepUpdateDueOnlySendsNoTitle(t *testing.T) {
 	transport := &mockStepUpdateTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -270,11 +271,11 @@ func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--due", "2026-07-04")
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, transport.getCount)
+	assert.Equal(t, 0, transport.getCount, "expected no read-before-write")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Current title", body["title"])
+	assert.NotContains(t, body, "title", "must not echo back a field the caller never changed")
 	assert.Equal(t, "2026-07-04", body["due_on"])
 }
 
