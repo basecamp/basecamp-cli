@@ -444,7 +444,7 @@ func (s *stepPathTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return nil, fmt.Errorf("unexpected HTTP request: %s %s", req.Method, path)
 }
 
-func setupStepPathTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+func setupStepPathTestApp(t *testing.T, transport *stepPathTransport) *appctx.App {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
@@ -726,7 +726,7 @@ func (m *mockStepAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	stepJSON := `{"id": 456, "title": "Existing step", "completed": false, "assignees": [{"id": 11, "name": "Existing Person"}]}`
+	stepJSON := `{"id": 456, "title": "Existing step", "due_on": "2026-09-01", "completed": false, "assignees": [{"id": 11, "name": "Existing Person"}]}`
 
 	switch req.Method {
 	case "GET":
@@ -762,9 +762,12 @@ func (m *mockStepAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 }
 
-// TestAssignStepCarriesTitle verifies that assigning a person to a step sends
-// the current title in the update, which the API requires.
-func TestAssignStepCarriesTitle(t *testing.T) {
+// TestAssignStepSendsOnlyAssignees verifies that assigning a person to a step
+// sends assignee_ids and nothing else. The server preserves attributes the
+// request omits, so echoing back the title or due date would be the CLI
+// re-asserting values the caller never changed — and reverting a concurrent
+// edit to them.
+func TestAssignStepSendsOnlyAssignees(t *testing.T) {
 	transport := &mockStepAssignTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -774,13 +777,16 @@ func TestAssignStepCarriesTitle(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Existing step", body["title"])
+	assert.NotContains(t, body, "title")
+	assert.NotContains(t, body, "due_on")
 	assert.Equal(t, []any{float64(11), float64(99)}, body["assignee_ids"])
 }
 
-// TestUnassignStepCarriesTitle verifies that removing a person from a step
-// also sends the current title in the update.
-func TestUnassignStepCarriesTitle(t *testing.T) {
+// TestUnassignStepSendsEmptyAssigneeList verifies the same for removal, and
+// that taking off the last assignee sends an explicit empty list — omitting
+// the key would now mean "leave assignees alone", so the clear must be said
+// out loud.
+func TestUnassignStepSendsEmptyAssigneeList(t *testing.T) {
 	transport := &mockStepAssignTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -790,93 +796,7 @@ func TestUnassignStepCarriesTitle(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Existing step", body["title"])
+	assert.NotContains(t, body, "title")
+	assert.NotContains(t, body, "due_on")
 	assert.Equal(t, []any{}, body["assignee_ids"])
-}
-
-// stepUpdateBodyTransport serves the step and the current user, and captures
-// the PUT body so tests can assert exactly which fields reach the wire.
-type stepUpdateBodyTransport struct {
-	stepAssignees string // JSON array for the step's current assignees
-	capturedPut   []byte
-	getCount      int
-}
-
-func (s *stepUpdateBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
-
-	respond := func(body string) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(body)),
-			Header:     header,
-		}, nil
-	}
-
-	path := req.URL.Path
-	assignees := s.stepAssignees
-	if assignees == "" {
-		assignees = "[]"
-	}
-	stepJSON := fmt.Sprintf(`{"id": 456, "title": "Test Step", "due_on": "2026-07-04", "assignees": %s}`, assignees)
-
-	switch {
-	case req.Method == "GET" && strings.Contains(path, "/projects.json"):
-		return respond(`[{"id": 123, "name": "Test Project"}]`)
-	case req.Method == "GET" && strings.Contains(path, "/my/profile.json"):
-		return respond(`{"id": 999, "name": "Test User"}`)
-	case req.Method == "GET" && strings.Contains(path, "card_tables/steps/456"):
-		s.getCount++
-		return respond(stepJSON)
-	case req.Method == "PUT" && strings.Contains(path, "card_tables/steps/456"):
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			return nil, err
-		}
-		s.capturedPut = body
-		if err := req.Body.Close(); err != nil {
-			return nil, err
-		}
-		return respond(stepJSON)
-	}
-
-	return nil, fmt.Errorf("unexpected HTTP request: %s %s", req.Method, path)
-}
-
-// TestAssignStepSendsOnlyAssignees verifies that assigning someone to a step
-// sends assignee_ids and nothing else. The server preserves attributes the
-// request omits, so echoing back the title or due date would be the CLI
-// re-asserting values the caller never asked to change.
-func TestAssignStepSendsOnlyAssignees(t *testing.T) {
-	transport := &stepUpdateBodyTransport{}
-	app := setupStepPathTestApp(t, transport)
-
-	cmd := NewAssignCmd()
-	require.NoError(t, executeAssignCommand(cmd, app, "456", "--step", "--to", "me", "-p", "123"))
-
-	var body map[string]any
-	require.NotEmpty(t, transport.capturedPut, "step update was never sent")
-	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.NotContains(t, body, "title")
-	assert.NotContains(t, body, "due_on")
-	assert.Equal(t, []any{float64(999)}, body["assignee_ids"])
-}
-
-// TestUnassignStepSendsEmptyAssigneeList verifies that removing the last
-// assignee sends an explicit empty list — which is what clears assignees —
-// and still says nothing about title or due date.
-func TestUnassignStepSendsEmptyAssigneeList(t *testing.T) {
-	transport := &stepUpdateBodyTransport{stepAssignees: `[{"id": 999, "name": "Test User"}]`}
-	app := setupStepPathTestApp(t, transport)
-
-	cmd := NewUnassignCmd()
-	require.NoError(t, executeAssignCommand(cmd, app, "456", "--step", "--from", "me", "-p", "123"))
-
-	var body map[string]any
-	require.NotEmpty(t, transport.capturedPut, "step update was never sent")
-	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.NotContains(t, body, "title")
-	assert.NotContains(t, body, "due_on")
-	assert.Equal(t, []any{}, body["assignee_ids"], "an empty list is how the API is told to clear assignees")
 }
