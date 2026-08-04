@@ -1,0 +1,32 @@
+internal/resilience/circuit_breaker_test.go
+  s_569e40c54282b2::t_75fe78a509dee8 343-344
+  s_569e40c54282b2::t_37a9844119b740 310-311,313,321,327-328
+  s_569e40c54282b2::t_9ff76d31255fd0 89,93,95,102-103
+  s_569e40c54282b2::t_7cd8f76968c1f6 276,280,282,294-295
+  s_569e40c54282b2::t_90e8520271b240 356,358,365,371-372,383,386
+  s_569e40c54282b2::t_d226cd86a2d0a9 6,14-36
+  s_569e40c54282b2::t_07f0154ff48f4a 37
+internal/resilience/hooks_test.go
+  s_569e40c54282b2::t_6b6b8ab2f41fba 316-317
+  s_569e40c54282b2::t_f58f4d8b756382 336,341
+  s_569e40c54282b2::t_4963ca02e982ff 272-273,293-302
+internal/resilience/circuit_breaker.go
+  s_569e40c54282b2::t_2af0cdc86f877c 11-15
+  s_569e40c54282b2::t_cf149e4e7abd66 34,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "069a5d644fe51e72ba31f2373517a41884ac369d",
+  "prompts": {},
+  "sessions": {
+    "s_569e40c54282b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53d5aefa-f39d-4887-8559-102f4a749d0a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
