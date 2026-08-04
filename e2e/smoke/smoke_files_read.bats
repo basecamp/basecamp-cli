@@ -71,6 +71,14 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "files versions lists an upload's versions" {
+  ensure_upload || mark_unverifiable "No upload in project"
+
+  run_smoke basecamp files versions "$QA_UPLOAD" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "files download downloads a file" {
   ensure_upload || return 0
 
