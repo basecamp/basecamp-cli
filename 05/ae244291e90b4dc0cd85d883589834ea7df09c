@@ -1,0 +1,30 @@
+API-COVERAGE.md
+  s_d931ffd296629c::t_671c2ba21cd8e1 9,11,13-17,20-25
+  s_d931ffd296629c::t_eb2dd2226d0e99 209,211
+  s_d931ffd296629c::t_da9a93a735878a 31-55
+  s_d931ffd296629c::t_bdfa7ce38b7b93 26,156,176,179-182,186,195
+ACCOUNT-WIDE-LISTINGS.md
+  s_d931ffd296629c::t_65195ce21112e5 227-228,232-253
+internal/commands/bookmarks.go
+  s_d931ffd296629c::t_8f6480f5fc2a91 272
+internal/commands/bookmarks_test.go
+  s_d931ffd296629c::t_ef206db4e76f50 192
+skills/basecamp/SKILL.md
+  s_d931ffd296629c::t_ea9b96ff6275b8 6-7,22-25,184-193,815-841,966-1026
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "05ae244291e90b4dc0cd85d883589834ea7df09c",
+  "prompts": {},
+  "sessions": {
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}

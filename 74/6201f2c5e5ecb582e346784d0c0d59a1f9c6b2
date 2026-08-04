@@ -1,0 +1,62 @@
+internal/commands/todos.go
+  s_d931ffd296629c::t_423c154d34729f 505,507,509,511
+  s_d931ffd296629c::t_837adfd243c0d6 430
+internal/commands/cards.go
+  s_d931ffd296629c::t_c9eee25eb1f189 391
+  s_d931ffd296629c::t_73a24c5ee7155d 316,318,320,322,324
+go.mod
+  s_d931ffd296629c::t_4d83cfb8734a02 9
+go.sum
+  s_d931ffd296629c::t_21edba67d9cc27 26-27
+internal/version/sdk-provenance.json
+  s_d931ffd296629c::t_31bfe9fcf69123 4-6,10-11
+internal/commands/bookmarks.go
+  s_d931ffd296629c::t_0c630a7ea468a2 1-343
+internal/commands/bookmarks_test.go
+  s_d931ffd296629c::t_e0b21433ebeacd 1-3,6-10,12-17,19-62,88-100,102-114,116-124,126-132,134-136,140-144,146-168,182-202,204-212,220-224,226-240,242-252,254-276,278-289
+  s_d931ffd296629c::t_3258a1226c50aa 4-5,11,18,63-87,101,115,125,133,137-139,145,169-181,203,213-219,225,241,253,277
+e2e/smoke/smoke_bookmarks.bats
+  s_d931ffd296629c::t_2a780fafa5ee59 28-29,34,45-46,49-50
+  s_d931ffd296629c::t_d62ec851695c09 1-27,30-33,35-44,47-48,51
+internal/commands/drafts_test.go
+  s_d931ffd296629c::t_325105f948e872 1-147
+internal/commands/drafts.go
+  s_d931ffd296629c::t_00a66039465fff 1-178
+internal/commands/commands_test.go
+  s_d931ffd296629c::t_6c90f30b87b726 114-115
+internal/commands/accountwide.go
+  s_d931ffd296629c::t_ac207417f19687 178-205
+internal/cli/root.go
+  s_d931ffd296629c::t_6a72fd967b7f4f 342-343
+e2e/smoke/smoke_drafts.bats
+  s_d931ffd296629c::t_bdf4289d24e64f 1-32
+internal/commands/commands.go
+  s_d931ffd296629c::t_4c87da264ce0d1 79-84
+  s_46c38fbb28f3e9::t_d7bde0b1914cfd 78
+.surface
+  s_d931ffd296629c::t_b0a68657f9eb1d 19-21,470-474,659-660,2008-2115,6526-6570,16736-16740,16925-16926
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "746201f2c5e5ecb582e346784d0c0d59a1f9c6b2",
+  "prompts": {},
+  "sessions": {
+    "s_46c38fbb28f3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "889b17e4-24ce-4e9d-a57d-f68894e16555",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
