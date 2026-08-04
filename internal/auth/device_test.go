@@ -959,37 +959,11 @@ func TestAccountID(t *testing.T) {
 	}
 }
 
-// TestIsReadOnly gates the insufficient-scope explanation: only a read-scoped
-// BC5 token turns a bare 403 into "re-login with --scope full". Launchpad
-// tokens carry no scope, so their 403 is a real permission failure.
-func TestIsReadOnly(t *testing.T) {
-	tests := []struct {
-		name     string
-		creds    Credentials
-		expected bool
-	}{
-		{"read-scoped BC5", Credentials{OAuthType: oauthTypeBC5, Scope: "read"}, true},
-		{"full-scoped BC5", Credentials{OAuthType: oauthTypeBC5, Scope: "full"}, false},
-		{"launchpad", Credentials{OAuthType: oauthTypeLaunchpad}, false},
-		{"launchpad with a stale scope", Credentials{OAuthType: oauthTypeLaunchpad, Scope: "read"}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newDeviceTestManager(t, "https://example.com")
-			require.NoError(t, m.store.Save(m.credentialKey(), &tc.creds))
-			assert.Equal(t, tc.expected, m.IsReadOnly())
-		})
-	}
-}
-
-// TestEnvTokenOverridesStoredCredentialAnswers pins BASECAMP_TOKEN precedence
-// for the two accessors that read the credential store. Requests carry the
-// environment token (AccessToken short-circuits on it), so answering from
-// stored credentials would describe a token that is not being used: a stale
-// BC5 binding would address the wrong account, and a stale read scope would
-// relabel that token's genuine 403 as a missing scope.
-func TestEnvTokenOverridesStoredCredentialAnswers(t *testing.T) {
+// TestEnvTokenOverridesStoredAccountBinding pins BASECAMP_TOKEN precedence for
+// AccountID. Requests carry the environment token (AccessToken short-circuits
+// on it), so answering from a stored BC5 binding would silently address an
+// account that token may have nothing to do with.
+func TestEnvTokenOverridesStoredAccountBinding(t *testing.T) {
 	stale := &Credentials{
 		AccessToken: "stored-tok",
 		OAuthType:   oauthTypeBC5,
@@ -997,28 +971,19 @@ func TestEnvTokenOverridesStoredCredentialAnswers(t *testing.T) {
 		Resource:    "urn:bc:account:2914079",
 	}
 
-	t.Run("stored answers stand without an env token", func(t *testing.T) {
+	t.Run("stored binding stands without an env token", func(t *testing.T) {
 		m := newDeviceTestManager(t, "https://example.com")
 		require.NoError(t, m.store.Save(m.credentialKey(), stale))
 		t.Setenv("BASECAMP_TOKEN", "") // don't inherit an ambient token
 
 		assert.Equal(t, "2914079", m.AccountID())
-		assert.True(t, m.IsReadOnly())
 	})
 
-	t.Run("env token suppresses the stored account binding", func(t *testing.T) {
+	t.Run("env token suppresses the stored binding", func(t *testing.T) {
 		m := newDeviceTestManager(t, "https://example.com")
 		require.NoError(t, m.store.Save(m.credentialKey(), stale))
 		t.Setenv("BASECAMP_TOKEN", "bc_at_from_environment")
 
 		assert.Empty(t, m.AccountID(), "the env token's account is not the stored one")
-	})
-
-	t.Run("env token suppresses the stored read scope", func(t *testing.T) {
-		m := newDeviceTestManager(t, "https://example.com")
-		require.NoError(t, m.store.Save(m.credentialKey(), stale))
-		t.Setenv("BASECAMP_TOKEN", "bc_at_from_environment")
-
-		assert.False(t, m.IsReadOnly(), "a 403 from the env token must not be blamed on a stored scope")
 	})
 }

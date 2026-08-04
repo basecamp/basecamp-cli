@@ -1102,27 +1102,6 @@ func (m *Manager) GetOAuthType() string {
 	return creds.OAuthType
 }
 
-// IsReadOnly reports that the stored credentials grant read access only, so
-// any write is refused before the server resolves the resource. Only BC5
-// tokens carry a scope; Launchpad tokens are read-write, so a 403 there is a
-// genuine permission failure rather than a missing scope.
-//
-// BASECAMP_TOKEN wins — match AccessToken() precedence. The request carried
-// the environment token, whose scope is unknown and unrelated to whatever
-// credentials happen to sit in the store, so its 403 must be reported as it
-// arrived rather than blamed on a stale stored scope.
-func (m *Manager) IsReadOnly() bool {
-	if os.Getenv("BASECAMP_TOKEN") != "" {
-		return false
-	}
-
-	creds, err := m.store.Load(m.credentialKey())
-	if err != nil {
-		return false
-	}
-	return creds.OAuthType == oauthTypeBC5 && creds.Scope == scopeRead
-}
-
 // accountResourceURNPrefix is the RFC 8707 resource indicator BC5 binds an
 // account-scoped token to. The trailing segment is the account's public ID —
 // the same one that appears in Basecamp URLs.

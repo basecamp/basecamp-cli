@@ -12,7 +12,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/config"
-	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -285,35 +284,4 @@ func TestVersionWithJQReturnsUsageError(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--jq is not supported by the version command")
-}
-
-// TestScopeErrorFor covers the rewrite that turns BC5's unexplained 403 into
-// actionable guidance. BC5 checks scope before it resolves the resource and
-// answers with an empty body, so "access denied" is all a read-scoped write
-// would otherwise report.
-func TestScopeErrorFor(t *testing.T) {
-	t.Run("bare 403 becomes an insufficient-scope error", func(t *testing.T) {
-		rewritten := scopeErrorFor(output.ErrForbidden("access denied"))
-
-		apiErr := output.AsError(rewritten)
-		require.NotNil(t, apiErr)
-		assert.Equal(t, 403, apiErr.HTTPStatus)
-		assert.Contains(t, apiErr.Hint, "--scope full", "the user needs the remedy, not just the refusal")
-	})
-
-	t.Run("a 403 that explains itself is preserved", func(t *testing.T) {
-		explained := &output.Error{
-			Code:       "forbidden",
-			Message:    "Project is archived",
-			Hint:       "Unarchive the project first",
-			HTTPStatus: 403,
-		}
-
-		assert.Same(t, explained, scopeErrorFor(explained), "a server-supplied hint must not be replaced")
-	})
-
-	t.Run("other statuses are untouched", func(t *testing.T) {
-		notFound := output.ErrNotFound("project", "12345")
-		assert.Same(t, notFound, scopeErrorFor(notFound))
-	})
 }

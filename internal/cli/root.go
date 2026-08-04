@@ -374,9 +374,6 @@ func Execute() {
 		// Transform Cobra errors to match Bash CLI error format
 		err = transformCobraError(err)
 
-		// A read-scoped token's 403 carries no body to explain itself.
-		err = explainInsufficientScope(err, appctx.FromContext(executedCmd.Context()))
-
 		// Convert error to structured output
 		apiErr := output.AsError(err)
 
@@ -611,32 +608,6 @@ func isMachineConsumer(root *cobra.Command) bool {
 		return true
 	}
 	return false
-}
-
-// explainInsufficientScope replaces a bare 403 with scope-specific guidance
-// when the stored token is read-only.
-//
-// BC5 checks scope before it resolves the resource and answers with an empty
-// body — the only signal is a WWW-Authenticate challenge the SDK does not
-// surface — so an unqualified "access denied" is all a user would otherwise
-// see for a write on a read-scoped login. A 403 that already carries a
-// server hint is left alone, as is any credential that could genuinely lack
-// permission (Launchpad tokens have no scope at all).
-func explainInsufficientScope(err error, app *appctx.App) error {
-	if app == nil || app.Auth == nil || !app.Auth.IsReadOnly() {
-		return err
-	}
-	return scopeErrorFor(err)
-}
-
-// scopeErrorFor rewrites an unexplained 403 as an insufficient-scope error.
-// A 403 that already carries a server hint explains itself and is preserved.
-func scopeErrorFor(err error) error {
-	apiErr := output.AsError(err)
-	if apiErr == nil || apiErr.HTTPStatus != 403 || apiErr.Hint != "" {
-		return err
-	}
-	return output.ErrForbiddenScope()
 }
 
 // transformCobraError transforms Cobra's default error messages to match the
