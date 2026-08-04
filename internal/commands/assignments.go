@@ -53,12 +53,14 @@ const upNextIDGuidance = `Which id to pass:
 
   A to-do, or a card itself     the entry's own id
   A step not yet prioritized    the step's id, from the parent card's children
-  A step already prioritized    the entry's priority_recording_id
+  A step already prioritized    the entry's id, which is its priority_recording_id
 
-That last case is the one that bites: once a step is prioritized the listing
-shows it under its parent card, so the entry's id belongs to the card and only
-priority_recording_id addresses the step. 'basecamp assignments list' is the
-only place that value appears — it is in no URL you can paste.
+Once a step is prioritized the listing shows it under its parent card. The
+entry's 'id' is the value that addresses the step — the same one reported as
+'priority_recording_id' — while the parent card stays available as
+'recording_id'. That makes 'assignments list --ids-only' safe to pipe into these
+verbs. 'basecamp assignments list' is the only place the value appears; it is in
+no URL you can paste.
 
 If two steps on one card are prioritized, the listing shows the card once with
 a single priority_recording_id, and the siblings are not separately
@@ -273,17 +275,26 @@ func flattenAssignments(result *basecamp.MyAssignmentsResult) []map[string]any {
 func appendAssignmentRows(rows []map[string]any, items []basecamp.MyAssignment, priority bool) []map[string]any {
 	for _, item := range items {
 		row := map[string]any{
-			"id":      item.ID,
-			"content": item.Content,
-			"type":    item.Type,
-			"project": item.Bucket.Name,
-			"due_on":  item.DueOn,
-			"up_next": priority,
+			"id":           item.ID,
+			"recording_id": item.ID,
+			"content":      item.Content,
+			"type":         item.Type,
+			"project":      item.Bucket.Name,
+			"due_on":       item.DueOn,
+			"up_next":      priority,
 		}
 		// Present only once the step or card has been prioritized, and the one
 		// id that addresses it thereafter.
+		//
+		// It also becomes the row's `id`, because `id` is the enumerable one:
+		// --ids-only prints that field and nothing else, so leaving the parent
+		// card there made `assignments list --ids-only | xargs ... deprioritize`
+		// address the card instead of the prioritized step. Deprioritize answers
+		// 204 whether or not anything matched, so that pipeline reported success
+		// and changed nothing. The parent stays reachable as recording_id.
 		if item.PriorityRecordingID != nil {
 			row["priority_recording_id"] = *item.PriorityRecordingID
+			row["id"] = *item.PriorityRecordingID
 		}
 		rows = append(rows, row)
 	}

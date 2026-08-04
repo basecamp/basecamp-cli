@@ -119,7 +119,17 @@ note, so there is no separate "create" step.
   basecamp notes set --file notes.md
   cat notes.md | basecamp notes set
 
-Attachments are out of scope: this writes the note body only.`,
+Attachments are out of scope: this writes the note body only.
+
+Empty content is refused, in every form — an empty argument, an empty file, an
+empty pipe. 'set' replaces everything, so an empty write is indistinguishable
+from a script whose input silently produced nothing, and the note it would erase
+is not recoverable from here.
+
+The cost is that there is no way to clear the note from the CLI: do that on
+Basecamp web. An explicit --clear would close that gap without weakening the
+guard, and is deliberately left for its own change rather than folded in here —
+a destructive verb deserves its own review, not a rider on a bump.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())

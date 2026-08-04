@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 const checkinsRemindersPath = "/99999/my/question_reminders.json"
@@ -196,6 +199,34 @@ func TestCheckinsRemindersRejectsScopeFlags(t *testing.T) {
 				"an ignored scope flag must not reach the server as an account-wide request")
 		})
 	}
+}
+
+// --ids-only prints the `id` field and nothing else, so a row that carries only
+// question_id enumerates as nothing at all — the command silently produces empty
+// output. The question id is the actionable one, since answering takes
+// `basecamp checkins answer <question-id>`.
+func TestCheckinsRemindersIDsOnlyEmitsTheQuestionID(t *testing.T) {
+	reminderID := int64(5)
+	rows := flattenQuestionReminders([]basecamp.QuestionReminder{{
+		RemindAt:   time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+		ReminderID: &reminderID,
+		Question: basecamp.Question{
+			ID:    789,
+			Title: "What did you work on?",
+		},
+	}})
+
+	require.Len(t, rows, 1)
+	assert.Equal(t, int64(789), rows[0]["id"], "the question id is the actionable one")
+	assert.Equal(t, int64(789), rows[0]["question_id"])
+	assert.Equal(t, reminderID, rows[0]["reminder_id"], "the reminder's own id stays available")
+
+	var buf bytes.Buffer
+	writer := output.New(output.Options{Writer: &buf, Format: output.FormatIDs})
+	require.NoError(t, writer.OK(rows))
+
+	assert.Equal(t, []string{"789"}, strings.Fields(buf.String()),
+		"--ids-only must enumerate the reminder feed, not print nothing")
 }
 
 // The reminder feed nests the question it is about, and the renderer skips

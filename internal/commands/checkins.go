@@ -115,13 +115,23 @@ This is your own reminder feed across every project, so it takes no
 // A QuestionReminder nests the question it is about, and the renderer skips
 // nested objects — so a generic render would show a timestamp and nothing that
 // says which question is due, or where.
+//
+// The question's id is the row's `id`, not just `question_id`: `id` is the
+// enumerable field, so a row without one makes `checkins reminders --ids-only`
+// print nothing at all. Answering a reminder takes the question id
+// (`basecamp checkins answer <question-id>`), so that is the actionable value.
+// The reminder's own id is kept as `reminder_id` for anything that needs it.
 func flattenQuestionReminders(reminders []basecamp.QuestionReminder) []map[string]any {
 	rows := make([]map[string]any, 0, len(reminders))
 	for _, r := range reminders {
 		row := map[string]any{
+			"id":          r.Question.ID,
 			"question_id": r.Question.ID,
 			"question":    r.Question.Title,
 			"remind_at":   r.RemindAt,
+		}
+		if r.ReminderID != nil {
+			row["reminder_id"] = *r.ReminderID
 		}
 		if r.Question.Bucket != nil {
 			row["project"] = r.Question.Bucket.Name
