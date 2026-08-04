@@ -1106,7 +1106,16 @@ func (m *Manager) GetOAuthType() string {
 // any write is refused before the server resolves the resource. Only BC5
 // tokens carry a scope; Launchpad tokens are read-write, so a 403 there is a
 // genuine permission failure rather than a missing scope.
+//
+// BASECAMP_TOKEN wins — match AccessToken() precedence. The request carried
+// the environment token, whose scope is unknown and unrelated to whatever
+// credentials happen to sit in the store, so its 403 must be reported as it
+// arrived rather than blamed on a stale stored scope.
 func (m *Manager) IsReadOnly() bool {
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return false
+	}
+
 	creds, err := m.store.Load(m.credentialKey())
 	if err != nil {
 		return false
@@ -1128,7 +1137,16 @@ const accountResourceURNPrefix = "urn:bc:account:"
 // account, so there is nothing to discover over the network and no picker to
 // show. It also works where account discovery cannot — /authorization.json
 // is served only on the API host, which beta deployments don't route.
+//
+// BASECAMP_TOKEN wins — match AccessToken() precedence. Requests carry the
+// environment token, which is bound to whatever the operator issued it for;
+// answering with a stored token's account would silently address the wrong
+// one. Fall through to discovery, which asks using the token in play.
 func (m *Manager) AccountID() string {
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return ""
+	}
+
 	creds, err := m.store.Load(m.credentialKey())
 	if err != nil {
 		return ""
