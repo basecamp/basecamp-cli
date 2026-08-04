@@ -1,0 +1,151 @@
+go.mod
+  s_d931ffd296629c::t_4d83cfb8734a02 9
+go.sum
+  s_d931ffd296629c::t_21edba67d9cc27 26-27
+internal/version/sdk-provenance.json
+  s_d931ffd296629c::t_31bfe9fcf69123 4-6,10-11
+internal/commands/bookmarks.go
+  s_d931ffd296629c::t_0c630a7ea468a2 1-271,273-343
+  s_d931ffd296629c::t_8f6480f5fc2a91 272
+internal/commands/bookmarks_test.go
+  s_d931ffd296629c::t_e0b21433ebeacd 1-3,6-10,12-17,19-62,88-100,102-114,116-124,126-132,134-136,140-144,146-168,182-191,193-202,204-212,220-224,226-240,242-252,254-276,278-289
+  s_d931ffd296629c::t_3258a1226c50aa 4-5,11,18,63-87,101,115,125,133,137-139,145,169-181,203,213-219,225,241,253,277
+  s_d931ffd296629c::t_ef206db4e76f50 192
+e2e/smoke/smoke_bookmarks.bats
+  s_d931ffd296629c::t_2a780fafa5ee59 28-29,34,45-46,49-50
+  s_d931ffd296629c::t_d62ec851695c09 1-27,30-33,35-44,47-48,51
+internal/commands/drafts_test.go
+  s_d931ffd296629c::t_325105f948e872 1-147
+internal/commands/drafts.go
+  s_d931ffd296629c::t_00a66039465fff 1-178
+internal/commands/commands_test.go
+  s_d931ffd296629c::t_6c90f30b87b726 114-115
+  s_d931ffd296629c::t_6a8ffc180f87e1 116-117
+internal/commands/accountwide.go
+  s_d931ffd296629c::t_ac207417f19687 279-306
+  s_d931ffd296629c::t_21d9fb9141e882 4,7
+  s_d931ffd296629c::t_705f772623ea99 228-256
+  s_d931ffd296629c::t_191027c02a6fe5 180-227,257-278
+internal/cli/root.go
+  s_d931ffd296629c::t_6a72fd967b7f4f 342-343
+  s_d931ffd296629c::t_4e6e021f94a172 344-345
+e2e/smoke/smoke_drafts.bats
+  s_d931ffd296629c::t_bdf4289d24e64f 1-32
+internal/commands/commands.go
+  s_d931ffd296629c::t_4c87da264ce0d1 80-83,85-86
+  s_46c38fbb28f3e9::t_d7bde0b1914cfd 79
+  s_d931ffd296629c::t_3b31934a199545 84
+  s_d931ffd296629c::t_d4bfea2e9c2fbc 76
+  s_d931ffd296629c::t_50a393edb3a360 75
+  s_d931ffd296629c::t_8c91cfe7c3683e 48
+.surface
+  s_d931ffd296629c::t_b0a68657f9eb1d 23-25,489-493,691-692,2107-2214,6923-6967,17202-17206,17404-17405
+  s_d931ffd296629c::t_66ab5e9aa5ae01 36-38,263,504-506,858-860,2429-2492,11005-11068,17217-17219,17571-17573
+  s_d931ffd296629c::t_e323149476d78e 10,12-14,468,471-472,1654-1674,1717-1759,17181,17184-17185
+  s_d931ffd296629c::t_a830dfa79c9ea1 91,93-95,107,109-111,569,571-573,577,585,587-589,593,3955-3977,4004-4073,4149-4171,4342-4364,4391-4460,4536-4558,14258,17282,17284-17286,17290,17298,17300-17302,17306
+  s_d931ffd296629c::t_a91b734b5a5957 3049,3054,14277,14281
+internal/commands/calendars.go
+  s_d931ffd296629c::t_4fba635f10667c 1-188
+e2e/smoke/smoke_calendars.bats
+  s_d931ffd296629c::t_de16263ee2e13f 1-25
+internal/commands/notes.go
+  s_d931ffd296629c::t_55a75d16c880b6 1-211
+internal/commands/notes_test.go
+  s_d931ffd296629c::t_4c0a545598574f 1-164
+  s_d931ffd296629c::t_961a8f16c77fcf 165-170
+internal/commands/calendars_test.go
+  s_d931ffd296629c::t_fe5a11e4b66101 1-119
+e2e/smoke/smoke_notes.bats
+  s_d931ffd296629c::t_7578f057e82545 1-20
+internal/commands/assignments_priority_test.go
+  s_d931ffd296629c::t_dab956791ba9c8 1-131
+  s_d931ffd296629c::t_a4ac3f18aadaaa 132-134
+internal/commands/assignments.go
+  s_d931ffd296629c::t_06759b03c3f606 204,236,253-275,282-291
+  s_d931ffd296629c::t_e933ae540c85b4 276-281
+  s_d931ffd296629c::t_cff92f1d3e2690 6,10
+  s_d931ffd296629c::t_47f0620c3a622d 40-42,48-125,129-203
+  s_d931ffd296629c::t_e8872e8b2d2986 126-128
+  s_d931ffd296629c::t_a15844ab2fd077 5
+  s_555508c40a7b3b::t_be0382a1e47540 11,205,292
+e2e/smoke/smoke_assignments.bats
+  s_d931ffd296629c::t_8e91d0fd607f9e 27-49
+internal/commands/checkins_question_admin_test.go
+  s_d931ffd296629c::t_205d5973644560 113,120
+  s_d931ffd296629c::t_0e03979ff1f10a 1-27,29,31-112,114-119,121-190
+  s_d931ffd296629c::t_3c82c9109088b8 28,30
+internal/commands/todos_loose_test.go
+  s_d931ffd296629c::t_6651f40104bb36 89-96
+  s_d931ffd296629c::t_6384effad7d72e 14
+  s_d931ffd296629c::t_9210c651ddbc25 1-13,15-88,97-105
+internal/commands/todos.go
+  s_d931ffd296629c::t_9e30e545a0ac6b 1434-1436
+  s_d931ffd296629c::t_6261930f27df42 1225,1230-1237
+  s_d931ffd296629c::t_8632e03d4335b7 1373-1382,1384-1395
+  s_d931ffd296629c::t_85bd02c2849c2d 1278-1289,1293-1308,1310-1312,1314-1318
+  s_d931ffd296629c::t_132161da6e44d6 191-199
+  s_d931ffd296629c::t_d0eff408bbc4ce 31-32,82-85,87-93,104-108,229,239,380-386,401,408,464-466,468-469,523,544,546,548,550,763,782,793-798,800,802,805-806,816,849-862,864-871,873-878,892-894,896-898,924,958-960,981
+  s_d931ffd296629c::t_e07b07a2667e14 86,268-272,379,467,540,863,872,889,895
+  s_d931ffd296629c::t_a6c2b6dfa7aed6 526
+internal/commands/checkins.go
+  s_d931ffd296629c::t_9ecd035f83ffa8 118,243-246,252-335,337-468
+  s_d931ffd296629c::t_583e8322700e5e 336
+  s_d931ffd296629c::t_26bb884e937a3d 44,50-117
+  s_46c38fbb28f3e9::t_4711ca9e4c09ae 119,469
+e2e/smoke/smoke_checkins.bats
+  s_d931ffd296629c::t_b4d4779a15dfa3 59-90
+e2e/smoke/smoke_core.bats
+  s_d931ffd296629c::t_0f69eda00e2cbb 81-86
+  s_d931ffd296629c::t_8a7121c108d1b7 87-98
+API-COVERAGE.md
+  s_d931ffd296629c::t_671c2ba21cd8e1 9,11,13-17,20-25
+  s_d931ffd296629c::t_eb2dd2226d0e99 209,211
+  s_d931ffd296629c::t_da9a93a735878a 31-55
+  s_d931ffd296629c::t_bdfa7ce38b7b93 26,156,176,179-182,186,195
+ACCOUNT-WIDE-LISTINGS.md
+  s_d931ffd296629c::t_65195ce21112e5 235-236,240-261
+  s_d931ffd296629c::t_70954d7eeaab4b 109-116,146-148,367-424,499-512
+skills/basecamp/SKILL.md
+  s_d931ffd296629c::t_ea9b96ff6275b8 6-7,22-25,188-197,819-845,983-1043
+  s_d931ffd296629c::t_0f3eaf65b06b06 184-187,970-982
+internal/commands/cards.go
+  s_d931ffd296629c::t_99b59b1c96a5b7 32,78-79,101-106,126-127,177-192,328-340,354,356,358,360,362,429-439
+internal/commands/accountwide_filters_test.go
+  s_d931ffd296629c::t_8ef9669f57f166 1-258
+internal/commands/todos_test.go
+  s_d931ffd296629c::t_a63337400d7c32 425-430,432,434-435
+.surface-breaking
+  s_d931ffd296629c::t_c997c325606cc5 747
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.19",
+  "base_commit_sha": "642857c6d5a4dfc216ef95a4eb6ff4d4fed44f9f",
+  "prompts": {},
+  "sessions": {
+    "s_46c38fbb28f3e9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "889b17e4-24ce-4e9d-a57d-f68894e16555",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_555508c40a7b3b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e708032-ac78-4cef-b1cf-d589a0d95671",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_d931ffd296629c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ba81883-0cd3-4faf-ba1a-4be89d947282",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
