@@ -1,0 +1,40 @@
+internal/commands/notes.go
+  s_5db9c709885cff::t_5522da43d5db4a 122-132
+internal/commands/assignments.go
+  s_5db9c709885cff::t_7de7e5889f1086 56,58-63
+  s_5db9c709885cff::t_bd4a1df38a186e 278-284,288-294,297
+internal/commands/checkins.go
+  s_5db9c709885cff::t_cd28b027c15ccb 118-123,128,133-134
+  s_5db9c709885cff::t_215b4634f03114 135
+internal/commands/assignments_priority_test.go
+  s_5db9c709885cff::t_d6b9575289d7b6 130-132,139-140,143-168,171-174
+  s_5db9c709885cff::t_5bd6e0f845330d 169-170
+  s_ae792ed0be3006::t_10f7480e09dd55 4,7,14-15,175
+internal/commands/checkins_question_admin_test.go
+  s_5db9c709885cff::t_37ea0e8d49eed0 204-231
+  s_5db9c709885cff::t_1546e5070edb04 4,16-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "ad39cd8c7a4475b81a1aead8b2841d9b7fb0172a",
+  "prompts": {},
+  "sessions": {
+    "s_5db9c709885cff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0d4b599-9a1c-4868-ad38-a62eda149422",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_ae792ed0be3006": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fd3dc2e-89cf-437b-8756-21beefe1c5f6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
