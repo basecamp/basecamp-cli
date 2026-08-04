@@ -18,8 +18,9 @@ decodes the response with the wrong type: the API returns version *events*
 (`action`, `details`, `recording_id`), the OpenAPI spec models them as
 `[]Upload`, so a caller gets Upload structs with blank `title`/`filename`/
 `status` and an `id` that is the event id and does not resolve as an upload.
-Shipping a command on that would mean shipping wrong data, so it is held. See
-[COMMUNIQUE-sdk-upload-versions-response.md](COMMUNIQUE-sdk-upload-versions-response.md).
+Shipping a command on that would mean shipping wrong data, so it is held.
+Reported to the SDK; the command lands when `ListVersions` returns an event
+type.
 
 This file previously read "100% coverage of tracked in-scope API (184/184)".
 That was wrong, and the matrix had no way to say so — with only ✅ and ⏭️
@@ -211,7 +212,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ⚠️ | BC4 | - | list, show, create, update, download; trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only). **Blocked:** `GET /uploads/:id/versions.json` — the SDK's `ListVersions` types the response as `[]Upload`, but the API returns version *events*, so the data comes back blank and misleading. Command is written and held on `feat/files-versions`; see [COMMUNIQUE-sdk-upload-versions-response.md](COMMUNIQUE-sdk-upload-versions-response.md). Replacing an upload's *file* is a separate BC3 gap — see [COMMUNIQUE-upload-versions-api.md](COMMUNIQUE-upload-versions-api.md) |
+| uploads | 8 | `files`, `uploads` | ⚠️ | BC4 | - | list, show, create, update, download; trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only). **Blocked:** `GET /uploads/:id/versions.json` — the SDK's `ListVersions` types the response as `[]Upload`, but the API returns version *events*, so the data comes back blank and misleading. Command is written and held on `feat/files-versions`, pending an SDK fix. Replacing an upload's *file* has no API at all — a separate BC3 gap, tracked outside this repo |
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
