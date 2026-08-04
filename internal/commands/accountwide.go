@@ -191,15 +191,17 @@ func accountWideCapNotice(capped bool, meta basecamp.ListMeta, count int, plural
 // algorithm untouched; the number of requests it takes is a property of the
 // result, not of the filter.
 //
-// Project-scoped --assignee is a different animal — see the note on
-// filterTodosByAssignees.
+// Project-scoped --assignee is a different animal: that endpoint has no
+// assignee parameter, so the flag is applied client-side over an unlimited
+// fetch. See the note in listTodosInList (internal/commands/todos.go).
 
 // dueFilterValues are the tokens --due accepts. These are categories, not
 // dates: internal/dateparse is deliberately not involved, since "overdue" is
 // not a date and "with" is not a date range.
 var dueFilterValues = []string{"with", "without", "overdue"}
 
-// rejectEmptyTaskFilterValues refuses an explicitly empty --due or --assignee.
+// validateTaskFilterValues refuses an explicitly empty --due or --assignee, and
+// an unknown --due token.
 //
 // Every other check in this file tests the flag's *value*, which makes `--due=`
 // indistinguishable from never passing --due: the project-scoped guard stops
