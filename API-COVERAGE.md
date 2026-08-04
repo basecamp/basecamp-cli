@@ -86,8 +86,11 @@ Model and transport changes riding along:
   and `TodolistGroup` the tag carries no `omitempty`, so the key is always
   present in machine output.
 - HTTP 400 now maps to the `validation` error code rather than `api_error` (#482).
-  Since `convertSDKError` passes the SDK code straight through, **a 400's exit
-  code moves from 7 to 9**; 422 was already validation.
+  `convertSDKError` passes the SDK code straight through, so a 400's JSON `code`
+  changes `api_error` → `validation`. **Its exit code does not move: a 400 still
+  exits 7.** `internal/output` defines no `validation` mapping, and `clioutput`
+  defaults an unrecognised code to `ExitAPI` — so the new code lands on the same
+  exit status the old one did. Exit 9 is not reachable from the CLI at all.
 - Retry behavior: per-operation `retry.max` is honored as a ceiling (#483),
   `*WithBody` request bodies replay across retries (#481), and the declared
   `retry_on` status set is honored (#486).

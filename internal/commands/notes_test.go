@@ -168,3 +168,53 @@ func TestNotesSetRejectsAmbiguousOrEmptyInput(t *testing.T) {
 		})
 	}
 }
+
+// A piped body must never lose to a flag. `generate | basecamp notes set --file
+// fallback.md` used to overwrite the note from the file and throw the generated
+// body away, because stdin was only consulted after --file had been ruled out.
+func TestNotesSetRejectsPipedContentAlongsideAnotherSource(t *testing.T) {
+	populated := filepath.Join(t.TempDir(), "note.md")
+	require.NoError(t, os.WriteFile(populated, []byte("from the file"), 0o600))
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"pipe and --file together", []string{"set", "--file", populated}},
+		{"pipe and an argument together", []string{"set", "inline"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport, _ := setupPersonalFeedApp(t, notesUpdateRoute())
+
+			cmd := NewNotesCmd()
+			cmd.SetIn(strings.NewReader("piped note body"))
+
+			err := executeRecordingCommand(cmd, app, tc.args...)
+
+			requireBookmarksUsageError(t, err)
+			assert.Empty(t, transport.recorded(), "a rejected write must not reach the server")
+		})
+	}
+}
+
+// An empty pipe carries no body to lose, so it must not turn an otherwise valid
+// --file call into an ambiguity error.
+func TestNotesSetIgnoresAnEmptyPipeAlongsideAFile(t *testing.T) {
+	populated := filepath.Join(t.TempDir(), "note.md")
+	require.NoError(t, os.WriteFile(populated, []byte("from the file"), 0o600))
+
+	app, transport, _ := setupPersonalFeedApp(t, notesUpdateRoute())
+
+	cmd := NewNotesCmd()
+	cmd.SetIn(strings.NewReader("   \n"))
+
+	require.NoError(t, executeRecordingCommand(cmd, app, "set", "--file", populated))
+
+	var body struct {
+		Note struct {
+			Content string `json:"content"`
+		} `json:"note"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(transport.last(t).Body), &body))
+	assert.Contains(t, body.Note.Content, "from the file")
+}

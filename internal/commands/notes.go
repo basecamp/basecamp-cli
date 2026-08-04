@@ -163,36 +163,50 @@ Attachments are out of scope: this writes the note body only.`,
 // Naming two sources is a usage error rather than a silent precedence rule: a
 // caller who passes both an argument and --file has a wrong expectation about
 // which one wins, and this command overwrites the whole note.
+//
+// All three sources are detected before any of them is chosen. Checking stdin
+// only after an argument and --file had been ruled out made
+// `generate | basecamp notes set --file fallback.md` overwrite the note from
+// the file and discard the generated body without a word — the precise failure
+// this function exists to prevent, in the one command that replaces everything.
 func notesContent(cmd *cobra.Command, args []string, file string) (string, error) {
 	positional := strings.Join(args, " ")
-
-	if file != "" && positional != "" {
-		return "", output.ErrUsage("pass note content as an argument or --file, not both")
-	}
-
-	if file != "" {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return "", output.ErrUsage(fmt.Sprintf("failed to read %s: %v", file, err))
-		}
-		return notesRequireContent(string(data))
-	}
-
-	if positional != "" {
-		return notesRequireContent(positional)
-	}
 
 	piped, ok, err := readPipedStdin(cmd)
 	if err != nil {
 		return "", err
 	}
-	if !ok {
-		return "", output.ErrUsageHint(
-			"note content is required",
-			`Pass it as an argument, with --file, or on stdin: basecamp notes set "..."`,
-		)
+	// An empty pipe is not a source. A redirected-but-empty stdin carries no
+	// body to lose, so it must not turn a valid `--file` call into an error.
+	hasPipe := ok && strings.TrimSpace(piped) != ""
+
+	named := 0
+	for _, present := range []bool{file != "", positional != "", hasPipe} {
+		if present {
+			named++
+		}
 	}
-	return notesRequireContent(piped)
+	if named > 1 {
+		return "", output.ErrUsage("pass note content as an argument, with --file, or on stdin — not more than one")
+	}
+
+	switch {
+	case file != "":
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", output.ErrUsage(fmt.Sprintf("failed to read %s: %v", file, err))
+		}
+		return notesRequireContent(string(data))
+	case positional != "":
+		return notesRequireContent(positional)
+	case hasPipe:
+		return notesRequireContent(piped)
+	}
+
+	return "", output.ErrUsageHint(
+		"note content is required",
+		`Pass it as an argument, with --file, or on stdin: basecamp notes set "..."`,
+	)
 }
 
 // notesRequireContent refuses to blank the note by accident.

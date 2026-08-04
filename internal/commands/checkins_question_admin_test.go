@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,6 +168,34 @@ func TestCheckinsRemindersLists(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
 	assert.Equal(t, "1 pending check-in reminders", envelope.Summary)
+}
+
+// --project, --in and --questionnaire are persistent flags on the checkins
+// parent, so cobra accepts them on `reminders` even though the feed is
+// account-wide. Silently ignoring them is the worst outcome: the caller
+// believes the request was scoped and gets every project's reminders back, with
+// nothing in the output to say otherwise.
+func TestCheckinsRemindersRejectsScopeFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"reminders", "--project", "977190"},
+		{"reminders", "--in", "977190"},
+		{"reminders", "--questionnaire", "123"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			app, transport, _ := setupPersonalFeedApp(t, stubRoute{
+				method: http.MethodGet,
+				path:   checkinsRemindersPath,
+				status: http.StatusOK,
+				body:   `[]`,
+			})
+
+			err := executeRecordingCommand(NewCheckinsCmd(), app, args...)
+
+			requireBookmarksUsageError(t, err)
+			assert.Empty(t, transport.recorded(),
+				"an ignored scope flag must not reach the server as an account-wide request")
+		})
+	}
 }
 
 // The reminder feed nests the question it is about, and the renderer skips

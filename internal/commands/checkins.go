@@ -64,6 +64,20 @@ This is your own reminder feed across every project, so it takes no
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			// --project/--in/--questionnaire are persistent flags on the parent,
+			// so cobra accepts them here even though this feed is account-wide.
+			// Accepting and ignoring them is worse than rejecting them: the
+			// caller believes they scoped the request and gets every project's
+			// reminders back, with nothing in the output saying otherwise.
+			for _, scoped := range []string{"project", "in", "questionnaire"} {
+				if cmd.Flags().Changed(scoped) {
+					return output.ErrUsageHint(
+						fmt.Sprintf("checkins reminders does not take --%s", scoped),
+						"This is your own reminder feed across every project. Drop the flag.",
+					)
+				}
+			}
+
 			if limit < 0 {
 				return output.ErrUsage("--limit must be zero or positive")
 			}
