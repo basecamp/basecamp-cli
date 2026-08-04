@@ -1236,3 +1236,75 @@ func TestFilesGroupSpellingsGetHonestAccountWideSemantics(t *testing.T) {
 		assert.NotContains(t, transport.last(t).Query, "kind=")
 	})
 }
+
+// mockUploadVersionsTransport serves the versions listing for upload 789 and
+// records every path it is asked for, so a stray call to the wrong endpoint
+// fails the test instead of passing on a lucky response.
+type mockUploadVersionsTransport struct {
+	requests []string
+}
+
+func (t *mockUploadVersionsTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.Method+" "+req.URL.Path)
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method != http.MethodGet || !strings.HasSuffix(req.URL.Path, "/uploads/789/versions.json") {
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body: io.NopCloser(strings.NewReader(
+			`[{"id":790,"title":"report.pdf","filename":"report.pdf","status":"active"}]`,
+		)),
+		Header: header,
+	}, nil
+}
+
+// TestFilesVersionsListsUploadVersions verifies the command reaches the
+// account-level versions endpoint — no project scope, no extra lookups.
+func TestFilesVersionsListsUploadVersions(t *testing.T) {
+	transport := &mockUploadVersionsTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "versions", "789")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"GET /99999/uploads/789/versions.json"}, transport.requests)
+}
+
+// TestFilesVersionsAcceptsURL verifies a pasted upload URL resolves to the
+// same request as the bare ID.
+func TestFilesVersionsAcceptsURL(t *testing.T) {
+	transport := &mockUploadVersionsTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "versions", "https://3.basecamp.com/99999/buckets/456/uploads/789")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"GET /99999/uploads/789/versions.json"}, transport.requests)
+}
+
+// TestFilesVersionsRejectsConflictingPagination pins the same pagination
+// contract the other bounded listings use: --page disables the walk, so it
+// cannot be combined with --all or --limit, and only page 1 is reachable.
+func TestFilesVersionsRejectsConflictingPagination(t *testing.T) {
+	for name, args := range map[string][]string{
+		"--all with --limit": {"versions", "789", "--all", "--limit", "5"},
+		"--page with --all":  {"versions", "789", "--page", "1", "--all"},
+		"--page beyond 1":    {"versions", "789", "--page", "2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockUploadVersionsTransport{}
+			app := showTestApp(t, transport)
+
+			err := executeMessagesCommand(NewFilesCmd(), app, args...)
+			require.Error(t, err)
+			assert.Empty(t, transport.requests, "must refuse before any request")
+		})
+	}
+}

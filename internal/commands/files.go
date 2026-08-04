@@ -45,6 +45,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
+		newFilesVersionsCmd(),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
@@ -1536,6 +1537,94 @@ You can pass either an item ID or a Basecamp URL:
 	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
 	dlDir = addDownloadAttachmentsFlag(cmd)
 	cf = addCommentFlags(cmd, false)
+
+	return cmd
+}
+
+func newFilesVersionsCmd() *cobra.Command {
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
+		Use:   "versions <upload_id|url>",
+		Short: "List an upload's versions",
+		Long: `List every version of an uploaded file.
+
+Replacing a file in Basecamp keeps the earlier copies as versions of the same
+upload, so the upload ID stays stable while its contents change.
+
+You can pass either an upload ID or a Basecamp URL:
+  basecamp files versions 789 --in my-project
+  basecamp files versions https://3.basecamp.com/123/buckets/456/uploads/789`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			// Validate flag combinations
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+			if page > 0 && (all || limit > 0) {
+				return output.ErrUsage("--page cannot be combined with --all or --limit")
+			}
+			if page > 1 {
+				return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			uploadIDStr := extractID(args[0])
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			// Build pagination options. The SDK treats Limit 0 as "every
+			// version", which is also this command's default.
+			opts := &basecamp.UploadVersionListOptions{}
+			if limit > 0 {
+				opts.Limit = limit
+			}
+			if page > 0 {
+				opts.Page = page
+			}
+
+			versionsResult, err := app.Account().Uploads().ListVersions(cmd.Context(), uploadID, opts)
+			if err != nil {
+				return convertSDKError(err)
+			}
+			versions := versionsResult.Versions
+
+			respOpts := []output.ResponseOption{
+				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp files show %s", uploadIDStr),
+						Description: "Show file details",
+					},
+					output.Breadcrumb{
+						Action:      "download",
+						Cmd:         fmt.Sprintf("basecamp files download %s", uploadIDStr),
+						Description: "Download the current version",
+					},
+				),
+			}
+
+			if notice := output.TruncationNoticeWithTotal(len(versions), versionsResult.Meta.TotalCount); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+
+			return app.OK(versions, respOpts...)
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of versions to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all versions (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
 }

@@ -159,6 +159,10 @@ load smoke_helper
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
 
+@test "docs versions is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
 @test "docs uploads create is out of scope" {
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
@@ -198,6 +202,10 @@ load smoke_helper
 }
 
 @test "vaults update is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults versions is out of scope" {
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
 

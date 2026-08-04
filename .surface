@@ -146,6 +146,7 @@ ARG basecamp docs upload create 00 <file>
 ARG basecamp docs uploads create 00 <file>
 ARG basecamp docs vault create 00 <name>
 ARG basecamp docs vaults create 00 <name>
+ARG basecamp docs versions 00 <upload_id|url>
 ARG basecamp documents archive 00 <id|url>
 ARG basecamp documents doc create 00 <title>
 ARG basecamp documents doc create 01 [content]
@@ -164,6 +165,7 @@ ARG basecamp documents upload create 00 <file>
 ARG basecamp documents uploads create 00 <file>
 ARG basecamp documents vault create 00 <name>
 ARG basecamp documents vaults create 00 <name>
+ARG basecamp documents versions 00 <upload_id|url>
 ARG basecamp events 00 <id|url>
 ARG basecamp file archive 00 <id|url>
 ARG basecamp file doc create 00 <title>
@@ -183,6 +185,7 @@ ARG basecamp file upload create 00 <file>
 ARG basecamp file uploads create 00 <file>
 ARG basecamp file vault create 00 <name>
 ARG basecamp file vaults create 00 <name>
+ARG basecamp file versions 00 <upload_id|url>
 ARG basecamp files archive 00 <id|url>
 ARG basecamp files doc create 00 <title>
 ARG basecamp files doc create 01 [content]
@@ -201,6 +204,7 @@ ARG basecamp files upload create 00 <file>
 ARG basecamp files uploads create 00 <file>
 ARG basecamp files vault create 00 <name>
 ARG basecamp files vaults create 00 <name>
+ARG basecamp files versions 00 <upload_id|url>
 ARG basecamp folders archive 00 <id|url>
 ARG basecamp folders doc create 00 <title>
 ARG basecamp folders doc create 01 [content]
@@ -219,6 +223,7 @@ ARG basecamp folders upload create 00 <file>
 ARG basecamp folders uploads create 00 <file>
 ARG basecamp folders vault create 00 <name>
 ARG basecamp folders vaults create 00 <name>
+ARG basecamp folders versions 00 <upload_id|url>
 ARG basecamp forwards replies 00 <forward_id|url>
 ARG basecamp forwards reply 00 <forward_id|url>
 ARG basecamp forwards reply 01 <reply_id|url>
@@ -414,6 +419,7 @@ ARG basecamp vault upload create 00 <file>
 ARG basecamp vault uploads create 00 <file>
 ARG basecamp vault vault create 00 <name>
 ARG basecamp vault vaults create 00 <name>
+ARG basecamp vault versions 00 <upload_id|url>
 ARG basecamp vaults archive 00 <id|url>
 ARG basecamp vaults doc create 00 <title>
 ARG basecamp vaults doc create 01 [content]
@@ -432,6 +438,7 @@ ARG basecamp vaults upload create 00 <file>
 ARG basecamp vaults uploads create 00 <file>
 ARG basecamp vaults vault create 00 <name>
 ARG basecamp vaults vaults create 00 <name>
+ARG basecamp vaults versions 00 <upload_id|url>
 ARG basecamp webhook create 00 <url>
 ARG basecamp webhook delete 00 <id>
 ARG basecamp webhook show 00 <id>
@@ -652,6 +659,7 @@ CMD basecamp docs vault list
 CMD basecamp docs vaults
 CMD basecamp docs vaults create
 CMD basecamp docs vaults list
+CMD basecamp docs versions
 CMD basecamp doctor
 CMD basecamp documents
 CMD basecamp documents archive
@@ -688,6 +696,7 @@ CMD basecamp documents vault list
 CMD basecamp documents vaults
 CMD basecamp documents vaults create
 CMD basecamp documents vaults list
+CMD basecamp documents versions
 CMD basecamp drafts
 CMD basecamp drafts list
 CMD basecamp events
@@ -726,6 +735,7 @@ CMD basecamp file vault list
 CMD basecamp file vaults
 CMD basecamp file vaults create
 CMD basecamp file vaults list
+CMD basecamp file versions
 CMD basecamp files
 CMD basecamp files archive
 CMD basecamp files doc
@@ -761,6 +771,7 @@ CMD basecamp files vault list
 CMD basecamp files vaults
 CMD basecamp files vaults create
 CMD basecamp files vaults list
+CMD basecamp files versions
 CMD basecamp folders
 CMD basecamp folders archive
 CMD basecamp folders doc
@@ -796,6 +807,7 @@ CMD basecamp folders vault list
 CMD basecamp folders vaults
 CMD basecamp folders vaults create
 CMD basecamp folders vaults list
+CMD basecamp folders versions
 CMD basecamp forwards
 CMD basecamp forwards inbox
 CMD basecamp forwards list
@@ -1068,6 +1080,7 @@ CMD basecamp vault vault list
 CMD basecamp vault vaults
 CMD basecamp vault vaults create
 CMD basecamp vault vaults list
+CMD basecamp vault versions
 CMD basecamp vaults
 CMD basecamp vaults archive
 CMD basecamp vaults doc
@@ -1103,6 +1116,7 @@ CMD basecamp vaults vault list
 CMD basecamp vaults vaults
 CMD basecamp vaults vaults create
 CMD basecamp vaults vaults list
+CMD basecamp vaults versions
 CMD basecamp version
 CMD basecamp webhook
 CMD basecamp webhook create
@@ -6006,6 +6020,32 @@ FLAG basecamp docs vaults list --styled type=bool
 FLAG basecamp docs vaults list --todolist type=string
 FLAG basecamp docs vaults list --vault type=string
 FLAG basecamp docs vaults list --verbose type=count
+FLAG basecamp docs versions --account type=string
+FLAG basecamp docs versions --agent type=bool
+FLAG basecamp docs versions --all type=bool
+FLAG basecamp docs versions --cache-dir type=string
+FLAG basecamp docs versions --count type=bool
+FLAG basecamp docs versions --folder type=string
+FLAG basecamp docs versions --help type=bool
+FLAG basecamp docs versions --hints type=bool
+FLAG basecamp docs versions --ids-only type=bool
+FLAG basecamp docs versions --in type=string
+FLAG basecamp docs versions --jq type=string
+FLAG basecamp docs versions --json type=bool
+FLAG basecamp docs versions --limit type=int
+FLAG basecamp docs versions --markdown type=bool
+FLAG basecamp docs versions --md type=bool
+FLAG basecamp docs versions --no-hints type=bool
+FLAG basecamp docs versions --no-stats type=bool
+FLAG basecamp docs versions --page type=int
+FLAG basecamp docs versions --profile type=string
+FLAG basecamp docs versions --project type=string
+FLAG basecamp docs versions --quiet type=bool
+FLAG basecamp docs versions --stats type=bool
+FLAG basecamp docs versions --styled type=bool
+FLAG basecamp docs versions --todolist type=string
+FLAG basecamp docs versions --vault type=string
+FLAG basecamp docs versions --verbose type=count
 FLAG basecamp doctor --account type=string
 FLAG basecamp doctor --agent type=bool
 FLAG basecamp doctor --cache-dir type=string
@@ -6920,6 +6960,32 @@ FLAG basecamp documents vaults list --styled type=bool
 FLAG basecamp documents vaults list --todolist type=string
 FLAG basecamp documents vaults list --vault type=string
 FLAG basecamp documents vaults list --verbose type=count
+FLAG basecamp documents versions --account type=string
+FLAG basecamp documents versions --agent type=bool
+FLAG basecamp documents versions --all type=bool
+FLAG basecamp documents versions --cache-dir type=string
+FLAG basecamp documents versions --count type=bool
+FLAG basecamp documents versions --folder type=string
+FLAG basecamp documents versions --help type=bool
+FLAG basecamp documents versions --hints type=bool
+FLAG basecamp documents versions --ids-only type=bool
+FLAG basecamp documents versions --in type=string
+FLAG basecamp documents versions --jq type=string
+FLAG basecamp documents versions --json type=bool
+FLAG basecamp documents versions --limit type=int
+FLAG basecamp documents versions --markdown type=bool
+FLAG basecamp documents versions --md type=bool
+FLAG basecamp documents versions --no-hints type=bool
+FLAG basecamp documents versions --no-stats type=bool
+FLAG basecamp documents versions --page type=int
+FLAG basecamp documents versions --profile type=string
+FLAG basecamp documents versions --project type=string
+FLAG basecamp documents versions --quiet type=bool
+FLAG basecamp documents versions --stats type=bool
+FLAG basecamp documents versions --styled type=bool
+FLAG basecamp documents versions --todolist type=string
+FLAG basecamp documents versions --vault type=string
+FLAG basecamp documents versions --verbose type=count
 FLAG basecamp drafts --account type=string
 FLAG basecamp drafts --agent type=bool
 FLAG basecamp drafts --cache-dir type=string
@@ -7882,6 +7948,32 @@ FLAG basecamp file vaults list --styled type=bool
 FLAG basecamp file vaults list --todolist type=string
 FLAG basecamp file vaults list --vault type=string
 FLAG basecamp file vaults list --verbose type=count
+FLAG basecamp file versions --account type=string
+FLAG basecamp file versions --agent type=bool
+FLAG basecamp file versions --all type=bool
+FLAG basecamp file versions --cache-dir type=string
+FLAG basecamp file versions --count type=bool
+FLAG basecamp file versions --folder type=string
+FLAG basecamp file versions --help type=bool
+FLAG basecamp file versions --hints type=bool
+FLAG basecamp file versions --ids-only type=bool
+FLAG basecamp file versions --in type=string
+FLAG basecamp file versions --jq type=string
+FLAG basecamp file versions --json type=bool
+FLAG basecamp file versions --limit type=int
+FLAG basecamp file versions --markdown type=bool
+FLAG basecamp file versions --md type=bool
+FLAG basecamp file versions --no-hints type=bool
+FLAG basecamp file versions --no-stats type=bool
+FLAG basecamp file versions --page type=int
+FLAG basecamp file versions --profile type=string
+FLAG basecamp file versions --project type=string
+FLAG basecamp file versions --quiet type=bool
+FLAG basecamp file versions --stats type=bool
+FLAG basecamp file versions --styled type=bool
+FLAG basecamp file versions --todolist type=string
+FLAG basecamp file versions --vault type=string
+FLAG basecamp file versions --verbose type=count
 FLAG basecamp files --account type=string
 FLAG basecamp files --agent type=bool
 FLAG basecamp files --cache-dir type=string
@@ -8775,6 +8867,32 @@ FLAG basecamp files vaults list --styled type=bool
 FLAG basecamp files vaults list --todolist type=string
 FLAG basecamp files vaults list --vault type=string
 FLAG basecamp files vaults list --verbose type=count
+FLAG basecamp files versions --account type=string
+FLAG basecamp files versions --agent type=bool
+FLAG basecamp files versions --all type=bool
+FLAG basecamp files versions --cache-dir type=string
+FLAG basecamp files versions --count type=bool
+FLAG basecamp files versions --folder type=string
+FLAG basecamp files versions --help type=bool
+FLAG basecamp files versions --hints type=bool
+FLAG basecamp files versions --ids-only type=bool
+FLAG basecamp files versions --in type=string
+FLAG basecamp files versions --jq type=string
+FLAG basecamp files versions --json type=bool
+FLAG basecamp files versions --limit type=int
+FLAG basecamp files versions --markdown type=bool
+FLAG basecamp files versions --md type=bool
+FLAG basecamp files versions --no-hints type=bool
+FLAG basecamp files versions --no-stats type=bool
+FLAG basecamp files versions --page type=int
+FLAG basecamp files versions --profile type=string
+FLAG basecamp files versions --project type=string
+FLAG basecamp files versions --quiet type=bool
+FLAG basecamp files versions --stats type=bool
+FLAG basecamp files versions --styled type=bool
+FLAG basecamp files versions --todolist type=string
+FLAG basecamp files versions --vault type=string
+FLAG basecamp files versions --verbose type=count
 FLAG basecamp folders --account type=string
 FLAG basecamp folders --agent type=bool
 FLAG basecamp folders --cache-dir type=string
@@ -9668,6 +9786,32 @@ FLAG basecamp folders vaults list --styled type=bool
 FLAG basecamp folders vaults list --todolist type=string
 FLAG basecamp folders vaults list --vault type=string
 FLAG basecamp folders vaults list --verbose type=count
+FLAG basecamp folders versions --account type=string
+FLAG basecamp folders versions --agent type=bool
+FLAG basecamp folders versions --all type=bool
+FLAG basecamp folders versions --cache-dir type=string
+FLAG basecamp folders versions --count type=bool
+FLAG basecamp folders versions --folder type=string
+FLAG basecamp folders versions --help type=bool
+FLAG basecamp folders versions --hints type=bool
+FLAG basecamp folders versions --ids-only type=bool
+FLAG basecamp folders versions --in type=string
+FLAG basecamp folders versions --jq type=string
+FLAG basecamp folders versions --json type=bool
+FLAG basecamp folders versions --limit type=int
+FLAG basecamp folders versions --markdown type=bool
+FLAG basecamp folders versions --md type=bool
+FLAG basecamp folders versions --no-hints type=bool
+FLAG basecamp folders versions --no-stats type=bool
+FLAG basecamp folders versions --page type=int
+FLAG basecamp folders versions --profile type=string
+FLAG basecamp folders versions --project type=string
+FLAG basecamp folders versions --quiet type=bool
+FLAG basecamp folders versions --stats type=bool
+FLAG basecamp folders versions --styled type=bool
+FLAG basecamp folders versions --todolist type=string
+FLAG basecamp folders versions --vault type=string
+FLAG basecamp folders versions --verbose type=count
 FLAG basecamp forwards --account type=string
 FLAG basecamp forwards --agent type=bool
 FLAG basecamp forwards --cache-dir type=string
@@ -15978,6 +16122,32 @@ FLAG basecamp vault vaults list --styled type=bool
 FLAG basecamp vault vaults list --todolist type=string
 FLAG basecamp vault vaults list --vault type=string
 FLAG basecamp vault vaults list --verbose type=count
+FLAG basecamp vault versions --account type=string
+FLAG basecamp vault versions --agent type=bool
+FLAG basecamp vault versions --all type=bool
+FLAG basecamp vault versions --cache-dir type=string
+FLAG basecamp vault versions --count type=bool
+FLAG basecamp vault versions --folder type=string
+FLAG basecamp vault versions --help type=bool
+FLAG basecamp vault versions --hints type=bool
+FLAG basecamp vault versions --ids-only type=bool
+FLAG basecamp vault versions --in type=string
+FLAG basecamp vault versions --jq type=string
+FLAG basecamp vault versions --json type=bool
+FLAG basecamp vault versions --limit type=int
+FLAG basecamp vault versions --markdown type=bool
+FLAG basecamp vault versions --md type=bool
+FLAG basecamp vault versions --no-hints type=bool
+FLAG basecamp vault versions --no-stats type=bool
+FLAG basecamp vault versions --page type=int
+FLAG basecamp vault versions --profile type=string
+FLAG basecamp vault versions --project type=string
+FLAG basecamp vault versions --quiet type=bool
+FLAG basecamp vault versions --stats type=bool
+FLAG basecamp vault versions --styled type=bool
+FLAG basecamp vault versions --todolist type=string
+FLAG basecamp vault versions --vault type=string
+FLAG basecamp vault versions --verbose type=count
 FLAG basecamp vaults --account type=string
 FLAG basecamp vaults --agent type=bool
 FLAG basecamp vaults --cache-dir type=string
@@ -16871,6 +17041,32 @@ FLAG basecamp vaults vaults list --styled type=bool
 FLAG basecamp vaults vaults list --todolist type=string
 FLAG basecamp vaults vaults list --vault type=string
 FLAG basecamp vaults vaults list --verbose type=count
+FLAG basecamp vaults versions --account type=string
+FLAG basecamp vaults versions --agent type=bool
+FLAG basecamp vaults versions --all type=bool
+FLAG basecamp vaults versions --cache-dir type=string
+FLAG basecamp vaults versions --count type=bool
+FLAG basecamp vaults versions --folder type=string
+FLAG basecamp vaults versions --help type=bool
+FLAG basecamp vaults versions --hints type=bool
+FLAG basecamp vaults versions --ids-only type=bool
+FLAG basecamp vaults versions --in type=string
+FLAG basecamp vaults versions --jq type=string
+FLAG basecamp vaults versions --json type=bool
+FLAG basecamp vaults versions --limit type=int
+FLAG basecamp vaults versions --markdown type=bool
+FLAG basecamp vaults versions --md type=bool
+FLAG basecamp vaults versions --no-hints type=bool
+FLAG basecamp vaults versions --no-stats type=bool
+FLAG basecamp vaults versions --page type=int
+FLAG basecamp vaults versions --profile type=string
+FLAG basecamp vaults versions --project type=string
+FLAG basecamp vaults versions --quiet type=bool
+FLAG basecamp vaults versions --stats type=bool
+FLAG basecamp vaults versions --styled type=bool
+FLAG basecamp vaults versions --todolist type=string
+FLAG basecamp vaults versions --vault type=string
+FLAG basecamp vaults versions --verbose type=count
 FLAG basecamp version --account type=string
 FLAG basecamp version --agent type=bool
 FLAG basecamp version --cache-dir type=string
@@ -17365,6 +17561,7 @@ SUB basecamp docs vault list
 SUB basecamp docs vaults
 SUB basecamp docs vaults create
 SUB basecamp docs vaults list
+SUB basecamp docs versions
 SUB basecamp doctor
 SUB basecamp documents
 SUB basecamp documents archive
@@ -17401,6 +17598,7 @@ SUB basecamp documents vault list
 SUB basecamp documents vaults
 SUB basecamp documents vaults create
 SUB basecamp documents vaults list
+SUB basecamp documents versions
 SUB basecamp drafts
 SUB basecamp drafts list
 SUB basecamp events
@@ -17439,6 +17637,7 @@ SUB basecamp file vault list
 SUB basecamp file vaults
 SUB basecamp file vaults create
 SUB basecamp file vaults list
+SUB basecamp file versions
 SUB basecamp files
 SUB basecamp files archive
 SUB basecamp files doc
@@ -17474,6 +17673,7 @@ SUB basecamp files vault list
 SUB basecamp files vaults
 SUB basecamp files vaults create
 SUB basecamp files vaults list
+SUB basecamp files versions
 SUB basecamp folders
 SUB basecamp folders archive
 SUB basecamp folders doc
@@ -17509,6 +17709,7 @@ SUB basecamp folders vault list
 SUB basecamp folders vaults
 SUB basecamp folders vaults create
 SUB basecamp folders vaults list
+SUB basecamp folders versions
 SUB basecamp forwards
 SUB basecamp forwards inbox
 SUB basecamp forwards list
@@ -17781,6 +17982,7 @@ SUB basecamp vault vault list
 SUB basecamp vault vaults
 SUB basecamp vault vaults create
 SUB basecamp vault vaults list
+SUB basecamp vault versions
 SUB basecamp vaults
 SUB basecamp vaults archive
 SUB basecamp vaults doc
@@ -17816,6 +18018,7 @@ SUB basecamp vaults vault list
 SUB basecamp vaults vaults
 SUB basecamp vaults vaults create
 SUB basecamp vaults vaults list
+SUB basecamp vaults versions
 SUB basecamp version
 SUB basecamp webhook
 SUB basecamp webhook create
