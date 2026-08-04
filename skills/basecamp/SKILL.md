@@ -547,10 +547,10 @@ PARENT_TODO_ID=<parent_todo_id> \
 basecamp recordings list --in <project> --type Kanban::Step --all \
   --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
 
-# Assign or set a due date.
-# Include the current title and every person who should remain assigned.
+# Assign or set a due date. Send only what you're changing — omitted fields are
+# left alone. `assignee_ids` replaces the whole list, so name everyone who stays.
 basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
-  --data '{"title":"Current subtask title","assignee_ids":[<person_id>,<existing_person_id>],"due_on":"<YYYY-MM-DD>"}' \
+  --data '{"assignee_ids":[<person_id>,<existing_person_id>],"due_on":"<YYYY-MM-DD>"}' \
   --json
 
 # Complete or reopen a subtask
@@ -589,10 +589,20 @@ returned `not_found`:
 subtasks, add `--status trashed`; archived parents may require
 `--status archived`.
 
-When updating a todo subtask with the raw API, include the existing `title` along
-with metadata changes; omitting it may reset the step title to `Untitled`.
-`assignee_ids` sets the full assignee list for the step, so include every person
-who should remain assigned. The generic
+**Raw step updates are partial.** `PUT .../card_tables/steps/<id>.json` leaves
+every parameter you omit unchanged, so send only the fields you are changing.
+Echoing back a `title` you did not mean to change is not merely redundant — it
+reverts anyone who edited the title between your read and your write. To clear a
+value, say so explicitly: `"due_on": null` clears the due date, `"assignee_ids":
+[]` removes everyone. `assignee_ids` always replaces the whole list rather than
+adding to it, so name every person who should remain assigned.
+
+(This is bc3#12521. Before it, an omitted field *was* cleared and a title-less
+update was rejected, which is why older guidance said to resend the title. Todo
+subtasks and card steps share one endpoint and one contract — `PUT
+card_tables/steps/:id` routes to the same controller for both.)
+
+The generic
 `basecamp assign <step_id> --step ...` command is intended for card steps and
 may fail with `Bad Request` for todo-backed steps, so prefer `assignee_ids` on
 the raw step update endpoint for todo subtasks.
