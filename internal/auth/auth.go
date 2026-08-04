@@ -48,6 +48,13 @@ const (
 	oauthTypeLaunchpad = "launchpad"
 )
 
+// OAuth scopes the BC5 client is registered for. Launchpad ignores scope
+// entirely; its tokens are read-write.
+const (
+	scopeRead = "read"
+	scopeFull = "full"
+)
+
 // Default OAuth callback address and redirect URI.
 const (
 	defaultCallbackAddr = "127.0.0.1:8976"
@@ -393,7 +400,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 	}
 
 	// Validate scope early (single source of truth)
-	if opts.Scope != "" && opts.Scope != "read" && opts.Scope != "full" {
+	if opts.Scope != "" && opts.Scope != scopeRead && opts.Scope != scopeFull {
 		return nil, output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
 
@@ -551,10 +558,21 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		}
 	}
 
-	devOpts := []oauth.DeviceOption{oauth.WithDeviceHTTPClient(m.httpClient)}
-	if opts.Scope != "" {
-		devOpts = append(devOpts, oauth.WithDeviceScope(opts.Scope))
+	// Request a scope explicitly rather than letting the server pick. BC5
+	// defaults an omitted scope to its least-privilege entry (read), which
+	// would silently hand every write command a 403 — Launchpad logins have
+	// always been read-write, so an unqualified `auth login` keeps meaning
+	// that here. --scope read is how a caller asks for less.
+	requestedScope := opts.Scope
+	if requestedScope == "" {
+		requestedScope = scopeFull
 	}
+
+	devOpts := make([]oauth.DeviceOption, 0, 2+len(opts.deviceOptions))
+	devOpts = append(devOpts,
+		oauth.WithDeviceHTTPClient(m.httpClient),
+		oauth.WithDeviceScope(requestedScope),
+	)
 	devOpts = append(devOpts, opts.deviceOptions...)
 
 	// The SDK display hook can't return an error, and the SDK proceeds into
@@ -620,12 +638,11 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		return nil, err
 	}
 
+	// The granted scope is whatever the server says it granted; fall back to
+	// what was asked for only when the token response omits it.
 	effectiveScope := token.Scope
 	if effectiveScope == "" {
-		effectiveScope = opts.Scope
-	}
-	if effectiveScope == "" {
-		effectiveScope = "read"
+		effectiveScope = requestedScope
 	}
 
 	creds := &Credentials{
@@ -1083,6 +1100,53 @@ func (m *Manager) GetOAuthType() string {
 		return ""
 	}
 	return creds.OAuthType
+}
+
+// IsReadOnly reports that the stored credentials grant read access only, so
+// any write is refused before the server resolves the resource. Only BC5
+// tokens carry a scope; Launchpad tokens are read-write, so a 403 there is a
+// genuine permission failure rather than a missing scope.
+func (m *Manager) IsReadOnly() bool {
+	creds, err := m.store.Load(m.credentialKey())
+	if err != nil {
+		return false
+	}
+	return creds.OAuthType == oauthTypeBC5 && creds.Scope == scopeRead
+}
+
+// accountResourceURNPrefix is the RFC 8707 resource indicator BC5 binds an
+// account-scoped token to. The trailing segment is the account's public ID —
+// the same one that appears in Basecamp URLs.
+const accountResourceURNPrefix = "urn:bc:account:"
+
+// AccountID returns the account a BC5 token is bound to, derived from its
+// stored RFC 8707 resource indicator, or "" when the credentials carry no
+// account binding (Launchpad tokens, or a resource naming the service
+// origin rather than one account).
+//
+// The binding is authoritative: the token grants access to exactly this
+// account, so there is nothing to discover over the network and no picker to
+// show. It also works where account discovery cannot — /authorization.json
+// is served only on the API host, which beta deployments don't route.
+func (m *Manager) AccountID() string {
+	creds, err := m.store.Load(m.credentialKey())
+	if err != nil {
+		return ""
+	}
+
+	id := strings.TrimPrefix(creds.Resource, accountResourceURNPrefix)
+	if id == creds.Resource || id == "" {
+		return ""
+	}
+
+	// Digits only: this feeds URL construction, and a resource indicator is
+	// server-controlled data.
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return id
 }
 
 // GetUserEmail returns the stored user email for the current credential key.

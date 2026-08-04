@@ -79,6 +79,7 @@ load test_helper
   assert_success
   assert_output_contains "Headless authentication with manual browser instructions"
   assert_output_contains "ignored by Launchpad"
+  assert_output_contains "default full"
 }
 
 @test "basecamp profile create --help describes flags provider-neutrally" {
@@ -86,6 +87,7 @@ load test_helper
   assert_success
   assert_output_contains "Headless authentication with manual browser instructions"
   assert_output_contains "ignored by Launchpad"
+  assert_output_contains "default full"
 }
 
 @test "basecamp auth login rejects --device-code --local" {

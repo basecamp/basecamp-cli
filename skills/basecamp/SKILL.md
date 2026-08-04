@@ -1241,7 +1241,8 @@ leave the skill only and surface the per-agent `basecamp setup <id>` commands.
 ```bash
 basecamp auth status                              # Check auth
 basecamp auth login                               # Re-authenticate
-basecamp auth login --scope full                  # Full access (ignored by Launchpad)
+basecamp auth login --scope full                  # Full access (the default; ignored by Launchpad)
+basecamp auth login --scope read                  # Read-only access (ignored by Launchpad)
 basecamp auth login --device-code                 # Headless authentication with manual browser instructions
 ```
 

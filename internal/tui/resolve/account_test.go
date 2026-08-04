@@ -111,3 +111,57 @@ func TestFetchAccounts_LaunchpadToken(t *testing.T) {
 	require.Len(t, accounts, 1)
 	assert.Equal(t, int64(200), accounts[0].ID)
 }
+
+// TestAccount_UsesResourceIndicatorBinding proves a BC5 device login can
+// address its own account with no network call and no picker: the token is
+// bound to exactly one account by its RFC 8707 resource indicator. This is
+// also the only path that works against beta deployments, where BC3 serves
+// /authorization.json only on an API host that beta does not route.
+func TestAccount_UsesResourceIndicatorBinding(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "basecamp"), 0700))
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	authMgr := auth.NewManager(cfg, nil)
+	require.NoError(t, authMgr.GetStore().Save(authMgr.CredentialKey(), &auth.Credentials{
+		AccessToken: "bc_at_test",
+		OAuthType:   "bc5",
+		Scope:       "full",
+		Resource:    "urn:bc:account:2914079",
+	}))
+
+	// A nil SDK client is deliberate: reaching the accounts fetch would panic,
+	// so this also proves the binding short-circuits the network.
+	r := New(nil, authMgr, cfg, WithFlags(&Flags{Agent: true}))
+
+	resolved, err := r.Account(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "2914079", resolved.Value)
+	assert.Equal(t, SourceDefault, resolved.Source)
+}
+
+// TestAccount_FlagBeatsResourceIndicator keeps the binding subordinate to an
+// explicit choice.
+func TestAccount_FlagBeatsResourceIndicator(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "basecamp"), 0700))
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com"}
+	authMgr := auth.NewManager(cfg, nil)
+	require.NoError(t, authMgr.GetStore().Save(authMgr.CredentialKey(), &auth.Credentials{
+		AccessToken: "bc_at_test",
+		OAuthType:   "bc5",
+		Resource:    "urn:bc:account:2914079",
+	}))
+
+	r := New(nil, authMgr, cfg, WithFlags(&Flags{Account: "999", Agent: true}))
+
+	resolved, err := r.Account(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "999", resolved.Value)
+	assert.Equal(t, SourceFlag, resolved.Source)
+}

@@ -337,7 +337,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Basecamp API base URL (default: https://3.basecampapi.com)")
-	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (ignored by Launchpad)")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
 	cmd.Flags().StringVar(&accountID, "account", "", "Account ID")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")

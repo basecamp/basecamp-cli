@@ -121,9 +121,9 @@ no modern OAuth issuer is advertised for the server; once a modern issuer is
 selected, login failures surface loudly rather than silently falling back.
 
 ```bash
-basecamp auth login              # Authenticate with Basecamp
-basecamp auth login --scope read # Read-only access (default; ignored by Launchpad)
-basecamp auth login --scope full # Full read+write access (ignored by Launchpad)
+basecamp auth login              # Authenticate with Basecamp (full access)
+basecamp auth login --scope read # Read-only access (ignored by Launchpad)
+basecamp auth login --scope full # Full read+write access (default; ignored by Launchpad)
 basecamp auth token              # Print token for scripts
 ```
 
