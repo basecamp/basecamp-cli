@@ -30,8 +30,8 @@ var skillLocations = []skillLocation{
 	{Name: "Agents (Shared)", Path: "~/.agents/skills/basecamp/SKILL.md"},
 	{Name: "Claude Code (Global)", Path: "~/.claude/skills/basecamp/SKILL.md"},
 	{Name: "Claude Code (Project)", Path: ".claude/skills/basecamp/SKILL.md"},
-	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skill/basecamp/SKILL.md"},
-	{Name: "OpenCode (Project)", Path: ".opencode/skill/basecamp/SKILL.md"},
+	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skills/basecamp/SKILL.md"},
+	{Name: "OpenCode (Project)", Path: ".opencode/skills/basecamp/SKILL.md"},
 	{Name: "Codex (Global)", Path: codexGlobalSkillPath()},
 }
 

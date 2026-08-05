@@ -222,6 +222,30 @@ func TestCopySkillFilesRejectsSubdirs(t *testing.T) {
 	}
 }
 
+// skillLocations is both the wizard's install targets and the refresh set, so a
+// path an agent doesn't read is a silent no-op in either direction. Pin the
+// literals rather than deriving them, so a test can't mirror the same typo the
+// code has. OpenCode's search paths: https://opencode.ai/docs/skills/. Codex's
+// entry is computed by codexGlobalSkillPath and covered separately.
+func TestSkillLocationsMatchAgentSearchPaths(t *testing.T) {
+	want := map[string]string{
+		"Agents (Shared)":       "~/.agents/skills/basecamp/SKILL.md",
+		"Claude Code (Global)":  "~/.claude/skills/basecamp/SKILL.md",
+		"Claude Code (Project)": ".claude/skills/basecamp/SKILL.md",
+		"OpenCode (Global)":     "~/.config/opencode/skills/basecamp/SKILL.md",
+		"OpenCode (Project)":    ".opencode/skills/basecamp/SKILL.md",
+	}
+
+	got := make(map[string]string, len(skillLocations))
+	for _, loc := range skillLocations {
+		got[loc.Name] = loc.Path
+	}
+
+	for name, path := range want {
+		assert.Equal(t, path, got[name], "install target for %s", name)
+	}
+}
+
 func TestNormalizeSkillPath(t *testing.T) {
 	tests := []struct {
 		input, want string
@@ -494,7 +518,7 @@ func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
 	require.NoError(t, os.MkdirAll(claudeSkill, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(claudeSkill, "SKILL.md"), []byte("old"), 0o644))
 
-	opencode := filepath.Join(home, ".config", "opencode", "skill", "basecamp")
+	opencode := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(opencode, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(opencode, "SKILL.md"), []byte("old"), 0o644))
 
