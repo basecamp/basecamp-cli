@@ -35,6 +35,20 @@ var skillLocations = []skillLocation{
 	{Name: "Codex (Global)", Path: codexGlobalSkillPath()},
 }
 
+// legacySkillLocations are paths an agent still reads but that we no longer
+// offer as install targets. They are refreshed, never suggested.
+//
+// opencode accepts both spellings — its own docs table reads
+// `~/.config/opencode/skill(s)/<name>/SKILL.md`, the same `agent(s)`/`command(s)`
+// optional plural it uses elsewhere. #624 moved the install targets to the
+// plural form and dropped the singular entirely, which left anyone who had
+// picked OpenCode in the wizard with a file opencode still loads but that
+// nothing updates: working, and silently frozen at the version that wrote it.
+var legacySkillLocations = []skillLocation{
+	{Name: "OpenCode (Global, legacy path)", Path: "~/.config/opencode/skill/basecamp/SKILL.md"},
+	{Name: "OpenCode (Project, legacy path)", Path: ".opencode/skill/basecamp/SKILL.md"},
+}
+
 // NewSkillCmd creates the skill command.
 func NewSkillCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -360,7 +374,7 @@ func refreshAllInstalledSkills() bool {
 
 	updated := 0
 	failed := 0
-	for _, loc := range skillLocations {
+	for _, loc := range append(append([]skillLocation{}, skillLocations...), legacySkillLocations...) {
 		// Skip project-relative paths — no reliable project root in PostRunE.
 		if !strings.HasPrefix(loc.Path, "~") && !filepath.IsAbs(loc.Path) {
 			continue

@@ -222,11 +222,14 @@ func TestCopySkillFilesRejectsSubdirs(t *testing.T) {
 	}
 }
 
-// skillLocations is both the wizard's install targets and the refresh set, so a
-// path an agent doesn't read is a silent no-op in either direction. Pin the
-// literals rather than deriving them, so a test can't mirror the same typo the
-// code has. OpenCode's search paths: https://opencode.ai/docs/skills/. Codex's
-// entry is computed by codexGlobalSkillPath and covered separately.
+// Pin the literals rather than deriving them, so a test can't mirror a typo the
+// code has. Codex's entry is computed by codexGlobalSkillPath and covered
+// separately.
+//
+// These are install targets, not the full set of paths an agent reads. opencode
+// takes an optional plural throughout — its own table reads
+// `~/.config/opencode/skill(s)/<name>/SKILL.md` — so the singular form works too
+// and is kept alive for refresh in legacySkillLocations.
 func TestSkillLocationsMatchAgentSearchPaths(t *testing.T) {
 	want := map[string]string{
 		"Agents (Shared)":       "~/.agents/skills/basecamp/SKILL.md",
@@ -244,6 +247,43 @@ func TestSkillLocationsMatchAgentSearchPaths(t *testing.T) {
 	for name, path := range want {
 		assert.Equal(t, path, got[name], "install target for %s", name)
 	}
+}
+
+// A wizard install written before #624 sits at opencode's singular path.
+// opencode still loads it, so dropping it from the refresh set does not break
+// the skill — it freezes it at the version that wrote it, which is worse than
+// breaking because nothing reports it.
+func TestRefreshAllInstalledSkills_LegacyOpenCodePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home) // no claude binary
+
+	origVersion := version.Version
+	version.Version = "5.0.0"
+	defer func() { version.Version = origVersion }()
+
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+
+	// Singular — what the wizard wrote before #624.
+	legacy := filepath.Join(home, ".config", "opencode", "skill", "basecamp")
+	require.NoError(t, os.MkdirAll(legacy, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte("old"), 0o644))
+
+	require.True(t, refreshAllInstalledSkills())
+
+	got, readErr := os.ReadFile(filepath.Join(legacy, "SKILL.md"))
+	require.NoError(t, readErr)
+	assert.Equal(t, string(embedded), string(got),
+		"a pre-#624 opencode install must keep getting refreshed")
+
+	// Refreshing a legacy install must not conjure the new path.
+	_, statErr := os.Stat(filepath.Join(home, ".config", "opencode", "skills", "basecamp", "SKILL.md"))
+	assert.True(t, os.IsNotExist(statErr), "refresh updates in place; it does not install elsewhere")
 }
 
 func TestNormalizeSkillPath(t *testing.T) {
