@@ -333,7 +333,7 @@ check-smoke-coverage: build
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -412,6 +412,11 @@ check-skill-drift:
 .PHONY: check-bare-groups
 check-bare-groups:
 	@scripts/check-bare-groups.sh
+
+# Verify every workflow lints with the same golangci-lint version
+.PHONY: check-lint-lockstep
+check-lint-lockstep:
+	@scripts/check-lint-lockstep.sh
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming

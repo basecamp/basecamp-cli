@@ -57,7 +57,7 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.9.0
+          version: v2.11.1  # keep in lockstep with test.yml Lint
           install-only: true
 
       - name: Cache BATS
@@ -79,7 +79,7 @@ jobs:
 
       - name: Run release quality gate
         run: |
-          make fmt-check vet lint test test-e2e provenance-check check-naming check-surface
+          make check-lint-lockstep fmt-check vet lint test test-e2e provenance-check check-naming check-surface
           go test -tags dev -race -count=1 ./...
 
       - name: Run govulncheck
