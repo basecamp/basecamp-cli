@@ -1,0 +1,24 @@
+internal/commands/skill.go
+  s_28b941f602e6de::t_fc889c4d1a820b 33-34
+internal/commands/skill_test.go
+  s_28b941f602e6de::t_7e9e48f21c12d1 521
+  s_28b941f602e6de::t_0a5337804ef056 232-233,235-236
+  s_28b941f602e6de::t_762456dc8ae203 225-227,230-231,234,237-248
+  s_28b941f602e6de::t_54732d90e68ac5 228-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "3176e945b463fe6efca91655898e6571c339f1a8",
+  "prompts": {},
+  "sessions": {
+    "s_28b941f602e6de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f07ef290-3b56-48c6-aa7d-f6be7ecf4f08",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
