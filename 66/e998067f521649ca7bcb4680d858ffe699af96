@@ -1,0 +1,19 @@
+scripts/check-lint-lockstep.sh
+  s_28b941f602e6de::t_336b5faaf762a8 9-13,18-19,23-27,29,35-37,43,48-57,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "66e998067f521649ca7bcb4680d858ffe699af96",
+  "prompts": {},
+  "sessions": {
+    "s_28b941f602e6de": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f07ef290-3b56-48c6-aa7d-f6be7ecf4f08",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
