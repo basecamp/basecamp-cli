@@ -11,14 +11,43 @@
 # others. An unpinned step resolves to whatever the action defaults to, which
 # drifts on its own schedule and would rebuild exactly the release-only mismatch
 # this exists to prevent — so a missing pin is a failure, not a skip.
+#
+# Agreement alone is not enough either: three workflows uniformly pinned back at
+# v2.9.0 would pass this check and reproduce the release failure that motivated
+# it. Hence a floor as well as a lockstep.
 set -euo pipefail
 
 WORKFLOW_DIR=".github/workflows"
 
+# The oldest golangci-lint every workflow may pin. Raising this is a deliberate
+# act, not housekeeping: move it in the same commit that moves the workflow
+# pins, so the floor and the pins never disagree in a merged tree.
+MIN_VERSION="v2.11.1"
+
+# Compare with sort -V, never lexically or arithmetically. As strings v2.9.0
+# sorts *above* v2.11.1 — 9 > 1 — so a lexical test would wave through the exact
+# version that failed the release tag. `[ -gt ]` cannot parse either one.
+version_gte() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V | head -1 | grep -qx -- "$2"
+}
+
+# Both spellings: every workflow here is .yml today, but GitHub honours .yaml
+# just as well, and a .yaml workflow that ran a linter this check never opened
+# would be exactly the invisible drift it exists to catch.
+shopt -s nullglob
+workflows=("$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml)
+shopt -u nullglob
+
+if [[ "${#workflows[@]}" -eq 0 ]]; then
+  echo "FAIL: no workflow files found under $WORKFLOW_DIR"
+  echo "An empty scan is a broken check, not a clean tree."
+  exit 1
+fi
+
 # One line per golangci-lint-action step: "<file>:<version>", or
 # "<file>:UNPINNED" when the step declares no version.
 mapfile -t pins < <(
-  for f in "$WORKFLOW_DIR"/*.yml; do
+  for f in "${workflows[@]}"; do
     awk -v file="$f" '
       function close_step() {
         if (in_step) { print file ":UNPINNED"; in_step = 0 }
@@ -68,4 +97,15 @@ if [[ "$count" -ne 1 ]]; then
   exit 1
 fi
 
-echo "golangci-lint lockstep check passed (${#pins[@]} steps pinned at $versions)"
+if ! version_gte "$versions" "$MIN_VERSION"; then
+  echo "FAIL: golangci-lint pinned at $versions, below the floor $MIN_VERSION:"
+  printf '  %s\n' "${pins[@]}"
+  echo ""
+  echo "Agreeing on a stale version is still stale. v2.9.0 in lockstep would"
+  echo "pass the check above and fail the release on the same gosec G115 false"
+  echo "positive it was written to prevent. Raise the pins, then raise"
+  echo "MIN_VERSION in $0 in the same commit."
+  exit 1
+fi
+
+echo "golangci-lint lockstep check passed (${#pins[@]} steps across ${#workflows[@]} workflows pinned at $versions, floor $MIN_VERSION)"
