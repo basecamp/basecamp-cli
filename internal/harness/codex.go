@@ -22,12 +22,27 @@ const (
 	CodexMarketplaceName = "37signals"
 	// CodexExpectedPluginKey is the fully qualified Basecamp plugin ID.
 	CodexExpectedPluginKey = CodexPluginName + "@" + CodexMarketplaceName
+
+	// codexQueryTimeout bounds how long the Codex probe may run.
+	codexQueryTimeout = 5 * time.Second
+	// codexWaitDelay is the grace period after the kill before Wait gives up on
+	// output pipes a surviving grandchild still holds open.
+	codexWaitDelay = time.Second
 )
 
 var (
 	codexLookPath   = exec.LookPath
 	runCodexCommand = func(ctx context.Context, path string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, path, args...).Output() //nolint:gosec // path comes from exec.LookPath
+		cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path comes from exec.LookPath
+		// Bound Wait, not just the process. Cancelling the context kills the
+		// child, but it does not close output pipes a *grandchild* inherited,
+		// and Wait blocks on those copies until they do — so the 5s timeout in
+		// queryCodexPlugin buys nothing on its own. `codex` is routinely a
+		// wrapper that shells out (an npm exec launcher, a mise shim), and one
+		// of those left `basecamp doctor` hanging for ten minutes rather than
+		// five seconds. WaitDelay is what makes the deadline real.
+		cmd.WaitDelay = codexWaitDelay
+		return cmd.Output()
 	}
 )
 
@@ -189,7 +204,7 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	if path == "" {
 		return codexPluginState{}, false, errCodexBinaryMissing
 	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, codexQueryTimeout)
 	defer cancel()
 	data, err := runCodexCommand(ctx, path, "plugin", "list", "--available", "--json")
 	if err != nil {

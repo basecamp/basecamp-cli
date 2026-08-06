@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,4 +201,41 @@ func boolJSON(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// TestRunCodexCommandOutlivingGrandchild pins the deadline that ten minutes of
+// a hung `basecamp doctor` proved was not being enforced.
+//
+// The stub above replaces runCodexCommand, so nothing else here exercises the
+// real one. This does. It stands in for the shape codex actually ships as on
+// some machines — a wrapper script that backgrounds a longer-lived process —
+// where cancelling the context kills the wrapper but the grandchild keeps the
+// inherited stdout pipe open. Without cmd.WaitDelay, Wait blocks on that pipe
+// for as long as the grandchild lives, and the query timeout means nothing.
+func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	// Exits immediately, leaving a child holding stdout well past any deadline.
+	script := "sleep 120 & exit 0"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		defer close(done)
+		_, _ = runCodexCommand(ctx, "/bin/sh", "-c", script)
+	}()
+
+	select {
+	case <-done:
+		// The call must return on its own deadline, not the grandchild's.
+		assert.Less(t, time.Since(start), 30*time.Second,
+			"runCodexCommand blocked on a pipe held open by a surviving grandchild")
+	case <-time.After(30 * time.Second):
+		t.Fatal("runCodexCommand did not return: WaitDelay is not bounding Wait")
+	}
 }
