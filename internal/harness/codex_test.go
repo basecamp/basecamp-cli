@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,12 +215,32 @@ func boolJSON(value bool) string {
 // inherited stdout pipe open. Without cmd.WaitDelay, Wait blocks on that pipe
 // for as long as the grandchild lives, and the query timeout means nothing.
 func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
 		t.Skip("sh not available")
 	}
 
-	// Exits immediately, leaving a child holding stdout well past any deadline.
-	script := "sleep 120 & exit 0"
+	// The grandchild has to outlive the deadline by a wide margin, or the test
+	// passes on the sleep ending rather than on WaitDelay working. That makes
+	// it our job to reap it: WaitDelay closes the inherited pipe, it does not
+	// kill the process, which is reparented to init and would otherwise sit
+	// there for two minutes accumulating one orphan per `bin/ci`.
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	script := "sleep 120 & echo $! > " + pidFile + "; exit 0"
+
+	t.Cleanup(func() {
+		raw, readErr := os.ReadFile(pidFile) //nolint:gosec // G304: path is this test's own TempDir
+		if readErr != nil {
+			return
+		}
+		pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if convErr != nil {
+			return
+		}
+		if proc, findErr := os.FindProcess(pid); findErr == nil {
+			_ = proc.Kill()
+		}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -227,7 +249,7 @@ func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
 	start := time.Now()
 	go func() {
 		defer close(done)
-		_, _ = runCodexCommand(ctx, "/bin/sh", "-c", script)
+		_, _ = runCodexCommand(ctx, sh, "-c", script)
 	}()
 
 	select {
