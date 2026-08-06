@@ -34,7 +34,7 @@ var (
 	codexLookPath   = exec.LookPath
 	runCodexCommand = func(ctx context.Context, path string, args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path comes from exec.LookPath
-		// Bound Wait, not just the process. Cancelling the context kills the
+		// Bound Wait, not just the process. Canceling the context kills the
 		// child, but it does not close output pipes a *grandchild* inherited,
 		// and Wait blocks on those copies until they do — so the 5s timeout in
 		// queryCodexPlugin buys nothing on its own. `codex` is routinely a

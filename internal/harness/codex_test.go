@@ -209,7 +209,7 @@ func boolJSON(value bool) string {
 // The stub above replaces runCodexCommand, so nothing else here exercises the
 // real one. This does. It stands in for the shape codex actually ships as on
 // some machines — a wrapper script that backgrounds a longer-lived process —
-// where cancelling the context kills the wrapper but the grandchild keeps the
+// where canceling the context kills the wrapper but the grandchild keeps the
 // inherited stdout pipe open. Without cmd.WaitDelay, Wait blocks on that pipe
 // for as long as the grandchild lives, and the query timeout means nothing.
 func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
