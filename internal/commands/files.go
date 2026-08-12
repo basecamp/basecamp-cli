@@ -17,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewFilesCmd creates the files command group.
@@ -1604,10 +1605,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// unlike versions, both follow-up commands resolve a project
 			// before fetching, so a bare ID could prompt or fail headless.
 			ref := args[0]
-			scope := ""
-			if *project != "" {
-				scope = fmt.Sprintf(" --project %s", *project)
-			}
+			scope := breadcrumbScope(*project)
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
@@ -1697,15 +1695,39 @@ You can pass either an upload ID or a Basecamp URL:
 				return err
 			}
 
+			// A pasted URL names its own account; refuse one that isn't the
+			// session's before anything is staged — extractID keeps only the
+			// numeric ID, which would silently retarget the configured
+			// account's same-numbered upload on a mutating request.
+			if parsed := urlarg.Parse(args[0]); parsed != nil && parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
+				return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsed.AccountID, app.Config.AccountID))
+			}
+
 			uploadIDStr := extractID(args[0])
 			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
-			if err != nil {
+			if err != nil || uploadID <= 0 {
 				return output.ErrUsage("Invalid upload ID")
 			}
 
 			filePath := richtext.NormalizeDragPath(args[1])
 			if err := richtext.ValidateFile(filePath); err != nil {
 				return fmt.Errorf("%s: %w", filePath, err)
+			}
+
+			// Resolve the description first: its local-image references can
+			// fail deterministically, and staging a large replacement before
+			// finding that out wastes the whole transfer. A nil Description
+			// carries the previous version's forward; --description "" clears.
+			var descPtr *string
+			if cmd.Flags().Changed("description") {
+				descHTML := ""
+				if description != "" {
+					descHTML = richtext.MarkdownToHTML(description)
+					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
+						return err
+					}
+				}
+				descPtr = basecamp.Ptr(descHTML)
 			}
 
 			// Step 1: stage the new file as an attachment (same two-step flow
@@ -1724,21 +1746,11 @@ You can pass either an upload ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
-			// Step 2: replace the upload's file. A nil Description carries the
-			// previous version's forward; --description "" clears it.
+			// Step 2: replace the upload's file.
 			req := &basecamp.CreateUploadVersionRequest{
 				AttachableSGID: resp.AttachableSGID,
 				BaseName:       baseName,
-			}
-			if cmd.Flags().Changed("description") {
-				descHTML := ""
-				if description != "" {
-					descHTML = richtext.MarkdownToHTML(description)
-					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
-						return err
-					}
-				}
-				req.Description = basecamp.Ptr(descHTML)
+				Description:    descPtr,
 			}
 
 			upload, err := app.Account().Uploads().CreateVersion(cmd.Context(), uploadID, req)
@@ -1750,10 +1762,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// explicit --project: download resolves a project before fetching,
 			// so a bare ID without the scope could prompt or fail headless.
 			ref := args[0]
-			scope := ""
-			if *project != "" {
-				scope = fmt.Sprintf(" --project %s", *project)
-			}
+			scope := breadcrumbScope(*project)
 
 			return app.OK(upload,
 				output.WithSummary(fmt.Sprintf("Replaced upload #%d's file with %s", upload.ID, upload.Filename)),
@@ -1777,6 +1786,19 @@ You can pass either an upload ID or a Basecamp URL:
 	cmd.Flags().StringVar(&baseName, "base-name", "", "Rename the file (without extension); omit to keep the uploaded file's name")
 
 	return cmd
+}
+
+// breadcrumbScope renders the --project suffix for a breadcrumb command,
+// quoting names that contain whitespace so the emitted command round-trips
+// through a shell instead of splitting into stray positional arguments.
+func breadcrumbScope(project string) string {
+	if project == "" {
+		return ""
+	}
+	if strings.ContainsAny(project, " \t") {
+		return fmt.Sprintf(" --project %q", project)
+	}
+	return " --project " + project
 }
 
 func newFilesUpdateCmd(project *string) *cobra.Command {

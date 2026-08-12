@@ -1429,6 +1429,38 @@ func TestFilesReplaceAcceptsURL(t *testing.T) {
 	assert.Contains(t, transport.postPaths[1], "/uploads/789/versions.json")
 }
 
+// TestFilesReplaceRejectsBeforeStaging pins that every locally-detectable
+// problem — a URL for a different account, a non-positive ID, a description
+// whose local image reference doesn't resolve — fails before ANY request is
+// made, so a large replacement is never transferred toward a doomed call.
+func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+	}{
+		"foreign-account URL": {
+			args: []string{"replace", "https://3.basecamp.com/12345/buckets/456/uploads/789", ""},
+		},
+		"zero upload ID": {
+			args: []string{"replace", "0", ""},
+		},
+		"unresolvable description image": {
+			args: []string{"replace", "789", "", "--description", "![preview](missing-image-file.png)"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilesReplaceTransport{}
+			app := showTestApp(t, transport)
+
+			args := tc.args
+			args[2] = writeTempUpload(t)
+			cmd := NewFilesCmd()
+			err := executeMessagesCommand(cmd, app, args...)
+			require.Error(t, err)
+			assert.Empty(t, transport.postPaths, "nothing may be staged or mutated")
+		})
+	}
+}
+
 // TestFilesReplaceBaseNameReachesTheWire pins --base-name: the rename travels
 // as base_name (the server keeps the staged file's extension), and omitting
 // the flag keeps the field off the wire so the uploaded name stands.
