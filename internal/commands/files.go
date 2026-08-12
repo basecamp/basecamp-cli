@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1604,7 +1605,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// its project scope, and an explicit --project carries over —
 			// unlike versions, both follow-up commands resolve a project
 			// before fetching, so a bare ID could prompt or fail headless.
-			ref := args[0]
+			ref := shellQuote(args[0])
 			scope := breadcrumbScope(*project)
 
 			respOpts := []output.ResponseOption{
@@ -1699,8 +1700,13 @@ You can pass either an upload ID or a Basecamp URL:
 			// session's before anything is staged — extractID keeps only the
 			// numeric ID, which would silently retarget the configured
 			// account's same-numbered upload on a mutating request.
-			if parsed := urlarg.Parse(args[0]); parsed != nil && parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-				return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsed.AccountID, app.Config.AccountID))
+			if parsed := urlarg.Parse(args[0]); parsed != nil {
+				if parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
+					return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsed.AccountID, app.Config.AccountID))
+				}
+				if parsed.Type != "uploads" {
+					return output.ErrUsage(fmt.Sprintf("URL identifies a %s recording, not an upload", parsed.Type))
+				}
 			}
 
 			uploadIDStr := extractID(args[0])
@@ -1761,7 +1767,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// Breadcrumbs reuse the caller's own reference and carry an
 			// explicit --project: download resolves a project before fetching,
 			// so a bare ID without the scope could prompt or fail headless.
-			ref := args[0]
+			ref := shellQuote(args[0])
 			scope := breadcrumbScope(*project)
 
 			return app.OK(upload,
@@ -1788,17 +1794,30 @@ You can pass either an upload ID or a Basecamp URL:
 	return cmd
 }
 
-// breadcrumbScope renders the --project suffix for a breadcrumb command,
-// quoting names that contain whitespace so the emitted command round-trips
-// through a shell instead of splitting into stray positional arguments.
+// shellSafeRe matches strings that need no quoting in an emitted shell
+// command: IDs, plain Basecamp URLs, and simple names. Everything else gets
+// single-quoted.
+var shellSafeRe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=-]+$`)
+
+// shellQuote renders s safe to embed in an emitted shell command. Clearly
+// inert strings pass through bare; anything else is single-quoted — the one
+// POSIX form in which nothing substitutes — with embedded single quotes
+// spelled '\”. This is an encoding applied to every embedded value, not a
+// metacharacter list: breadcrumbs interpolate user- and API-controlled text,
+// and escaping cases one at a time is how quoting bugs recur.
+func shellQuote(s string) string {
+	if s != "" && shellSafeRe.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// breadcrumbScope renders the --project suffix for a breadcrumb command.
 func breadcrumbScope(project string) string {
 	if project == "" {
 		return ""
 	}
-	if strings.ContainsAny(project, " \t") {
-		return fmt.Sprintf(" --project %q", project)
-	}
-	return " --project " + project
+	return " --project " + shellQuote(project)
 }
 
 func newFilesUpdateCmd(project *string) *cobra.Command {

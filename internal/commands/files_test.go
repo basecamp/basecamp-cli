@@ -1446,6 +1446,9 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 		"unresolvable description image": {
 			args: []string{"replace", "789", "", "--description", "![preview](missing-image-file.png)"},
 		},
+		"same-account URL of another recording type": {
+			args: []string{"replace", "https://3.basecamp.com/99999/buckets/456/todos/789", ""},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			transport := &mockFilesReplaceTransport{}
@@ -1458,6 +1461,24 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 			require.Error(t, err)
 			assert.Empty(t, transport.postPaths, "nothing may be staged or mutated")
 		})
+	}
+}
+
+// TestShellQuote pins the breadcrumb encoding: inert strings (IDs, plain
+// Basecamp URLs) pass bare, and everything else is single-quoted so no shell
+// syntax survives — quoting is an encoding, not a metacharacter list.
+func TestShellQuote(t *testing.T) {
+	for input, want := range map[string]string{
+		"789": "789",
+		"https://3.basecamp.com/99999/buckets/456/uploads/789": "https://3.basecamp.com/99999/buckets/456/uploads/789",
+		"https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)": `'https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)'`,
+		"release;id":         `'release;id'`,
+		"$(command) project": `'$(command) project'`,
+		"My Project":         `'My Project'`,
+		"O'Brien's":          `'O'\''Brien'\''s'`,
+		"":                   `''`,
+	} {
+		assert.Equal(t, want, shellQuote(input), "shellQuote(%q)", input)
 	}
 }
 
