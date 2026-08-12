@@ -1,0 +1,37 @@
+internal/commands/files.go
+  s_a184dcf8a8f5f1::t_edbb26870d5b33 1672-1772
+  s_a184dcf8a8f5f1::t_e297197ae6cd04 49
+e2e/smoke/smoke_files_write.bats
+  s_a184dcf8a8f5f1::t_1fe33d45fe09ce 52-73
+skills/basecamp/SKILL.md
+  s_a184dcf8a8f5f1::t_2e89673217e957 767-768
+  s_a184dcf8a8f5f1::t_d18be89570d7f9 803-806
+internal/commands/files_test.go
+  s_a184dcf8a8f5f1::t_a21cf6afbc7ca9 1356-1467
+e2e/smoke/smoke_lifecycle.bats
+  s_a184dcf8a8f5f1::t_d77288ef4a11b1 224-231
+  s_a184dcf8a8f5f1::t_747480cdd4799b 170-173
+  s_a184dcf8a8f5f1::t_c3716c3cef6ad8 166-169,174-177
+.surface
+  s_a184dcf8a8f5f1::t_e9b234acc5a9be 141-144,164-167,188-191,211-214,234-237,434-437,457-460,674-675,713-714,754-755,792-793,830-831,1105-1106,1143-1144,5661-5710,6651-6700,7689-7738,8658-8707,9627-9676,16013-16062,16982-17031,17940-17941,17979-17980,18020-18021,18058-18059,18096-18097,18371-18372,18409-18410
+API-COVERAGE.md
+  s_a184dcf8a8f5f1::t_b194fee87e80da 215
+internal/commands/commands.go
+  s_a184dcf8a8f5f1::t_e94986d328e87b 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "fe92090ed79429f7eec6e54645af95bb1f994c14",
+  "prompts": {},
+  "sessions": {
+    "s_a184dcf8a8f5f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f5e3024-49fc-4240-a8b6-97292c195c47",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
