@@ -212,7 +212,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
 | recordings | 4 | `recordings` | ✅ | BC4 | - | Browse by type/status, trash/archive/restore |
 | **Files & Documents** |
-| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show, create, update, download, versions (`files versions <id>`); trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only) |
+| uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show, create, update, download, versions (`files versions <id>`), replace (`files replace <id> <file>`); trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only) |
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |

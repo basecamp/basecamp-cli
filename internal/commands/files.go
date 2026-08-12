@@ -46,6 +46,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
 		newFilesVersionsCmd(&project),
+		newFilesReplaceCmd(),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
@@ -1666,6 +1667,107 @@ func flattenUploadVersions(versions []basecamp.UploadVersion) []map[string]any {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func newFilesReplaceCmd() *cobra.Command {
+	var description string
+	var baseName string
+
+	cmd := &cobra.Command{
+		Use:     "replace <upload-id|url> <file>",
+		Aliases: []string{"new-version"},
+		Short:   "Replace an upload's file with a new version",
+		Long: `Replace an uploaded file with a new version.
+
+The upload keeps its ID, URL and comments; the previous file becomes a past
+version (see 'basecamp files versions'). Use this instead of a fresh upload
+when publishing a new build of the same file, so its published link keeps
+working.
+
+Nobody is notified, and the description carries forward unless --description
+is given.
+
+You can pass either an upload ID or a Basecamp URL:
+  basecamp files replace 789 ./build-v2.exe
+  basecamp files replace https://3.basecamp.com/123/buckets/456/uploads/789 ./build-v2.exe`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			uploadIDStr := extractID(args[0])
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			filePath := richtext.NormalizeDragPath(args[1])
+			if err := richtext.ValidateFile(filePath); err != nil {
+				return fmt.Errorf("%s: %w", filePath, err)
+			}
+
+			// Step 1: stage the new file as an attachment (same two-step flow
+			// as uploads create).
+			contentType := richtext.DetectMIME(filePath)
+			filename := filepath.Base(filePath)
+
+			f, err := os.Open(filePath)
+			if err != nil {
+				return fmt.Errorf("%s: %w", filePath, err)
+			}
+			defer f.Close()
+
+			resp, err := app.Account().Attachments().Create(cmd.Context(), filename, contentType, f)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			// Step 2: replace the upload's file. A nil Description carries the
+			// previous version's forward; --description "" clears it.
+			req := &basecamp.CreateUploadVersionRequest{
+				AttachableSGID: resp.AttachableSGID,
+				BaseName:       baseName,
+			}
+			if cmd.Flags().Changed("description") {
+				descHTML := ""
+				if description != "" {
+					descHTML = richtext.MarkdownToHTML(description)
+					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
+						return err
+					}
+				}
+				req.Description = basecamp.Ptr(descHTML)
+			}
+
+			upload, err := app.Account().Uploads().CreateVersion(cmd.Context(), uploadID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(upload,
+				output.WithSummary(fmt.Sprintf("Replaced upload #%d's file with %s", upload.ID, upload.Filename)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "versions",
+						Cmd:         fmt.Sprintf("basecamp files versions %s", args[0]),
+						Description: "List versions",
+					},
+					output.Breadcrumb{
+						Action:      "download",
+						Cmd:         fmt.Sprintf("basecamp files download %s", args[0]),
+						Description: "Download the new version",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&description, "description", "", "New description (Markdown); omit to carry the current one forward")
+	cmd.Flags().StringVar(&baseName, "base-name", "", "Rename the file (without extension); omit to keep the uploaded file's name")
+
+	return cmd
 }
 
 func newFilesUpdateCmd(project *string) *cobra.Command {

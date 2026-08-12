@@ -49,6 +49,28 @@ setup_file() {
   echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/uploads_create_id"
 }
 
+@test "files replace uploads a new version of an upload" {
+  local id_file="$BATS_FILE_TMPDIR/uploads_create_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"
+  local upload_id
+  upload_id=$(<"$id_file")
+
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_files_replace.txt"
+  echo "smoke files replace content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp files replace "$upload_id" "$tmpfile" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.id' "$upload_id"
+  assert_json_value '.data.filename' 'smoke_files_replace.txt'
+
+  # The replaced file surfaces as the single current version.
+  run_smoke basecamp files versions "$upload_id" --json
+  assert_success
+  run bash -c "echo '$output' | jq '[.data[] | select(.current == true)] | length'"
+  assert_output "1"
+}
+
 @test "uploads show returns upload detail" {
   local id_file="$BATS_FILE_TMPDIR/uploads_create_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"

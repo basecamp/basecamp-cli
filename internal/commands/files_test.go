@@ -1353,6 +1353,118 @@ func TestFlattenUploadVersionsCarriesTheRecordedFile(t *testing.T) {
 	assert.NotContains(t, rows[2], "current", "an upload-less event gets no file columns")
 }
 
+// mockFilesReplaceTransport serves the two-step replace flow: staging the
+// attachment, then POSTing the new version to upload 789. Any other request
+// fails the test.
+type mockFilesReplaceTransport struct {
+	postPaths   []string
+	versionBody []byte
+}
+
+func (t *mockFilesReplaceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	respond := func(status int, body string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	path := req.URL.Path
+	switch {
+	case req.Method == http.MethodPost && strings.Contains(path, "/attachments.json"):
+		t.postPaths = append(t.postPaths, path)
+		return respond(201, `{"attachable_sgid":"sgid-v2"}`)
+	case req.Method == http.MethodPost && strings.HasSuffix(path, "/uploads/789/versions.json"):
+		t.postPaths = append(t.postPaths, path)
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading version body: %w", err)
+		}
+		t.versionBody = body
+		return respond(201, `{"id":789,"title":"report","filename":"report-v2.pdf","byte_size":9}`)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, path)
+	}
+}
+
+// TestFilesReplaceStagesAndCreatesVersion pins the two-step flow and the
+// carry-forward default: no --description means no description key on the
+// wire, which the server reads as "keep the current one".
+func TestFilesReplaceStagesAndCreatesVersion(t *testing.T) {
+	transport := &mockFilesReplaceTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "replace", "789", writeTempUpload(t))
+	require.NoError(t, err)
+
+	require.Len(t, transport.postPaths, 2)
+	assert.Contains(t, transport.postPaths[0], "/attachments.json")
+	assert.Contains(t, transport.postPaths[1], "/uploads/789/versions.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.versionBody, &body))
+	assert.Equal(t, "sgid-v2", body["attachable_sgid"])
+	_, hasDescription := body["description"]
+	assert.False(t, hasDescription, "omitted --description must not reach the wire")
+	_, hasNotify := body["notify"]
+	assert.False(t, hasNotify, "no notify field means notify nobody")
+}
+
+// TestFilesReplaceAcceptsURL verifies a pasted upload URL resolves to the
+// same versions endpoint as the bare ID.
+func TestFilesReplaceAcceptsURL(t *testing.T) {
+	transport := &mockFilesReplaceTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "replace", "https://3.basecamp.com/99999/buckets/456/uploads/789", writeTempUpload(t))
+	require.NoError(t, err)
+	require.Len(t, transport.postPaths, 2)
+	assert.Contains(t, transport.postPaths[1], "/uploads/789/versions.json")
+}
+
+// TestFilesReplaceDescriptionTriState pins the presence-aware description:
+// a provided value is sent as HTML, an explicit empty string is sent (and
+// clears server-side), and omission stays off the wire (covered above).
+func TestFilesReplaceDescriptionTriState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		flagValue string
+		expect    func(t *testing.T, desc any)
+	}{
+		"markdown value becomes HTML": {
+			flagValue: "New **build**",
+			expect: func(t *testing.T, desc any) {
+				assert.Contains(t, desc, "<strong>build</strong>")
+			},
+		},
+		"explicit empty clears": {
+			flagValue: "",
+			expect: func(t *testing.T, desc any) {
+				assert.Equal(t, "", desc)
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilesReplaceTransport{}
+			app := showTestApp(t, transport)
+
+			cmd := NewFilesCmd()
+			err := executeMessagesCommand(cmd, app, "replace", "789", writeTempUpload(t), "--description", tc.flagValue)
+			require.NoError(t, err)
+
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(transport.versionBody, &body))
+			desc, hasDescription := body["description"]
+			require.True(t, hasDescription, "--description must reach the wire")
+			tc.expect(t, desc)
+		})
+	}
+}
+
 // TestFilesVersionsRejectsConflictingPagination pins the same pagination
 // contract the other bounded listings use: --page disables the walk, so it
 // cannot be combined with --all or --limit, and only page 1 is reachable.

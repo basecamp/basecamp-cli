@@ -764,6 +764,8 @@ basecamp files list --all-projects --all                # Every page (slow on bi
 basecamp files show <id> --in <project>                 # Show item (auto-detects type)
 basecamp files versions <upload_id> --json              # Every version of an uploaded file
 basecamp files versions <upload_id> --limit 5 --json    # Cap results (default: all)
+basecamp files replace <upload_id> <file>               # Replace the file, keep the ID/URL/comments
+basecamp files replace <upload_id> <file> --description "v2 notes"  # Also set a new description
 basecamp files download <id> --in <project>             # Download file
 basecamp files download <id> --out ./dir                # Download to specific dir
 basecamp files download "https://storage.../download/f" # Download from storage URL
@@ -798,6 +800,10 @@ remediation for nested docs/uploads.
 upload ID, so `basecamp files versions <upload_id>` is how you see the history of
 one file. A file that was never replaced returns its single current version, not
 an error. Only `--page 1` is accepted; use `--all` to walk every page.
+`basecamp files replace <upload_id> <file>` publishes a new version in place —
+the upload keeps its ID, URL and comments, nobody is notified, and the
+description carries forward unless `--description` is given. Use it instead of
+`uploads create` when shipping a new build of the same file.
 
 **Subcommands:** `folders`, `uploads`, `documents` (each with pagination flags)
 
