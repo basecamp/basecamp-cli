@@ -208,7 +208,7 @@ func TestCheckinsRemindersRejectsScopeFlags(t *testing.T) {
 func TestCheckinsRemindersIDsOnlyEmitsTheQuestionID(t *testing.T) {
 	reminderID := int64(5)
 	rows := flattenQuestionReminders([]basecamp.QuestionReminder{{
-		RemindAt:   time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+		RemindAt:   basecamp.Ptr(time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)),
 		ReminderID: &reminderID,
 		Question: basecamp.Question{
 			ID:    789,
@@ -234,7 +234,7 @@ func TestCheckinsRemindersIDsOnlyEmitsTheQuestionID(t *testing.T) {
 // saying what, or where.
 func TestFlattenQuestionRemindersCarriesTheQuestion(t *testing.T) {
 	rows := flattenQuestionReminders([]basecamp.QuestionReminder{{
-		RemindAt: time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+		RemindAt: basecamp.Ptr(time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)),
 		Question: basecamp.Question{
 			ID:     789,
 			Title:  "What did you work on?",

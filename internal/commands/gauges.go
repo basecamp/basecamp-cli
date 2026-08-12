@@ -58,10 +58,11 @@ func newGaugesListCmd() *cobra.Command {
 				return err
 			}
 
-			gauges, err := app.Account().Gauges().List(cmd.Context())
+			result, err := app.Account().Gauges().List(cmd.Context(), nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			gauges := result.Gauges
 
 			return app.OK(gauges,
 				output.WithSummary(fmt.Sprintf("%d gauge(s)", len(gauges))),
@@ -101,10 +102,11 @@ func newGaugesNeedlesCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			needles, err := app.Account().Gauges().ListNeedles(cmd.Context(), projectID)
+			result, err := app.Account().Gauges().ListNeedles(cmd.Context(), projectID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			needles := result.Needles
 
 			return app.OK(needles,
 				output.WithSummary(fmt.Sprintf("%d needle(s)", len(needles))),
@@ -272,7 +274,7 @@ func newGaugesUpdateCmd() *cobra.Command {
 			}
 
 			req := &basecamp.UpdateGaugeNeedleRequest{
-				Description: description,
+				Description: basecamp.Ptr(description),
 			}
 
 			needle, err := app.Account().Gauges().UpdateNeedle(cmd.Context(), needleID, req)

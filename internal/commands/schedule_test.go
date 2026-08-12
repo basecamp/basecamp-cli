@@ -83,6 +83,11 @@ func (t *mockScheduleCreateTransport) RoundTrip(req *http.Request) (*http.Respon
 			body = `[{"id": 123, "name": "Test Project"}]`
 		} else if strings.Contains(req.URL.Path, "/projects/") {
 			body = `{"id": 123, "dock": [{"name": "schedule", "id": 777, "enabled": true}]}`
+		} else if strings.Contains(req.URL.Path, "/schedule_entries/") {
+			// UpdateEntry is a merge-safe composite since SDK v0.13.0: it GETs
+			// the entry first and refuses one missing required fields, so the
+			// stub must serve a complete entry rather than `{}`.
+			body = `{"id": 999, "summary": "Event", "starts_at": "2026-03-04T09:00:00Z", "ends_at": "2026-03-04T09:30:00Z", "all_day": false, "participants": []}`
 		} else {
 			body = `{}`
 		}

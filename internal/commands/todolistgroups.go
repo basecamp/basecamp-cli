@@ -318,13 +318,14 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 				return output.ErrUsage("Invalid group ID")
 			}
 
-			// Build SDK request
-			req := &basecamp.UpdateTodolistGroupRequest{
+			// A group is a todolist server-side, and the todolists endpoint is
+			// the merge-safe write: TodolistGroups().Replace omits-and-erases
+			// the description (SDK MIGRATING, v0.13.0).
+			req := &basecamp.UpdateTodolistRequest{
 				Name: name,
 			}
 
-			// Update group via SDK
-			group, err := app.Account().TodolistGroups().Update(cmd.Context(), groupID, req)
+			group, err := app.Account().Todolists().Update(cmd.Context(), groupID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}

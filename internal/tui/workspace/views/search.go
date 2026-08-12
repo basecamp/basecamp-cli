@@ -525,6 +525,14 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 	}
 	excerpt = truncateExcerpt(excerpt, 120)
 
+	// CreatedAt is a pointer since SDK v0.13.0 — search results may omit it.
+	createdAt := ""
+	var createdAtTS int64
+	if r.CreatedAt != nil {
+		createdAt = r.CreatedAt.Format("Jan 2")
+		createdAtTS = r.CreatedAt.Unix()
+	}
+
 	return workspace.SearchResultInfo{
 		ID:          r.ID,
 		Title:       title,
@@ -534,8 +542,8 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		ProjectID:   projectID,
 		Account:     accountName,
 		AccountID:   accountID,
-		CreatedAt:   r.CreatedAt.Format("Jan 2"),
-		CreatedAtTS: r.CreatedAt.Unix(),
+		CreatedAt:   createdAt,
+		CreatedAtTS: createdAtTS,
 	}
 }
 

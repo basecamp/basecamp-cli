@@ -389,8 +389,9 @@ func formatEvent(e basecamp.TimelineEvent) string {
 	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 
+	// CreatedAt is a pointer since SDK v0.13.0 — the feed may omit it.
 	var timeStr string
-	if !e.CreatedAt.IsZero() {
+	if e.CreatedAt != nil && !e.CreatedAt.IsZero() {
 		timeStr = e.CreatedAt.Local().Format("15:04")
 	} else {
 		timeStr = "--:--"

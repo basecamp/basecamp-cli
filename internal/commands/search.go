@@ -371,12 +371,16 @@ func humanizeSearchResults(results []basecamp.SearchResult) []map[string]any {
 		if r.Bucket != nil {
 			project = r.Bucket.Name
 		}
+		created := ""
+		if r.CreatedAt != nil {
+			created = relativeTime(*r.CreatedAt)
+		}
 		row := map[string]any{
 			"id":      r.ID,
 			"title":   title,
 			"type":    simplifyType(r.Type),
 			"project": project,
-			"created": relativeTime(r.CreatedAt),
+			"created": created,
 		}
 		out = append(out, row)
 	}

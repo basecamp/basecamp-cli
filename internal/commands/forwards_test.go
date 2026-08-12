@@ -24,7 +24,7 @@ import (
 // account; forwardsInboxPath is the project-scoped inbox listing.
 const (
 	forwardsAccountWidePath = "/99999/forwards.json"
-	forwardsInboxPath       = "/99999/inboxes/555/forwards.json"
+	forwardsInboxPath       = "/99999/inboxes/555/inbox_forwards.json"
 )
 
 // forwardsFeedBody renders n forwards as the account-wide feed serves them.

@@ -1254,10 +1254,13 @@ func (t *mockUploadVersionsTransport) RoundTrip(req *http.Request) (*http.Respon
 		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
 	}
 
+	// The body is the shape production serves (captured from a live canary of
+	// bc3's versions partial): reverse-chronological version EVENTS, the file
+	// each one recorded nested under "upload", exactly one of them current.
 	return &http.Response{
 		StatusCode: 200,
 		Body: io.NopCloser(strings.NewReader(
-			`[{"id":790,"title":"report.pdf","filename":"report.pdf","status":"active"}]`,
+			`[{"id":791,"recording_id":789,"action":"blob_changed","created_at":"2026-08-11T21:11:00Z","creator":{"id":1,"name":"Clawdito"},"upload":{"filename":"report-v2.pdf","content_type":"application/pdf","byte_size":109,"download_url":"https://example.test/v2","app_download_url":"https://example.test/app/v2","current":true}},{"id":790,"recording_id":789,"action":"created","created_at":"2026-08-11T21:10:00Z","creator":{"id":1,"name":"Clawdito"},"upload":{"filename":"report.pdf","content_type":"application/pdf","byte_size":73,"download_url":"https://example.test/v1","app_download_url":"https://example.test/app/v1","current":false}}]`,
 		)),
 		Header: header,
 	}, nil
@@ -1287,6 +1290,51 @@ func TestFilesVersionsAcceptsURL(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"GET /99999/uploads/789/versions.json"}, transport.requests)
+}
+
+// TestFlattenUploadVersionsCarriesTheRecordedFile pins the display contract
+// for version events: the file each event recorded surfaces from the nested
+// upload, exactly one row is current, and the row id is the event's — there
+// is deliberately no row field carrying an id that `files show` would 404 on.
+func TestFlattenUploadVersionsCarriesTheRecordedFile(t *testing.T) {
+	byteSize := int64(73)
+	rows := flattenUploadVersions([]basecamp.UploadVersion{
+		{
+			ID: 791, Action: "blob_changed",
+			Creator: basecamp.Person{Name: "Clawdito"},
+			Upload: &basecamp.UploadVersionFile{
+				Filename: "report-v2.pdf", Current: true,
+				DownloadURL: "https://example.test/v2",
+			},
+		},
+		{
+			ID: 790, Action: "created",
+			Creator: basecamp.Person{Name: "Clawdito"},
+			Upload: &basecamp.UploadVersionFile{
+				Filename: "report.pdf", ByteSize: &byteSize, Current: false,
+				DownloadURL: "https://example.test/v1",
+			},
+		},
+		// A deleted recordable leaves the event behind with no upload at all.
+		{ID: 780, Action: "created", Creator: basecamp.Person{Name: "Clawdito"}},
+	})
+
+	require.Len(t, rows, 3)
+	assert.Equal(t, int64(791), rows[0]["id"], "row id is the version event's id")
+	assert.Equal(t, "report-v2.pdf", rows[0]["filename"])
+	assert.Equal(t, "Clawdito", rows[0]["creator"], "creator flattens to the name")
+
+	currents := 0
+	for _, row := range rows {
+		if cur, ok := row["current"].(bool); ok && cur {
+			currents++
+		}
+	}
+	assert.Equal(t, 1, currents, "exactly one version is current")
+
+	assert.Equal(t, int64(73), rows[1]["byte_size"])
+	assert.NotContains(t, rows[2], "filename", "an upload-less event gets no file columns")
+	assert.NotContains(t, rows[2], "current", "an upload-less event gets no file columns")
 }
 
 // TestFilesVersionsRejectsConflictingPagination pins the same pagination

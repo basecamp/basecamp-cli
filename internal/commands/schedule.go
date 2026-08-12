@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -438,6 +439,12 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 			if endsAt == "" {
 				return output.ErrUsage("--ends-at required (ISO 8601 datetime)")
 			}
+			if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
+				return err
+			}
+			if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
+				return err
+			}
 
 			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
 		},
@@ -643,15 +650,21 @@ You can pass either an entry ID or a Basecamp URL:
 			hasChanges := false
 
 			if summary != "" {
-				req.Summary = summary
+				req.Summary = basecamp.Ptr(summary)
 				hasChanges = true
 			}
 			if startsAt != "" {
-				req.StartsAt = startsAt
+				if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
+					return err
+				}
+				req.StartsAt = basecamp.Ptr(startsAt)
 				hasChanges = true
 			}
 			if endsAt != "" {
-				req.EndsAt = endsAt
+				if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
+					return err
+				}
+				req.EndsAt = basecamp.Ptr(endsAt)
 				hasChanges = true
 			}
 			var mentionNotice string
@@ -677,7 +690,7 @@ You can pass either an entry ID or a Basecamp URL:
 					html = richtext.EmbedAttachments(html, refs)
 				}
 
-				req.Description = html
+				req.Description = basecamp.Ptr(html)
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
@@ -685,7 +698,7 @@ You can pass either an entry ID or a Basecamp URL:
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("notify") {
-				req.Notify = notify
+				req.Notify = basecamp.Ptr(notify)
 				hasChanges = true
 			}
 			if participants != "" {
@@ -697,7 +710,7 @@ You can pass either an entry ID or a Basecamp URL:
 					}
 				}
 				if len(ids) > 0 {
-					req.ParticipantIDs = ids
+					req.ParticipantIDs = basecamp.Ptr(ids)
 					hasChanges = true
 				}
 			}
@@ -713,7 +726,7 @@ You can pass either an entry ID or a Basecamp URL:
 				if fetchErr != nil {
 					return convertSDKError(fetchErr)
 				}
-				req.Description = richtext.EmbedAttachments(existing.Description, refs)
+				req.Description = basecamp.Ptr(richtext.EmbedAttachments(existing.Description, refs))
 				hasChanges = true
 			}
 
@@ -843,4 +856,19 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 // getScheduleID retrieves the schedule ID from a project's dock, handling multi-dock projects.
 func getScheduleID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "schedule", "", "schedule", "schedule")
+}
+
+// validateScheduleTimestamp accepts what bc3 accepts: an RFC 3339 timestamp,
+// or a bare date (2026-06-01), which renders the entry all-day. The SDK
+// stopped validating these client-side at v0.13.0 so bare dates could
+// round-trip; the CLI still fails garbage locally as a usage error rather
+// than spending a request to surface it as a 422.
+func validateScheduleTimestamp(flag, value string) error {
+	if _, err := time.Parse(time.RFC3339, value); err == nil {
+		return nil
+	}
+	if _, err := time.Parse("2006-01-02", value); err == nil {
+		return nil
+	}
+	return output.ErrUsage(fmt.Sprintf("Invalid --%s: %q is neither an RFC 3339 timestamp (2026-06-01T09:00:00Z) nor a date (2026-06-01)", flag, value))
 }

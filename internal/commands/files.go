@@ -1596,7 +1596,7 @@ You can pass either an upload ID or a Basecamp URL:
 			if err != nil {
 				return convertSDKError(err)
 			}
-			versions := versionsResult.Versions
+			versions := flattenUploadVersions(versionsResult.Versions)
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
@@ -1627,6 +1627,35 @@ You can pass either an upload ID or a Basecamp URL:
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
 
 	return cmd
+}
+
+// flattenUploadVersions turns version events into display rows. Each element is
+// an event — "created"/"active" records the original file, "blob_changed" a
+// replacement — with the file it recorded nested under upload. The row id is
+// the EVENT's id: it is not an upload id and no files command accepts it, which
+// is why the breadcrumbs above address the upload by the id the user gave.
+// A version whose recordable no longer resolves carries no upload at all, so
+// the file columns stay empty rather than inventing zero values.
+func flattenUploadVersions(versions []basecamp.UploadVersion) []map[string]any {
+	rows := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		row := map[string]any{
+			"id":      v.ID,
+			"action":  v.Action,
+			"created": v.CreatedAt,
+			"creator": v.Creator.Name,
+		}
+		if v.Upload != nil {
+			row["filename"] = v.Upload.Filename
+			if v.Upload.ByteSize != nil {
+				row["byte_size"] = *v.Upload.ByteSize
+			}
+			row["current"] = v.Upload.Current
+			row["download_url"] = v.Upload.DownloadURL
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func newFilesUpdateCmd(project *string) *cobra.Command {
@@ -1734,11 +1763,7 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
-					if err != nil {
-						return convertSDKError(err)
-					}
-					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
+					doc, err := updateDocument(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1750,7 +1775,7 @@ You can pass either an item ID or a Basecamp URL:
 						req.BaseName = title
 					}
 					if nonDocContentSet {
-						req.Description = content
+						req.Description = basecamp.Ptr(content)
 					}
 					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
@@ -1772,11 +1797,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
-					if buildErr != nil {
-						return convertSDKError(buildErr)
-					}
-					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
+					doc, err := updateDocument(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1812,7 +1833,7 @@ You can pass either an item ID or a Basecamp URL:
 								req.BaseName = title
 							}
 							if nonDocContentSet {
-								req.Description = content
+								req.Description = basecamp.Ptr(content)
 							}
 							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
@@ -1856,21 +1877,45 @@ You can pass either an item ID or a Basecamp URL:
 	return cmd
 }
 
-func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
-	// BC3 rebuilds documents from permitted params on PUT, so omitted
-	// title/content fields are replaced with empty values. Fetch and merge when
-	// the caller updates only one field so the untouched field is preserved.
-	//
-	// Explicit clears via --title "" or --content "" work by composition: the
-	// SDK strips empty strings to absent JSON fields, and the controller then
-	// nulls those absent fields during rebuild. The wire-shape assertion in
-	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
-	//
+func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.Document, error) {
 	// setTitle/setContent are caller-computed effective flags: they're true when
 	// the user provided either a non-whitespace value or an explicit empty
 	// string. Whitespace-only values arrive as setTitle=false/setContent=false
 	// so the existing field is preserved.
-	if existingDoc == nil && (!setTitle || !setContent) {
+	//
+	// Documents().Update is the SDK's merge-safe composite: it fetches and
+	// merges server state itself, so a single-field update preserves the other
+	// field without a CLI-side fetch. The one instruction it cannot carry is an
+	// explicit clear — its empty string means "leave the field alone" — so
+	// --title "" / --content "" route to Documents().Replace, whose omitted
+	// fields the server nulls, with the surviving field carried over verbatim.
+	// The wire-shape assertion in
+	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
+	clearTitle := setTitle && title == ""
+	clearContent := setContent && content == ""
+
+	var docHTML string
+	if setContent && content != "" {
+		docHTML = richtext.MarkdownToHTML(content)
+		var err error
+		docHTML, err = resolveLocalImages(cmd, app, docHTML)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !clearTitle && !clearContent {
+		req := &basecamp.UpdateDocumentRequest{}
+		if setTitle {
+			req.Title = title
+		}
+		if setContent {
+			req.Content = docHTML
+		}
+		return app.Account().Documents().Update(cmd.Context(), itemID, req)
+	}
+
+	if existingDoc == nil {
 		var err error
 		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
 		if err != nil {
@@ -1878,30 +1923,22 @@ func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int6
 		}
 	}
 
-	req := &basecamp.UpdateDocumentRequest{}
-	if existingDoc != nil {
-		req.Title = existingDoc.Title
-		req.Content = existingDoc.Content
-	}
-
-	if setTitle {
-		req.Title = title
-	}
-	if setContent {
-		if content == "" {
-			req.Content = ""
-			return req, nil
+	req := &basecamp.ReplaceDocumentRequest{}
+	if !clearTitle {
+		effective := existingDoc.Title
+		if setTitle {
+			effective = title
 		}
-		docHTML := richtext.MarkdownToHTML(content)
-		var err error
-		docHTML, err = resolveLocalImages(cmd, app, docHTML)
-		if err != nil {
-			return nil, err
-		}
-		req.Content = docHTML
+		req.Title = basecamp.Ptr(effective)
 	}
-
-	return req, nil
+	if !clearContent {
+		effective := existingDoc.Content
+		if setContent {
+			effective = docHTML
+		}
+		req.Content = basecamp.Ptr(effective)
+	}
+	return app.Account().Documents().Replace(cmd.Context(), itemID, req)
 }
 
 func newFilesDownloadCmd(project *string) *cobra.Command {

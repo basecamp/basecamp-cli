@@ -2940,7 +2940,7 @@ You can pass either a step ID or a Basecamp URL:
 				req.Title = title
 			}
 			if dueOn != "" {
-				req.DueOn = dateparse.Parse(dueOn)
+				req.DueOn = basecamp.Ptr(dateparse.Parse(dueOn))
 			}
 			if assignees != "" {
 				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignees)
