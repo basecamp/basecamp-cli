@@ -1467,6 +1467,17 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 	}
 }
 
+// TestScopeProject pins breadcrumb scope sourcing: the group flag wins, the
+// root-level --project (app.Flags.Project) fills in behind it, and the config
+// default is deliberately absent — a copier's own config supplies that one.
+func TestScopeProject(t *testing.T) {
+	app := &appctx.App{Flags: appctx.GlobalFlags{Project: "root-flag"}}
+	assert.Equal(t, "group-flag", scopeProject(app, "group-flag"))
+	assert.Equal(t, "root-flag", scopeProject(app, ""))
+	app.Flags.Project = ""
+	assert.Equal(t, "", scopeProject(app, ""))
+}
+
 // TestShellQuote pins the breadcrumb encoding: inert strings (IDs, plain
 // Basecamp URLs) pass bare, and everything else is single-quoted so no shell
 // syntax survives — quoting is an encoding, not a metacharacter list.

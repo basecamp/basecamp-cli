@@ -1606,7 +1606,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// unlike versions, both follow-up commands resolve a project
 			// before fetching, so a bare ID could prompt or fail headless.
 			ref := shellQuote(args[0])
-			scope := breadcrumbScope(*project)
+			scope := breadcrumbScope(scopeProject(app, *project))
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
@@ -1775,7 +1775,7 @@ You can pass either an upload ID or a Basecamp URL:
 			// explicit --project: download resolves a project before fetching,
 			// so a bare ID without the scope could prompt or fail headless.
 			ref := shellQuote(args[0])
-			scope := breadcrumbScope(*project)
+			scope := breadcrumbScope(scopeProject(app, *project))
 
 			return app.OK(upload,
 				output.WithSummary(fmt.Sprintf("Replaced upload #%d's file with %s", upload.ID, upload.Filename)),
@@ -1817,6 +1817,17 @@ func shellQuote(s string) string {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// scopeProject resolves the project value a breadcrumb should carry: the
+// group-level flag, else the root-level --project (app.Flags.Project) — the
+// same precedence the fetch paths use, minus the config default, which a
+// copier's own config supplies.
+func scopeProject(app *appctx.App, project string) string {
+	if project != "" {
+		return project
+	}
+	return app.Flags.Project
 }
 
 // breadcrumbScope renders the --project suffix for a breadcrumb command.
