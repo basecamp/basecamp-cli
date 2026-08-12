@@ -1,0 +1,18 @@
+.claude-plugin/plugin.json
+  h_7c48a88bf05c0d 3
+.codex-plugin/plugin.json
+  h_7c48a88bf05c0d 3
+nix/package.nix
+  h_7c48a88bf05c0d 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3410466bc857c439a5f626951a69f2f650fbe9dc",
+  "prompts": {},
+  "humans": {
+    "h_7c48a88bf05c0d": {
+      "author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
