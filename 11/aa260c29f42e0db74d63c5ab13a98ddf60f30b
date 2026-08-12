@@ -1,0 +1,34 @@
+e2e/smoke/smoke_lifecycle.bats
+  s_569e40c54282b2::t_9304163a272d99 162-165
+  s_569e40c54282b2::t_cb0982bc5aefcb 208-211
+internal/commands/commands.go
+  s_569e40c54282b2::t_2c20762433b3e9 47
+skills/basecamp/SKILL.md
+  s_569e40c54282b2::t_ff0145d6af308e 765-766
+  s_569e40c54282b2::t_ad97aab6243ff3 797-801
+internal/commands/files.go
+  s_569e40c54282b2::t_23e69728d4763d 1544-1631
+  s_569e40c54282b2::t_104e1c8c196dac 48
+e2e/smoke/smoke_files_read.bats
+  s_569e40c54282b2::t_140d3e0c20a06f 74-81
+.surface
+  s_569e40c54282b2::t_6b9379560ceb47 149,168,188,207,226,422,441,662,699,738,774,810,1083,1119,6023-6048,6963-6988,7951-7976,8870-8895,9789-9814,16125-16150,17044-17069,17564,17601,17640,17676,17712,17985,18021
+internal/commands/files_test.go
+  s_569e40c54282b2::t_21e865131201d2 1239-1310
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "11aa260c29f42e0db74d63c5ab13a98ddf60f30b",
+  "prompts": {},
+  "sessions": {
+    "s_569e40c54282b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53d5aefa-f39d-4887-8559-102f4a749d0a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
