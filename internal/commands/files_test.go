@@ -287,6 +287,22 @@ func TestFilesUpdateDocumentEmptyContentClearsWhilePreservingTitle(t *testing.T)
 	assert.False(t, hasContent)
 }
 
+// A Replace that omits both fields is rejected by the SDK and by BC3, so the
+// CLI fails fast as a usage error — before any request is spent.
+func TestFilesUpdateDocumentRejectsClearingBothFields(t *testing.T) {
+	transport := &mockFilesUpdateTransport{}
+	app := showTestApp(t, transport)
+	app.Config.ProjectID = "456"
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "update", "999", "--type", "document", "--title", "", "--content", "")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Empty(t, transport.capturedBody, "no write request may reach the wire")
+}
+
 func TestFilesUpdateTypeWithoutChangesShowsHelp(t *testing.T) {
 	app, _ := setupMessagesTestApp(t)
 	app.Config.ProjectID = "456"

@@ -37,6 +37,10 @@ func TestExitCodeFor(t *testing.T) {
 		{CodeNetwork, ExitNetwork},
 		{CodeAPI, ExitAPI},
 		{CodeAmbiguous, ExitAmbiguous},
+		// SDK v0.13/v0.14 codes the shared module doesn't know: the local
+		// arms must catch them before the shared default flattens them to 7.
+		{CodeValidation, ExitValidation},
+		{CodeLimitExceeded, ExitLimit},
 		{"unknown_code", ExitAPI}, // Unknown codes default to ExitAPI
 		{"", ExitAPI},             // Empty code defaults to ExitAPI
 	}

@@ -45,7 +45,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
-		newFilesVersionsCmd(),
+		newFilesVersionsCmd(&project),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
@@ -1541,7 +1541,7 @@ You can pass either an item ID or a Basecamp URL:
 	return cmd
 }
 
-func newFilesVersionsCmd() *cobra.Command {
+func newFilesVersionsCmd(project *string) *cobra.Command {
 	var limit int
 	var page int
 	var all bool
@@ -1598,17 +1598,27 @@ You can pass either an upload ID or a Basecamp URL:
 			}
 			versions := flattenUploadVersions(versionsResult.Versions)
 
+			// Breadcrumbs reuse the caller's own reference: a pasted URL keeps
+			// its project scope, and an explicit --project carries over —
+			// unlike versions, both follow-up commands resolve a project
+			// before fetching, so a bare ID could prompt or fail headless.
+			ref := args[0]
+			scope := ""
+			if *project != "" {
+				scope = fmt.Sprintf(" --project %s", *project)
+			}
+
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp files show %s", uploadIDStr),
+						Cmd:         fmt.Sprintf("basecamp files show %s%s", ref, scope),
 						Description: "Show file details",
 					},
 					output.Breadcrumb{
 						Action:      "download",
-						Cmd:         fmt.Sprintf("basecamp files download %s", uploadIDStr),
+						Cmd:         fmt.Sprintf("basecamp files download %s%s", ref, scope),
 						Description: "Download the current version",
 					},
 				),
@@ -1893,6 +1903,13 @@ func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingD
 	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
 	clearTitle := setTitle && title == ""
 	clearContent := setContent && content == ""
+
+	// Omission is the SDK-sanctioned clear spelling, but a Replace that omits
+	// BOTH fields is rejected (locally by the SDK, and by BC3, which requires
+	// the wrapping document object) — so fail fast with a usable message.
+	if clearTitle && clearContent {
+		return nil, output.ErrUsage("Cannot clear both --title and --content at once; clear one at a time or provide a new value")
+	}
 
 	var docHTML string
 	if setContent && content != "" {

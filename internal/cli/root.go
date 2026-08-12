@@ -388,7 +388,7 @@ func Execute() {
 		if !disableJQ {
 			if app := appctx.FromContext(executedCmd.Context()); app != nil {
 				if writeErr := app.Err(err); writeErr == nil {
-					os.Exit(apiErr.ExitCode())
+					os.Exit(output.ExitCodeFor(apiErr.Code))
 				}
 				// app.Err() write failed (e.g. jq runtime error on the error
 				// envelope, or broken pipe). Disable jq in the fallback writer
@@ -437,7 +437,7 @@ func Execute() {
 		})
 		_ = writer.Err(err)
 
-		os.Exit(apiErr.ExitCode())
+		os.Exit(output.ExitCodeFor(apiErr.Code))
 	}
 }
 
