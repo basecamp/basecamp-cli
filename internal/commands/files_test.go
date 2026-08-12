@@ -1452,6 +1452,14 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 		"uploads collection URL (vault-scoped)": {
 			args: []string{"replace", "https://3.basecamp.com/99999/buckets/456/vaults/555/uploads", ""},
 		},
+		"untrusted host with matching account and path": {
+			args: []string{"replace", "https://evil.example/99999/buckets/456/uploads/789", ""},
+		},
+		"description mixing a valid and a missing image": {
+			// The valid image must NOT upload before the missing one is
+			// discovered — resolveLocalImages preflights every reference.
+			args: []string{"replace", "789", "", "--description", "![gone](missing-image-file.png) and ![ok](VALID_IMAGE)"},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			transport := &mockFilesReplaceTransport{}
@@ -1459,6 +1467,13 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 
 			args := tc.args
 			args[2] = writeTempUpload(t)
+			for i, a := range args {
+				if strings.Contains(a, "VALID_IMAGE") {
+					img := filepath.Join(t.TempDir(), "ok.png")
+					require.NoError(t, os.WriteFile(img, []byte("png-bytes"), 0o644))
+					args[i] = strings.ReplaceAll(a, "VALID_IMAGE", img)
+				}
+			}
 			cmd := NewFilesCmd()
 			err := executeMessagesCommand(cmd, app, args...)
 			require.Error(t, err)

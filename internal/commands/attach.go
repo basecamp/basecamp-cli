@@ -137,6 +137,27 @@ func resolveLocalImages(cmd *cobra.Command, app *appctx.App, htmlStr string) (st
 		return htmlStr, nil
 	}
 
+	// Preflight every reference before uploading any: a deterministic local
+	// failure (a missing file) must not strand already-uploaded attachments
+	// from earlier in the loop.
+	for _, m := range matches {
+		src := html.UnescapeString(htmlStr[m[2]:m[3]])
+		alt := ""
+		if m[4] >= 0 {
+			alt = htmlStr[m[4]:m[5]]
+		}
+		action, classErr := classifyImageSrc(src, alt)
+		if classErr != nil {
+			return "", classErr
+		}
+		if action == imgSkip {
+			continue
+		}
+		if err := richtext.ValidateFile(richtext.NormalizeDragPath(src)); err != nil {
+			return "", fmt.Errorf("%s: %w", src, err)
+		}
+	}
+
 	// Process in reverse order so replacements don't shift indices
 	result := htmlStr
 	for i := len(matches) - 1; i >= 0; i-- {

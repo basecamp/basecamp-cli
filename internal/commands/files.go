@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -1700,6 +1701,15 @@ You can pass either an upload ID or a Basecamp URL:
 			// session's before anything is staged — extractID keeps only the
 			// numeric ID, which would silently retarget the configured
 			// account's same-numbered upload on a mutating request.
+			// A URL-shaped argument must live on a trusted Basecamp host:
+			// the URL router is host-agnostic, so a look-alike on an
+			// attacker-controlled host would otherwise pass the identity
+			// checks below and retarget the configured account's upload —
+			// the confused-deputy case hostutil exists to prevent.
+			if urlarg.IsURL(args[0]) && !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+				return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+			}
+
 			if parsed := urlarg.Parse(args[0]); parsed != nil {
 				if parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
 					return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsed.AccountID, app.Config.AccountID))
