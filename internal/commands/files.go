@@ -1707,6 +1707,13 @@ You can pass either an upload ID or a Basecamp URL:
 				if parsed.Type != "uploads" {
 					return output.ErrUsage(fmt.Sprintf("URL identifies a %s recording, not an upload", parsed.Type))
 				}
+				// A collection URL (/vaults/456/uploads, /buckets/456/uploads)
+				// also parses as type "uploads", but its extracted ID is the
+				// PARENT's — the identity predicate needs the recording half
+				// too, or extractID retargets a same-numbered upload.
+				if parsed.IsCollection || parsed.RecordingID == "" {
+					return output.ErrUsage("URL identifies an uploads listing, not a single upload")
+				}
 			}
 
 			uploadIDStr := extractID(args[0])

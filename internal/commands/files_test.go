@@ -1449,6 +1449,9 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 		"same-account URL of another recording type": {
 			args: []string{"replace", "https://3.basecamp.com/99999/buckets/456/todos/789", ""},
 		},
+		"uploads collection URL (vault-scoped)": {
+			args: []string{"replace", "https://3.basecamp.com/99999/buckets/456/vaults/555/uploads", ""},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			transport := &mockFilesReplaceTransport{}
@@ -1470,7 +1473,7 @@ func TestFilesReplaceRejectsBeforeStaging(t *testing.T) {
 func TestShellQuote(t *testing.T) {
 	for input, want := range map[string]string{
 		"789": "789",
-		"https://3.basecamp.com/99999/buckets/456/uploads/789": "https://3.basecamp.com/99999/buckets/456/uploads/789",
+		"https://3.basecamp.com/99999/buckets/456/uploads/789":                  "https://3.basecamp.com/99999/buckets/456/uploads/789",
 		"https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)": `'https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)'`,
 		"release;id":         `'release;id'`,
 		"$(command) project": `'$(command) project'`,
