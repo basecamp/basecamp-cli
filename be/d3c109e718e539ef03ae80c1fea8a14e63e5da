@@ -1,0 +1,72 @@
+internal/commands/files.go
+  s_a184dcf8a8f5f1::t_20ae834737a3f4 1599
+  s_a184dcf8a8f5f1::t_940492865d4fe9 1800
+  s_a184dcf8a8f5f1::t_3c965f4f90d00a 1880,1885-1899,1901,1907-1915,1918,1920,1926-1941
+  s_a184dcf8a8f5f1::t_90f11f2584a6a0 1632-1660
+  s_a184dcf8a8f5f1::t_53ba720f3db6d5 1766
+  s_a184dcf8a8f5f1::t_507b014316a162 1778,1836
+internal/commands/webhooks.go
+  s_a184dcf8a8f5f1::t_32b07122918039 305-311
+internal/commands/schedule_test.go
+  s_a184dcf8a8f5f1::t_a3a9f4eed0c195 86-90
+internal/sdk/errors/errors.go
+  s_a184dcf8a8f5f1::t_de4d0083b3319a 37-40
+  s_a184dcf8a8f5f1::t_2afa7b82c877b8 52-55
+  s_a184dcf8a8f5f1::t_bf9c8c0415cc3d 77-80
+  s_a184dcf8a8f5f1::t_248f0c7d35314a 45-51
+internal/resilience/hooks.go
+  s_a184dcf8a8f5f1::t_2eb1dccfb54fd6 177-181
+internal/commands/search.go
+  s_a184dcf8a8f5f1::t_d41f7df34943e3 374-377,383
+internal/commands/timeline.go
+  s_a184dcf8a8f5f1::t_370eb82bc1467c 392,394
+internal/tui/workspace/views/search.go
+  s_a184dcf8a8f5f1::t_8d31b7e95d8ec4 528-535,545-546
+internal/commands/schedule.go
+  s_a184dcf8a8f5f1::t_bb5e51d7a280b6 442-447
+  s_a184dcf8a8f5f1::t_5cf4297b04b314 657-660,664-666
+  s_a184dcf8a8f5f1::t_0b2bde631faa18 7,653,667,693,701,713,729,860-874
+internal/commands/forwards_test.go
+  s_a184dcf8a8f5f1::t_1d0e59f569755f 27
+internal/output/codes.go
+  s_a184dcf8a8f5f1::t_4d97b3026c9095 31-42,44-52
+internal/commands/files_test.go
+  s_a184dcf8a8f5f1::t_5a513317db5ca5 1257-1259,1263
+  s_a184dcf8a8f5f1::t_6bd68d7850ed7e 1295-1339
+internal/commands/cards.go
+  s_a184dcf8a8f5f1::t_0758b1cebe9c4f 2943
+internal/commands/todolistgroups.go
+  s_a184dcf8a8f5f1::t_5e6fe37f87f81c 321-324,328
+go.mod
+  s_a184dcf8a8f5f1::t_349abea7339135 9,127-129
+go.sum
+  s_a184dcf8a8f5f1::t_a6aa298ba7c86a 90-91,444-449,452-453
+internal/commands/checkins_question_admin_test.go
+  s_a184dcf8a8f5f1::t_d0fcd994663a63 211,237
+internal/commands/gauges.go
+  s_a184dcf8a8f5f1::t_dac5f159fd68e3 61,65,105,109,277
+internal/commands/reports.go
+  s_a184dcf8a8f5f1::t_1c3f98249f5a80 305
+internal/tui/workspace/data/hub.go
+  s_a184dcf8a8f5f1::t_088b85f9e83c0d 842-846,850-851
+internal/tui/workspace/data/hub_global.go
+  s_a184dcf8a8f5f1::t_2afde426057d90 612-616,620-621
+internal/version/sdk-provenance.json
+  s_a184dcf8a8f5f1::t_58982f0002990f 4-6,10-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "bed3c109e718e539ef03ae80c1fea8a14e63e5da",
+  "prompts": {},
+  "sessions": {
+    "s_a184dcf8a8f5f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0f5e3024-49fc-4240-a8b6-97292c195c47",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
