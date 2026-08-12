@@ -46,7 +46,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
 		newFilesVersionsCmd(&project),
-		newFilesReplaceCmd(),
+		newFilesReplaceCmd(&project),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
@@ -1669,7 +1669,7 @@ func flattenUploadVersions(versions []basecamp.UploadVersion) []map[string]any {
 	return rows
 }
 
-func newFilesReplaceCmd() *cobra.Command {
+func newFilesReplaceCmd(project *string) *cobra.Command {
 	var description string
 	var baseName string
 
@@ -1746,17 +1746,26 @@ You can pass either an upload ID or a Basecamp URL:
 				return convertSDKError(err)
 			}
 
+			// Breadcrumbs reuse the caller's own reference and carry an
+			// explicit --project: download resolves a project before fetching,
+			// so a bare ID without the scope could prompt or fail headless.
+			ref := args[0]
+			scope := ""
+			if *project != "" {
+				scope = fmt.Sprintf(" --project %s", *project)
+			}
+
 			return app.OK(upload,
 				output.WithSummary(fmt.Sprintf("Replaced upload #%d's file with %s", upload.ID, upload.Filename)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "versions",
-						Cmd:         fmt.Sprintf("basecamp files versions %s", args[0]),
+						Cmd:         fmt.Sprintf("basecamp files versions %s%s", ref, scope),
 						Description: "List versions",
 					},
 					output.Breadcrumb{
 						Action:      "download",
-						Cmd:         fmt.Sprintf("basecamp files download %s", args[0]),
+						Cmd:         fmt.Sprintf("basecamp files download %s%s", ref, scope),
 						Description: "Download the new version",
 					},
 				),

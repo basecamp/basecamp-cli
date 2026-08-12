@@ -67,8 +67,7 @@ setup_file() {
   # The replaced file surfaces as the single current version.
   run_smoke basecamp files versions "$upload_id" --json
   assert_success
-  run bash -c "echo '$output' | jq '[.data[] | select(.current == true)] | length'"
-  assert_output "1"
+  assert_json_value '[.data[] | select(.current == true)] | length' '1'
 }
 
 @test "uploads show returns upload detail" {

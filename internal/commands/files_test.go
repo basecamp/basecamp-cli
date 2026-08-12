@@ -1412,6 +1412,8 @@ func TestFilesReplaceStagesAndCreatesVersion(t *testing.T) {
 	assert.False(t, hasDescription, "omitted --description must not reach the wire")
 	_, hasNotify := body["notify"]
 	assert.False(t, hasNotify, "no notify field means notify nobody")
+	_, hasBaseName := body["base_name"]
+	assert.False(t, hasBaseName, "omitted --base-name keeps the uploaded filename")
 }
 
 // TestFilesReplaceAcceptsURL verifies a pasted upload URL resolves to the
@@ -1425,6 +1427,22 @@ func TestFilesReplaceAcceptsURL(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, transport.postPaths, 2)
 	assert.Contains(t, transport.postPaths[1], "/uploads/789/versions.json")
+}
+
+// TestFilesReplaceBaseNameReachesTheWire pins --base-name: the rename travels
+// as base_name (the server keeps the staged file's extension), and omitting
+// the flag keeps the field off the wire so the uploaded name stands.
+func TestFilesReplaceBaseNameReachesTheWire(t *testing.T) {
+	transport := &mockFilesReplaceTransport{}
+	app := showTestApp(t, transport)
+
+	cmd := NewFilesCmd()
+	err := executeMessagesCommand(cmd, app, "replace", "789", writeTempUpload(t), "--base-name", "build-v2")
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.versionBody, &body))
+	assert.Equal(t, "build-v2", body["base_name"])
 }
 
 // TestFilesReplaceDescriptionTriState pins the presence-aware description:
