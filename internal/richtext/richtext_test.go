@@ -85,7 +85,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "list followed by blank line then paragraph",
 			input:    "- Item 1\n- Item 2\n\nFollowing paragraph.",
-			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<br>\n<p>Following paragraph.</p>",
+			expected: "<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n<p><br></p>\n<p>Following paragraph.</p>",
 		},
 		{
 			// CommonMark §5.4: "After" is a lazy continuation of the second list item.
@@ -128,7 +128,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "mixed formatting",
 			input:    "# Title\n\nThis is **bold** and *italic* and `code`.",
-			expected: "<h1>Title</h1>\n<br>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
+			expected: "<h1>Title</h1>\n<p><br></p>\n<p>This is <strong>bold</strong> and <em>italic</em> and <code>code</code>.</p>",
 		},
 		{
 			name:     "escapes HTML",
@@ -143,12 +143,12 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "paragraph spacing with blank line",
 			input:    "First paragraph\n\nSecond paragraph",
-			expected: "<p>First paragraph</p>\n<br>\n<p>Second paragraph</p>",
+			expected: "<p>First paragraph</p>\n<p><br></p>\n<p>Second paragraph</p>",
 		},
 		{
 			name:     "multiple blank lines collapse to one break",
 			input:    "First\n\n\n\nSecond",
-			expected: "<p>First</p>\n<br>\n<p>Second</p>",
+			expected: "<p>First</p>\n<p><br></p>\n<p>Second</p>",
 		},
 		{
 			name:     "consecutive lines join into one paragraph",
@@ -158,12 +158,12 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "blank line before list",
 			input:    "Intro\n\n- Item 1\n- Item 2",
-			expected: "<p>Intro</p>\n<br>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
+			expected: "<p>Intro</p>\n<p><br></p>\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>",
 		},
 		{
 			name:     "blank line before code block",
 			input:    "Intro\n\n```\ncode\n```",
-			expected: "<p>Intro</p>\n<br>\n<pre><code>code\n</code></pre>",
+			expected: "<p>Intro</p>\n<p><br></p>\n<pre><code>code\n</code></pre>",
 		},
 		{
 			name:     "leading blank lines ignored",
@@ -173,12 +173,12 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "blank line before blockquote",
 			input:    "Intro\n\n> A quote",
-			expected: "<p>Intro</p>\n<br>\n<blockquote>A quote</blockquote>",
+			expected: "<p>Intro</p>\n<p><br></p>\n<blockquote>A quote</blockquote>",
 		},
 		{
 			name:     "blank line before horizontal rule",
 			input:    "Intro\n\n---",
-			expected: "<p>Intro</p>\n<br>\n<hr>",
+			expected: "<p>Intro</p>\n<p><br></p>\n<hr>",
 		},
 		{
 			name:     "heading flushes accumulated paragraph",
@@ -214,7 +214,7 @@ func TestMarkdownToHTML(t *testing.T) {
 		{
 			name:     "fenced code block containing HTML tags is converted",
 			input:    "intro\n\n```\n<div>hello</div>\n```",
-			expected: "<p>intro</p>\n<br>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;\n</code></pre>",
+			expected: "<p>intro</p>\n<p><br></p>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;\n</code></pre>",
 		},
 	}
 
@@ -2223,30 +2223,30 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 		{
 			name:     "two contiguous paragraphs get a separator",
 			input:    "<p>Line 1</p><p>Line 2</p>",
-			expected: "<p>Line 1</p><br><p>Line 2</p>",
+			expected: "<p>Line 1</p><p><br></p><p>Line 2</p>",
 		},
 		{
 			name:     "three contiguous paragraphs get separators between each",
 			input:    "<p>A</p><p>B</p><p>C</p>",
-			expected: "<p>A</p><br><p>B</p><br><p>C</p>",
+			expected: "<p>A</p><p><br></p><p>B</p><p><br></p><p>C</p>",
 		},
 		{
 			name:     "paragraphs with attributes are separated",
 			input:    `<p dir="auto">A</p><p dir="auto">B</p>`,
-			expected: `<p dir="auto">A</p><br><p dir="auto">B</p>`,
+			expected: `<p dir="auto">A</p><p><br></p><p dir="auto">B</p>`,
 		},
 		{
 			name:     "whitespace-only gap is preserved and separator added",
 			input:    "<p>A</p>\n<p>B</p>",
-			expected: "<p>A</p>\n<br><p>B</p>",
+			expected: "<p>A</p>\n<p><br></p><p>B</p>",
 		},
 		{
-			name:     "existing bare br separator is left untouched (idempotent)",
+			name:     "bare br separator becomes an editor-durable separator paragraph",
 			input:    "<p>A</p><br><p>B</p>",
-			expected: "<p>A</p><br><p>B</p>",
+			expected: "<p>A</p><p><br></p><p>B</p>",
 		},
 		{
-			name:     "empty separator paragraph is left untouched (Lexxy canonical)",
+			name:     "separator paragraph is left untouched (editor canonical)",
 			input:    "<p>A</p><p><br></p><p>B</p>",
 			expected: "<p>A</p><p><br></p><p>B</p>",
 		},
@@ -2293,7 +2293,7 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 		{
 			name:     "paragraph with inline br is still non-empty and separated",
 			input:    "<p>A<br>C</p><p>B</p>",
-			expected: "<p>A<br>C</p><br><p>B</p>",
+			expected: "<p>A<br>C</p><p><br></p><p>B</p>",
 		},
 		{
 			name:     "leading empty paragraph is left alone",
@@ -2301,9 +2301,9 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 			expected: "<p></p><p>A</p>",
 		},
 		{
-			name:     "mix of separated and contiguous only fills the gap that lacks a separator",
+			name:     "mix of contiguous and bare-br boundaries both get separator paragraphs",
 			input:    "<p>A</p><p>B</p><br><p>C</p>",
-			expected: "<p>A</p><br><p>B</p><br><p>C</p>",
+			expected: "<p>A</p><p><br></p><p>B</p><p><br></p><p>C</p>",
 		},
 	}
 
@@ -2325,6 +2325,7 @@ func TestMarkdownToHTMLParagraphSeparatorsIdempotent(t *testing.T) {
 		`<p dir="auto">A</p><p dir="auto">B</p>`,
 		"<p>A</p>\n<p>B</p>",
 		"<p>A</p><p><br></p><p>B</p>",
+		"<p>A</p><br><p>B</p>",
 		"<p>A</p><h3>H</h3><p>B</p>",
 	}
 
@@ -2345,10 +2346,27 @@ func TestMarkdownToHTMLParagraphSeparatorsMatchMarkdownPath(t *testing.T) {
 	fromMarkdown := MarkdownToHTML("Line 1\n\nLine 2")
 	fromHTML := MarkdownToHTML("<p>Line 1</p><p>Line 2</p>")
 
-	if !strings.Contains(fromMarkdown, "<br>") {
-		t.Fatalf("markdown path unexpectedly produced no <br>: %q", fromMarkdown)
+	if fromMarkdown != "<p>Line 1</p>\n<p><br></p>\n<p>Line 2</p>" {
+		t.Errorf("markdown path = %q", fromMarkdown)
 	}
-	if fromHTML != "<p>Line 1</p><br><p>Line 2</p>" {
-		t.Errorf("HTML path = %q, want %q", fromHTML, "<p>Line 1</p><br><p>Line 2</p>")
+	if fromHTML != "<p>Line 1</p><p><br></p><p>Line 2</p>" {
+		t.Errorf("HTML path = %q, want %q", fromHTML, "<p>Line 1</p><p><br></p><p>Line 2</p>")
+	}
+}
+
+// Basecamp's editor discards a bare top-level <br> the first time the content is
+// edited, collapsing the spacing. No blank line between blocks may rely on one.
+func TestMarkdownToHTMLEmitsNoBareTopLevelBreaks(t *testing.T) {
+	markdown := "Para one.\n\nPara two.\n\n## Heading\n\n- a\n- b\n\n> A quote\n\n```\ncode\n```\n\n---\n\nClosing."
+
+	html := MarkdownToHTML(markdown)
+
+	for _, block := range []string{"<p>", "<h2>", "<ul>", "<blockquote>", "<pre>", "<hr>"} {
+		if strings.Contains(html, "<br>\n"+block) {
+			t.Errorf("bare <br> separator before %s in %q", block, html)
+		}
+	}
+	if want := strings.Count(markdown, "\n\n"); strings.Count(html, paragraphSeparator) != want {
+		t.Errorf("got %d separator paragraphs, want %d in %q", strings.Count(html, paragraphSeparator), want, html)
 	}
 }
