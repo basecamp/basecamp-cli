@@ -2241,14 +2241,22 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 			expected: "<p>A</p>\n<p><br></p><p>B</p>",
 		},
 		{
-			name:     "bare br separator becomes an editor-durable separator paragraph",
+			name:     "caller-supplied bare br separator is left untouched",
 			input:    "<p>A</p><br><p>B</p>",
-			expected: "<p>A</p><p><br></p><p>B</p>",
+			expected: "<p>A</p><br><p>B</p>",
 		},
 		{
 			name:     "separator paragraph is left untouched (editor canonical)",
 			input:    "<p>A</p><p><br></p><p>B</p>",
 			expected: "<p>A</p><p><br></p><p>B</p>",
+		},
+		{
+			// A <br> between paragraphs nested in a blockquote is inline content,
+			// which the editor keeps — matching is not nesting-aware, so leaving
+			// caller-supplied separators alone is what protects it.
+			name:     "bare br inside a blockquote is left untouched",
+			input:    "<blockquote><p>A</p><br><p>B</p></blockquote>",
+			expected: "<blockquote><p>A</p><br><p>B</p></blockquote>",
 		},
 		{
 			name:     "empty paragraph separator is left untouched",
@@ -2301,9 +2309,9 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 			expected: "<p></p><p>A</p>",
 		},
 		{
-			name:     "mix of contiguous and bare-br boundaries both get separator paragraphs",
+			name:     "mix of separated and contiguous only fills the gap that lacks a separator",
 			input:    "<p>A</p><p>B</p><br><p>C</p>",
-			expected: "<p>A</p><p><br></p><p>B</p><p><br></p><p>C</p>",
+			expected: "<p>A</p><p><br></p><p>B</p><br><p>C</p>",
 		},
 	}
 

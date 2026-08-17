@@ -398,14 +398,16 @@ func MarkdownToHTML(md string) string {
 // distinction), so contiguous paragraphs from HTML input are treated as
 // separate paragraphs.
 //
-// A boundary already carrying an empty separator paragraph (<p><br></p> or
-// <p></p>) on either side is left untouched, so running this on Basecamp editor
-// output — or on its own output — is a no-op. A boundary separated only by bare
-// <br> tags is rewritten to the separator paragraph: the editor drops those on
-// the first edit, so leaving them would keep the spacing they express fragile.
-// Only directly adjacent <p> blocks are separated; anything else between them,
-// such as a heading, list, or attachment, already provides its own break and is
-// left alone.
+// The transform is byte-preserving apart from the inserted separators and is
+// idempotent: a boundary that already carries a separator — a bare <br> between
+// the paragraphs, or an empty separator paragraph (<p><br></p> or <p></p>) on
+// either side — is left untouched, so running it on already-separated content
+// (including Basecamp editor output) is a no-op. Separators the caller supplied
+// are left as they came: this matching is not nesting-aware, and a <br> the
+// caller put between two paragraphs inside a blockquote is legal inline content
+// that survives editing. Only directly adjacent <p> blocks are separated;
+// anything else between them, such as a heading, list, or attachment, already
+// provides its own break and is left alone.
 func insertParagraphSeparators(s string) string {
 	locs := reP.FindAllStringIndex(s, -1)
 	if len(locs) < 2 {
@@ -431,21 +433,14 @@ func insertParagraphSeparators(s string) string {
 
 		nextStart := locs[i+1][0]
 		gap := s[end:nextStart]
-		if !empty[i] && !empty[i+1] && isSeparatorGap(gap) {
-			b.WriteString(reBR.ReplaceAllString(gap, ""))
+		if !empty[i] && !empty[i+1] && strings.TrimSpace(gap) == "" {
+			b.WriteString(gap)
 			b.WriteString(paragraphSeparator)
 			cursor = nextStart
 		}
 	}
 	b.WriteString(s[cursor:])
 	return b.String()
-}
-
-// isSeparatorGap reports whether the markup between two paragraph blocks holds
-// nothing but whitespace and bare <br> tags — i.e. whatever spacing it expresses
-// can be replaced by a separator paragraph.
-func isSeparatorGap(gap string) bool {
-	return strings.TrimSpace(reBR.ReplaceAllString(gap, "")) == ""
 }
 
 // isEmptyParagraph reports whether a <p>...</p> block has no visible content —
