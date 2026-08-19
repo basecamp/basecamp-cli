@@ -664,6 +664,14 @@ func transformCobraError(err error) error {
 		return output.ErrUsage("ID required")
 	}
 
+	// Every other cobra arity message ("accepts at most 2 arg(s), received 3")
+	// is a usage error by construction — only the code was wrong, so agents
+	// branching on it saw api_error and could retry a call that will never
+	// succeed. The wording is already clear; keep it and fix the code.
+	if strings.Contains(msg, "arg(s), received ") {
+		return output.ErrUsage(msg)
+	}
+
 	// Transform "required flag(s) X not set" → more specific message
 	if strings.HasPrefix(msg, "required flag(s) ") {
 		re := regexp.MustCompile(`required flag\(s\) "(\w+)" not set`)

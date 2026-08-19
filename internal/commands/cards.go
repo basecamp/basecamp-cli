@@ -857,6 +857,9 @@ Use - as the body argument to read the body from stdin:
   printf 'Card body' | basecamp cards create "My card" - --in myproject`,
 		Example: `  basecamp cards create "My card" --in myproject
   basecamp cards create --in myproject -- "--title with dashes"`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {

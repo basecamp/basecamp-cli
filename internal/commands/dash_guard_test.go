@@ -67,7 +67,7 @@ func TestDashGuardRejectsUnlistedFlagWhenPiped(t *testing.T) {
 	assert.Contains(t, outErr.Message, "--title")
 	// -- doesn't escape flag values, so the hint must not claim it does.
 	assert.NotContains(t, outErr.Hint, "-- separator")
-	assert.Contains(t, outErr.Hint, "/dev/tty")
+	assert.Contains(t, outErr.Hint, "without piped stdin")
 }
 
 // The guard runs at Args-validation time: before the command's own Args

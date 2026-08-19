@@ -63,6 +63,19 @@ func TestReadStdinContentTTYIsUsageErrorWithEscapeHints(t *testing.T) {
 	assert.NotContains(t, outErr.Hint, "--edit", "no --edit flag on this command")
 }
 
+// The hint must name the input that actually carried the "-". Suggesting a
+// bare trailing "-" for a flag-borne dash would exceed the command's
+// positional arity — an escape the caller cannot use.
+func TestReadStdinContentTTYHintNamesTheFlag(t *testing.T) {
+	cmd := &cobra.Command{Use: "post <path>"}
+	devNullStdin(t, cmd)
+
+	_, err := readStdinContent(cmd, "--data")
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Hint, "--data -")
+	assert.NotContains(t, outErr.Hint, "... -)", "a bare positional dash would break arity")
+}
+
 func TestReadStdinContentTTYHintMentionsEditWhenAvailable(t *testing.T) {
 	cmd := &cobra.Command{Use: "x"}
 	cmd.Flags().Bool("edit", false, "")

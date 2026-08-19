@@ -51,7 +51,7 @@ func readStdinContent(cmd *cobra.Command, what string) (string, error) {
 	if !stdinarg.IsPiped(cmd.InOrStdin()) {
 		return "", output.ErrUsageHint(
 			fmt.Sprintf(`%s is "-" (read from stdin) but nothing is piped`, what),
-			stdinEscapeHint(cmd),
+			stdinEscapeHint(cmd, what),
 		)
 	}
 	data, err := io.ReadAll(cmd.InOrStdin())
@@ -67,11 +67,18 @@ func readStdinContent(cmd *cobra.Command, what string) (string, error) {
 
 // stdinEscapeHint lists the ways to satisfy a "-" from an interactive
 // terminal, mentioning --edit only where the command has it.
-func stdinEscapeHint(cmd *cobra.Command) string {
+//
+// The examples repeat the input that actually carried the "-": suggesting a
+// bare trailing "-" for a flag would exceed the command's positional arity.
+func stdinEscapeHint(cmd *cobra.Command, what string) string {
 	path := cmd.CommandPath()
+	source := "-"
+	if strings.HasPrefix(what, "--") {
+		source = what + " -"
+	}
 	hint := fmt.Sprintf(
-		"Pipe the content (printf '...' | %[1]s ... -), use a heredoc (%[1]s ... - <<'EOF'), or run cat | %[1]s ... - and type the content, ending with Ctrl-D",
-		path)
+		"Pipe the content (printf '...' | %[1]s ... %[2]s), use a heredoc (%[1]s ... %[2]s <<'EOF'), or run cat | %[1]s ... %[2]s and type the content, ending with Ctrl-D",
+		path, source)
 	if cmd.Flags().Lookup("edit") != nil {
 		hint += "; or compose with --edit"
 	}
@@ -225,13 +232,15 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 		msg := fmt.Sprintf(`%s does not read stdin via "-" for %s`,
 			cmd.CommandPath(), strings.Join(disallowed, ", "))
 		// -- only escapes positionals; a flag value has no in-line escape, so
-		// the honest remedy there is an unpiped stdin.
+		// the honest remedy there is an unpiped stdin. Naming a concrete
+		// redirect would be wrong on Windows and on headless runners with no
+		// controlling terminal, so the hint stays at the shape of the fix.
 		var hints []string
 		if len(disallowedArgs) > 0 {
 			hints = append(hints, `For a literal "-" argument, pass it after the -- separator`)
 		}
 		if len(disallowedFlags) > 0 {
-			hints = append(hints, `For a literal "-" flag value, run without piped stdin (append </dev/tty)`)
+			hints = append(hints, `For a literal "-" flag value, run the command without piped stdin`)
 		}
 		if accepts := describeAllowed(cmd, allow); accepts != "" {
 			hints = append(hints, "this command reads stdin when \"-\" is given as "+accepts)

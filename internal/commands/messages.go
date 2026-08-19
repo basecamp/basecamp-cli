@@ -435,6 +435,9 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 
 Use - as the body argument to read the body from stdin:
   printf 'Long **Markdown** body' | basecamp messages create "Title" -`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {

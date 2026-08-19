@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -148,4 +150,91 @@ func TestTodosUpdateDescriptionDashReadsStdin(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "the piped description should reach the wire as HTML")
+}
+
+// countingTransport records whether any request escaped the command.
+type countingTransport struct{ calls int }
+
+func (t *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	t.calls++
+	return nil, errors.New("network disabled in tests")
+}
+
+// trackingReader records whether stdin was ever read.
+type trackingReader struct {
+	r    *strings.Reader
+	read bool
+}
+
+func (t *trackingReader) Read(p []byte) (int, error) {
+	t.read = true
+	return t.r.Read(p)
+}
+
+func setupTransportTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{AccountID: "99999", ProjectID: "123"}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &testTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: &bytes.Buffer{}}),
+	}
+}
+
+// The <title> [body] creates bound their arity, so a stray trailing token is a
+// usage error at Args-validation time — before "-" drains stdin and before any
+// request is built. Without the bound the extra token was silently dropped
+// *after* stdin had already been consumed.
+func TestExactPositionalCreatesRejectExtraArgsBeforeConsumingStdin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		path []string
+	}{
+		{"messages", NewMessagesCmd, []string{"create"}},
+		{"cards", NewCardsCmd, []string{"create"}},
+		{"docs", NewDocsCmd, []string{"documents", "create"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupTransportTestApp(t, transport)
+
+			stdin := &trackingReader{r: strings.NewReader("body from stdin")}
+			cmd := tc.cmd()
+			InstallDashGuard(cmd)
+			cmd.SetIn(stdin)
+
+			args := append(append([]string{}, tc.path...), "Title", "-", "unexpected")
+			err := executeCommand(cmd, app, args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "accepts at most 2 arg")
+			assert.False(t, stdin.read, "stdin must not be consumed before arity validation")
+			assert.Zero(t, transport.calls, "no request may be issued")
+		})
+	}
+}
+
+// A flag-borne "-" with nothing piped must suggest an escape that parses:
+// "api post ... --data -", never a bare positional "-" (api post takes one).
+func TestAPIPostDataDashOnTTYHintPreservesTheFlag(t *testing.T) {
+	transport := &countingTransport{}
+	app := setupTransportTestApp(t, transport)
+
+	cmd := NewAPICmd()
+	InstallDashGuard(cmd)
+	devNullStdin(t, cmd)
+
+	err := executeCommand(cmd, app, "post", "/buckets/1/todos.json", "--data", "-")
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Hint, "api post ... --data -")
+	assert.Zero(t, transport.calls)
 }

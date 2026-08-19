@@ -1230,6 +1230,9 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 Use - as the content argument to read the document body from stdin:
   basecamp docs create "Title" - --in my-project < body.md`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no arguments
 			if len(args) == 0 {
