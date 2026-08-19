@@ -1,0 +1,19 @@
+nix/package.nix
+  s_f77573f40278b6::t_264a8fbaad2c19 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3b2ae7483d2a07ccb397c59b29f291827e406b3a",
+  "prompts": {},
+  "sessions": {
+    "s_f77573f40278b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "272cab6f-5556-43ec-9cbc-d697e9a030b5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
