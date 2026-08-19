@@ -91,3 +91,19 @@ func IsPiped(r io.Reader) bool {
 	}
 	return fi.Mode()&os.ModeCharDevice == 0
 }
+
+// InteractiveStdio reports whether both stdout and stdin are character
+// devices — the floor for launching anything that draws to the terminal and
+// reads keystrokes. A TUI (picker, wizard) reads key events from stdin, so a
+// pipe or redirected file can never drive one — and when the command is
+// consuming piped content (a "-" stdin input), a TUI would eat that content
+// as key events.
+func InteractiveStdio() bool {
+	for _, f := range []*os.File{os.Stdout, os.Stdin} {
+		fi, err := f.Stat()
+		if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+			return false
+		}
+	}
+	return true
+}

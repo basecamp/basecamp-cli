@@ -143,7 +143,9 @@ func InstallDashGuard(root *cobra.Command) {
 	// turn "basecamp unknowncmd" into a quickstart run. Leaving the root
 	// unguarded loses nothing: its positionals are subcommand names, and a
 	// bare "basecamp -" just runs quickstart, which posts no content for a
-	// literal "-" to corrupt.
+	// literal "-" to corrupt and whose TUI paths (the first-run wizard) are
+	// stdin-gated by stdinarg.InteractiveStdio — piped stdin routes to the
+	// non-interactive summary instead of a wizard that would eat the pipe.
 	skipRoot := root.Args == nil && !root.HasParent() && root.HasSubCommands()
 	if root.Runnable() && !skipRoot {
 		existing := root.Args

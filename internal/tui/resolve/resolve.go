@@ -5,12 +5,12 @@ package resolve
 
 import (
 	"context"
-	"os"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -120,24 +120,11 @@ func (r *Resolver) IsInteractive() bool {
 		}
 	}
 
-	// Check if stdout is a character device (e.g. a terminal)
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	if fi.Mode()&os.ModeCharDevice == 0 {
-		return false
-	}
-
-	// Stdin must be a character device too: pickers read keystrokes from
-	// stdin, so a pipe or redirected file can never drive one — and when the
-	// command is consuming piped content (a "-" stdin input), a picker would
-	// eat that content as key events.
-	fi, err = os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	// Both stdout and stdin must be character devices: pickers draw to
+	// stdout and read keystrokes from stdin, so a pipe on either end can
+	// never drive one — and when the command is consuming piped content
+	// (a "-" stdin input), a picker would eat that content as key events.
+	return stdinarg.InteractiveStdio()
 }
 
 // ResolvedValue represents a value that was resolved, along with metadata

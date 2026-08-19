@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/resilience"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -374,13 +375,11 @@ func (a *App) IsInteractive() bool {
 		return false
 	}
 
-	// Check if stdout is a terminal
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	// Both stdout and stdin must be character devices: a TUI draws to stdout
+	// and reads keystrokes from stdin, so a pipe on either end can never
+	// drive one — and when the command is consuming piped content (a "-"
+	// stdin input), a TUI would eat that content as key events.
+	return stdinarg.InteractiveStdio()
 }
 
 // WithApp stores the app in the context.
