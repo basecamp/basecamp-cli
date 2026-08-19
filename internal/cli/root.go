@@ -520,8 +520,14 @@ func profileNames(cfg *config.Config) string {
 	return strings.Join(names, ", ")
 }
 
-// isInteractiveTTY returns true if stdout is a character device (e.g. a
-// terminal) and no noninteractive mode is set.
+// isInteractiveTTY reports whether the profile picker may run: no
+// noninteractive mode set, and both ends of stdio are character devices.
+//
+// Stdin counts because the picker is a TUI reading key events, and this runs
+// from PersistentPreRunE — before any command touches its own input. Gating on
+// stdout alone let "printf body | basecamp todos create -" open the picker on
+// a terminal stdout and consume the piped body as keystrokes. Same predicate
+// as App.IsInteractive and resolve.Resolver.IsInteractive.
 func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 	if config.NonInteractiveEnv() {
 		return false
@@ -532,12 +538,7 @@ func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 		return false
 	}
 
-	// Check if stdout is a character device (e.g. a terminal)
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	return stdinarg.InteractiveStdio()
 }
 
 // promptForProfile shows an interactive picker for profile selection.

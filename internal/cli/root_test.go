@@ -285,3 +285,36 @@ func TestVersionWithJQReturnsUsageError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--jq is not supported by the version command")
 }
+
+// The profile picker runs from PersistentPreRunE, before any command reads its
+// own input. Piped stdin can never drive a TUI, and when the invocation is
+// feeding a "-" content input the picker would eat that body as keystrokes —
+// so a terminal stdout is not on its own enough to open one.
+func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(os.DevNull + " not available")
+	}
+	origStdout := os.Stdout
+	os.Stdout = devNull
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		devNull.Close()
+	})
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+
+	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}), "char-device stdio is interactive")
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	origStdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		reader.Close()
+		writer.Close()
+	})
+
+	assert.False(t, isInteractiveTTY(appctx.GlobalFlags{}),
+		"piped stdin must not open the profile picker")
+}

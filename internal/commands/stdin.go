@@ -140,14 +140,26 @@ func afterDashSeparator(cmd *cobra.Command, index int) bool {
 func InstallDashGuard(root *cobra.Command) {
 	// The root's nil Args is load-bearing: cobra's Find() rejects unknown
 	// subcommands (legacyArgs) only while Args == nil, so wrapping it would
-	// turn "basecamp unknowncmd" into a quickstart run. Leaving the root
-	// unguarded loses nothing: its positionals are subcommand names, and a
-	// bare "basecamp -" just runs quickstart, which posts no content for a
-	// literal "-" to corrupt and whose TUI paths (the first-run wizard) are
-	// stdin-gated by stdinarg.InteractiveStdio — piped stdin routes to the
-	// non-interactive summary instead of a wizard that would eat the pipe.
-	skipRoot := root.Args == nil && !root.HasParent() && root.HasSubCommands()
-	if root.Runnable() && !skipRoot {
+	// turn "basecamp unknowncmd" into a quickstart run. Guard its RunE
+	// instead, so "printf x | basecamp -" still gets the stray-dash error
+	// rather than silently running quickstart and ignoring the pipe. RunE is
+	// later than Args validation, but the root's pre-run work (config
+	// hardening, the update check) neither reads stdin nor writes content —
+	// and its one TUI path, the first-run wizard, is stdin-gated by
+	// stdinarg.InteractiveStdio, so piped stdin routes to the non-interactive
+	// summary instead of a wizard that would eat the pipe.
+	skipRootArgs := root.Args == nil && !root.HasParent() && root.HasSubCommands()
+	switch {
+	case !root.Runnable():
+	case skipRootArgs:
+		existing := root.RunE
+		root.RunE = func(cmd *cobra.Command, args []string) error {
+			if err := guardDashArgs(cmd, args); err != nil {
+				return err
+			}
+			return existing(cmd, args)
+		}
+	default:
 		existing := root.Args
 		root.Args = func(cmd *cobra.Command, args []string) error {
 			if err := guardDashArgs(cmd, args); err != nil {

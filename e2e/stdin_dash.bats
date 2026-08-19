@@ -71,3 +71,22 @@ load test_helper
   assert_success
   assert_json_value '.data.project_id.value' '-'
 }
+
+@test "a piped bare dash at the root is rejected, not silently quick-started" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bash -c "printf 'x' | basecamp - --json"
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error | contains("does not read stdin")' 'true'
+}
+
+@test "basecamp unknowncmd still reports an unknown command" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bash -c "basecamp unknowncmd --json < /dev/null"
+  assert_failure
+  assert_output_contains "unknown command"
+}

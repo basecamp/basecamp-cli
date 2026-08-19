@@ -253,3 +253,72 @@ func TestDashGuardNamesASoloFlagPlainly(t *testing.T) {
 	assert.Contains(t, outErr.Message, "--title")
 	assert.NotContains(t, outErr.Message, "/--")
 }
+
+// The root keeps nil Args so cobra's legacyArgs still rejects unknown
+// subcommands, so its guard hangs off RunE instead. All four root behaviors
+// have to survive together.
+func TestDashGuardOnRootPreservesUnknownCommandHandling(t *testing.T) {
+	newRoot := func(probe *dashProbe) *cobra.Command {
+		root := &cobra.Command{
+			Use: "basecamp",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				probe.ran = true
+				probe.args = args
+				return nil
+			},
+		}
+		root.AddCommand(&cobra.Command{
+			Use:  "todos",
+			RunE: func(cmd *cobra.Command, args []string) error { return nil },
+		})
+		InstallDashGuard(root)
+		require.Nil(t, root.Args, "root Args must stay nil for legacyArgs")
+		root.SetOut(&strings.Builder{})
+		root.SetErr(&strings.Builder{})
+		return root
+	}
+
+	t.Run("piped dash is a usage error", func(t *testing.T) {
+		probe := &dashProbe{}
+		root := newRoot(probe)
+		root.SetIn(strings.NewReader("piped"))
+		root.SetArgs([]string{"-"})
+
+		outErr := requireUsageErr(t, root.Execute())
+		assert.Contains(t, outErr.Message, "does not read stdin")
+		assert.False(t, probe.ran, "quick-start must not run on a stray dash")
+	})
+
+	t.Run("separator keeps the dash literal", func(t *testing.T) {
+		probe := &dashProbe{}
+		root := newRoot(probe)
+		root.SetIn(strings.NewReader("piped"))
+		root.SetArgs([]string{"--", "-"})
+
+		require.NoError(t, root.Execute())
+		assert.True(t, probe.ran)
+		assert.Equal(t, []string{"-"}, probe.args)
+	})
+
+	t.Run("unknown subcommand still errors", func(t *testing.T) {
+		probe := &dashProbe{}
+		root := newRoot(probe)
+		root.SetIn(strings.NewReader("piped"))
+		root.SetArgs([]string{"unknowncmd"})
+
+		err := root.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown command")
+		assert.False(t, probe.ran)
+	})
+
+	t.Run("bare invocation still runs", func(t *testing.T) {
+		probe := &dashProbe{}
+		root := newRoot(probe)
+		root.SetIn(strings.NewReader("piped"))
+		root.SetArgs(nil)
+
+		require.NoError(t, root.Execute())
+		assert.True(t, probe.ran)
+	})
+}
