@@ -31,7 +31,7 @@ person, so there is nothing to list and no id to pass.
   basecamp notes show
   basecamp notes set "Remember to follow up on the Q3 rollout"
   basecamp notes set --file notes.md
-  cat notes.md | basecamp notes set`,
+  cat notes.md | basecamp notes set -`,
 		Annotations: map[string]string{
 			"agent_notes": "Account-wide and personal — no --in <project> needed.\n" +
 				"Singleton: no id. 'set' replaces the whole note; it does not append.",
@@ -108,16 +108,17 @@ func newNotesSetCmd() *cobra.Command {
 		Short: "Replace your personal note",
 		Long: `Replace your personal note with new content.
 
-Content comes from a positional argument, --file, or piped stdin. Markdown is
-converted to HTML, since the note is a rich text field — passing raw text
-through would store escaped markup rather than formatting.
+Content comes from a positional argument or --file; either accepts - to read
+from stdin. Markdown is converted to HTML, since the note is a rich text
+field — passing raw text through would store escaped markup rather than
+formatting.
 
 This replaces the whole note; it does not append. The first write creates the
 note, so there is no separate "create" step.
 
   basecamp notes set "Follow up with Ann on the rollout"
   basecamp notes set --file notes.md
-  cat notes.md | basecamp notes set
+  cat notes.md | basecamp notes set -
 
 Attachments are out of scope: this writes the note body only.
 
@@ -163,44 +164,37 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&file, "file", "f", "", "Read note content from a file")
+	cmd.Flags().StringVarP(&file, "file", "f", "", "Read note content from a file; use - to read from stdin")
+
+	allowDash(cmd, "arg:0", "flag:file")
 
 	return cmd
 }
 
-// notesContent resolves the note body from exactly one of the three inputs.
-//
-// Naming two sources is a usage error rather than a silent precedence rule: a
+// notesContent resolves the note body from exactly one of two inputs: the
+// positional argument (where "-" reads stdin) or --file (where "-" also reads
+// stdin). Naming both is a usage error rather than a silent precedence rule: a
 // caller who passes both an argument and --file has a wrong expectation about
 // which one wins, and this command overwrites the whole note.
 //
-// All three sources are detected before any of them is chosen. Checking stdin
-// only after an argument and --file had been ruled out made
-// `generate | basecamp notes set --file fallback.md` overwrite the note from
-// the file and discard the generated body without a word — the precise failure
-// this function exists to prevent, in the one command that replaces everything.
+// A pipe without "-" is deliberately not consumed as an implicit third source.
+// Reading it silently made `generate | basecamp notes set --file fallback.md`
+// a coin-flip over which body survives; requiring the explicit "-" makes the
+// caller name the source in the one command that replaces everything.
 func notesContent(cmd *cobra.Command, args []string, file string) (string, error) {
 	positional := strings.Join(args, " ")
 
-	piped, ok, err := readPipedStdin(cmd)
-	if err != nil {
-		return "", err
-	}
-	// An empty pipe is not a source. A redirected-but-empty stdin carries no
-	// body to lose, so it must not turn a valid `--file` call into an error.
-	hasPipe := ok && strings.TrimSpace(piped) != ""
-
-	named := 0
-	for _, present := range []bool{file != "", positional != "", hasPipe} {
-		if present {
-			named++
-		}
-	}
-	if named > 1 {
-		return "", output.ErrUsage("pass note content as an argument, with --file, or on stdin — not more than one")
+	if file != "" && positional != "" {
+		return "", output.ErrUsage("pass note content as an argument or with --file — not both")
 	}
 
 	switch {
+	case file == "-":
+		content, err := readStdinContent(cmd, "--file")
+		if err != nil {
+			return "", err
+		}
+		return notesRequireContent(content)
 	case file != "":
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -208,14 +202,16 @@ func notesContent(cmd *cobra.Command, args []string, file string) (string, error
 		}
 		return notesRequireContent(string(data))
 	case positional != "":
-		return notesRequireContent(positional)
-	case hasPipe:
-		return notesRequireContent(piped)
+		content, err := resolveContentValue(cmd, positional, 0, "[content]")
+		if err != nil {
+			return "", err
+		}
+		return notesRequireContent(content)
 	}
 
 	return "", output.ErrUsageHint(
 		"note content is required",
-		`Pass it as an argument, with --file, or on stdin: basecamp notes set "..."`,
+		`Pass it as an argument, with --file, or pipe it and pass "-": basecamp notes set -`,
 	)
 }
 

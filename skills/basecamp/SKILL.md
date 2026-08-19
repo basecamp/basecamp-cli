@@ -108,6 +108,23 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    ```bash
    printf '%s\n' '海报 mockup 方向稿：' '' '<bc-attachment ...>' | basecamp comments create <recording_id> - --in <project> --json
    ```
+   `-` means "read from stdin" on every content input: content-kind positionals
+   (`comments create/update`, `messages create [body]`, `cards create [body]`,
+   `todos create`, `docs create [content]`, `chat post/update`, `boost create`,
+   `checkins answer create/update`, `notes set`) and content flags (`--data` on
+   `api post/put`, `--body`, `--content`, `--description`, `--comment` on
+   `todos sweep`, `--file` on `notes set`). Each command's `--agent` help lists
+   its stdin inputs. Rules:
+   - A pipe is **never consumed implicitly** — without `-` it is ignored (or, where
+     content is required and missing, the error teaches `-`).
+   - Only one input can read stdin per invocation.
+   - A literal `-` anywhere else (a title, a name, a path) **errors when stdin is
+     piped**; escape it after the `--` separator: `basecamp projects create -- -`.
+   - `-` with nothing piped (interactive TTY) errors immediately instead of
+     hanging; use a pipe, a heredoc (`basecamp comments create <id> - <<'EOF'`),
+     or `--edit` where offered.
+   - Trailing newlines are trimmed from stdin content, so `printf 'x\n' | ... -`
+     posts `x` (this keeps `boost create -` inside its 16-rune limit).
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the seven list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
    Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected) or `--all` for everything. `--page N` fetches exactly one page, but only on the paginated listings.
@@ -1086,8 +1103,9 @@ at 250 server-side.
 
 `notes` is a single private scratchpad — one per person, no id, nothing to list.
 Before your first write it renders empty rather than 404ing. `set` **replaces**
-the whole note (it does not append) and takes content from an argument,
-`--file`, or piped stdin; Markdown is converted to HTML.
+the whole note (it does not append) and takes content from an argument or
+`--file` — either accepts `-` to read stdin (`cat notes.md | basecamp notes set -`);
+a pipe without `-` is not consumed. Markdown is converted to HTML.
 
 ### Calendars
 

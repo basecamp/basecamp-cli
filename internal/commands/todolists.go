@@ -288,6 +288,11 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -366,8 +371,10 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description; use - to read from stdin")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -393,6 +400,11 @@ You can pass either a todolist ID or a Basecamp URL:
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -457,7 +469,9 @@ You can pass either a todolist ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }

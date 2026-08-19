@@ -887,12 +887,18 @@ as an upload in the target folder (vault).`,
   basecamp uploads create ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
 			return runUploadFile(cmd, *project, *vaultID, args[0], description, visibleToClients)
 		},
 	}
 
-	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown); use - to read from stdin")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -915,6 +921,10 @@ attachment and then created as an upload in the target folder.`,
   basecamp upload ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
 			return runUploadFile(cmd, project, vaultID, args[0], description, visibleToClients)
 		},
 	}
@@ -923,8 +933,10 @@ attachment and then created as an upload in the target folder.`,
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
 	cmd.Flags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
-	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown); use - to read from stdin")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -1214,6 +1226,10 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <title> [content]",
 		Short: "Create a new document",
+		Long: `Create a new document in a project's Docs & Files area.
+
+Use - as the content argument to read the document body from stdin:
+  basecamp docs create "Title" - --in my-project < body.md`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no arguments
 			if len(args) == 0 {
@@ -1229,7 +1245,11 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 			}
 			content := ""
 			if len(args) > 1 {
-				content = args[1]
+				var contentErr error
+				content, contentErr = resolveContentValue(cmd, args[1], 1, "[content]")
+				if contentErr != nil {
+					return contentErr
+				}
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)
@@ -1338,6 +1358,8 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the document visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "arg:1")
 
 	return cmd
 }
@@ -1693,6 +1715,13 @@ You can pass either an upload ID or a Basecamp URL:
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Only an exact "-" reads stdin; --description "" stays the clear idiom.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -1805,8 +1834,10 @@ You can pass either an upload ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVar(&description, "description", "", "New description (Markdown); omit to carry the current one forward")
+	cmd.Flags().StringVar(&description, "description", "", "New description (Markdown); omit to carry the current one forward; use - to read from stdin")
 	cmd.Flags().StringVar(&baseName, "base-name", "", "Rename the file (without extension); omit to keep the uploaded file's name")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -1866,6 +1897,13 @@ You can pass either an item ID or a Basecamp URL:
 		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because BC3 rebuilds documents from permitted params on PUT; explicit clears via --title \"\"/--content \"\" work because the SDK strips empty strings to absent fields, which the controller then nulls. Upload/vault updates do not clear by omission, so empty-valued flags are rejected CLI-side."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Only an exact "-" reads stdin; --content "" stays the clear idiom.
+			var contentErr error
+			content, contentErr = resolveContentValue(cmd, content, -1, "--content")
+			if contentErr != nil {
+				return contentErr
+			}
+
 			titleChanged := cmd.Flags().Changed("title")
 			contentChanged := cmd.Flags().Changed("content")
 			titleTrimmed := strings.TrimSpace(title)
@@ -2061,8 +2099,10 @@ You can pass either an item ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&content, "content", "c", "", "New content")
+	cmd.Flags().StringVarP(&content, "content", "c", "", "New content; use - to read from stdin")
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type (vault, document, upload)")
+
+	allowDash(cmd, "flag:content")
 
 	return cmd
 }
@@ -2279,6 +2319,9 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 	}
 
 	cmd.Flags().StringVarP(&outDir, "out", "o", "", "Output directory (default: current directory)")
+
+	// --out - means stream to stdout — exempt from the stdin dash guard.
+	allowDash(cmd, "flag:out")
 
 	return cmd
 }

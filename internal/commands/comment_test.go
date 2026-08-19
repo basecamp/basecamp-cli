@@ -84,23 +84,26 @@ func TestCommentsUpdateRejectsEmptyDashContent(t *testing.T) {
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr), "expected *output.Error, got %T: %v", err, err)
 	assert.Equal(t, output.CodeUsage, outErr.Code)
-	assert.Equal(t, "<content> required", outErr.Message)
+	assert.Equal(t, "stdin for <content> is empty", outErr.Message)
 	assert.Empty(t, transport.capturedBodies)
 }
 
-func TestCommentsCreateReadsContentFromStdin(t *testing.T) {
+// A pipe without "-" is no longer consumed implicitly: the error teaches the
+// explicit placeholder instead, and nothing reaches the server.
+func TestCommentsCreateBarePipeErrorsWithDashHint(t *testing.T) {
 	transport := &mockCommentWriteTransport{}
 	app, _ := setupCommentsWriteTestApp(t, transport)
+	app.Flags.JSON = true
 
 	cmd := NewCommentsCmd()
 	cmd.SetIn(strings.NewReader("hello from stdin"))
 	err := executeCommand(cmd, app, "create", "123")
-	require.NoError(t, err)
-	require.Len(t, transport.capturedBodies, 1)
-
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(transport.capturedBodies[0], &body))
-	assert.Equal(t, "<p>hello from stdin</p>", body["content"])
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Hint, `"-"`)
+	assert.Empty(t, transport.capturedBodies)
 }
 
 func TestCommentsCreatePrefersPositionalContentOverStdin(t *testing.T) {
@@ -140,7 +143,7 @@ func TestCommentsCreateMissingContentReturnsUsageBeforeAccountResolution(t *test
 	assert.NotContains(t, err.Error(), "account")
 }
 
-func TestReadPipedStdinIgnoresUnreadableStdin(t *testing.T) {
+func TestReadStdinContentUnreadableStdinIsUsageError(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
@@ -148,10 +151,12 @@ func TestReadPipedStdinIgnoresUnreadableStdin(t *testing.T) {
 
 	cmd := newCommentsCreateCmd()
 	cmd.SetIn(r)
-	content, hasPipedStdin, err := readPipedStdin(cmd)
-	require.NoError(t, err)
+	content, err := readStdinContent(cmd, "<content>")
+	require.Error(t, err)
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeUsage, outErr.Code)
 	assert.Empty(t, content)
-	assert.False(t, hasPipedStdin)
 }
 
 func setupCommentsWriteTestApp(t *testing.T, transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {

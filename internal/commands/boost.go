@@ -271,14 +271,20 @@ Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			content, err := resolveContentValue(cmd, args[1], 1, "<content>")
+			if err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			return runBoostCreate(cmd, app, args[0], *project, args[1], eventID)
+			return runBoostCreate(cmd, app, args[0], *project, content, eventID)
 		},
 	}
 
 	cmd.Flags().StringVar(&eventID, "event", "", "Event ID (for event-specific boosts)")
+
+	allowDash(cmd, "arg:1")
 
 	return cmd
 }

@@ -1269,7 +1269,10 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 			}
 
 			questionID := args[0]
-			content := strings.Join(args[1:], " ")
+			content, err := resolveContentArg(cmd, args[1:], 1)
+			if err != nil {
+				return err
+			}
 
 			app := appctx.FromContext(cmd.Context())
 
@@ -1359,6 +1362,8 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 	cmd.Flags().StringVar(&groupOn, "date", "", "Date to group answer (ISO 8601, e.g., 2024-01-22; defaults to today)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
+	allowDash(cmd, "arg:1+")
+
 	return cmd
 }
 
@@ -1381,7 +1386,10 @@ You can pass either an answer ID or a Basecamp URL:
 			// Extract ID and project from URL if provided
 			answerIDStr, urlProjectID := extractWithProject(args[0])
 
-			content := strings.Join(args[1:], " ")
+			content, err := resolveContentArg(cmd, args[1:], 1)
+			if err != nil {
+				return err
+			}
 
 			app := appctx.FromContext(cmd.Context())
 
@@ -1460,6 +1468,8 @@ You can pass either an answer ID or a Basecamp URL:
 			)
 		},
 	}
+
+	allowDash(cmd, "arg:1+")
 
 	return cmd
 }

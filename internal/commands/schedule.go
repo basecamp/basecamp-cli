@@ -446,6 +446,11 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
 		},
 	}
@@ -456,13 +461,15 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringVar(&startsAt, "start", "", "Start time (alias)")
 	cmd.Flags().StringVar(&endsAt, "ends-at", "", "End time (ISO 8601)")
 	cmd.Flags().StringVar(&endsAt, "end", "", "End time (alias)")
-	cmd.Flags().StringVar(&description, "description", "", "Detailed description")
+	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
@@ -613,6 +620,12 @@ You can pass either an entry ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -764,13 +777,15 @@ You can pass either an entry ID or a Basecamp URL:
 	cmd.Flags().StringVar(&startsAt, "start", "", "Start time (alias)")
 	cmd.Flags().StringVar(&endsAt, "ends-at", "", "End time (ISO 8601)")
 	cmd.Flags().StringVar(&endsAt, "end", "", "End time (alias)")
-	cmd.Flags().StringVar(&description, "description", "", "Detailed description")
+	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 
 	return cmd
 }

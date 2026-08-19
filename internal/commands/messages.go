@@ -431,7 +431,10 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
 		Short: "Create a new message",
-		Long:  "Post a new message to a project's message board.",
+		Long: `Post a new message to a project's message board.
+
+Use - as the body argument to read the body from stdin:
+  printf 'Long **Markdown** body' | basecamp messages create "Title" -`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {
@@ -449,9 +452,16 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return cmd.Help()
 			}
 
-			// Validate user input first, before checking account
+			// Validate user input first, before checking account. The --edit
+			// exclusion runs before "-" resolution so --edit … - errors
+			// without consuming stdin.
 			if edit && body != "" {
 				return output.ErrUsage("cannot combine --edit and body argument")
+			}
+			var err error
+			body, err = resolveContentValue(cmd, body, 1, "[body]")
+			if err != nil {
+				return err
 			}
 			if edit {
 				fi, err := os.Stdin.Stat()
@@ -591,6 +601,8 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
 
+	allowDash(cmd, "arg:1")
+
 	return cmd
 }
 
@@ -610,6 +622,12 @@ You can pass either a message ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" {
 				return noChanges(cmd)
+			}
+
+			var err error
+			body, err = resolveContentValue(cmd, body, -1, "--body")
+			if err != nil {
+				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -672,7 +690,9 @@ You can pass either a message ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content")
+	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content; use - to read from stdin")
+
+	allowDash(cmd, "flag:body")
 
 	return cmd
 }

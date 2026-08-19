@@ -1243,7 +1243,10 @@ project's to-do set instead, outside any list:
 
   basecamp todos create "Call the vendor back" --loose --in <project>
 
---loose needs no list, so it neither prompts for one nor accepts --list.`,
+--loose needs no list, so it neither prompts for one nor accepts --list.
+
+Use - as the content argument to read the todo title from stdin:
+  printf 'Call the vendor back' | basecamp todos create - --in <project>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -1254,9 +1257,17 @@ project's to-do set instead, outside any list:
 			if len(args) == 0 {
 				return missingArg(cmd, "<content>")
 			}
-			content := strings.Join(args, " ")
+			content, err := resolveContentArg(cmd, args, 0)
+			if err != nil {
+				return err
+			}
 			if strings.TrimSpace(content) == "" {
 				return cmd.Help()
+			}
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -1437,12 +1448,14 @@ project's to-do set instead, outside any list:
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee ID (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown); use - to read from stdin")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().StringVar(&notifyOnCompletion, "notify-on-completion", "", "People to notify when done (names or IDs, comma-separated)")
 	// Not --todoset: that flag already means "which to-do set", and this one
 	// means "no list at all".
 	cmd.Flags().BoolVar(&loose, "loose", false, "Create on the to-do set, outside any list")
+
+	allowDash(cmd, "arg:0+", "flag:description")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)
@@ -1535,6 +1548,12 @@ Set or clear the people notified when the todo is completed:
 				(!cmd.Flags().Changed("notify") || !notify) &&
 				!clearDue && !clearStarts && !clearDescription && !clearSubscribers {
 				return noChanges(cmd)
+			}
+
+			// Only an exact "-" reads stdin; --description "" stays the clear idiom.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -1664,7 +1683,7 @@ Set or clear the people notified when the todo is completed:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "Todo title (plain text)")
-	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown); use - to read from stdin")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignees (names or IDs, comma-separated)")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignees (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
@@ -1681,6 +1700,8 @@ Set or clear the people notified when the todo is completed:
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("notify-on-completion", completer.PeopleNameCompletion())
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -1873,6 +1894,12 @@ Examples:
   basecamp todos sweep --in <project> --assignee me --comment "Following up"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			comment, err := resolveContentValue(cmd, comment, -1, "--comment")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -2020,10 +2047,12 @@ Examples:
 	cmd.Flags().StringVarP(&todoset, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Filter by assignee")
 	cmd.Flags().BoolVar(&overdueOnly, "overdue", false, "Filter overdue todos")
-	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Comment to add to matching todos")
+	cmd.Flags().StringVarP(&comment, "comment", "c", "", "Comment to add to matching todos; use - to read from stdin")
 	cmd.Flags().BoolVar(&complete, "complete", false, "Mark matching todos as complete")
 	cmd.Flags().BoolVar(&complete, "done", false, "Mark matching todos as complete (alias)")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Preview without making changes")
+
+	allowDash(cmd, "flag:comment")
 
 	// Register tab completion for flags
 	completer := completion.NewCompleter(nil)

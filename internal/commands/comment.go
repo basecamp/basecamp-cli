@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -23,6 +22,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
@@ -1049,7 +1049,7 @@ as backslash-n.`,
 				return missingArg(cmd, "<content>")
 			}
 
-			content, err := contentArgOrStdin(cmd, args[1:])
+			content, err := resolveContentArg(cmd, args[1:], 1)
 			if err != nil {
 				return err
 			}
@@ -1114,6 +1114,8 @@ as backslash-n.`,
 		},
 	}
 
+	allowDash(cmd, "arg:1+")
+
 	return cmd
 }
 
@@ -1132,8 +1134,8 @@ Comma-separated IDs add the same comment to multiple items:
   basecamp comments create 789,012,345 "Looks good!"
   basecamp comments create https://3.basecamp.com/123/buckets/456/todos/789 "Looks good!"
 
-Content can also be piped from stdin:
-  printf 'Looks good!' | basecamp comments create 789
+Content can be piped from stdin by passing - as the content argument:
+  printf 'Looks good!' | basecamp comments create 789 -
 
 Content supports Markdown and @mentions (@Name or @First.Last):
   basecamp comments create 789 "Hey @Jane.Smith, **please review**"
@@ -1164,7 +1166,7 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			var content string
 			if len(args) > 1 {
 				var err error
-				content, err = contentArgOrStdin(cmd, args[1:])
+				content, err = resolveContentArg(cmd, args[1:], 1)
 				if err != nil {
 					return err
 				}
@@ -1180,20 +1182,18 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 				}
 			}
 
-			if !edit && strings.TrimSpace(content) == "" {
-				stdinContent, hasPipedStdin, err := readPipedStdin(cmd)
-				if err != nil {
-					return err
-				}
-				if hasPipedStdin {
-					content = stdinContent
-				}
-			}
-
-			// Show help when invoked with no content; keep error if editor was opened
+			// Show help when invoked with no content; keep error if editor was opened.
+			// A pipe without "-" is deliberately not consumed: teach the explicit
+			// placeholder instead of silently reading stdin.
 			if strings.TrimSpace(content) == "" {
 				if edit {
 					return output.ErrUsage("Comment content required")
+				}
+				if stdinarg.IsPiped(cmd.InOrStdin()) {
+					return output.ErrUsageHint(
+						"<content> required",
+						fmt.Sprintf(`To read the piped stdin, pass "-" as the content: %s %s -`, cmd.CommandPath(), recordingArg),
+					)
 				}
 				return missingArg(cmd, "<content>")
 			}
@@ -1336,16 +1336,7 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 	cmd.Flags().BoolVar(&edit, "edit", false, "Open $EDITOR to compose content")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
-	return cmd
-}
+	allowDash(cmd, "arg:1+")
 
-func contentArgOrStdin(cmd *cobra.Command, args []string) (string, error) {
-	if len(args) == 1 && args[0] == "-" {
-		b, err := io.ReadAll(cmd.InOrStdin())
-		if err != nil {
-			return "", output.ErrUsage(fmt.Sprintf("failed to read content from stdin: %v", err))
-		}
-		return string(b), nil
-	}
-	return strings.Join(args, " "), nil
+	return cmd
 }

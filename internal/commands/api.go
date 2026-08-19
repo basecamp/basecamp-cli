@@ -74,7 +74,10 @@ func newAPIPostCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "post <path>",
 		Short: "POST request to API",
-		Long:  "Make a raw POST request to any Basecamp API endpoint.",
+		Long: `Make a raw POST request to any Basecamp API endpoint.
+
+Use --data - to read the JSON body from stdin:
+  printf '{"content":"Buy milk"}' | basecamp api post buckets/1/todolists/2/todos.json --data -`,
 		Example: `  basecamp api post buckets/123/todolists/456/todos.json -d '{"content":"Buy milk"}'
   basecamp api post buckets/123/message_boards/789/messages.json -d '{"subject":"Hello","content":"<p>World</p>"}'`,
 		Args: apiPathArgs,
@@ -82,6 +85,11 @@ func newAPIPostCmd() *cobra.Command {
 			// Show help when invoked with no data
 			if data == "" {
 				return missingArg(cmd, "--data")
+			}
+
+			data, err := resolveContentValue(cmd, data, -1, "--data")
+			if err != nil {
+				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -116,7 +124,9 @@ func newAPIPostCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
+	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required); use - to read from stdin")
+
+	allowDash(cmd, "flag:data")
 
 	return cmd
 }
@@ -125,15 +135,23 @@ func newAPIPutCmd() *cobra.Command {
 	var data string
 
 	cmd := &cobra.Command{
-		Use:     "put <path>",
-		Short:   "PUT request to API",
-		Long:    "Make a raw PUT request to any Basecamp API endpoint.",
+		Use:   "put <path>",
+		Short: "PUT request to API",
+		Long: `Make a raw PUT request to any Basecamp API endpoint.
+
+Use --data - to read the JSON body from stdin:
+  printf '{"content":"Updated"}' | basecamp api put buckets/1/todos/2.json --data -`,
 		Example: `  basecamp api put buckets/123/todos/456.json -d '{"content":"Updated todo"}'`,
 		Args:    apiPathArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no data
 			if data == "" {
 				return missingArg(cmd, "--data")
+			}
+
+			data, err := resolveContentValue(cmd, data, -1, "--data")
+			if err != nil {
+				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -168,7 +186,9 @@ func newAPIPutCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required)")
+	cmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body (required); use - to read from stdin")
+
+	allowDash(cmd, "flag:data")
 
 	return cmd
 }

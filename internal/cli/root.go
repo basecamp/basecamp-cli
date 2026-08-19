@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -351,6 +352,10 @@ func Execute() {
 	cmd.AddCommand(commands.NewTUICmd())
 	cmd.AddCommand(commands.NewBonfireCmd())
 	cmd.AddCommand(commands.NewAgentHookCmd())
+
+	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
+	// everywhere a command doesn't explicitly accept it.
+	commands.InstallDashGuard(cmd)
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
@@ -762,6 +767,12 @@ func emitAgentHelp(cmd *cobra.Command) {
 		}
 	}
 
+	// Synthesize the stdin note from the allow_dash annotation, so every
+	// command that accepts "-" auto-documents it.
+	if note := stdinDashNote(cmd, info.Args); note != "" {
+		info.Notes = append(info.Notes, note)
+	}
+
 	// Subcommands (include aliases so the CLI surface snapshot tracks them)
 	for _, sub := range cmd.Commands() {
 		if sub.IsAvailableCommand() || sub.Name() == "help" {
@@ -825,4 +836,35 @@ func emitAgentHelp(cmd *cobra.Command) {
 	})
 
 	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(info)
+}
+
+// stdinDashNote renders the "-" (stdin) inputs a command accepts, from its
+// allow_dash annotation: positionals by their Use-string names, flags by
+// --name. Returns "" when the command reads no stdin input — --out's "-"
+// means stdout, so it never appears here.
+func stdinDashNote(cmd *cobra.Command, args []ArgInfo) string {
+	allow := stdinarg.ParseAllow(cmd.Annotations[stdinarg.AnnotationAllowDash])
+	if allow.Empty() {
+		return ""
+	}
+
+	var parts []string
+	for i, a := range args {
+		if allow.Arg(i) {
+			if a.Required {
+				parts = append(parts, "<"+a.Name+">")
+			} else {
+				parts = append(parts, "["+a.Name+"]")
+			}
+		}
+	}
+	for _, token := range strings.Fields(cmd.Annotations[stdinarg.AnnotationAllowDash]) {
+		if name, ok := strings.CutPrefix(token, "flag:"); ok && name != "out" {
+			parts = append(parts, "--"+name)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Pass - to read from stdin: " + strings.Join(parts, ", ")
 }

@@ -308,15 +308,28 @@ By default, messages are sent as plain text. Use --content-type text/html
 for rich text (HTML) messages.
 
 @mentions (@Name or @First.Last) are resolved automatically and the
-content type is promoted to text/html when mentions are present.`,
+content type is promoted to text/html when mentions are present.
+
+Use - as the message argument to read the message from stdin:
+  printf 'Build is green' | basecamp chat post - --in my-project`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Validate user input first, before checking account
+			// Validate user input first, before checking account. The
+			// positional wins over --content before "-" resolution, so only
+			// the winning source can consume stdin.
 			messageContent := content
+			argIndex, what := -1, "--content"
 			if len(args) > 0 {
 				messageContent = args[0]
+				argIndex, what = 0, "<message>"
+			}
+
+			var err error
+			messageContent, err = resolveContentValue(cmd, messageContent, argIndex, what)
+			if err != nil {
+				return err
 			}
 
 			// Show help when invoked with no message content
@@ -332,9 +345,11 @@ content type is promoted to text/html when mentions are present.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&content, "content", "", "Message content")
+	cmd.Flags().StringVar(&content, "content", "", "Message content; use - to read from stdin")
 	cmd.Flags().StringVar(contentType, "content-type", "", "Content type (text/html for rich text)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+
+	allowDash(cmd, "arg:0", "flag:content")
 
 	return cmd
 }
@@ -766,9 +781,19 @@ edit to rich text.`,
 				return missingArg(cmd, "<id|url>")
 			}
 
+			// The positional wins over --content before "-" resolution, so
+			// only the winning source can consume stdin.
 			messageContent := content
+			argIndex, what := -1, "--content"
 			if len(args) > 1 {
 				messageContent = args[1]
+				argIndex, what = 1, "[content]"
+			}
+
+			var contentErr error
+			messageContent, contentErr = resolveContentValue(cmd, messageContent, argIndex, what)
+			if contentErr != nil {
+				return contentErr
 			}
 
 			if strings.TrimSpace(messageContent) == "" {
@@ -958,8 +983,10 @@ edit to rich text.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&content, "content", "", "New message content")
+	cmd.Flags().StringVar(&content, "content", "", "New message content; use - to read from stdin")
 	cmd.Flags().StringVar(contentType, "content-type", "", "Input handling: text/html (supply HTML) or text/plain (verbatim); applied locally, edits always render as rich text")
+
+	allowDash(cmd, "arg:1", "flag:content")
 
 	return cmd
 }

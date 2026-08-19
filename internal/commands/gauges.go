@@ -208,6 +208,10 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 				req.Color = color
 			}
 			if description != "" {
+				description, err = resolveContentValue(cmd, description, -1, "--description")
+				if err != nil {
+					return err
+				}
 				req.Description = description
 			}
 			if notify != "" {
@@ -240,9 +244,11 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 
 	cmd.Flags().Int32Var(&position, "position", 0, "Position on gauge (0-100, required)")
 	cmd.Flags().StringVar(&color, "color", "", "Needle color: green, yellow, or red")
-	cmd.Flags().StringVar(&description, "description", "", "Description (rich text HTML)")
+	cmd.Flags().StringVar(&description, "description", "", "Description (rich text HTML); use - to read from stdin")
 	cmd.Flags().StringVar(&notify, "notify", "", "Notification mode: everyone, working_on, or custom")
 	cmd.Flags().Int64SliceVar(&subscriptions, "subscriptions", nil, "Person IDs to notify (used with --notify custom)")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -273,6 +279,11 @@ func newGaugesUpdateCmd() *cobra.Command {
 				return output.ErrUsage("No changes specified (use --description)")
 			}
 
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateGaugeNeedleRequest{
 				Description: basecamp.Ptr(description),
 			}
@@ -295,7 +306,9 @@ func newGaugesUpdateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&description, "description", "", "New description (rich text HTML)")
+	cmd.Flags().StringVar(&description, "description", "", "New description (rich text HTML); use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
