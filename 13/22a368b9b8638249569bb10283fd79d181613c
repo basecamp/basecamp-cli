@@ -1,0 +1,29 @@
+internal/tui/resolve/resolve.go
+  s_f77573f40278b6::t_a2be349c80d0ab 13
+  s_f77573f40278b6::t_24079c637c7478 123-127
+internal/commands/stdin.go
+  s_f77573f40278b6::t_ab54f5c304031a 146-148
+internal/appctx/context.go
+  s_f77573f40278b6::t_25ae36b1871b3a 22
+  s_f77573f40278b6::t_b5a9425d2415af 378-382
+internal/stdinarg/stdinarg.go
+  s_f77573f40278b6::t_13bd1e538d87d7 94-109
+internal/stdinarg/stdinarg_test.go
+  s_f77573f40278b6::t_ef53ca50ffe649 68-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "1322a368b9b8638249569bb10283fd79d181613c",
+  "prompts": {},
+  "sessions": {
+    "s_f77573f40278b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "272cab6f-5556-43ec-9cbc-d697e9a030b5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
