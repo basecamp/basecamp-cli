@@ -7,11 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // Cobra's arity messages are usage failures by construction. They used to fall
-// through to the default classification (api_error, exit 4), which tells an
+// through to the default classification (api_error, exit 7), which tells an
 // agent to retry a call that can never succeed.
 func TestTransformCobraErrorClassifiesArityAsUsage(t *testing.T) {
 	for _, msg := range []string{
@@ -38,4 +40,48 @@ func TestTransformCobraErrorKeepsZeroArgRewrite(t *testing.T) {
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, output.CodeUsage, outErr.Code)
 	assert.Equal(t, "ID required", outErr.Message)
+}
+
+// A typed error already carries a code, an HTTP status and a retryable flag.
+// Matching on its rendered text would flatten all of that into a bare usage
+// string — so an API error that merely quotes an arity phrase is left alone.
+func TestTransformCobraErrorPreservesTypedErrors(t *testing.T) {
+	t.Run("SDK error", func(t *testing.T) {
+		original := &basecamp.Error{
+			Code:       basecamp.CodeAPI,
+			Message:    "server rejected the payload: accepts 1 arg(s), received 2",
+			HTTPStatus: 422,
+			Retryable:  true,
+		}
+
+		err := transformCobraError(original)
+
+		var sdkErr *basecamp.Error
+		require.True(t, errors.As(err, &sdkErr), "expected the SDK error to survive, got %T", err)
+		assert.Equal(t, basecamp.CodeAPI, sdkErr.Code)
+		assert.Equal(t, 422, sdkErr.HTTPStatus)
+		assert.True(t, sdkErr.Retryable)
+	})
+
+	t.Run("output error", func(t *testing.T) {
+		original := output.ErrNotFound("todo", "123")
+
+		err := transformCobraError(original)
+
+		var outErr *output.Error
+		require.True(t, errors.As(err, &outErr))
+		assert.Equal(t, output.CodeNotFound, outErr.Code, "must not be reclassified as usage")
+	})
+}
+
+// Anchored: a command's own error that merely contains the phrase is not an
+// arity failure and must keep its own classification path.
+func TestTransformCobraErrorIgnoresUnanchoredArityText(t *testing.T) {
+	msg := "the API said: accepts 1 arg(s), received 2 (and then some)"
+
+	err := transformCobraError(errors.New(msg))
+
+	var outErr *output.Error
+	assert.False(t, errors.As(err, &outErr), "should be left untouched, got %T", err)
+	assert.Equal(t, msg, err.Error())
 }

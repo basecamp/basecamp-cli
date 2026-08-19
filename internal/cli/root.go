@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/itchyny/gojq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -619,9 +621,27 @@ func isMachineConsumer(root *cobra.Command) bool {
 	return false
 }
 
+// cobraArityError matches cobra's four arity messages exactly (ExactArgs,
+// MaximumNArgs, RangeArgs; MinimumNArgs is handled by an earlier rule). Anchored
+// so a command's own error that merely quotes the phrase is left alone.
+var cobraArityError = regexp.MustCompile(`^accepts (\d+|at most \d+|between \d+ and \d+) arg\(s\), received \d+$`)
+
 // transformCobraError transforms Cobra's default error messages to match the
 // Bash CLI format for consistency with existing tests and user expectations.
+//
+// Only untyped errors are rewritten. An error that already carries a code, an
+// HTTP status, a hint or a retryable flag is ours or the SDK's, and matching on
+// its rendered text would flatten that metadata into a bare usage string.
 func transformCobraError(err error) error {
+	var outErr *output.Error
+	if errors.As(err, &outErr) {
+		return err
+	}
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
+		return err
+	}
+
 	msg := err.Error()
 
 	// Transform "flag needs an argument: --FLAG" → "--FLAG requires a value"
@@ -668,7 +688,7 @@ func transformCobraError(err error) error {
 	// is a usage error by construction — only the code was wrong, so agents
 	// branching on it saw api_error and could retry a call that will never
 	// succeed. The wording is already clear; keep it and fix the code.
-	if strings.Contains(msg, "arg(s), received ") {
+	if cobraArityError.MatchString(msg) {
 		return output.ErrUsage(msg)
 	}
 

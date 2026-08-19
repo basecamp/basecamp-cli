@@ -178,6 +178,20 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
   basecamp gauges create --position 75 --color green --in MyProject
   basecamp gauges create --position 50 --color yellow --description "Halfway there" --in MyProject`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("position") {
+				return output.ErrUsage("--position is required")
+			}
+			if position < 0 || position > 100 {
+				return output.ErrUsage("--position must be between 0 and 100")
+			}
+
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -194,13 +208,6 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			if !cmd.Flags().Changed("position") {
-				return output.ErrUsage("--position is required")
-			}
-			if position < 0 || position > 100 {
-				return output.ErrUsage("--position must be between 0 and 100")
-			}
-
 			req := &basecamp.CreateGaugeNeedleRequest{
 				Position: position,
 			}
@@ -208,10 +215,6 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 				req.Color = color
 			}
 			if description != "" {
-				description, err = resolveContentValue(cmd, description, -1, "--description")
-				if err != nil {
-					return err
-				}
 				req.Description = description
 			}
 			if notify != "" {
@@ -264,6 +267,17 @@ func newGaugesUpdateCmd() *cobra.Command {
   basecamp gauges update 12345 --description "Updated status"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("description") {
+				return output.ErrUsage("No changes specified (use --description)")
+			}
+
+			// Resolve "-" before any account or network work, so a bad stdin
+			// gets the stdin error rather than "--account is required".
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -273,15 +287,6 @@ func newGaugesUpdateCmd() *cobra.Command {
 			needleID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid needle ID")
-			}
-
-			if !cmd.Flags().Changed("description") {
-				return output.ErrUsage("No changes specified (use --description)")
-			}
-
-			description, err = resolveContentValue(cmd, description, -1, "--description")
-			if err != nil {
-				return err
 			}
 
 			req := &basecamp.UpdateGaugeNeedleRequest{

@@ -428,11 +428,6 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return missingArg(cmd, "<summary>")
 			}
 
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			if startsAt == "" {
 				return output.ErrUsage("--starts-at required (ISO 8601 datetime)")
 			}
@@ -446,8 +441,15 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 

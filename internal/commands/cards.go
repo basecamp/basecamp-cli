@@ -1091,6 +1091,13 @@ You can pass either a card ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
+			// Resolve "-" before any account or network work, so a bad stdin
+			// gets the stdin error rather than "--account is required".
+			content, err := resolveContentValue(cmd, content, -1, "--body")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -1108,10 +1115,6 @@ You can pass either a card ID or a Basecamp URL:
 			req := &basecamp.UpdateCardRequest{}
 			if title != "" {
 				req.Title = &title
-			}
-			content, err = resolveContentValue(cmd, content, -1, "--body")
-			if err != nil {
-				return err
 			}
 
 			var mentionNotice string

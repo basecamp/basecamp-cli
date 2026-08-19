@@ -238,3 +238,92 @@ func TestAPIPostDataDashOnTTYHintPreservesTheFlag(t *testing.T) {
 	assert.Contains(t, outErr.Hint, "api post ... --data -")
 	assert.Zero(t, transport.calls)
 }
+
+// setupNoAccountApp builds an app with no account configured, so any command
+// that reaches account resolution fails with "--account is required".
+func setupNoAccountApp(t *testing.T, transport http.RoundTripper) *appctx.App {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	cfg := &config.Config{}
+	authMgr := auth.NewManager(cfg, nil)
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &testTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+	)
+	return &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: &bytes.Buffer{}}),
+	}
+}
+
+// Every "-" must be diagnosed before account, project or network work, so the
+// caller gets the stdin error the feature promises instead of "--account is
+// required" — or, worse, a resolution round-trip for an invocation that was
+// never going to run. Driven on a TTY stdin because that error is produced by
+// the resolver itself, which pins where in the sequence it ran.
+func TestStdinResolvesBeforeAccountAndProject(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"cards update --body", NewCardsCmd, []string{"update", "1", "--body", "-"}},
+		{"docs create [content]", NewDocsCmd, []string{"documents", "create", "Title", "-"}},
+		{"gauges create --description", NewGaugesCmd, []string{"create", "--position", "50", "--description", "-"}},
+		{"gauges update --description", NewGaugesCmd, []string{"update", "1", "--description", "-"}},
+		{"schedule create --description", NewScheduleCmd, []string{
+			"create", "Title", "--starts-at", "2026-01-01T10:00:00Z", "--ends-at", "2026-01-01T11:00:00Z", "--description", "-",
+		}},
+		{"templates update --description", NewTemplatesCmd, []string{"update", "1", "--description", "-"}},
+		{"templates construct --description", NewTemplatesCmd, []string{"construct", "1", "--name", "P", "--description", "-"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupNoAccountApp(t, transport)
+
+			cmd := tc.cmd()
+			InstallDashGuard(cmd)
+			devNullStdin(t, cmd)
+
+			err := executeCommand(cmd, app, tc.args...)
+			outErr := requireUsageErr(t, err)
+			assert.Contains(t, outErr.Message, "nothing is piped",
+				"expected the stdin error, got %q", outErr.Message)
+			assert.NotContains(t, outErr.Message, "account")
+			assert.Zero(t, transport.calls, "no request may be issued")
+		})
+	}
+}
+
+// Two explicit content sources used to resolve by silent precedence: the
+// positional won and --content was dropped, so "--content -" left the pipe
+// unread and posted the positional instead.
+func TestChatRejectsPositionalAlongsideContentFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"post", []string{"post", "hello", "--content", "-"}},
+		{"update", []string{"update", "123", "hello", "--content", "-"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupTransportTestApp(t, transport)
+
+			stdin := &trackingReader{r: strings.NewReader("from stdin")}
+			cmd := NewChatCmd()
+			InstallDashGuard(cmd)
+			cmd.SetIn(stdin)
+
+			err := executeCommand(cmd, app, tc.args...)
+			outErr := requireUsageErr(t, err)
+			assert.Contains(t, outErr.Message, "--content")
+			assert.False(t, stdin.read, "the discarded source must not consume stdin")
+			assert.Zero(t, transport.calls)
+		})
+	}
+}

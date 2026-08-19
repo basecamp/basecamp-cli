@@ -257,6 +257,17 @@ func newTemplatesUpdateCmd() *cobra.Command {
 		Long:  "Update an existing template's name or description.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if name == "" && description == "" {
+				return noChanges(cmd)
+			}
+
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -266,15 +277,6 @@ func newTemplatesUpdateCmd() *cobra.Command {
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
-			}
-
-			if name == "" && description == "" {
-				return noChanges(cmd)
-			}
-
-			description, err = resolveContentValue(cmd, description, -1, "--description")
-			if err != nil {
-				return err
 			}
 
 			// SDK requires name for update, fetch current if not provided
@@ -374,6 +376,17 @@ This is an asynchronous operation. The command returns a construction ID
 which can be polled via 'templates construction' until the status is "completed".`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if projectName == "" {
+				return output.ErrUsage("--name is required (project name)")
+			}
+
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
+			projectDesc, err := resolveContentValue(cmd, projectDesc, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -383,15 +396,6 @@ which can be polled via 'templates construction' until the status is "completed"
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
-			}
-
-			if projectName == "" {
-				return output.ErrUsage("--name is required (project name)")
-			}
-
-			projectDesc, err := resolveContentValue(cmd, projectDesc, -1, "--description")
-			if err != nil {
-				return err
 			}
 
 			construction, err := app.Account().Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)

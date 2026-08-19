@@ -1241,11 +1241,8 @@ Use - as the content argument to read the document body from stdin:
 
 			title := args[0]
 
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
+			// Resolve "-" before any account or network work, so a bad stdin
+			// gets the stdin error rather than "--account is required".
 			content := ""
 			if len(args) > 1 {
 				var contentErr error
@@ -1253,6 +1250,12 @@ Use - as the content argument to read the document body from stdin:
 				if contentErr != nil {
 					return contentErr
 				}
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)

@@ -220,3 +220,36 @@ func TestDownloadCommandsExemptOutFlag(t *testing.T) {
 		assert.True(t, allow.Flag("out"), "%s download should exempt --out", cmd.Name())
 	}
 }
+
+// Parsed state keeps only the merged value, never which spelling the caller
+// typed — so naming one alias is a coin flip that reports "--in" for a caller
+// who wrote "--project -". Name the whole group instead.
+func TestDashGuardNamesTheWholeAliasGroup(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Flags.JSON = true
+
+	// --project/--in are two spellings of one persistent value on the group.
+	cmd := NewCardsCmd()
+	InstallDashGuard(cmd)
+	cmd.SetIn(strings.NewReader("piped"))
+
+	err := executeCommand(cmd, app, "create", "Title", "--in", "old", "--project", "-")
+	outErr := requireUsageErr(t, err)
+	// pflag visits flags in sorted order, so the group label is stable.
+	assert.Contains(t, outErr.Message, "--in/--project")
+}
+
+// A flag with no alias still reads as a single spelling.
+func TestDashGuardNamesASoloFlagPlainly(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Flags.JSON = true
+
+	cmd := NewTodosCmd()
+	InstallDashGuard(cmd)
+	cmd.SetIn(strings.NewReader("piped"))
+
+	err := executeCommand(cmd, app, "update", "1", "--title", "-")
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Message, "--title")
+	assert.NotContains(t, outErr.Message, "/--")
+}

@@ -190,22 +190,15 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Alias flags (--description/--desc) share one backing value, and pflag
-	// hands each alias the same Value instance — dedupe on it, or a value set
-	// through both spellings would count as two stdin inputs.
-	seen := map[pflag.Value]bool{}
-	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if !f.Changed || seen[f.Value] {
-			return
-		}
+	for _, group := range changedFlagGroups(cmd) {
 		dashes := 0
-		switch f.Value.Type() {
+		switch group.value.Type() {
 		case "string":
-			if f.Value.String() == "-" {
+			if group.value.String() == "-" {
 				dashes = 1
 			}
 		case "stringArray", "stringSlice":
-			if sv, ok := f.Value.(pflag.SliceValue); ok {
+			if sv, ok := group.value.(pflag.SliceValue); ok {
 				for _, v := range sv.GetSlice() {
 					if v == "-" {
 						dashes++
@@ -213,18 +206,17 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 				}
 			}
 		default:
-			return
+			continue
 		}
-		seen[f.Value] = true
 		if dashes == 0 {
-			return
+			continue
 		}
-		if allow.Flag(f.Name) {
+		if group.allowed(allow) {
 			allowed += dashes
 		} else {
-			disallowedFlags = append(disallowedFlags, "--"+f.Name)
+			disallowedFlags = append(disallowedFlags, group.label())
 		}
-	})
+	}
 
 	if allowed > 1 {
 		return output.ErrUsage(`only one input can read from stdin ("-") at a time`)
@@ -250,6 +242,58 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 		return output.ErrUsageHint(msg, strings.Join(hints, "; "))
 	}
 	return nil
+}
+
+// flagGroup is one logical input: every spelling pflag has bound to the same
+// backing value. Aliases (--description/--desc, --in/--project) share a single
+// pflag.Value instance, so grouping on it keeps a value set through two
+// spellings from counting as two stdin inputs.
+type flagGroup struct {
+	names   []string
+	value   pflag.Value
+	changed bool
+}
+
+// label names the group for a guard error. Parsed state does not record which
+// spelling the caller typed — only the merged value survives — so an alias
+// group names every spelling rather than guessing one and being wrong.
+func (g *flagGroup) label() string {
+	return "--" + strings.Join(g.names, "/--")
+}
+
+// allowed reports whether any spelling of this input is registered for stdin.
+// One value, one policy: registering a single alias covers the group.
+func (g *flagGroup) allowed(allow stdinarg.Allow) bool {
+	for _, name := range g.names {
+		if allow.Flag(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// changedFlagGroups returns the groups the caller actually set, in flag-
+// declaration order within each group.
+func changedFlagGroups(cmd *cobra.Command) []*flagGroup {
+	var groups []*flagGroup
+	index := map[pflag.Value]*flagGroup{}
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		group, ok := index[f.Value]
+		if !ok {
+			group = &flagGroup{value: f.Value}
+			index[f.Value] = group
+			groups = append(groups, group)
+		}
+		group.names = append(group.names, f.Name)
+		group.changed = group.changed || f.Changed
+	})
+	changed := groups[:0]
+	for _, group := range groups {
+		if group.changed {
+			changed = append(changed, group)
+		}
+	}
+	return changed
 }
 
 // positionalName names a positional for guard errors, preferring the
