@@ -316,12 +316,16 @@ Use - as the message argument to read the message from stdin:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Validate user input first, before checking account. The
-			// positional wins over --content before "-" resolution, so only
-			// the winning source can consume stdin.
+			// Validate user input first, before checking account. A
+			// positional and --content are the same input, so supplying both
+			// is rejected rather than one silently winning — with "-" in
+			// play, the losing source would discard piped content unread.
 			messageContent := content
 			argIndex, what := -1, "--content"
 			if len(args) > 0 {
+				if cmd.Flags().Changed("content") {
+					return output.ErrUsage("cannot combine a <message> argument with --content")
+				}
 				messageContent = args[0]
 				argIndex, what = 0, "<message>"
 			}
@@ -781,11 +785,15 @@ edit to rich text.`,
 				return missingArg(cmd, "<id|url>")
 			}
 
-			// The positional wins over --content before "-" resolution, so
-			// only the winning source can consume stdin.
+			// A positional and --content are the same input, so supplying
+			// both is rejected rather than one silently winning — with "-"
+			// in play, the losing source would discard piped content unread.
 			messageContent := content
 			argIndex, what := -1, "--content"
 			if len(args) > 1 {
+				if cmd.Flags().Changed("content") {
+					return output.ErrUsage("cannot combine a [content] argument with --content")
+				}
 				messageContent = args[1]
 				argIndex, what = 1, "[content]"
 			}

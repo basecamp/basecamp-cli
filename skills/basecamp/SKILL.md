@@ -110,7 +110,7 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    ```
    `-` means "read from stdin" on every content input: content-kind positionals
    (`comments create/update`, `messages create [body]`, `cards create [body]`,
-   `todos create`, `docs create [content]`, `chat post/update`, `boost create`,
+   `todos create`, `docs documents create [content]`, `chat post/update`, `boost create`,
    `checkins answer create/update`, `notes set`) and content flags (`--data` on
    `api post/put`, `--body`, `--content`, `--description`, `--comment` on
    `todos sweep`, `--file` on `notes set`). Each command's `--agent` help lists

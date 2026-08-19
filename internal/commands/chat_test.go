@@ -1796,3 +1796,19 @@ func TestChatRoomShorthandFlag(t *testing.T) {
 	require.Len(t, envelope.Data, 1)
 	assert.Equal(t, "Engineering", envelope.Data[0]["title"])
 }
+
+// TestChatPostRejectsPositionalWithContentFlag verifies that a positional
+// message and --content are rejected together instead of one silently
+// winning — with "-" in play, the losing source would discard piped
+// content unread.
+func TestChatPostRejectsPositionalWithContentFlag(t *testing.T) {
+	app := &appctx.App{Config: &config.Config{}}
+
+	err := executeChatCommand(NewChatCmd(), app, "post", "literal", "--content", "other")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot combine")
+
+	err = executeChatCommand(NewChatCmd(), app, "update", "123", "literal", "--content", "other")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot combine")
+}

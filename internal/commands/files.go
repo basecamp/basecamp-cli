@@ -1229,7 +1229,7 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 		Long: `Create a new document in a project's Docs & Files area.
 
 Use - as the content argument to read the document body from stdin:
-  basecamp docs create "Title" - --in my-project < body.md`,
+  basecamp docs documents create "Title" - --in my-project < body.md`,
 		// Bounded so a stray third token is a usage error rather than being
 		// silently dropped after "-" has already drained stdin.
 		Args: cobra.MaximumNArgs(2),
