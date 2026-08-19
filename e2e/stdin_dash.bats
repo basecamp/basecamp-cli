@@ -3,8 +3,9 @@
 #
 # Tier 1: content inputs accept "-" to read piped stdin. Tier 2: everywhere
 # else, a literal "-" combined with piped stdin is a usage error instead of
-# silently becoming literal content. All cases here fail before any HTTP, so
-# no cassette or server is needed.
+# silently becoming literal content. Every case resolves locally — usage
+# errors before any request, or a config write — so no cassette or server
+# is needed.
 
 load test_helper
 
@@ -56,14 +57,17 @@ load test_helper
   assert_json_value '.hint | contains("after the -- separator")' 'true'
 }
 
-@test "projects create -- - with piped stdin passes the guard" {
-  # The -- separator makes the "-" literal; the command proceeds past the
-  # guard and fails on the (unreachable) API instead of on usage.
-  export BASECAMP_BASE_URL="http://127.0.0.1:1"
+@test "a -- - after the separator passes the guard and lands literally" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run bash -c "printf 'x' | basecamp projects create --json -- -"
-  assert_failure
-  [[ "$output" != *'does not read stdin'* ]]
+  # config set writes locally — a deterministic success proving the escaped
+  # "-" passed the guard and was stored as a literal value.
+  run bash -c "cd '$TEST_PROJECT' && printf 'x' | basecamp config set project_id --json -- -"
+  assert_success
+  assert_json_value '.data.value' '-'
+
+  run bash -c "cd '$TEST_PROJECT' && basecamp config show --json < /dev/null"
+  assert_success
+  assert_json_value '.data.project_id.value' '-'
 }

@@ -44,8 +44,9 @@ func allowDash(cmd *cobra.Command, tokens ...string) {
 // never an intentional write, and for update-style commands it would be an
 // implicit clear.
 //
-// Trailing newlines are trimmed: Markdown bodies don't care, but titles and
-// boosts (16-rune limit) do, and virtually every pipe ends with one.
+// Trailing newlines — LF and CRLF alike — are trimmed: Markdown bodies don't
+// care, but titles and boosts (16-rune limit) do, and virtually every pipe
+// ends with one. Interior line breaks are untouched.
 func readStdinContent(cmd *cobra.Command, what string) (string, error) {
 	if !stdinarg.IsPiped(cmd.InOrStdin()) {
 		return "", output.ErrUsageHint(
@@ -57,7 +58,7 @@ func readStdinContent(cmd *cobra.Command, what string) (string, error) {
 	if err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("failed to read %s from stdin: %v", what, err))
 	}
-	content := strings.TrimRight(string(data), "\n")
+	content := strings.TrimRight(string(data), "\r\n")
 	if strings.TrimSpace(content) == "" {
 		return "", output.ErrUsage(fmt.Sprintf("stdin for %s is empty", what))
 	}
@@ -120,18 +121,33 @@ func afterDashSeparator(cmd *cobra.Command, index int) bool {
 }
 
 // InstallDashGuard wraps every runnable command in the tree with the tier-2
-// dash guard. It wraps RunE rather than hooking PersistentPreRunE because
-// cobra runs only the innermost PersistentPreRunE — the agent hook already
-// shadows the root's, and any future subtree would silently lose the guard.
-// Wrapping RunE also runs after flag parsing and Args validation, with
-// ArgsLenAtDash available.
+// dash guard. It wraps the Args validator: cobra runs ValidateArgs after flag
+// parsing (so Changed and ArgsLenAtDash are available) but before the
+// persistent pre-run chain, PreRunE, and required-flag validation — so a
+// stray "-" is rejected before any lifecycle side effect (config hardening,
+// the update check) and before a competing usage error can shadow it. It is
+// not a PersistentPreRunE hook because cobra runs only the innermost one —
+// the agent hook already shadows the root's, and any future subtree would
+// silently lose the guard. A nil Args means ArbitraryArgs (always nil), so
+// wrapping it is behavior-preserving.
 func InstallDashGuard(root *cobra.Command) {
-	if run := root.RunE; run != nil {
-		root.RunE = func(cmd *cobra.Command, args []string) error {
+	// The root's nil Args is load-bearing: cobra's Find() rejects unknown
+	// subcommands (legacyArgs) only while Args == nil, so wrapping it would
+	// turn "basecamp unknowncmd" into a quickstart run. Leaving the root
+	// unguarded loses nothing: its positionals are subcommand names, and a
+	// bare "basecamp -" just runs quickstart, which posts no content for a
+	// literal "-" to corrupt.
+	skipRoot := root.Args == nil && !root.HasParent() && root.HasSubCommands()
+	if root.Runnable() && !skipRoot {
+		existing := root.Args
+		root.Args = func(cmd *cobra.Command, args []string) error {
 			if err := guardDashArgs(cmd, args); err != nil {
 				return err
 			}
-			return run(cmd, args)
+			if existing != nil {
+				return existing(cmd, args)
+			}
+			return nil
 		}
 	}
 	for _, sub := range root.Commands() {
@@ -152,7 +168,7 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 	allow := stdinarg.ParseAllow(cmd.Annotations[stdinarg.AnnotationAllowDash])
 
 	allowed := 0
-	var disallowed []string
+	var disallowedArgs, disallowedFlags []string
 
 	for i, a := range args {
 		if a != "-" || afterDashSeparator(cmd, i) {
@@ -161,12 +177,16 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 		if allow.Arg(i) {
 			allowed++
 		} else {
-			disallowed = append(disallowed, positionalName(cmd, i))
+			disallowedArgs = append(disallowedArgs, positionalName(cmd, i))
 		}
 	}
 
+	// Alias flags (--description/--desc) share one backing value, and pflag
+	// hands each alias the same Value instance — dedupe on it, or a value set
+	// through both spellings would count as two stdin inputs.
+	seen := map[pflag.Value]bool{}
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if !f.Changed {
+		if !f.Changed || seen[f.Value] {
 			return
 		}
 		dashes := 0
@@ -183,28 +203,40 @@ func guardDashArgs(cmd *cobra.Command, args []string) error {
 					}
 				}
 			}
+		default:
+			return
 		}
+		seen[f.Value] = true
 		if dashes == 0 {
 			return
 		}
 		if allow.Flag(f.Name) {
 			allowed += dashes
 		} else {
-			disallowed = append(disallowed, "--"+f.Name)
+			disallowedFlags = append(disallowedFlags, "--"+f.Name)
 		}
 	})
 
 	if allowed > 1 {
 		return output.ErrUsage(`only one input can read from stdin ("-") at a time`)
 	}
+	disallowed := append(append([]string{}, disallowedArgs...), disallowedFlags...)
 	if len(disallowed) > 0 && stdinarg.IsPiped(cmd.InOrStdin()) {
 		msg := fmt.Sprintf(`%s does not read stdin via "-" for %s`,
 			cmd.CommandPath(), strings.Join(disallowed, ", "))
-		hint := `For a literal "-", pass it after the -- separator`
-		if accepts := describeAllowed(cmd, allow); accepts != "" {
-			hint += "; this command reads stdin when \"-\" is given as " + accepts
+		// -- only escapes positionals; a flag value has no in-line escape, so
+		// the honest remedy there is an unpiped stdin.
+		var hints []string
+		if len(disallowedArgs) > 0 {
+			hints = append(hints, `For a literal "-" argument, pass it after the -- separator`)
 		}
-		return output.ErrUsageHint(msg, hint)
+		if len(disallowedFlags) > 0 {
+			hints = append(hints, `For a literal "-" flag value, run without piped stdin (append </dev/tty)`)
+		}
+		if accepts := describeAllowed(cmd, allow); accepts != "" {
+			hints = append(hints, "this command reads stdin when \"-\" is given as "+accepts)
+		}
+		return output.ErrUsageHint(msg, strings.Join(hints, "; "))
 	}
 	return nil
 }

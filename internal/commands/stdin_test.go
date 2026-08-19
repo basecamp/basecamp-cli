@@ -41,6 +41,17 @@ func TestReadStdinContentTrimsTrailingNewlines(t *testing.T) {
 	assert.Equal(t, "🎉", content)
 }
 
+// CRLF pipes (Windows tools, curl -w) must not leave a stray \r behind — it
+// would count against boost's 16-rune limit and corrupt titles.
+func TestReadStdinContentTrimsTrailingCRLF(t *testing.T) {
+	cmd := &cobra.Command{Use: "x"}
+	cmd.SetIn(strings.NewReader("exactly16chars!!\r\n"))
+
+	content, err := readStdinContent(cmd, "<content>")
+	require.NoError(t, err)
+	assert.Equal(t, "exactly16chars!!", content)
+}
+
 func TestReadStdinContentTTYIsUsageErrorWithEscapeHints(t *testing.T) {
 	cmd := &cobra.Command{Use: "x"}
 	devNullStdin(t, cmd)

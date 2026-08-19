@@ -65,6 +65,77 @@ func TestDashGuardRejectsUnlistedFlagWhenPiped(t *testing.T) {
 	err := executeCommand(cmd, app, "update", "1", "--title", "-")
 	outErr := requireUsageErr(t, err)
 	assert.Contains(t, outErr.Message, "--title")
+	// -- doesn't escape flag values, so the hint must not claim it does.
+	assert.NotContains(t, outErr.Hint, "-- separator")
+	assert.Contains(t, outErr.Hint, "/dev/tty")
+}
+
+// The guard runs at Args-validation time: before the command's own Args
+// check, PreRunE, and required-flag validation, so the stray-dash error is
+// what the caller sees instead of a competing usage error — and no pre-run
+// side effect happens first.
+func TestDashGuardFiresBeforeArgsPreRunAndRequiredFlags(t *testing.T) {
+	preRunRan := false
+	cmd := &cobra.Command{
+		Use:  "probe <name> <other>",
+		Args: cobra.ExactArgs(2),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			preRunRan = true
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+	cmd.Flags().String("title", "", "")
+	require.NoError(t, cmd.MarkFlagRequired("title"))
+	InstallDashGuard(cmd)
+	cmd.SetIn(strings.NewReader("piped"))
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	cmd.SetArgs([]string{"-"}) // one arg: ExactArgs(2) and the missing --title would both error later
+
+	err := cmd.Execute()
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Message, "<name>")
+	assert.False(t, preRunRan, "guard must fire before PreRunE")
+}
+
+// Alias flags share one backing value; a value set through both spellings is
+// one logical input, not two.
+func TestDashGuardAliasFlagsCountOnce(t *testing.T) {
+	newAliasCmd := func(probe *dashProbe) *cobra.Command {
+		var description string
+		cmd := &cobra.Command{
+			Use: "probe",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				probe.ran = true
+				probe.args = []string{description}
+				return nil
+			},
+		}
+		cmd.Flags().StringVar(&description, "description", "", "")
+		cmd.Flags().StringVar(&description, "desc", "", "")
+		allowDash(cmd, "flag:description", "flag:desc")
+		InstallDashGuard(cmd)
+		cmd.SetOut(&strings.Builder{})
+		cmd.SetErr(&strings.Builder{})
+		return cmd
+	}
+
+	// Dash last: the merged value is "-", one allowed stdin input.
+	probe := &dashProbe{}
+	cmd := newAliasCmd(probe)
+	cmd.SetIn(strings.NewReader("piped"))
+	cmd.SetArgs([]string{"--description", "old", "--desc", "-"})
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, []string{"-"}, probe.args)
+
+	// Dash first: the literal value wins, no dash in play at all.
+	probe = &dashProbe{}
+	cmd = newAliasCmd(probe)
+	cmd.SetIn(strings.NewReader("piped"))
+	cmd.SetArgs([]string{"--desc", "-", "--description", "old"})
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, []string{"old"}, probe.args)
 }
 
 func TestDashGuardPassesLiteralDashOnTTY(t *testing.T) {

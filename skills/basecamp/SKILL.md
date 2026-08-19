@@ -119,7 +119,9 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
      content is required and missing, the error teaches `-`).
    - Only one input can read stdin per invocation.
    - A literal `-` anywhere else (a title, a name, a path) **errors when stdin is
-     piped**; escape it after the `--` separator: `basecamp projects create -- -`.
+     piped**. Escape a positional after the `--` separator
+     (`basecamp projects create -- -`); a flag value has no in-line escape — run
+     it without the pipe (append `</dev/tty`).
    - `-` with nothing piped (interactive TTY) errors immediately instead of
      hanging; use a pipe, a heredoc (`basecamp comments create <id> - <<'EOF'`),
      or `--edit` where offered.
