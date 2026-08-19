@@ -1,0 +1,19 @@
+go.mod
+  s_f77573f40278b6::t_e113ea9a66567e 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "ed492b0a142fa61dbd267ba5f9ee3dc424b384c6",
+  "prompts": {},
+  "sessions": {
+    "s_f77573f40278b6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "272cab6f-5556-43ec-9cbc-d697e9a030b5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
