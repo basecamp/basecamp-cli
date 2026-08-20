@@ -445,6 +445,12 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			// Local validation, then "-", then account: a bad stdin gets the
 			// stdin error rather than "--account is required".
 			description, err := resolveContentValue(cmd, description, -1, "--description")
@@ -638,6 +644,24 @@ You can pass either an entry ID or a Basecamp URL:
 			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid schedule entry ID")
+			}
+
+			// The timestamp formats and the attachment paths are decidable from
+			// the flags alone, as they already are on the create path — so they
+			// precede the read rather than following account and project
+			// resolution.
+			if startsAt != "" {
+				if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
+					return err
+				}
+			}
+			if endsAt != "" {
+				if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
+					return err
+				}
+			}
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
 			}
 
 			// Syntactic checks first, then "-", then account and network.

@@ -1276,6 +1276,12 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid question ID")
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			content, err := resolveContentArg(cmd, args[1:], 1)
 			if err != nil {
 				return err

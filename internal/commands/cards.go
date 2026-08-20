@@ -870,6 +870,17 @@ Use - as the body argument to read the body from stdin:
 			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
+			// A named column needs --card-table to resolve against, and that is
+			// knowable from the flags alone. Attachment paths are readable or
+			// not regardless of the body. Both precede the read, so a doomed
+			// invocation never costs the caller a drained pipe.
+			if column != "" && !isNumericID(column) && *cardTable == "" {
+				return output.ErrUsage("--card-table is required when using --column with a name")
+			}
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			var content string
 			if len(args) > 1 {
 				var err error

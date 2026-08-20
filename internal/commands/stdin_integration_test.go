@@ -405,6 +405,16 @@ func TestDeterministicFailuresRejectedBeforeReadingStdin(t *testing.T) {
 			[]string{"documents", "create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
 		{"messages subscribe conflict", NewMessagesCmd,
 			[]string{"create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
+		{"messages bad attachment", NewMessagesCmd,
+			[]string{"create", "Title", "-", "--attach", "/nope/missing.png"}, "missing.png"},
+		{"cards named column without a table", NewCardsCmd,
+			[]string{"create", "Title", "-", "--column", "Backlog"}, "--card-table is required"},
+		{"files replace untrusted host", NewFilesCmd,
+			[]string{"replace", "https://evil.example/123/buckets/456/uploads/789", "stdin.go", "--description", "-"}, "untrusted host"},
+		{"files vault with content", NewFilesCmd,
+			[]string{"update", "123", "--type", "vault", "--content", "-"}, "--content can only be used"},
+		{"schedule bad timestamp", NewScheduleCmd,
+			[]string{"update", "123", "--starts-at", "invalid", "--description", "-"}, "starts-at"},
 		{"schedule bad entry id", NewScheduleCmd,
 			[]string{"update", "nope", "--description", "-"}, "Invalid schedule entry ID"},
 		{"uploads unreadable file", NewUploadsCmd,
@@ -426,4 +436,24 @@ func TestDeterministicFailuresRejectedBeforeReadingStdin(t *testing.T) {
 			assert.Zero(t, transport.calls, "no request may be issued")
 		})
 	}
+}
+
+// The --loose gate has to see a configured todolist too, not just the local
+// --list flag: a global --todolist arrives via app.Flags and used to be caught
+// only after the pipe was drained and the project resolved.
+func TestTodosLooseRejectsAConfiguredTodolistBeforeReadingStdin(t *testing.T) {
+	transport := &countingTransport{}
+	app := setupTransportTestApp(t, transport)
+	app.Flags.Todolist = "123"
+
+	stdin := &trackingReader{r: strings.NewReader("body from stdin")}
+	cmd := NewTodosCmd()
+	InstallDashGuard(cmd)
+	cmd.SetIn(stdin)
+
+	err := executeCommand(cmd, app, "create", "-", "--loose")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be combined with --list")
+	assert.False(t, stdin.read, "stdin must not be drained for an invocation that cannot succeed")
+	assert.Zero(t, transport.calls)
 }

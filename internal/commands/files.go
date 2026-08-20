@@ -1270,6 +1270,12 @@ Use - as the content argument to read the document body from stdin:
 				return err
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			content := ""
 			if len(args) > 1 {
 				var contentErr error
@@ -1760,11 +1766,19 @@ You can pass either an upload ID or a Basecamp URL:
 				return fmt.Errorf("%s: %w", filePath, err)
 			}
 
+			// The trusted-host check needs only the configured base URL, so it
+			// runs here rather than with the account-identity checks below —
+			// refusing a look-alike host must not cost the caller a drained
+			// pipe. The full rationale for the check is at its sibling below.
+			if urlarg.IsURL(args[0]) && !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+				return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+			}
+
 			// Syntactic checks first, then "-", then account and network: a
-			// malformed ID or missing file is answered without waiting on the
-			// producer. The URL identity checks below need the session account,
-			// so they necessarily follow. Only an exact "-" reads stdin;
-			// --description "" stays the clear idiom.
+			// malformed ID, missing file or foreign host is answered without
+			// waiting on the producer. The account-identity checks below need
+			// the session account, so they necessarily follow. Only an exact
+			// "-" reads stdin; --description "" stays the clear idiom.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -1956,6 +1970,16 @@ You can pass either an item ID or a Basecamp URL:
 					fmt.Sprintf("Invalid type: %s", itemType),
 					"Use: vault, document, or upload",
 				)
+			}
+
+			// --content is meaningless for a folder, and whether it was given is
+			// knowable before its value is: the switch below needs the resolved
+			// content for its no-op branches, this does not.
+			if cmd.Flags().Changed("content") {
+				switch itemType {
+				case "vault", "folder":
+					return output.ErrUsage("--content can only be used with --type document or upload")
+				}
 			}
 
 			// Only an exact "-" reads stdin; --content "" stays the clear idiom.

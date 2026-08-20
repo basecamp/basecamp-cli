@@ -1263,12 +1263,18 @@ Use - as the content argument to read the todo title from stdin:
 			// drained: a doomed invocation should not make the caller wait on a
 			// producer, and a blank pipe must not answer "stdin is empty"
 			// instead of naming the conflict. The destination resolution below
-			// still repeats the check, since app.Flags.Todolist is only one of
-			// its inputs.
-			if loose && (cmd.Flags().Changed("list") || todolist != "") {
+			// still repeats the check, since a configured todolist is only one
+			// of its inputs.
+			if loose && (cmd.Flags().Changed("list") || todolist != "" || app.Flags.Todolist != "") {
 				return output.ErrUsageHint(
 					"--loose creates a todo outside any list, so it cannot be combined with --list",
 					"Drop --list to create on the to-do set, or drop --loose to create in that list")
+			}
+
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
 			}
 
 			content, err := resolveContentArg(cmd, args, 0)

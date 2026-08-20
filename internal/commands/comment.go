@@ -1166,6 +1166,12 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 				return output.ErrUsage("cannot combine --edit and positional content")
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			var content string
 			if len(args) > 1 {
 				var err error

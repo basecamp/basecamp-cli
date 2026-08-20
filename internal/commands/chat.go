@@ -340,6 +340,12 @@ Use - as the message argument to read the message from stdin:
 				}
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			var err error
 			messageContent, err = resolveContentValue(cmd, messageContent, argIndex, what)
 			if err != nil {
