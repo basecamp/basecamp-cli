@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"testing"
 
@@ -87,24 +86,25 @@ func TestTransformCobraErrorIgnoresUnanchoredArityText(t *testing.T) {
 	assert.Equal(t, msg, err.Error())
 }
 
-// An invalid --jq paired with an error raised before jq validation used to
-// exit non-zero having printed nothing: the fallback writer tried to render the
-// envelope through the broken filter, and its failure was discarded. The error
-// the caller needs outranks the filter they asked for.
-func TestInvalidJQFilterStillRendersAnEarlierError(t *testing.T) {
-	var buf bytes.Buffer
-	writer := output.New(output.Options{
-		Format:   output.FormatJSON,
-		Writer:   &buf,
-		JQFilter: ".[invalid",
-	})
-
-	require.Error(t, writer.Err(output.ErrUsage("stray dash")),
-		"a broken filter must report that it could not render")
-	require.Empty(t, buf.String(), "and must not have written a usable envelope")
-
-	buf.Reset()
-	plain := output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
-	require.NoError(t, plain.Err(output.ErrUsage("stray dash")))
-	assert.Contains(t, buf.String(), "stray dash")
+// jqUsable decides whether the fallback writer may keep a filter. It answers
+// only the question that is knowable before any output exists — a filter that
+// parses and compiles can still fail partway through producing results, which
+// is why the jq-backed path never retries a failed write. That end-to-end
+// property needs the real binary and is covered in e2e/stdin_dash.bats; this
+// only pins the predicate.
+func TestJQUsable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		filter string
+		want   bool
+	}{
+		{"valid", ".error", true},
+		{"parse failure", ".[invalid", false},
+		{"compile failure", ".foo | undefined_function", false},
+		{"valid but fails at runtime", `.error, error("stop")`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, jqUsable(tc.filter))
+		})
+	}
 }

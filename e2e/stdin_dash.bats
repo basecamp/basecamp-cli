@@ -110,3 +110,35 @@ load test_helper
   assert_success
   assert_output_contains "--description"
 }
+
+
+# --jq error rendering. Not stdin-specific, but it shares this file's contract:
+# exactly one document reaches stdout, so a machine consumer can parse it.
+
+@test "a jq filter that fails partway leaves one document on stdout" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # This filter emits .error, then raises. writeJQ streams results as it
+  # produces them, so the first line is already on stdout when it fails —
+  # replaying the envelope would append a second, incompatible document.
+  run bash -c "basecamp todos create --jq '.error, error(\"stop\")' 2>/dev/null < /dev/null"
+  assert_failure
+  [ "${#lines[@]}" -eq 1 ]
+  assert_output_contains "required"
+
+  # The failure is still reported, on stderr.
+  run bash -c "basecamp todos create --jq '.error, error(\"stop\")' 2>&1 >/dev/null < /dev/null"
+  assert_output_contains "--jq"
+}
+
+@test "an unparseable jq filter still renders an error raised before validation" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # The stray-dash guard fires before --jq is validated, so the envelope would
+  # otherwise be rendered through an unparseable filter and print nothing.
+  run bash -c "printf 'x' | basecamp --jq '.[invalid' - 2>/dev/null"
+  assert_failure
+  assert_output_contains "does not read stdin"
+}

@@ -396,12 +396,27 @@ func Execute() {
 		disableJQ := output.IsJQError(err)
 		if !disableJQ {
 			if app := appctx.FromContext(executedCmd.Context()); app != nil {
-				if writeErr := app.Err(err); writeErr == nil {
+				writeErr := app.Err(err)
+				if writeErr == nil {
 					os.Exit(output.ExitCodeFor(apiErr.Code))
 				}
-				// app.Err() write failed (e.g. jq runtime error on the error
-				// envelope, or broken pipe). Disable jq in the fallback writer
-				// to avoid replaying the same failure.
+
+				// The write failed. When a filter was in play it may already
+				// have emitted results — writeJQ streams each one as it is
+				// produced, so a filter like `.error, error("stop")` prints
+				// before it fails. Replaying the envelope on stdout would
+				// append a second, unfiltered document to the first, which is
+				// two incompatible outputs for the machine consumer the filter
+				// exists to serve. Once a jq-backed write has begun, stdout is
+				// final: report the failure on stderr and stop.
+				if jq, _ := cmd.PersistentFlags().GetString("jq"); jq != "" {
+					fmt.Fprintf(os.Stderr, "error rendering error output through --jq: %v\n", writeErr)
+					os.Exit(output.ExitCodeFor(apiErr.Code))
+				}
+
+				// No filter: nothing partial can have been written through one,
+				// so the plain fallback below is still the right last resort
+				// (e.g. a broken pipe).
 				disableJQ = true
 			}
 		}
@@ -439,13 +454,14 @@ func Execute() {
 			format = output.FormatJSON
 		}
 
-		// An unusable filter must not swallow the error: --jq is validated in
-		// the pre-run, so an error raised *before* that check would otherwise
-		// be rendered through an unparseable filter and exit non-zero having
-		// printed nothing. Decide here instead of retrying after a failed
-		// write — writeJQ streams each result as it produces it, so a filter
-		// that fails partway (".error, error(\"stop\")") has already written,
-		// and a second pass would emit two incompatible envelopes.
+		// This path runs only when nothing has been written yet: either no app
+		// was available (an error raised before it was built) or no filter was
+		// in play. An unusable filter must not swallow the error — --jq is
+		// validated in the pre-run, so an error raised *before* that check
+		// would otherwise render through an unparseable filter and exit
+		// non-zero having printed nothing. Decide usability up front rather
+		// than retrying after a failed write, which is what the jq-backed path
+		// above refuses to do.
 		if jqFilter != "" && !jqUsable(jqFilter) {
 			jqFilter = ""
 		}
