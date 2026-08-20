@@ -256,8 +256,8 @@ func TestDashGuardNamesASoloFlagPlainly(t *testing.T) {
 }
 
 // The root keeps nil Args so cobra's legacyArgs still rejects unknown
-// subcommands, so its guard hangs off RunE instead. All four root behaviors
-// have to survive together.
+// subcommands, so its guard hangs off the front of its persistent pre-run
+// instead. All four root behaviors have to survive together.
 func TestDashGuardOnRootPreservesUnknownCommandHandling(t *testing.T) {
 	newRoot := func(probe *dashProbe) *cobra.Command {
 		root := &cobra.Command{
@@ -383,4 +383,62 @@ func TestDashGuardOnRootDoesNotAffectSubcommands(t *testing.T) {
 	require.NoError(t, root.Execute())
 	assert.True(t, preRunRan, "the inherited pre-run still runs for subcommands")
 	assert.Equal(t, []string{"-"}, got, "an allowed dash reaches the subcommand")
+}
+
+// Tier 2 stops a stray "-" landing as content, so cobra's generated commands
+// are exempt: they take no content and write nothing. For the completion
+// commands the exemption is load-bearing, not merely harmless — the shell
+// passes the word being completed as an argument, so "todos create -<TAB>"
+// runs "__complete todos create -". Guarding that would break completion for
+// every flag in the CLI.
+func TestDashGuardExemptsGeneratedMetaCommands(t *testing.T) {
+	root := &cobra.Command{
+		Use:  "basecamp",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+	root.AddCommand(&cobra.Command{
+		Use:  "todos",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	InstallDashGuard(root)
+
+	help := findSubcommand(root, "help")
+	require.NotNil(t, help, "InstallDashGuard must materialize the help command so the exemption is explicit")
+	assert.True(t, isMetaCommand(help))
+
+	for _, name := range []string{cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd} {
+		assert.True(t, isMetaCommand(&cobra.Command{Use: name}), "%s must stay unguarded", name)
+	}
+
+	// A piped "help -" resolves like any unknown topic rather than erroring.
+	root.SetIn(strings.NewReader("piped"))
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"help", "-"})
+	assert.NoError(t, root.Execute())
+}
+
+// Setting PersistentPreRunE shadows a non-E hook cobra would otherwise run in
+// its place. Production uses the E form, so this only guards the refactor.
+func TestDashGuardOnRootKeepsNonErrorPersistentPreRun(t *testing.T) {
+	preRunRan := false
+	root := &cobra.Command{
+		Use: "basecamp",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			preRunRan = true
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+	root.AddCommand(&cobra.Command{
+		Use:  "todos",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	InstallDashGuard(root)
+	root.SetIn(strings.NewReader("piped"))
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs(nil)
+
+	require.NoError(t, root.Execute())
+	assert.True(t, preRunRan, "the non-error pre-run must still run")
 }

@@ -138,6 +138,13 @@ func afterDashSeparator(cmd *cobra.Command, index int) bool {
 // silently lose the guard. A nil Args means ArbitraryArgs (always nil), so
 // wrapping it is behavior-preserving.
 func InstallDashGuard(root *cobra.Command) {
+	// Materialize cobra's generated help command before the walk so the
+	// exemption below is a decision the tree records, not an accident of
+	// running before ExecuteC adds it. Idempotent; ExecuteC calls it again.
+	if !root.HasParent() {
+		root.InitDefaultHelpCmd()
+	}
+
 	// The root's nil Args is load-bearing: cobra's Find() rejects unknown
 	// subcommands (legacyArgs) only while Args == nil, so wrapping it would
 	// turn "basecamp unknowncmd" into a quickstart run. Guard the front of its
@@ -151,17 +158,23 @@ func InstallDashGuard(root *cobra.Command) {
 	// guarded at Args-validation time, which is earlier still.
 	skipRootArgs := root.Args == nil && !root.HasParent() && root.HasSubCommands()
 	switch {
-	case !root.Runnable():
+	case !root.Runnable(), isMetaCommand(root):
 	case skipRootArgs:
-		existing := root.PersistentPreRunE
+		existingE := root.PersistentPreRunE
+		existing := root.PersistentPreRun
 		root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 			if cmd == root {
 				if err := guardDashArgs(cmd, args); err != nil {
 					return err
 				}
 			}
-			if existing != nil {
-				return existing(cmd, args)
+			// Setting the E form shadows any non-E hook cobra would have run
+			// in its place, so call it here rather than dropping it.
+			switch {
+			case existingE != nil:
+				return existingE(cmd, args)
+			case existing != nil:
+				existing(cmd, args)
 			}
 			return nil
 		}
@@ -180,6 +193,23 @@ func InstallDashGuard(root *cobra.Command) {
 	for _, sub := range root.Commands() {
 		InstallDashGuard(sub)
 	}
+}
+
+// isMetaCommand reports whether cmd is one of cobra's generated commands, which
+// the tier-2 guard deliberately skips.
+//
+// Tier 2 exists to stop a stray "-" landing as content. These take no content
+// and write nothing: "help -" resolves like any unknown topic and prints help.
+// For the completion commands the exemption is load-bearing rather than merely
+// harmless — the shell passes the word being completed as an argument, so
+// "basecamp todos create -<TAB>" runs "basecamp __complete todos create -".
+// Guarding that would break completion for every flag in the CLI.
+func isMetaCommand(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return true
+	}
+	return false
 }
 
 // guardDashArgs enforces the tier-2 policy for one invocation:

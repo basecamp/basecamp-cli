@@ -90,3 +90,22 @@ load test_helper
   assert_failure
   assert_output_contains "unknown command"
 }
+
+@test "piped help - is exempt from the dash guard" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run bash -c "printf 'x' | basecamp help - --json"
+  assert_success
+}
+
+@test "piped completion of a flag word is exempt from the dash guard" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # The shell passes the word being completed, so "todos create -<TAB>" runs
+  # this. Guarding it would break flag completion everywhere.
+  run bash -c "printf 'x' | basecamp __complete todos create -"
+  assert_success
+  assert_output_contains "--description"
+}

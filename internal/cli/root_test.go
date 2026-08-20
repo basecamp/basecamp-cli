@@ -320,11 +320,13 @@ func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
 		"piped stdin must not open the profile picker")
 }
 
-// The root's dash guard hangs off RunE (its Args must stay nil for cobra's
-// unknown-command handling), so quick-start's own interactive paths run in the
-// same window. The e2e suite always has a piped stdout, which takes the
-// machine-output branch and never reaches them — this covers the other side:
-// a character-device stdout, the terminal stand-in, with a piped stdin.
+// The root's dash guard hangs off the front of its persistent pre-run (its Args
+// must stay nil for cobra's unknown-command handling), so quick-start's own
+// interactive paths sit behind it. The e2e suite always has a piped stdout,
+// which takes the machine-output branch and never reaches them — this covers
+// the other side: a character-device stdout, the terminal stand-in, with a
+// piped stdin. The root carries a subcommand so InstallDashGuard takes the
+// pre-run branch production uses, not the Args branch for a childless root.
 func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 	isolateRootTest(t)
 
@@ -358,7 +360,9 @@ func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 		"piped stdin must close every TUI gate even with a terminal stdout")
 
 	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
 	commands.InstallDashGuard(root)
+	require.Nil(t, root.Args, "the root must keep nil Args for cobra's unknown-command lookup")
 	root.SetIn(reader)
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
