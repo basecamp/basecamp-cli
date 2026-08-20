@@ -356,7 +356,9 @@ func Execute() {
 	cmd.AddCommand(commands.NewAgentHookCmd())
 
 	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
-	// everywhere a command doesn't explicitly accept it.
+	// everywhere a command doesn't explicitly accept it — except cobra's
+	// generated meta commands, which are deliberately exempt (see
+	// commands.InstallDashGuard).
 	commands.InstallDashGuard(cmd)
 
 	// Use ExecuteC to get the executed command (for correct context access)

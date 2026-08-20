@@ -128,9 +128,9 @@ func afterDashSeparator(cmd *cobra.Command, index int) bool {
 	return lenAtDash >= 0 && index >= lenAtDash
 }
 
-// InstallDashGuard wraps every runnable command in the tree with the tier-2
-// dash guard. It wraps the Args validator: cobra runs ValidateArgs after flag
-// parsing (so Changed and ArgsLenAtDash are available) but before the
+// InstallDashGuard wraps every non-meta runnable command in the tree with the
+// tier-2 dash guard. It wraps the Args validator: cobra runs ValidateArgs
+// after flag parsing (so Changed and ArgsLenAtDash are available) but before the
 // persistent pre-run chain, PreRunE, and required-flag validation — so a
 // stray "-" is rejected before any lifecycle side effect (config hardening,
 // the update check) and before a competing usage error can shadow it. It is
