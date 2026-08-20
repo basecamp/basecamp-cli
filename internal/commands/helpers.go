@@ -460,9 +460,21 @@ func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input strin
 //
 // subscribeChanged should be true when the --subscribe flag was explicitly
 // provided on the command line (i.e. cmd.Flags().Changed("subscribe")).
-func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
+// rejectSubscribeConflict answers the one part of applySubscribeFlags that
+// needs neither the network nor an account, so callers that read stdin can
+// settle it first: draining a pipe for an invocation this rejects makes the
+// caller wait on a producer whose output is discarded, and lets a blank pipe
+// answer "stdin is empty" instead of naming the conflict.
+func rejectSubscribeConflict(subscribeChanged, noSubscribe bool) error {
 	if subscribeChanged && noSubscribe {
-		return nil, output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+		return output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+	}
+	return nil
+}
+
+func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
+	if err := rejectSubscribeConflict(subscribeChanged, noSubscribe); err != nil {
+		return nil, err
 	}
 	if noSubscribe {
 		empty := []int64{}

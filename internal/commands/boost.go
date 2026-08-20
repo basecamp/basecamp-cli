@@ -271,6 +271,20 @@ Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Both identifiers are decidable from the arguments alone, so they
+			// are checked before the pipe is drained; runBoostCreate parses
+			// them again once the project is known.
+			recordingID, _ := extractWithProject(args[0])
+			if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
+				return output.ErrUsage("Invalid ID")
+			}
+			if eventID != "" {
+				if _, err := strconv.ParseInt(eventID, 10, 64); err != nil {
+					return output.ErrUsage("Invalid event ID")
+				}
+			}
+
 			content, err := resolveContentValue(cmd, args[1], 1, "<content>")
 			if err != nil {
 				return err

@@ -1257,6 +1257,20 @@ Use - as the content argument to read the todo title from stdin:
 			if len(args) == 0 {
 				return missingArg(cmd, "<content>")
 			}
+
+			// --loose and a named list are mutually exclusive, and that is
+			// knowable from the flags alone. Decide it before the pipe is
+			// drained: a doomed invocation should not make the caller wait on a
+			// producer, and a blank pipe must not answer "stdin is empty"
+			// instead of naming the conflict. The destination resolution below
+			// still repeats the check, since app.Flags.Todolist is only one of
+			// its inputs.
+			if loose && (cmd.Flags().Changed("list") || todolist != "") {
+				return output.ErrUsageHint(
+					"--loose creates a todo outside any list, so it cannot be combined with --list",
+					"Drop --list to create on the to-do set, or drop --loose to create in that list")
+			}
+
 			content, err := resolveContentArg(cmd, args, 0)
 			if err != nil {
 				return err
@@ -1898,6 +1912,15 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			// Require at least one filter. This gate decides the invocation on
+			// its own, so it runs before the pipe is drained: otherwise the
+			// caller waits on a producer whose output is already discarded, and
+			// a blank pipe answers "stdin is empty" instead of naming the
+			// missing filter.
+			if !overdueOnly && assignee == "" {
+				return output.ErrUsageHint("Sweep requires a filter", "Use --overdue or --assignee to select todos")
+			}
+
 			comment, err := resolveContentValue(cmd, comment, -1, "--comment")
 			if err != nil {
 				return err
@@ -1905,11 +1928,6 @@ Examples:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Require at least one filter
-			if !overdueOnly && assignee == "" {
-				return output.ErrUsageHint("Sweep requires a filter", "Use --overdue or --assignee to select todos")
 			}
 
 			// Require at least one action

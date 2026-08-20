@@ -185,6 +185,13 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("--position must be between 0 and 100")
 			}
 
+			// --notify custom without --subscriptions cannot succeed, and that
+			// is knowable from the flags alone, so it is decided before the pipe
+			// is drained rather than at request-building time.
+			if notify == "custom" && len(subscriptions) == 0 {
+				return output.ErrUsage("--subscriptions required when using --notify custom")
+			}
+
 			// Local validation, then "-", then account: a bad stdin gets the
 			// stdin error rather than "--account is required".
 			description, err := resolveContentValue(cmd, description, -1, "--description")
@@ -220,9 +227,6 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 			if notify != "" {
 				req.Notify = notify
 				if notify == "custom" {
-					if len(subscriptions) == 0 {
-						return output.ErrUsage("--subscriptions required when using --notify custom")
-					}
 					req.Subscriptions = subscriptions
 				}
 			}

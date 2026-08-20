@@ -441,6 +441,10 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+				return err
+			}
+
 			// Local validation, then "-", then account: a bad stdin gets the
 			// stdin error rather than "--account is required".
 			description, err := resolveContentValue(cmd, description, -1, "--description")

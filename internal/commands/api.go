@@ -87,12 +87,19 @@ Use --data - to read the JSON body from stdin:
 				return missingArg(cmd, "--data")
 			}
 
+			app := appctx.FromContext(cmd.Context())
+
+			// Refuse a foreign host before the pipe is drained; the rest of the
+			// path parse needs the resolved account, so it follows.
+			if err := rejectForeignAPIPath(args[0], app.Config.BaseURL); err != nil {
+				return err
+			}
+
 			data, err := resolveContentValue(cmd, data, -1, "--data")
 			if err != nil {
 				return err
 			}
 
-			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -149,12 +156,19 @@ Use --data - to read the JSON body from stdin:
 				return missingArg(cmd, "--data")
 			}
 
+			app := appctx.FromContext(cmd.Context())
+
+			// Refuse a foreign host before the pipe is drained; the rest of the
+			// path parse needs the resolved account, so it follows.
+			if err := rejectForeignAPIPath(args[0], app.Config.BaseURL); err != nil {
+				return err
+			}
+
 			data, err := resolveContentValue(cmd, data, -1, "--data")
 			if err != nil {
 				return err
 			}
 
-			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -256,6 +270,28 @@ var accountSegmentPattern = regexp.MustCompile(`^/([0-9]+)(/.*)?$`)
 // All leading slashes and a mixed-case scheme are normalized first so neither
 // "//https://evil/…" nor "HTTPS://evil/…" can smuggle an absolute URL past the
 // host check (URL schemes are case-insensitive per RFC 3986 §3.1).
+// rejectForeignAPIPath answers the half of parsePath that needs only the
+// configured base URL: an absolute URL on another host is refused outright, so
+// credentials never leave the configured host. The account-segment half needs a
+// resolved account, so it stays in parsePath — this exists so the host check can
+// run before a "-" drains stdin for an invocation that cannot be sent.
+func rejectForeignAPIPath(input, baseURL string) error {
+	candidate := strings.TrimLeft(input, "/")
+	lower := strings.ToLower(candidate)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return nil
+	}
+	u, err := url.Parse(candidate)
+	if err != nil || u.Host == "" {
+		return output.ErrUsage("invalid API URL: " + input)
+	}
+	base, baseErr := url.Parse(baseURL)
+	if baseErr != nil || base.Host == "" || !sameHostPort(u, base) {
+		return output.ErrUsage("API path must be relative or a Basecamp URL on the configured host; refusing to send credentials to " + input)
+	}
+	return nil
+}
+
 func parsePath(input, baseURL, accountID string) (string, error) {
 	candidate := strings.TrimLeft(input, "/")
 	lower := strings.ToLower(candidate)

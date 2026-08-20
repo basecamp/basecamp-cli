@@ -330,6 +330,16 @@ Use - as the message argument to read the message from stdin:
 				argIndex, what = 0, "<message>"
 			}
 
+			// An explicitly supplied --room must be numeric; when it is absent
+			// the room is resolved from the project, which needs the network.
+			// Check the supplied case here so a malformed room does not cost
+			// the caller a drained pipe.
+			if *chatID != "" {
+				if _, err := strconv.ParseInt(*chatID, 10, 64); err != nil {
+					return output.ErrUsage("Invalid chat room ID")
+				}
+			}
+
 			var err error
 			messageContent, err = resolveContentValue(cmd, messageContent, argIndex, what)
 			if err != nil {
@@ -798,6 +808,18 @@ edit to rich text.`,
 				argIndex, what = 1, "[content]"
 			}
 
+			// Validate the content mode before reading stdin, not just before
+			// the request: an unknown --content-type dooms the invocation, and
+			// draining the pipe first makes the caller wait on a producer whose
+			// output is already discarded — or lets a blank pipe answer "stdin
+			// is empty" instead of naming the bad flag.
+			ct := *contentType
+			switch ct {
+			case "", "text/html", "text/plain":
+			default:
+				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", ct))
+			}
+
 			var contentErr error
 			messageContent, contentErr = resolveContentValue(cmd, messageContent, argIndex, what)
 			if contentErr != nil {
@@ -806,16 +828,6 @@ edit to rich text.`,
 
 			if strings.TrimSpace(messageContent) == "" {
 				return missingArg(cmd, "<content>")
-			}
-
-			// Validate the content mode before any request or account setup so an
-			// unknown --content-type fails fast rather than silently sending raw
-			// bytes (the SDK no longer validates content type for us).
-			ct := *contentType
-			switch ct {
-			case "", "text/html", "text/plain":
-			default:
-				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", ct))
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {

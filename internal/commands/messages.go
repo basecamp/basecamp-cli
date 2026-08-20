@@ -461,6 +461,9 @@ Use - as the body argument to read the body from stdin:
 			if edit && body != "" {
 				return output.ErrUsage("cannot combine --edit and body argument")
 			}
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+				return err
+			}
 			var err error
 			body, err = resolveContentValue(cmd, body, 1, "[body]")
 			if err != nil {

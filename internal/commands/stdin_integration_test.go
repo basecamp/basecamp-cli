@@ -367,3 +367,61 @@ func TestMalformedIDRejectedBeforeReadingStdin(t *testing.T) {
 		})
 	}
 }
+
+// An invocation that is already doomed by its flags or arguments must be
+// rejected before the pipe is drained. Otherwise the caller waits on a producer
+// whose output is discarded, an unbounded one buffers into memory, and a blank
+// one answers "stdin is empty" instead of naming the real problem.
+func TestDeterministicFailuresRejectedBeforeReadingStdin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+		want string
+	}{
+		{"api foreign host", NewAPICmd,
+			[]string{"post", "https://evil.example/x", "--data", "-"}, "configured host"},
+		{"chat post bad room", NewChatCmd,
+			[]string{"post", "-", "--room", "nope"}, "Invalid chat room ID"},
+		{"chat update bad content-type", NewChatCmd,
+			[]string{"update", "1", "-", "--content-type", "bogus"}, "unsupported --content-type"},
+		{"boost bad id", NewBoostsCmd,
+			[]string{"create", "nope", "-"}, "Invalid ID"},
+		{"boost bad event", NewBoostsCmd,
+			[]string{"create", "1", "-", "--event", "nope"}, "Invalid event ID"},
+		{"checkins bad question", NewCheckinsCmd,
+			[]string{"answer", "create", "nope", "-"}, "Invalid question ID"},
+		{"checkins bad answer", NewCheckinsCmd,
+			[]string{"answer", "update", "nope", "-"}, "Invalid answer ID"},
+		{"files bad type", NewFilesCmd,
+			[]string{"update", "1", "--type", "nonsense", "--content", "-"}, "Invalid type"},
+		{"todos sweep without a filter", NewTodosCmd,
+			[]string{"sweep", "--comment", "-"}, "requires a filter"},
+		{"todos loose with a list", NewTodosCmd,
+			[]string{"create", "-", "--loose", "--list", "123"}, "cannot be combined with --list"},
+		{"gauges custom notify", NewGaugesCmd,
+			[]string{"create", "--position", "50", "--notify", "custom", "--description", "-"}, "--subscriptions required"},
+		{"docs subscribe conflict", NewDocsCmd,
+			[]string{"documents", "create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
+		{"messages subscribe conflict", NewMessagesCmd,
+			[]string{"create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
+		{"uploads unreadable file", NewUploadsCmd,
+			[]string{"create", "/nope/missing.txt", "--description", "-"}, "missing.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupTransportTestApp(t, transport)
+
+			stdin := &trackingReader{r: strings.NewReader("body from stdin")}
+			cmd := tc.cmd()
+			InstallDashGuard(cmd)
+			cmd.SetIn(stdin)
+
+			err := executeCommand(cmd, app, tc.args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.False(t, stdin.read, "stdin must not be drained for an invocation that cannot succeed")
+			assert.Zero(t, transport.calls, "no request may be issued")
+		})
+	}
+}

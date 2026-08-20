@@ -439,22 +439,38 @@ func Execute() {
 			format = output.FormatJSON
 		}
 
+		// An unusable filter must not swallow the error: --jq is validated in
+		// the pre-run, so an error raised *before* that check would otherwise
+		// be rendered through an unparseable filter and exit non-zero having
+		// printed nothing. Decide here instead of retrying after a failed
+		// write — writeJQ streams each result as it produces it, so a filter
+		// that fails partway (".error, error(\"stop\")") has already written,
+		// and a second pass would emit two incompatible envelopes.
+		if jqFilter != "" && !jqUsable(jqFilter) {
+			jqFilter = ""
+		}
+
 		writer := output.New(output.Options{
 			Format:   format,
 			Writer:   os.Stdout,
 			JQFilter: jqFilter,
 		})
-		if writeErr := writer.Err(err); writeErr != nil && jqFilter != "" {
-			// The filter itself could not render the envelope — an invalid
-			// --jq paired with an error raised before jq validation, which
-			// otherwise exits non-zero having printed nothing at all. The
-			// error the caller needs outranks the filter they asked for.
-			plain := output.New(output.Options{Format: format, Writer: os.Stdout})
-			_ = plain.Err(err)
-		}
+		_ = writer.Err(err)
 
 		os.Exit(output.ExitCodeFor(apiErr.Code))
 	}
+}
+
+// jqUsable reports whether a filter parses and compiles. Only these failures
+// are knowable before any output is produced, which is what makes clearing the
+// filter safe: a filter that fails at runtime may already have written.
+func jqUsable(filter string) bool {
+	q, err := gojq.Parse(filter)
+	if err != nil {
+		return false
+	}
+	_, err = gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
+	return err == nil
 }
 
 // resolveProfile determines which profile to use.

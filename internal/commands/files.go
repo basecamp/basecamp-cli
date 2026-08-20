@@ -887,11 +887,15 @@ as an upload in the target folder (vault).`,
   basecamp uploads create ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			description, err := resolveContentValue(cmd, description, -1, "--description")
+			filePath, err := validateUploadPath(args[0])
 			if err != nil {
 				return err
 			}
-			return runUploadFile(cmd, *project, *vaultID, args[0], description, visibleToClients)
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+			return runUploadFile(cmd, *project, *vaultID, filePath, description, visibleToClients)
 		},
 	}
 
@@ -921,11 +925,15 @@ attachment and then created as an upload in the target folder.`,
   basecamp upload ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			description, err := resolveContentValue(cmd, description, -1, "--description")
+			filePath, err := validateUploadPath(args[0])
 			if err != nil {
 				return err
 			}
-			return runUploadFile(cmd, project, vaultID, args[0], description, visibleToClients)
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+			return runUploadFile(cmd, project, vaultID, filePath, description, visibleToClients)
 		},
 	}
 
@@ -968,6 +976,19 @@ func resolveVaultClientVisibility(cmd *cobra.Command, app *appctx.App, vaultFlag
 	return &value, nil
 }
 
+// validateUploadPath normalizes a drag/paste path and checks the file is
+// readable. It needs no account and no network, so the upload commands run it
+// before resolving a "-" description: a missing file should not cost the caller
+// a drained pipe, and a blank pipe must not answer "stdin is empty" instead of
+// naming the unreadable file.
+func validateUploadPath(filePath string) (string, error) {
+	filePath = richtext.NormalizeDragPath(filePath)
+	if err := richtext.ValidateFile(filePath); err != nil {
+		return "", fmt.Errorf("%s: %w", filePath, err)
+	}
+	return filePath, nil
+}
+
 func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string, visibleToClients bool) error {
 	app := appctx.FromContext(cmd.Context())
 
@@ -975,10 +996,12 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		return err
 	}
 
-	// Normalize drag/paste paths and validate
-	filePath = richtext.NormalizeDragPath(filePath)
-	if err := richtext.ValidateFile(filePath); err != nil {
-		return fmt.Errorf("%s: %w", filePath, err)
+	// Normalize drag/paste paths and validate. Callers that read stdin run
+	// this first (see validateUploadPath); repeating it is idempotent and
+	// keeps this function correct on its own.
+	filePath, err := validateUploadPath(filePath)
+	if err != nil {
+		return err
 	}
 
 	// Resolve project, with interactive fallback
@@ -1243,6 +1266,10 @@ Use - as the content argument to read the document body from stdin:
 
 			// Resolve "-" before any account or network work, so a bad stdin
 			// gets the stdin error rather than "--account is required".
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+				return err
+			}
+
 			content := ""
 			if len(args) > 1 {
 				var contentErr error
@@ -1917,8 +1944,21 @@ You can pass either an item ID or a Basecamp URL:
 
 			// Syntactic checks first, then "-", then account and network: a
 			// malformed ID is answered without waiting on the producer, and a
-			// blank pipe cannot mask it. Only an exact "-" reads stdin;
-			// --content "" stays the clear idiom.
+			// blank pipe cannot mask it. The --type vocabulary is checked here
+			// too — the switch below cannot move, since its no-op branches read
+			// the resolved content, but an unknown type dooms the invocation on
+			// its own and must not cost the caller a drained pipe.
+			itemType = strings.ToLower(strings.TrimSpace(itemType))
+			switch itemType {
+			case "", "document", "doc", "vault", "folder", "upload", "file":
+			default:
+				return output.ErrUsageHint(
+					fmt.Sprintf("Invalid type: %s", itemType),
+					"Use: vault, document, or upload",
+				)
+			}
+
+			// Only an exact "-" reads stdin; --content "" stays the clear idiom.
 			var contentErr error
 			content, contentErr = resolveContentValue(cmd, content, -1, "--content")
 			if contentErr != nil {
@@ -1936,7 +1976,6 @@ You can pass either an item ID or a Basecamp URL:
 			docContentSet := contentChanged && (content == "" || contentTrimmed != "")
 			nonDocTitleSet := titleChanged && titleTrimmed != ""
 			nonDocContentSet := contentChanged && contentTrimmed != ""
-			itemType = strings.ToLower(strings.TrimSpace(itemType))
 			switch itemType {
 			case "", "document", "doc":
 				if !docTitleSet && !docContentSet {
