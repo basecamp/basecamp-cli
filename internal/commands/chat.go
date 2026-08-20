@@ -333,11 +333,17 @@ Use - as the message argument to read the message from stdin:
 			// An explicitly supplied --room must be numeric; when it is absent
 			// the room is resolved from the project, which needs the network.
 			// Check the supplied case here so a malformed room does not cost
-			// the caller a drained pipe.
+			// the caller a drained pipe. Same for the content mode, which chat
+			// update already checks before its own read.
 			if *chatID != "" {
 				if _, err := strconv.ParseInt(*chatID, 10, 64); err != nil {
 					return output.ErrUsage("Invalid chat room ID")
 				}
+			}
+			switch *contentType {
+			case "", "text/html", "text/plain":
+			default:
+				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", *contentType))
 			}
 
 			// Attachment paths are readable or not regardless of the body, so

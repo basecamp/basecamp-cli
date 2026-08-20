@@ -1577,9 +1577,27 @@ Set or clear the people notified when the todo is completed:
 				return output.ErrUsage("Invalid todo ID")
 			}
 
+			// Date formats are decidable from the flags alone, so they join the
+			// ID check ahead of the read. The parsed values are carried forward
+			// rather than re-derived below.
+			var parsedDue string
+			if !clearDue && strings.TrimSpace(due) != "" {
+				parsedDue = dateparse.Parse(due)
+				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
+				}
+			}
+			var parsedStarts string
+			if !clearStarts && !clearDue && strings.TrimSpace(startsOn) != "" {
+				parsedStarts = dateparse.Parse(startsOn)
+				if _, err := time.Parse("2006-01-02", parsedStarts); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid start date: %q", startsOn))
+				}
+			}
+
 			// Syntactic checks first, then "-", then account and network: a
-			// malformed ID is answered without waiting on the producer, and a
-			// blank pipe cannot mask it. Only an exact "-" reads stdin;
+			// malformed ID or date is answered without waiting on the producer,
+			// and a blank pipe cannot mask it. Only an exact "-" reads stdin;
 			// --description "" stays the clear idiom.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
@@ -1601,21 +1619,6 @@ Set or clear the people notified when the todo is completed:
 			var descHTML string
 			if !clearDescription && description != "" {
 				descHTML = richtext.MarkdownToHTML(description)
-			}
-
-			var parsedDue string
-			if !clearDue && strings.TrimSpace(due) != "" {
-				parsedDue = dateparse.Parse(due)
-				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
-					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
-				}
-			}
-			var parsedStarts string
-			if !clearStarts && !clearDue && strings.TrimSpace(startsOn) != "" {
-				parsedStarts = dateparse.Parse(startsOn)
-				if _, err := time.Parse("2006-01-02", parsedStarts); err != nil {
-					return output.ErrUsage(fmt.Sprintf("Invalid start date: %q", startsOn))
-				}
 			}
 
 			var assigneeIDs []int64

@@ -166,16 +166,7 @@ func isolateRootTest(t *testing.T) {
 }
 
 func TestIsInteractiveTTYWithNonInteractiveEnv(t *testing.T) {
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skip(os.DevNull + " not available")
-	}
-	origStdout := os.Stdout
-	os.Stdout = devNull
-	t.Cleanup(func() {
-		os.Stdout = origStdout
-		devNull.Close()
-	})
+	stubCharDeviceStdio(t)
 
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}))
@@ -292,16 +283,7 @@ func TestVersionWithJQReturnsUsageError(t *testing.T) {
 // feeding a "-" content input the picker would eat that body as keystrokes —
 // so a terminal stdout is not on its own enough to open one.
 func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skip(os.DevNull + " not available")
-	}
-	origStdout := os.Stdout
-	os.Stdout = devNull
-	t.Cleanup(func() {
-		os.Stdout = origStdout
-		devNull.Close()
-	})
+	stubCharDeviceStdio(t)
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 
 	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}), "char-device stdio is interactive")
@@ -330,16 +312,7 @@ func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
 func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 	isolateRootTest(t)
 
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skip(os.DevNull + " not available")
-	}
-	origStdout := os.Stdout
-	os.Stdout = devNull
-	t.Cleanup(func() {
-		os.Stdout = origStdout
-		devNull.Close()
-	})
+	stubCharDeviceStdio(t)
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 
 	reader, writer, err := os.Pipe()
@@ -371,4 +344,22 @@ func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 	err = root.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not read stdin")
+}
+
+// stubCharDeviceStdio points both stdout and stdin at /dev/null, a character
+// device, so interactivity assertions do not depend on how `go test` itself was
+// invoked — a piped stdin on the test runner would otherwise fail the
+// interactive baseline now that both streams are checked.
+func stubCharDeviceStdio(t *testing.T) {
+	t.Helper()
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(os.DevNull + " not available")
+	}
+	origStdout, origStdin := os.Stdout, os.Stdin
+	os.Stdout, os.Stdin = devNull, devNull
+	t.Cleanup(func() {
+		os.Stdout, os.Stdin = origStdout, origStdin
+		devNull.Close()
+	})
 }
