@@ -20,7 +20,8 @@ import (
 // dash guard installed over the whole command tree: when stdin is piped, a
 // stray "-" is ambiguous (the caller almost certainly meant "read the pipe"),
 // so it fails as a usage error instead of landing as literal content. On a
-// TTY, a literal "-" stays legal everywhere.
+// TTY, a literal "-" stays legal everywhere. Cobra's generated meta commands
+// (help, __complete) are the one deliberate exemption — see isMetaCommand.
 
 // allowDash marks where cmd accepts "-" as "read from stdin", merging with any
 // tokens already registered. Tokens: "arg:0" (exact positional index),
@@ -198,8 +199,10 @@ func InstallDashGuard(root *cobra.Command) {
 // isMetaCommand reports whether cmd is one of cobra's generated commands, which
 // the tier-2 guard deliberately skips.
 //
-// Tier 2 exists to stop a stray "-" landing as content. These take no content
-// and write nothing: "help -" resolves like any unknown topic and prints help.
+// Tier 2 exists to stop a stray "-" landing as content. These perform no
+// Basecamp content write — they print to stdout and stop there — so a literal
+// "-" has nothing to corrupt: "help -" resolves like any unknown topic and
+// prints help.
 // For the completion commands the exemption is load-bearing rather than merely
 // harmless — the shell passes the word being completed as an argument, so
 // "basecamp todos create -<TAB>" runs "basecamp __complete todos create -".

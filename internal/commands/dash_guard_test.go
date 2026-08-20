@@ -386,7 +386,7 @@ func TestDashGuardOnRootDoesNotAffectSubcommands(t *testing.T) {
 }
 
 // Tier 2 stops a stray "-" landing as content, so cobra's generated commands
-// are exempt: they take no content and write nothing. For the completion
+// are exempt: they perform no Basecamp content write. For the completion
 // commands the exemption is load-bearing, not merely harmless — the shell
 // passes the word being completed as an argument, so "todos create -<TAB>"
 // runs "__complete todos create -". Guarding that would break completion for

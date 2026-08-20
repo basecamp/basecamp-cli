@@ -3,9 +3,10 @@
 #
 # Tier 1: content inputs accept "-" to read piped stdin. Tier 2: everywhere
 # else, a literal "-" combined with piped stdin is a usage error instead of
-# silently becoming literal content. Every case resolves locally — usage
-# errors before any request, or a config write — so no cassette or server
-# is needed.
+# silently becoming literal content — except cobra's generated meta commands
+# (help, __complete), which are deliberately exempt and covered below. Every
+# case resolves locally — usage errors before any request, or a config write —
+# so no cassette or server is needed.
 
 load test_helper
 

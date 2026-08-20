@@ -121,7 +121,9 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    - A literal `-` anywhere else (a title, a name, a path) **errors when stdin is
      piped**. Escape a positional after the `--` separator
      (`basecamp projects create -- -`); a flag value has no in-line escape — run
-     the command without piped stdin.
+     the command without piped stdin. `basecamp help` and shell completion are
+     exempt: they write nothing to Basecamp, and completion legitimately
+     receives `-` as the word being completed.
    - `-` with nothing piped (interactive TTY) errors immediately instead of
      hanging; use a pipe, a heredoc (`basecamp comments create <id> - <<'EOF'`),
      or `--edit` where offered.
