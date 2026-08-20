@@ -629,13 +629,19 @@ You can pass either an entry ID or a Basecamp URL:
 
 			// Extract ID and project from URL if provided. Purely syntactic,
 			// so it precedes the stdin read like every other target-ID check.
-			// (This command never rejects a malformed entry ID locally — the
-			// ParseInt below discards its error and the server answers. That
-			// predates this change and is left alone.)
 			entryID, urlProjectID := extractWithProject(args[0])
 
+			// This command used to send a malformed ID to the server as 0 —
+			// the ParseInt further down discarded its error. Reject it here
+			// instead, like every sibling update command, and before the pipe
+			// is drained.
+			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid schedule entry ID")
+			}
+
 			// Syntactic checks first, then "-", then account and network.
-			description, err := resolveContentValue(cmd, description, -1, "--description")
+			description, err = resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
 			}
@@ -666,8 +672,6 @@ You can pass either an entry ID or a Basecamp URL:
 			if err != nil {
 				return err
 			}
-
-			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
 
 			// Build request with provided fields only
 			req := &basecamp.UpdateScheduleEntryRequest{}

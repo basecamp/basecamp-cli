@@ -405,6 +405,8 @@ func TestDeterministicFailuresRejectedBeforeReadingStdin(t *testing.T) {
 			[]string{"documents", "create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
 		{"messages subscribe conflict", NewMessagesCmd,
 			[]string{"create", "Title", "-", "--subscribe", "me", "--no-subscribe"}, "mutually exclusive"},
+		{"schedule bad entry id", NewScheduleCmd,
+			[]string{"update", "nope", "--description", "-"}, "Invalid schedule entry ID"},
 		{"uploads unreadable file", NewUploadsCmd,
 			[]string{"create", "/nope/missing.txt", "--description", "-"}, "missing.txt"},
 	} {
