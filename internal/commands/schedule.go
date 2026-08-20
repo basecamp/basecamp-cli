@@ -623,6 +623,14 @@ You can pass either an entry ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
+			// Extract ID and project from URL if provided. Purely syntactic,
+			// so it precedes the stdin read like every other target-ID check.
+			// (This command never rejects a malformed entry ID locally — the
+			// ParseInt below discards its error and the server answers. That
+			// predates this change and is left alone.)
+			entryID, urlProjectID := extractWithProject(args[0])
+
+			// Syntactic checks first, then "-", then account and network.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -631,9 +639,6 @@ You can pass either an entry ID or a Basecamp URL:
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Extract ID and project from URL if provided
-			entryID, urlProjectID := extractWithProject(args[0])
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project

@@ -627,7 +627,17 @@ You can pass either a message ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
-			var err error
+			// Extract ID from URL if provided
+			messageIDStr := extractID(args[0])
+
+			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid message ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
 			body, err = resolveContentValue(cmd, body, -1, "--body")
 			if err != nil {
 				return err
@@ -637,14 +647,6 @@ You can pass either a message ID or a Basecamp URL:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID from URL if provided
-			messageIDStr := extractID(args[0])
-
-			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid message ID")
 			}
 
 			// Build SDK request

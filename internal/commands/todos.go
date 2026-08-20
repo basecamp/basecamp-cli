@@ -1550,7 +1550,17 @@ Set or clear the people notified when the todo is completed:
 				return noChanges(cmd)
 			}
 
-			// Only an exact "-" reads stdin; --description "" stays the clear idiom.
+			// Extract ID from URL if provided
+			todoIDStr := extractID(args[0])
+			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todo ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it. Only an exact "-" reads stdin;
+			// --description "" stays the clear idiom.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -1563,13 +1573,6 @@ Set or clear the people notified when the todo is completed:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID from URL if provided
-			todoIDStr := extractID(args[0])
-			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todo ID")
 			}
 
 			// Pre-Edit validation and resolution — no todo HTTP happens here.

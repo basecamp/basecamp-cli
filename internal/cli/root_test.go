@@ -12,6 +12,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -317,4 +318,53 @@ func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
 
 	assert.False(t, isInteractiveTTY(appctx.GlobalFlags{}),
 		"piped stdin must not open the profile picker")
+}
+
+// The root's dash guard hangs off RunE (its Args must stay nil for cobra's
+// unknown-command handling), so quick-start's own interactive paths run in the
+// same window. The e2e suite always has a piped stdout, which takes the
+// machine-output branch and never reaches them — this covers the other side:
+// a character-device stdout, the terminal stand-in, with a piped stdin.
+func TestRootDashGuardWithTerminalStdout(t *testing.T) {
+	isolateRootTest(t)
+
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(os.DevNull + " not available")
+	}
+	origStdout := os.Stdout
+	os.Stdout = devNull
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+		devNull.Close()
+	})
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	origStdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		reader.Close()
+		writer.Close()
+	})
+	_, _ = writer.WriteString("piped body")
+	writer.Close()
+
+	// Terminal stdout plus piped stdin: no TUI may open, and the stray "-"
+	// must be rejected rather than quietly quick-starting.
+	assert.False(t, stdinarg.InteractiveStdio(),
+		"piped stdin must close every TUI gate even with a terminal stdout")
+
+	root := NewRootCmd()
+	commands.InstallDashGuard(root)
+	root.SetIn(reader)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"-"})
+
+	err = root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not read stdin")
 }

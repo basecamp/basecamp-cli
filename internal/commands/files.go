@@ -1722,7 +1722,22 @@ You can pass either an upload ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Only an exact "-" reads stdin; --description "" stays the clear idiom.
+			uploadIDStr := extractID(args[0])
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil || uploadID <= 0 {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			filePath := richtext.NormalizeDragPath(args[1])
+			if err := richtext.ValidateFile(filePath); err != nil {
+				return fmt.Errorf("%s: %w", filePath, err)
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID or missing file is answered without waiting on the
+			// producer. The URL identity checks below need the session account,
+			// so they necessarily follow. Only an exact "-" reads stdin;
+			// --description "" stays the clear idiom.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -1759,17 +1774,6 @@ You can pass either an upload ID or a Basecamp URL:
 				if parsed.IsCollection || parsed.RecordingID == "" {
 					return output.ErrUsage("URL identifies an uploads listing, not a single upload")
 				}
-			}
-
-			uploadIDStr := extractID(args[0])
-			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
-			if err != nil || uploadID <= 0 {
-				return output.ErrUsage("Invalid upload ID")
-			}
-
-			filePath := richtext.NormalizeDragPath(args[1])
-			if err := richtext.ValidateFile(filePath); err != nil {
-				return fmt.Errorf("%s: %w", filePath, err)
 			}
 
 			// Resolve the description first: its local-image references can
@@ -1903,7 +1907,18 @@ You can pass either an item ID or a Basecamp URL:
 		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because BC3 rebuilds documents from permitted params on PUT; explicit clears via --title \"\"/--content \"\" work because the SDK strips empty strings to absent fields, which the controller then nulls. Upload/vault updates do not clear by omission, so empty-valued flags are rejected CLI-side."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Only an exact "-" reads stdin; --content "" stays the clear idiom.
+			// Extract ID and project from URL if provided
+			itemIDStr, urlProjectID := extractWithProject(args[0])
+
+			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid item ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it. Only an exact "-" reads stdin;
+			// --content "" stays the clear idiom.
 			var contentErr error
 			content, contentErr = resolveContentValue(cmd, content, -1, "--content")
 			if contentErr != nil {
@@ -1949,14 +1964,6 @@ You can pass either an item ID or a Basecamp URL:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID := extractWithProject(args[0])
-
-			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid item ID")
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback

@@ -1049,6 +1049,18 @@ as backslash-n.`,
 				return missingArg(cmd, "<content>")
 			}
 
+			// Extract comment ID from URL if provided
+			// Uses extractCommentWithProject to prefer CommentID from URL fragments
+			commentIDStr, _ := extractCommentWithProject(args[0])
+
+			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid comment ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
 			content, err := resolveContentArg(cmd, args[1:], 1)
 			if err != nil {
 				return err
@@ -1060,15 +1072,6 @@ as backslash-n.`,
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract comment ID from URL if provided
-			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, _ := extractCommentWithProject(args[0])
-
-			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid comment ID")
 			}
 
 			// Convert Markdown content to HTML for Basecamp's rich text fields

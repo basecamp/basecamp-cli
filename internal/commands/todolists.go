@@ -402,6 +402,18 @@ You can pass either a todolist ID or a Basecamp URL:
 				return fmt.Errorf("app not initialized")
 			}
 
+			// Extract ID and project from URL if provided
+			todolistIDStr, urlProjectID := extractWithProject(args[0])
+
+			// Parse todolist ID as int64
+			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -410,9 +422,6 @@ You can pass either a todolist ID or a Basecamp URL:
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-
-			// Extract ID and project from URL if provided
-			todolistIDStr, urlProjectID := extractWithProject(args[0])
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -429,12 +438,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-			}
-
-			// Parse todolist ID as int64
-			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todolist ID")
 			}
 
 			// Build SDK request

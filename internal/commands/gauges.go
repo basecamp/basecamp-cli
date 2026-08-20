@@ -271,8 +271,12 @@ func newGaugesUpdateCmd() *cobra.Command {
 				return output.ErrUsage("No changes specified (use --description)")
 			}
 
-			// Resolve "-" before any account or network work, so a bad stdin
-			// gets the stdin error rather than "--account is required".
+			needleID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid needle ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -282,11 +286,6 @@ func newGaugesUpdateCmd() *cobra.Command {
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			needleID, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid needle ID")
 			}
 
 			req := &basecamp.UpdateGaugeNeedleRequest{

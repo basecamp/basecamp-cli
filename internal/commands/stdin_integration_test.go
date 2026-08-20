@@ -327,3 +327,43 @@ func TestChatRejectsPositionalAlongsideContentFlag(t *testing.T) {
 		})
 	}
 }
+
+// A malformed target ID is knowable from the arguments alone, so it must be
+// reported without first draining the pipe: reading blocks on the producer, and
+// a blank pipe would answer "stdin is empty" instead of naming the bad ID.
+func TestMalformedIDRejectedBeforeReadingStdin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"cards update", NewCardsCmd, []string{"update", "nope", "--body", "-"}},
+		{"cards column update", NewCardsCmd, []string{"column", "update", "nope", "--description", "-"}},
+		{"gauges update", NewGaugesCmd, []string{"update", "nope", "--description", "-"}},
+		{"templates update", NewTemplatesCmd, []string{"update", "nope", "--description", "-"}},
+		{"templates construct", NewTemplatesCmd, []string{"construct", "nope", "--name", "P", "--description", "-"}},
+		{"messages update", NewMessagesCmd, []string{"update", "nope", "--body", "-"}},
+		{"todos update", NewTodosCmd, []string{"update", "nope", "--description", "-"}},
+		{"todolists update", NewTodolistsCmd, []string{"update", "nope", "--description", "-"}},
+		{"projects update", NewProjectsCmd, []string{"update", "nope", "--description", "-"}},
+		{"comments update", NewCommentsCmd, []string{"update", "nope", "-"}},
+		{"files update", NewFilesCmd, []string{"update", "nope", "--content", "-"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupTransportTestApp(t, transport)
+
+			stdin := &trackingReader{r: strings.NewReader("body from stdin")}
+			cmd := tc.cmd()
+			InstallDashGuard(cmd)
+			cmd.SetIn(stdin)
+
+			err := executeCommand(cmd, app, tc.args...)
+			outErr := requireUsageErr(t, err)
+			assert.Contains(t, strings.ToLower(outErr.Message), "invalid",
+				"expected the malformed-ID error, got %q", outErr.Message)
+			assert.False(t, stdin.read, "stdin must not be drained before the ID is validated")
+			assert.Zero(t, transport.calls, "no request may be issued")
+		})
+	}
+}

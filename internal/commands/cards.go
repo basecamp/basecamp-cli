@@ -1091,8 +1091,17 @@ You can pass either a card ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
-			// Resolve "-" before any account or network work, so a bad stdin
-			// gets the stdin error rather than "--account is required".
+			// Extract ID from URL if provided
+			cardIDStr := extractID(args[0])
+
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
 			content, err := resolveContentValue(cmd, content, -1, "--body")
 			if err != nil {
 				return err
@@ -1102,14 +1111,6 @@ You can pass either a card ID or a Basecamp URL:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID from URL if provided
-			cardIDStr := extractID(args[0])
-
-			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid card ID")
 			}
 
 			req := &basecamp.UpdateCardRequest{}
@@ -2137,6 +2138,14 @@ You can pass either a column ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
+			// Extract ID from URL if provided
+			columnIDStr := extractID(args[0])
+			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid column ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -2146,13 +2155,6 @@ You can pass either a column ID or a Basecamp URL:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
-			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid column ID")
 			}
 
 			req := &basecamp.UpdateColumnRequest{

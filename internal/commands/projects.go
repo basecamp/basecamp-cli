@@ -331,6 +331,12 @@ Examples:
 				return fmt.Errorf("app not initialized")
 			}
 
+			projectID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network.
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -339,11 +345,6 @@ Examples:
 			// Resolve account if not configured (enables interactive prompt)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			projectID, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid project ID")
 			}
 
 			// For update, we need to provide name (required by SDK)
