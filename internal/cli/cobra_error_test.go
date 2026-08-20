@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -84,4 +85,26 @@ func TestTransformCobraErrorIgnoresUnanchoredArityText(t *testing.T) {
 	var outErr *output.Error
 	assert.False(t, errors.As(err, &outErr), "should be left untouched, got %T", err)
 	assert.Equal(t, msg, err.Error())
+}
+
+// An invalid --jq paired with an error raised before jq validation used to
+// exit non-zero having printed nothing: the fallback writer tried to render the
+// envelope through the broken filter, and its failure was discarded. The error
+// the caller needs outranks the filter they asked for.
+func TestInvalidJQFilterStillRendersAnEarlierError(t *testing.T) {
+	var buf bytes.Buffer
+	writer := output.New(output.Options{
+		Format:   output.FormatJSON,
+		Writer:   &buf,
+		JQFilter: ".[invalid",
+	})
+
+	require.Error(t, writer.Err(output.ErrUsage("stray dash")),
+		"a broken filter must report that it could not render")
+	require.Empty(t, buf.String(), "and must not have written a usable envelope")
+
+	buf.Reset()
+	plain := output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	require.NoError(t, plain.Err(output.ErrUsage("stray dash")))
+	assert.Contains(t, buf.String(), "stray dash")
 }

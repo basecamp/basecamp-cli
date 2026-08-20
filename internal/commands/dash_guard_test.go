@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -321,4 +322,65 @@ func TestDashGuardOnRootPreservesUnknownCommandHandling(t *testing.T) {
 		require.NoError(t, root.Execute())
 		assert.True(t, probe.ran)
 	})
+}
+
+// The root guard runs at the front of the persistent pre-run, so nothing the
+// caller did not ask about — config loading, profile resolution, --jq
+// validation — can answer ahead of the stray dash.
+func TestDashGuardOnRootPrecedesPersistentPreRun(t *testing.T) {
+	preRunRan := false
+	root := &cobra.Command{
+		Use: "basecamp",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			preRunRan = true
+			return errors.New("pre-run would have answered first")
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+	root.AddCommand(&cobra.Command{
+		Use:  "todos",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	InstallDashGuard(root)
+	root.SetIn(strings.NewReader("piped"))
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"-"})
+
+	outErr := requireUsageErr(t, root.Execute())
+	assert.Contains(t, outErr.Message, "does not read stdin")
+	assert.False(t, preRunRan, "the guard must precede the root's pre-run work")
+}
+
+// Subcommands inherit the root's persistent pre-run; the guard there must not
+// double-fire for them, since they are already guarded at Args-validation time.
+func TestDashGuardOnRootDoesNotAffectSubcommands(t *testing.T) {
+	preRunRan := false
+	var got []string
+	root := &cobra.Command{
+		Use: "basecamp",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			preRunRan = true
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	}
+	sub := &cobra.Command{
+		Use: "notes",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			got = args
+			return nil
+		},
+	}
+	allowDash(sub, "arg:0")
+	root.AddCommand(sub)
+	InstallDashGuard(root)
+	root.SetIn(strings.NewReader("piped"))
+	root.SetOut(&strings.Builder{})
+	root.SetErr(&strings.Builder{})
+	root.SetArgs([]string{"notes", "-"})
+
+	require.NoError(t, root.Execute())
+	assert.True(t, preRunRan, "the inherited pre-run still runs for subcommands")
+	assert.Equal(t, []string{"-"}, got, "an allowed dash reaches the subcommand")
 }

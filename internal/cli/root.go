@@ -442,7 +442,14 @@ func Execute() {
 			Writer:   os.Stdout,
 			JQFilter: jqFilter,
 		})
-		_ = writer.Err(err)
+		if writeErr := writer.Err(err); writeErr != nil && jqFilter != "" {
+			// The filter itself could not render the envelope — an invalid
+			// --jq paired with an error raised before jq validation, which
+			// otherwise exits non-zero having printed nothing at all. The
+			// error the caller needs outranks the filter they asked for.
+			plain := output.New(output.Options{Format: format, Writer: os.Stdout})
+			_ = plain.Err(err)
+		}
 
 		os.Exit(output.ExitCodeFor(apiErr.Code))
 	}

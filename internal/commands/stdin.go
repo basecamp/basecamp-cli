@@ -140,24 +140,30 @@ func afterDashSeparator(cmd *cobra.Command, index int) bool {
 func InstallDashGuard(root *cobra.Command) {
 	// The root's nil Args is load-bearing: cobra's Find() rejects unknown
 	// subcommands (legacyArgs) only while Args == nil, so wrapping it would
-	// turn "basecamp unknowncmd" into a quickstart run. Guard its RunE
-	// instead, so "printf x | basecamp -" still gets the stray-dash error
-	// rather than silently running quickstart and ignoring the pipe. RunE is
-	// later than Args validation, but the root's pre-run work (config
-	// hardening, the update check) neither reads stdin nor writes content —
-	// and its one TUI path, the first-run wizard, is stdin-gated by
-	// stdinarg.InteractiveStdio, so piped stdin routes to the non-interactive
-	// summary instead of a wizard that would eat the pipe.
+	// turn "basecamp unknowncmd" into a quickstart run. Guard the front of its
+	// persistent pre-run instead — the earliest hook that still leaves Args
+	// nil, and earlier than RunE, so the stray-dash error is not shadowed by
+	// config loading, profile resolution or --jq validation, none of which the
+	// caller asked about.
+	//
+	// Subcommands inherit this hook when they define none of their own, so it
+	// acts only when the root itself is executing; every subcommand is already
+	// guarded at Args-validation time, which is earlier still.
 	skipRootArgs := root.Args == nil && !root.HasParent() && root.HasSubCommands()
 	switch {
 	case !root.Runnable():
 	case skipRootArgs:
-		existing := root.RunE
-		root.RunE = func(cmd *cobra.Command, args []string) error {
-			if err := guardDashArgs(cmd, args); err != nil {
-				return err
+		existing := root.PersistentPreRunE
+		root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+			if cmd == root {
+				if err := guardDashArgs(cmd, args); err != nil {
+					return err
+				}
 			}
-			return existing(cmd, args)
+			if existing != nil {
+				return existing(cmd, args)
+			}
+			return nil
 		}
 	default:
 		existing := root.Args
