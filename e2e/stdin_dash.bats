@@ -127,9 +127,14 @@ load test_helper
   [ "${#lines[@]}" -eq 1 ]
   assert_output_contains "required"
 
-  # The failure is still reported, on stderr.
-  run bash -c "basecamp todos create --jq '.error, error(\"stop\")' 2>&1 >/dev/null < /dev/null"
+  # The failure is still reported on stderr, but response-selected text in a
+  # jq runtime error cannot inject terminal controls or forge another line.
+  run bash -c "basecamp todos create --jq 'error(\"\\u001b[31mPWN\\u001b[0m\\nforged\")' 2>&1 >/dev/null < /dev/null"
+  assert_failure
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" != *$'\033'* ]]
   assert_output_contains "--jq"
+  assert_output_contains "PWN forged"
 }
 
 @test "an unparseable jq filter still renders an error raised before validation" {

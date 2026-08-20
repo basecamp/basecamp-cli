@@ -444,6 +444,9 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
 				return err
 			}
+			if err := requireNumericID(*scheduleID, "schedule ID"); err != nil {
+				return err
+			}
 
 			// Attachment paths are readable or not regardless of the body, so
 			// check them before the pipe is drained.
@@ -706,16 +709,10 @@ You can pass either an entry ID or a Basecamp URL:
 				hasChanges = true
 			}
 			if startsAt != "" {
-				if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
-					return err
-				}
 				req.StartsAt = basecamp.Ptr(startsAt)
 				hasChanges = true
 			}
 			if endsAt != "" {
-				if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
-					return err
-				}
 				req.EndsAt = basecamp.Ptr(endsAt)
 				hasChanges = true
 			}

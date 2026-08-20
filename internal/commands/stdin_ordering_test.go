@@ -48,29 +48,38 @@ func TestSyntacticArgChecksPrecedeStdinReads(t *testing.T) {
 				return true
 			}
 
-			firstStdinRead, firstArgCheck := token.NoPos, token.NoPos
+			firstStdinRead := token.NoPos
+			var lateChecks []token.Pos
 			ast.Inspect(kv.Value, func(inner ast.Node) bool {
 				call, ok := inner.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
 				switch {
-				case stdinResolver(call) && !firstStdinRead.IsValid():
-					firstStdinRead = call.Pos()
-				case syntacticArgUse(call) && !firstArgCheck.IsValid():
-					firstArgCheck = call.Pos()
+				case stdinResolver(call):
+					if !firstStdinRead.IsValid() {
+						firstStdinRead = call.Pos()
+					}
+				case deterministicCheck(call):
+					// Every recognized check must precede the read, not just
+					// the earliest one: comparing first-to-first lets a single
+					// early check hide every later one.
+					if firstStdinRead.IsValid() && call.Pos() > firstStdinRead {
+						lateChecks = append(lateChecks, call.Pos())
+					}
 				}
 				return true
 			})
 
-			if !firstStdinRead.IsValid() || !firstArgCheck.IsValid() {
+			if !firstStdinRead.IsValid() {
 				return true
 			}
 			checked++
-			assert.Less(t, int(firstArgCheck), int(firstStdinRead),
-				"%s: this command reads stdin at %s before validating its arguments at %s — "+
-					"hoist the argument check above the resolver",
-				name, fset.Position(firstStdinRead), fset.Position(firstArgCheck))
+			for _, late := range lateChecks {
+				assert.Fail(t, "stdin is read before a check that decides the invocation",
+					"%s: reads stdin at %s but checks its arguments at %s — hoist the check above the resolver",
+					name, fset.Position(firstStdinRead), fset.Position(late))
+			}
 			return true
 		})
 	}
@@ -84,10 +93,36 @@ func stdinResolver(call *ast.CallExpr) bool {
 	return ok && (name.Name == "resolveContentValue" || name.Name == "resolveContentArg")
 }
 
-// syntacticArgUse matches a call that derives something from args without any
-// account, config, or network dependency — the checks that must come first.
+// deterministicCheck matches a call that can decide the invocation without the
+// network: a syntactic use of args, or one of the local validation helpers.
 // Recognizing a form by name is exactly as wide as the names listed; a new
 // helper needs adding here, which is why the coverage claim above is bounded.
+//
+// Normalizers are deliberately absent. dateparse.Parse and isNumericID cannot
+// fail, so they decide nothing on their own — listing them would report call
+// sites that are branch selection rather than validation, and the noise would
+// be answered by suppressions instead of fixes.
+func deterministicCheck(call *ast.CallExpr) bool {
+	if id, ok := call.Fun.(*ast.Ident); ok {
+		switch id.Name {
+		case "validateAttachPaths", "validateUploadPath", "validateScheduleTimestamp",
+			"rejectSubscribeConflict", "rejectForeignAPIPath":
+			return true
+		}
+	}
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if pkg, ok := sel.X.(*ast.Ident); ok {
+			switch pkg.Name + "." + sel.Sel.Name {
+			case "hostutil.IsTrustedBasecampHost", "urlarg.Parse", "urlarg.IsURL":
+				return true
+			}
+		}
+	}
+	return syntacticArgUse(call)
+}
+
+// syntacticArgUse matches a call that derives something from args without any
+// account, config, or network dependency.
 func syntacticArgUse(call *ast.CallExpr) bool {
 	name, ok := call.Fun.(*ast.Ident)
 	if !ok {

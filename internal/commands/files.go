@@ -1269,6 +1269,9 @@ Use - as the content argument to read the document body from stdin:
 			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
 				return err
 			}
+			if err := requireNumericID(*vaultID, "folder ID"); err != nil {
+				return err
+			}
 
 			// Attachment paths are readable or not regardless of the body, so
 			// check them before the pipe is drained.
@@ -1766,12 +1769,31 @@ You can pass either an upload ID or a Basecamp URL:
 				return fmt.Errorf("%s: %w", filePath, err)
 			}
 
-			// The trusted-host check needs only the configured base URL, so it
-			// runs here rather than with the account-identity checks below —
-			// refusing a look-alike host must not cost the caller a drained
-			// pipe. The full rationale for the check is at its sibling below.
-			if urlarg.IsURL(args[0]) && !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
-				return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+			// A URL-shaped argument must live on a trusted Basecamp host: the
+			// URL router is host-agnostic, so a look-alike on an
+			// attacker-controlled host would otherwise pass the identity checks
+			// and retarget the configured account's upload — the confused-deputy
+			// case hostutil exists to prevent. That, and whether the URL names a
+			// single upload at all, need only the configured base URL, so they
+			// run before the read; only the account comparison waits.
+			var parsedURL *urlarg.Parsed
+			if urlarg.IsURL(args[0]) {
+				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+				}
+				parsedURL = urlarg.Parse(args[0])
+			}
+			if parsedURL != nil {
+				if parsedURL.Type != "uploads" {
+					return output.ErrUsage(fmt.Sprintf("URL identifies a %s recording, not an upload", parsedURL.Type))
+				}
+				// A collection URL (/vaults/456/uploads, /buckets/456/uploads)
+				// also parses as type "uploads", but its extracted ID is the
+				// PARENT's — the identity predicate needs the recording half
+				// too, or extractID retargets a same-numbered upload.
+				if parsedURL.IsCollection || parsedURL.RecordingID == "" {
+					return output.ErrUsage("URL identifies an uploads listing, not a single upload")
+				}
 			}
 
 			// Syntactic checks first, then "-", then account and network: a
@@ -1791,30 +1813,10 @@ You can pass either an upload ID or a Basecamp URL:
 			// A pasted URL names its own account; refuse one that isn't the
 			// session's before anything is staged — extractID keeps only the
 			// numeric ID, which would silently retarget the configured
-			// account's same-numbered upload on a mutating request.
-			// A URL-shaped argument must live on a trusted Basecamp host:
-			// the URL router is host-agnostic, so a look-alike on an
-			// attacker-controlled host would otherwise pass the identity
-			// checks below and retarget the configured account's upload —
-			// the confused-deputy case hostutil exists to prevent.
-			if urlarg.IsURL(args[0]) && !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
-				return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
-			}
-
-			if parsed := urlarg.Parse(args[0]); parsed != nil {
-				if parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-					return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsed.AccountID, app.Config.AccountID))
-				}
-				if parsed.Type != "uploads" {
-					return output.ErrUsage(fmt.Sprintf("URL identifies a %s recording, not an upload", parsed.Type))
-				}
-				// A collection URL (/vaults/456/uploads, /buckets/456/uploads)
-				// also parses as type "uploads", but its extracted ID is the
-				// PARENT's — the identity predicate needs the recording half
-				// too, or extractID retargets a same-numbered upload.
-				if parsed.IsCollection || parsed.RecordingID == "" {
-					return output.ErrUsage("URL identifies an uploads listing, not a single upload")
-				}
+			// account's same-numbered upload on a mutating request. Host and
+			// shape were settled before the read; only this needed the account.
+			if parsedURL != nil && parsedURL.AccountID != "" && parsedURL.AccountID != app.Config.AccountID {
+				return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
 			// Resolve the description first: its local-image references can

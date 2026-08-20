@@ -108,3 +108,18 @@ func TestJQUsable(t *testing.T) {
 		})
 	}
 }
+
+func TestJQRenderErrorDiagnosticIsTerminalSafeAndSingleLine(t *testing.T) {
+	err := output.ErrJQRuntime(errors.New("error: \x1b[31mPWN\x1b[0m\r\nforged\tline \x1b]8;;https://evil.example\aLINK\x1b]8;;\a \u009b31mC1\u009b0m"))
+
+	got := jqRenderErrorDiagnostic(err)
+
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.NotContains(t, got, "\n")
+	assert.NotContains(t, got, "\t")
+	assert.NotContains(t, got, "\u009b")
+	assert.Contains(t, got, "PWN")
+	assert.Contains(t, got, "forged line LINK")
+	assert.Contains(t, got, "C1")
+}

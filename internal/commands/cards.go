@@ -877,6 +877,9 @@ Use - as the body argument to read the body from stdin:
 			if column != "" && !isNumericID(column) && *cardTable == "" {
 				return output.ErrUsage("--card-table is required when using --column with a name")
 			}
+			if err := requireNumericID(*cardTable, "card table ID"); err != nil {
+				return err
+			}
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
@@ -894,12 +897,6 @@ Use - as the body argument to read the body from stdin:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Column name (non-numeric) requires --card-table for resolution
-			// Numeric column IDs can be used directly without card table discovery
-			if column != "" && !isNumericID(column) && *cardTable == "" {
-				return output.ErrUsage("--card-table is required when using --column with a name")
 			}
 
 			// Resolve project, with interactive fallback
@@ -1108,6 +1105,12 @@ You can pass either a card ID or a Basecamp URL:
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
+			}
+
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
 			}
 
 			// Syntactic checks first, then "-", then account and network: a
@@ -2055,6 +2058,10 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 			title := args[0]
 
 			app := appctx.FromContext(cmd.Context())
+
+			if err := requireNumericID(*cardTable, "card table ID"); err != nil {
+				return err
+			}
 
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {

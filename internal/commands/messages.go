@@ -464,6 +464,9 @@ Use - as the body argument to read the body from stdin:
 			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
 				return err
 			}
+			if err := requireNumericID(*messageBoard, "message board ID"); err != nil {
+				return err
+			}
 			// Attachment paths are readable or not regardless of the body, so
 			// check them before the pipe is drained.
 			if err := validateAttachPaths(attachFiles); err != nil {

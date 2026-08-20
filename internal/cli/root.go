@@ -22,6 +22,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -410,7 +411,7 @@ func Execute() {
 				// exists to serve. Once a jq-backed write has begun, stdout is
 				// final: report the failure on stderr and stop.
 				if jq, _ := cmd.PersistentFlags().GetString("jq"); jq != "" {
-					fmt.Fprintf(os.Stderr, "error rendering error output through --jq: %v\n", writeErr)
+					fmt.Fprintln(os.Stderr, jqRenderErrorDiagnostic(writeErr))
 					os.Exit(output.ExitCodeFor(apiErr.Code))
 				}
 
@@ -487,6 +488,21 @@ func jqUsable(filter string) bool {
 	}
 	_, err = gojq.Compile(q, gojq.WithEnvironLoader(os.Environ))
 	return err == nil
+}
+
+// jqRenderErrorDiagnostic renders a terminal-safe, single-line explanation of
+// a failed jq-backed error write. A jq runtime error can include response data
+// selected by the filter, so it must not reach stderr verbatim.
+func jqRenderErrorDiagnostic(err error) string {
+	const prefix = "error rendering error output through --jq"
+	if err == nil {
+		return prefix
+	}
+	detail := richtext.SanitizeSingleLine(err.Error())
+	if detail == "" {
+		return prefix
+	}
+	return prefix + ": " + detail
 }
 
 // resolveProfile determines which profile to use.

@@ -832,6 +832,40 @@ edit to rich text.`,
 				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", ct))
 			}
 
+			// Resolve the line reference before the read: the URL host and
+			// shape, an explicitly supplied --room, and a bare numeric line ID
+			// are all decidable from the arguments and the configured base URL,
+			// so a bad reference must not cost the caller a drained pipe.
+			lineID := args[0]
+			urlChatID := ""
+			urlProjectID := ""
+			var parsedURL *urlarg.Parsed
+			if urlarg.IsURL(args[0]) {
+				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+				}
+				parsed := urlarg.Parse(args[0])
+				// Require an individual chat-line URL. A room's line-collection URL
+				// (/chats/{c}/lines) also parses as Type "lines" but with
+				// IsCollection set and RecordingID holding the campfire ID, not a
+				// line ID — accepting it would edit PUT /chats/{c}/lines/{c}.
+				if parsed == nil || parsed.Type != "lines" || parsed.IsCollection {
+					return output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
+				}
+				lineID = parsed.RecordingID
+				urlChatID = parsed.CampfireID
+				urlProjectID = parsed.ProjectID
+				parsedURL = parsed
+			}
+			if _, err := strconv.ParseInt(lineID, 10, 64); err != nil {
+				return output.ErrUsage("Invalid chat line ID")
+			}
+			if *chatID != "" {
+				if _, err := strconv.ParseInt(*chatID, 10, 64); err != nil {
+					return output.ErrUsage("Invalid chat room ID")
+				}
+			}
+
 			var contentErr error
 			messageContent, contentErr = resolveContentValue(cmd, messageContent, argIndex, what)
 			if contentErr != nil {
@@ -846,34 +880,13 @@ edit to rich text.`,
 				return err
 			}
 
-			// Resolve the line reference. A bare numeric ID falls through to
-			// --room/dock resolution; a URL must be a chat-line URL on a trusted
-			// host so a pasted card/todo/message URL — or a look-alike on an
-			// attacker-controlled host — can't be misinterpreted into an edit.
-			lineID := args[0]
-			urlChatID := ""
-			urlProjectID := ""
-			if urlarg.IsURL(args[0]) {
-				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
-					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
-				}
-				parsed := urlarg.Parse(args[0])
-				// Require an individual chat-line URL. A room's line-collection URL
-				// (/chats/{c}/lines) also parses as Type "lines" but with
-				// IsCollection set and RecordingID holding the campfire ID, not a
-				// line ID — accepting it would edit PUT /chats/{c}/lines/{c}.
-				if parsed == nil || parsed.Type != "lines" || parsed.IsCollection {
-					return output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
-				}
-				// Guard against editing in the wrong account: the URL names an
-				// account, and if it disagrees with the configured one the safe
-				// move is to stop rather than silently target a different account.
-				if parsed.AccountID != "" && app.Config.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-					return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
-				}
-				lineID = parsed.RecordingID
-				urlChatID = parsed.CampfireID
-				urlProjectID = parsed.ProjectID
+			// The URL's host and shape were settled before the read; only the
+			// account comparison had to wait for a resolved account. Editing in
+			// the wrong account is worth stopping for rather than silently
+			// targeting a different one.
+			if parsedURL != nil && parsedURL.AccountID != "" && app.Config.AccountID != "" &&
+				parsedURL.AccountID != app.Config.AccountID {
+				return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
 			// Resolve the chat (campfire) ID, and a project only when needed. The

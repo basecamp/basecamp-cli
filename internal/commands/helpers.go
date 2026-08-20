@@ -148,6 +148,21 @@ func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName str
 //
 // When exactly one tool exists, its ID is returned.
 // When no tools of the type exist, a not found error is returned.
+// requireNumericID rejects an explicitly supplied dock or container ID that is
+// not numeric. getDockToolID returns an explicit value verbatim — there is no
+// name resolution for these — so the check needs neither an account nor the
+// network, and commands that also read a "-" input run it before the read
+// rather than discovering it after a request is already being built.
+func requireNumericID(value, label string) error {
+	if value == "" {
+		return nil
+	}
+	if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+		return output.ErrUsage("Invalid " + label)
+	}
+	return nil
+}
+
 func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, explicitID, friendlyName, flagName string) (string, error) {
 	// If explicit ID provided, use it directly
 	if explicitID != "" {

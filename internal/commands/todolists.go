@@ -288,6 +288,10 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := requireNumericID(*todosetID, "todoset ID"); err != nil {
+				return err
+			}
+
 			description, err := resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err

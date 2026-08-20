@@ -1276,6 +1276,9 @@ Use - as the content argument to read the todo title from stdin:
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
+			if err := requireNumericID(todoset, "todoset ID"); err != nil {
+				return err
+			}
 
 			content, err := resolveContentArg(cmd, args, 0)
 			if err != nil {

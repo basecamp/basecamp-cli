@@ -97,14 +97,16 @@ func validateAttachPaths(paths []string) error {
 // uploadAttachments uploads each path and returns attachment references.
 // Sequential, fails on first error.
 func uploadAttachments(cmd *cobra.Command, app *appctx.App, paths []string) ([]richtext.AttachmentRef, error) {
+	// Callers that read stdin run this first; repeating it here is idempotent
+	// and keeps this function correct on its own.
+	if err := validateAttachPaths(paths); err != nil {
+		return nil, err
+	}
+
 	refs := make([]richtext.AttachmentRef, 0, len(paths))
 
 	for _, path := range paths {
 		normalized := richtext.NormalizeDragPath(path)
-
-		if err := richtext.ValidateFile(normalized); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
 
 		contentType := richtext.DetectMIME(normalized)
 		filename := filepath.Base(normalized)
