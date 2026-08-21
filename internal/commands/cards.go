@@ -1116,8 +1116,14 @@ You can pass either a card ID or a Basecamp URL:
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
+			// Every non-empty value is parsed, not just non-blank ones: the
+			// no-change guard above tests due == "", so a whitespace-only
+			// --due passes it, and dateparse.Parse trims that to an empty
+			// date. Parsing it here answers "Invalid due date" instead of
+			// sending an update with nothing in it. Surrounding whitespace on
+			// a real date is already handled by the parser.
 			var parsedDue string
-			if strings.TrimSpace(due) != "" {
+			if due != "" {
 				parsedDue = dateparse.Parse(due)
 				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
 					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))

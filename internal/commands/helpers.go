@@ -457,6 +457,18 @@ func requireOneParseableTarget(arg string) error {
 	return output.ErrUsage(fmt.Sprintf("no valid recording ID in %q", arg))
 }
 
+// hasPersonToken reports whether input holds at least one token resolvePersonIDs
+// would attempt to resolve. It splits the same way, so the pre-read guard and
+// the resolver cannot disagree about what counts as empty.
+func hasPersonToken(input string) bool {
+	for token := range strings.SplitSeq(input, ",") {
+		if strings.TrimSpace(token) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // resolvePersonIDs splits a comma-separated input string and resolves each
 // token (name, email, ID, or "me") to a person ID via the name resolver.
 func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input string) ([]int64, error) {
@@ -498,10 +510,10 @@ func rejectSubscribeConflict(subscribeChanged, noSubscribe bool, subscribe strin
 	if subscribeChanged && noSubscribe {
 		return output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
 	}
-	// resolvePersonIDs skips blank tokens, so a changed-but-blank value can
-	// never resolve to anyone. Deciding that here rather than after the lookup
-	// keeps it ahead of any stdin read.
-	if subscribeChanged && strings.TrimSpace(subscribe) == "" {
+	// resolvePersonIDs skips blank tokens, so a value with no resolvable token
+	// can never name anyone — ",,," reaches the same error as "". Deciding it
+	// here rather than after the lookup keeps it ahead of any stdin read.
+	if subscribeChanged && !hasPersonToken(subscribe) {
 		return output.ErrUsage("--subscribe requires at least one person")
 	}
 	return nil
