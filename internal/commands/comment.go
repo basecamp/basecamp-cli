@@ -1167,8 +1167,14 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			}
 
 			// Attachment paths are readable or not regardless of the body, so
-			// check them before the pipe is drained.
+			// check them before the pipe is drained. So is whether any target
+			// is even a number: the loop below tolerates individual bad IDs so
+			// a mixed batch still posts, but when none can parse the invocation
+			// creates nothing, and that is knowable from the argument alone.
 			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+			if err := requireOneParseableTarget(recordingArg); err != nil {
 				return err
 			}
 

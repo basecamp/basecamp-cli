@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1108,9 +1109,19 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Attachment paths are readable or not regardless of the body, so
-			// check them before the pipe is drained.
+			// check them before the pipe is drained. The due date too:
+			// dateparse.Parse returns unrecognized input unchanged, so a bad
+			// value fails only at the server, after the producer is spent.
+			// todos update already rejects it locally; match that.
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
+			}
+			var parsedDue string
+			if strings.TrimSpace(due) != "" {
+				parsedDue = dateparse.Parse(due)
+				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
+				}
 			}
 
 			// Syntactic checks first, then "-", then account and network: a
@@ -1160,9 +1171,8 @@ You can pass either a card ID or a Basecamp URL:
 			if html != "" {
 				req.Content = &html
 			}
-			if due != "" {
-				dueOn := dateparse.Parse(due)
-				req.DueOn = &dueOn
+			if parsedDue != "" {
+				req.DueOn = &parsedDue
 			}
 			if cmd.Flags().Changed("assignee") {
 				assigneeID, err := resolveAssigneeID(cmd.Context(), app, assignee)

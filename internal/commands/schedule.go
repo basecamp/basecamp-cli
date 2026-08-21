@@ -441,7 +441,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
-			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
 				return err
 			}
 			if err := requireNumericID(*scheduleID, "schedule ID"); err != nil {

@@ -1272,7 +1272,7 @@ Use - as the content argument to read the document body from stdin:
 
 			// Resolve "-" before any account or network work, so a bad stdin
 			// gets the stdin error rather than "--account is required".
-			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
 				return err
 			}
 			if err := requireNumericID(*vaultID, "folder ID"); err != nil {

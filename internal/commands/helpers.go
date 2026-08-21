@@ -443,6 +443,20 @@ func extractIDs(args []string) []string {
 	return urlarg.ExtractIDs(args)
 }
 
+// requireOneParseableTarget rejects a recording argument whose every
+// comma-separated token fails to parse. Callers tolerate individual bad IDs so
+// a mixed batch still posts what it can, but an all-invalid argument creates
+// nothing — and extractIDs is pure, so that is decidable from the argument
+// alone, before a "-" drains the producer.
+func requireOneParseableTarget(arg string) error {
+	for _, id := range extractIDs([]string{arg}) {
+		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+			return nil
+		}
+	}
+	return output.ErrUsage(fmt.Sprintf("no valid recording ID in %q", arg))
+}
+
 // resolvePersonIDs splits a comma-separated input string and resolves each
 // token (name, email, ID, or "me") to a person ID via the name resolver.
 func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input string) ([]int64, error) {
@@ -480,15 +494,21 @@ func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input strin
 // settle it first: draining a pipe for an invocation this rejects makes the
 // caller wait on a producer whose output is discarded, and lets a blank pipe
 // answer "stdin is empty" instead of naming the conflict.
-func rejectSubscribeConflict(subscribeChanged, noSubscribe bool) error {
+func rejectSubscribeConflict(subscribeChanged, noSubscribe bool, subscribe string) error {
 	if subscribeChanged && noSubscribe {
 		return output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+	}
+	// resolvePersonIDs skips blank tokens, so a changed-but-blank value can
+	// never resolve to anyone. Deciding that here rather than after the lookup
+	// keeps it ahead of any stdin read.
+	if subscribeChanged && strings.TrimSpace(subscribe) == "" {
+		return output.ErrUsage("--subscribe requires at least one person")
 	}
 	return nil
 }
 
 func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
-	if err := rejectSubscribeConflict(subscribeChanged, noSubscribe); err != nil {
+	if err := rejectSubscribeConflict(subscribeChanged, noSubscribe, subscribe); err != nil {
 		return nil, err
 	}
 	if noSubscribe {

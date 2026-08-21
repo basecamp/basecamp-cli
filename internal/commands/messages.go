@@ -461,7 +461,7 @@ Use - as the body argument to read the body from stdin:
 			if edit && body != "" {
 				return output.ErrUsage("cannot combine --edit and body argument")
 			}
-			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe); err != nil {
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
 				return err
 			}
 			if err := requireNumericID(*messageBoard, "message board ID"); err != nil {
