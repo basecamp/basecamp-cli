@@ -98,22 +98,22 @@ func stdinResolver(call *ast.CallExpr) bool {
 // Recognizing a form by name is exactly as wide as the names listed; a new
 // helper needs adding here, which is why the coverage claim above is bounded.
 //
-// Normalizers are deliberately absent. dateparse.Parse and isNumericID cannot
-// fail, so they decide nothing on their own — listing them would report call
-// sites that are branch selection rather than validation, and the noise would
+// Normalizers and branch selectors are deliberately absent. dateparse.Parse,
+// isNumericID and urlarg.IsURL cannot reject an invocation, so listing them
+// would report branch selection as if it were validation, and the noise would
 // be answered by suppressions instead of fixes.
 func deterministicCheck(call *ast.CallExpr) bool {
 	if id, ok := call.Fun.(*ast.Ident); ok {
 		switch id.Name {
 		case "validateAttachPaths", "validateUploadPath", "validateScheduleTimestamp",
-			"rejectSubscribeConflict", "rejectForeignAPIPath":
+			"rejectSubscribeConflict", "rejectForeignAPIPath", "requireNumericID":
 			return true
 		}
 	}
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 		if pkg, ok := sel.X.(*ast.Ident); ok {
 			switch pkg.Name + "." + sel.Sel.Name {
-			case "hostutil.IsTrustedBasecampHost", "urlarg.Parse", "urlarg.IsURL":
+			case "hostutil.IsTrustedBasecampHost", "urlarg.Parse":
 				return true
 			}
 		}

@@ -443,6 +443,10 @@ func TestDeterministicFailuresRejectedBeforeReadingStdin(t *testing.T) {
 			[]string{"create", "-", "--todoset", "nope"}, "Invalid todoset ID"},
 		{"schedule bad entry id", NewScheduleCmd,
 			[]string{"update", "nope", "--description", "-"}, "Invalid schedule entry ID"},
+		{"uploads create bad folder id", NewUploadsCmd,
+			[]string{"create", "stdin.go", "--folder", "nope", "--description", "-"}, "Invalid folder ID"},
+		{"upload shortcut bad folder id", NewUploadCmd,
+			[]string{"stdin.go", "--folder", "nope", "--description", "-"}, "Invalid folder ID"},
 		{"uploads unreadable file", NewUploadsCmd,
 			[]string{"create", "/nope/missing.txt", "--description", "-"}, "missing.txt"},
 	} {

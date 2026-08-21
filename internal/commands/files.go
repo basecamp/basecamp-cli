@@ -891,6 +891,9 @@ as an upload in the target folder (vault).`,
 			if err != nil {
 				return err
 			}
+			if err := requireNumericID(*vaultID, "folder ID"); err != nil {
+				return err
+			}
 			description, err = resolveContentValue(cmd, description, -1, "--description")
 			if err != nil {
 				return err
@@ -927,6 +930,9 @@ attachment and then created as an upload in the target folder.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath, err := validateUploadPath(args[0])
 			if err != nil {
+				return err
+			}
+			if err := requireNumericID(vaultID, "folder ID"); err != nil {
 				return err
 			}
 			description, err = resolveContentValue(cmd, description, -1, "--description")

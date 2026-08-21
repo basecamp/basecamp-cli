@@ -139,15 +139,6 @@ func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName str
 	return output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
 }
 
-// getDockToolID retrieves a dock tool ID from a project, handling the multi-dock case.
-//
-// When multiple tools of the same type exist in the project:
-//   - If explicitID is provided, it is returned as-is
-//   - Otherwise, an error is returned listing the available tools;
-//     if flagName is non-empty, the hint directs users to that flag
-//
-// When exactly one tool exists, its ID is returned.
-// When no tools of the type exist, a not found error is returned.
 // requireNumericID rejects an explicitly supplied dock or container ID that is
 // not numeric. getDockToolID returns an explicit value verbatim — there is no
 // name resolution for these — so the check needs neither an account nor the
@@ -163,6 +154,15 @@ func requireNumericID(value, label string) error {
 	return nil
 }
 
+// getDockToolID retrieves a dock tool ID from a project, handling the multi-dock case.
+//
+// When multiple tools of the same type exist in the project:
+//   - If explicitID is provided, it is returned as-is
+//   - Otherwise, an error is returned listing the available tools;
+//     if flagName is non-empty, the hint directs users to that flag
+//
+// When exactly one tool exists, its ID is returned.
+// When no tools of the type exist, a not found error is returned.
 func getDockToolID(ctx context.Context, app *appctx.App, projectID, dockName, explicitID, friendlyName, flagName string) (string, error) {
 	// If explicit ID provided, use it directly
 	if explicitID != "" {
