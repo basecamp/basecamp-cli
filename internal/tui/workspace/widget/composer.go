@@ -114,10 +114,11 @@ func defaultComposerKeyMap() composerKeyMap {
 // Composer is a reusable Markdown editing widget with attachment support.
 type Composer struct {
 	// Input widgets
-	textInput  textinput.Model
-	textArea   textarea.Model
-	mode       ComposerMode
-	autoExpand bool // auto-switch quick→rich on markdown formatting
+	textInput   textinput.Model
+	textArea    textarea.Model
+	mode        ComposerMode
+	initialMode ComposerMode // mode the composer was constructed with; Reset restores it
+	autoExpand  bool         // auto-switch quick→rich on markdown formatting
 
 	// Attachments
 	attachments  []Attachment
@@ -201,6 +202,7 @@ func NewComposer(styles *tui.Styles, opts ...ComposerOption) *Composer {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.initialMode = c.mode
 
 	return c
 }
@@ -252,8 +254,13 @@ func (c *Composer) Value() string {
 	return c.textArea.Value()
 }
 
-// SetValue sets the text content (useful for pre-populating).
+// SetValue sets the text content (useful for pre-populating). Multi-line or
+// Markdown content expands a quick composer to rich mode first: the
+// single-line textinput would silently flatten newlines.
 func (c *Composer) SetValue(s string) {
+	if c.mode == ComposerQuick && (strings.Contains(s, "\n") || richtext.IsMarkdown(s)) {
+		c.expandToRich()
+	}
 	if c.mode == ComposerQuick {
 		c.textInput.SetValue(s)
 	} else {
@@ -262,19 +269,20 @@ func (c *Composer) SetValue(s string) {
 }
 
 // InsertPaste appends pasted text at the current cursor position.
-// If the text contains newlines or markdown, the composer auto-expands to rich mode.
+// If the text contains newlines or markdown, SetValue auto-expands the
+// composer to rich mode.
 func (c *Composer) InsertPaste(text string) {
 	if text == "" {
 		return
 	}
-	if c.mode == ComposerQuick && (strings.Contains(text, "\n") || richtext.IsMarkdown(text)) {
-		c.expandToRich()
-	}
-	existing := c.Value()
-	c.SetValue(existing + text)
+	c.SetValue(c.Value() + text)
 }
 
-// Reset clears all content, attachments, and returns to quick mode.
+// Reset clears all content and attachments and returns the composer to its
+// constructed mode. A quick composer that auto-expanded collapses back to
+// quick; a composer built rich stays rich — dropping it to a single-line
+// input would flatten the next multi-line SetValue and demote Enter from
+// newline to send.
 func (c *Composer) Reset() {
 	c.textInput.Reset()
 	c.textArea.Reset()
@@ -282,7 +290,7 @@ func (c *Composer) Reset() {
 	c.attachCursor = -1
 	c.uploading = 0
 	c.preview = false
-	c.mode = ComposerQuick
+	c.mode = c.initialMode
 }
 
 // Attachments returns the current attachment list.
@@ -743,15 +751,9 @@ func (c *Composer) HandleEditorReturn(msg EditorReturnMsg) tea.Cmd {
 	if content == "" {
 		return nil
 	}
-	// If content has multiple lines or markdown, switch to rich mode
-	if strings.Contains(content, "\n") || richtext.IsMarkdown(content) {
-		if c.mode == ComposerQuick {
-			c.expandToRich()
-		}
-		c.textArea.SetValue(content)
-	} else {
-		c.SetValue(content)
-	}
+	// SetValue switches to rich mode when the content has multiple lines or
+	// markdown.
+	c.SetValue(content)
 	return nil
 }
 

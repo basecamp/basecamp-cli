@@ -983,3 +983,19 @@ func newTextInputWithValue(val string) textinput.Model {
 	ti.SetValue(val)
 	return ti
 }
+
+// --- Edit description: multi-line content survives the composer ---
+
+func TestTodos_EditDescription_PreservesMultilineMarkdown(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.descComposer = widget.NewComposer(v.styles, widget.WithMode(widget.ComposerRich))
+
+	todos := sampleTodos()
+	todos[0].Description = "<p>para one</p>\n<p><br></p>\n<p>para two</p>"
+	v.session.Hub().Todos(42, 10).Set(todos)
+
+	cmd := v.startEditDescription()
+	require.NotNil(t, cmd)
+	assert.Equal(t, "para one\n\npara two", v.descComposer.Value(),
+		"Reset must not drop the rich composer to single-line mode and flatten the description")
+}
