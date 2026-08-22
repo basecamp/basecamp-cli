@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,6 +154,35 @@ func installSkillFiles() (string, error) {
 }
 
 // runSkillWizard runs the interactive skill installation wizard.
+// skillPromptFailed decides what a failed prompt means. Exactly one outcome is
+// a success: the user was asked and said no. Everything else is a failure and
+// has to be reported, because "Installation canceled." plus exit 0 claims an
+// answer nobody gave and leaves the caller believing it declined an install it
+// never saw.
+//
+// Three cases, and the default is deliberately *not* cancellation:
+//
+//   - tui.ErrCanceled — the user dismissed the prompt. Report and exit 0.
+//   - tui.ErrNotInteractive — nothing could be asked. app.IsInteractive() checks
+//     stdin and stdout, but huh draws to stderr, so `basecamp skill 2>somewhere`
+//     enters the wizard and only then finds it has nowhere to draw.
+//   - anything else — a timeout, or a bubbletea or runtime failure. Propagate
+//     it; guessing that it meant "no" is how a real error disappears.
+func skillPromptFailed(w io.Writer, styles *tui.Styles, err error) error {
+	switch {
+	case errors.Is(err, tui.ErrCanceled):
+		fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
+		return nil
+	case errors.Is(err, tui.ErrNotInteractive):
+		return output.ErrUsageHint(
+			"Can't show the installation prompts here",
+			"Installing interactively needs a terminal on both stdin and stderr. "+
+				"Run basecamp skill install to install without prompts, or basecamp skill to print the file.")
+	default:
+		return fmt.Errorf("showing the installation prompts: %w", err)
+	}
+}
+
 func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 	w := cmd.OutOrStdout()
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
@@ -175,16 +206,18 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 
 	selectedPath, err := tui.Select("  Where would you like to install the Basecamp skill?", options)
 	if err != nil {
-		fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
-		return nil //nolint:nilerr // user canceled prompt
+		return skillPromptFailed(w, styles, err)
 	}
 
 	// Handle custom path
 	if selectedPath == "other" {
 		selectedPath, err = tui.Input("  Enter custom path", "/path/to/skills/basecamp/SKILL.md")
-		if err != nil || selectedPath == "" {
+		if err != nil {
+			return skillPromptFailed(w, styles, err)
+		}
+		if selectedPath == "" {
 			fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
-			return nil //nolint:nilerr // user canceled prompt
+			return nil
 		}
 		selectedPath = normalizeSkillPath(selectedPath)
 	}
@@ -195,9 +228,12 @@ func runSkillWizard(cmd *cobra.Command, app *appctx.App) error {
 	if _, statErr := os.Stat(expandedPath); statErr == nil {
 		overwrite, confirmErr := tui.Confirm(
 			fmt.Sprintf("  File already exists at %s. Overwrite?", selectedPath), false)
-		if confirmErr != nil || !overwrite {
+		if confirmErr != nil {
+			return skillPromptFailed(w, styles, confirmErr)
+		}
+		if !overwrite {
 			fmt.Fprintln(w, styles.Muted.Render("  Installation canceled."))
-			return nil //nolint:nilerr // user canceled or declined
+			return nil
 		}
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("checking existing file: %w", statErr)

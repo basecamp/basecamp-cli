@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/version"
 	"github.com/basecamp/basecamp-cli/skills"
 )
@@ -684,4 +688,77 @@ func TestRepairClaudeSkillLink_HealthySymlink(t *testing.T) {
 	// Target should be unchanged (no unnecessary repair)
 	targetAfter, _ := os.Readlink(filepath.Join(symlinkDir, "basecamp"))
 	assert.Equal(t, targetBefore, targetAfter, "healthy symlink should not be modified")
+}
+
+// TestSkillWizardReportsWhenItCannotPrompt covers the gap between "the user
+// said no" and "nobody could be asked". app.IsInteractive() looks at stdin and
+// stdout, but huh draws the form to stderr — so `basecamp skill 2>somewhere`
+// gets past the interactivity check and only then finds it has nowhere to draw.
+//
+// Every prompt error used to print "Installation canceled." and exit 0, which
+// claims an answer nobody gave, and leaves a caller believing it declined an
+// install it never saw. A real cancellation still exits 0; this must not.
+func TestSkillWizardReportsWhenItCannotPrompt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	nonInteractiveStdin(t, "devnull")
+
+	buf := &bytes.Buffer{}
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+
+	err := skillPromptFailed(buf, styles, tui.ErrNotInteractive)
+
+	require.Error(t, err, "being unable to prompt is not a successful cancellation")
+	outErr := output.AsError(err)
+	require.NotNil(t, outErr)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Hint, "basecamp skill install",
+		"the hint must name the non-interactive path that works")
+	assert.NotContains(t, buf.String(), "canceled",
+		"must not claim the user canceled when the user was never asked")
+}
+
+// TestSkillWizardTreatsCancellationAsSuccess is the other half: an actual
+// cancellation is an answer, and answering no is not an error.
+func TestSkillWizardTreatsCancellationAsSuccess(t *testing.T) {
+	buf := &bytes.Buffer{}
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+
+	err := skillPromptFailed(buf, styles, tui.ErrCanceled)
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "canceled")
+}
+
+// TestSkillWizardPropagatesRealPromptErrors is the case that makes the other
+// two mean anything. Cancellation is the *only* prompt outcome that exits 0, so
+// the default has to be propagation.
+//
+// huh signals a real dismissal with ErrUserAborted and nothing else; a timeout,
+// or a bubbletea or runtime failure, arrives as an ordinary error. Treating
+// every error as cancellation — which this did — turns any of those into
+// "Installation canceled." and exit 0, reporting a decision nobody made.
+func TestSkillWizardPropagatesRealPromptErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		// huh's own values, spelled out rather than imported: the launcher
+		// backstop keeps huh to a single import path, and these are plain
+		// sentinels (form.go:51-57).
+		{"timeout", errors.New("timeout")},
+		{"a wrapped bubbletea failure", fmt.Errorf("huh: %w", errors.New("could not open a new TTY"))},
+		{"anything unrecognized", errors.New("boom")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+
+			err := skillPromptFailed(buf, styles, tc.err)
+
+			require.Error(t, err, "a failure that is not a cancellation must not exit 0")
+			assert.ErrorIs(t, err, tc.err, "the cause must survive so it can be diagnosed")
+			assert.NotContains(t, buf.String(), "canceled",
+				"must not claim the user canceled when the prompt failed")
+		})
+	}
 }

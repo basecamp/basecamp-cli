@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -44,64 +46,6 @@ func TestIsFirstRunAuthenticated(t *testing.T) {
 	app, _ := setupQuickstartTestApp(t, "12345", "")
 
 	assert.False(t, isFirstRun(app), "isFirstRun should be false when authenticated")
-}
-
-// TestWizardResultJSON verifies the WizardResult struct serializes correctly.
-func TestWizardResultJSON(t *testing.T) {
-	app, buf := setupQuickstartTestApp(t, "", "")
-
-	result := WizardResult{
-		Version:     "1.0.0",
-		Status:      "complete",
-		AccountID:   "12345",
-		AccountName: "Test Company",
-		ProjectID:   "67890",
-		ProjectName: "My Project",
-		ConfigScope: "global",
-	}
-
-	err := app.OK(result, output.WithSummary("Setup complete"))
-	require.NoError(t, err)
-
-	out := buf.String()
-	assert.Contains(t, out, `"account_id": "12345"`)
-	assert.Contains(t, out, `"project_id": "67890"`)
-	assert.Contains(t, out, `"config_scope": "global"`)
-}
-
-// TestWizardSummaryLine verifies summary generation.
-func TestWizardSummaryLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		result   WizardResult
-		expected string
-	}{
-		{
-			name:     "with account name",
-			result:   WizardResult{AccountName: "Test Co"},
-			expected: "Setup complete - Test Co",
-		},
-		{
-			name:     "without account name",
-			result:   WizardResult{AccountID: "123"},
-			expected: "Setup complete",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, wizardSummaryLine(tt.result))
-		})
-	}
-}
-
-// TestWizardSummaryLineIncomplete verifies the summary reflects an unhealthy
-// agent-setup outcome instead of claiming completion.
-func TestWizardSummaryLineIncomplete(t *testing.T) {
-	assert.Equal(t, "Setup finished with issues",
-		wizardSummaryLine(WizardResult{Status: "incomplete"}))
-	assert.Equal(t, "Setup finished with issues - Test Co",
-		wizardSummaryLine(WizardResult{Status: "incomplete", AccountName: "Test Co"}))
 }
 
 // TestSuccessHeadline verifies the completion banner is honest when the
@@ -229,40 +173,6 @@ func TestShowSuccessComplete(t *testing.T) {
 	assert.Contains(t, out, "Setup complete!")
 	assert.NotContains(t, out, "Some steps need attention")
 	assert.NotContains(t, out, "basecamp doctor")
-}
-
-// TestWizardBreadcrumbs verifies breadcrumb generation based on wizard outcome.
-func TestWizardBreadcrumbs(t *testing.T) {
-	t.Run("with project", func(t *testing.T) {
-		result := WizardResult{ProjectID: "123"}
-		crumbs := wizardBreadcrumbs(result)
-
-		assert.True(t, len(crumbs) >= 2)
-		assert.Equal(t, "list_projects", crumbs[0].Action)
-
-		// Should have todos breadcrumb when project is set
-		var hasTodos bool
-		for _, c := range crumbs {
-			if c.Action == "list_todos" {
-				hasTodos = true
-			}
-		}
-		assert.True(t, hasTodos, "expected list_todos breadcrumb when project is set")
-	})
-
-	t.Run("without project", func(t *testing.T) {
-		result := WizardResult{}
-		crumbs := wizardBreadcrumbs(result)
-
-		// Should suggest setting a project
-		var hasSetProject bool
-		for _, c := range crumbs {
-			if c.Action == "set_project" {
-				hasSetProject = true
-			}
-		}
-		assert.True(t, hasSetProject, "expected set_project breadcrumb when no project")
-	})
 }
 
 // TestIsFirstRunOnboarded verifies isFirstRun returns false when onboarded flag is set.
@@ -701,4 +611,351 @@ func TestJoinNames(t *testing.T) {
 	assert.Equal(t, "Claude Code", joinNames([]string{"Claude Code"}))
 	assert.Equal(t, "Claude Code and Cursor", joinNames([]string{"Claude Code", "Cursor"}))
 	assert.Equal(t, "A, B, and C", joinNames([]string{"A", "B", "C"}))
+}
+
+// terminalOutputs points both os.Stdout and os.Stderr at a pseudo-terminal so
+// stdin is the only thing left disqualifying a prompt. Both are needed: the
+// setup gate asks IsInteractive (stdin+stdout) and InteractivePrompt
+// (stdin+stderr), and go test pipes both — so without this the assertions below
+// would hold for any stdin at all and prove nothing.
+//
+// Best-effort: where no pty is available the test still runs, less specifically.
+func terminalOutputs(t *testing.T) {
+	t.Helper()
+
+	for _, stream := range []**os.File{&os.Stdout, &os.Stderr} {
+		if runtime.GOOS == "windows" {
+			return
+		}
+		pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+		if err != nil {
+			return
+		}
+
+		orig, target := *stream, stream
+		*stream = pty
+		t.Cleanup(func() {
+			*target = orig
+			_ = pty.Close()
+		})
+	}
+}
+
+// nonInteractiveStdin points os.Stdin at the named non-terminal for the
+// duration of the test, so the assertions hold no matter how the test binary
+// was invoked — running it straight from a terminal would otherwise leave stdin
+// a TTY and prove nothing. "devnull" is the case that used to slip through: a
+// character device that is not a terminal.
+func nonInteractiveStdin(t *testing.T, kind string) {
+	t.Helper()
+
+	terminalOutputs(t)
+
+	var replacement *os.File
+	switch kind {
+	case "pipe":
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = w.Close() })
+		replacement = r
+	case "devnull":
+		f, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		require.NoError(t, err)
+		replacement = f
+	default:
+		t.Fatalf("unknown stdin kind %q", kind)
+	}
+
+	orig := os.Stdin
+	os.Stdin = replacement
+	t.Cleanup(func() {
+		os.Stdin = orig
+		_ = replacement.Close()
+	})
+}
+
+// runSetupWithin executes the setup command and fails if it has not returned
+// within the timeout. The timeout is the real assertion: an ungated wizard
+// reaches a huh prompt, which blocks on /dev/tty rather than failing.
+func runSetupWithin(t *testing.T, cmd *cobra.Command, timeout time.Duration) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		t.Fatal("setup blocked instead of returning; it reached a prompt it cannot drive")
+		return nil
+	}
+}
+
+// TestSetupRefusesNonInteractiveStdio covers the hang this gate exists for:
+// `basecamp setup` off a terminal used to walk into a huh prompt, which falls
+// back to /dev/tty instead of failing. It must return a usage error instead,
+// and the hint must name a path that actually works without a terminal.
+func TestSetupRefusesNonInteractiveStdio(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		json bool
+		kind string
+	}{
+		{"plain/pipe", false, "pipe"},
+		{"plain/devnull", false, "devnull"},
+		{"json/pipe", true, "pipe"},
+		{"json/devnull", true, "devnull"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			nonInteractiveStdin(t, tc.kind)
+
+			app, _ := setupQuickstartTestApp(t, "", "")
+			app.Flags.JSON = tc.json
+
+			cmd := NewSetupCmd()
+			cmd.SetArgs(nil)
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			err := runSetupWithin(t, cmd, 10*time.Second)
+			require.Error(t, err)
+
+			outErr := output.AsError(err)
+			require.NotNil(t, outErr)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Hint, "basecamp setup agents",
+				"the hint must name a non-interactive alternative, not just restate the problem")
+		})
+	}
+}
+
+// TestSetupRefusesUnderNonInteractiveEnv verifies BASECAMP_NONINTERACTIVE is
+// honored even where stdio would pass: the wizard is prompts end to end, so
+// the env var that means "never prompt me" has to reach it.
+func TestSetupRefusesUnderNonInteractiveEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs(nil)
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := runSetupWithin(t, cmd, 10*time.Second)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+}
+
+// TestSetupRefusesMachineOutputOnATerminal covers the other half of the gate.
+// Terminal stdio is not enough: a caller that asked for machine output has
+// declared it is not there to answer questions, and the wizard is nothing but
+// questions. Config-driven json/quiet counts too — app.IsInteractive() does not
+// look at it, which is why the gate also asks IsMachineOutput().
+func TestSetupRefusesMachineOutputOnATerminal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
+	}
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("open /dev/ptmx: %v", err)
+	}
+	origOut, origIn, origErr := os.Stdout, os.Stdin, os.Stderr
+	os.Stdout, os.Stdin, os.Stderr = pty, pty, pty
+	t.Cleanup(func() {
+		os.Stdout, os.Stdin, os.Stderr = origOut, origIn, origErr
+		pty.Close()
+	})
+
+	for _, tc := range []struct {
+		name  string
+		apply func(*appctx.App)
+	}{
+		{"json flag", func(a *appctx.App) { a.Flags.JSON = true }},
+		{"agent flag", func(a *appctx.App) { a.Flags.Agent = true }},
+		{"quiet flag", func(a *appctx.App) { a.Flags.Quiet = true }},
+		{"config format json", func(a *appctx.App) { a.Config.Format = "json" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+
+			app, _ := setupQuickstartTestApp(t, "", "")
+			tc.apply(app)
+
+			cmd := NewSetupCmd()
+			cmd.SetArgs(nil)
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			err := runSetupWithin(t, cmd, 10*time.Second)
+			require.Error(t, err)
+			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			assert.Contains(t, output.AsError(err).Hint, "basecamp setup agents")
+		})
+	}
+}
+
+// TestSetupSubcommandsSurviveTheGate is the other half of the gate: it belongs
+// to the parent's RunE only. `setup agents`, `setup claude` and `setup codex`
+// are the supported non-interactive paths and must keep working off a terminal
+// — a persistent hook here would have broken all three.
+func TestSetupSubcommandsSurviveTheGate(t *testing.T) {
+	for _, sub := range []string{"agents", "claude", "codex"} {
+		t.Run(sub, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("PATH", t.TempDir()) // no agent binaries
+			t.Setenv("BASECAMP_SETUP_AGENT", "none")
+			nonInteractiveStdin(t, "devnull")
+
+			app, _ := setupQuickstartTestApp(t, "", "")
+			app.Flags.JSON = true
+
+			cmd := NewSetupCmd()
+			cmd.SetArgs([]string{sub}) // --json is a root persistent flag; app.Flags carries it here
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			err := runSetupWithin(t, cmd, 10*time.Second)
+			require.NoError(t, err, "setup %s must still run without a terminal", sub)
+		})
+	}
+}
+
+// TestBareBasecampNeverReportsASetupError covers the difference between asking
+// for the wizard and being handed one. `basecamp setup` refuses out loud when it
+// cannot prompt — the user named that command. Bare `basecamp` never asked for a
+// wizard, so an error about `basecamp setup` is an answer to a question nobody
+// posed, and it replaces output the user was entitled to.
+//
+// Both rows reach runWizard through RunQuickStartDefault's first-run path and
+// would have hit the gate, because isFirstRun's old check saw only stdin and
+// stdout:
+//
+//   - stderr redirected: stdin/stdout are terminals, so first-run fires, but
+//     huh draws to stderr and could not have shown anything.
+//   - config-driven json: IsInteractive does not read Config.Format, so
+//     first-run fires, while quickstart.go documents this shape as preserving
+//     the quick-start envelope.
+func TestBareBasecampNeverReportsASetupError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(t *testing.T, app *appctx.App)
+	}{
+		{
+			name: "stderr redirected on a terminal",
+			apply: func(t *testing.T, _ *appctx.App) {
+				terminalStdio(t)        // stdin+stdout+stderr all terminals...
+				redirectStderrToPipe(t) // ...then take away the one huh draws to
+			},
+		},
+		{
+			name: "config-driven json output",
+			apply: func(t *testing.T, app *appctx.App) {
+				terminalStdio(t)
+				app.Config.Format = "json"
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+
+			app, _ := setupQuickstartTestApp(t, "", "")
+			tc.apply(t, app)
+
+			// Without this the test proves nothing: isFirstRun bails on
+			// IsInteractive before it ever reaches the wizard, and every
+			// assertion below passes for the wrong reason. An earlier version
+			// of this test did exactly that — it set stdout and stderr but left
+			// stdin on go test's /dev/null, so it passed against the bug.
+			require.True(t, app.IsInteractive(),
+				"precondition: stdin and stdout must look interactive, or first-run never fires")
+
+			cmd := NewQuickStartCmd()
+			cmd.SetArgs(nil)
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			done := make(chan error, 1)
+			go func() { done <- RunQuickStartDefault(cmd, nil) }()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					assert.NotContains(t, err.Error(), "basecamp setup",
+						"bare basecamp must not fail with an error about a command the user never typed")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("bare basecamp blocked; it reached a prompt it cannot drive")
+			}
+		})
+	}
+}
+
+// TestExplicitSetupStillRefuses is the other side of the same predicate: naming
+// the command still gets the usage error, in exactly the contexts where bare
+// `basecamp` must not.
+func TestExplicitSetupStillRefuses(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	terminalStdio(t)
+	redirectStderrToPipe(t)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	require.True(t, app.IsInteractive(),
+		"precondition: only stderr should be disqualifying here")
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs(nil)
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := runSetupWithin(t, cmd, 10*time.Second)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+}
+
+// terminalStdio points stdin, stdout and stderr at pseudo-terminals, so an
+// invocation looks fully interactive before a test takes one of them away.
+func terminalStdio(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
+	}
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("open /dev/ptmx: %v", err)
+	}
+	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = pty, pty, pty
+	t.Cleanup(func() {
+		os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr
+		pty.Close()
+	})
+}
+
+// redirectStderrToPipe makes stderr a pipe — huh's render target, so a prompt
+// could not be seen even though stdin and stdout are terminals.
+func redirectStderrToPipe(t *testing.T) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	orig := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = orig
+		_ = r.Close()
+		_ = w.Close()
+	})
 }

@@ -1,0 +1,341 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// stdinKinds are the two ways stdin arrives without a human behind it. Both
+// have to refuse, and /dev/null is the one that used to slip through: it is a
+// character device, so the older interactivity test called it a terminal.
+var stdinKinds = []string{"pipe", "devnull"}
+
+// The two launchers in this package draw to different streams, so the tests
+// have to hold different things constant. A huh form renders to stderr
+// (huh form.go:112), a bare bubbletea program to stdout. Point the launcher's
+// own output stream at a pty so stdin is the only thing left disqualifying it —
+// otherwise go test's piped stdout and stderr fail the check on their own, and
+// the stdin cases below prove nothing at all.
+//
+// Best-effort: where no pty is available the test still runs, less specifically.
+func terminalStdout(t *testing.T) {
+	t.Helper()
+	swapForPTY(t, &os.Stdout)
+}
+
+// terminalStderr is terminalStdout's counterpart for huh, which draws there.
+func terminalStderr(t *testing.T) {
+	t.Helper()
+	swapForPTY(t, &os.Stderr)
+}
+
+func swapForPTY(t *testing.T, stream **os.File) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		return
+	}
+
+	orig := *stream
+	*stream = pty
+	t.Cleanup(func() {
+		*stream = orig
+		_ = pty.Close()
+	})
+}
+
+// nonInteractiveStdin points os.Stdin at the named non-terminal for the
+// duration of the test, so the assertions hold no matter how the test binary
+// was invoked — running it straight from a terminal would otherwise leave
+// stdin a TTY and prove nothing. The caller points the relevant output stream
+// at a pty first.
+func nonInteractiveStdin(t *testing.T, kind string) {
+	t.Helper()
+
+	var replacement *os.File
+	switch kind {
+	case "pipe":
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = w.Close() })
+		replacement = r
+	case "devnull":
+		f, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+		require.NoError(t, err)
+		replacement = f
+	default:
+		t.Fatalf("unknown stdin kind %q", kind)
+	}
+
+	orig := os.Stdin
+	os.Stdin = replacement
+	t.Cleanup(func() {
+		os.Stdin = orig
+		_ = replacement.Close()
+	})
+}
+
+// promptFloor is one exported prompt in forms.go and a call that must refuse.
+// The name has to match the function's declared name: TestPromptFloorCovers
+// walks forms.go and fails if an exported function is missing from this table,
+// so a prompt added without the floor cannot pass unnoticed.
+type promptFloor struct {
+	name string
+	call func() error
+}
+
+func promptFloors() []promptFloor {
+	opts := []SelectOption{{Value: "a", Label: "A"}}
+
+	return []promptFloor{
+		{"Confirm", func() error { _, err := Confirm("q", true); return err }},
+		{"ConfirmDangerous", func() error { _, err := ConfirmDangerous("q"); return err }},
+		{"Input", func() error { _, err := Input("t", "p"); return err }},
+		{"InputRequired", func() error { _, err := InputRequired("t", "p"); return err }},
+		{"TextArea", func() error { _, err := TextArea("t", "p"); return err }},
+		{"Select", func() error { _, err := Select("t", opts); return err }},
+		{"SelectWithDescription", func() error { _, err := SelectWithDescription("t", "d", opts); return err }},
+		{"MultiSelect", func() error { _, err := MultiSelect("t", opts); return err }},
+		{"Form", func() error { _, err := Form("t", []FormField{{Key: "k", Title: "T"}}); return err }},
+		{"Note", func() error { return Note("t", "b") }},
+		{"ConfirmSetDefault", func() error { _, err := ConfirmSetDefault("account_id"); return err }},
+		{"SelectScope", func() error { _, err := SelectScope(); return err }},
+	}
+}
+
+// TestPromptFloorRefusesNonInteractiveStdio is the anti-hang assertion: every
+// prompt returns ErrNotInteractive rather than launching a bubbletea program.
+// A prompt that skips the floor fails one of the two assertions depending on
+// the environment — it blocks on /dev/tty where there is a controlling
+// terminal (the timeout catches that), and returns a huh TTY error where there
+// is not (the errors.Is catches that).
+func TestPromptFloorRefusesNonInteractiveStdio(t *testing.T) {
+	for _, floor := range promptFloors() {
+		for _, kind := range stdinKinds {
+			for _, term := range []string{"xterm-256color", "dumb"} {
+				t.Run(floor.name+"/"+kind+"/TERM="+term, func(t *testing.T) {
+					// TERM=dumb makes huh switch the form to accessible mode,
+					// which renders through a different path entirely and never
+					// starts a bubbletea program. The floor has to hold in both,
+					// so it is asserted in both.
+					t.Setenv("TERM", term)
+					terminalStderr(t) // huh draws here; stdin is the variable under test
+					nonInteractiveStdin(t, kind)
+
+					done := make(chan error, 1)
+					go func() { done <- floor.call() }()
+
+					select {
+					case err := <-done:
+						assert.True(t, errors.Is(err, ErrNotInteractive),
+							"%s should return ErrNotInteractive on %s stdin (TERM=%s), got %v",
+							floor.name, kind, term, err)
+					case <-time.After(5 * time.Second):
+						t.Fatalf("%s blocked on %s stdin (TERM=%s) instead of refusing",
+							floor.name, kind, term)
+					}
+				})
+			}
+		}
+	}
+}
+
+// TestPickerFloorRefusesNonInteractiveStdio covers the other bubbletea
+// launcher in this package. Every current picker call site gates on
+// resolve.Resolver.IsInteractive first; this makes the next one safe anyway.
+//
+// The loader case also asserts the loader never ran. A refusal that still
+// fetched would have paid for a round trip nobody can act on, and would leave
+// the caller unable to tell a refusal from a failed fetch.
+func TestPickerFloorRefusesNonInteractiveStdio(t *testing.T) {
+	items := []PickerItem{{ID: "1", Title: "One"}}
+
+	var loaderCalls int
+	loader := func() ([]PickerItem, error) {
+		loaderCalls++
+		return items, nil
+	}
+
+	for _, tc := range []struct {
+		name   string
+		picker *Picker
+	}{
+		{"items", NewPicker(items)},
+		{"loader", NewPickerWithLoader(loader)},
+	} {
+		for _, kind := range stdinKinds {
+			t.Run(tc.name+"/"+kind, func(t *testing.T) {
+				terminalStdout(t) // the picker draws here; stdin is the variable under test
+				nonInteractiveStdin(t, kind)
+
+				done := make(chan error, 1)
+				go func() {
+					_, err := tc.picker.Run()
+					done <- err
+				}()
+
+				select {
+				case err := <-done:
+					assert.True(t, errors.Is(err, ErrNotInteractive),
+						"picker should return ErrNotInteractive on %s stdin, got %v", kind, err)
+				case <-time.After(5 * time.Second):
+					t.Fatalf("picker blocked on %s stdin instead of refusing", kind)
+				}
+			})
+		}
+	}
+
+	assert.Zero(t, loaderCalls, "a refused picker must not fetch items it cannot show")
+}
+
+// TestDeadLaunchersStillRefuse covers Spinner and PaginatedPicker. Both are
+// exported, both have zero callers today, and both are slated for deletion —
+// but "nobody calls it" is not a gate. Adding a caller would not add a
+// tea.NewProgram, so the structural backstop would still pass while the hang
+// came straight back. They hold the floor until they are gone.
+func TestDeadLaunchersStillRefuse(t *testing.T) {
+	for _, kind := range stdinKinds {
+		t.Run("spinner/"+kind, func(t *testing.T) {
+			terminalStdout(t)
+			nonInteractiveStdin(t, kind)
+
+			var ran bool
+			done := make(chan error, 1)
+			go func() {
+				_, err := NewSpinner("working").Run(func() (string, error) {
+					ran = true
+					return "", nil
+				})
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				assert.True(t, errors.Is(err, ErrNotInteractive),
+					"spinner should return ErrNotInteractive on %s stdin, got %v", kind, err)
+				assert.False(t, ran, "a refused spinner must not run the work it was wrapping")
+			case <-time.After(5 * time.Second):
+				t.Fatalf("spinner blocked on %s stdin instead of refusing", kind)
+			}
+		})
+
+		t.Run("paginated_picker/"+kind, func(t *testing.T) {
+			terminalStdout(t)
+			nonInteractiveStdin(t, kind)
+
+			var fetched bool
+			fetcher := func(context.Context, string) (*PageResult, error) {
+				fetched = true
+				return &PageResult{}, nil
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := NewPaginatedPicker(context.Background(), fetcher).Run()
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				assert.True(t, errors.Is(err, ErrNotInteractive),
+					"paginated picker should return ErrNotInteractive on %s stdin, got %v", kind, err)
+				assert.False(t, fetched, "a refused picker must not fetch a page it cannot show")
+			case <-time.After(5 * time.Second):
+				t.Fatalf("paginated picker blocked on %s stdin instead of refusing", kind)
+			}
+		})
+	}
+}
+
+// TestAutoSelectSingleWorksWithoutATerminal pins the one path through
+// Picker.Run that is deliberately outside the floor. With WithAutoSelectSingle
+// and exactly one static item, Run resolves without constructing a bubbletea
+// program or reading a keystroke — there is nothing for non-terminal stdio to
+// fail to drive, and WithAutoSelectSingle documents the behavior as
+// unconditional. Gating it would have broken that for no safety gain.
+//
+// The second case is the boundary: two items need a real picker, so the floor
+// applies again.
+func TestAutoSelectSingleWorksWithoutATerminal(t *testing.T) {
+	for _, kind := range stdinKinds {
+		t.Run("single item resolves/"+kind, func(t *testing.T) {
+			nonInteractiveStdin(t, kind)
+
+			items := []PickerItem{{ID: "42", Title: "Only one"}}
+
+			done := make(chan *PickerItem, 1)
+			errs := make(chan error, 1)
+			go func() {
+				got, err := NewPicker(items, WithAutoSelectSingle()).Run()
+				done <- got
+				errs <- err
+			}()
+
+			select {
+			case got := <-done:
+				require.NoError(t, <-errs)
+				require.NotNil(t, got, "the single item should be auto-selected")
+				assert.Equal(t, "42", got.ID)
+			case <-time.After(5 * time.Second):
+				t.Fatal("auto-select blocked; it should never reach a TUI")
+			}
+		})
+
+		t.Run("two items still refuse/"+kind, func(t *testing.T) {
+			terminalStdout(t)
+			nonInteractiveStdin(t, kind)
+
+			items := []PickerItem{{ID: "1", Title: "One"}, {ID: "2", Title: "Two"}}
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := NewPicker(items, WithAutoSelectSingle()).Run()
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				assert.True(t, errors.Is(err, ErrNotInteractive),
+					"more than one item needs a real picker, got %v", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("picker blocked instead of refusing")
+			}
+		})
+	}
+}
+
+// TestPromptFloorCovers keeps the table honest. Every exported function in
+// forms.go launches a huh form — directly or through one that does — so every
+// one of them has to be exercised above. A new prompt fails here first.
+func TestPromptFloorCovers(t *testing.T) {
+	covered := make(map[string]bool)
+	for _, floor := range promptFloors() {
+		covered[floor.name] = true
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), "forms.go", nil, 0)
+	require.NoError(t, err)
+
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !fn.Name.IsExported() {
+			continue
+		}
+		assert.True(t, covered[fn.Name.Name],
+			"forms.go exports %s but promptFloors() does not exercise its non-interactive floor", fn.Name.Name)
+	}
+}

@@ -375,10 +375,11 @@ func (a *App) IsInteractive() bool {
 		return false
 	}
 
-	// Both stdout and stdin must be character devices: a TUI draws to stdout
-	// and reads keystrokes from stdin, so a pipe on either end can never
-	// drive one — and when the command is consuming piped content (a "-"
-	// stdin input), a TUI would eat that content as key events.
+	// Both stdout and stdin must be terminals: a TUI draws to stdout and reads
+	// keystrokes from stdin, so a pipe on either end can never drive one — and
+	// when the command is consuming piped content (a "-" stdin input), a TUI
+	// would eat that content as key events. A character device is not enough;
+	// /dev/null is one and delivers nothing. See stdinarg.InteractiveStdio.
 	return stdinarg.InteractiveStdio()
 }
 

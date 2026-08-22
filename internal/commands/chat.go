@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1052,6 +1053,18 @@ You can pass either a line ID or a Basecamp line URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Refuse before any account, project or chat lookup. This command
+			// confirms interactively unless told otherwise, and
+			// isNonInteractiveCommand only knows about flags, the env var and
+			// stdout — it never looks at stdin. An agent in a PTY with stdin on
+			// /dev/null and no --json lands here, and a prompt reached there
+			// waits on /dev/tty instead of failing. Failing up front costs it
+			// nothing; reaching the prompt spent two round trips first.
+			if err := ensureDeleteConfirmable(cmd, force); err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -1100,13 +1113,20 @@ You can pass either a line ID or a Basecamp line URL:
 				return output.ErrUsage("Invalid line ID")
 			}
 
-			// Confirm destructive action in interactive mode
+			// Confirm destructive action in interactive mode. ensureDeleteConfirmable
+			// above already rejected the case where the prompt cannot be answered,
+			// so a failure here is the user canceling.
 			if !force && !isNonInteractiveCommand(cmd) {
 				confirmed, err := tui.ConfirmDangerous("Permanently delete this chat line?")
-				if err != nil {
-					return nil //nolint:nilerr // user canceled prompt
-				}
-				if !confirmed {
+				switch {
+				case errors.Is(err, tui.ErrCanceled):
+					return nil // the user answered, and the answer was no
+				case err != nil:
+					// Not a cancellation — a timeout or a bubbletea failure.
+					// Nothing is deleted either way, but say what happened
+					// rather than reporting a decision nobody made.
+					return fmt.Errorf("confirming the delete: %w", err)
+				case !confirmed:
 					return nil
 				}
 			}

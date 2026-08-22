@@ -154,6 +154,10 @@ func NewSpinner(message string, opts ...SpinnerOption) *Spinner {
 // Run executes the given function while displaying a spinner.
 // Returns the result and any error from the function.
 func (s *Spinner) Run(fn func() (string, error)) (string, error) {
+	if !canPick() {
+		return "", ErrNotInteractive
+	}
+
 	m := newSpinnerModel(s.message, s.opts...)
 
 	p := tea.NewProgram(m)

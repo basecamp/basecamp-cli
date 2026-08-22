@@ -387,8 +387,13 @@ func NewPaginatedPicker(ctx context.Context, fetcher PageFetcher, opts ...Pagina
 }
 
 // Run shows the picker and returns the selected item.
-// Returns nil if the user canceled.
+// Returns nil if the user canceled, and ErrNotInteractive when stdio cannot
+// drive a TUI at all.
 func (p *PaginatedPicker) Run() (*PickerItem, error) {
+	if !canPick() {
+		return nil, ErrNotInteractive
+	}
+
 	m := newPaginatedPickerModel(p.ctx, p.fetcher, p.opts...)
 	program := tea.NewProgram(m)
 

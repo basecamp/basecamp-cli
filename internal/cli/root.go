@@ -578,13 +578,15 @@ func profileNames(cfg *config.Config) string {
 }
 
 // isInteractiveTTY reports whether the profile picker may run: no
-// noninteractive mode set, and both ends of stdio are character devices.
+// noninteractive mode set, and both ends of stdio are terminals.
 //
 // Stdin counts because the picker is a TUI reading key events, and this runs
 // from PersistentPreRunE — before any command touches its own input. Gating on
 // stdout alone let "printf body | basecamp todos create -" open the picker on
-// a terminal stdout and consume the piped body as keystrokes. Same predicate
-// as App.IsInteractive and resolve.Resolver.IsInteractive.
+// a terminal stdout and consume the piped body as keystrokes. A character
+// device is not enough either: /dev/null is one, delivers no keystrokes, and
+// Bubble Tea answers it by waiting on /dev/tty. Same predicate as
+// App.IsInteractive and resolve.Resolver.IsInteractive.
 func isInteractiveTTY(flags appctx.GlobalFlags) bool {
 	if config.NonInteractiveEnv() {
 		return false

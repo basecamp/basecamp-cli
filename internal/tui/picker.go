@@ -488,7 +488,9 @@ func NewPickerWithLoader(loader ItemLoader, opts ...PickerOption) *Picker {
 }
 
 // Run shows the picker and returns the selected item.
-// Returns nil if the user canceled.
+// Returns nil if the user canceled, and ErrNotInteractive when stdio cannot
+// drive a TUI at all — except for the single-item WithAutoSelectSingle fast
+// path, which resolves without a TUI and so works anywhere.
 func (p *Picker) Run() (*PickerItem, error) {
 	if p.loader != nil {
 		return p.runWithLoader()
@@ -496,20 +498,20 @@ func (p *Picker) Run() (*PickerItem, error) {
 
 	m := newPickerModel(p.items, p.opts...)
 
-	// Auto-select if only one item and option is set
+	// Auto-select if only one item and option is set. Deliberately ahead of the
+	// floor: this path launches nothing and reads no input, so there is nothing
+	// for a non-terminal stdio to fail to drive, and refusing here would break
+	// WithAutoSelectSingle's documented unconditional behavior for no safety
+	// gain. Everything that does launch goes through runPicker, which holds the
+	// floor.
 	if m.autoSelectSingle && len(m.items) == 1 {
 		return m.getOriginalItem(m.items[0].ID), nil
 	}
 
-	// Use alternate screen so picker disappears after selection
-	program := tea.NewProgram(m)
-
-	finalModel, err := program.Run()
+	final, err := runPicker(m, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	final := finalModel.(pickerModel) //nolint:errcheck // type assertion always succeeds here
 	if final.quitting {
 		return nil, nil
 	}
@@ -523,25 +525,47 @@ func (p *Picker) runWithLoader() (*PickerItem, error) {
 		m.loading = true
 		m.loadingMsg = "Loading…"
 	}
-	// Use alternate screen so picker disappears after selection
-	program := tea.NewProgram(m)
 
-	// Load items in background
-	go func() {
-		items, err := p.loader()
-		program.Send(PickerItemsLoadedMsg{Items: items, Err: err})
-	}()
-
-	finalModel, err := program.Run()
+	// Load items in background, once the program exists to receive them.
+	final, err := runPicker(m, func(program *tea.Program) {
+		go func() {
+			items, loadErr := p.loader()
+			program.Send(PickerItemsLoadedMsg{Items: items, Err: loadErr})
+		}()
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	final := finalModel.(pickerModel) //nolint:errcheck // type assertion always succeeds here
 	if final.quitting {
 		return nil, final.loadError // Return loader error if any (nil if user just canceled)
 	}
 	return final.selected, nil
+}
+
+// runPicker is the one place this package starts a bubbletea program, and so
+// the one place the floor has to hold. TestPickerRunsOnlyThroughRunPicker keeps
+// it that way: a tea.NewProgram anywhere else in this file fails the test. It
+// mirrors runForm in forms.go — a launcher nobody can reach without passing the
+// floor beats a call-site audit, which is what missed `basecamp setup`.
+//
+// start, when non-nil, runs after the program is constructed and before it is
+// started, for work that needs to Send into it.
+func runPicker(m pickerModel, start func(*tea.Program)) (pickerModel, error) {
+	if !canPick() {
+		return pickerModel{}, ErrNotInteractive
+	}
+
+	// Use alternate screen so picker disappears after selection
+	program := tea.NewProgram(m)
+	if start != nil {
+		start(program)
+	}
+
+	finalModel, err := program.Run()
+	if err != nil {
+		return pickerModel{}, err
+	}
+	return finalModel.(pickerModel), nil //nolint:errcheck // type assertion always succeeds here
 }
 
 // Pick is a convenience function for simple picking.

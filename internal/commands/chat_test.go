@@ -1811,3 +1811,45 @@ func TestChatPostRejectsPositionalWithContentFlag(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot combine")
 }
+
+// TestChatDeleteRefusesWhenStdinCannotConfirm covers the gap isMachineOutput
+// cannot see: it checks flags, the env var and stdout, never stdin. An agent in
+// a PTY with stdin on /dev/null and no --json reaches the confirmation prompt,
+// which used to block on /dev/tty. It must now fail with a usage error naming
+// --force, before it issues a single request.
+func TestChatDeleteRefusesWhenStdinCannotConfirm(t *testing.T) {
+	for _, kind := range []string{"pipe", "devnull"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			nonInteractiveStdin(t, kind)
+
+			transport := &countingChatTransport{inner: &mockChatDeleteTransport{}}
+			app, _ := newChatDeleteTestApp(transport)
+			// No machine-output flag and a *bytes.Buffer stdout, so
+			// isNonInteractiveCommand is false and the confirm is reached.
+
+			cmd := NewChatCmd()
+			err := executeChatCommand(cmd, app, "delete", "111")
+			require.Error(t, err, "delete must not silently succeed on a confirmation nobody can answer")
+
+			outErr := output.AsError(err)
+			require.NotNil(t, outErr)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Hint, "--force")
+
+			assert.Zero(t, transport.requests,
+				"the refusal belongs before the account and project lookups, not after them")
+		})
+	}
+}
+
+// countingChatTransport counts every request that reaches the wire.
+type countingChatTransport struct {
+	inner    http.RoundTripper
+	requests int
+}
+
+func (t *countingChatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests++
+	return t.inner.RoundTrip(req)
+}

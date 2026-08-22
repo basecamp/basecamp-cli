@@ -12,6 +12,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // AnnotationAllowDash is the cmd.Annotations key marking where a command
@@ -92,18 +94,45 @@ func IsPiped(r io.Reader) bool {
 	return fi.Mode()&os.ModeCharDevice == 0
 }
 
-// InteractiveStdio reports whether both stdout and stdin are character
-// devices — the floor for launching anything that draws to the terminal and
-// reads keystrokes. A TUI (picker, wizard) reads key events from stdin, so a
-// pipe or redirected file can never drive one — and when the command is
-// consuming piped content (a "-" stdin input), a TUI would eat that content
-// as key events.
+// InteractiveStdio reports whether both stdout and stdin are terminals — the
+// floor for launching anything that draws to the terminal and reads
+// keystrokes. A TUI (picker, wizard) reads key events from stdin, so a pipe or
+// redirected file can never drive one — and when the command is consuming
+// piped content (a "-" stdin input), a TUI would eat that content as key
+// events.
+//
+// This asks term.IsTerminal, not whether the file is a character device. The
+// two differ on exactly the case that matters: /dev/null is a character device
+// that delivers no keystrokes, and `cmd < /dev/null` from a terminal session is
+// how an agent says "I have nothing to type". Bubble Tea agrees — it tests
+// the same term.IsTerminal, and when stdin fails that test it does not error, it opens
+// /dev/tty and waits on the real terminal instead. Calling /dev/null
+// interactive is therefore a hang, not a cosmetic mismatch.
+//
+// IsPiped above deliberately keeps the character-device test: it answers a
+// different question (is there content on stdin to read?), and reading
+// /dev/null correctly yields nothing.
 func InteractiveStdio() bool {
-	for _, f := range []*os.File{os.Stdout, os.Stdin} {
-		fi, err := f.Stat()
-		if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-			return false
-		}
-	}
-	return true
+	return isTerminal(os.Stdin) && isTerminal(os.Stdout)
+}
+
+// InteractivePrompt reports whether stdin and stderr are terminals — the floor
+// for a huh form specifically, because huh draws the form to stderr rather than
+// stdout (huh form.go:112 passes tea.WithOutput(os.Stderr)), while a bare
+// bubbletea program such as the picker draws to stdout.
+//
+// The distinction is not pedantry. Checking stdout for a form that renders to
+// stderr means `cmd 2>somewhere` draws the prompt into the void while still
+// reading /dev/tty: an invisible question blocking a terminal. Ask about the
+// stream the launcher actually writes to.
+func InteractivePrompt() bool {
+	return isTerminal(os.Stdin) && isTerminal(os.Stderr)
+}
+
+// isTerminal uses charmbracelet/x/term, the same package Bubble Tea asks —
+// both v1 (tea.go:25) and v2 (tea.go:34) import it — so this floor and the
+// /dev/tty fallback it exists to prevent cannot disagree about what a terminal
+// is.
+func isTerminal(f *os.File) bool {
+	return term.IsTerminal(f.Fd())
 }

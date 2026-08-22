@@ -303,6 +303,9 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	fmt.Fprintln(w)
 
 	install, confirmErr := tui.Confirm("  Set up Basecamp for your coding agents?", true)
+	if confirmErr != nil && !errors.Is(confirmErr, tui.ErrCanceled) {
+		return agentSetupOutcome{}, fmt.Errorf("asking about agent setup: %w", confirmErr)
+	}
 	if confirmErr != nil || !install {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, styles.Muted.Render("  You can set up agents later:"))
@@ -314,7 +317,7 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 		fmt.Fprintln(w)
 		// Skipped carries the current snapshot for the checklist but records no
 		// issues, so a deliberate skip stays "complete".
-		return agentSetupOutcome{Skipped: true, Checks: preChecks}, nil //nolint:nilerr // Treat confirm error as skip (user canceled)
+		return agentSetupOutcome{Skipped: true, Checks: preChecks}, nil
 	}
 
 	fmt.Fprintln(w)
@@ -324,7 +327,9 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	// Install baseline skill (always, for any agent)
 	if _, err := installSkillFiles(); err != nil {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Skill install failed: %s", err)))
-		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: basecamp setup"})
+		// Not "basecamp setup": this runs inside it, so that advice is circular.
+		// `setup agents` retries exactly the step that failed, and needs no terminal.
+		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: basecamp setup agents"})
 	} else {
 		fmt.Fprintln(w, styles.RenderStatus(true, "Agent skill installed"))
 	}

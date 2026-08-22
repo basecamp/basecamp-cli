@@ -100,12 +100,16 @@ func (r *Resolver) Flags() *Flags {
 	return r.flags
 }
 
-// IsInteractive returns true if interactive prompts can be shown.
+// IsInteractive returns true if a picker can be shown.
 // This checks stdout, stdin, and machine-output flags.
 // Returns false if BASECAMP_NONINTERACTIVE is set, if any machine-output flag is
 // set (--agent, --json, --quiet, --ids-only, --count), or if stdout or stdin is
-// not a character device (the guard treats any char device — a terminal,
-// /dev/null, etc. — as interactive-capable).
+// not a terminal. /dev/null does not count: it is a character device, but it
+// delivers no keystrokes, and Bubble Tea responds to a non-terminal stdin by
+// opening /dev/tty and waiting on the real terminal.
+//
+// This is the picker's pair (stdin+stdout). A huh form draws to stderr instead,
+// which is stdinarg.InteractivePrompt — see internal/tui.
 func (r *Resolver) IsInteractive() bool {
 	// Explicit escape hatch: BASECAMP_NONINTERACTIVE forces non-interactive mode
 	// even under a PTY, without changing the output format.
@@ -120,10 +124,10 @@ func (r *Resolver) IsInteractive() bool {
 		}
 	}
 
-	// Both stdout and stdin must be character devices: pickers draw to
-	// stdout and read keystrokes from stdin, so a pipe on either end can
-	// never drive one — and when the command is consuming piped content
-	// (a "-" stdin input), a picker would eat that content as key events.
+	// Both stdout and stdin must be terminals: pickers draw to stdout and read
+	// keystrokes from stdin, so a pipe on either end can never drive one — and
+	// when the command is consuming piped content (a "-" stdin input), a picker
+	// would eat that content as key events.
 	return stdinarg.InteractiveStdio()
 }
 

@@ -2,16 +2,97 @@ package tui
 
 import (
 	"errors"
+	"os"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
+
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 )
+
+// ErrNotInteractive is returned instead of launching a form when stdio cannot
+// drive one. huh runs the form as a bubbletea program, and redirecting stdin
+// does not make that program fail: bubbletea v1 sees a non-terminal stdin and
+// silently opens /dev/tty instead (tea.go:590-613), so the prompt sits waiting
+// on the real terminal — a hang for a caller that redirected stdin precisely
+// because nobody is there to type. Where there is no controlling terminal it
+// fails instead, but only partway through, after the earlier steps have run.
+// Neither outcome is usable, so refuse rather than launch.
+//
+// The floor lives here rather than at the call sites because a call-site audit
+// is exactly what missed `basecamp setup`: huh calls tea.NewProgram inside
+// form.go, so grepping for the launcher cannot see these functions at all.
+// Gating the constructor bounds where a prompt can be reached, and covers the
+// prompts nobody has written yet.
+var ErrNotInteractive = errors.New("not an interactive terminal")
+
+// ErrCanceled is returned when the user dismissed a prompt — Escape or Ctrl+C.
+// It is an answer, and callers are right to treat it as "no" rather than as a
+// failure.
+//
+// It exists so they can do that *precisely*. huh returns ErrUserAborted only
+// for a real dismissal; a timeout, or a bubbletea or runtime failure, comes back
+// as an ordinary error. Callers that treat every prompt error as cancellation
+// therefore report an answer nobody gave, and exit 0 having done nothing — the
+// same mistake as claiming an install was canceled when the prompt never
+// appeared. Translate once here so no caller has to know huh's error values.
+var ErrCanceled = errors.New("prompt canceled")
+
+// canPrompt reports whether stdio can drive a huh form: stdin must be a
+// terminal to deliver keystrokes, and stderr must be one because that is where
+// huh draws. A character device is not enough, and stdout is not the stream to
+// ask about — see stdinarg.InteractivePrompt.
+func canPrompt() bool {
+	return stdinarg.InteractivePrompt()
+}
+
+// canPick reports whether stdio can drive a bare bubbletea program. The picker
+// draws to stdout, not stderr, so it asks a different pair than canPrompt.
+func canPick() bool {
+	return stdinarg.InteractiveStdio()
+}
 
 // escKeyMap returns a keymap where both Ctrl+C and Escape abort the form.
 func escKeyMap() *huh.KeyMap {
 	km := huh.NewDefaultKeyMap()
 	km.Quit = key.NewBinding(key.WithKeys("ctrl+c", "esc"))
 	return km
+}
+
+// runForm is the one place in this package a huh form is executed, and so the
+// one place the floor has to hold. Every exported prompt below funnels through
+// it. TestNoUnsanctionedLaunchers keeps it that way — it fails on a .Run() in
+// this file outside runForm, and on a huh import or a tea.NewProgram anywhere
+// outside the handful of sanctioned files — because widening a call-site audit
+// is exactly what let `basecamp setup` slip through.
+func runForm(form *huh.Form) error {
+	if !canPrompt() {
+		return ErrNotInteractive
+	}
+	// Pin the output stream rather than inheriting huh's, which is not one
+	// stream. NewForm defaults to stderr, but it silently switches the whole
+	// form to accessible mode when TERM=dumb (form.go:124), and that mode writes
+	// to f.output-or-stdout instead (form.go:670-673). A floor that asks about
+	// stderr while huh draws to stdout is wrong in both directions: it refuses a
+	// prompt that would have rendered fine, and permits one nobody can see.
+	// Setting it here makes the answer the same in both modes, so canPrompt and
+	// huh cannot disagree.
+	//
+	// Only the output. Passing WithInput would set bubbletea's inputType to
+	// customInput and so disable its /dev/tty fallback — which sounds desirable
+	// until you read tty.go:100, where a swallowed io.EOF means the program
+	// hangs instead of quitting. The floor keeps a non-terminal stdin from
+	// reaching here at all.
+	err := form.WithOutput(os.Stderr).WithKeyMap(escKeyMap()).Run()
+	if errors.Is(err, huh.ErrUserAborted) {
+		return ErrCanceled
+	}
+	return err
+}
+
+// runFields runs a single-group form over the given fields.
+func runFields(fields ...huh.Field) error {
+	return runForm(huh.NewForm(huh.NewGroup(fields...)))
 }
 
 // Confirm shows a yes/no confirmation prompt. Escape or Ctrl+C cancels.
@@ -23,10 +104,7 @@ func Confirm(message string, defaultValue bool) (bool, error) {
 		Negative("No").
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	if err != nil {
+	if err := runFields(field); err != nil {
 		return defaultValue, err
 	}
 	return result, nil
@@ -42,10 +120,7 @@ func ConfirmDangerous(message string) (bool, error) {
 		Negative("Cancel").
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	if err != nil {
+	if err := runFields(field); err != nil {
 		return false, err
 	}
 	return result, nil
@@ -59,10 +134,7 @@ func Input(title, placeholder string) (string, error) {
 		Placeholder(placeholder).
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // InputRequired shows a required text input prompt. Escape or Ctrl+C cancels.
@@ -79,10 +151,7 @@ func InputRequired(title, placeholder string) (string, error) {
 			return nil
 		})
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // TextArea shows a multiline text input prompt. Escape or Ctrl+C cancels.
@@ -93,10 +162,7 @@ func TextArea(title, placeholder string) (string, error) {
 		Placeholder(placeholder).
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // SelectOption represents an option in a select prompt.
@@ -118,10 +184,7 @@ func Select(title string, options []SelectOption) (string, error) {
 		Options(huhOptions...).
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // SelectWithDescription shows a select prompt with descriptions. Escape or Ctrl+C cancels.
@@ -138,10 +201,7 @@ func SelectWithDescription(title, description string, options []SelectOption) (s
 		Options(huhOptions...).
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // MultiSelect shows a multi-select prompt. Escape or Ctrl+C cancels.
@@ -157,10 +217,7 @@ func MultiSelect(title string, options []SelectOption) ([]string, error) {
 		Options(huhOptions...).
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	return result, err
+	return result, runFields(field)
 }
 
 // FormField represents a field in a form.
@@ -199,11 +256,8 @@ func Form(title string, fields []FormField) (map[string]string, error) {
 		huhFields[i] = input
 	}
 
-	form := huh.NewForm(
-		huh.NewGroup(huhFields...).Title(title),
-	).WithKeyMap(escKeyMap())
-
-	if err := form.Run(); err != nil {
+	form := huh.NewForm(huh.NewGroup(huhFields...).Title(title))
+	if err := runForm(form); err != nil {
 		return nil, err
 	}
 
@@ -214,12 +268,12 @@ func Form(title string, fields []FormField) (map[string]string, error) {
 	return results, nil
 }
 
-// Note shows an informational note (non-interactive).
+// Note shows an informational note. It takes no input, but huh still runs it as
+// a bubbletea program reading os.Stdin, so it needs the same floor.
 func Note(title, body string) error {
-	return huh.NewNote().
+	return runFields(huh.NewNote().
 		Title(title).
-		Description(body).
-		Run()
+		Description(body))
 }
 
 // ConfirmSetDefault asks the user if they want to save a value as the default. Escape or Ctrl+C cancels.
@@ -232,16 +286,16 @@ func ConfirmSetDefault(valueName string) (bool, error) {
 		Negative("No").
 		Value(&result)
 
-	err := huh.NewForm(huh.NewGroup(field)).
-		WithKeyMap(escKeyMap()).
-		Run()
-	if err != nil {
+	if err := runFields(field); err != nil {
 		return false, err
 	}
 	return result, nil
 }
 
 // SelectScope shows a prompt for selecting the config scope (global or local).
+// It inherits Select's floor, so it returns ErrNotInteractive off a terminal.
+//
+//nolint:gocritic // delegates deliberately; the floor lives in runForm
 func SelectScope() (string, error) {
 	options := []SelectOption{
 		{Value: "local", Label: "Local (.basecamp/config.json)"},

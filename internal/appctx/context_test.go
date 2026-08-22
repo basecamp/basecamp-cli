@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -205,30 +206,34 @@ func TestIsInteractiveWithCountMode(t *testing.T) {
 }
 
 func TestIsInteractiveWithNonInteractiveEnv(t *testing.T) {
-	// Swap os.Stdout to the null device — a char device that passes the
-	// ModeCharDevice guard — so IsInteractive() would otherwise return true.
-	// Without this, go test's piped stdout makes IsInteractive() false regardless
-	// of the env var, and the assertion would pass even if the short-circuit were
-	// removed.
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skip(os.DevNull + " not available")
+	// Point both ends at a pseudo-terminal so IsInteractive() would otherwise
+	// return true. Without this, go test's piped stdout and /dev/null stdin make
+	// it false regardless of the env var, and the assertion would pass even if
+	// the short-circuit were removed. /dev/null will not stand in for a terminal
+	// here: it is a character device but not a terminal, which is precisely the
+	// distinction IsInteractive() now draws.
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
 	}
-	origStdout := os.Stdout
-	os.Stdout = devNull
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("open /dev/ptmx: %v", err)
+	}
+	origStdout, origStdin := os.Stdout, os.Stdin
+	os.Stdout, os.Stdin = pty, pty
 	t.Cleanup(func() {
-		os.Stdout = origStdout
-		devNull.Close()
+		os.Stdout, os.Stdin = origStdout, origStdin
+		pty.Close()
 	})
 
 	cfg := &config.Config{}
 	app := NewApp(cfg)
 
-	// Baseline: char-device stdout, no env/flags → interactive.
+	// Baseline: terminal stdio, no env/flags → interactive.
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
-	require.True(t, app.IsInteractive(), "char-device stdout should be interactive without the escape hatch")
+	require.True(t, app.IsInteractive(), "terminal stdio should be interactive without the escape hatch")
 
-	// The env escape hatch forces non-interactive even with an interactive stdout.
+	// The env escape hatch forces non-interactive even with interactive stdio.
 	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
 	assert.False(t, app.IsInteractive(), "BASECAMP_NONINTERACTIVE should force non-interactive")
 	// Output format is untouched — the escape hatch only disables prompts.
