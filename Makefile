@@ -190,6 +190,41 @@ bench-compare:
 	@command -v benchstat >/dev/null 2>&1 || go install golang.org/x/perf/cmd/benchstat@latest
 	benchstat benchmarks-baseline.txt benchmarks-current.txt
 
+# Report unreachable code, whole-program, from the production binary's main.
+#
+# NOT a gate, and not wired into `make check`. golangci's `unused` (staticcheck
+# U1000) runs per-package and treats every exported identifier in a non-main
+# package as used by definition, which is why 602 lines of exported, zero-caller
+# internal/tui API survived it — no configuration fixes that, the analysis
+# cannot see across package boundaries. deadcode can, because it starts from a
+# main and follows the call graph.
+#
+# Which main matters. Only main packages are roots, so `deadcode ./...` loads
+# every package and then reports everything no main reaches as unreachable —
+# 1100+ of its 1250 lines here are the dev-tagged workspace tree, which the
+# untagged build genuinely cannot reach. True, and useless. Naming the binary
+# gives two answers worth reading instead:
+#
+#   deadcode ./cmd/basecamp            what a released basecamp can never run
+#   deadcode -tags=dev ./cmd/basecamp  the same, with the dev `basecamp tui` tree
+#
+# `go run` the pinned version rather than trusting whatever `deadcode` happens
+# to be on PATH; an unpinned tool makes the output depend on the machine.
+#
+# Read the output before acting on it. A zero-caller exported symbol is a
+# candidate, not a verdict — some are a deliberate API surface, and the -tags
+# dev tree is legitimately partial. Wiring a noisy check into CI is how a
+# control nobody sized gets built.
+DEADCODE := golang.org/x/tools/cmd/deadcode@v0.40.0
+
+.PHONY: deadcode
+deadcode: check-toolchain
+	@echo "== shipped binary =="
+	$(GOCMD) run $(DEADCODE) ./cmd/basecamp
+	@echo
+	@echo "== with -tags dev =="
+	$(GOCMD) run $(DEADCODE) -tags=dev ./cmd/basecamp
+
 # Guard against Go toolchain mismatch (mise environment)
 .PHONY: check-toolchain
 check-toolchain:
