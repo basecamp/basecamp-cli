@@ -222,7 +222,7 @@ func TestMarkdownToHTML(t *testing.T) {
 			// heading+table regression.
 			name:     "gfm table with heading (issue #405)",
 			input:    "# Report\n\n| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
-			expected: "<h1>Report</h1>\n<table>\n<thead>\n<tr>\n<th>Foo</th>\n<th>Bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Baz</td>\n<td>Qux</td>\n</tr>\n</tbody>\n</table>",
+			expected: "<h1>Report</h1>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>Foo</th>\n<th>Bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Baz</td>\n<td>Qux</td>\n</tr>\n</tbody>\n</table>",
 		},
 	}
 
@@ -2467,17 +2467,75 @@ func TestMarkdownToHTMLParagraphSeparatorsMatchMarkdownPath(t *testing.T) {
 // Basecamp's editor discards a bare top-level <br> the first time the content is
 // edited, collapsing the spacing. No blank line between blocks may rely on one.
 func TestMarkdownToHTMLEmitsNoBareTopLevelBreaks(t *testing.T) {
-	markdown := "Para one.\n\nPara two.\n\n## Heading\n\n- a\n- b\n\n> A quote\n\n```\ncode\n```\n\n---\n\nClosing."
+	markdown := "Para one.\n\nPara two.\n\n## Heading\n\n- a\n- b\n\n> A quote\n\n```\ncode\n```\n\n---\n\n| a | b |\n|---|---|\n\nClosing."
 
 	html := MarkdownToHTML(markdown)
 
-	for _, block := range []string{"<p>", "<h2>", "<ul>", "<blockquote>", "<pre>", "<hr>"} {
+	for _, block := range []string{"<p>", "<h2>", "<ul>", "<blockquote>", "<pre>", "<hr>", "<table>"} {
 		if strings.Contains(html, "<br>\n"+block) {
 			t.Errorf("bare <br> separator before %s in %q", block, html)
 		}
 	}
 	if want := strings.Count(markdown, "\n\n"); strings.Count(html, paragraphSeparator) != want {
 		t.Errorf("got %d separator paragraphs, want %d in %q", strings.Count(html, paragraphSeparator), want, html)
+	}
+}
+
+// Goldmark's table extension builds the Table node in a paragraph transformer
+// that replaces the source paragraph without carrying its blank-previous-lines
+// flag over, so without recovery a blank-line-separated table is the one block
+// kind that loses its leading separator. The blank line is recovered from the
+// source; a table that interrupts a paragraph mid-flight stays attached.
+func TestMarkdownToHTMLTableSeparators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "blank-line-separated table gets a separator before and after",
+			input:    "Intro.\n\n| a |\n|---|\n\nAfter.",
+			expected: "<p>Intro.</p>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>\n<p><br></p>\n<p>After.</p>",
+		},
+		{
+			name:     "table interrupting a paragraph stays attached",
+			input:    "Intro.\n| a |\n|---|",
+			expected: "<p>Intro.</p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>",
+		},
+		{
+			name:     "blank line before an interrupted paragraph separates the paragraph, not the table",
+			input:    "X.\n\nIntro.\n| a |\n|---|",
+			expected: "<p>X.</p>\n<p><br></p>\n<p>Intro.</p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>",
+		},
+		{
+			name:     "consecutive blank-line-separated tables are separated",
+			input:    "| a |\n|---|\n\n| b |\n|---|",
+			expected: "<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>b</th>\n</tr>\n</thead>\n</table>",
+		},
+		{
+			name:     "table after a heading gets a separator",
+			input:    "## H\n\n| a |\n|---|",
+			expected: "<h2>H</h2>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>",
+		},
+		{
+			name:     "table as first block gets no separator",
+			input:    "| a |\n|---|\n\nAfter.",
+			expected: "<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>\n<p><br></p>\n<p>After.</p>",
+		},
+		{
+			name:     "CRLF blank line before a table is recognized",
+			input:    "Intro.\r\n\r\n| a |\r\n|---|",
+			expected: "<p>Intro.</p>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n</table>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := MarkdownToHTML(tt.input)
+			if result != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
 

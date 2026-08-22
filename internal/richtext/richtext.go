@@ -222,11 +222,55 @@ func (t *trixTransformer) Transform(node *ast.Document, reader text.Reader, pc p
 
 	// Phase 2: Insert TrixBreak nodes before blank-line-separated top-level blocks
 	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-		if child.HasBlankPreviousLines() && child.PreviousSibling() != nil {
+		if child.PreviousSibling() != nil && hasBlankPreviousLines(child, reader.Source()) {
 			br := &TrixBreak{}
 			node.InsertBefore(node, child, br)
 		}
 	}
+}
+
+// hasBlankPreviousLines reports whether a top-level block was separated from
+// the previous block by a blank line. For most blocks this is the parser's own
+// flag. Tables are the exception: goldmark's table extension builds the Table
+// node inside a paragraph transformer that replaces the source paragraph
+// without carrying its blank-previous-lines flag over, so the flag is always
+// false and a blank-line-separated table would lose its separator. Recover the
+// answer from the source instead: the table's Pos is the start of the replaced
+// paragraph's first line, so the table was blank-line-separated exactly when
+// the line above that position is blank.
+//
+// A table that interrupted a paragraph ("Intro.\n| a | b |\n|---|---|") is the
+// case the flag being false is right about: the transformer leaves the leading
+// lines behind as a paragraph sharing the table's Pos, so the line above Pos
+// belongs to whatever preceded that paragraph, not to the table. Detect it by
+// that shared Pos and keep the table attached.
+func hasBlankPreviousLines(child ast.Node, source []byte) bool {
+	table, ok := child.(*east.Table)
+	if !ok {
+		return child.HasBlankPreviousLines()
+	}
+	if p, isPara := child.PreviousSibling().(*ast.Paragraph); isPara && p.Pos() == table.Pos() {
+		return false
+	}
+	return precedingLineIsBlank(source, table.Pos())
+}
+
+// precedingLineIsBlank reports whether the line immediately above pos in
+// source is blank — empty or whitespace-only.
+func precedingLineIsBlank(source []byte, pos int) bool {
+	i := pos - 1
+	if i >= 0 && source[i] == '\n' {
+		i--
+	}
+	if i >= 0 && source[i] == '\r' {
+		i--
+	}
+	for ; i >= 0 && source[i] != '\n'; i-- {
+		if c := source[i]; c != ' ' && c != '\t' && c != '\r' {
+			return false
+		}
+	}
+	return true
 }
 
 func replaceParagraphsWithTextBlocks(parent ast.Node) {
