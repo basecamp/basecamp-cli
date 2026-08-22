@@ -93,6 +93,13 @@ func TestComposerSetValueExpandsForMultilineContent(t *testing.T) {
 		t.Errorf("value = %q, newlines were flattened", c.Value())
 	}
 
+	// Single-line Markdown expands too — rendering it needs the rich editor.
+	markdown := NewComposer(testStyles())
+	markdown.SetValue("some **bold** text")
+	if markdown.Mode() != ComposerRich {
+		t.Errorf("mode after Markdown SetValue = %d, want ComposerRich", markdown.Mode())
+	}
+
 	single := NewComposer(testStyles())
 	single.SetValue("hello")
 	if single.Mode() != ComposerQuick {
