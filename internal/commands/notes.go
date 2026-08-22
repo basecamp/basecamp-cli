@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -196,11 +197,11 @@ func notesContent(cmd *cobra.Command, args []string, file string) (string, error
 		}
 		return notesRequireContent(content)
 	case file != "":
-		data, err := os.ReadFile(file)
+		content, err := notesFileContent(file)
 		if err != nil {
-			return "", output.ErrUsage(fmt.Sprintf("failed to read %s: %v", file, err))
+			return "", err
 		}
-		return notesRequireContent(string(data))
+		return notesRequireContent(content)
 	case positional != "":
 		content, err := resolveContentValue(cmd, positional, 0, "[content]")
 		if err != nil {
@@ -213,6 +214,25 @@ func notesContent(cmd *cobra.Command, args []string, file string) (string, error
 		"note content is required",
 		`Pass it as an argument, with --file, or pipe it and pass "-": basecamp notes set -`,
 	)
+}
+
+// notesFileContent reads --file under the same cap as --file -, so which side
+// of the "-" the bytes arrive on never changes whether they are accepted.
+func notesFileContent(file string) (string, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("failed to read %s: %v", file, err))
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxStdinContent+1))
+	if err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("failed to read %s: %v", file, err))
+	}
+	if len(data) > maxStdinContent {
+		return "", output.ErrUsage(fmt.Sprintf("--file %s exceeds %d bytes", file, maxStdinContent))
+	}
+	return string(data), nil
 }
 
 // notesRequireContent refuses to blank the note by accident.

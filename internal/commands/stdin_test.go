@@ -95,6 +95,39 @@ func TestReadStdinContentBlankPipeIsUsageError(t *testing.T) {
 	assert.Contains(t, outErr.Message, "empty")
 }
 
+// The cap is a read bound, so it is checked against the bytes read rather than
+// the trimmed content: exactly maxStdinContent is content, one byte past it is
+// a refusal — including when that byte is the trailing newline every pipe ends
+// with, which is the only way to stop reading at the cap at all.
+func TestReadStdinContentAtTheCapIsAccepted(t *testing.T) {
+	body := strings.Repeat("a", maxStdinContent)
+	cmd := &cobra.Command{Use: "x"}
+	cmd.SetIn(strings.NewReader(body))
+
+	content, err := readStdinContent(cmd, "<content>")
+	require.NoError(t, err)
+	assert.Equal(t, body, content)
+}
+
+func TestReadStdinContentOverTheCapIsUsageError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"one byte over", strings.Repeat("a", maxStdinContent+1)},
+		{"the cap plus a trailing newline", strings.Repeat("a", maxStdinContent) + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := &cobra.Command{Use: "x"}
+			cmd.SetIn(strings.NewReader(tc.body))
+
+			_, err := readStdinContent(cmd, "<content>")
+			outErr := requireUsageErr(t, err)
+			assert.Contains(t, outErr.Message, "exceeds 1048576 bytes")
+		})
+	}
+}
+
 func TestResolveContentArgJoinsLiteralArgs(t *testing.T) {
 	cmd := &cobra.Command{Use: "x"}
 	content, err := resolveContentArg(cmd, []string{"hello", "world"}, 1)

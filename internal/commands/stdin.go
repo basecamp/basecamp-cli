@@ -37,6 +37,13 @@ func allowDash(cmd *cobra.Command, tokens ...string) {
 	cmd.Annotations[stdinarg.AnnotationAllowDash] = merged
 }
 
+// maxStdinContent caps how much a "-" placeholder — and the --file twin that
+// shares its refusals — will read. It matches maxAgentHookInput by coincidence
+// of scale, not by kinship: that one bounds a JSON envelope an agent harness
+// writes, this one bounds prose a person pipes, and the two should stay free
+// to move apart.
+const maxStdinContent = 1 << 20
+
 // readStdinContent reads content for a "-" placeholder from piped stdin.
 //
 // Nothing piped (a TTY) is a usage error rather than a silent read: waiting on
@@ -44,6 +51,15 @@ func allowDash(cmd *cobra.Command, tokens ...string) {
 // hatches instead. A piped-but-blank stdin is also refused — blank content is
 // never an intentional write, and for update-style commands it would be an
 // implicit clear.
+//
+// A stream over maxStdinContent is refused as well, and refused rather than
+// truncated: `yes | basecamp api post /valid --data -` is a perfectly valid
+// invocation that would otherwise read until the process dies, and silently
+// posting the first megabyte would write partial content to Basecamp and
+// report success — unrecoverable once saved. The cap counts bytes read, so it
+// lands before the trim below rather than on the trimmed result: telling an
+// overflow that is only a trailing newline from any other would mean reading
+// past the cap, which is the thing being prevented.
 //
 // Trailing newlines — LF and CRLF alike — are trimmed: Markdown bodies don't
 // care, but titles and boosts (16-rune limit) do, and virtually every pipe
@@ -55,9 +71,12 @@ func readStdinContent(cmd *cobra.Command, what string) (string, error) {
 			stdinEscapeHint(cmd, what),
 		)
 	}
-	data, err := io.ReadAll(cmd.InOrStdin())
+	data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxStdinContent+1))
 	if err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("failed to read %s from stdin: %v", what, err))
+	}
+	if len(data) > maxStdinContent {
+		return "", output.ErrUsage(fmt.Sprintf("stdin for %s exceeds %d bytes", what, maxStdinContent))
 	}
 	content := strings.TrimRight(string(data), "\r\n")
 	if strings.TrimSpace(content) == "" {

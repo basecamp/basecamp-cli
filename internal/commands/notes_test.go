@@ -124,6 +124,26 @@ func TestNotesSetReadsFromAFile(t *testing.T) {
 	assert.NotContains(t, body.Note.Content, "# Heading", "raw Markdown must not reach the wire")
 }
 
+// --file and --file - are the same read, so they agree on the boundary: a file
+// of exactly maxStdinContent is content, one byte past it is a usage error.
+func TestNotesSetBoundsFileAtTheStdinCap(t *testing.T) {
+	dir := t.TempDir()
+	atCap := filepath.Join(dir, "at-cap.md")
+	require.NoError(t, os.WriteFile(atCap, []byte(strings.Repeat("a", maxStdinContent)), 0o600))
+	overCap := filepath.Join(dir, "over-cap.md")
+	require.NoError(t, os.WriteFile(overCap, []byte(strings.Repeat("a", maxStdinContent+1)), 0o600))
+
+	app, transport, _ := setupPersonalFeedApp(t, notesUpdateRoute())
+	require.NoError(t, executeRecordingCommand(NewNotesCmd(), app, "set", "--file", atCap))
+	assert.NotEmpty(t, transport.recorded())
+
+	app, transport, _ = setupPersonalFeedApp(t, notesUpdateRoute())
+	err := executeRecordingCommand(NewNotesCmd(), app, "set", "--file", overCap)
+	outErr := requireBookmarksUsageError(t, err)
+	assert.Contains(t, outErr.Message, "exceeds 1048576 bytes")
+	assert.Empty(t, transport.recorded(), "a rejected write must not reach the server")
+}
+
 func TestNotesSetReadsDashFromStdin(t *testing.T) {
 	app, transport, _ := setupPersonalFeedApp(t, notesUpdateRoute())
 
