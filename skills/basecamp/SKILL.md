@@ -259,7 +259,6 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Gauge needles | `basecamp gauges needles --in <project> --json` |
 | Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |
 | Account details | `basecamp accounts show --json` |
-| Watch timeline | `basecamp timeline --watch` |
 
 ## URL Parsing
 
@@ -900,11 +899,9 @@ basecamp timeline --json                          # Account-wide activity
 basecamp timeline --in <project> --json           # Project activity
 basecamp timeline me --json                       # Your activity
 basecamp timeline --person <id> --json            # Person's activity
-basecamp timeline --watch                         # Live monitoring (TUI)
-basecamp timeline --watch --interval 60           # Poll every 60 seconds
 ```
 
-Use `--limit N` to cap results or `--all` to fetch everything (default: 100 events). `--all` and `--page` cannot be combined with `--watch`.
+Use `--limit N` to cap results or `--all` to fetch everything (default: 100 events).
 
 ### Events (change history)
 

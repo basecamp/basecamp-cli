@@ -1,32 +1,20 @@
 package commands
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"strconv"
-	"strings"
-	"syscall"
-	"time"
 
-	"charm.land/bubbles/v2/spinner"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewTimelineCmd creates the timeline command for viewing activity feeds.
 func NewTimelineCmd() *cobra.Command {
 	var project string
 	var person string
-	var watch bool
-	var interval int
 	var limit int
 	var page int
 	var all bool
@@ -39,14 +27,10 @@ func NewTimelineCmd() *cobra.Command {
 By default, shows the account-wide activity feed (recent activity across all projects).
 
 Use --in to view a specific project's timeline.
-Use "me" or --person to view a person's activity timeline.
-Use --watch to continuously poll for new activity.`,
+Use "me" or --person to view a person's activity timeline.`,
 		Annotations: map[string]string{"agent_notes": "Timeline shows activity feed — account-wide by default, or scoped with --in <project> or --person <id>"},
 		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if watch {
-				return runTimelineWatch(cmd, args, project, person, time.Duration(interval)*time.Second, limit, page, all)
-			}
 			return runTimeline(cmd, args, project, person, limit, page, all)
 		},
 	}
@@ -54,8 +38,6 @@ Use --watch to continuously poll for new activity.`,
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Project ID or name (alias for --project)")
 	cmd.Flags().StringVar(&person, "person", "", "Person ID or name")
-	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Watch for new activity (poll continuously)")
-	cmd.Flags().IntVar(&interval, "interval", 30, "Poll interval in seconds (default: 30)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of events to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all events (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
@@ -260,335 +242,4 @@ func runPersonTimeline(cmd *cobra.Command, personArg string, opts *basecamp.Time
 	}
 
 	return app.OK(result.Events, respOpts...)
-}
-
-// watchModel is the bubbletea model for the watch mode TUI.
-type watchModel struct {
-	spinner     spinner.Model
-	events      []basecamp.TimelineEvent
-	seenIDs     map[int64]bool
-	lastUpdate  time.Time
-	interval    time.Duration
-	err         error
-	fetchFn     func(context.Context) ([]basecamp.TimelineEvent, error)
-	ctx         context.Context
-	cancel      context.CancelFunc
-	description string
-	newCount    int
-}
-
-type watchTickMsg struct{}
-type watchEventsMsg struct {
-	events []basecamp.TimelineEvent
-	err    error
-}
-
-func (m watchModel) Init() tea.Cmd {
-	return tea.Batch(
-		m.spinner.Tick,
-		m.fetchEvents,
-	)
-}
-
-func (m watchModel) fetchEvents() tea.Msg {
-	// Check if context is already canceled before making API call
-	if err := m.ctx.Err(); err != nil {
-		return watchEventsMsg{events: nil, err: err}
-	}
-	events, err := m.fetchFn(m.ctx)
-	return watchEventsMsg{events: events, err: err}
-}
-
-func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.cancel()
-			return m, tea.Quit
-		}
-	case watchEventsMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			// Continue polling even on error
-		} else {
-			// Count and track new events
-			newEvents := 0
-			for _, e := range msg.events {
-				if !m.seenIDs[e.ID] {
-					m.seenIDs[e.ID] = true
-					newEvents++
-				}
-			}
-			if newEvents > 0 && len(m.events) > 0 {
-				m.newCount += newEvents
-			}
-			m.events = msg.events
-			m.lastUpdate = time.Now()
-			m.err = nil
-		}
-		// Schedule next poll
-		return m, tea.Tick(m.interval, func(t time.Time) tea.Msg {
-			return watchTickMsg{}
-		})
-	case watchTickMsg:
-		return m, m.fetchEvents
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
-	}
-	return m, nil
-}
-
-func (m watchModel) View() tea.View {
-	var status string
-	if m.err != nil {
-		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-		status = errStyle.Render(fmt.Sprintf("Error: %s", m.err))
-	} else if m.lastUpdate.IsZero() {
-		status = fmt.Sprintf("%s Fetching %s...", m.spinner.View(), m.description)
-	} else {
-		elapsed := time.Since(m.lastUpdate).Truncate(time.Second)
-		var newIndicator string
-		if m.newCount > 0 {
-			newStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-			newIndicator = newStyle.Render(fmt.Sprintf(" (+%d new)", m.newCount))
-		}
-		status = fmt.Sprintf("%s %d events%s (updated %s ago, polling every %s) - Press q to quit",
-			m.spinner.View(), len(m.events), newIndicator, elapsed, m.interval)
-	}
-
-	// Build output
-	var output strings.Builder
-	output.WriteString(status + "\n")
-
-	if len(m.events) > 0 {
-		output.WriteString("\n")
-		// Show latest 10 events
-		count := min(len(m.events), 10)
-		for i := 0; i < count; i++ {
-			e := m.events[i]
-			line := formatEvent(e)
-			output.WriteString(line + "\n")
-		}
-		if len(m.events) > 10 {
-			muted := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			output.WriteString(muted.Render(fmt.Sprintf("... and %d more", len(m.events)-10)) + "\n")
-		}
-	}
-
-	v := tea.NewView(output.String())
-	v.AltScreen = true
-	return v
-}
-
-func formatEvent(e basecamp.TimelineEvent) string {
-	// Format: [time] Creator Action on Title
-	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-
-	// CreatedAt is a pointer since SDK v0.13.0 — the feed may omit it.
-	var timeStr string
-	if e.CreatedAt != nil && !e.CreatedAt.IsZero() {
-		timeStr = e.CreatedAt.Local().Format("15:04")
-	} else {
-		timeStr = "--:--"
-	}
-
-	// API-controlled fields are sanitized before rendering: rune truncation
-	// preserves escape bytes, and the alt-screen watch TUI would otherwise
-	// execute embedded OSC/ANSI sequences (terminal injection).
-	// Strip before the empty check so a name that's only escape sequences
-	// still falls back to the placeholder rather than rendering blank.
-	creatorName := "Someone"
-	if e.Creator != nil {
-		if name := richtext.SanitizeSingleLine(e.Creator.Name); name != "" {
-			creatorName = name
-		}
-	}
-
-	action := richtext.SanitizeSingleLine(e.Action)
-	if action == "" {
-		action = "updated"
-	}
-
-	title := richtext.SanitizeSingleLine(e.Title)
-	if title == "" {
-		title = richtext.SanitizeSingleLine(e.SummaryExcerpt)
-	}
-	// Truncate at rune boundary for proper Unicode handling
-	if len([]rune(title)) > 40 {
-		title = string([]rune(title)[:37]) + "..."
-	}
-
-	return fmt.Sprintf("%s %s %s %s",
-		timeStyle.Render(timeStr),
-		nameStyle.Render(creatorName),
-		actionStyle.Render(action),
-		title,
-	)
-}
-
-// watchLabel builds a watch-status label from an API-controlled name,
-// sanitizing it for the single-line terminal sink. An all-escape name collapses
-// to "" after sanitization, which would render a blank trailing value (e.g.
-// "activity for "); in that case fall back to the already-resolved ID so the
-// label always names something concrete.
-func watchLabel(format, name, fallbackID string) string {
-	safeName := richtext.SanitizeSingleLine(name)
-	if safeName == "" {
-		safeName = fallbackID
-	}
-	return fmt.Sprintf(format, safeName)
-}
-
-func runTimelineWatch(cmd *cobra.Command, args []string, project, person string, interval time.Duration, limit, page int, all bool) error {
-	if all {
-		return output.ErrUsage("--all cannot be used with --watch")
-	}
-	if page > 0 {
-		return output.ErrUsage("--page cannot be used with --watch")
-	}
-	if err := validateTimelinePagination(limit, page, all); err != nil {
-		return err
-	}
-
-	app := appctx.FromContext(cmd.Context())
-
-	if interval < 1 {
-		return output.ErrUsage("--interval must be at least 1 second")
-	}
-
-	if err := ensureAccount(cmd, app); err != nil {
-		return err
-	}
-
-	// Check for mutually exclusive flags
-	if person != "" && project != "" {
-		return output.ErrUsage("--person and --project are mutually exclusive")
-	}
-
-	// Validate positional argument
-	if len(args) > 0 && args[0] != "me" {
-		return output.ErrUsageHint(
-			fmt.Sprintf("invalid argument %q", args[0]),
-			"Only \"me\" is supported as a positional argument.",
-		)
-	}
-
-	// Set up cancellable context
-	ctx, cancel := context.WithCancel(cmd.Context())
-	defer cancel()
-
-	// Handle signals - stop notification when done and exit cleanly
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	go func() {
-		select {
-		case <-sigChan:
-			cancel()
-		case <-ctx.Done():
-			// Context canceled elsewhere; exit goroutine
-		}
-	}()
-
-	opts := timelineListOpts(limit, 0, false)
-
-	// Determine fetch function and description based on flags
-	var fetchFn func(context.Context) ([]basecamp.TimelineEvent, error)
-	var description string
-
-	if len(args) > 0 && args[0] == "me" {
-		// Personal timeline
-		resolvedID, _, err := app.Names.ResolvePerson(ctx, "me")
-		if err != nil {
-			return err
-		}
-		personID, err := strconv.ParseInt(resolvedID, 10, 64)
-		if err != nil {
-			return output.ErrUsage("Invalid user ID")
-		}
-		description = "your activity"
-		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
-			if err != nil {
-				return nil, err
-			}
-			return result.Events, nil
-		}
-	} else if person != "" {
-		// Specific person timeline
-		resolvedPersonID, personName, err := app.Names.ResolvePerson(ctx, person)
-		if err != nil {
-			return err
-		}
-		personID, err := strconv.ParseInt(resolvedPersonID, 10, 64)
-		if err != nil {
-			return output.ErrUsage("Invalid person ID")
-		}
-		description = watchLabel("activity for %s", personName, resolvedPersonID)
-		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			result, err := app.Account().Timeline().PersonProgress(ctx, personID, opts)
-			if err != nil {
-				return nil, err
-			}
-			return result.Events, nil
-		}
-	} else if project != "" {
-		// Project timeline
-		resolvedProjectID, projectName, err := app.Names.ResolveProject(ctx, project)
-		if err != nil {
-			return err
-		}
-		projectIDInt, err := strconv.ParseInt(resolvedProjectID, 10, 64)
-		if err != nil {
-			return output.ErrUsage("Invalid project ID")
-		}
-		description = watchLabel("activity in %s", projectName, resolvedProjectID)
-		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			r, err := app.Account().Timeline().ProjectTimeline(ctx, projectIDInt, opts)
-			if err != nil {
-				return nil, err
-			}
-			return r.Events, nil
-		}
-	} else {
-		// Account-wide timeline
-		description = "account activity"
-		fetchFn = func(ctx context.Context) ([]basecamp.TimelineEvent, error) {
-			r, err := app.Account().Timeline().Progress(ctx, opts)
-			if err != nil {
-				return nil, err
-			}
-			return r.Events, nil
-		}
-	}
-
-	// Create spinner
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-
-	// Create model
-	m := watchModel{
-		spinner:     s,
-		seenIDs:     make(map[int64]bool),
-		interval:    interval,
-		fetchFn:     fetchFn,
-		ctx:         ctx,
-		cancel:      cancel,
-		description: description,
-	}
-
-	// Run TUI
-	p := tea.NewProgram(m)
-	_, err := p.Run()
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
