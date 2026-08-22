@@ -97,12 +97,17 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
    For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
 
-   **Table boundary:** GFM tables render in message/comment bodies, but the TUI
-   in-place editors **refuse to open** table-bearing content (edit it on Basecamp
-   web, or replace the whole field via `messages update` / `comments update` /
-   `todos update --description`, which take fresh content and are unaffected), and
-   human-readable CLI/TUI **display** of such content may lose table structure —
-   both pending server-side Markdown support (BC3 #11986).
+   **Table boundary:** GFM tables round-trip: they render in message/comment
+   bodies, display converts them back to pipe tables, and the TUI in-place
+   editors open simple grids for editing. Only **complex** tables — merged
+   cells (colspan/rowspan), captions, extra header rows, nested tables,
+   attachments/images or block content inside cells, multi-paragraph or
+   multi-line cells, or a table inside a blockquote or list — refuse to open,
+   since a GFM pipe table can't represent those shapes (edit them on Basecamp
+   web, or replace the
+   whole field via `messages update` / `comments update` / `todos update
+   --description`, which take fresh content and are unaffected). Complex
+   tables still **display** best-effort, flattened to a plain grid.
 
    **Multiline / non-ASCII content:** do not rely on bash ANSI-C quoting (`$'...\n...'`) — it is a bash/zsh extension. Under a POSIX `/bin/sh` (dash, busybox-ash, common in sandboxes) the `$` is passed through literally and posts a stray leading `$`, and `\n` stays a literal backslash-n. Pipe the content via stdin instead, using `-` as the content argument:
    ```bash

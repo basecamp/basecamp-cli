@@ -708,7 +708,27 @@ func HTMLToMarkdown(html string) string {
 	})
 
 	// Lists — use balanced-tag replacement to handle nesting correctly.
+	// Runs before the parked table pass below: list items convert their
+	// tables inline (see formatListItem) so each pipe row picks up the item
+	// indent a parked one-line placeholder would deny it.
 	html = replaceBalancedListBlocks(html)
+
+	// Tables — convert to GFM pipe tables while row and cell tags are still
+	// intact. Must run before the paragraph, line-break, and tag-stripping
+	// passes below, which would otherwise smear cell text together. The
+	// emitted Markdown is parked behind placeholders until every later pass
+	// has run: cell text is fully entity-decoded and escaped, so the
+	// document-level unescape would double-decode it (and could conjure
+	// unescaped pipes out of encoded ones).
+	var tables []string
+	html = reTableBlock.ReplaceAllStringFunc(html, func(s string) string {
+		md := convertTableHTML(s)
+		if md == "" {
+			return "\n\n"
+		}
+		tables = append(tables, md)
+		return "\x00tbl" + strconv.Itoa(len(tables)-1) + "\x00\n\n"
+	})
 
 	// Paragraphs
 	html = reP.ReplaceAllString(html, "$1\n\n")
@@ -745,32 +765,7 @@ func HTMLToMarkdown(html string) string {
 	html = reHTMLStrike.ReplaceAllString(html, "~~$1~~")
 
 	// @-mentions: extract display text, render as bold (must fire before general attachment regex)
-	html = reMentionAttachment.ReplaceAllStringFunc(html, func(s string) string {
-		inner := ""
-		if match := reMentionAttachment.FindStringSubmatch(s); len(match) >= 2 {
-			inner = match[1]
-		}
-
-		name := ""
-		if match := reMentionFigcaption.FindStringSubmatch(inner); len(match) >= 2 {
-			name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(match[1], "")))
-		}
-		if name == "" {
-			if match := reMentionImgAlt.FindStringSubmatch(inner); len(match) >= 2 {
-				name = strings.TrimSpace(unescapeHTML(match[1]))
-			}
-		}
-		if name == "" {
-			name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(inner, "")))
-		}
-		if name == "" {
-			name = "mention"
-		}
-		if !strings.HasPrefix(name, "@") {
-			name = "@" + name
-		}
-		return "**" + name + "**"
-	})
+	html = reMentionAttachment.ReplaceAllStringFunc(html, mentionMarkdown)
 
 	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
 	html = reAttachment.ReplaceAllString(html, "\n📎 $1\n")
@@ -788,7 +783,240 @@ func HTMLToMarkdown(html string) string {
 	// Clean up multiple newlines
 	html = reMultiNewline.ReplaceAllString(html, "\n\n")
 
+	// Restore the parked tables now that no pass can touch their content.
+	for i, table := range tables {
+		html = strings.Replace(html, "\x00tbl"+strconv.Itoa(i)+"\x00", table, 1)
+	}
+
 	return strings.TrimSpace(html)
+}
+
+// mentionMarkdown converts one <bc-attachment> mention element to bold
+// Markdown, extracting the display name from the figcaption, the image alt,
+// or the remaining text, in that order.
+func mentionMarkdown(s string) string {
+	inner := ""
+	if match := reMentionAttachment.FindStringSubmatch(s); len(match) >= 2 {
+		inner = match[1]
+	}
+
+	name := ""
+	if match := reMentionFigcaption.FindStringSubmatch(inner); len(match) >= 2 {
+		name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(match[1], "")))
+	}
+	if name == "" {
+		if match := reMentionImgAlt.FindStringSubmatch(inner); len(match) >= 2 {
+			name = strings.TrimSpace(unescapeHTML(match[1]))
+		}
+	}
+	if name == "" {
+		name = strings.TrimSpace(unescapeHTML(reStripTags.ReplaceAllString(inner, "")))
+	}
+	if name == "" {
+		name = "mention"
+	}
+	if !strings.HasPrefix(name, "@") {
+		name = "@" + name
+	}
+	return "**" + name + "**"
+}
+
+// Pre-compiled regexes for HTML table conversion. BC3 rich text is sanitized
+// editor output, not arbitrary email HTML: tables are always flat
+// editor-authored grids (no nesting, no layout tables), so a non-greedy block
+// match is safe and every <table> converts — none are skipped.
+var (
+	reTableBlock     = regexp.MustCompile(`(?is)<table(?:\s[^>]*)?>.*?</table\s*>`)
+	reTableRowHTML   = regexp.MustCompile(`(?is)<tr(?:\s[^>]*)?>(.*?)</tr\s*>`)
+	reTableCellHTML  = regexp.MustCompile(`(?is)<t[hd]((?:\s[^>]*)?)>(.*?)</t[hd]\s*>`)
+	reTableCellAlign = regexp.MustCompile(`(?i)\balign="(left|center|right)"`)
+	reTableCaption   = regexp.MustCompile(`(?is)<caption(?:\s[^>]*)?>(.*?)</caption\s*>`)
+	reWhitespaceRun  = regexp.MustCompile(`\s+`)
+)
+
+// convertTableHTML converts one <table> block to a GFM pipe table. The first
+// row is the header whether its cells are <th> or <td> (GFM has no headerless
+// tables), with its align attributes — what MarkdownToHTML emits for GFM
+// column alignment — mapped back to :--- / :---: / ---: markers. The widest
+// row sizes the table and narrower rows are padded with empty cells. Cells
+// carrying colspan/rowspan emit as ordinary cells: a merged grid displays
+// better flattened than smeared, and editing such tables stays guarded by
+// HasComplexTableHTML.
+func convertTableHTML(table string) string {
+	caption := ""
+	if m := reTableCaption.FindStringSubmatch(table); m != nil {
+		caption = cellMarkdown(m[1])
+	}
+
+	var rows [][]string
+	var aligns []string
+	for _, row := range reTableRowHTML.FindAllStringSubmatch(table, -1) {
+		cells := reTableCellHTML.FindAllStringSubmatch(row[1], -1)
+		if len(cells) == 0 {
+			continue
+		}
+		texts := make([]string, 0, len(cells))
+		for _, cell := range cells {
+			texts = append(texts, cellMarkdown(cell[2]))
+		}
+		if rows == nil {
+			aligns = make([]string, 0, len(cells))
+			for _, cell := range cells {
+				aligns = append(aligns, cellAlign(cell[1]))
+			}
+		}
+		rows = append(rows, texts)
+	}
+	if rows == nil {
+		return caption
+	}
+
+	// Size the table to its widest row, not just the header: truncating a
+	// wider later row would silently drop cell data.
+	width := 0
+	for _, row := range rows {
+		width = max(width, len(row))
+	}
+	separators := make([]string, width)
+	for i := range separators {
+		switch {
+		case i < len(aligns) && aligns[i] == "left":
+			separators[i] = ":---"
+		case i < len(aligns) && aligns[i] == "center":
+			separators[i] = ":---:"
+		case i < len(aligns) && aligns[i] == "right":
+			separators[i] = "---:"
+		default:
+			separators[i] = "---"
+		}
+	}
+
+	pipeRow := func(cells []string) string {
+		for len(cells) < width {
+			cells = append(cells, "")
+		}
+		return "| " + strings.Join(cells, " | ") + " |"
+	}
+	lines := make([]string, 0, len(rows)+1)
+	lines = append(lines, pipeRow(rows[0]), pipeRow(separators))
+	for _, row := range rows[1:] {
+		lines = append(lines, pipeRow(row))
+	}
+	out := strings.Join(lines, "\n")
+	// GFM has no table captions; emit the text as a paragraph above the grid
+	// rather than dropping user-visible content. Caption-bearing tables stay
+	// display-only (HasComplexTableHTML), so this never has to round-trip.
+	if caption != "" {
+		out = caption + "\n\n" + out
+	}
+	return out
+}
+
+// cellAlign extracts the whitelisted align attribute value from a cell's
+// open-tag attributes, or "" when unaligned.
+func cellAlign(attrs string) string {
+	if m := reTableCellAlign.FindStringSubmatch(attrs); m != nil {
+		return strings.ToLower(m[1])
+	}
+	return ""
+}
+
+// reCellEscape matches the characters that must be backslash-escaped in cell
+// text. Pipes would split the row. Backslashes must double: GFM processes
+// escapes left to right, so a lone literal `\` before an escaped pipe would
+// swallow its backslash and turn the pipe back into a delimiter. Ampersands
+// would let decoded text that still looks like an entity (say a literal
+// &#124;) be decoded a second time by goldmark on the next render.
+var reCellEscape = regexp.MustCompile(`[\\|&]`)
+
+// reCodeNonSpaceWS matches whitespace other than plain spaces. Code-span cell
+// content must be one line, but interior spaces are significant in GFM code
+// spans, so only these collapse.
+var reCodeNonSpaceWS = regexp.MustCompile(`[\t\n\r\f\v]+`)
+
+// reAdjacentCode matches the boundary between two code elements with nothing
+// separating them.
+var reAdjacentCode = regexp.MustCompile(`(?i)</code><code(?:\s[^>]*)?>`)
+
+// codeSpanMarkdown wraps code content in a backtick fence long enough to
+// survive backticks in the content, with CommonMark's space padding when the
+// content begins or ends with a backtick — or with a space, since the parser
+// strips exactly one leading/trailing space pair from padded spans and would
+// otherwise eat a significant edge space. All-space content needs no padding:
+// the strip rule exempts it.
+func codeSpanMarkdown(content string) string {
+	longest, run := 0, 0
+	for _, r := range content {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	delim := strings.Repeat("`", longest+1)
+	pad := ""
+	edgeSpace := (strings.HasPrefix(content, " ") || strings.HasSuffix(content, " ")) &&
+		strings.TrimSpace(content) != ""
+	if strings.HasPrefix(content, "`") || strings.HasSuffix(content, "`") || edgeSpace {
+		pad = " "
+	}
+	return delim + pad + content + pad + delim
+}
+
+// cellMarkdown converts a table cell's inner HTML to single-line Markdown:
+// inline elements convert as usual, block boundaries (<p>, <br>, and any
+// other leftover tag) collapse to spaces, and backslashes and pipes are
+// escaped so cell text can't break the row. Code spans pass through as
+// placeholders: backslashes are literal inside code, so only their pipes are
+// escaped (GFM's row splitting honors `\|` inside code spans). Entities are
+// fully decoded here, after tags are gone and before escaping — escaping
+// must see the real characters (an encoded pipe is still a pipe, and
+// goldmark would decode it on the next render) — which is why HTMLToMarkdown
+// parks the emitted table out of reach of its document-level unescape pass.
+func cellMarkdown(inner string) string {
+	s := reMentionAttachment.ReplaceAllStringFunc(inner, mentionMarkdown)
+
+	// Adjacent code elements with no gap coalesce into one span: GFM cannot
+	// express them separately (`a``b` pairs the outer fences instead), and
+	// the rendered output of one span is identical.
+	s = reAdjacentCode.ReplaceAllString(s, "")
+
+	var codes []string
+	s = reHTMLCode.ReplaceAllStringFunc(s, func(m string) string {
+		codes = append(codes, reHTMLCode.FindStringSubmatch(m)[1])
+		return "\x00" + strconv.Itoa(len(codes)-1) + "\x00"
+	})
+
+	s = reHTMLStrong.ReplaceAllString(s, "**$1**")
+	s = reHTMLB.ReplaceAllString(s, "**$1**")
+	s = reHTMLEm.ReplaceAllString(s, "*$1*")
+	s = reHTMLI.ReplaceAllString(s, "*$1*")
+	s = reHTMLLink.ReplaceAllString(s, "[$2]($1)")
+	s = reHTMLImgSA.ReplaceAllString(s, "![$2]($1)")
+	s = reHTMLImgAS.ReplaceAllString(s, "![$1]($2)")
+	s = reHTMLImgS.ReplaceAllString(s, "![]($1)")
+	s = reHTMLDel.ReplaceAllString(s, "~~$1~~")
+	s = reHTMLS.ReplaceAllString(s, "~~$1~~")
+	s = reHTMLStrike.ReplaceAllString(s, "~~$1~~")
+	s = reAttachment.ReplaceAllString(s, "📎 $1")
+	s = reAttachClose.ReplaceAllString(s, "")
+	s = reAttachNoFile.ReplaceAllString(s, "📎 attachment")
+	s = reStripTags.ReplaceAllString(s, " ")
+	s = strings.ReplaceAll(html.UnescapeString(s), "\u00a0", " ")
+	s = reCellEscape.ReplaceAllString(s, `\${0}`)
+	s = strings.TrimSpace(reWhitespaceRun.ReplaceAllString(s, " "))
+
+	for i, code := range codes {
+		// Decode before collapsing so entity-encoded newlines (&#10;) can't
+		// slip through and split the row. No TrimSpace: edge spaces are
+		// significant in code spans — codeSpanMarkdown pads so the parser's
+		// strip restores them.
+		code = reCodeNonSpaceWS.ReplaceAllString(html.UnescapeString(code), " ")
+		code = strings.ReplaceAll(code, "|", `\|`)
+		s = strings.Replace(s, "\x00"+strconv.Itoa(i)+"\x00", codeSpanMarkdown(code), 1)
+	}
+	return s
 }
 
 // reBRLine matches a <br> tag followed by an optional newline, collapsing
@@ -799,6 +1027,16 @@ var reBRLine = regexp.MustCompile(`(?i)<br\s*/?\s*>\n?`)
 // formatListItem converts a list item's HTML content to Markdown, handling
 // <br> tags as indented continuation lines.
 func formatListItem(prefix, indent, content string) string {
+	// Tables inside list items convert here, like quoted tables convert in
+	// the blockquote pass: the indentation below applies per line, so the
+	// pipe rows must already be in place. Editing stays blocked by
+	// HasComplexTableHTML.
+	content = reTableBlock.ReplaceAllStringFunc(content, func(s string) string {
+		if md := convertTableHTML(s); md != "" {
+			return "\n" + md + "\n"
+		}
+		return ""
+	})
 	content = strings.TrimSpace(content)
 	content = reBRLine.ReplaceAllString(content, "\n")
 	lines := strings.Split(content, "\n")
@@ -1005,6 +1243,19 @@ func blockquoteInnerToMarkdown(inner string) string {
 	content := strings.TrimSpace(inner)
 	content = reCodeBlock.ReplaceAllStringFunc(content, func(s string) string {
 		return convertCodeBlockHTML(s) + "\n\n"
+	})
+	// Quoted tables convert here, not in HTMLToMarkdown's parked table pass:
+	// the quote prefixes each line below, so the pipe rows must already be in
+	// place. The emitted cells then pass through the document-level unescape,
+	// which is inert for them — cell text is decoded once here and its
+	// ampersands are escaped, so no entity survives to decode again. Editing
+	// quoted tables stays blocked by HasComplexTableHTML regardless.
+	content = reTableBlock.ReplaceAllStringFunc(content, func(s string) string {
+		md := convertTableHTML(s)
+		if md == "" {
+			return "\n\n"
+		}
+		return md + "\n\n"
 	})
 	content = replaceBalancedListBlocks(content)
 	// Replace </p> with double newline (paragraph break) to separate adjacent blocks,
@@ -1506,15 +1757,152 @@ func IsHTML(s string) bool {
 // reTableHTML matches a real <table> tag — with attributes (`<table …>`), bare
 // (`<table>`), or self-closing (`<table/>`) — distinct from the Markdown table
 // detector. The trailing class requires a boundary after the name so longer
-// tags like <tablefoo> don't match. Used to gate the fail-closed TUI edit paths.
+// tags like <tablefoo> don't match.
 var reTableHTML = regexp.MustCompile(`(?i)<table[\s/>]`)
 
-// HasTableHTML reports whether s contains an HTML table element. The TUI in-place
-// editors use this to refuse table-bearing content: HTMLToMarkdown has no table
-// handling and would strip the structure, so those edits fail closed rather than
-// silently flatten the table on resubmit.
-func HasTableHTML(s string) bool {
-	return reTableHTML.MatchString(s)
+// reTableClose matches a closing </table> tag.
+var reTableClose = regexp.MustCompile(`(?i)</table\s*>`)
+
+// Complexity markers within a table block: merged cells (matched against a
+// cell's open-tag attributes, so prose that merely mentions colspan= stays
+// simple); block elements, captions, attachments, and images anywhere inside
+// the table; header cells beyond the first row (GFM has exactly one header
+// row); and cells whose content spans multiple paragraphs, divs, or lines.
+// All are shapes a GFM pipe table cannot represent — cellMarkdown flattens
+// them to single-line text for display, so resubmitting would lose the
+// structure.
+var (
+	reTableMergedCell   = regexp.MustCompile(`(?i)\b(?:colspan|rowspan)\s*=`)
+	reTableComplexInner = regexp.MustCompile(`(?i)<(?:ul|ol|pre|blockquote|h[1-6]|hr|caption|figure|img|bc-attachment)[\s/>]`)
+	reTableTH           = regexp.MustCompile(`(?i)<th[\s/>]`)
+	reOpeningDiv        = regexp.MustCompile(`(?i)<div(?:\s[^>]*)?>`)
+	// BC3's sanitizer preserves color/background-color styles; conversion
+	// strips them, so a styled tag anywhere in the table is data an edit
+	// would lose.
+	reTableStyledTag = regexp.MustCompile(`(?i)<[^>]*\bstyle\s*=`)
+)
+
+// reWholeCellWrapper matches cell content that is exactly one <p> or <div>
+// element wrapping everything — the shape whose boundary costs nothing to
+// flatten.
+var reWholeCellWrapper = regexp.MustCompile(`(?is)^(?:<p(?:\s[^>]*)?>.*</p\s*>|<div(?:\s[^>]*)?>.*</div\s*>)$`)
+
+// cellFlattensLineStructure reports whether a cell's inner HTML carries line
+// structure cellMarkdown would flatten to spaces: any <br>, more than one
+// block wrapper, or a single <p>/<div> that doesn't wrap the entire cell.
+func cellFlattensLineStructure(inner string) bool {
+	if reBR.MatchString(inner) {
+		return true
+	}
+	blocks := len(reOpeningP.FindAllString(inner, -1)) + len(reOpeningDiv.FindAllString(inner, -1))
+	if blocks > 1 {
+		return true
+	}
+	return blocks == 1 && !reWholeCellWrapper.MatchString(strings.TrimSpace(inner))
+}
+
+// reTableContext matches the tags whose nesting decides whether a table sits
+// inside another block container (a blockquote or a list item). GFM pipe
+// tables are top-level only, so a table nested in either cannot round-trip.
+var reTableContext = regexp.MustCompile(`(?i)<(/?)(blockquote|li|table)[\s/>]`)
+
+// tableHasGrid reports whether a table block contains at least one row with
+// at least one cell — the minimum structure convertTableHTML can emit.
+func tableHasGrid(block string) bool {
+	for _, row := range reTableRowHTML.FindAllStringSubmatch(block, -1) {
+		if reTableCellHTML.MatchString(row[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasComplexTableHTML reports whether s contains a table that HTMLToMarkdown
+// cannot round-trip as a GFM pipe table: merged cells (colspan/rowspan), a
+// nested table, block content inside a cell, or the table itself nested in a
+// blockquote or list. The TUI in-place editors use this to gate edits —
+// HTMLToMarkdown still converts such tables for display, best-effort, but an
+// edit-and-resubmit would flatten the structure, so those edits fail closed.
+// Simple grids round-trip cleanly and stay editable.
+func HasComplexTableHTML(s string) bool {
+	depth := 0
+	for _, m := range reTableContext.FindAllStringSubmatch(s, -1) {
+		closing := m[1] == "/"
+		if strings.EqualFold(m[2], "table") {
+			if !closing && depth > 0 {
+				return true
+			}
+		} else if closing {
+			if depth > 0 {
+				depth--
+			}
+		} else {
+			depth++
+		}
+	}
+
+	for {
+		open := reTableHTML.FindStringIndex(s)
+		if open == nil {
+			return false
+		}
+		rest := s[open[1]:]
+		closeTag := reTableClose.FindStringIndex(rest)
+		// No closing tag: the converter can't parse the table, so nothing
+		// about the edit loop is safe. Fail closed.
+		if closeTag == nil {
+			return true
+		}
+		block := rest[:closeTag[0]]
+		if reTableHTML.MatchString(block) {
+			return true
+		}
+		// A table the converter can't extract a grid from vanishes from the
+		// Markdown; if it holds any text, that vanishing is data loss.
+		if !tableHasGrid(block) && strings.TrimSpace(reStripTags.ReplaceAllString(block, "")) != "" {
+			return true
+		}
+		// Mentions are the one rich element cells may keep: they convert to
+		// **@Name** exactly as they do in body text. Strip them before
+		// scanning for content the conversion would lose.
+		stripped := reMentionAttachment.ReplaceAllString(block, "")
+		if reTableComplexInner.MatchString(stripped) || reTableStyledTag.MatchString(stripped) {
+			return true
+		}
+		var headerAligns []string
+		for ri, row := range reTableRowHTML.FindAllStringSubmatch(block, -1) {
+			// convertTableHTML promotes only the first row to the GFM header;
+			// a <th> in any later row would be demoted to a plain cell.
+			if ri > 0 && reTableTH.MatchString(row[1]) {
+				return true
+			}
+			for ci, cell := range reTableCellHTML.FindAllStringSubmatch(row[1], -1) {
+				if reTableMergedCell.MatchString(cell[1]) {
+					return true
+				}
+				if cellFlattensLineStructure(cell[2]) {
+					return true
+				}
+				// GFM alignment is a column property declared by the header
+				// row; a later cell whose align differs from its column's
+				// cannot round-trip. Our own MarkdownToHTML output aligns
+				// every cell with its column, so real CLI tables pass.
+				align := cellAlign(cell[1])
+				if ri == 0 {
+					headerAligns = append(headerAligns, align)
+				} else {
+					want := ""
+					if ci < len(headerAligns) {
+						want = headerAligns[ci]
+					}
+					if align != want {
+						return true
+					}
+				}
+			}
+		}
+		s = rest[closeTag[1]:]
+	}
 }
 
 func isEscapedAt(s string, pos int) bool {
