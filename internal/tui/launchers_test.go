@@ -36,15 +36,7 @@ var (
 	// bubbleteaLaunchers maps a file that may call tea.NewProgram to the sole
 	// function within it that may do so.
 	bubbleteaLaunchers = map[string]string{
-		"internal/tui/picker.go": "runPicker",
-
-		// Zero callers today and slated for deletion, but "dead" is not a gate:
-		// adding a caller would not add a NewProgram, so the check would still
-		// pass while the hang came back. Both launch from their own Run, and
-		// both apply the floor there.
-		"internal/tui/spinner.go":          "Run",
-		"internal/tui/paginated_picker.go": "Run",
-
+		"internal/tui/picker.go":   "runPicker",
 		"internal/commands/tui.go": "", // dev build tag; not in a shipped binary
 	}
 

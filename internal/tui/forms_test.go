@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -200,65 +199,6 @@ func TestPickerFloorRefusesNonInteractiveStdio(t *testing.T) {
 	}
 
 	assert.Zero(t, loaderCalls, "a refused picker must not fetch items it cannot show")
-}
-
-// TestDeadLaunchersStillRefuse covers Spinner and PaginatedPicker. Both are
-// exported, both have zero callers today, and both are slated for deletion —
-// but "nobody calls it" is not a gate. Adding a caller would not add a
-// tea.NewProgram, so the structural backstop would still pass while the hang
-// came straight back. They hold the floor until they are gone.
-func TestDeadLaunchersStillRefuse(t *testing.T) {
-	for _, kind := range stdinKinds {
-		t.Run("spinner/"+kind, func(t *testing.T) {
-			terminalStdout(t)
-			nonInteractiveStdin(t, kind)
-
-			var ran bool
-			done := make(chan error, 1)
-			go func() {
-				_, err := NewSpinner("working").Run(func() (string, error) {
-					ran = true
-					return "", nil
-				})
-				done <- err
-			}()
-
-			select {
-			case err := <-done:
-				assert.True(t, errors.Is(err, ErrNotInteractive),
-					"spinner should return ErrNotInteractive on %s stdin, got %v", kind, err)
-				assert.False(t, ran, "a refused spinner must not run the work it was wrapping")
-			case <-time.After(5 * time.Second):
-				t.Fatalf("spinner blocked on %s stdin instead of refusing", kind)
-			}
-		})
-
-		t.Run("paginated_picker/"+kind, func(t *testing.T) {
-			terminalStdout(t)
-			nonInteractiveStdin(t, kind)
-
-			var fetched bool
-			fetcher := func(context.Context, string) (*PageResult, error) {
-				fetched = true
-				return &PageResult{}, nil
-			}
-
-			done := make(chan error, 1)
-			go func() {
-				_, err := NewPaginatedPicker(context.Background(), fetcher).Run()
-				done <- err
-			}()
-
-			select {
-			case err := <-done:
-				assert.True(t, errors.Is(err, ErrNotInteractive),
-					"paginated picker should return ErrNotInteractive on %s stdin, got %v", kind, err)
-				assert.False(t, fetched, "a refused picker must not fetch a page it cannot show")
-			case <-time.After(5 * time.Second):
-				t.Fatalf("paginated picker blocked on %s stdin instead of refusing", kind)
-			}
-		})
-	}
 }
 
 // TestAutoSelectSingleWorksWithoutATerminal pins the one path through
