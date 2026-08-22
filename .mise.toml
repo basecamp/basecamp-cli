@@ -11,5 +11,5 @@ shellcheck = "0.11.0"
 # tests run locally instead of skipping.
 powershell = "7.6.5"
 # Keep in sync with the zizmor-action `version:` input in
-# .github/workflows/test.yml (the action's default floats to latest).
+# .github/workflows/test.yml so local bin/ci runs the same release CI does.
 zizmor = "1.29.0"
