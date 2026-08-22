@@ -86,6 +86,16 @@ make lint             # Linter
 make check            # All checks (what bin/ci runs)
 ```
 
+**Dead code**: `make deadcode` reports unreachable functions whole-program, rooted
+at the shipped binary and again with `-tags dev`. It is a report, not a gate, and
+is deliberately outside `make check`. The linter's `unused` cannot do this job —
+it runs per-package and counts every exported identifier in a non-main package as
+used, which is how 600 lines of exported, zero-caller `internal/tui` API survived
+it. Root it at the binary, not `./...`: only main packages are roots, so `./...`
+reports everything no main reaches — mostly the `dev`-tagged workspace tree — as
+unreachable. Read the output before acting on it: a zero-caller exported symbol is
+a candidate, not a verdict, and the `dev`-tagged tree is legitimately partial.
+
 Requirements: Go 1.26+, [bats-core](https://github.com/bats-core/bats-core) for e2e tests.
 
 ## OAuth Development
