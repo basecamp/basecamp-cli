@@ -573,12 +573,18 @@ func TestDetail_CommentEdit_Ignored_WhenNoFocus(t *testing.T) {
 	assert.False(t, v.editingComment)
 }
 
-const tableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
+// A simple grid round-trips through HTMLToMarkdown and stays editable; a
+// merged-cell grid cannot be represented as a GFM pipe table, so its edits
+// fail closed.
+const simpleTableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
 	"<tbody><tr><td>Baz</td></tr></tbody></table></figure>"
 
-func TestDetail_EditBody_BlockedForTable(t *testing.T) {
+const complexTableHTML = "<figure><table><thead><tr><th>Foo</th><th>Bar</th></tr></thead>" +
+	"<tbody><tr><td colspan=\"2\">Baz</td></tr></tbody></table></figure>"
+
+func TestDetail_EditBody_BlockedForComplexTable(t *testing.T) {
 	v := testDetailWithSession("Message", false)
-	v.data.content = tableHTML
+	v.data.content = complexTableHTML
 
 	cmd := v.startEditBody()
 	assert.False(t, v.editingBody, "must not enter edit mode on table content")
@@ -601,10 +607,35 @@ func TestDetail_EditBody_EntersForNonTable(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
-func TestDetail_CommentEdit_BlockedForTable(t *testing.T) {
+func TestDetail_EditBody_EntersForSimpleTable(t *testing.T) {
+	v := testDetailWithSession("Message", false)
+	v.data.content = simpleTableHTML
+
+	cmd := v.startEditBody()
+	assert.True(t, v.editingBody, "should enter edit mode on simple-table content")
+	require.NotNil(t, v.bodyEditComposer, "composer should be built")
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "| Foo |\n| --- |\n| Baz |", v.bodyEditComposer.Value(),
+		"composer should hold the table as Markdown")
+}
+
+func TestDetail_CommentEdit_EntersForSimpleTable(t *testing.T) {
 	v := detailWithComments()
 	v.focusedComment = 0
-	v.data.comments[0].content = tableHTML
+	v.data.comments[0].content = simpleTableHTML
+
+	cmd := v.startCommentEdit()
+	assert.True(t, v.editingComment, "should enter edit mode on simple-table content")
+	require.NotNil(t, v.commentEditComposer, "composer should be built")
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "| Foo |\n| --- |\n| Baz |", v.commentEditComposer.Value(),
+		"composer should hold the table as Markdown")
+}
+
+func TestDetail_CommentEdit_BlockedForComplexTable(t *testing.T) {
+	v := detailWithComments()
+	v.focusedComment = 0
+	v.data.comments[0].content = complexTableHTML
 
 	cmd := v.startCommentEdit()
 	assert.False(t, v.editingComment, "must not enter edit mode on table content")

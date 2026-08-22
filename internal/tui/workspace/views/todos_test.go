@@ -942,20 +942,23 @@ func TestTodos_BoostTarget_IncludesAccountID(t *testing.T) {
 	assert.Equal(t, int64(42), picker.Target.ProjectID)
 }
 
-// --- Edit description: table fail-closed guard ---
+// --- Edit description: complex-table fail-closed guard ---
 
-const todoTableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
+const todoSimpleTableHTML = "<figure><table><thead><tr><th>Foo</th></tr></thead>" +
 	"<tbody><tr><td>Baz</td></tr></tbody></table></figure>"
 
-func TestTodos_EditDescription_BlockedForTable(t *testing.T) {
+const todoComplexTableHTML = "<figure><table><thead><tr><th>Foo</th><th>Bar</th></tr></thead>" +
+	"<tbody><tr><td colspan=\"2\">Baz</td></tr></tbody></table></figure>"
+
+func TestTodos_EditDescription_BlockedForComplexTable(t *testing.T) {
 	v := testTodosViewWithTodos()
 
 	todos := sampleTodos()
-	todos[0].Description = todoTableHTML
+	todos[0].Description = todoComplexTableHTML
 	v.session.Hub().Todos(42, 10).Set(todos)
 
 	cmd := v.startEditDescription()
-	assert.False(t, v.editingDesc, "must not enter edit mode on table content")
+	assert.False(t, v.editingDesc, "must not enter edit mode on complex-table content")
 
 	require.NotNil(t, cmd, "should return a status command")
 	status, ok := cmd().(workspace.StatusMsg)
@@ -975,6 +978,21 @@ func TestTodos_EditDescription_EntersForNonTable(t *testing.T) {
 	cmd := v.startEditDescription()
 	assert.True(t, v.editingDesc, "should enter edit mode on table-free content")
 	assert.NotNil(t, cmd)
+}
+
+func TestTodos_EditDescription_EntersForSimpleTable(t *testing.T) {
+	v := testTodosViewWithTodos()
+	v.descComposer = widget.NewComposer(v.styles, widget.WithMode(widget.ComposerRich))
+
+	todos := sampleTodos()
+	todos[0].Description = todoSimpleTableHTML
+	v.session.Hub().Todos(42, 10).Set(todos)
+
+	cmd := v.startEditDescription()
+	assert.True(t, v.editingDesc, "should enter edit mode on simple-table content")
+	assert.NotNil(t, cmd)
+	assert.Equal(t, "| Foo |\n| --- |\n| Baz |", v.descComposer.Value(),
+		"composer should hold the table as Markdown, line structure intact")
 }
 
 // newTextInputWithValue creates a textinput with a preset value for testing.

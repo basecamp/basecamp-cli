@@ -922,6 +922,48 @@ func TestEditLoopRoundTrip(t *testing.T) {
 			markdown: "# Title\n\nSome **bold** text.\n\n- Item 1\n- Item 2\n\n> A quote\n\n```\ncode\n```",
 			expected: "# Title\n\nSome **bold** text.\n\n- Item 1\n- Item 2\n\n> A quote\n\n```\ncode\n```",
 		},
+		{
+			name:     "table",
+			markdown: "| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+			expected: "| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+		},
+		{
+			name:     "table with alignment",
+			markdown: "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |",
+			expected: "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |",
+		},
+		{
+			// The #648 separator (<p><br></p>) before the table must come back
+			// as the blank line it encodes.
+			name:     "paragraph then table",
+			markdown: "Intro.\n\n| a | b |\n| --- | --- |\n| c | d |",
+			expected: "Intro.\n\n| a | b |\n| --- | --- |\n| c | d |",
+		},
+		{
+			name:     "table cell with escaped pipe after backslash",
+			markdown: "| h |\n| --- |\n| a\\\\\\|b |",
+			expected: "| h |\n| --- |\n| a\\\\\\|b |",
+		},
+		{
+			name:     "table cell with code span containing a pipe",
+			markdown: "| h |\n| --- |\n| `a\\|b` |",
+			expected: "| h |\n| --- |\n| `a\\|b` |",
+		},
+		{
+			name:     "table cell with ampersand",
+			markdown: "| h |\n| --- |\n| AT\\&T |",
+			expected: "| h |\n| --- |\n| AT\\&T |",
+		},
+		{
+			name:     "table cell with code span containing a backtick",
+			markdown: "| h |\n| --- |\n| ``a`b`` |",
+			expected: "| h |\n| --- |\n| ``a`b`` |",
+		},
+		{
+			name:     "table cell with space-padded code span",
+			markdown: "| h |\n| --- |\n| `  a  ` |",
+			expected: "| h |\n| --- |\n| `  a  ` |",
+		},
 	}
 
 	for _, tt := range tests {
@@ -930,6 +972,279 @@ func TestEditLoopRoundTrip(t *testing.T) {
 			back := HTMLToMarkdown(html)
 			if back != tt.expected {
 				t.Errorf("round-trip mismatch\nmarkdown: %q\nhtml:     %q\ngot:      %q\nwant:     %q", tt.markdown, html, back, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHTMLToMarkdownTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "thead th and tbody td",
+			input:    "<table>\n<thead>\n<tr>\n<th>Foo</th>\n<th>Bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Baz</td>\n<td>Qux</td>\n</tr>\n</tbody>\n</table>",
+			expected: "| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+		},
+		{
+			// Trix-style grid with no <thead>: the first row is promoted to
+			// the header — GFM has no headerless tables.
+			name:     "td-only table",
+			input:    "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>",
+			expected: "| a | b |\n| --- | --- |\n| c | d |",
+		},
+		{
+			name:     "alignment attributes",
+			input:    `<table><thead><tr><th align="left">L</th><th align="center">C</th><th align="right">R</th></tr></thead><tbody><tr><td align="left">a</td><td align="center">b</td><td align="right">c</td></tr></tbody></table>`,
+			expected: "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |",
+		},
+		{
+			name:     "pipe in cell text is escaped",
+			input:    "<table><tr><td>a|b</td><td>c</td></tr></table>",
+			expected: "| a\\|b | c |\n| --- | --- |",
+		},
+		{
+			name:     "inline formatting in cells",
+			input:    `<table><tr><th>Who</th><th>What</th></tr><tr><td><strong>bold</strong> and <em>italic</em></td><td><code>code</code> and <a href="https://example.com">link</a></td></tr></table>`,
+			expected: "| Who | What |\n| --- | --- |\n| **bold** and *italic* | `code` and [link](https://example.com) |",
+		},
+		{
+			name:     "mention in cell",
+			input:    `<table><tr><th>Owner</th></tr><tr><td><bc-attachment content-type="application/vnd.basecamp.mention"><figure><img alt="Jane Doe"><figcaption>Jane Doe</figcaption></figure></bc-attachment></td></tr></table>`,
+			expected: "| Owner |\n| --- |\n| **@Jane Doe** |",
+		},
+		{
+			name:     "multi-paragraph cell joins with spaces",
+			input:    "<table><tr><th>Notes</th></tr><tr><td><p>one</p><p>two</p></td></tr></table>",
+			expected: "| Notes |\n| --- |\n| one two |",
+		},
+		{
+			name:     "br in cell joins with spaces",
+			input:    "<table><tr><th>Notes</th></tr><tr><td>one<br>two</td></tr></table>",
+			expected: "| Notes |\n| --- |\n| one two |",
+		},
+		{
+			name:     "ragged row padded to header width",
+			input:    "<table><tr><th>a</th><th>b</th></tr><tr><td>c</td></tr></table>",
+			expected: "| a | b |\n| --- | --- |\n| c |  |",
+		},
+		{
+			// Truncating would silently drop cell data, so the widest row
+			// sizes the table.
+			name:     "row wider than header widens the table",
+			input:    "<table><tr><th>a</th></tr><tr><td>b</td><td>c</td></tr></table>",
+			expected: "| a |  |\n| --- | --- |\n| b | c |",
+		},
+		{
+			// A literal backslash must double, or GFM's left-to-right escape
+			// processing would pair it with the escaped pipe's backslash and
+			// turn the pipe back into a delimiter.
+			name:     "backslash before pipe in cell text",
+			input:    `<table><tr><td>a\|b</td><td>c</td></tr></table>`,
+			expected: "| a\\\\\\|b | c |\n| --- | --- |",
+		},
+		{
+			// Backslashes are literal inside code spans, so only the pipe is
+			// escaped there.
+			name:     "code span with pipe and backslash",
+			input:    `<table><tr><td><code>a|b</code></td><td><code>c\d</code></td></tr></table>`,
+			expected: "| `a\\|b` | `c\\d` |\n| --- | --- |",
+		},
+		{
+			name:     "table between paragraphs",
+			input:    "<p>Intro.</p>\n<p><br></p>\n<table>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>b</td>\n</tr>\n</tbody>\n</table>\n<p><br></p>\n<p>After.</p>",
+			expected: "Intro.\n\n| a |\n| --- |\n| b |\n\nAfter.",
+		},
+		{
+			// Best-effort display of shapes GFM can't represent: merged cells
+			// emit as ordinary cells (editing stays guarded by
+			// HasComplexTableHTML).
+			name:     "colspan cell emits as ordinary cell",
+			input:    `<table><tr><th>a</th><th>b</th></tr><tr><td colspan="2">wide</td></tr></table>`,
+			expected: "| a | b |\n| --- | --- |\n| wide |  |",
+		},
+		{
+			// Quoted tables convert inside the blockquote pass so every pipe
+			// row carries the quote prefix; editing them stays guarded.
+			name:     "table inside blockquote keeps the quote",
+			input:    "<blockquote><table><tr><th>a</th></tr><tr><td>b</td></tr></table></blockquote>",
+			expected: "> | a |\n> | --- |\n> | b |",
+		},
+		{
+			// List-nested tables convert inside the list pass so every pipe
+			// row carries the item indent; editing them stays guarded.
+			name:     "table inside list item keeps the indent",
+			input:    "<ul><li><table><tr><th>a</th></tr><tr><td>b</td></tr></table></li></ul>",
+			expected: "- | a |\n  | --- |\n  | b |",
+		},
+		{
+			// GFM has no captions; the text surfaces as a paragraph above the
+			// grid instead of vanishing. Editing stays guarded.
+			name:     "caption becomes a leading paragraph",
+			input:    "<table><caption>Quarterly results</caption><tr><th>a</th></tr><tr><td>b</td></tr></table>",
+			expected: "Quarterly results\n\n| a |\n| --- |\n| b |",
+		},
+		{
+			name:     "empty table vanishes",
+			input:    "<p>Before.</p><table></table><p>After.</p>",
+			expected: "Before.\n\nAfter.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := HTMLToMarkdown(tt.input)
+			if result != tt.expected {
+				t.Errorf("HTMLToMarkdown(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestHTMLToMarkdownTableGoldmarkRoundTrip verifies cell CONTENT survives a
+// full HTML -> Markdown -> HTML cycle by checking what goldmark parses back
+// out of the emitted pipe table — not just the Markdown bytes. This is what
+// proves the escaping actually escapes: a broken escape still produces
+// plausible-looking Markdown, but goldmark splits the row differently.
+func TestHTMLToMarkdownTableGoldmarkRoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantInHTML []string
+		wantTables int
+	}{
+		{
+			name:       "backslash before pipe in text",
+			input:      `<table><tr><th>h</th></tr><tr><td>a\|b</td></tr></table>`,
+			wantInHTML: []string{`<td>a\|b</td>`},
+			wantTables: 1,
+		},
+		{
+			name:       "code span containing a pipe",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a|b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a|b</code></td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "code span containing a backslash",
+			input:      `<table><tr><th>h</th></tr><tr><td><code>a\b</code></td></tr></table>`,
+			wantInHTML: []string{`<td><code>a\b</code></td>`},
+			wantTables: 1,
+		},
+		{
+			// goldmark percent-encodes the escaped pipe in the destination;
+			// the URL is equivalent and the row stays intact.
+			name:       "link destination containing a pipe",
+			input:      `<table><tr><th>h</th></tr><tr><td><a href="https://example.com/a|b">t</a></td></tr></table>`,
+			wantInHTML: []string{`<td><a href="https://example.com/a%7Cb">t</a></td>`},
+			wantTables: 1,
+		},
+		{
+			// An encoded pipe is still a pipe: goldmark decodes the entity on
+			// the next render, so cellMarkdown must decode-then-escape or the
+			// entity smuggles an unescaped pipe into the cell.
+			name:       "entity-encoded pipe in text",
+			input:      "<table><tr><th>h</th></tr><tr><td>a&#124;b</td></tr></table>",
+			wantInHTML: []string{"<td>a|b</td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "entity-encoded backslash before pipe",
+			input:      "<table><tr><th>h</th></tr><tr><td>a&#92;|b</td></tr></table>",
+			wantInHTML: []string{`<td>a\|b</td>`},
+			wantTables: 1,
+		},
+		{
+			name:       "entity-encoded pipe inside code",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a&#124;b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a|b</code></td>"},
+			wantTables: 1,
+		},
+		{
+			// A decoded literal that still looks like an entity must not be
+			// decoded a second time: the escaped ampersand keeps it literal.
+			name:       "entity-looking literal survives",
+			input:      "<table><tr><th>h</th></tr><tr><td>&amp;#124;</td></tr></table>",
+			wantInHTML: []string{"<td>&amp;#124;</td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "code span containing a backtick",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a`b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a`b</code></td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "code span keeps interior spaces",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a  b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a  b</code></td>"},
+			wantTables: 1,
+		},
+		{
+			// Edge spaces are significant in code spans: the emission pads so
+			// the parser's one-space strip restores the original content.
+			name:       "code span keeps edge spaces",
+			input:      "<table><tr><th>h</th></tr><tr><td><code> a </code></td></tr></table>",
+			wantInHTML: []string{"<td><code> a </code></td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "code span keeps a trailing space",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a </code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a </code></td>"},
+			wantTables: 1,
+		},
+		{
+			name:       "all-space code span survives",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>   </code></td></tr></table>",
+			wantInHTML: []string{"<td><code>   </code></td>"},
+			wantTables: 1,
+		},
+		{
+			// Decode-then-collapse: an entity-encoded newline must not split
+			// the row.
+			name:       "code span with entity-encoded newline",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a&#10;b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>a b</code></td>"},
+			wantTables: 1,
+		},
+		{
+			// Zero-gap adjacent code elements coalesce: GFM can't express
+			// them separately, and one span renders identically.
+			name:       "adjacent code spans coalesce",
+			input:      "<table><tr><th>h</th></tr><tr><td><code>a</code><code>b</code></td></tr></table>",
+			wantInHTML: []string{"<td><code>ab</code></td>"},
+			wantTables: 1,
+		},
+		{
+			// goldmark honors the escaped pipe inside code spans, backslash
+			// context included — the row must not split here.
+			name:       "code span with backslash before pipe",
+			input:      `<table><tr><th>h</th></tr><tr><td><code>a\|b</code></td></tr></table>`,
+			wantInHTML: []string{`<td><code>a\|b</code></td>`},
+			wantTables: 1,
+		},
+		{
+			name:       "adjacent tables stay separate",
+			input:      "<table><tr><th>one</th></tr></table>\n<p><br></p>\n<table><tr><th>two</th></tr></table>",
+			wantInHTML: []string{"<th>one</th>", "<th>two</th>"},
+			wantTables: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			md := HTMLToMarkdown(tt.input)
+			html := MarkdownToHTML(md)
+			for _, want := range tt.wantInHTML {
+				if !strings.Contains(html, want) {
+					t.Errorf("round-trip HTML missing %q\nmarkdown: %q\nhtml:     %q", want, md, html)
+				}
+			}
+			if got := strings.Count(html, "<table"); got != tt.wantTables {
+				t.Errorf("round-trip HTML has %d tables, want %d\nmarkdown: %q\nhtml:     %q", got, tt.wantTables, md, html)
 			}
 		})
 	}
@@ -1330,25 +1645,59 @@ func TestIsHTML(t *testing.T) {
 	}
 }
 
-func TestHasTableHTML(t *testing.T) {
+func TestHasComplexTableHTML(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
 		expected bool
 	}{
-		{name: "lowercase table tag", input: "<table><tr><td>x</td></tr></table>", expected: true},
-		{name: "uppercase table tag with attrs", input: `<TABLE class="x"><tr></tr></TABLE>`, expected: true},
-		{name: "self-closing table tag", input: "<table/>", expected: true},
-		{name: "wrapped table", input: "<figure><table></table></figure>", expected: true},
-		{name: "plain text", input: "just some text", expected: false},
-		{name: "pipe markdown", input: "| a | b |\n| --- | --- |\n| 1 | 2 |", expected: false},
+		{name: "colspan cell", input: `<table><tr><td colspan="2">x</td></tr></table>`, expected: true},
+		{name: "rowspan cell", input: `<table><tr><td rowspan="3">x</td><td>y</td></tr></table>`, expected: true},
+		{name: "uppercase colspan", input: `<TABLE><TR><TD COLSPAN="2">x</TD></TR></TABLE>`, expected: true},
+		{name: "whitespace around colspan equals", input: `<table><tr><td colspan = "2">x</td></tr></table>`, expected: true},
+		{name: "colspan mentioned in cell text stays simple", input: "<table><tr><td>Set colspan=2 here</td></tr></table>", expected: false},
+		{name: "second header row", input: "<table><thead><tr><th>A</th></tr><tr><th>B</th></tr></thead></table>", expected: true},
+		{name: "div-separated cell", input: "<table><tr><td><div>one</div><div>two</div></td></tr></table>", expected: true},
+		{name: "single-div cell stays simple", input: "<table><tr><td><div>one</div></td></tr></table>", expected: false},
+		{name: "partially wrapped cell", input: "<table><tr><td>before<p>inside</p>after</td></tr></table>", expected: true},
+		{name: "hr in cell", input: "<table><tr><td>a<hr>b</td></tr></table>", expected: true},
+		{name: "body cell align conflicts with column", input: `<table><tr><th>h</th></tr><tr><td align="right">x</td></tr></table>`, expected: true},
+		{name: "body cell align matches column stays simple", input: `<table><tr><th align="right">h</th></tr><tr><td align="right">x</td></tr></table>`, expected: false},
+		{name: "styled span in cell", input: `<table><tr><td><span style="color: red">urgent</span></td></tr></table>`, expected: true},
+		{name: "plain span in cell stays simple", input: "<table><tr><td><span>plain</span></td></tr></table>", expected: false},
+		{name: "nested table", input: "<table><tr><td><table><tr><td>x</td></tr></table></td></tr></table>", expected: true},
+		{name: "list in cell", input: "<table><tr><td><ul><li>x</li></ul></td></tr></table>", expected: true},
+		{name: "ordered list in cell", input: "<table><tr><td><ol><li>x</li></ol></td></tr></table>", expected: true},
+		{name: "code block in cell", input: "<table><tr><td><pre>x</pre></td></tr></table>", expected: true},
+		{name: "blockquote in cell", input: "<table><tr><td><blockquote>x</blockquote></td></tr></table>", expected: true},
+		{name: "heading in cell", input: "<table><tr><td><h3>x</h3></td></tr></table>", expected: true},
+		{name: "plain grid", input: "<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>x</td></tr></tbody></table>", expected: false},
+		{name: "grid with inline formatting", input: "<table><tr><td><strong>x</strong> and <a href=\"u\">y</a></td></tr></table>", expected: false},
+		{name: "no table at all", input: "<p>colspan= is mentioned outside a table</p><ul><li>x</li></ul>", expected: false},
+		{name: "block after simple table", input: "<table><tr><td>x</td></tr></table><ul><li>y</li></ul>", expected: false},
+		{name: "second table is complex", input: `<table><tr><td>x</td></tr></table><table><tr><td colspan="2">y</td></tr></table>`, expected: true},
+		{name: "caption", input: "<table><caption>c</caption><tr><td>x</td></tr></table>", expected: true},
+		{name: "rowless table with content", input: "<table><div>orphan</div></table>", expected: true},
+		{name: "cellless row with content", input: "<table><tr>orphan</tr></table>", expected: true},
+		{name: "empty table stays simple", input: "<table></table>", expected: false},
+		{name: "unclosed table", input: "<table><tr><td>x</td></tr>", expected: true},
+		{name: "image in cell", input: `<table><tr><td><img src="u" alt="a"></td></tr></table>`, expected: true},
+		{name: "attachment in cell", input: `<table><tr><td><bc-attachment filename="f.pdf"/></td></tr></table>`, expected: true},
+		{name: "mention in cell stays simple", input: `<table><tr><td><bc-attachment content-type="application/vnd.basecamp.mention"><figure><img alt="Jane"><figcaption>Jane</figcaption></figure></bc-attachment></td></tr></table>`, expected: false},
+		{name: "multi-paragraph cell", input: "<table><tr><td><p>a</p><p>b</p></td></tr></table>", expected: true},
+		{name: "br in cell", input: "<table><tr><td>a<br>b</td></tr></table>", expected: true},
+		{name: "single-paragraph cell stays simple", input: "<table><tr><td><p>a</p></td></tr></table>", expected: false},
+		{name: "table inside blockquote", input: "<blockquote><table><tr><td>x</td></tr></table></blockquote>", expected: true},
+		{name: "table inside list item", input: "<ul><li><table><tr><td>x</td></tr></table></li></ul>", expected: true},
+		{name: "blockquote then separate table", input: "<blockquote>quote</blockquote><table><tr><td>x</td></tr></table>", expected: false},
 		{name: "word starting with table", input: "the tablet is here", expected: false},
+		{name: "pipe markdown", input: "| a | b |\n| --- | --- |\n| 1 | 2 |", expected: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := HasTableHTML(tt.input); got != tt.expected {
-				t.Errorf("HasTableHTML(%q) = %v, want %v", tt.input, got, tt.expected)
+			if got := HasComplexTableHTML(tt.input); got != tt.expected {
+				t.Errorf("HasComplexTableHTML(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
 		})
 	}
