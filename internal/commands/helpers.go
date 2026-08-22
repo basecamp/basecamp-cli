@@ -56,29 +56,90 @@ func noChanges(cmd *cobra.Command) error {
 	return cmd.Help()
 }
 
-// ensureDeleteConfirmable rejects an invocation that will reach a confirmation
-// prompt it cannot drive. isNonInteractiveCommand decides whether to prompt at
-// all, but it reads flags, the env var and stdout — never stdin. The gap is a
-// PTY with stdin redirected, which is how an agent says "I have nothing to
-// type": the prompt is not skipped, and bubbletea answers a non-terminal stdin
-// by opening /dev/tty and waiting on the real terminal. It asks
-// InteractivePrompt rather than InteractiveStdio because the confirmation is a
-// huh form, which draws to stderr.
+// machineReadsThisOutput reports whether the envelope being written will be
+// parsed by a program rather than read by a person.
+func machineReadsThisOutput(cmd *cobra.Command) bool {
+	app := appctx.FromContext(cmd.Context())
+	if app == nil || app.Output == nil {
+		return isMachineOutput(cmd)
+	}
+	switch app.Output.EffectiveFormat() {
+	case output.FormatStyled, output.FormatMarkdown:
+		// Both are written to be read: styled for a terminal, Markdown for a
+		// file or a pager like glow. Redirecting either does not change that.
+		return false
+	default:
+		// JSON, quiet, ids, count — parsed, not read.
+		return true
+	}
+}
+
+// deleteNeedsForce reports whether a delete in this invocation's context would
+// have to carry --force: either no confirmation will be shown (machine output),
+// or one would be shown to stdio that cannot answer it.
 //
-// Deliberately narrow: this does not change when a command prompts, only what
-// happens when the prompt it already decided to show cannot be answered.
-// Widening isNonInteractiveCommand itself would change missingArg and noChanges
-// across many commands, which is a separate decision.
+// The three clauses are the three distinct ways a confirmation fails to happen,
+// and each needs its own question:
+//
+//   - BASECAMP_NONINTERACTIVE: the operator said never prompt me.
+//   - machineReadsThisOutput: a program is parsing this, so no prompt is shown.
+//     Deliberately NOT isNonInteractiveCommand, whose isMachineOutput treats any
+//     redirected stdout as machine — that would demand --force for
+//     `chat delete … --md >report.md` even though the confirmation draws to a
+//     terminal stderr and a person can answer it.
+//   - InteractivePrompt: a prompt would be shown but nothing could answer it.
+//
+// This is about the invocation running now. A breadcrumb suggesting a *future*
+// delete asks a narrower question — see deleteLineCmd, which uses the audience
+// clause alone, because the current process's stdin and env say nothing about
+// the terminal the reader will paste into.
+func deleteNeedsForce(cmd *cobra.Command) bool {
+	return config.NonInteractiveEnv() || machineReadsThisOutput(cmd) || !stdinarg.InteractivePrompt()
+}
+
+// ensureDeleteConfirmable gates a permanent, non-trashable delete on one
+// invariant: it happens only when the caller said --force, or when a
+// confirmation will actually be shown and can actually be answered.
+//
+// That leaves exactly three outcomes, and no fourth:
+//
+//   - --force: proceed. The caller stated the intent explicitly.
+//   - a confirmation that will be shown and can be answered: prompt, and let
+//     the answer decide.
+//   - anything else: refuse, naming --force, before any lookup or request.
+//
+// The "anything else" is two distinct cases that used to end differently.
+// Machine-output mode skips the prompt entirely, so the delete went through
+// unconfirmed — `basecamp chat delete <id> --json` destroyed a message with no
+// statement of intent anywhere in the invocation. And a terminal with stdin
+// redirected does not skip the prompt: isNonInteractiveCommand reads flags, the
+// env var and stdout, never stdin, so the confirmation is shown to an agent
+// that has nothing to type with, and bubbletea answers a non-terminal stdin by
+// opening /dev/tty and waiting on the real terminal.
+//
+// Both are the same failure — a destructive act with nobody affirming it — so
+// both get the same answer. Requiring the flag precisely where no human can
+// confirm is the point; it is not an obstacle to a caller who means it, since
+// --force is one word and already the documented form.
+//
+// It asks InteractivePrompt rather than InteractiveStdio because the
+// confirmation is a huh form, which draws to stderr.
+//
+// isNonInteractiveCommand is read, never widened: its other callers (missingArg,
+// noChanges) use it to choose between help and a structured error, and changing
+// it would move behavior across many commands.
 func ensureDeleteConfirmable(cmd *cobra.Command, force bool) error {
-	if force || isNonInteractiveCommand(cmd) || stdinarg.InteractivePrompt() {
+	if force || !deleteNeedsForce(cmd) {
 		return nil
 	}
 	// Name the requirement, not one end of it: this also fires when stdin is a
 	// terminal but stderr is redirected, where the confirmation would be drawn
 	// somewhere nobody can see it.
 	return output.ErrUsageHint(
-		"This deletion needs a confirmation that can't be shown or answered here",
-		"Confirming needs a terminal on both stdin and stderr. Pass --force to delete without confirming.")
+		"Permanent deletion needs --force here",
+		"Nothing can confirm this delete: it is not trashable and cannot be undone. "+
+			"Machine-output modes show no prompt at all, and confirming interactively needs a "+
+			"terminal on both stdin and stderr. Pass --force to state the intent explicitly.")
 }
 
 // isNonInteractiveCommand returns true when command-level flows should avoid

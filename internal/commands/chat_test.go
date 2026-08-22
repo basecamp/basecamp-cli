@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -1511,21 +1513,28 @@ func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	assert.Equal(t, "111", data["id"])
 }
 
-// TestChatDeleteSkipsPromptInAgentMode verifies that --agent mode skips the
-// confirmation prompt and issues the DELETE call.
-func TestChatDeleteSkipsPromptInAgentMode(t *testing.T) {
+// TestChatDeleteRequiresForceInAgentMode is the inverse of what this test used
+// to assert. Agent mode skips the confirmation prompt — that part is unchanged
+// and correct — but it used to then delete anyway, so `basecamp chat delete
+// <id> --agent` permanently destroyed a message with no statement of intent
+// anywhere in the invocation and nobody in a position to object. Skipping the
+// prompt is not the same as answering it.
+func TestChatDeleteRequiresForceInAgentMode(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
-	transport := &mockChatDeleteTransport{}
+	transport := &countingChatTransport{inner: &mockChatDeleteTransport{}}
 	app, _ := newChatDeleteTestApp(transport)
 	app.Flags.Agent = true // machine output — no prompt
 
 	cmd := NewChatCmd()
 	err := executeChatCommand(cmd, app, "delete", "111")
-	require.NoError(t, err)
+	require.Error(t, err)
 
-	assert.Equal(t, "DELETE", transport.capturedMethod)
-	assert.Contains(t, transport.capturedPath, "/lines/")
+	outErr := output.AsError(err)
+	require.NotNil(t, outErr)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Hint, "--force")
+	assert.Zero(t, transport.requests, "nothing should have been requested, let alone deleted")
 }
 
 // TestChatDeleteForceSkipsPrompt verifies that --force bypasses the confirmation
@@ -1812,31 +1821,115 @@ func TestChatPostRejectsPositionalWithContentFlag(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot combine")
 }
 
-// TestChatDeleteRefusesWhenStdinCannotConfirm covers the gap isMachineOutput
-// cannot see: it checks flags, the env var and stdout, never stdin. An agent in
-// a PTY with stdin on /dev/null and no --json reaches the confirmation prompt,
-// which used to block on /dev/tty. It must now fail with a usage error naming
-// --force, before it issues a single request.
-func TestChatDeleteRefusesWhenStdinCannotConfirm(t *testing.T) {
-	for _, kind := range []string{"pipe", "devnull"} {
-		t.Run(kind, func(t *testing.T) {
+// TestChatDeleteConfirmationMatrix pins the whole invariant: a permanent delete
+// happens only with --force, or with a confirmation that will be shown and can
+// be answered. Every other shape refuses, names --force, and issues nothing.
+//
+// Each row starts from an invocation that would genuinely prompt — styled
+// output, and stdin/stderr on a pty — and then removes exactly one thing. That
+// setup is the whole point of the test: with the fixture's default JSON output,
+// or with go test's non-terminal stdio, every row refuses through a condition it
+// was not testing, and the table passes with any single guard deleted.
+//
+// The format field is what production would actually render for that input, so
+// the flag and config rows exercise the path from their input to the audience
+// decision rather than asserting it in the fixture.
+func TestChatDeleteConfirmationMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		format  output.Format // what this invocation renders; Styled = a person reads it
+		apply   func(t *testing.T, app *appctx.App)
+		args    []string
+		deletes bool
+	}{
+		{
+			name:   "agent mode renders quiet, which is parsed",
+			format: output.FormatQuiet,
+			apply:  func(_ *testing.T, app *appctx.App) { app.Flags.Agent = true },
+		},
+		{
+			name:   "json mode is parsed",
+			format: output.FormatJSON,
+			apply:  func(_ *testing.T, app *appctx.App) { app.Flags.JSON = true },
+		},
+		{
+			name:   "quiet mode is parsed",
+			format: output.FormatQuiet,
+			apply:  func(_ *testing.T, app *appctx.App) { app.Flags.Quiet = true },
+		},
+		{
+			name:   "config-driven json is parsed",
+			format: output.FormatJSON,
+			apply:  func(_ *testing.T, app *appctx.App) { app.Config.Format = "json" },
+		},
+		{
+			// Styled output: only the env var disqualifies this one, so
+			// deleting the NonInteractiveEnv clause must fail exactly here.
+			name:   "noninteractive env, despite human output",
+			format: output.FormatStyled,
+			apply: func(t *testing.T, _ *appctx.App) {
+				t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+			},
+		},
+		{
+			// Styled output and no env var: only stdin disqualifies these.
+			name:   "piped stdin, despite human output",
+			format: output.FormatStyled,
+			apply:  func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "pipe") },
+		},
+		{
+			name:   "stdin on /dev/null, despite human output",
+			format: output.FormatStyled,
+			apply:  func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "devnull") },
+		},
+		{
+			name:    "forced in agent mode",
+			format:  output.FormatQuiet,
+			apply:   func(_ *testing.T, app *appctx.App) { app.Flags.Agent = true },
+			args:    []string{"--force"},
+			deletes: true,
+		},
+		{
+			name:    "forced with stdin on /dev/null",
+			format:  output.FormatStyled,
+			apply:   func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "devnull") },
+			args:    []string{"--force"},
+			deletes: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("BASECAMP_NO_KEYRING", "1")
-			nonInteractiveStdin(t, kind)
+			t.Setenv("BASECAMP_NONINTERACTIVE", "") // rows opt in; no leakage between them
+			promptableStdio(t)
 
 			transport := &countingChatTransport{inner: &mockChatDeleteTransport{}}
+			buf := &bytes.Buffer{}
 			app, _ := newChatDeleteTestApp(transport)
-			// No machine-output flag and a *bytes.Buffer stdout, so
-			// isNonInteractiveCommand is false and the confirm is reached.
+			// Override the fixture's JSON writer: it would otherwise refuse
+			// every row through the audience clause, whatever the row is about.
+			app.Output = output.New(output.Options{Format: tc.format, Writer: buf})
+			tc.apply(t, app)
 
 			cmd := NewChatCmd()
-			err := executeChatCommand(cmd, app, "delete", "111")
-			require.Error(t, err, "delete must not silently succeed on a confirmation nobody can answer")
+			// Bounded, because promptableStdio hands the process a real pty:
+			// if a regression lets one of these rows reach the confirmation,
+			// huh waits for a keystroke that never comes and the suite hangs
+			// instead of failing. A hung CI job is a much worse signal than a
+			// red one — it looks like infrastructure, not like this test.
+			err := executeChatWithin(t, cmd, app, 10*time.Second,
+				append([]string{"delete", "111"}, tc.args...)...)
 
+			if tc.deletes {
+				require.NoError(t, err)
+				assert.Equal(t, "DELETE", transport.inner.(*mockChatDeleteTransport).capturedMethod)
+				return
+			}
+
+			require.Error(t, err, "a delete nobody can confirm must not succeed")
 			outErr := output.AsError(err)
 			require.NotNil(t, outErr)
 			assert.Equal(t, output.CodeUsage, outErr.Code)
 			assert.Contains(t, outErr.Hint, "--force")
-
 			assert.Zero(t, transport.requests,
 				"the refusal belongs before the account and project lookups, not after them")
 		})
@@ -1852,4 +1945,270 @@ type countingChatTransport struct {
 func (t *countingChatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.requests++
 	return t.inner.RoundTrip(req)
+}
+
+// chatLineDeleteBreadcrumb runs `chat line` and returns its delete breadcrumb
+// out of the rendered envelope. JSON only — the point is to prove the breadcrumb
+// really reaches the wire, and the other formats do not emit parseable output.
+func chatLineDeleteBreadcrumb(t *testing.T, app *appctx.App, buf *bytes.Buffer) string {
+	t.Helper()
+
+	app.Flags.Hints = true // breadcrumbs are stripped from the envelope without this
+
+	cmd := NewChatCmd()
+	require.NoError(t, executeChatCommand(cmd, app, "line", "111"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	for _, b := range envelope.Breadcrumbs {
+		if b.Action == "delete" {
+			return b.Cmd
+		}
+	}
+	t.Fatal("expected a delete breadcrumb")
+	return ""
+}
+
+// TestChatLineDeleteBreadcrumbMatchesItsReader pins which invocations get a
+// pre-forced delete suggestion. Breadcrumbs are not machine-only — they render
+// in styled and Markdown output too — and the string outlives the invocation
+// that produced it, so the only sound basis is what this output *is*, not how
+// this process happens to be wired.
+//
+// Getting it wrong in one direction hands a machine a command that can only
+// fail. In the other it hands a person a command that permanently deletes
+// without the confirmation they were owed. Three predicates were tried and
+// discarded before this one; each row below is a shape that defeated an earlier
+// attempt, so they are regression cases, not enumeration for its own sake.
+func TestChatLineDeleteBreadcrumbMatchesItsReader(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		format    output.Format
+		configFmt string
+		flags     func(app *appctx.App)
+		wire      func(t *testing.T)
+		wantForce bool
+		wantFlag  string // an override the suggestion must carry forward
+	}{
+		{name: "json is parsed by a program", format: output.FormatJSON, wantForce: true},
+		{name: "quiet is parsed", format: output.FormatQuiet, wantForce: true},
+		{name: "ids-only is parsed", format: output.FormatIDs, wantForce: true},
+		{
+			name:      "auto off a tty resolves to json",
+			format:    output.FormatAuto,
+			wantForce: true,
+		},
+		{name: "styled is read by a person", format: output.FormatStyled, wantForce: false},
+		{
+			// The flag is what makes this human; a fresh process re-reads the
+			// config, renders json again, and would refuse the bare command.
+			name:      "styled overriding a json config carries the flag",
+			format:    output.FormatStyled,
+			configFmt: "json",
+			flags:     func(app *appctx.App) { app.Flags.Styled = true },
+			wantForce: false,
+			wantFlag:  "--styled",
+		},
+		{
+			name:      "md overriding a quiet config carries the flag",
+			format:    output.FormatMarkdown,
+			configFmt: "quiet",
+			flags:     func(app *appctx.App) { app.Flags.MD = true },
+			wantForce: false,
+			wantFlag:  "--md",
+		},
+		{
+			// No configured machine format to fight, so nothing to carry.
+			name:      "styled with no configured format stays bare",
+			format:    output.FormatStyled,
+			flags:     func(app *appctx.App) { app.Flags.Styled = true },
+			wantForce: false,
+		},
+		{
+			name:      "markdown redirected to a file is still read by a person",
+			format:    output.FormatMarkdown,
+			wantForce: false,
+		},
+		{
+			// The redirection ends with the show command; the reader pastes
+			// into whatever terminal they are sitting at.
+			name:   "styled with this invocation's stdin redirected",
+			format: output.FormatStyled,
+			wire:   func(t *testing.T) { nonInteractiveStdin(t, "devnull") },
+		},
+		{
+			// A one-shot env assignment likewise ends with the command, and
+			// does not change what the output looks like.
+			name:   "styled under BASECAMP_NONINTERACTIVE",
+			format: output.FormatStyled,
+			wire:   func(t *testing.T) { t.Setenv("BASECAMP_NONINTERACTIVE", "1") },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			if tc.wire != nil {
+				tc.wire(t)
+			}
+
+			buf := &bytes.Buffer{}
+			app, _ := newChatDeleteTestApp(&mockChatUpdateTransport{})
+			// A *bytes.Buffer writer is not a TTY — the shape a redirect or a
+			// pipe produces, which is exactly what misled the earlier predicate.
+			app.Output = output.New(output.Options{Format: tc.format, Writer: buf})
+			app.Config.Format = tc.configFmt
+			if tc.flags != nil {
+				tc.flags(app)
+			}
+
+			cmd := NewChatCmd()
+			cmd.SetContext(appctx.WithApp(context.Background(), app))
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+
+			got := deleteLineCmd(cmd, "111", "789", "123")
+
+			if tc.wantFlag != "" {
+				assert.Contains(t, got, tc.wantFlag,
+					"%s: the override must travel with the suggestion, or a fresh process "+
+						"re-reads the config and refuses this command", tc.name)
+			} else {
+				assert.NotContains(t, got, "--styled")
+				assert.NotContains(t, got, "--md")
+			}
+
+			if tc.wantForce {
+				assert.Contains(t, got, "--force",
+					"%s: no confirmation is shown, so the bare command could only fail", tc.name)
+			} else {
+				assert.NotContains(t, got, "--force",
+					"%s: the reader will be asked to confirm; the hint must not spend that for them", tc.name)
+			}
+		})
+	}
+}
+
+// TestChatLineDeleteBreadcrumbReachesTheEnvelope proves the suggestion actually
+// ships, and that a machine consumer's copy survives the guard it would hit.
+// The table above tests the decision; this tests that the decision is wired in.
+func TestChatLineDeleteBreadcrumbReachesTheEnvelope(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	app, buf := newChatDeleteTestApp(&mockChatUpdateTransport{})
+	app.Flags.JSON = true
+
+	deleteCmd := chatLineDeleteBreadcrumb(t, app, buf)
+	assert.Contains(t, deleteCmd, "--force")
+
+	require.NoError(t, ensureDeleteConfirmable(deleteGuard(app), strings.Contains(deleteCmd, "--force")),
+		"the breadcrumb %q is rejected by the very guard it would hit", deleteCmd)
+}
+
+// executeChatWithin runs a chat command and fails if it has not returned within
+// the timeout, converting a blocked prompt into a legible failure.
+func executeChatWithin(t *testing.T, cmd *cobra.Command, app *appctx.App, timeout time.Duration, args ...string) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() { done <- executeChatCommand(cmd, app, args...) }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		t.Fatalf("chat %v blocked instead of returning; it reached a prompt nothing will answer", args)
+		return nil
+	}
+}
+
+// promptableStdio points stdin and stderr at a pseudo-terminal — the pair
+// stdinarg.InteractivePrompt asks about — so a confirmation could really be
+// shown and answered. Tests that want to prove some *other* condition refuses
+// start here, then remove only that condition.
+func promptableStdio(t *testing.T) {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
+	}
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("open /dev/ptmx: %v", err)
+	}
+	origIn, origErr := os.Stdin, os.Stderr
+	os.Stdin, os.Stderr = pty, pty
+	t.Cleanup(func() {
+		os.Stdin, os.Stderr = origIn, origErr
+		pty.Close()
+	})
+}
+
+// deleteGuard builds the command the suggested delete would actually run as.
+// It mirrors executeChatCommand's wiring, including SetOut — isMachineOutput
+// inspects cmd.OutOrStdout(), so a guard left on the real os.Stdout would read
+// go test's pipe as a machine consumer and disagree with the command that
+// produced the breadcrumb.
+func deleteGuard(app *appctx.App) *cobra.Command {
+	guard := NewChatCmd()
+	guard.SetContext(appctx.WithApp(context.Background(), app))
+	guard.SetOut(&bytes.Buffer{})
+	guard.SetErr(&bytes.Buffer{})
+	return guard
+}
+
+// TestDeleteConfirmableFollowsTheAudienceNotTheDevice pins the guard directly,
+// without running a delete — these shapes would reach a real prompt on a pty and
+// block, which is the point: they are the cases where a confirmation *can* be
+// shown, so demanding --force there contradicts the invariant.
+//
+// The distinction is between "stdout is redirected" and "a program is reading
+// this". `chat delete … --md >report.md` with terminal stdin and stderr writes a
+// document to a file while asking a person, on their terminal, whether to go
+// ahead. That is confirmable, and was being refused.
+func TestDeleteConfirmableFollowsTheAudienceNotTheDevice(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		format     output.Format
+		env        string
+		wantsForce bool
+	}{
+		{name: "markdown to a file is read by a person", format: output.FormatMarkdown},
+		{name: "styled to a pager is read by a person", format: output.FormatStyled},
+		{name: "json is parsed, so no prompt is shown", format: output.FormatJSON, wantsForce: true},
+		{name: "quiet is parsed", format: output.FormatQuiet, wantsForce: true},
+		{name: "ids-only is parsed", format: output.FormatIDs, wantsForce: true},
+		{
+			name:       "the escape hatch still wins over a human format",
+			format:     output.FormatStyled,
+			env:        "1",
+			wantsForce: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			t.Setenv("BASECAMP_NONINTERACTIVE", tc.env)
+			promptableStdio(t) // a confirmation could genuinely be shown and answered
+
+			buf := &bytes.Buffer{}
+			app, _ := newChatDeleteTestApp(&mockChatDeleteTransport{})
+			// Not a TTY — the shape a redirect or pipe produces, and the thing
+			// the old predicate mistook for "a machine is reading this".
+			app.Output = output.New(output.Options{Format: tc.format, Writer: buf})
+
+			err := ensureDeleteConfirmable(deleteGuard(app), false)
+
+			if tc.wantsForce {
+				require.Error(t, err, "%s: nothing will ask, so --force must be required", tc.name)
+				assert.Contains(t, output.AsError(err).Hint, "--force")
+			} else {
+				require.NoError(t, err,
+					"%s: the confirmation can be shown on stderr and answered on stdin", tc.name)
+			}
+		})
+	}
 }

@@ -72,8 +72,12 @@ setup_file() {
   local line_id
   line_id=$(<"$id_file")
 
+  # --force is required in machine-output mode: the delete is permanent (the API
+  # does not trash it) and --json shows no confirmation prompt, so the intent has
+  # to be stated. This suite means it — without the flag the delete is refused
+  # and the posted test message is left behind.
   run_smoke basecamp campfire delete "$line_id" \
-    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json --force
   assert_success
   assert_json_value '.ok' 'true'
 }

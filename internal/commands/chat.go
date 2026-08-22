@@ -757,8 +757,8 @@ You can pass either a line ID or a Basecamp line URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "delete",
-						Cmd:         fmt.Sprintf("basecamp chat delete %s --room %s --in %s", lineID, effectiveChatID, resolvedProjectID),
-						Description: "Delete line",
+						Cmd:         deleteLineCmd(cmd, lineID, effectiveChatID, resolvedProjectID),
+						Description: "Delete line (permanent)",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
@@ -776,6 +776,71 @@ You can pass either a line ID or a Basecamp line URL:
 	cf = addCommentFlags(cmd, false)
 
 	return cmd
+}
+
+// deleteLineCmd builds the delete breadcrumb for whoever will read it.
+// Breadcrumbs are not machine-only — they render in styled and Markdown output
+// too — so the flag depends on the audience:
+//
+//   - Machine output: no confirmation is shown in that mode, so the bare
+//     command could only fail. Emit --force.
+//   - Human-facing output: they will be asked to confirm. Emit the bare command,
+//     because handing over a pre-forced one quietly spends the affirmation this
+//     change exists to require.
+//
+// The audience is the *rendered format* of this envelope — the only property of
+// the current invocation that survives into the one the reader will type. Three
+// tempting predicates are all wrong here, each for the same reason:
+//
+//   - stdin: `chat line 111 </dev/null` on a terminal is a human reading styled
+//     output, and the redirection is over by the time they paste.
+//   - BASECAMP_NONINTERACTIVE: a one-shot assignment ends with the command and
+//     does not change what the output looks like.
+//   - isMachineOutput: true whenever stdout is not a TTY, so
+//     `chat line 111 --md > guide.md` — a document written for a person — is
+//     classified as machine output.
+//
+// EffectiveFormat resolves the auto case the same way the renderer does, so a
+// plain redirect (auto → JSON) is machine, while an explicitly human format
+// stays human wherever it is written.
+//
+// When the guess is wrong the reader gets a usage error naming --force, which is
+// recoverable. The reverse mistake is a permanent delete with no confirmation,
+// which is not — so this errs toward omitting the flag.
+func deleteLineCmd(cmd *cobra.Command, lineID, chatID, projectID string) string {
+	c := fmt.Sprintf("basecamp chat delete %s --room %s --in %s", lineID, chatID, projectID)
+	if machineReadsThisOutput(cmd) {
+		return c + " --force"
+	}
+	// Human-facing, so no --force. But if this invocation is only human-facing
+	// because a flag overrode a machine-output config, that flag has to travel
+	// with the suggestion: pasting it starts a fresh process which re-reads the
+	// config, renders json/quiet again, and refuses the very command we just
+	// handed over for lacking --force. Carrying the flag keeps it both runnable
+	// and confirmable, which adding --force would not.
+	return c + humanFormatOverride(appctx.FromContext(cmd.Context()))
+}
+
+// humanFormatOverride returns the flag that is holding this invocation in a
+// human format against a configured machine one, or "" when the configuration
+// is not fighting it.
+func humanFormatOverride(app *appctx.App) string {
+	if app == nil || app.Config == nil {
+		return ""
+	}
+	switch app.Config.Format {
+	case "json", "quiet": // a fresh process would render machine output
+	default:
+		return ""
+	}
+	switch {
+	case app.Flags.Styled:
+		return " --styled"
+	case app.Flags.MD:
+		return " --md"
+	default:
+		return ""
+	}
 }
 
 func newChatLineUpdateCmd(project, chatID, contentType *string) *cobra.Command {
@@ -1047,20 +1112,26 @@ func newChatLineDeleteCmd(project, chatID *string) *cobra.Command {
 
 This permanently deletes the message — it is not moved to trash.
 
+Deleting asks for confirmation. Where nothing can answer that, --force is
+required instead, so a permanent delete always carries an explicit statement
+of intent. That covers any machine-output mode (--json, --agent, --quiet),
+BASECAMP_NONINTERACTIVE, and a confirmation that could not be shown or
+answered — which needs a terminal on both stdin and stderr, since the prompt
+is drawn to stderr.
+
 You can pass either a line ID or a Basecamp line URL:
   basecamp chat delete 789 --in my-project
+  basecamp chat delete 789 --in my-project --json --force
   basecamp chat delete https://3.basecamp.com/123/buckets/456/chats/789/lines/111`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Refuse before any account, project or chat lookup. This command
-			// confirms interactively unless told otherwise, and
-			// isNonInteractiveCommand only knows about flags, the env var and
-			// stdout — it never looks at stdin. An agent in a PTY with stdin on
-			// /dev/null and no --json lands here, and a prompt reached there
-			// waits on /dev/tty instead of failing. Failing up front costs it
-			// nothing; reaching the prompt spent two round trips first.
+			// A chat line delete is permanent — the API does not trash it — so
+			// it happens only with --force or a confirmation somebody can
+			// answer. Refuse before any account, project or chat lookup: an
+			// invocation that cannot proceed should not spend two round trips
+			// discovering that.
 			if err := ensureDeleteConfirmable(cmd, force); err != nil {
 				return err
 			}
@@ -1113,10 +1184,11 @@ You can pass either a line ID or a Basecamp line URL:
 				return output.ErrUsage("Invalid line ID")
 			}
 
-			// Confirm destructive action in interactive mode. ensureDeleteConfirmable
-			// above already rejected the case where the prompt cannot be answered,
-			// so a failure here is the user canceling.
-			if !force && !isNonInteractiveCommand(cmd) {
+			// Confirm unless forced. ensureDeleteConfirmable established that
+			// without --force a prompt will be shown and can be answered — one
+			// predicate for both, so the guard cannot accept an invocation that
+			// this block then skips, which would delete unconfirmed.
+			if !force {
 				confirmed, err := tui.ConfirmDangerous("Permanently delete this chat line?")
 				switch {
 				case errors.Is(err, tui.ErrCanceled):
