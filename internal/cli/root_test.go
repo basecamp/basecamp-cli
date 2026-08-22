@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -166,7 +167,7 @@ func isolateRootTest(t *testing.T) {
 }
 
 func TestIsInteractiveTTYWithNonInteractiveEnv(t *testing.T) {
-	stubCharDeviceStdio(t)
+	stubTerminalStdio(t)
 
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}))
@@ -283,10 +284,10 @@ func TestVersionWithJQReturnsUsageError(t *testing.T) {
 // feeding a "-" content input the picker would eat that body as keystrokes —
 // so a terminal stdout is not on its own enough to open one.
 func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
-	stubCharDeviceStdio(t)
+	stubTerminalStdio(t)
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 
-	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}), "char-device stdio is interactive")
+	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}), "terminal stdio is interactive")
 
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
@@ -306,13 +307,12 @@ func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
 // must stay nil for cobra's unknown-command handling), so quick-start's own
 // interactive paths sit behind it. The e2e suite always has a piped stdout,
 // which takes the machine-output branch and never reaches them — this covers
-// the other side: a character-device stdout, the terminal stand-in, with a
-// piped stdin. The root carries a subcommand so InstallDashGuard takes the
+// the other side: a terminal stdout with a piped stdin. The root carries a subcommand so InstallDashGuard takes the
 // pre-run branch production uses, not the Args branch for a childless root.
 func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 	isolateRootTest(t)
 
-	stubCharDeviceStdio(t)
+	stubTerminalStdio(t)
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 
 	reader, writer, err := os.Pipe()
@@ -350,16 +350,23 @@ func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 // device, so interactivity assertions do not depend on how `go test` itself was
 // invoked — a piped stdin on the test runner would otherwise fail the
 // interactive baseline now that both streams are checked.
-func stubCharDeviceStdio(t *testing.T) {
+// stubTerminalStdio points stdio at a pseudo-terminal, the only stand-in
+// isInteractiveTTY accepts. /dev/null used to serve here — it is a character
+// device — but a character device is not a terminal, and treating it as one is
+// how `cmd < /dev/null` ended up launching prompts that wait on /dev/tty.
+func stubTerminalStdio(t *testing.T) {
 	t.Helper()
-	devNull, err := os.Open(os.DevNull)
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
+	}
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
 	if err != nil {
-		t.Skip(os.DevNull + " not available")
+		t.Skipf("open /dev/ptmx: %v", err)
 	}
 	origStdout, origStdin := os.Stdout, os.Stdin
-	os.Stdout, os.Stdin = devNull, devNull
+	os.Stdout, os.Stdin = pty, pty
 	t.Cleanup(func() {
 		os.Stdout, os.Stdin = origStdout, origStdin
-		devNull.Close()
+		pty.Close()
 	})
 }

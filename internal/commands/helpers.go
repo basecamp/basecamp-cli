@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
@@ -53,6 +54,28 @@ func noChanges(cmd *cobra.Command) error {
 		return output.ErrUsageHint("No update fields specified", hint)
 	}
 	return cmd.Help()
+}
+
+// ensureDeleteConfirmable rejects an invocation that will reach a confirmation
+// prompt it cannot drive. isNonInteractiveCommand decides whether to prompt at
+// all, but it reads flags, the env var and stdout — never stdin. The gap is a
+// PTY with stdin redirected, which is how an agent says "I have nothing to
+// type": the prompt is not skipped, and bubbletea answers a non-terminal stdin
+// by opening /dev/tty and waiting on the real terminal. It asks
+// InteractivePrompt rather than InteractiveStdio because the confirmation is a
+// huh form, which draws to stderr.
+//
+// Deliberately narrow: this does not change when a command prompts, only what
+// happens when the prompt it already decided to show cannot be answered.
+// Widening isNonInteractiveCommand itself would change missingArg and noChanges
+// across many commands, which is a separate decision.
+func ensureDeleteConfirmable(cmd *cobra.Command, force bool) error {
+	if force || isNonInteractiveCommand(cmd) || stdinarg.InteractivePrompt() {
+		return nil
+	}
+	return output.ErrUsageHint(
+		"This deletion needs a confirmation that stdin can't answer",
+		"Pass --force to delete without confirming")
 }
 
 // isNonInteractiveCommand returns true when command-level flows should avoid

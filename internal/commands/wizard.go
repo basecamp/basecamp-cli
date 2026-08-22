@@ -15,20 +15,23 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
-// WizardResult holds the outcome of the first-run wizard.
+// WizardResult holds the outcome of the first-run wizard, for showSuccess to
+// render. It carries no json tags: the wizard only runs interactively, so the
+// structured envelope it once emitted is unreachable and nothing serializes
+// this.
 type WizardResult struct {
-	Version     string `json:"version"`
-	Status      string `json:"status"` // "complete"
-	AccountID   string `json:"account_id,omitempty"`
-	AccountName string `json:"account_name,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
-	ProjectName string `json:"project_name,omitempty"`
-	ConfigScope string `json:"config_scope,omitempty"` // "global", "local", or "" if skipped
+	Status      string // "complete" or "incomplete"
+	AccountID   string
+	AccountName string
+	ProjectID   string
+	ProjectName string
+	ConfigScope string // "global", "local", or "" if skipped
 }
 
 // NewSetupCmd creates the setup command (explicit wizard invocation).
@@ -56,8 +59,27 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 		return fmt.Errorf("app not initialized")
 	}
 
+	// --jq keeps its own, more specific error; it is a usage error either way.
 	if app.Flags.JQFilter != "" {
 		return output.ErrJQNotSupported("the setup command")
+	}
+
+	// The wizard is prompts end to end, so refuse whenever we cannot or should
+	// not prompt. Redirecting stdin does not skip a prompt — bubbletea falls
+	// back to /dev/tty and waits on the real terminal (see
+	// tui.ErrNotInteractive) — and asking a caller that requested machine
+	// output to answer a question is the same mistake with a terminal attached.
+	// IsInteractive covers non-terminal stdin/stdout, the machine-output flags
+	// and the BASECAMP_NONINTERACTIVE escape hatch; IsMachineOutput adds the
+	// config-driven json/quiet formats it does not look at; InteractivePrompt
+	// adds stderr, which is where huh actually draws the prompts. Refuse before
+	// any output or auth, and name the paths that work without a terminal.
+	//
+	// The gate belongs to this RunE alone: `setup claude`, `setup codex` and
+	// `setup agents` are the supported non-interactive paths and must keep
+	// working, which a persistent hook here would have broken.
+	if !app.IsInteractive() || app.IsMachineOutput() || !stdinarg.InteractivePrompt() {
+		return output.ErrUsageHint("basecamp setup needs an interactive terminal", wizardEscapeHint())
 	}
 
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
@@ -72,7 +94,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	// Step 3: Account selection
-	result := WizardResult{Version: version.Version, Status: "complete"}
+	result := WizardResult{Status: "complete"}
 	accountID, err := wizardAccount(cmd, app, styles)
 	if err != nil {
 		return err
@@ -115,18 +137,23 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist onboarding flag: %v\n", err)
 	}
 
-	// Step 7: Summary with next steps
-	// Interactive mode shows the rich checklist directly; non-interactive
-	// or machine-output mode delegates to app.OK which renders the structured envelope.
-	if app.IsInteractive() && !app.IsMachineOutput() {
-		showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped)
-		return nil
-	}
+	// Step 7: Summary with next steps. The gate above already established
+	// interactive, non-machine output — the wizard cannot run any other way —
+	// so the rich checklist is the only summary this path renders. The
+	// structured-envelope branch that used to sit here was reachable only under
+	// machine output, which the gate now refuses; it and its two helpers went
+	// with it rather than being kept alive for nobody.
+	showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped)
+	return nil
+}
 
-	return app.OK(result,
-		output.WithSummary(wizardSummaryLine(result)),
-		output.WithBreadcrumbs(wizardBreadcrumbs(result)...),
-	)
+// wizardEscapeHint names the non-interactive paths that cover what the wizard
+// would have prompted for, rather than restating that a terminal is missing.
+// Modeled on stdinEscapeHint: point at the real alternatives.
+func wizardEscapeHint() string {
+	return "Agent setup runs without a terminal: basecamp setup agents (or basecamp setup claude / basecamp setup codex). " +
+		"Set the defaults the wizard would ask for with basecamp config set account_id <id> (or basecamp accounts use <id>) and basecamp config set project_id <id>. " +
+		"Check authentication with basecamp auth status."
 }
 
 // showWelcome displays the welcome screen with animated logo.
@@ -445,36 +472,6 @@ func fetchProjectName(cmd *cobra.Command, app *appctx.App, projectID string) str
 		return ""
 	}
 	return project.Name
-}
-
-// wizardSummaryLine builds a concise summary for the output envelope.
-func wizardSummaryLine(result WizardResult) string {
-	headline := "Setup complete"
-	if result.Status == "incomplete" {
-		headline = "Setup finished with issues"
-	}
-	if result.AccountName != "" {
-		return fmt.Sprintf("%s - %s", headline, result.AccountName)
-	}
-	return headline
-}
-
-// wizardBreadcrumbs returns next-step breadcrumbs based on wizard outcome.
-func wizardBreadcrumbs(result WizardResult) []output.Breadcrumb {
-	crumbs := []output.Breadcrumb{
-		{Action: "list_projects", Cmd: "basecamp projects list", Description: "List projects"},
-	}
-	if result.ProjectID != "" {
-		crumbs = append(crumbs,
-			output.Breadcrumb{Action: "list_todos", Cmd: "basecamp todos list", Description: "List to-dos"},
-			output.Breadcrumb{Action: "search", Cmd: "basecamp search \"query\"", Description: "Search Basecamp"},
-		)
-	} else {
-		crumbs = append(crumbs,
-			output.Breadcrumb{Action: "set_project", Cmd: "basecamp config project", Description: "Set default project"},
-		)
-	}
-	return crumbs
 }
 
 // isFirstRun returns true if this appears to be a first-time run.
