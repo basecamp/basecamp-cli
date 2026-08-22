@@ -2349,6 +2349,18 @@ func TestMarkdownToHTMLInsertsParagraphSeparators(t *testing.T) {
 			expected: "<blockquote><p>A</p><br><p>B</p></blockquote>",
 		},
 		{
+			// Contiguous paragraphs nested in a blockquote get the same separator
+			// deliberately: lexxy quotes hold <p> children, and an empty paragraph
+			// is exactly what the editor itself authors for a blank line inside a
+			// quote, so it round-trips verbatim (verified against lexical 0.44
+			// import/export). A bare <br> at that position also survives but is a
+			// shape the editor never authors, and inside <li> it balloons to
+			// <br><br><br> on first edit while the empty paragraph normalizes away.
+			name:     "contiguous paragraphs inside a blockquote get a separator",
+			input:    "<blockquote><p>A</p><p>B</p></blockquote>",
+			expected: "<blockquote><p>A</p><p><br></p><p>B</p></blockquote>",
+		},
+		{
 			name:     "empty paragraph separator is left untouched",
 			input:    "<p>A</p><p></p><p>B</p>",
 			expected: "<p>A</p><p></p><p>B</p>",
