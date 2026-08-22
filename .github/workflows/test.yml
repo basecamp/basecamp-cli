@@ -95,6 +95,9 @@ jobs:
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
+          # The action's default version floats to the latest zizmor release.
+          # Keep in sync with the .mise.toml zizmor pin.
+          version: "1.29.0"
           advanced-security: false
 
   security:

@@ -2,3 +2,14 @@
 go = "1.26"
 # Keep in sync with .github/workflows/release.yml GoReleaser CLI version pin.
 goreleaser = "2.15.4"
+# Keep in sync with .github/workflows/test.yml rhysd/actionlint version pin.
+actionlint = "1.7.12"
+# Not invoked directly; actionlint shells out to it to lint workflow `run:`
+# scripts (CI uses the runner's preinstalled shellcheck).
+shellcheck = "0.11.0"
+# No CI pin to match; runners preinstall pwsh. Lets e2e/installer.bats pwsh
+# tests run locally instead of skipping.
+powershell = "7.6.5"
+# Keep in sync with the zizmor-action `version:` input in
+# .github/workflows/test.yml (the action's default floats to latest).
+zizmor = "1.29.0"
