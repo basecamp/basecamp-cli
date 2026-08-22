@@ -2,6 +2,7 @@ package stdinarg
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -66,40 +67,97 @@ func TestIsPipedRegularFile(t *testing.T) {
 	assert.True(t, IsPiped(f))
 }
 
-// TestInteractiveStdio proves TUIs are gated off when stdin is piped: a
-// wizard or picker reads keystrokes from stdin, so piped stdin would be
-// consumed as key events — including piped content meant for a "-" input.
-func TestInteractiveStdio(t *testing.T) {
-	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("open %s: %v", os.DevNull, err)
+// openPTY returns the master side of a new pseudo-terminal — the only thing
+// term.IsTerminal accepts. /dev/null will not stand in: it is a character
+// device but not a terminal, and that gap is what these predicates exist to
+// close.
+func openPTY(t *testing.T) *os.File {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/ptmx on Windows")
 	}
+	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("open /dev/ptmx: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// stdioMatrix exercises a predicate over each of its two endpoints. The
+// terminal/terminal row is the load-bearing one: without a passing positive
+// baseline every other row would hold for a predicate hardwired to false, and
+// the test would bless a floor that refuses everything.
+//
+// pipe and /dev/null are the two ways a stream arrives without a human. Both
+// have to fail, and /dev/null is the one that used to pass: a character device
+// that is not a terminal. Bubble Tea does not error on one, it opens /dev/tty
+// and waits on the real terminal — so classifying it interactive is a hang.
+func stdioMatrix(t *testing.T, name string, predicate func() bool, first, second **os.File) {
+	t.Helper()
+
+	pty := openPTY(t)
+
+	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	require.NoError(t, err)
 	defer devnull.Close()
 
 	pipeR, pipeW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
+	require.NoError(t, err)
 	defer pipeR.Close()
 	defer pipeW.Close()
 
-	origOut, origIn := os.Stdout, os.Stdin
-	t.Cleanup(func() { os.Stdout, os.Stdin = origOut, origIn })
+	origFirst, origSecond := *first, *second
+	t.Cleanup(func() { *first, *second = origFirst, origSecond })
 
-	// /dev/null is a character device, standing in for a terminal on both
-	// ends without needing a PTY.
-	os.Stdout, os.Stdin = devnull, devnull
-	if !InteractiveStdio() {
-		t.Fatal("expected interactive with char-device stdout and stdin")
+	for _, tc := range []struct {
+		label       string
+		first       *os.File
+		second      *os.File
+		interactive bool
+	}{
+		{"terminal/terminal", pty, pty, true},
+		{"pipe/terminal", pipeR, pty, false},
+		{"terminal/pipe", pty, pipeW, false},
+		{"devnull/terminal", devnull, pty, false},
+		{"terminal/devnull", pty, devnull, false},
+	} {
+		*first, *second = tc.first, tc.second
+		assert.Equal(t, tc.interactive, predicate(), "%s with %s", name, tc.label)
 	}
+}
 
-	os.Stdin = pipeR
-	if InteractiveStdio() {
-		t.Fatal("expected non-interactive with piped stdin")
-	}
+// TestInteractiveStdio covers the picker's pair: a bare bubbletea program reads
+// keystrokes from stdin and draws to stdout.
+func TestInteractiveStdio(t *testing.T) {
+	stdioMatrix(t, "InteractiveStdio", InteractiveStdio, &os.Stdin, &os.Stdout)
+}
 
-	os.Stdout, os.Stdin = pipeW, devnull
-	if InteractiveStdio() {
-		t.Fatal("expected non-interactive with piped stdout")
-	}
+// TestInteractivePrompt covers huh's pair. huh draws the form to stderr
+// (form.go:112 passes tea.WithOutput(os.Stderr)), so asking about stdout would
+// let `cmd 2>somewhere` render an invisible question that still blocks a
+// terminal — and would refuse `cmd | less` where the prompt would have worked.
+func TestInteractivePrompt(t *testing.T) {
+	stdioMatrix(t, "InteractivePrompt", InteractivePrompt, &os.Stdin, &os.Stderr)
+}
+
+// TestPredicatesDisagreeOnTheStreamTheyAskAbout pins the reason there are two:
+// a terminal stdin with a piped stdout and a terminal stderr is exactly the
+// shape where a form works and a picker does not.
+func TestPredicatesDisagreeOnTheStreamTheyAskAbout(t *testing.T) {
+	pty := openPTY(t)
+
+	pipeR, pipeW, err := os.Pipe()
+	require.NoError(t, err)
+	defer pipeR.Close()
+	defer pipeW.Close()
+
+	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
+	t.Cleanup(func() { os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr })
+
+	os.Stdin, os.Stdout, os.Stderr = pty, pipeW, pty
+
+	assert.False(t, InteractiveStdio(), "a piped stdout is no place for a picker")
+	assert.True(t, InteractivePrompt(), "but a form draws to stderr, which is still a terminal")
 }
