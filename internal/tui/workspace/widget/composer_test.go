@@ -57,12 +57,46 @@ func TestComposerReset(t *testing.T) {
 	}
 }
 
-func TestComposerResetReturnsToQuickMode(t *testing.T) {
-	c := NewComposer(testStyles(), WithMode(ComposerRich))
-	c.SetValue("some text")
-	c.Reset()
-	if c.Mode() != ComposerQuick {
-		t.Errorf("mode after Reset = %d, want ComposerQuick", c.Mode())
+func TestComposerResetRestoresConstructedMode(t *testing.T) {
+	// A composer built rich stays rich across Reset: dropping to the
+	// single-line quick input would flatten the next multi-line SetValue
+	// (e.g. re-editing a to-do description) and demote Enter to send.
+	rich := NewComposer(testStyles(), WithMode(ComposerRich))
+	rich.SetValue("some text")
+	rich.Reset()
+	if rich.Mode() != ComposerRich {
+		t.Errorf("mode after Reset = %d, want ComposerRich", rich.Mode())
+	}
+
+	// A quick composer that auto-expanded collapses back to quick.
+	quick := NewComposer(testStyles())
+	quick.InsertPaste("line1\nline2")
+	if quick.Mode() != ComposerRich {
+		t.Fatalf("paste should have expanded to rich, got %d", quick.Mode())
+	}
+	quick.Reset()
+	if quick.Mode() != ComposerQuick {
+		t.Errorf("mode after Reset = %d, want ComposerQuick", quick.Mode())
+	}
+}
+
+func TestComposerSetValueExpandsForMultilineContent(t *testing.T) {
+	// SetValue is a content entry point like InsertPaste and editor return:
+	// multi-line or Markdown content must expand a quick composer, or the
+	// single-line textinput silently flattens the newlines.
+	c := NewComposer(testStyles())
+	c.SetValue("para one\n\npara two")
+	if c.Mode() != ComposerRich {
+		t.Errorf("mode after multi-line SetValue = %d, want ComposerRich", c.Mode())
+	}
+	if c.Value() != "para one\n\npara two" {
+		t.Errorf("value = %q, newlines were flattened", c.Value())
+	}
+
+	single := NewComposer(testStyles())
+	single.SetValue("hello")
+	if single.Mode() != ComposerQuick {
+		t.Errorf("single-line SetValue should stay quick, got %d", single.Mode())
 	}
 }
 
