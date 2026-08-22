@@ -1238,7 +1238,8 @@ func TestChatUpdatePlainTextOptOut(t *testing.T) {
 
 // TestChatUpdatePlainTextSerializesLiterally is the F2 literal case: text/plain
 // serializes via richtext.PlainToHTML, so HTML-special characters are escaped
-// (rendered as typed, not interpreted) and line breaks are preserved as <br>.
+// (rendered as typed, not interpreted) and line breaks are preserved as <br>
+// inside the paragraph, where Basecamp's editor keeps them.
 func TestChatUpdatePlainTextSerializesLiterally(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
@@ -1255,10 +1256,8 @@ func TestChatUpdatePlainTextSerializesLiterally(t *testing.T) {
 
 	content, ok := requestBody["content"].(string)
 	require.True(t, ok)
-	assert.Contains(t, content, "&lt;strong&gt;x&lt;/strong&gt;",
-		"HTML-special characters should be escaped, not interpreted as markup")
-	assert.Contains(t, content, "<br>",
-		"line breaks should be preserved as <br>")
+	assert.Contains(t, content, "&lt;strong&gt;x&lt;/strong&gt;<br>line2</p>",
+		"HTML-special characters should be escaped and the line break kept inline within the paragraph")
 	assert.NotContains(t, content, "bc-attachment",
 		"text/plain skips mention resolution")
 }

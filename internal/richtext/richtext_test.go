@@ -2634,13 +2634,20 @@ func TestPlainToHTML(t *testing.T) {
 		want  string
 	}{
 		{"empty", "", ""},
-		{"plain text", "hello world", "hello world"},
-		{"escapes HTML special chars", "<strong>x</strong> & y", "&lt;strong&gt;x&lt;/strong&gt; &amp; y"},
-		{"preserves line breaks as <br>", "line1\nline2", "line1<br>line2"},
-		{"collapses CRLF to a single break", "line1\r\nline2", "line1<br>line2"},
-		{"normalizes bare CR", "line1\rline2", "line1<br>line2"},
-		{"leaves @mentions literal", "ping @Jane.Smith now", "ping @Jane.Smith now"},
-		{"escapes then breaks multiline markup", "<b>a</b>\n<i>b</i>", "&lt;b&gt;a&lt;/b&gt;<br>&lt;i&gt;b&lt;/i&gt;"},
+		{"plain text", "hello world", "<p>hello world</p>"},
+		{"escapes HTML special chars", "<strong>x</strong> & y", "<p>&lt;strong&gt;x&lt;/strong&gt; &amp; y</p>"},
+		{"keeps a single line break inside the paragraph", "line1\nline2", "<p>line1<br>line2</p>"},
+		{"collapses CRLF to a single break", "line1\r\nline2", "<p>line1<br>line2</p>"},
+		{"normalizes bare CR", "line1\rline2", "<p>line1<br>line2</p>"},
+		{"blank line becomes an empty paragraph", "a\n\nb", "<p>a</p><p><br></p><p>b</p>"},
+		{"each blank line becomes its own empty paragraph", "a\n\n\nb", "<p>a</p><p><br></p><p><br></p><p>b</p>"},
+		{"mixes single breaks and blank lines", "a\nb\n\nc", "<p>a<br>b</p><p><br></p><p>c</p>"},
+		{"whitespace-only line counts as blank", "a\n \t \nb", "<p>a</p><p><br></p><p>b</p>"},
+		{"drops trailing blank lines", "a\n", "<p>a</p>"},
+		{"drops leading blank lines", "\n\na", "<p>a</p>"},
+		{"only blank lines", "\n \n", ""},
+		{"leaves @mentions literal", "ping @Jane.Smith now", "<p>ping @Jane.Smith now</p>"},
+		{"escapes then breaks multiline markup", "<b>a</b>\n<i>b</i>", "<p>&lt;b&gt;a&lt;/b&gt;<br>&lt;i&gt;b&lt;/i&gt;</p>"},
 	}
 
 	for _, tt := range tests {
@@ -2649,6 +2656,19 @@ func TestPlainToHTML(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("PlainToHTML(%q) = %q, want %q", tt.input, got, tt.want)
 			}
+			// The editor keeps a <br> only between two text runs inside a block;
+			// a doubled <br> or one at the root is dropped on the first edit.
+			if strings.Contains(got, "<br><br>") || strings.Contains(got, "</p><br>") || strings.HasPrefix(got, "<br>") {
+				t.Errorf("PlainToHTML(%q) = %q emits a <br> the editor would drop", tt.input, got)
+			}
 		})
+	}
+}
+
+func TestPlainToHTMLRoundTripsThroughHTMLToMarkdown(t *testing.T) {
+	for _, text := range []string{"a", "a\nb", "a\n\nb", "a\nb\n\nc\n\nd\ne"} {
+		if got := HTMLToMarkdown(PlainToHTML(text)); got != text {
+			t.Errorf("HTMLToMarkdown(PlainToHTML(%q)) = %q", text, got)
+		}
 	}
 }
