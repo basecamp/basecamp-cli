@@ -95,6 +95,29 @@ load test_helper
   assert_output_contains "ID required"
 }
 
+# A chat line delete is permanent — the API does not trash it. In machine-output
+# mode there is no confirmation prompt and nobody to answer one, so the intent
+# has to be stated with --force. This resolves before any request, so no
+# cassette is needed; a delete that reached the wire would be the bug.
+@test "chat delete in json mode requires --force" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat delete 111 --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint | contains("--force")' 'true'
+}
+
+@test "chat delete in agent mode requires --force" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat delete 111 --agent
+  assert_failure
+  assert_output_contains "--force"
+}
+
 @test "chat update without args shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'

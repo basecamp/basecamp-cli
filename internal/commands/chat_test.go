@@ -1511,21 +1511,28 @@ func TestChatDeleteReturnsDeletedPayload(t *testing.T) {
 	assert.Equal(t, "111", data["id"])
 }
 
-// TestChatDeleteSkipsPromptInAgentMode verifies that --agent mode skips the
-// confirmation prompt and issues the DELETE call.
-func TestChatDeleteSkipsPromptInAgentMode(t *testing.T) {
+// TestChatDeleteRequiresForceInAgentMode is the inverse of what this test used
+// to assert. Agent mode skips the confirmation prompt — that part is unchanged
+// and correct — but it used to then delete anyway, so `basecamp chat delete
+// <id> --agent` permanently destroyed a message with no statement of intent
+// anywhere in the invocation and nobody in a position to object. Skipping the
+// prompt is not the same as answering it.
+func TestChatDeleteRequiresForceInAgentMode(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 
-	transport := &mockChatDeleteTransport{}
+	transport := &countingChatTransport{inner: &mockChatDeleteTransport{}}
 	app, _ := newChatDeleteTestApp(transport)
 	app.Flags.Agent = true // machine output — no prompt
 
 	cmd := NewChatCmd()
 	err := executeChatCommand(cmd, app, "delete", "111")
-	require.NoError(t, err)
+	require.Error(t, err)
 
-	assert.Equal(t, "DELETE", transport.capturedMethod)
-	assert.Contains(t, transport.capturedPath, "/lines/")
+	outErr := output.AsError(err)
+	require.NotNil(t, outErr)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Hint, "--force")
+	assert.Zero(t, transport.requests, "nothing should have been requested, let alone deleted")
 }
 
 // TestChatDeleteForceSkipsPrompt verifies that --force bypasses the confirmation
@@ -1812,31 +1819,86 @@ func TestChatPostRejectsPositionalWithContentFlag(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot combine")
 }
 
-// TestChatDeleteRefusesWhenStdinCannotConfirm covers the gap isMachineOutput
-// cannot see: it checks flags, the env var and stdout, never stdin. An agent in
-// a PTY with stdin on /dev/null and no --json reaches the confirmation prompt,
-// which used to block on /dev/tty. It must now fail with a usage error naming
-// --force, before it issues a single request.
-func TestChatDeleteRefusesWhenStdinCannotConfirm(t *testing.T) {
-	for _, kind := range []string{"pipe", "devnull"} {
-		t.Run(kind, func(t *testing.T) {
+// TestChatDeleteConfirmationMatrix pins the whole invariant: a permanent delete
+// happens only with --force, or with a confirmation that will be shown and can
+// be answered. Every other shape refuses, names --force, and issues nothing.
+//
+// The rows split into two failures that used to end differently. Machine-output
+// mode skipped the prompt and deleted regardless. A terminal with redirected
+// stdin did show the prompt — isMachineOutput reads flags, the env var and
+// stdout, never stdin — to a caller with nothing to type, where bubbletea waits
+// on /dev/tty rather than failing. Same missing affirmation, same answer now.
+func TestChatDeleteConfirmationMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		apply   func(t *testing.T, app *appctx.App)
+		args    []string
+		deletes bool
+	}{
+		{
+			name:  "agent mode",
+			apply: func(_ *testing.T, app *appctx.App) { app.Flags.Agent = true },
+		},
+		{
+			name:  "json mode",
+			apply: func(_ *testing.T, app *appctx.App) { app.Flags.JSON = true },
+		},
+		{
+			name:  "quiet mode",
+			apply: func(_ *testing.T, app *appctx.App) { app.Flags.Quiet = true },
+		},
+		{
+			name:  "config-driven json",
+			apply: func(_ *testing.T, app *appctx.App) { app.Config.Format = "json" },
+		},
+		{
+			name: "noninteractive env",
+			apply: func(t *testing.T, _ *appctx.App) {
+				t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+			},
+		},
+		{
+			name:  "piped stdin",
+			apply: func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "pipe") },
+		},
+		{
+			name:  "stdin on /dev/null",
+			apply: func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "devnull") },
+		},
+		{
+			name:    "forced in agent mode",
+			apply:   func(_ *testing.T, app *appctx.App) { app.Flags.Agent = true },
+			args:    []string{"--force"},
+			deletes: true,
+		},
+		{
+			name:    "forced with stdin on /dev/null",
+			apply:   func(t *testing.T, _ *appctx.App) { nonInteractiveStdin(t, "devnull") },
+			args:    []string{"--force"},
+			deletes: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("BASECAMP_NO_KEYRING", "1")
-			nonInteractiveStdin(t, kind)
 
 			transport := &countingChatTransport{inner: &mockChatDeleteTransport{}}
 			app, _ := newChatDeleteTestApp(transport)
-			// No machine-output flag and a *bytes.Buffer stdout, so
-			// isNonInteractiveCommand is false and the confirm is reached.
+			tc.apply(t, app)
 
 			cmd := NewChatCmd()
-			err := executeChatCommand(cmd, app, "delete", "111")
-			require.Error(t, err, "delete must not silently succeed on a confirmation nobody can answer")
+			err := executeChatCommand(cmd, app, append([]string{"delete", "111"}, tc.args...)...)
 
+			if tc.deletes {
+				require.NoError(t, err)
+				assert.Equal(t, "DELETE", transport.inner.(*mockChatDeleteTransport).capturedMethod)
+				return
+			}
+
+			require.Error(t, err, "a delete nobody can confirm must not succeed")
 			outErr := output.AsError(err)
 			require.NotNil(t, outErr)
 			assert.Equal(t, output.CodeUsage, outErr.Code)
 			assert.Contains(t, outErr.Hint, "--force")
-
 			assert.Zero(t, transport.requests,
 				"the refusal belongs before the account and project lookups, not after them")
 		})
