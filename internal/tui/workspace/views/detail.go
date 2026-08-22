@@ -757,9 +757,9 @@ func (v *Detail) startCommentEdit() tea.Cmd {
 		return nil
 	}
 	c := v.data.comments[v.focusedComment]
-	// Fail closed on table-bearing content (see startEditBody).
-	if richtext.HasTableHTML(c.content) {
-		return workspace.SetStatus("This comment contains a table — edit it on Basecamp web", true)
+	// Fail closed on complex tables (see startEditBody).
+	if richtext.HasComplexTableHTML(c.content) {
+		return workspace.SetStatus("This comment contains a table too complex to edit as Markdown — edit it on Basecamp web", true)
 	}
 	v.editingComment = true
 	v.commentEditComposer = widget.NewComposer(v.styles,
@@ -1078,10 +1078,12 @@ func (v *Detail) startEditBody() tea.Cmd {
 	if v.data == nil {
 		return nil
 	}
-	// Fail closed on table-bearing content: HTMLToMarkdown has no table handling,
-	// so entering edit mode and resubmitting would strip the table. Block the edit.
-	if richtext.HasTableHTML(v.data.content) {
-		return workspace.SetStatus("This message contains a table — edit it on Basecamp web", true)
+	// Fail closed on complex tables — shapes a GFM pipe table can't
+	// represent (see richtext.HasComplexTableHTML): HTMLToMarkdown flattens
+	// them, so an edit-and-resubmit would lose structure. Simple grids
+	// round-trip and stay editable.
+	if richtext.HasComplexTableHTML(v.data.content) {
+		return workspace.SetStatus("This message contains a table too complex to edit as Markdown — edit it on Basecamp web", true)
 	}
 	v.editingBody = true
 	v.bodyEditComposer = widget.NewComposer(v.styles,
