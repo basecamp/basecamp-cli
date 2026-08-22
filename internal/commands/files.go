@@ -3,9 +3,12 @@ package commands
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,8 +16,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewFilesCmd creates the files command group.
@@ -43,6 +48,8 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
 		newFilesShowCmd(&project),
+		newFilesVersionsCmd(&project),
+		newFilesReplaceCmd(&project),
 		newFilesUpdateCmd(&project),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
@@ -96,39 +103,139 @@ func NewUploadsCmd() *cobra.Command {
 	return cmd
 }
 
-func newFilesListCmd(project, vaultID *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List all items in a folder",
-		Long:  "List all folders, documents, and uploads in a folder.",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFilesList(cmd, *project, *vaultID)
-		},
+// filesAccountWideKinds is the accepted --kind vocabulary, in the order the
+// usage error lists it. It mirrors EverythingFilesOptions.Kind.
+var filesAccountWideKinds = []string{"all", "images", "pdfs", "documents", "videos"}
+
+const filesKindDocuments = "documents"
+
+// The three group spellings that reach this leaf. `vaults`/`folders` and
+// `docs`/`documents` are built from NewFilesCmd, so the leaf is shared and the
+// group's own name is the only thing that says which listing the user asked
+// for.
+const (
+	filesGroupFiles = iota
+	filesGroupFolders
+	filesGroupDocuments
+)
+
+// filesGroupSpelling reports which group noun invoked this list command. Name()
+// returns the group's canonical Use rather than the alias typed, so `folders`
+// and `vault` both resolve through `vaults`.
+func filesGroupSpelling(cmd *cobra.Command) int {
+	parent := cmd.Parent()
+	if parent == nil {
+		return filesGroupFiles
+	}
+	switch parent.Name() {
+	case "vaults":
+		return filesGroupFolders
+	case "docs":
+		return filesGroupDocuments
+	default:
+		return filesGroupFiles
 	}
 }
 
-func runFilesList(cmd *cobra.Command, project, vaultID string) error {
+func newFilesListCmd(project, vaultID *string) *cobra.Command {
+	var allProjects bool
+	var kind string
+	var people []string
+	var limit, page int
+	var all bool
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all items in a folder",
+		Long: `List all folders, documents, and uploads in a folder.
+
+With no project in scope, lists every file across all accessible projects
+instead of asking which project to use. Pass --all-projects to list
+account-wide even when a project is configured.
+
+--kind and --person filter the account-wide listing only; the project-scoped
+folder listing has no equivalent for them.
+
+--limit/--page/--all page through the account-wide listing, which returns
+the first 100 files by default. A project's folder listing is a single
+unpaginated response, so it rejects all three.`,
+		Example: `  basecamp files list --in my-project
+  basecamp files list --all-projects --kind images
+  basecamp files list --all-projects --person me
+  basecamp files list --all-projects --limit 500`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFilesList(cmd, *project, *vaultID, allProjects, kind, people, limit, page, all)
+		},
+	}
+
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List files across every accessible project")
+	cmd.Flags().StringVar(&kind, "kind", "", fmt.Sprintf("Account-wide only: filter by file kind (%s)", strings.Join(filesAccountWideKinds, ", ")))
+	cmd.Flags().StringArrayVar(&people, "person", nil, "Account-wide only: filter by creator (name, email, ID, or \"me\"; repeatable)")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Account-wide only: maximum files to fetch (0 = default 100)")
+	cmd.Flags().IntVar(&page, "page", 0, "Account-wide only: fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&all, "all", false, "Account-wide only: fetch every page")
+
+	return cmd
+}
+
+func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool, kind string, people []string, limit, page int, all bool) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// Scope is settled before any scope-specific validation, and an explicit
+	// project counts whether it arrived after the group noun or at the root.
+	explicitProject := project != "" || app.Flags.Project != ""
+	if allProjects && explicitProject {
+		return output.ErrUsageHint(
+			"--all-projects conflicts with --project/--in",
+			"Drop --all-projects to list that project's folder, or drop --project/--in to list every project.",
+		)
+	}
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Resolve project from CLI flags and config, with interactive fallback
+	// --all-projects overrides a configured project; otherwise a project from
+	// any layer keeps the folder listing. With nothing to scope to, list
+	// account-wide rather than prompting.
+	if allProjects || !projectKnown(app, project) {
+		return runFilesListAccountWide(cmd, app, vaultID, kind, people, limit, page, all)
+	}
+
+	// A project's folder listing is three unpaginated calls — Vaults, Uploads,
+	// and Documents each get a nil options struct, so there is no page number
+	// to thread. Accepting a cap here and ignoring it is the defect these
+	// scope rules exist to prevent.
+	if err := rejectScopedPaginationFlags(cmd, "a project's folder listing",
+		"Drop --project/--in (and pass --all-projects if a project is configured) to page through files across every project."); err != nil {
+		return err
+	}
+
+	// The account-wide filters have no project-scoped equivalent, so a project
+	// in scope rejects them instead of quietly dropping them. Detection is by
+	// flag presence, not by value: --kind "" is still the user asking for a
+	// filter, and dropping it because the value is empty is the same silent
+	// ignore as dropping it because a project is set.
+	if cmd.Flags().Changed("kind") {
+		return output.ErrUsageHint(
+			"--kind only applies to the account-wide file listing",
+			"A project's folder listing has no kind filter. Drop --project/--in (and pass --all-projects if a project is configured) to filter across every project.",
+		)
+	}
+	if len(people) > 0 {
+		return output.ErrUsageHint(
+			"--person only applies to the account-wide file listing",
+			"A project's folder listing has no creator filter. Drop --project/--in (and pass --all-projects if a project is configured) to filter across every project.",
+		)
+	}
+
+	// Resolve project from CLI flags and config
 	projectID := project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
 	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-
-	// If no project specified, try interactive resolution
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
 		projectID = app.Config.ProjectID
 	}
 
@@ -233,6 +340,197 @@ func runFilesList(cmd *cobra.Command, project, vaultID string) error {
 	}
 
 	return app.OK(items, respOpts...)
+}
+
+// runFilesListAccountWide lists every file across all accessible projects.
+// The bare files listing has no --limit/--page/--all project-scoped and gains
+// none here, so it always follows the Link header across every page.
+func runFilesListAccountWide(cmd *cobra.Command, app *appctx.App, vaultID, kind string, people []string, limit, page int, all bool) error {
+	if err := rejectAccountWideTodolist(app, "file"); err != nil {
+		return err
+	}
+
+	// vaults/folders and docs/documents are the same command under different
+	// names, but the account-wide feed is not the same listing. It carries
+	// Uploads, Documents, and Attachments — no folder variant at all — so the
+	// folder spellings would return a listing with none of the thing they are
+	// named for. Answer honestly instead, and let the document spellings mean
+	// what they say by pinning the kind they already name.
+	switch filesGroupSpelling(cmd) {
+	case filesGroupFolders:
+		return output.ErrUsageHint(
+			"folders have no account-wide listing",
+			"Folders exist inside one project: basecamp folders list --in <project>. For files across every project: basecamp files list --all-projects")
+	case filesGroupDocuments:
+		if cmd.Flags().Changed("kind") {
+			return output.ErrUsageHint(
+				"--kind cannot narrow an account-wide document listing",
+				"This command already lists documents. For other kinds: basecamp files list --all-projects --kind <kind>")
+		}
+		kind = filesKindDocuments
+	}
+	// --vault/--folder names a folder inside one project. Account-wide has no
+	// such container, and ignoring the flag would hand back a listing of
+	// something else entirely.
+	if vaultID != "" {
+		return output.ErrUsageHint(
+			"--vault/--folder names a folder inside one project, which an account-wide listing has no equivalent for",
+			"Pass --project/--in to list that folder's contents, or drop --vault/--folder to list files across every project.",
+		)
+	}
+
+	if limit < 0 {
+		return output.ErrUsage("--limit must be zero or positive")
+	}
+	if all && limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if page > 0 && (all || limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if cmd.Flags().Changed("page") && page < 1 {
+		return output.ErrUsageHint(
+			"--page must be a positive page number",
+			"Omit --page, or pass --all, to follow every page")
+	}
+	if page > math.MaxInt32 {
+		return output.ErrUsage("--page is out of range")
+	}
+
+	opts, err := filesAccountWideOptions(cmd, app, kind, people)
+	if err != nil {
+		return err
+	}
+
+	fetch := func(p int32) ([]basecamp.EverythingFile, basecamp.ListMeta, error) {
+		result, err := app.Account().Everything().Files(cmd.Context(), p, opts)
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return result.Files, result.Meta, nil
+	}
+
+	// The default used to follow the Link header across the whole account,
+	// which on a large one is both slow and fragile: a single failing page
+	// takes down the entire listing, and before these flags existed there was
+	// no way to step around it. Bound the default and let --page/--all reach
+	// the rest.
+	var (
+		files  []basecamp.EverythingFile
+		meta   basecamp.ListMeta
+		capped bool
+	)
+	if all || page > 0 {
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
+			return err
+		}
+		if files, meta, err = fetch(sdkPage); err != nil {
+			return err
+		}
+	} else {
+		effectiveLimit := limit
+		if effectiveLimit == 0 {
+			effectiveLimit = accountWideDefaultLimit
+		}
+		if files, capped, meta, err = accountWideCollect(fetch, accountWideFlatCount[basecamp.EverythingFile], effectiveLimit); err != nil {
+			return err
+		}
+		// The walk stops at a page boundary, so trim to the exact cap.
+		if len(files) > effectiveLimit {
+			files = files[:effectiveLimit]
+		}
+	}
+
+	// EverythingFile is an all-pointer superset far too wide to render raw, and
+	// its bucket is nested, so every consumer but --json and --agent reads the
+	// flat rows.
+	respOpts := accountWideRespOpts(len(files), "file", "files", meta, limit > 0)
+	if notice := accountWideCapNotice(capped, meta, len(files), "files"); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideFiles(files)))
+	respOpts = append(respOpts, output.WithBreadcrumbs(
+		output.Breadcrumb{
+			Action:      "kind",
+			Cmd:         "basecamp files list --all-projects --kind images",
+			Description: "Filter by file kind",
+		},
+		output.Breadcrumb{
+			Action:      "project",
+			Cmd:         "basecamp files list --in <project>",
+			Description: "List one project's folder",
+		},
+	))
+
+	return app.OK(files, respOpts...)
+}
+
+// filesAccountWideOptions validates --kind and resolves --person into the
+// creator IDs the files feed filters on.
+func filesAccountWideOptions(cmd *cobra.Command, app *appctx.App, kind string, people []string) (*basecamp.EverythingFilesOptions, error) {
+	opts := &basecamp.EverythingFilesOptions{}
+
+	// Presence, not value: --kind "" is still the user asking for a filter, and
+	// dropping it because the value is empty is a silent ignore. A kind the
+	// command pinned for itself (the docs spelling) arrives non-empty with the
+	// flag unchanged, so it applies without being re-validated as user input.
+	if cmd.Flags().Changed("kind") {
+		normalized := strings.ToLower(strings.TrimSpace(kind))
+		if !slices.Contains(filesAccountWideKinds, normalized) {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("Invalid --kind value %q", kind),
+				fmt.Sprintf("Use one of: %s", strings.Join(filesAccountWideKinds, ", ")),
+			)
+		}
+		opts.Kind = normalized
+	} else if kind != "" {
+		opts.Kind = kind
+	}
+
+	for _, person := range people {
+		id, err := resolvePersonRoleID(cmd.Context(), app, person, "Person")
+		if err != nil {
+			return nil, err
+		}
+		opts.PeopleIDs = append(opts.PeopleIDs, id)
+	}
+
+	return opts, nil
+}
+
+// flattenAccountWideFiles reduces the files feed to styled table rows.
+// EverythingFile is an all-pointer superset over the Upload, Document, and
+// Attachment variants, so every field is nil-checked and an absent one stays
+// absent rather than rendering a fabricated zero.
+func flattenAccountWideFiles(files []basecamp.EverythingFile) []map[string]any {
+	rows := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		row := map[string]any{}
+		if f.ID != nil {
+			row["id"] = *f.ID
+		}
+		if f.Bucket != nil {
+			row["project"] = f.Bucket.Name
+		}
+		switch {
+		case f.Title != nil && *f.Title != "":
+			row["name"] = *f.Title
+		case f.Filename != nil:
+			row["name"] = *f.Filename
+		}
+		if f.Type != nil {
+			row["type"] = *f.Type
+		}
+		if f.ByteSize != nil {
+			row["size"] = humanSize(*f.ByteSize)
+		}
+		if f.CreatedAt != nil {
+			row["created"] = relativeTime(*f.CreatedAt)
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func newFoldersCmd(project, vaultID *string) *cobra.Command {
@@ -576,6 +874,7 @@ func runUploadsList(cmd *cobra.Command, project, vaultID string, limit, page int
 
 func newUploadsCreateCmd(project, vaultID *string) *cobra.Command {
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <file>",
@@ -588,11 +887,25 @@ as an upload in the target folder (vault).`,
   basecamp uploads create ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadFile(cmd, *project, *vaultID, args[0], description)
+			filePath, err := validateUploadPath(args[0])
+			if err != nil {
+				return err
+			}
+			if err := requireNumericID(*vaultID, "folder ID"); err != nil {
+				return err
+			}
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+			return runUploadFile(cmd, *project, *vaultID, filePath, description, visibleToClients)
 		},
 	}
 
-	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown); use - to read from stdin")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -602,6 +915,7 @@ func NewUploadCmd() *cobra.Command {
 	var project string
 	var vaultID string
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "upload <file>",
@@ -614,7 +928,18 @@ attachment and then created as an upload in the target folder.`,
   basecamp upload ./photo.png --folder 123 --description "Site photo"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUploadFile(cmd, project, vaultID, args[0], description)
+			filePath, err := validateUploadPath(args[0])
+			if err != nil {
+				return err
+			}
+			if err := requireNumericID(vaultID, "folder ID"); err != nil {
+				return err
+			}
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+			return runUploadFile(cmd, project, vaultID, filePath, description, visibleToClients)
 		},
 	}
 
@@ -622,22 +947,67 @@ attachment and then created as an upload in the target folder.`,
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().StringVar(&vaultID, "vault", "", "Folder ID (default: root)")
 	cmd.Flags().StringVar(&vaultID, "folder", "", "Folder ID (alias for --vault)")
-	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Upload description (Markdown); use - to read from stdin")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the upload visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
 
-func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string) error {
+// resolveVaultClientVisibility returns the *bool to assign to a create request's
+// VisibleToClients field. It is nil when --visible-to-clients was not passed
+// (server default preserved). When passed, create-time client visibility is only
+// honored in the docked/root vault; for a nested folder (Vault.Parent != nil) it
+// returns a usage error, because the server would silently inherit folder
+// visibility and the visibility endpoint 403s for nested docs/uploads afterward.
+// Must be called before any mutating request so a rejection stages nothing.
+// vaultFlag is the raw --vault/--folder string ("" = default root, no fetch needed).
+func resolveVaultClientVisibility(cmd *cobra.Command, app *appctx.App, vaultFlag string, vaultIDNum int64, value bool) (*bool, error) {
+	if !cmd.Flags().Changed("visible-to-clients") {
+		return nil, nil
+	}
+	if vaultFlag != "" { // explicit folder targeted — confirm it's the root vault
+		v, err := app.Account().Vaults().Get(cmd.Context(), vaultIDNum)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		if v.Parent != nil {
+			return nil, output.ErrUsageHint(
+				"--visible-to-clients is only supported when creating in the root Docs & Files folder",
+				"A nested folder inherits its visibility, which can't be changed per-item afterward. Create in the root folder (omit --vault/--folder), or change the eligible top-level ancestor that controls this folder's visibility before creating.",
+			)
+		}
+	}
+	return &value, nil
+}
+
+// validateUploadPath normalizes a drag/paste path and checks the file is
+// readable. It needs no account and no network, so the upload commands run it
+// before resolving a "-" description: a missing file should not cost the caller
+// a drained pipe, and a blank pipe must not answer "stdin is empty" instead of
+// naming the unreadable file.
+func validateUploadPath(filePath string) (string, error) {
+	filePath = richtext.NormalizeDragPath(filePath)
+	if err := richtext.ValidateFile(filePath); err != nil {
+		return "", fmt.Errorf("%s: %w", filePath, err)
+	}
+	return filePath, nil
+}
+
+func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description string, visibleToClients bool) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Normalize drag/paste paths and validate
-	filePath = richtext.NormalizeDragPath(filePath)
-	if err := richtext.ValidateFile(filePath); err != nil {
-		return fmt.Errorf("%s: %w", filePath, err)
+	// Normalize drag/paste paths and validate. Callers that read stdin run
+	// this first (see validateUploadPath); repeating it is idempotent and
+	// keeps this function correct on its own.
+	filePath, err := validateUploadPath(filePath)
+	if err != nil {
+		return err
 	}
 
 	// Resolve project, with interactive fallback
@@ -674,6 +1044,13 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		return output.ErrUsage("Invalid folder ID")
 	}
 
+	// Resolve client visibility before any mutating request: a nested-folder
+	// target with --visible-to-clients is rejected here so nothing is staged.
+	vis, err := resolveVaultClientVisibility(cmd, app, vaultID, vaultIDNum, visibleToClients)
+	if err != nil {
+		return err
+	}
+
 	// Step 1: Upload attachment
 	contentType := richtext.DetectMIME(filePath)
 	filename := filepath.Base(filePath)
@@ -691,8 +1068,9 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 
 	// Step 2: Create upload in vault
 	req := &basecamp.CreateUploadRequest{
-		AttachableSGID: resp.AttachableSGID,
-		BaseName:       strings.TrimSuffix(filename, filepath.Ext(filename)),
+		AttachableSGID:   resp.AttachableSGID,
+		BaseName:         strings.TrimSuffix(filename, filepath.Ext(filename)),
+		VisibleToClients: vis,
 	}
 	if description != "" {
 		descHTML := richtext.MarkdownToHTML(description)
@@ -872,10 +1250,18 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [content]",
 		Short: "Create a new document",
+		Long: `Create a new document in a project's Docs & Files area.
+
+Use - as the content argument to read the document body from stdin:
+  basecamp docs documents create "Title" - --in my-project < body.md`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no arguments
 			if len(args) == 0 {
@@ -884,14 +1270,34 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 
 			title := args[0]
 
+			// Resolve "-" before any account or network work, so a bad stdin
+			// gets the stdin error rather than "--account is required".
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
+				return err
+			}
+			if err := requireNumericID(*vaultID, "folder ID"); err != nil {
+				return err
+			}
+
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
+			content := ""
+			if len(args) > 1 {
+				var contentErr error
+				content, contentErr = resolveContentValue(cmd, args[1], 1, "[content]")
+				if contentErr != nil {
+					return contentErr
+				}
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-			content := ""
-			if len(args) > 1 {
-				content = args[1]
 			}
 
 			// Resolve subscription flags before project (fail fast on bad input)
@@ -934,6 +1340,13 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 				return output.ErrUsage("Invalid folder ID")
 			}
 
+			// Resolve client visibility before any mutating request: a nested-folder
+			// target with --visible-to-clients is rejected here so nothing is staged.
+			vis, err := resolveVaultClientVisibility(cmd, app, *vaultID, vaultIDNum, visibleToClients)
+			if err != nil {
+				return err
+			}
+
 			// Create document using SDK
 			// Convert Markdown content to HTML
 			html := richtext.MarkdownToHTML(content)
@@ -954,9 +1367,10 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 			}
 
 			req := &basecamp.CreateDocumentRequest{
-				Title:         title,
-				Content:       html,
-				Subscriptions: subs,
+				Title:            title,
+				Content:          html,
+				Subscriptions:    subs,
+				VisibleToClients: vis,
 			}
 			if draft {
 				req.Status = "drafted"
@@ -991,6 +1405,9 @@ func newDocsCreateCmd(project, vaultID *string) *cobra.Command {
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the document visible to clients (root Docs & Files folder only; a nested folder inherits its folder's visibility). Omit for the server default.")
+
+	allowDash(cmd, "arg:1")
 
 	return cmd
 }
@@ -1198,6 +1615,329 @@ You can pass either an item ID or a Basecamp URL:
 	return cmd
 }
 
+func newFilesVersionsCmd(project *string) *cobra.Command {
+	var limit int
+	var page int
+	var all bool
+
+	cmd := &cobra.Command{
+		Use:   "versions <upload_id|url>",
+		Short: "List an upload's versions",
+		Long: `List every version of an uploaded file.
+
+Replacing a file in Basecamp keeps the earlier copies as versions of the same
+upload, so the upload ID stays stable while its contents change.
+
+You can pass either an upload ID or a Basecamp URL:
+  basecamp files versions 789 --in my-project
+  basecamp files versions https://3.basecamp.com/123/buckets/456/uploads/789`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			// Validate flag combinations
+			if all && limit > 0 {
+				return output.ErrUsage("--all and --limit are mutually exclusive")
+			}
+			if page > 0 && (all || limit > 0) {
+				return output.ErrUsage("--page cannot be combined with --all or --limit")
+			}
+			if page > 1 {
+				return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			uploadIDStr := extractID(args[0])
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			// Build pagination options. The SDK treats Limit 0 as "every
+			// version", which is also this command's default.
+			opts := &basecamp.UploadVersionListOptions{}
+			if limit > 0 {
+				opts.Limit = limit
+			}
+			if page > 0 {
+				opts.Page = page
+			}
+
+			versionsResult, err := app.Account().Uploads().ListVersions(cmd.Context(), uploadID, opts)
+			if err != nil {
+				return convertSDKError(err)
+			}
+			versions := flattenUploadVersions(versionsResult.Versions)
+
+			// Breadcrumbs reuse the caller's own reference: a pasted URL keeps
+			// its project scope, and an explicit --project carries over —
+			// unlike versions, both follow-up commands resolve a project
+			// before fetching, so a bare ID could prompt or fail headless.
+			ref := shellQuote(args[0])
+			scope := breadcrumbScope(scopeProject(app, *project))
+
+			respOpts := []output.ResponseOption{
+				output.WithSummary(fmt.Sprintf("%d versions of upload #%s", len(versions), uploadIDStr)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp files show %s%s", ref, scope),
+						Description: "Show file details",
+					},
+					output.Breadcrumb{
+						Action:      "download",
+						Cmd:         fmt.Sprintf("basecamp files download %s%s", ref, scope),
+						Description: "Download the current version",
+					},
+				),
+			}
+
+			if notice := output.TruncationNoticeWithTotal(len(versions), versionsResult.Meta.TotalCount); notice != "" {
+				respOpts = append(respOpts, output.WithNotice(notice))
+			}
+
+			return app.OK(versions, respOpts...)
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of versions to fetch (0 = all)")
+	cmd.Flags().BoolVar(&all, "all", false, "Fetch all versions (no limit)")
+	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+
+	return cmd
+}
+
+// flattenUploadVersions turns version events into display rows. Each element is
+// an event — "created"/"active" records the original file, "blob_changed" a
+// replacement — with the file it recorded nested under upload. The row id is
+// the EVENT's id: it is not an upload id and no files command accepts it, which
+// is why the breadcrumbs above address the upload by the id the user gave.
+// A version whose recordable no longer resolves carries no upload at all, so
+// the file columns stay empty rather than inventing zero values.
+func flattenUploadVersions(versions []basecamp.UploadVersion) []map[string]any {
+	rows := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		row := map[string]any{
+			"id":      v.ID,
+			"action":  v.Action,
+			"created": v.CreatedAt,
+			"creator": v.Creator.Name,
+		}
+		if v.Upload != nil {
+			row["filename"] = v.Upload.Filename
+			if v.Upload.ByteSize != nil {
+				row["byte_size"] = *v.Upload.ByteSize
+			}
+			row["current"] = v.Upload.Current
+			row["download_url"] = v.Upload.DownloadURL
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func newFilesReplaceCmd(project *string) *cobra.Command {
+	var description string
+	var baseName string
+
+	cmd := &cobra.Command{
+		Use:     "replace <upload-id|url> <file>",
+		Aliases: []string{"new-version"},
+		Short:   "Replace an upload's file with a new version",
+		Long: `Replace an uploaded file with a new version.
+
+The upload keeps its ID, URL and comments; the previous file becomes a past
+version (see 'basecamp files versions'). Use this instead of a fresh upload
+when publishing a new build of the same file, so its published link keeps
+working.
+
+Nobody is notified, and the description carries forward unless --description
+is given.
+
+You can pass either an upload ID or a Basecamp URL:
+  basecamp files replace 789 ./build-v2.exe
+  basecamp files replace https://3.basecamp.com/123/buckets/456/uploads/789 ./build-v2.exe`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			uploadIDStr := extractID(args[0])
+			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
+			if err != nil || uploadID <= 0 {
+				return output.ErrUsage("Invalid upload ID")
+			}
+
+			filePath := richtext.NormalizeDragPath(args[1])
+			if err := richtext.ValidateFile(filePath); err != nil {
+				return fmt.Errorf("%s: %w", filePath, err)
+			}
+
+			// A URL-shaped argument must live on a trusted Basecamp host: the
+			// URL router is host-agnostic, so a look-alike on an
+			// attacker-controlled host would otherwise pass the identity checks
+			// and retarget the configured account's upload — the confused-deputy
+			// case hostutil exists to prevent. That, and whether the URL names a
+			// single upload at all, need only the configured base URL, so they
+			// run before the read; only the account comparison waits.
+			var parsedURL *urlarg.Parsed
+			if urlarg.IsURL(args[0]) {
+				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+				}
+				parsedURL = urlarg.Parse(args[0])
+			}
+			if parsedURL != nil {
+				if parsedURL.Type != "uploads" {
+					return output.ErrUsage(fmt.Sprintf("URL identifies a %s recording, not an upload", parsedURL.Type))
+				}
+				// A collection URL (/vaults/456/uploads, /buckets/456/uploads)
+				// also parses as type "uploads", but its extracted ID is the
+				// PARENT's — the identity predicate needs the recording half
+				// too, or extractID retargets a same-numbered upload.
+				if parsedURL.IsCollection || parsedURL.RecordingID == "" {
+					return output.ErrUsage("URL identifies an uploads listing, not a single upload")
+				}
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID, missing file or foreign host is answered without
+			// waiting on the producer. The account-identity checks below need
+			// the session account, so they necessarily follow. Only an exact
+			// "-" reads stdin; --description "" stays the clear idiom.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// A pasted URL names its own account; refuse one that isn't the
+			// session's before anything is staged — extractID keeps only the
+			// numeric ID, which would silently retarget the configured
+			// account's same-numbered upload on a mutating request. Host and
+			// shape were settled before the read; only this needed the account.
+			if parsedURL != nil && parsedURL.AccountID != "" && parsedURL.AccountID != app.Config.AccountID {
+				return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsedURL.AccountID, app.Config.AccountID))
+			}
+
+			// Resolve the description first: its local-image references can
+			// fail deterministically, and staging a large replacement before
+			// finding that out wastes the whole transfer. A nil Description
+			// carries the previous version's forward; --description "" clears.
+			var descPtr *string
+			if cmd.Flags().Changed("description") {
+				descHTML := ""
+				if description != "" {
+					descHTML = richtext.MarkdownToHTML(description)
+					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
+						return err
+					}
+				}
+				descPtr = basecamp.Ptr(descHTML)
+			}
+
+			// Step 1: stage the new file as an attachment (same two-step flow
+			// as uploads create).
+			contentType := richtext.DetectMIME(filePath)
+			filename := filepath.Base(filePath)
+
+			f, err := os.Open(filePath)
+			if err != nil {
+				return fmt.Errorf("%s: %w", filePath, err)
+			}
+			defer f.Close()
+
+			resp, err := app.Account().Attachments().Create(cmd.Context(), filename, contentType, f)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			// Step 2: replace the upload's file.
+			req := &basecamp.CreateUploadVersionRequest{
+				AttachableSGID: resp.AttachableSGID,
+				BaseName:       baseName,
+				Description:    descPtr,
+			}
+
+			upload, err := app.Account().Uploads().CreateVersion(cmd.Context(), uploadID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			// Breadcrumbs reuse the caller's own reference and carry an
+			// explicit --project: download resolves a project before fetching,
+			// so a bare ID without the scope could prompt or fail headless.
+			ref := shellQuote(args[0])
+			scope := breadcrumbScope(scopeProject(app, *project))
+
+			return app.OK(upload,
+				output.WithSummary(fmt.Sprintf("Replaced upload #%d's file with %s", upload.ID, upload.Filename)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "versions",
+						Cmd:         fmt.Sprintf("basecamp files versions %s%s", ref, scope),
+						Description: "List versions",
+					},
+					output.Breadcrumb{
+						Action:      "download",
+						Cmd:         fmt.Sprintf("basecamp files download %s%s", ref, scope),
+						Description: "Download the new version",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&description, "description", "", "New description (Markdown); omit to carry the current one forward; use - to read from stdin")
+	cmd.Flags().StringVar(&baseName, "base-name", "", "Rename the file (without extension); omit to keep the uploaded file's name")
+
+	allowDash(cmd, "flag:description")
+
+	return cmd
+}
+
+// shellSafeRe matches strings that need no quoting in an emitted shell
+// command: IDs, plain Basecamp URLs, and simple names. Everything else gets
+// single-quoted.
+var shellSafeRe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=-]+$`)
+
+// shellQuote renders s safe to embed in an emitted shell command. Clearly
+// inert strings pass through bare; anything else is single-quoted — the one
+// POSIX form in which nothing substitutes — with embedded single quotes
+// spelled '\”. This is an encoding applied to every embedded value, not a
+// metacharacter list: breadcrumbs interpolate user- and API-controlled text,
+// and escaping cases one at a time is how quoting bugs recur.
+func shellQuote(s string) string {
+	if s != "" && shellSafeRe.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// scopeProject resolves the project value a breadcrumb should carry: the
+// group-level flag, else the root-level --project (app.Flags.Project) — the
+// same precedence the fetch paths use, minus the config default, which a
+// copier's own config supplies.
+func scopeProject(app *appctx.App, project string) string {
+	if project != "" {
+		return project
+	}
+	return app.Flags.Project
+}
+
+// breadcrumbScope renders the --project suffix for a breadcrumb command.
+func breadcrumbScope(project string) string {
+	if project == "" {
+		return ""
+	}
+	return " --project " + shellQuote(project)
+}
+
 func newFilesUpdateCmd(project *string) *cobra.Command {
 	var title string
 	var content string
@@ -1216,6 +1956,47 @@ You can pass either an item ID or a Basecamp URL:
 		Annotations: map[string]string{"agent_notes": "Document updates preserve untouched title/content by fetching current state first because BC3 rebuilds documents from permitted params on PUT; explicit clears via --title \"\"/--content \"\" work because the SDK strips empty strings to absent fields, which the controller then nulls. Upload/vault updates do not clear by omission, so empty-valued flags are rejected CLI-side."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Extract ID and project from URL if provided
+			itemIDStr, urlProjectID := extractWithProject(args[0])
+
+			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid item ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it. The --type vocabulary is checked here
+			// too — the switch below cannot move, since its no-op branches read
+			// the resolved content, but an unknown type dooms the invocation on
+			// its own and must not cost the caller a drained pipe.
+			itemType = strings.ToLower(strings.TrimSpace(itemType))
+			switch itemType {
+			case "", "document", "doc", "vault", "folder", "upload", "file":
+			default:
+				return output.ErrUsageHint(
+					fmt.Sprintf("Invalid type: %s", itemType),
+					"Use: vault, document, or upload",
+				)
+			}
+
+			// --content is meaningless for a folder, and whether it was given is
+			// knowable before its value is: the switch below needs the resolved
+			// content for its no-op branches, this does not.
+			if cmd.Flags().Changed("content") {
+				switch itemType {
+				case "vault", "folder":
+					return output.ErrUsage("--content can only be used with --type document or upload")
+				}
+			}
+
+			// Only an exact "-" reads stdin; --content "" stays the clear idiom.
+			var contentErr error
+			content, contentErr = resolveContentValue(cmd, content, -1, "--content")
+			if contentErr != nil {
+				return contentErr
+			}
+
 			titleChanged := cmd.Flags().Changed("title")
 			contentChanged := cmd.Flags().Changed("content")
 			titleTrimmed := strings.TrimSpace(title)
@@ -1227,7 +2008,6 @@ You can pass either an item ID or a Basecamp URL:
 			docContentSet := contentChanged && (content == "" || contentTrimmed != "")
 			nonDocTitleSet := titleChanged && titleTrimmed != ""
 			nonDocContentSet := contentChanged && contentTrimmed != ""
-			itemType = strings.ToLower(strings.TrimSpace(itemType))
 			switch itemType {
 			case "", "document", "doc":
 				if !docTitleSet && !docContentSet {
@@ -1255,14 +2035,6 @@ You can pass either an item ID or a Basecamp URL:
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID := extractWithProject(args[0])
-
-			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid item ID")
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
@@ -1303,11 +2075,7 @@ You can pass either an item ID or a Basecamp URL:
 					result = vault
 					detectedType = "vault"
 				case "document", "doc":
-					req, err := buildDocumentUpdateRequest(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
-					if err != nil {
-						return convertSDKError(err)
-					}
-					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
+					doc, err := updateDocument(cmd, app, itemID, nil, docTitleSet, docContentSet, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1319,7 +2087,7 @@ You can pass either an item ID or a Basecamp URL:
 						req.BaseName = title
 					}
 					if nonDocContentSet {
-						req.Description = content
+						req.Description = basecamp.Ptr(content)
 					}
 					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
@@ -1341,11 +2109,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try document first (most common update case)
 				existingDoc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 				if err == nil {
-					req, buildErr := buildDocumentUpdateRequest(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
-					if buildErr != nil {
-						return convertSDKError(buildErr)
-					}
-					doc, err := app.Account().Documents().Update(cmd.Context(), itemID, req)
+					doc, err := updateDocument(cmd, app, itemID, existingDoc, docTitleSet, docContentSet, title, content)
 					if err != nil {
 						return convertSDKError(err)
 					}
@@ -1381,7 +2145,7 @@ You can pass either an item ID or a Basecamp URL:
 								req.BaseName = title
 							}
 							if nonDocContentSet {
-								req.Description = content
+								req.Description = basecamp.Ptr(content)
 							}
 							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
@@ -1419,27 +2183,60 @@ You can pass either an item ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&content, "content", "c", "", "New content")
+	cmd.Flags().StringVarP(&content, "content", "c", "", "New content; use - to read from stdin")
 	cmd.Flags().StringVar(&itemType, "type", "", "Item type (vault, document, upload)")
+
+	allowDash(cmd, "flag:content")
 
 	return cmd
 }
 
-func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.UpdateDocumentRequest, error) {
-	// BC3 rebuilds documents from permitted params on PUT, so omitted
-	// title/content fields are replaced with empty values. Fetch and merge when
-	// the caller updates only one field so the untouched field is preserved.
-	//
-	// Explicit clears via --title "" or --content "" work by composition: the
-	// SDK strips empty strings to absent JSON fields, and the controller then
-	// nulls those absent fields during rebuild. The wire-shape assertion in
-	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
-	//
+func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.Document, error) {
 	// setTitle/setContent are caller-computed effective flags: they're true when
 	// the user provided either a non-whitespace value or an explicit empty
 	// string. Whitespace-only values arrive as setTitle=false/setContent=false
 	// so the existing field is preserved.
-	if existingDoc == nil && (!setTitle || !setContent) {
+	//
+	// Documents().Update is the SDK's merge-safe composite: it fetches and
+	// merges server state itself, so a single-field update preserves the other
+	// field without a CLI-side fetch. The one instruction it cannot carry is an
+	// explicit clear — its empty string means "leave the field alone" — so
+	// --title "" / --content "" route to Documents().Replace, whose omitted
+	// fields the server nulls, with the surviving field carried over verbatim.
+	// The wire-shape assertion in
+	// TestFilesUpdateDocumentEmptyTitleClearsWhilePreservingContent pins this.
+	clearTitle := setTitle && title == ""
+	clearContent := setContent && content == ""
+
+	// Omission is the SDK-sanctioned clear spelling, but a Replace that omits
+	// BOTH fields is rejected (locally by the SDK, and by BC3, which requires
+	// the wrapping document object) — so fail fast with a usable message.
+	if clearTitle && clearContent {
+		return nil, output.ErrUsage("Cannot clear both --title and --content at once; clear one at a time or provide a new value")
+	}
+
+	var docHTML string
+	if setContent && content != "" {
+		docHTML = richtext.MarkdownToHTML(content)
+		var err error
+		docHTML, err = resolveLocalImages(cmd, app, docHTML)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !clearTitle && !clearContent {
+		req := &basecamp.UpdateDocumentRequest{}
+		if setTitle {
+			req.Title = title
+		}
+		if setContent {
+			req.Content = docHTML
+		}
+		return app.Account().Documents().Update(cmd.Context(), itemID, req)
+	}
+
+	if existingDoc == nil {
 		var err error
 		existingDoc, err = app.Account().Documents().Get(cmd.Context(), itemID)
 		if err != nil {
@@ -1447,30 +2244,22 @@ func buildDocumentUpdateRequest(cmd *cobra.Command, app *appctx.App, itemID int6
 		}
 	}
 
-	req := &basecamp.UpdateDocumentRequest{}
-	if existingDoc != nil {
-		req.Title = existingDoc.Title
-		req.Content = existingDoc.Content
-	}
-
-	if setTitle {
-		req.Title = title
-	}
-	if setContent {
-		if content == "" {
-			req.Content = ""
-			return req, nil
+	req := &basecamp.ReplaceDocumentRequest{}
+	if !clearTitle {
+		effective := existingDoc.Title
+		if setTitle {
+			effective = title
 		}
-		docHTML := richtext.MarkdownToHTML(content)
-		var err error
-		docHTML, err = resolveLocalImages(cmd, app, docHTML)
-		if err != nil {
-			return nil, err
-		}
-		req.Content = docHTML
+		req.Title = basecamp.Ptr(effective)
 	}
-
-	return req, nil
+	if !clearContent {
+		effective := existingDoc.Content
+		if setContent {
+			effective = docHTML
+		}
+		req.Content = basecamp.Ptr(effective)
+	}
+	return app.Account().Documents().Replace(cmd.Context(), itemID, req)
 }
 
 func newFilesDownloadCmd(project *string) *cobra.Command {
@@ -1614,6 +2403,9 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 	}
 
 	cmd.Flags().StringVarP(&outDir, "out", "o", "", "Output directory (default: current directory)")
+
+	// --out - means stream to stdout — exempt from the stdin dash guard.
+	allowDash(cmd, "flag:out")
 
 	return cmd
 }

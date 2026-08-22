@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewCardsCmd creates the cards command group.
@@ -27,7 +30,7 @@ func NewCardsCmd() *cobra.Command {
 		Use:         "cards",
 		Short:       "Manage cards in Card Tables",
 		Long:        "List, show, create, and manage cards in Card Tables (Kanban boards).",
-		Annotations: map[string]string{"agent_notes": "Cards do NOT support --assignee filtering like todos — fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
+		Annotations: map[string]string{"agent_notes": "--assignee filters the account-wide listing only; within a project, fetch all and filter client-side\nIf a project has multiple card tables, you must specify --card-table <id>\nAssign/unassign shortcuts work on cards: basecamp assign <card_id> --to <person>\nCross-project cards: basecamp recordings cards --json"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -43,6 +46,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
+		newCardsWormholesCmd(&project, &cardTable),
 		newCardsStepsCmd(&project),
 		newCardsStepCmd(&project),
 		newRecordableTrashCmd("card"),
@@ -53,71 +57,459 @@ func NewCardsCmd() *cobra.Command {
 	return cmd
 }
 
+// cardsListOptions carries the flags `cards list` accepts, including the
+// group's persistent --project/--card-table, so the project-scoped and
+// account-wide branches read the same values.
+type cardsListOptions struct {
+	project     string
+	column      string
+	cardTable   string
+	limit       int
+	page        int
+	pageSet     bool
+	all         bool
+	allProjects bool
+	sortField   string
+	reverse     bool
+	status      string
+	unassigned  bool
+	noDueDate   bool
+	notNow      bool
+	overdue     bool
+	assignees   []string
+	due         string
+}
+
+// Account-wide card listings, one per Everything endpoint.
+const (
+	cardsSelectorOpen       = "open"
+	cardsSelectorCompleted  = "completed"
+	cardsSelectorUnassigned = "unassigned"
+	cardsSelectorNoDueDate  = "no-due-date"
+	cardsSelectorNotNow     = "not-now"
+	cardsSelectorOverdue    = "overdue"
+)
+
 func newCardsListCmd(project, cardTable *string) *cobra.Command {
-	var column string
-	var limit int
-	var page int
-	var all bool
-	var sortField string
-	var reverse bool
+	var opts cardsListOptions
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cards",
-		Long:  "List all cards in a project's card table.",
+		Long: "List all cards in a project's card table, or across every project with --all-projects.\n\n" +
+			"With --all-projects the listing comes from the account-wide card aggregates, grouped by\n" +
+			"project. --status completed, --unassigned, --no-due-date, --not-now, and --overdue each\n" +
+			"select a different aggregate and are account-wide only.\n\n" +
+			"--assignee (repeatable) and --due (with, without, overdue) filter those aggregates and are\n" +
+			"account-wide only too — the project-scoped card listing has no equivalent for either.\n" +
+			"--assignee matches a card assigned to any of the named people; assignees on nested steps\n" +
+			"are not considered. --assignee cannot be combined with --unassigned (nothing can match\n" +
+			"both), and --due cannot be combined with --overdue or --no-due-date.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCardsList(cmd, *project, column, *cardTable, limit, page, all, sortField, reverse)
+			opts.project = *project
+			opts.cardTable = *cardTable
+			opts.pageSet = cmd.Flags().Changed("page")
+			return runCardsList(cmd, opts)
 		},
 	}
 
-	cmd.Flags().StringVarP(&column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all)")
-	cmd.Flags().BoolVar(&all, "all", false, "Fetch all cards (no limit)")
-	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
-	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
-	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
+	cmd.Flags().StringVarP(&opts.column, "column", "c", "", "Filter by column ID or name")
+	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all in one project, 100 account-wide; use --all for every page)")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Fetch all cards (no limit)")
+	cmd.Flags().IntVar(&opts.page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&opts.sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
+	cmd.Flags().BoolVar(&opts.reverse, "reverse", false, "Reverse sort order")
+	cmd.Flags().BoolVar(&opts.allProjects, "all-projects", false, "List cards across every project")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Account-wide only: completed")
+	cmd.Flags().BoolVar(&opts.unassigned, "unassigned", false, "Account-wide only: cards with no assignee")
+	cmd.Flags().BoolVar(&opts.noDueDate, "no-due-date", false, "Account-wide only: cards with no due date")
+	cmd.Flags().BoolVar(&opts.notNow, "not-now", false, "Account-wide only: cards parked in Not now")
+	cmd.Flags().StringArrayVar(&opts.assignees, "assignee", nil, "Account-wide only: filter by assignee (repeatable)")
+	cmd.Flags().StringVar(&opts.due, "due", "", "Account-wide only: filter by due date (with, without, overdue)")
+	cmd.Flags().BoolVar(&opts.overdue, "overdue", false, "Account-wide only: overdue cards, oldest due date first")
 
 	return cmd
 }
 
-func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, page int, all bool, sortField string, reverse bool) error {
+func runCardsList(cmd *cobra.Command, opts cardsListOptions) error {
 	app := appctx.FromContext(cmd.Context())
 
-	// Validate flag combinations
-	if all && limit > 0 {
-		return output.ErrUsage("--all and --limit are mutually exclusive")
+	// Scope-independent flag validation. Anything that depends on the scope
+	// waits until the scope is known, because the two scopes disagree about
+	// which pages and sorts are legal.
+	if opts.reverse && opts.sortField == "" {
+		return output.ErrUsageHint("--reverse requires --sort", "Pick a field to sort by, e.g. --sort due --reverse.")
 	}
-	if page > 0 && (all || limit > 0) {
-		return output.ErrUsage("--page cannot be combined with --all or --limit")
-	}
-	if page > 1 {
-		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
-	}
-	if sortField != "" {
+	if opts.sortField != "" {
 		// Validate against the superset of all allowed fields early, before any
 		// API calls. Context-specific restrictions (e.g. no position in aggregate)
 		// are enforced at each branch below.
-		if err := validateSortField(sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
+		if err := validateSortField(opts.sortField, []string{"title", "created", "updated", "position", "due"}); err != nil {
 			return err
 		}
 	}
 
-	// Pagination flags only make sense when listing a single column
-	// When aggregating across columns, pagination is per-column which is confusing
-	if column == "" && (page > 0 || limit > 0 || all) {
+	// Scope- and account-independent filter validation: an explicitly empty
+	// --due/--assignee, and an unknown --due token. Before ensureAccount, so a
+	// usage error that needs no account does not demand one.
+	if err := validateTaskFilterValues(cmd, opts.due, opts.assignees); err != nil {
+		return err
+	}
+
+	selector, selectorFlag, err := cardsAccountWideSelector(opts)
+	if err != nil {
+		return err
+	}
+
+	// Scope precedence: an explicit project wins, then a configured one, then
+	// account-wide. --all-projects overrides a configured project and conflicts
+	// with an explicit one.
+	explicitProject := opts.project != "" || app.Flags.Project != ""
+	if opts.allProjects && explicitProject {
 		return output.ErrUsageHint(
-			"Pagination flags require --column",
-			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+			"--all-projects cannot be combined with --project",
+			"Drop one: --project scopes the listing to a project, --all-projects spans every project.",
 		)
 	}
+	accountWide := opts.allProjects || !projectKnown(app, opts.project)
 
 	// Resolve account (enables interactive prompt if needed)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
+	if accountWide {
+		return runCardsListAccountWide(cmd, app, opts, selector)
+	}
+
+	// --assignee and --due are parameters on the account-wide aggregates. The
+	// project-scoped card listing has no equivalent for either, so they are
+	// refused by name rather than silently ignored.
+	if len(opts.assignees) > 0 {
+		return output.ErrUsageHint(
+			"--assignee filters the account-wide card listing only",
+			"Pass --all-projects to filter across every project, or drop --assignee to list this project's cards.",
+		)
+	}
+	if opts.due != "" {
+		return output.ErrUsageHint(
+			"--due filters the account-wide card listing only",
+			"Pass --all-projects to filter across every project, or drop --due to list this project's cards.",
+		)
+	}
+
+	// The endpoint selectors reach account-wide aggregates that have no
+	// project-scoped equivalent, so a project in scope makes them unanswerable
+	// rather than a no-op.
+	if selectorFlag != "" {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%s lists cards across every project and cannot be combined with a project", selectorFlag),
+			"Pass --all-projects (which overrides a configured project), or drop the flag to list this project's cards.",
+		)
+	}
+
+	return runCardsListInProject(cmd, app, opts)
+}
+
+// cardsAccountWideSelector maps the endpoint-selector flags onto the aggregate
+// each one picks. The selectors are mutually exclusive: no endpoint combines
+// two. The returned flag spelling is empty when the caller passed none.
+func cardsAccountWideSelector(opts cardsListOptions) (selector, flag string, err error) {
+	var chosen []string
+	if opts.status != "" {
+		if !strings.EqualFold(strings.TrimSpace(opts.status), cardsSelectorCompleted) {
+			return "", "", output.ErrUsageHint(
+				fmt.Sprintf("--status %s is not a card listing", opts.status),
+				"Only --status completed is supported; open cards are the default.",
+			)
+		}
+		chosen = append(chosen, "--status completed")
+	}
+	for _, sel := range []struct {
+		on   bool
+		flag string
+		name string
+	}{
+		{opts.unassigned, "--unassigned", cardsSelectorUnassigned},
+		{opts.noDueDate, "--no-due-date", cardsSelectorNoDueDate},
+		{opts.notNow, "--not-now", cardsSelectorNotNow},
+		{opts.overdue, "--overdue", cardsSelectorOverdue},
+	} {
+		if sel.on {
+			chosen = append(chosen, sel.flag)
+		}
+	}
+
+	if len(chosen) > 1 {
+		return "", "", output.ErrUsage(fmt.Sprintf(
+			"%s and %s are mutually exclusive; each selects a different card listing",
+			chosen[0], chosen[1]))
+	}
+	if len(chosen) == 0 {
+		return cardsSelectorOpen, "", nil
+	}
+
+	switch chosen[0] {
+	case "--status completed":
+		return cardsSelectorCompleted, chosen[0], nil
+	case "--unassigned":
+		return cardsSelectorUnassigned, chosen[0], nil
+	case "--no-due-date":
+		return cardsSelectorNoDueDate, chosen[0], nil
+	case "--not-now":
+		return cardsSelectorNotNow, chosen[0], nil
+	default:
+		return cardsSelectorOverdue, chosen[0], nil
+	}
+}
+
+// runCardsListAccountWide lists cards across every accessible project. The
+// paginated aggregates come back grouped by project; --overdue comes back flat
+// and unpaginated.
+func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsListOptions, selector string) error {
+	if err := rejectAccountWideTodolist(app, "card"); err != nil {
+		return err
+	}
+	// Scope-child flags name a container inside one project, so they cannot
+	// narrow a listing that spans every project. --card-table also arrives via
+	// the group's persistent flag.
+	if opts.column != "" {
+		return output.ErrUsageHint(
+			"--column names a column in one project's card table and cannot narrow an account-wide listing",
+			"Scope the listing with --project <id> to filter by column.",
+		)
+	}
+	if opts.cardTable != "" {
+		return output.ErrUsageHint(
+			"--card-table names one project's card table and cannot narrow an account-wide listing",
+			"Scope the listing with --project <id> to pick a card table.",
+		)
+	}
+
+	if opts.limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+	if opts.pageSet && opts.page == 0 {
+		return output.ErrUsageHint(
+			"--page 0 is not a page number",
+			"Use --all to follow every page, or --page 1 for the first one.",
+		)
+	}
+	if opts.page < 0 {
+		return output.ErrUsage("--page cannot be negative")
+	}
+	if opts.page > math.MaxInt32 {
+		return output.ErrUsage("--page is out of range")
+	}
+	if opts.all && opts.limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if opts.page > 0 && (opts.all || opts.limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+
+	if selector == cardsSelectorOverdue {
+		// --page has nothing to address on an unpaginated endpoint, but --all
+		// does: the listing is capped by default, and --all is how you reach
+		// past the cap. Rejecting both would leave card 101 unreachable.
+		if opts.pageSet {
+			return output.ErrUsageHint(
+				"--page is not supported with --overdue (the overdue listing is not paginated)",
+				"Cap the results instead: basecamp cards list --overdue --limit <n>",
+			)
+		}
+		return runCardsListOverdue(cmd, app, opts)
+	}
+
+	// The grouped payloads nest cards under their project, and raw grouped
+	// output cannot represent a globally sorted list.
+	if opts.sortField != "" {
+		return output.ErrUsageHint(
+			"--sort is not supported for grouped account-wide card listings",
+			"These aggregates are grouped by project; --overdue returns a flat, sortable list.",
+		)
+	}
+
+	// Account-wide "all" is the whole account, not one project's cards, so the
+	// default is bounded and --all is how you ask for the rest. Walking pages
+	// to the cap beats fetching every page and discarding most of it.
+	if err := validateAccountWideTaskFilters(opts.assignees, opts.due, opts.unassigned,
+		opts.overdue, opts.noDueDate, "cards"); err != nil {
+		return err
+	}
+
+	// Server-side: these become assignee_ids[] and due= on the request, so the
+	// server narrows the listing before it is paginated. The bounded walk's
+	// algorithm is unchanged, but its request count is not guaranteed to match
+	// an unfiltered run — the cap counts items, so a narrower result can need an
+	// extra page. See the note on accountWideTaskFilters.
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, opts.assignees, opts.due)
+	if err != nil {
+		return err
+	}
+
+	limit := opts.limit
+	if limit == 0 {
+		limit = accountWideDefaultLimit
+	}
+
+	everything := app.Account().Everything()
+	fetch := func(page int32) ([]basecamp.BucketCardsGroup, basecamp.ListMeta, error) {
+		var (
+			groupsPage *basecamp.BucketCardsGroupsPage
+			err        error
+		)
+		switch selector {
+		case cardsSelectorCompleted:
+			groupsPage, err = everything.CompletedCards(cmd.Context(), page, taskFilters)
+		case cardsSelectorUnassigned:
+			groupsPage, err = everything.UnassignedCards(cmd.Context(), page, taskFilters)
+		case cardsSelectorNoDueDate:
+			groupsPage, err = everything.NoDueDateCards(cmd.Context(), page, taskFilters)
+		case cardsSelectorNotNow:
+			groupsPage, err = everything.NotNowCards(cmd.Context(), page, taskFilters)
+		default:
+			groupsPage, err = everything.OpenCards(cmd.Context(), page, taskFilters)
+		}
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return groupsPage.Groups, groupsPage.Meta, nil
+	}
+
+	var (
+		groups    []basecamp.BucketCardsGroup
+		capped    bool
+		truncated bool
+	)
+	if opts.all || opts.page > 0 {
+		sdkPage, err := accountWidePage(opts.page, opts.all)
+		if err != nil {
+			return err
+		}
+		pageGroups, meta, err := fetch(sdkPage)
+		if err != nil {
+			return err
+		}
+		groups, truncated = pageGroups, meta.Truncated
+	} else {
+		// --limit counts cards, not project groups: truncating groups would
+		// drop whole projects. The walk stops at a page boundary, so trim to
+		// the exact cap afterwards.
+		collected, more, _, err := accountWideCollect(fetch, countAccountWideCards, limit)
+		if err != nil {
+			return err
+		}
+		groups, capped = truncateAccountWideCards(collected, limit), more
+	}
+
+	// Meta.TotalCount counts project groups rather than cards, so the item
+	// total is ours to compute.
+	count := countAccountWideCards(groups)
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%d %s cards across %d projects", count, selector, len(groups))),
+		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
+	}
+	switch {
+	case capped:
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d cards; more may exist (use --all for every page, or --limit to raise the cap)", count)))
+	case truncated:
+		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
+	}
+
+	// --json and --agent keep the grouping the SDK returned; every other
+	// consumer gets flat rows. Nested groups have no id and no title of their
+	// own, so a renderer handed them produces unreadable cells, and --ids and
+	// --count read right past the cards to count projects.
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideCards(groups)))
+
+	return app.OK(groups, respOpts...)
+}
+
+// runCardsListOverdue lists overdue cards across every project. The endpoint
+// returns a flat, oldest-due-first array, so it renders like the
+// project-scoped path and accepts the sort flags.
+func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOptions) error {
+	if opts.sortField == "position" {
+		return output.ErrUsage("--sort position requires --column (position is per-column)")
+	}
+
+	if err := validateAccountWideTaskFilters(opts.assignees, opts.due, opts.unassigned,
+		opts.overdue, opts.noDueDate, "cards"); err != nil {
+		return err
+	}
+
+	taskFilters, err := accountWideTaskFilters(cmd.Context(), app, opts.assignees, opts.due)
+	if err != nil {
+		return err
+	}
+
+	cards, err := app.Account().Everything().OverdueCards(cmd.Context(), taskFilters)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	// Sort before truncating: truncating first would sort only the survivors.
+	if opts.sortField != "" {
+		sortCards(cards, opts.sortField, opts.reverse)
+	}
+
+	// The endpoint is unpaginated, so the complete array is already in hand and
+	// --all costs nothing beyond skipping the cap. --limit trims locally.
+	total := len(cards)
+	limit := opts.limit
+	if limit == 0 {
+		limit = accountWideDefaultLimit
+	}
+	if !opts.all && total > limit {
+		cards = cards[:limit]
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%d overdue cards across all projects", len(cards))),
+		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
+		output.WithDisplayData(flattenOverdueCards(cards)),
+	}
+	if len(cards) < total {
+		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d of %d overdue cards (use --all for the complete list, or --limit to raise the cap)",
+			len(cards), total)))
+	}
+
+	return app.OK(cards, respOpts...)
+}
+
+func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOptions) error {
+	// Validate flag combinations
+	if opts.all && opts.limit > 0 {
+		return output.ErrUsage("--all and --limit are mutually exclusive")
+	}
+	if opts.page > 0 && (opts.all || opts.limit > 0) {
+		return output.ErrUsage("--page cannot be combined with --all or --limit")
+	}
+	if opts.page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
+	}
+	if opts.page < 0 {
+		return output.ErrUsage("--page cannot be negative")
+	}
+	if opts.limit < 0 {
+		return output.ErrUsage("--limit cannot be negative")
+	}
+
+	// Pagination flags only make sense when listing a single column
+	// When aggregating across columns, pagination is per-column which is confusing
+	if opts.column == "" && (opts.page > 0 || opts.limit > 0 || opts.all) {
+		return output.ErrUsageHint(
+			"Pagination flags require --column",
+			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+		)
+	}
+
 	// Resolve project from CLI flags and config, with interactive fallback
-	projectID := project
+	projectID := opts.project
 	if projectID == "" {
 		projectID = app.Flags.Project
 	}
@@ -135,7 +527,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 	// Column name (non-numeric) requires --card-table for resolution
 	// Numeric column IDs can be used directly without discovery
-	if column != "" && !isNumericID(column) && cardTable == "" {
+	if opts.column != "" && !isNumericID(opts.column) && opts.cardTable == "" {
 		return output.ErrUsage("--card-table is required when using --column with a name")
 	}
 
@@ -145,31 +537,31 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	}
 
 	// Build pagination options
-	opts := &basecamp.CardListOptions{}
-	if all {
-		opts.Limit = -1 // SDK treats -1 as "fetch all"
-	} else if limit > 0 {
-		opts.Limit = limit
+	listOpts := &basecamp.CardListOptions{}
+	if opts.all {
+		listOpts.Limit = -1 // SDK treats -1 as "fetch all"
+	} else if opts.limit > 0 {
+		listOpts.Limit = opts.limit
 	}
-	if page > 0 {
-		opts.Page = page
+	if opts.page > 0 {
+		listOpts.Page = opts.page
 	}
 
 	// Optimization: If column is a numeric ID, skip card table discovery
 	// and fetch cards directly from the column endpoint
-	if column != "" && isNumericID(column) {
-		columnID, err := strconv.ParseInt(column, 10, 64)
+	if opts.column != "" && isNumericID(opts.column) {
+		columnID, err := strconv.ParseInt(opts.column, 10, 64)
 		if err != nil {
 			return output.ErrUsage("Invalid column ID")
 		}
 
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, listOpts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 
-		if sortField != "" {
-			sortCards(cardsResult.Cards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(cardsResult.Cards, opts.sortField, opts.reverse)
 		}
 
 		return app.OK(cardsResult.Cards,
@@ -179,7 +571,7 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 	}
 
 	// Get card table ID from project dock
-	cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, cardTable)
+	cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, opts.cardTable)
 	if err != nil {
 		return err
 	}
@@ -197,27 +589,27 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 
 	// Get cards from all columns or specific column
 	var allCards []basecamp.Card
-	if column != "" {
+	if opts.column != "" {
 		// Find column by ID or name
-		columnID := resolveColumn(cardTableData.Lists, column)
+		columnID := resolveColumn(cardTableData.Lists, opts.column)
 		if columnID == 0 {
 			return output.ErrUsageHint(
-				fmt.Sprintf("Column '%s' not found", column),
+				fmt.Sprintf("Column '%s' not found", opts.column),
 				"Use column ID or exact name",
 			)
 		}
-		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, opts)
+		cardsResult, err := app.Account().Cards().List(cmd.Context(), columnID, listOpts)
 		if err != nil {
 			return convertSDKError(err)
 		}
 		allCards = cardsResult.Cards
 
-		if sortField != "" {
-			sortCards(allCards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(allCards, opts.sortField, opts.reverse)
 		}
 	} else {
 		// No position in aggregate — it's only meaningful within a single column
-		if sortField == "position" {
+		if opts.sortField == "position" {
 			return output.ErrUsage("--sort position requires --column (position is per-column)")
 		}
 
@@ -230,8 +622,8 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			allCards = append(allCards, cardsResult.Cards...)
 		}
 
-		if sortField != "" {
-			sortCards(allCards, sortField, reverse)
+		if opts.sortField != "" {
+			sortCards(allCards, opts.sortField, opts.reverse)
 		}
 	}
 
@@ -245,6 +637,79 @@ func runCardsList(cmd *cobra.Command, project, column, cardTable string, limit, 
 			},
 		)...),
 	)
+}
+
+// countAccountWideCards totals the cards inside the project groups.
+func countAccountWideCards(groups []basecamp.BucketCardsGroup) int {
+	total := 0
+	for _, group := range groups {
+		total += len(group.Cards)
+	}
+	return total
+}
+
+// truncateAccountWideCards keeps the first limit cards, trimming groups from
+// the tail rather than dropping cards out of the middle of a project.
+func truncateAccountWideCards(groups []basecamp.BucketCardsGroup, limit int) []basecamp.BucketCardsGroup {
+	kept := make([]basecamp.BucketCardsGroup, 0, len(groups))
+	remaining := limit
+	for _, group := range groups {
+		if remaining <= 0 {
+			break
+		}
+		if len(group.Cards) > remaining {
+			group.Cards = group.Cards[:remaining]
+		}
+		remaining -= len(group.Cards)
+		kept = append(kept, group)
+	}
+	return kept
+}
+
+// flattenAccountWideCards turns the project groups into one row per card, so
+// styled output renders a flat table instead of nested cells.
+func flattenAccountWideCards(groups []basecamp.BucketCardsGroup) []map[string]any {
+	rows := make([]map[string]any, 0, countAccountWideCards(groups))
+	for _, group := range groups {
+		for _, card := range group.Cards {
+			rows = append(rows, map[string]any{
+				"id":      card.ID,
+				"title":   card.Title,
+				"project": group.Bucket.Name,
+				"status":  card.Status,
+				"due":     card.DueOn,
+			})
+		}
+	}
+	return rows
+}
+
+// flattenOverdueCards builds display rows for the flat overdue aggregate. The
+// cards arrive with a nested bucket, which both generic renderers skip by name,
+// so without this an account-wide overdue listing gives no way to tell which
+// project a card belongs to.
+func flattenOverdueCards(cards []basecamp.Card) []map[string]any {
+	rows := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
+		row := map[string]any{
+			"id":     card.ID,
+			"title":  card.Title,
+			"status": card.Status,
+			"due":    card.DueOn,
+		}
+		if card.Bucket != nil {
+			row["project"] = card.Bucket.Name
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func cardsAccountWideBreadcrumbs() []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "show", Cmd: "basecamp cards show <id>", Description: "Show card details"},
+		{Action: "scope", Cmd: "basecamp cards list --in <project_id>", Description: "List one project's cards"},
+	}
 }
 
 func cardsListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
@@ -347,27 +812,34 @@ You can pass either a card ID or a Basecamp URL:
 }
 
 func resolveAssigneeID(ctx context.Context, app *appctx.App, input string) (int64, error) {
+	return resolvePersonRoleID(ctx, app, input, "Assignee")
+}
+
+// resolvePersonRoleID resolves a single person name or ID. The role label
+// ("Assignee", "Completion subscriber", …) names the person's role in error
+// messages so callers surface the flag the user actually passed.
+func resolvePersonRoleID(ctx context.Context, app *appctx.App, input, role string) (int64, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return 0, output.ErrUsage("Assignee cannot be empty")
+		return 0, output.ErrUsage(fmt.Sprintf("%s cannot be empty", role))
 	}
 
 	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
 		if id <= 0 {
-			return 0, output.ErrUsage("Assignee ID must be a positive number")
+			return 0, output.ErrUsage(fmt.Sprintf("%s ID must be a positive number", role))
 		}
 		return id, nil
 	}
 	resolvedID, _, err := app.Names.ResolvePerson(ctx, input)
 	if err != nil {
-		return 0, fmt.Errorf("failed to resolve assignee '%s': %w", input, err)
+		return 0, fmt.Errorf("failed to resolve %s '%s': %w", strings.ToLower(role), input, err)
 	}
 	id, err := strconv.ParseInt(resolvedID, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid resolved ID '%s': %w", resolvedID, err)
 	}
 	if id <= 0 {
-		return 0, fmt.Errorf("resolved assignee ID for '%s' is not valid: %d", input, id)
+		return 0, fmt.Errorf("resolved %s ID for '%s' is not valid: %d", strings.ToLower(role), input, id)
 	}
 	return id, nil
 }
@@ -380,9 +852,15 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
 		Short: "Create a new card",
-		Long:  "Create a new card in a project's card table.",
+		Long: `Create a new card in a project's card table.
+
+Use - as the body argument to read the body from stdin:
+  printf 'Card body' | basecamp cards create "My card" - --in myproject`,
 		Example: `  basecamp cards create "My card" --in myproject
   basecamp cards create --in myproject -- "--title with dashes"`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {
@@ -393,21 +871,33 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 			if strings.TrimSpace(title) == "" {
 				return cmd.Help()
 			}
+			// A named column needs --card-table to resolve against, and that is
+			// knowable from the flags alone. Attachment paths are readable or
+			// not regardless of the body. Both precede the read, so a doomed
+			// invocation never costs the caller a drained pipe.
+			if column != "" && !isNumericID(column) && *cardTable == "" {
+				return output.ErrUsage("--card-table is required when using --column with a name")
+			}
+			if err := requireNumericID(*cardTable, "card table ID"); err != nil {
+				return err
+			}
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
 			var content string
 			if len(args) > 1 {
-				content = args[1]
+				var err error
+				content, err = resolveContentValue(cmd, args[1], 1, "[body]")
+				if err != nil {
+					return err
+				}
 			}
 
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
-			}
-
-			// Column name (non-numeric) requires --card-table for resolution
-			// Numeric column IDs can be used directly without card table discovery
-			if column != "" && !isNumericID(column) && *cardTable == "" {
-				return output.ErrUsage("--card-table is required when using --column with a name")
 			}
 
 			// Resolve project, with interactive fallback
@@ -580,6 +1070,8 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
+	allowDash(cmd, "arg:1")
+
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
@@ -608,12 +1100,6 @@ You can pass either a card ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Extract ID from URL if provided
 			cardIDStr := extractID(args[0])
 
@@ -622,10 +1108,47 @@ You can pass either a card ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained. The due date too:
+			// dateparse.Parse returns unrecognized input unchanged, so a bad
+			// value fails only at the server, after the producer is spent.
+			// todos update already rejects it locally; match that.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+			// Every non-empty value is parsed, not just non-blank ones: the
+			// no-change guard above tests due == "", so a whitespace-only
+			// --due passes it, and dateparse.Parse trims that to an empty
+			// date. Parsing it here answers "Invalid due date" instead of
+			// sending an update with nothing in it. Surrounding whitespace on
+			// a real date is already handled by the parser.
+			var parsedDue string
+			if due != "" {
+				parsedDue = dateparse.Parse(due)
+				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
+				}
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
+			content, err := resolveContentValue(cmd, content, -1, "--body")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateCardRequest{}
 			if title != "" {
-				req.Title = title
+				req.Title = &title
 			}
+
 			var mentionNotice string
 			var html string
 			if content != "" {
@@ -652,10 +1175,10 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			if html != "" {
-				req.Content = html
+				req.Content = &html
 			}
-			if due != "" {
-				req.DueOn = dateparse.Parse(due)
+			if parsedDue != "" {
+				req.DueOn = &parsedDue
 			}
 			if cmd.Flags().Changed("assignee") {
 				assigneeID, err := resolveAssigneeID(cmd.Context(), app, assignee)
@@ -688,7 +1211,7 @@ You can pass either a card ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&content, "body", "b", "", "New body content")
+	cmd.Flags().StringVarP(&content, "body", "b", "", "New body content; use - to read from stdin")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
@@ -697,6 +1220,8 @@ You can pass either a card ID or a Basecamp URL:
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
+	allowDash(cmd, "flag:body")
+
 	return cmd
 }
 
@@ -704,6 +1229,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var targetColumn string
 	var position int
 	var onHold bool
+	var toWormhole string
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
@@ -715,25 +1241,44 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards move https://3.basecamp.com/123/buckets/456/card_tables/cards/789 --to "Done"
   basecamp cards move 789 --to "Done" --position 1 --in my-project
   basecamp cards move 789 --on-hold --in my-project
-  basecamp cards move 789 --to 456 --on-hold --in my-project`,
+  basecamp cards move 789 --to 456 --on-hold --in my-project
+
+Move a card to a different project by teleporting it through a wormhole. Pass a
+wormhole ID, or the URL of the destination column it targets:
+  basecamp cards move 789 --to-wormhole 1069480287 --in my-project
+  basecamp cards move 789 --to-wormhole https://3.basecamp.com/123/buckets/456/card_tables/columns/999
+This is asynchronous: a new card appears in the destination project and the
+original card 404s once the server finishes filing it away.`,
 		Args:    cobra.ExactArgs(1),
 		Aliases: []string{"mv"},
 		Annotations: map[string]string{
 			"agent_notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
-				"--position cannot be combined with --on-hold.",
+				"--position cannot be combined with --on-hold. " +
+				"--to-wormhole teleports the card to a column on another project's card table; it is mutually exclusive with --to/--on-hold/--position. " +
+				"The teleport is asynchronous and mints a new card id — the original id 404s afterward, so do not reuse it.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if targetColumn == "" && !onHold {
-				return missingArg(cmd, "--to")
-			}
-
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
-			if positionSet && position <= 0 {
-				return output.ErrUsage("--position must be a positive integer (1-indexed)")
-			}
-			if positionSet && onHold {
-				return output.ErrUsage("--position cannot be used with --on-hold")
+			wormholeSet := cmd.Flags().Changed("to-wormhole")
+
+			if wormholeSet {
+				if targetColumn != "" || onHold || positionSet {
+					return output.ErrUsage("--to-wormhole cannot be combined with --to, --on-hold, or --position")
+				}
+				if toWormhole == "" {
+					return output.ErrUsage("--to-wormhole requires a wormhole ID or destination-column URL")
+				}
+			} else {
+				if targetColumn == "" && !onHold {
+					return missingArg(cmd, "--to")
+				}
+				if positionSet && position <= 0 {
+					return output.ErrUsage("--position must be a positive integer (1-indexed)")
+				}
+				if positionSet && onHold {
+					return output.ErrUsage("--position cannot be used with --on-hold")
+				}
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -747,6 +1292,13 @@ You can pass either a card ID or a Basecamp URL:
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
+			}
+
+			// --to-wormhole: teleport across projects. Self-contained — it derives
+			// the source project and card table from the fetched card, so it runs
+			// before (and instead of) the generic project resolution below.
+			if wormholeSet {
+				return moveCardThroughWormhole(cmd, app, cardID, cardIDStr, *project, urlProjectID, *cardTable, toWormhole)
 			}
 
 			isNumericColumn := targetColumn != "" && isNumericID(targetColumn)
@@ -874,8 +1426,257 @@ You can pass either a card ID or a Basecamp URL:
 	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
+	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Teleport the card across projects through a wormhole (wormhole ID or destination-column URL)")
 
 	return cmd
+}
+
+// moveCardThroughWormhole teleports a card across projects through a wormhole to
+// a column on another card table. wormholeRef is either an all-digits value —
+// always interpreted as a wormhole ID — or a Basecamp column URL identifying the
+// wormhole's destination column. (A bare numeric destination-column ID is not
+// accepted: it is indistinguishable from a wormhole ID, so a column must be given
+// as a URL.)
+//
+// The teleport is destructive and asynchronous: Cards().Move returns once it is
+// accepted, then the server copies the card into the destination column under a
+// new id and deletes the original — so the original id 404s once filing
+// completes. The move endpoint resolves the column_id against the whole project
+// bucket, so a sibling board's wormhole would happily teleport the card
+// elsewhere. Because that is irreversible, this fails closed: it always fetches
+// the card, derives the source project and table from the card itself, rejects
+// conflicting caller context, and requires the referenced wormhole to be present
+// and linked on that exact table before issuing the move. The output reports the
+// source under source_id (not id) and omits a same-id "view card" breadcrumb,
+// because that id is about to 404.
+func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, flagProject, urlProjectID, cardTableFlag, wormholeRef string) error {
+	// Validate the reference before any network call.
+	byID := isNumericID(wormholeRef)
+	var wantWormholeID, wantDestColumnID int64
+	if byID {
+		id, err := strconv.ParseInt(wormholeRef, 10, 64)
+		if err != nil || id <= 0 {
+			return output.ErrUsage("--to-wormhole must be a positive wormhole ID or a destination-column URL")
+		}
+		wantWormholeID = id
+	} else {
+		id, err := parseColumnID(wormholeRef)
+		if err != nil {
+			return err
+		}
+		wantDestColumnID = id
+	}
+
+	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if card.Bucket == nil || card.Bucket.ID == 0 {
+		return output.ErrNotFound("card", cardIDStr)
+	}
+	sourceProjectID := strconv.FormatInt(card.Bucket.ID, 10)
+
+	// Reject an explicit project (flag or card URL) that contradicts the card's
+	// own project — the card's bucket is authoritative for a cross-project move.
+	if err := rejectWormholeProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
+		return err
+	}
+
+	cardTableID, cardTableData, err := resolveCardTableForCard(cmd, app, sourceProjectID, cardTableFlag, card)
+	if err != nil {
+		return err
+	}
+	// resolveCardTableForCard trusts an explicit --card-table; confirm the card
+	// actually lives on the resolved table before searching its wormholes.
+	if err := requireCardInTable(card, cardTableData); err != nil {
+		return err
+	}
+
+	var wormhole *basecamp.Wormhole
+	if byID {
+		if wormhole = findWormholeByID(cardTableData.Wormholes, wantWormholeID); wormhole == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("Wormhole %d is not on this card's card table", wantWormholeID),
+				wormholeHint(cardTableData.Wormholes),
+			)
+		}
+	} else {
+		if wormhole = findWormholeByDestinationColumn(cardTableData.Wormholes, wantDestColumnID); wormhole == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("No wormhole on this card's card table teleports to column %d", wantDestColumnID),
+				wormholeHint(cardTableData.Wormholes),
+			)
+		}
+	}
+	if !wormhole.Linked {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Wormhole %d is unlinked — its destination column no longer exists", wormhole.ID),
+			fmt.Sprintf("Point it at a live column with: basecamp cards wormholes update %d --to-column <id|url> --in %s", wormhole.ID, sourceProjectID),
+		)
+	}
+
+	if err := app.Account().Cards().Move(cmd.Context(), cardID, wormhole.ID, nil); err != nil {
+		return convertSDKError(err)
+	}
+
+	result := map[string]any{
+		"source_id":   cardIDStr,
+		"status":      "teleporting",
+		"wormhole":    wormhole.ID,
+		"destination": wormhole.Title,
+	}
+	summary := fmt.Sprintf("Teleporting card #%s through wormhole %d (%s) — asynchronous; a new card appears in the destination and the original 404s once filing completes", cardIDStr, wormhole.ID, wormhole.Title)
+
+	return app.OK(result,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(wormholeMoveBreadcrumbs(sourceProjectID, cardTableID)...),
+	)
+}
+
+// wormholeListBreadcrumb builds the "list wormholes" follow-up. A wormhole's
+// parent is the card table it lives on, so it pins --card-table when known,
+// keeping the follow-up unambiguous on multi-table projects.
+func wormholeListBreadcrumb(bucketID int64, wormhole *basecamp.Wormhole) output.Breadcrumb {
+	cmd := fmt.Sprintf("basecamp cards wormholes list --in %d", bucketID)
+	if wormhole != nil && wormhole.Parent != nil && wormhole.Parent.ID != 0 {
+		cmd += fmt.Sprintf(" --card-table %d", wormhole.Parent.ID)
+	}
+	return output.Breadcrumb{Action: "list", Cmd: cmd, Description: "List wormholes"}
+}
+
+// wormholeMoveBreadcrumbs points at the source card table's wormhole list. It
+// pins --card-table (the resolved table id) so the follow-up is unambiguous on
+// multi-table projects, and deliberately offers no same-id "view card" action —
+// that id is about to 404.
+func wormholeMoveBreadcrumbs(sourceProjectID, cardTableID string) []output.Breadcrumb {
+	return []output.Breadcrumb{{
+		Action:      "wormholes",
+		Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %s --card-table %s", sourceProjectID, cardTableID),
+		Description: "List wormholes on this card table",
+	}}
+}
+
+// rejectWormholeProjectConflict fails when an explicitly supplied project (the
+// --in/--project flag or a card URL's bucket) resolves to a different project
+// than the card's own bucket. Config/interactive defaults are not checked — only
+// explicit caller context can conflict.
+func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProject, urlProjectID string, cardBucketID int64) error {
+	want := strconv.FormatInt(cardBucketID, 10)
+	check := func(value, label string) error {
+		if value == "" {
+			return nil
+		}
+		resolved, _, err := app.Names.ResolveProject(cmd.Context(), value)
+		if err != nil {
+			return err
+		}
+		if resolved != want {
+			return output.ErrUsageHint(
+				fmt.Sprintf("The card is in project %s, but %s points at project %s", want, label, resolved),
+				"Omit the conflicting project — a wormhole move always uses the card's own project",
+			)
+		}
+		return nil
+	}
+	if err := check(flagProject, "--in/--project"); err != nil {
+		return err
+	}
+	// app.Flags.Project carries a root-level --project (e.g.
+	// `basecamp --project 999 cards move …`), which lands here rather than in the
+	// card command's own flag — check it too so a root-level conflict can't slip
+	// past into a destructive move.
+	if err := check(app.Flags.Project, "--project"); err != nil {
+		return err
+	}
+	return check(urlProjectID, "the card URL")
+}
+
+// requireCardInTable confirms the card's parent column belongs to the resolved
+// card table, so an explicit --card-table can't point the wormhole search at a
+// table the card isn't on. The teleport is irreversible, so it fails closed: if
+// the card's parent column or the table's columns are unavailable, the placement
+// can't be verified and the move is refused rather than trusted.
+func requireCardInTable(card *basecamp.Card, table *basecamp.CardTable) error {
+	if card.Parent == nil || card.Parent.ID == 0 || table == nil {
+		return output.ErrUsageHint(
+			"Could not verify which card table the card is on before teleporting",
+			"Re-run without --card-table so the card's own table is resolved, and check the card ID",
+		)
+	}
+	if cardTableContainsColumn(table.Lists, card.Parent.ID) {
+		return nil
+	}
+	return output.ErrUsageHint(
+		"The card is not on the specified card table",
+		"Omit --card-table (the card's own table is used) or pass the table that contains the card",
+	)
+}
+
+// findWormholeByID returns the wormhole with the given id, or nil.
+func findWormholeByID(wormholes []basecamp.Wormhole, id int64) *basecamp.Wormhole {
+	for i := range wormholes {
+		if wormholes[i].ID == id {
+			return &wormholes[i]
+		}
+	}
+	return nil
+}
+
+// findWormholeByDestinationColumn returns the wormhole whose destination_url
+// resolves to columnID, or nil. Unlinked wormholes (nil destination_url) never
+// match.
+func findWormholeByDestinationColumn(wormholes []basecamp.Wormhole, columnID int64) *basecamp.Wormhole {
+	for i := range wormholes {
+		wormhole := &wormholes[i]
+		if wormhole.DestinationURL == nil {
+			continue
+		}
+		id := extractID(*wormhole.DestinationURL)
+		if parsed, err := strconv.ParseInt(id, 10, 64); err == nil && parsed == columnID {
+			return wormhole
+		}
+	}
+	return nil
+}
+
+// wormholeHint builds a usage hint listing a card table's wormholes by ID and
+// title, so a failed match points at the reachable options.
+func wormholeHint(wormholes []basecamp.Wormhole) string {
+	if len(wormholes) == 0 {
+		return "This card table has no wormholes — create one with: basecamp cards wormholes create --to-column <id|url>"
+	}
+	parts := make([]string, 0, len(wormholes))
+	for i := range wormholes {
+		wormhole := &wormholes[i]
+		parts = append(parts, fmt.Sprintf("#%d (%s)", wormhole.ID, wormhole.Title))
+	}
+	return "Target one of the wormholes on this card table: " + strings.Join(parts, ", ")
+}
+
+// parseColumnID resolves a destination-column reference — a positive numeric ID
+// or a Basecamp column URL (.../card_tables/columns/{id}) — to a positive column
+// ID. Any other Basecamp URL (a card, a project, a cards collection) is rejected
+// rather than silently accepting its trailing numeric id.
+func parseColumnID(ref string) (int64, error) {
+	invalid := func() (int64, error) {
+		return 0, output.ErrUsageHint(
+			fmt.Sprintf("Invalid destination column %q", ref),
+			"Pass a positive column ID or a Basecamp column URL (.../card_tables/columns/{id})",
+		)
+	}
+	idStr := ref
+	if urlarg.IsURL(ref) {
+		parsed := urlarg.Parse(ref)
+		if parsed == nil || parsed.Type != "columns" || parsed.IsCollection {
+			return invalid()
+		}
+		idStr = parsed.RecordingID
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return invalid()
+	}
+	return id, nil
 }
 
 func newCardsDoneCmd(project, cardTable *string) *cobra.Command {
@@ -1274,6 +2075,15 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 
 			app := appctx.FromContext(cmd.Context())
 
+			if err := requireNumericID(*cardTable, "card table ID"); err != nil {
+				return err
+			}
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -1337,7 +2147,9 @@ func newCardsColumnCreateCmd(project, cardTable *string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Column description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Column description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -1360,17 +2172,23 @@ You can pass either a column ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Extract ID from URL if provided
 			columnIDStr := extractID(args[0])
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			req := &basecamp.UpdateColumnRequest{
@@ -1390,7 +2208,9 @@ You can pass either a column ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -1708,6 +2528,252 @@ You can pass either a column ID or a Basecamp URL:
 	return cmd
 }
 
+// newCardsWormholesCmd creates the wormhole management group. A wormhole is a
+// portal on a card table that teleports any card dropped into it to a column on
+// another project's card table — the only way to move a card across projects.
+func newCardsWormholesCmd(project, cardTable *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "wormholes",
+		Short: "Manage card-table wormholes",
+		Long: `Manage wormholes — portals that teleport cards to a column on another project's card table.
+
+A wormhole is the only way to move a card across projects. Drop a card into one
+(with "cards move --to-wormhole") and the server teleports it to the wormhole's
+destination column, minting a new card and deleting the original. A card table
+holds at most four wormholes.`,
+	}
+
+	cmd.AddCommand(
+		newCardsWormholesListCmd(project, cardTable),
+		newCardsWormholesCreateCmd(project, cardTable),
+		newCardsWormholesUpdateCmd(project),
+		newCardsWormholesDeleteCmd(project),
+	)
+
+	return cmd
+}
+
+func newCardsWormholesListCmd(project, cardTable *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "list",
+		Short:   "List wormholes",
+		Long:    "List the wormholes on a project's card table with their IDs, destinations, and linked status.",
+		Aliases: []string{"ls"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			resolvedProjectID, err := resolveCardsProjectID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+			if err != nil {
+				return err
+			}
+
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card table ID")
+			}
+
+			cardTableData, err := app.Account().CardTables().Get(cmd.Context(), cardTableIDInt)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(cardTableData.Wormholes,
+				output.WithSummary(fmt.Sprintf("%d wormholes", len(cardTableData.Wormholes))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "create",
+						Cmd:         fmt.Sprintf("basecamp cards wormholes create --to-column <id|url> --in %s --card-table %s", resolvedProjectID, cardTableID),
+						Description: "Create a wormhole",
+					},
+					output.Breadcrumb{
+						Action:      "move",
+						Cmd:         "basecamp cards move <card> --to-wormhole <id>",
+						Description: "Teleport a card through a wormhole",
+					},
+				),
+			)
+		},
+	}
+	return cmd
+}
+
+func newCardsWormholesCreateCmd(project, cardTable *string) *cobra.Command {
+	var toColumn string
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a wormhole",
+		Long: `Create a wormhole on this project's card table that teleports cards to a column on another project's card table.
+
+Pass the destination column as an ID or a Basecamp column URL:
+  basecamp cards wormholes create --to-column 1069480051 --in my-project
+  basecamp cards wormholes create --to-column https://3.basecamp.com/123/buckets/456/card_tables/columns/789
+
+A card table holds at most four wormholes.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toColumn == "" {
+				return missingArg(cmd, "--to-column")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			resolvedProjectID, err := resolveCardsProjectID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Project ID must be numeric")
+			}
+
+			cardTableID, err := getCardTableID(cmd, app, resolvedProjectID, *cardTable)
+			if err != nil {
+				return err
+			}
+
+			cardTableIDInt, err := strconv.ParseInt(cardTableID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card table ID")
+			}
+
+			destColumnID, err := parseColumnID(toColumn)
+			if err != nil {
+				return err
+			}
+
+			wormhole, err := app.Account().Wormholes().Create(cmd.Context(), bucketID, cardTableIDInt, destColumnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(wormhole,
+				output.WithSummary(fmt.Sprintf("Created wormhole: %s", wormhole.Title)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "list",
+						Cmd:         fmt.Sprintf("basecamp cards wormholes list --in %s --card-table %s", resolvedProjectID, cardTableID),
+						Description: "List wormholes",
+					},
+					output.Breadcrumb{
+						Action:      "move",
+						Cmd:         fmt.Sprintf("basecamp cards move <card> --to-wormhole %d", wormhole.ID),
+						Description: "Teleport a card through this wormhole",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&toColumn, "to-column", "", "Destination column ID or URL (required)")
+
+	return cmd
+}
+
+func newCardsWormholesUpdateCmd(project *string) *cobra.Command {
+	var toColumn string
+
+	cmd := &cobra.Command{
+		Use:   "update <id>",
+		Short: "Update a wormhole's destination",
+		Long: `Point an existing wormhole at a new destination column.
+
+  basecamp cards wormholes update 1069480287 --to-column 1069480051 --in my-project`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toColumn == "" {
+				return missingArg(cmd, "--to-column")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
+			if err != nil || wormholeID <= 0 {
+				return output.ErrUsage("Invalid wormhole ID")
+			}
+
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			destColumnID, err := parseColumnID(toColumn)
+			if err != nil {
+				return err
+			}
+
+			wormhole, err := app.Account().Wormholes().Update(cmd.Context(), bucketID, wormholeID, destColumnID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(wormhole,
+				output.WithSummary(fmt.Sprintf("Updated wormhole: %s", wormhole.Title)),
+				output.WithBreadcrumbs(wormholeListBreadcrumb(bucketID, wormhole)),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&toColumn, "to-column", "", "New destination column ID or URL (required)")
+
+	return cmd
+}
+
+func newCardsWormholesDeleteCmd(project *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a wormhole",
+		Long:    "Remove a wormhole from a card table. Cards already teleported are unaffected.",
+		Args:    cobra.ExactArgs(1),
+		Aliases: []string{"rm"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
+			if err != nil || wormholeID <= 0 {
+				return output.ErrUsage("Invalid wormhole ID")
+			}
+
+			bucketID, err := resolveColumnBucketID(cmd, app, *project, urlProjectID)
+			if err != nil {
+				return err
+			}
+
+			if err := app.Account().Wormholes().Delete(cmd.Context(), bucketID, wormholeID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(map[string]any{"id": wormholeIDStr, "status": "deleted"},
+				output.WithSummary(fmt.Sprintf("Deleted wormhole #%s", wormholeIDStr)),
+			)
+		},
+	}
+	return cmd
+}
+
 // newCardsStepsCmd creates the steps listing subcommand.
 func newCardsStepsCmd(project *string) *cobra.Command {
 	var cardID string
@@ -1944,17 +3010,9 @@ You can pass either a step ID or a Basecamp URL:
 			req := &basecamp.UpdateStepRequest{}
 			if title != "" {
 				req.Title = title
-			} else {
-				// The API rejects step updates without a title, so carry
-				// over the current one when only other fields change.
-				current, err := app.Account().CardSteps().Get(cmd.Context(), stepID)
-				if err != nil {
-					return convertSDKError(err)
-				}
-				req.Title = current.Title
 			}
 			if dueOn != "" {
-				req.DueOn = dateparse.Parse(dueOn)
+				req.DueOn = basecamp.Ptr(dateparse.Parse(dueOn))
 			}
 			if assignees != "" {
 				assigneeIDs, err := resolveAssigneeIDs(cmd.Context(), app, assignees)
@@ -2156,6 +3214,31 @@ You can pass either a step ID or a Basecamp URL:
 type projectCardTable struct {
 	ID    int64
 	Title string
+}
+
+// resolveCardsProjectID resolves the project for a card command from the
+// flagProject value with the standard flag > env > config > interactive
+// precedence, then maps it to a numeric project ID via the name resolver.
+func resolveCardsProjectID(cmd *cobra.Command, app *appctx.App, flagProject string) (string, error) {
+	projectID := flagProject
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		if err := ensureProject(cmd, app); err != nil {
+			return "", err
+		}
+		projectID = app.Config.ProjectID
+	}
+
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", err
+	}
+	return resolvedProjectID, nil
 }
 
 // getCardTableID retrieves the card table ID from a project's dock.
@@ -2460,6 +3543,12 @@ func resolveColumn(columns []basecamp.CardColumn, identifier string) int64 {
 }
 
 func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]int64, error) {
+	return resolvePersonRoleIDs(ctx, app, input, "Assignee")
+}
+
+// resolvePersonRoleIDs resolves a comma-separated list of person names or IDs,
+// labeling errors with the given role (see resolvePersonRoleID).
+func resolvePersonRoleIDs(ctx context.Context, app *appctx.App, input, role string) ([]int64, error) {
 	parts := strings.Split(input, ",")
 	ids := make([]int64, 0, len(parts))
 
@@ -2469,7 +3558,7 @@ func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]i
 			continue
 		}
 
-		id, err := resolveAssigneeID(ctx, app, part)
+		id, err := resolvePersonRoleID(ctx, app, part, role)
 		if err != nil {
 			return nil, err
 		}
@@ -2477,7 +3566,7 @@ func resolveAssigneeIDs(ctx context.Context, app *appctx.App, input string) ([]i
 	}
 
 	if len(ids) == 0 {
-		return nil, output.ErrUsage("No valid assignees provided")
+		return nil, output.ErrUsage(fmt.Sprintf("No valid %ss provided", strings.ToLower(role)))
 	}
 
 	return ids, nil

@@ -130,7 +130,7 @@ LOCAL_API_PROVENANCE="../basecamp-sdk/spec/api-provenance.json"
 if [[ -f "${LOCAL_API_PROVENANCE}" ]]; then
   echo "    Reading API provenance from local SDK repo"
   API_REVISION=$(jq -r '.bc3.revision // ""' "${LOCAL_API_PROVENANCE}" 2>/dev/null || echo "")
-  API_SYNCED_AT=$(jq -r '.bc3.synced_at // ""' "${LOCAL_API_PROVENANCE}" 2>/dev/null || echo "")
+  API_SYNCED_AT=$(jq -r '.bc3.synced_at // .bc3.date // ""' "${LOCAL_API_PROVENANCE}" 2>/dev/null || echo "")
 elif command -v gh >/dev/null 2>&1 && [[ -n "${COMMIT}" ]]; then
   # Try remote via GitHub API
   echo "    Fetching API provenance from GitHub (ref: ${COMMIT})"
@@ -143,7 +143,7 @@ elif command -v gh >/dev/null 2>&1 && [[ -n "${COMMIT}" ]]; then
   fi
   if [[ -n "${API_JSON}" ]]; then
     API_REVISION=$(echo "${API_JSON}" | jq -r '.bc3.revision // ""' 2>/dev/null || echo "")
-    API_SYNCED_AT=$(echo "${API_JSON}" | jq -r '.bc3.synced_at // ""' 2>/dev/null || echo "")
+    API_SYNCED_AT=$(echo "${API_JSON}" | jq -r '.bc3.synced_at // .bc3.date // ""' 2>/dev/null || echo "")
   else
     echo "    Could not fetch API provenance (file may not exist yet)"
   fi

@@ -6,9 +6,14 @@ type Credentials struct {
 	RefreshToken  string `json:"refresh_token,omitempty"`
 	ExpiresAt     int64  `json:"expires_at,omitempty"`
 	TokenEndpoint string `json:"token_endpoint,omitempty"`
-	OAuthType     string `json:"oauth_type,omitempty"` // "bc3" or "launchpad"
+	OAuthType     string `json:"oauth_type,omitempty"` // "bc5", "launchpad", or legacy "bc3"
 	Scope         string `json:"scope,omitempty"`
 	UserID        string `json:"user_id,omitempty"`
+
+	// Resource is the RFC 8707 resource indicator the tokens are bound to
+	// (BC5: urn:bc:account:<id>), echoed on refresh — multi-account refresh
+	// tokens are rejected without it. Mirrors internal/auth.Credentials.
+	Resource string `json:"resource,omitempty"`
 }
 
 // CredentialStore provides persistent storage for OAuth credentials.

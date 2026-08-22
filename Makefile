@@ -212,8 +212,12 @@ bump-sdk:
 # Recompute Nix vendorHash via Docker and update nix/package.nix
 .PHONY: update-nix-hash
 update-nix-hash:
-	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1) && \
-	scripts/update-nix-flake.sh "$$VERSION" || true
+	@VERSION=$$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix | head -1); \
+	scripts/update-nix-flake.sh "$$VERSION"; RC=$$?; \
+	if [ $$RC -ne 0 ] && [ $$RC -ne 2 ]; then exit $$RC; fi
+	@# 0 = updated, 2 = nothing to do. Anything else is a real failure and must
+	@# propagate: a blanket `|| true` here silently undid the script's own
+	@# fail-closed check, which is how v0.8.0 shipped a flake that cannot build.
 
 # Verify sdk-provenance.json matches go.mod
 # Skips when a replace directive is active (local dev with go.work or go.mod replace)
@@ -329,7 +333,7 @@ check-smoke-coverage: build
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -352,18 +356,26 @@ release:
 .PHONY: test-release
 test-release:
 	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
+	SM_API_KEY= SM_CLIENT_CERT_FILE= SM_CLIENT_CERT_PASSWORD= \
 	goreleaser release --snapshot --skip=publish,sign --clean
 
-# Generate CLI surface snapshot (validates binary produces valid output)
+# Verify the committed CLI surface snapshot (.surface) matches the command tree.
+# TestSurfaceSnapshot is the authority: it diffs .surface against surface.Snapshot
+# and fails on any drift, pointing here for regeneration.
 .PHONY: check-surface
-check-surface: build
-	@command -v jq >/dev/null 2>&1 || { \
-		echo "ERROR: jq is required for check-surface but was not found."; \
-		echo "Install with: brew install jq (macOS), apt-get install jq (Debian/Ubuntu)"; \
+check-surface: check-toolchain
+	@BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) ./internal/commands/ -run TestSurfaceSnapshot -count=1 || { \
+		echo; echo "TestSurfaceSnapshot failed — if the committed .surface is stale, run: make update-surface"; \
 		exit 1; \
 	}
-	scripts/check-cli-surface.sh $(BUILD_DIR)/$(BINARY) /tmp/cli-surface.txt
-	@echo "CLI surface snapshot generated ($$(wc -l < /tmp/cli-surface.txt) entries)"
+	@echo "CLI surface snapshot up to date ($$(wc -l < .surface) entries)"
+
+# Regenerate the committed CLI surface snapshot (.surface) from the command tree.
+# Accepts additions; removals must be acknowledged in .surface-breaking.
+.PHONY: update-surface
+update-surface: check-toolchain
+	@BASECAMP_NO_KEYRING=1 $(GOTEST) $(BUILD_TAGS) ./internal/commands/ -run TestSurfaceSnapshot -update-surface -count=1
+	@echo "CLI surface snapshot regenerated ($$(wc -l < .surface) entries)"
 
 # Compare CLI surface against baseline (fails on removals)
 .PHONY: check-surface-diff
@@ -394,11 +406,17 @@ check-surface-compat: build
 .PHONY: check-skill-drift
 check-skill-drift:
 	@scripts/check-skill-drift.sh
+	@scripts/check-skill-drift.sh skills/basecamp-doctor/SKILL.md
 
 # Verify group commands show help bare (no RunE on parents with subcommands)
 .PHONY: check-bare-groups
 check-bare-groups:
 	@scripts/check-bare-groups.sh
+
+# Verify every workflow lints with the same golangci-lint version
+.PHONY: check-lint-lockstep
+check-lint-lockstep:
+	@scripts/check-lint-lockstep.sh
 
 # Guard against bcq/BCQ creeping back (allowlist in .naming-allowlist)
 .PHONY: check-naming
@@ -542,7 +560,8 @@ help:
 	@echo "  lint-actions   Lint GitHub Actions workflows (actionlint + zizmor)"
 	@echo "  tidy-check     Verify go.mod/go.sum are tidy"
 	@echo "  check          Run all checks (local CI gate)"
-	@echo "  check-surface  Generate CLI surface snapshot (validates --help --agent output)"
+	@echo "  check-surface  Verify committed .surface matches the command tree (TestSurfaceSnapshot)"
+	@echo "  update-surface  Regenerate committed .surface from the command tree"
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo "  check-skill-drift  Verify skill references match CLI surface"
 	@echo ""

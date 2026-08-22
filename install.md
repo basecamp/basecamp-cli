@@ -2,6 +2,8 @@
 
 Install the Basecamp CLI and connect it to your AI agent. Execute all steps autonomously.
 
+The piped installer (Step 1) already installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent. The optional "Connect Your Agent" section below is for forcing a specific agent, handling multiple detected agents, or verifying the connection.
+
 **DONE WHEN:** `basecamp --version && basecamp auth status` both succeed.
 
 ---
@@ -10,7 +12,7 @@ Install the Basecamp CLI and connect it to your AI agent. Execute all steps auto
 
 - [ ] Install Basecamp CLI
 - [ ] Authenticate with Basecamp
-- [ ] Connect agent (optional)
+- [ ] Connect agent (optional — the piped installer already attempts one detected agent)
 
 ---
 
@@ -28,9 +30,15 @@ curl -fsSL https://basecamp.com/install-cli | bash
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
-> **Note:** The install scripts auto-detect non-interactive environments (CI, piped input, coding agents) and skip the interactive setup wizard. You can also explicitly skip it with `BASECAMP_SKIP_SETUP=1`.
+> **Note:** The install scripts auto-detect non-interactive environments (CI, piped input, coding agents) and skip the interactive setup wizard. In that case they still run `basecamp setup agents`, which installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping the wizard with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`.
+>
+> Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `all`, or `none`). Set it for the interpreter, not the fetch:
+> - Bash: `curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash`
+> - PowerShell: `$env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex`
 >
 > **Windows note:** if `curl` fails with a `schannel` / `CRYPT_E_NO_REVOCATION_CHECK` TLS error, prefer the PowerShell installer, Scoop, or Git Bash's `/usr/bin/curl` instead of the system `curl.exe`.
+>
+> **Windows 11 with Smart App Control:** releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`, which Smart App Control blocks. Prefer WSL2 — run `curl -fsSL https://basecamp.com/install-cli | bash` inside a WSL terminal — or see [Troubleshooting](#troubleshooting) below.
 
 Alternatively install manually:
 
@@ -86,6 +94,10 @@ export PATH="$HOME/bin:$PATH"          # Git Bash / Windows bash environments
 export PATH="$HOME/go/bin:$PATH"
 ```
 
+### Upgrading later
+
+Run `basecamp upgrade`. Installer-script installs upgrade in place (Sigstore-verified download, transactional executable swap, post-upgrade version confirmation). Homebrew and Scoop installs delegate to their package manager, then verify the installed binary reports the new version. System packages (apt/dnf/apk, AUR, Nix) and `go install` builds are never touched — the command exits nonzero with upgrade guidance for that install method instead. Treat any nonzero exit as **not upgraded** and follow the hint in the error (`upgrade_required`, `upgrade_incomplete`, `upgrade_unverified`, or `upgrade_failed`).
+
 ---
 
 ## Step 2: Authenticate
@@ -112,6 +124,8 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
 
+The piped installer (Step 1) already installs the baseline skill and attempts to connect a single detected agent. Run the commands here to force a specific agent, connect a second one, or when several agents were detected and the installer connected none. Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
+
 ### Claude Code
 
 ```bash
@@ -119,6 +133,34 @@ basecamp setup claude
 ```
 
 This registers the marketplace and installs the plugin with skills, hooks, and agent workflow support.
+
+The hooks call the CLI's `agent-hook` command, so they need a `basecamp` new
+enough to have it. If hook errors appear after installing or refreshing the
+plugin, run `basecamp upgrade` and start a new session; `basecamp agent-hook
+--help` replying "unknown command" confirms the CLI is the old one.
+
+### Codex
+
+```bash
+basecamp setup codex
+```
+
+This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. After setup, review and trust the plugin hooks with `/hooks` (Codex lists untrusted hooks but does not run them until trusted), then start a new Codex thread to load the skills and hooks.
+
+For a manual install:
+
+```bash
+codex plugin marketplace add basecamp/claude-plugins
+codex plugin add basecamp@37signals
+```
+
+To pick up a newer plugin version later, refresh with `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
+
+Verify either agent integration with structured diagnostics:
+
+```bash
+basecamp doctor --json
+```
 
 ### Other Agents
 
@@ -157,6 +199,44 @@ basecamp auth logout && basecamp auth login
 ```bash
 basecamp auth login --scope full
 ```
+
+**Windows 11: Smart App Control blocks `basecamp.exe`:**
+
+Releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`. Smart App Control
+only runs code-signed executables — regardless of download source — and has no
+per-app exceptions, so it blocks the unsigned CLI at launch. Check whether an
+installed binary is signed with:
+
+```powershell
+Get-AuthenticodeSignature (Get-Command basecamp).Source
+```
+
+Preferred workaround — install inside WSL2, where Smart App Control doesn't
+apply and your Windows security setup is untouched:
+
+```powershell
+wsl --install
+```
+
+then inside the WSL terminal:
+
+```bash
+curl -fsSL https://basecamp.com/install-cli | bash
+```
+
+The DONE WHEN gate (`basecamp --version && basecamp auth status`) runs inside
+WSL in this setup.
+
+Alternative — turn Smart App Control off (Windows Security → App & browser
+control → Smart App Control settings) and leave it off while using the
+unsigned build: because there are no per-app exceptions, re-enabling it
+re-blocks `basecamp.exe` on its next run. Only re-enable after upgrading to a
+signed build. Windows 11 with the March/April 2026 updates can re-enable Smart
+App Control from Windows Security without a reset; on older builds re-enabling
+requires resetting Windows, so use WSL2 there instead.
+
+Plain SmartScreen (Smart App Control off) may warn on first run — choose
+"More info" → "Run anyway".
 
 **Termux / Android (`SIGSYS: bad system call` on startup):**
 

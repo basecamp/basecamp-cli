@@ -181,7 +181,7 @@ func showTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	cfg := &config.Config{AccountID: "99999"}
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &showTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &showTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -244,6 +244,8 @@ func (t *showTrackingTransport) RoundTrip(req *http.Request) (*http.Response, er
 		StatusCode: status,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     header,
+		// Request is required by the SDK's same-origin pagination guard.
+		Request: req,
 	}, nil
 }
 

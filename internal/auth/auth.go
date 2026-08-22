@@ -4,13 +4,13 @@ package auth
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +21,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // ClientCredentials holds OAuth client ID and secret.
@@ -34,6 +35,24 @@ type ClientCredentials struct {
 const (
 	launchpadClientID     = "5fdd0da8e485ae6f80f4ce0a4938640bb22f1348"
 	launchpadClientSecret = "a3dc33d78258e828efd6768ac2cd67f32ec1910a" //nolint:gosec // G101: Public OAuth client secret for native app
+)
+
+// bc5ClientID is the pre-registered public client for the BC5 device flow.
+// Public client: no secret.
+const bc5ClientID = "basecamp-cli"
+
+// OAuth provider types stored in credentials. Legacy "bc3" (the removed
+// DCR/PKCE development flow) may still appear in stored credentials.
+const (
+	oauthTypeBC5       = "bc5"
+	oauthTypeLaunchpad = "launchpad"
+)
+
+// OAuth scopes the BC5 client is registered for. Launchpad ignores scope
+// entirely; its tokens are read-write.
+const (
+	scopeRead = "read"
+	scopeFull = "full"
 )
 
 // Default OAuth callback address and redirect URI.
@@ -177,12 +196,12 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 
 	// Migrate old credentials missing OAuthType
 	if creds.OAuthType == "" {
-		creds.OAuthType = "launchpad"
+		creds.OAuthType = oauthTypeLaunchpad
 	}
 
 	// Migrate old credentials missing TokenEndpoint
 	if creds.TokenEndpoint == "" {
-		if creds.OAuthType == "bc3" {
+		if creds.OAuthType == "bc3" || creds.OAuthType == oauthTypeBC5 {
 			return output.ErrAuth("Stored credentials missing token endpoint — please re-authenticate: basecamp auth login")
 		}
 		lpURL, lpErr := m.launchpadURL()
@@ -194,24 +213,25 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 
 	tokenEndpoint := creds.TokenEndpoint
 
+	// The token endpoint here is a persisted (possibly migrated) value from
+	// the credential store and receives the refresh token plus client
+	// credentials. A poisoned store could carry userinfo (https://user@evil/),
+	// empty-host, or opaque/malformed https forms, so apply the same strict
+	// check used for the other OAuth endpoints before any POST.
+	if err := requireSecureOAuthEndpoint("token endpoint", tokenEndpoint); err != nil {
+		return err
+	}
+
 	// Resolve client credentials for the refresh request
 	var clientID, clientSecret string
 	switch creds.OAuthType {
 	case "bc3":
-		cc, err := m.loadBC3Client()
-		if err != nil {
-			if os.IsNotExist(err) {
-				// DCR credentials from custom-redirect logins are intentionally
-				// not persisted (see registerBC3Client). After a process restart
-				// the client.json won't exist and refresh is impossible.
-				return output.ErrAuth("Cannot load BC3 client credentials for token refresh. " +
-					"This can happen after a custom-redirect login (credentials are session-only). " +
-					"Please re-authenticate: basecamp auth login")
-			}
-			return output.ErrAuth(fmt.Sprintf("Cannot load BC3 client credentials for token refresh: %v", err))
-		}
-		clientID = cc.ClientID
-		clientSecret = cc.ClientSecret
+		// DCR-era development flow, removed. Its per-install dynamic clients
+		// can't be resolved anymore, so the refresh token is unusable.
+		return output.ErrAuth("Stored credentials are from a removed development flow — please re-authenticate: basecamp auth login")
+	case oauthTypeBC5:
+		// Pre-registered public client: no secret.
+		clientID = bc5ClientID
 	default:
 		// Launchpad (or old credentials defaulted to launchpad)
 		if envCreds, err := resolveClientCredentials(func(string) {}); err != nil {
@@ -228,11 +248,14 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	exchanger := oauth.NewExchanger(m.httpClient)
 
 	req := oauth.RefreshRequest{
-		TokenEndpoint:   tokenEndpoint,
-		RefreshToken:    creds.RefreshToken,
-		ClientID:        clientID,
-		ClientSecret:    clientSecret,
-		UseLegacyFormat: creds.OAuthType == "launchpad",
+		TokenEndpoint: tokenEndpoint,
+		RefreshToken:  creds.RefreshToken,
+		ClientID:      clientID,
+		ClientSecret:  clientSecret,
+		// Echo the stored RFC 8707 resource indicator (sent only when set):
+		// BC5 multi-account refresh tokens are rejected without it.
+		Resource:        creds.Resource,
+		UseLegacyFormat: creds.OAuthType == oauthTypeLaunchpad,
 	}
 
 	token, err := exchanger.Refresh(ctx, req)
@@ -243,6 +266,11 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	creds.AccessToken = token.AccessToken
 	if token.RefreshToken != "" {
 		creds.RefreshToken = token.RefreshToken
+	}
+	// An omitted resource preserves the stored binding (carry-forward, like an
+	// omitted rotated refresh token); a present one replaces it.
+	if token.Resource != "" {
+		creds.Resource = token.Resource
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
@@ -259,8 +287,8 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 // LoginResult holds the outcome of a successful Login().
 // Callers use this to determine the effective scope instead of their input.
 type LoginResult struct {
-	OAuthType string // "bc3" or "launchpad"
-	Scope     string // effective scope: "read"/"full" for BC3, "" for Launchpad
+	OAuthType string // "bc5" or "launchpad" (stored credentials may also carry legacy "bc3")
+	Scope     string // effective scope: "read"/"full" for BC5, "" for Launchpad
 }
 
 // LoginOptions configures the login flow.
@@ -296,6 +324,10 @@ type LoginOptions struct {
 	// Logger receives status messages during the login flow.
 	// If nil, messages are suppressed for headless/SDK use.
 	Logger func(msg string)
+
+	// deviceOptions are appended last to the SDK device-flow options.
+	// Test seam: lets tests inject WithDeviceSleep/WithDeviceClock.
+	deviceOptions []oauth.DeviceOption
 }
 
 // defaults fills in default values for LoginOptions.
@@ -359,21 +391,40 @@ func resolveOAuthCallback(opts *LoginOptions) (redirectURI string, listenAddr st
 	return raw, u.Host, nil
 }
 
-// Login initiates the OAuth login flow.
+// Login initiates the OAuth login flow. Discovery selects the provider:
+// a BC5 issuer runs the RFC 8628 device flow; the Launchpad fallback runs
+// the authorization-code flow with a loopback (or pasted) callback.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, error) {
 	if opts.Remote && opts.Local {
 		return nil, output.ErrUsage("--remote and --local are mutually exclusive")
 	}
 
 	// Validate scope early (single source of truth)
-	if opts.Scope != "" && opts.Scope != "read" && opts.Scope != "full" {
+	if opts.Scope != "" && opts.Scope != scopeRead && opts.Scope != scopeFull {
 		return nil, output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
 
 	opts.defaults()
 
+	credKey := m.credentialKey()
+
+	disc, err := m.discoverOAuth(ctx, opts.log)
+	if err != nil {
+		return nil, err
+	}
+
+	if disc.oauthType == oauthTypeBC5 {
+		return m.loginDevice(ctx, credKey, disc.config, &opts)
+	}
+	return m.loginLaunchpad(ctx, credKey, disc.config, &opts)
+}
+
+// loginLaunchpad runs the authorization-code flow against Launchpad:
+// browser (or printed) auth URL, then a loopback callback or pasted
+// callback URL in remote mode.
+func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *oauth.Config, opts *LoginOptions) (*LoginResult, error) {
 	// Resolve redirect URI and listener address
-	redirectURI, listenAddr, err := resolveOAuthCallback(&opts)
+	redirectURI, listenAddr, err := resolveOAuthCallback(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -384,46 +435,24 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 		opts.log(fmt.Sprintf("Using custom redirect URI: %s", redirectURI))
 	}
 
-	credKey := m.credentialKey()
+	if opts.Scope != "" {
+		opts.log("Launchpad does not support OAuth scopes; --scope ignored")
+	}
 
-	// Discover OAuth config
-	oauthCfg, oauthType, err := m.discoverOAuth(ctx, opts.log)
+	clientCreds, err := launchpadClientCredentials(opts.log)
 	if err != nil {
 		return nil, err
-	}
-
-	// Apply provider-aware scope rules
-	effectiveScope := opts.Scope
-	if oauthType == "launchpad" {
-		if effectiveScope != "" {
-			opts.log("Launchpad does not support OAuth scopes; --scope ignored")
-		}
-		effectiveScope = ""
-	} else {
-		// BC3: default to "read" when no scope specified
-		if effectiveScope == "" {
-			effectiveScope = "read"
-		}
-	}
-
-	// Load or register client credentials
-	clientCreds, err := m.loadClientCredentials(ctx, oauthCfg, oauthType, &opts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Generate PKCE challenge (for BC3)
-	var codeVerifier, codeChallenge string
-	if oauthType == "bc3" {
-		codeVerifier = pkce.GenerateVerifier()
-		codeChallenge = pkce.GenerateChallenge(codeVerifier)
 	}
 
 	// Generate state for CSRF protection
 	state := pkce.GenerateState()
 
+	if oauthCfg.AuthorizationEndpoint == nil {
+		return nil, output.ErrAuth("authorization server did not advertise an authorization endpoint")
+	}
+
 	// Build authorization URL
-	authURL, err := m.buildAuthURL(oauthCfg, oauthType, effectiveScope, state, codeChallenge, clientCreds.ClientID, &opts)
+	authURL, err := m.buildAuthURL(*oauthCfg.AuthorizationEndpoint, state, clientCreds.ClientID, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -494,21 +523,163 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 	defer resolve(false) // safety net: signal failure if we return without explicit resolve
 
 	// Exchange code for tokens
-	creds, err := m.exchangeCode(ctx, oauthCfg, oauthType, code, codeVerifier, clientCreds, &opts)
+	creds, err := m.exchangeCode(ctx, oauthCfg, code, clientCreds, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	creds.OAuthType = oauthType
+	creds.OAuthType = oauthTypeLaunchpad
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
-	creds.Scope = effectiveScope
+	creds.Scope = ""
 
 	if err := m.store.Save(credKey, creds); err != nil {
 		return nil, err
 	}
 
 	resolve(true)
-	return &LoginResult{OAuthType: oauthType, Scope: effectiveScope}, nil
+	return &LoginResult{OAuthType: oauthTypeLaunchpad, Scope: ""}, nil
+}
+
+// loginDevice runs the RFC 8628 device authorization grant against a
+// discovered BC5 issuer as the pre-registered public client. The display
+// callback is the trust boundary for the server-controlled device
+// authorization response: URIs are validated before launch and all printed
+// copies are sanitized.
+func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oauth.Config, opts *LoginOptions) (*LoginResult, error) {
+	// Both endpoints come from the server-controlled discovery document;
+	// reject unsafe forms before any POST. A nil device endpoint is left to
+	// the SDK's capability guard, which fails without making a request.
+	if err := requireSecureOAuthEndpoint("token endpoint", oauthCfg.TokenEndpoint); err != nil {
+		return nil, err
+	}
+	if oauthCfg.DeviceAuthorizationEndpoint != nil {
+		if err := requireSecureOAuthEndpoint("device authorization endpoint", *oauthCfg.DeviceAuthorizationEndpoint); err != nil {
+			return nil, err
+		}
+	}
+
+	// Request a scope explicitly rather than letting the server pick. BC5
+	// defaults an omitted scope to its least-privilege entry (read), which
+	// would silently hand every write command a 403 — Launchpad logins have
+	// always been read-write, so an unqualified `auth login` keeps meaning
+	// that here. --scope read is how a caller asks for less.
+	requestedScope := opts.Scope
+	if requestedScope == "" {
+		requestedScope = scopeFull
+	}
+
+	devOpts := make([]oauth.DeviceOption, 0, 2+len(opts.deviceOptions))
+	devOpts = append(devOpts,
+		oauth.WithDeviceHTTPClient(m.httpClient),
+		oauth.WithDeviceScope(requestedScope),
+	)
+	devOpts = append(devOpts, opts.deviceOptions...)
+
+	// The SDK display hook can't return an error, and the SDK proceeds into
+	// polling regardless. On malformed display data the callback records
+	// displayErr and cancels this derived context to abort before polling.
+	devCtx, cancelDev := context.WithCancel(ctx)
+	defer cancelDev()
+
+	var displayErr error
+	display := func(devAuth oauth.DeviceAuthorization) {
+		// Validate the raw server-supplied URIs before printing or launching
+		// anything: browser target is the code-embedding URI when valid,
+		// falling back to the plain verification URI.
+		target := ""
+		if devAuth.VerificationURIComplete != nil {
+			target = validVerificationURL(*devAuth.VerificationURIComplete)
+		}
+		if target == "" {
+			target = validVerificationURL(devAuth.VerificationURI)
+		}
+
+		// The command logger prints raw to the terminal, so strip
+		// ANSI/OSC/control sequences from everything displayed. Trim after
+		// sanitizing: a code that reduces to whitespace is as unusable as an
+		// empty one — without the trim it would be displayed and polled until
+		// expiry.
+		userCode := strings.TrimSpace(richtext.SanitizeSingleLine(devAuth.UserCode))
+		shownURI := strings.TrimSpace(richtext.SanitizeSingleLine(target))
+		if target == "" || userCode == "" || shownURI == "" {
+			displayErr = output.ErrAPI(0, "authorization server returned malformed device authorization")
+			cancelDev()
+			return
+		}
+
+		opts.log("\nTo authenticate, open this URL in a browser on any device:")
+		opts.log("  " + shownURI)
+		opts.log("")
+		opts.log("and enter the code: " + userCode)
+		if devAuth.ExpiresIn > 0 {
+			opts.log(fmt.Sprintf("The code expires in %v.", time.Duration(devAuth.ExpiresIn)*time.Second))
+		}
+		// Flag matrix: default/--local launch the browser; --remote,
+		// --device-code, and --no-browser (Remote implies NoBrowser) print
+		// only. defaults() leaves BrowserLauncher nil in headless modes, but
+		// honor NoBrowser too so an injected launcher can't override it.
+		if !opts.NoBrowser && opts.BrowserLauncher != nil {
+			if launchErr := opts.BrowserLauncher(target); launchErr != nil {
+				opts.log("\nCouldn't open browser automatically — use the URL above.")
+			} else {
+				opts.log("\nOpening browser for authentication...")
+			}
+		}
+		opts.log("\nWaiting for approval...")
+	}
+
+	token, err := oauth.PerformDeviceLogin(devCtx, oauthCfg, bc5ClientID, display, devOpts...)
+	if displayErr != nil {
+		// The malformed display data — not the cancellation it triggered —
+		// is the real cause.
+		return nil, displayErr
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// The granted scope is whatever the server says it granted; fall back to
+	// what was asked for only when the token response omits it.
+	effectiveScope := token.Scope
+	if effectiveScope == "" {
+		effectiveScope = requestedScope
+	}
+
+	creds := &Credentials{
+		AccessToken:   token.AccessToken,
+		RefreshToken:  token.RefreshToken,
+		OAuthType:     oauthTypeBC5,
+		TokenEndpoint: oauthCfg.TokenEndpoint,
+		Scope:         effectiveScope,
+		// The RFC 8707 account binding: a trusted-client device login mints a
+		// multi-account refresh token, and refreshing one without echoing this
+		// is rejected (400 invalid_request) — losing it here would strand the
+		// login at first token expiry.
+		Resource: token.Resource,
+	}
+	if !token.ExpiresAt.IsZero() {
+		creds.ExpiresAt = token.ExpiresAt.Unix()
+	}
+
+	if err := m.store.Save(credKey, creds); err != nil {
+		return nil, err
+	}
+
+	return &LoginResult{OAuthType: oauthTypeBC5, Scope: effectiveScope}, nil
+}
+
+// validVerificationURL validates a server-supplied verification URI with the
+// same policy as other OAuth browser URLs (https, or http on loopback, no
+// userinfo). Returns the raw URL when valid, "" otherwise.
+func validVerificationURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !isSecureEndpointURL(u) {
+		return ""
+	}
+	return raw
 }
 
 // Logout removes stored credentials.
@@ -517,25 +688,118 @@ func (m *Manager) Logout() error {
 	return m.store.Delete(credKey)
 }
 
-func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*oauth.Config, string, error) {
-	discoverer := oauth.NewDiscoverer(m.httpClient)
-	cfg, err := discoverer.Discover(ctx, m.cfg.BaseURL)
+// discovery is the outcome of provider selection: the OAuth config to use
+// and which login flow it drives.
+type discovery struct {
+	config    *oauth.Config
+	oauthType string
+	issuer    string
+}
+
+// discoverOAuth performs resource-first OAuth discovery (RFC 9728 → RFC 8414)
+// from the configured base URL's origin. Only the two soft pre-selection
+// outcomes fall back to Launchpad; once a BC5 issuer is selected, every
+// failure is returned loudly — never converted into a Launchpad attempt.
+func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*discovery, error) {
+	origin, err := resourceOrigin(m.cfg.BaseURL)
 	if err != nil {
-		log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", m.cfg.BaseURL))
-		// Fallback to Launchpad
+		return nil, err
+	}
+
+	discoverer := oauth.NewDiscoverer(m.httpClient)
+	res, err := discoverer.DiscoverFromResource(ctx, origin)
+	if err != nil {
+		// Hard selection failure: propagate unchanged. output.AsError at the
+		// root maps the wrapped *basecamp.Error taxonomy to exit codes.
+		return nil, err
+	}
+
+	if res.IsFallback() {
+		if res.FallbackReason == oauth.FallbackResourceDiscoveryFailed {
+			log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", origin))
+		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
-			return nil, "", lpErr
+			return nil, lpErr
 		}
+		authz := lpURL + "/authorization/new"
 		fallbackCfg := &oauth.Config{
-			AuthorizationEndpoint: lpURL + "/authorization/new",
+			AuthorizationEndpoint: &authz,
 			TokenEndpoint:         lpURL + "/authorization/token",
 		}
-		log(fmt.Sprintf("Authenticating via launchpad (%s)", fallbackCfg.AuthorizationEndpoint))
-		return fallbackCfg, "launchpad", nil
+		log(fmt.Sprintf("Authenticating via launchpad (%s)", authz))
+		return &discovery{config: fallbackCfg, oauthType: oauthTypeLaunchpad}, nil
 	}
-	log(fmt.Sprintf("Authenticating via bc3 (%s)", cfg.AuthorizationEndpoint))
-	return cfg, "bc3", nil
+
+	log(fmt.Sprintf("Authenticating via %s (device flow)", res.Issuer))
+	return &discovery{config: res.Config, oauthType: oauthTypeBC5, issuer: res.Issuer}, nil
+}
+
+// resourceOrigin reduces the configured base URL to a bare scheme://host[:port]
+// origin for RFC 9728 protected-resource discovery, CANONICALIZED: lowercase
+// scheme and host, explicit default ports stripped. The SDK binds the
+// protected-resource metadata's resource identifier to this string code-point
+// exact, so an equivalent spelling (HTTPS://3.BasecampAPI.com,
+// https://3.basecampapi.com:443) would otherwise mismatch the advertised
+// identifier and silently soft-fall back to Launchpad. Only the path is
+// stripped and case/default-port normalized; every other deviation is rejected
+// rather than laundered. Validation failures never echo the raw URL: userinfo,
+// query strings, and fragments can carry secrets, and parse errors can
+// reproduce their input.
+func resourceOrigin(baseURL string) (string, error) {
+	fail := func(rule string) (string, error) {
+		return "", output.ErrUsage("invalid base URL: " + rule)
+	}
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return fail("not a parseable URL")
+	}
+	if u.Opaque != "" || !u.IsAbs() {
+		return fail("must be an absolute URL")
+	}
+	if u.Hostname() == "" {
+		return fail("must include a hostname")
+	}
+	// The localhost carve-out checks the LOWERCASED host: DNS names are
+	// case-insensitive, so http://LocalHost is as local as http://localhost.
+	if u.Scheme != "https" && (u.Scheme != "http" || !hostutil.IsLocalhost(strings.ToLower(u.Host))) {
+		return fail("scheme must be https (or http on localhost)")
+	}
+	if u.User != nil {
+		return fail("userinfo is not allowed")
+	}
+	// ForceQuery catches the bare-"?" form ("https://host?"), which parses
+	// with an empty RawQuery but still carries a query component.
+	if u.RawQuery != "" || u.ForceQuery {
+		return fail("query string is not allowed")
+	}
+	if u.Fragment != "" {
+		return fail("fragment is not allowed")
+	}
+	// url.Parse lowercases the scheme; the host keeps its input case and must
+	// be lowered here (DNS names are case-insensitive, the code-point binding
+	// is not). Hostname() strips IPv6 brackets — restore them so the origin
+	// stays a parseable URL.
+	hostname := strings.ToLower(u.Hostname())
+	if strings.Contains(hostname, ":") {
+		hostname = "[" + hostname + "]"
+	}
+	host := hostname
+	if port := u.Port(); port != "" {
+		// url.Parse requires a numeric port but does not range-check it.
+		n, portErr := strconv.Atoi(port)
+		if portErr != nil || n < 1 || n > 65535 {
+			return fail("port must be between 1 and 65535")
+		}
+		// Strip an explicit default port (the canonical origin form) and
+		// normalize leading zeros; any other port is kept numerically.
+		if (u.Scheme != "https" || n != 443) && (u.Scheme != "http" || n != 80) {
+			host += ":" + strconv.Itoa(n)
+		}
+	}
+
+	return u.Scheme + "://" + host, nil
 }
 
 func (m *Manager) launchpadURL() (string, error) {
@@ -548,25 +812,10 @@ func (m *Manager) launchpadURL() (string, error) {
 	return "https://launchpad.37signals.com", nil
 }
 
-func (m *Manager) loadClientCredentials(ctx context.Context, oauthCfg *oauth.Config, oauthType string, opts *LoginOptions) (*ClientCredentials, error) {
-	if oauthType == "bc3" {
-		// BC3 with default redirect: try stored client first
-		if opts.RedirectURI == defaultRedirectURI {
-			creds, err := m.loadBC3Client()
-			if err == nil {
-				return creds, nil
-			}
-		}
-
-		// Register new client via DCR
-		if oauthCfg.RegistrationEndpoint == "" {
-			return nil, output.ErrAuth("OAuth server does not support Dynamic Client Registration")
-		}
-		return m.registerBC3Client(ctx, oauthCfg.RegistrationEndpoint, opts)
-	}
-
-	// Launchpad: resolve client credentials from env vars
-	creds, err := resolveClientCredentials(opts.log)
+// launchpadClientCredentials resolves the Launchpad OAuth client: env var
+// overrides first, then the built-in production credentials.
+func launchpadClientCredentials(log func(string)) (*ClientCredentials, error) {
+	creds, err := resolveClientCredentials(log)
 	if err != nil {
 		return nil, err
 	}
@@ -602,106 +851,65 @@ func resolveClientCredentials(log func(string)) (*ClientCredentials, error) {
 	return &ClientCredentials{ClientID: clientID, ClientSecret: clientSecret}, nil
 }
 
-func (m *Manager) loadBC3Client() (*ClientCredentials, error) {
-	clientFile := config.GlobalConfigDir() + "/client.json"
-	data, err := os.ReadFile(clientFile) //nolint:gosec // G304: Path is from trusted config dir
-	if err != nil {
-		return nil, err
+// isSecureEndpointURL reports whether u uses a scheme safe for OAuth endpoints
+// derived from the server-controlled discovery document: https, or http only on
+// loopback for local development. The URL must also be absolute with a hostname —
+// url.Parse accepts opaque forms like "https:foo" and port-only authorities like
+// "https://:3000/" that carry the right scheme but no hostname, which would
+// otherwise slip through to the transport or browser launcher. URLs carrying
+// userinfo (user:pass@host) are rejected outright: they enable phishing
+// displays in browsers and net/http synthesizes a Basic Authorization header
+// from them. Centralizing the rule keeps the authorization, token, device, and
+// verification-URI checks consistent.
+func isSecureEndpointURL(u *url.URL) bool {
+	if u.Hostname() == "" {
+		return false
 	}
-
-	var creds ClientCredentials
-	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, err
+	// Userinfo enables phishing display in browsers ("evil.example@real.host")
+	// and Basic-auth synthesis in net/http requests.
+	if u.User != nil {
+		return false
 	}
-
-	if creds.ClientID == "" {
-		return nil, fmt.Errorf("no client_id in stored credentials")
-	}
-
-	return &creds, nil
-}
-
-func (m *Manager) registerBC3Client(ctx context.Context, registrationEndpoint string, opts *LoginOptions) (*ClientCredentials, error) {
-	customRedirect := opts.RedirectURI != defaultRedirectURI
-	regReq := map[string]any{
-		"client_name":                "basecamp-cli",
-		"client_uri":                 "https://github.com/basecamp/basecamp-cli",
-		"redirect_uris":              []string{opts.RedirectURI},
-		"grant_types":                []string{"authorization_code"},
-		"response_types":             []string{"code"},
-		"token_endpoint_auth_method": "none",
-	}
-
-	body, err := json.Marshal(regReq)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", registrationEndpoint, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, output.ErrNetwork(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64 KB limit
-		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf("DCR failed: %s", string(respBody)))
-	}
-
-	var regResp struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret,omitempty"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&regResp); err != nil { // 64 KB limit
-		return nil, err
-	}
-
-	if regResp.ClientID == "" {
-		return nil, fmt.Errorf("no client_id in DCR response")
-	}
-
-	creds := &ClientCredentials{
-		ClientID:     regResp.ClientID,
-		ClientSecret: regResp.ClientSecret,
-	}
-
-	// Only persist DCR credentials when using the default redirect URI.
-	// Custom redirect URIs are session-only to prevent stale client.json
-	// entries that would fail on subsequent runs without the override.
-	if !customRedirect {
-		if err := m.saveBC3Client(creds); err != nil {
-			return nil, err
+	// url.Parse requires a numeric port but does not range-check it, so
+	// https://host:70000/ parses cleanly yet is undialable and unlaunchable.
+	if port := u.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return false
 		}
 	}
-
-	return creds, nil
+	// IsLocalhost takes the host:port form and strips the port itself. DNS
+	// hostnames are case-insensitive: lowercase before matching so a
+	// mixed-case loopback (http://LocalHost:3001) is not rejected as
+	// insecure — the same normalization resourceOrigin applies.
+	return u.Scheme == "https" || (u.Scheme == "http" && hostutil.IsLocalhost(strings.ToLower(u.Host)))
 }
 
-func (m *Manager) saveBC3Client(creds *ClientCredentials) error {
-	configDir := config.GlobalConfigDir()
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return err
-	}
-
-	data, err := json.Marshal(creds)
+// requireSecureOAuthEndpoint parses and validates a server-controlled OAuth
+// endpoint URL with isSecureEndpointURL, returning an auth-class error naming
+// the endpoint when it fails.
+func requireSecureOAuthEndpoint(name, endpoint string) error {
+	u, err := url.Parse(endpoint)
 	if err != nil {
-		return err
+		return output.ErrAuth(fmt.Sprintf("invalid %s %q: %v", name, endpoint, err))
 	}
-
-	clientFile := configDir + "/client.json"
-	return os.WriteFile(clientFile, data, 0600)
+	if !isSecureEndpointURL(u) {
+		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, endpoint))
+	}
+	return nil
 }
 
-func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeChallenge, clientID string, opts *LoginOptions) (string, error) {
-	u, err := url.Parse(cfg.AuthorizationEndpoint)
+func (m *Manager) buildAuthURL(authorizationEndpoint, state, clientID string, opts *LoginOptions) (string, error) {
+	u, err := url.Parse(authorizationEndpoint)
 	if err != nil {
-		return "", err
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: %v", authorizationEndpoint, err))
+	}
+
+	// The authorization endpoint comes from the server-controlled discovery
+	// document and is later dispatched to the OS browser handler (xdg-open /
+	// open). Restrict it to https (or http on loopback for local development)
+	// so a hostile discovery doc can't hand the OS a file:// (or other) URL.
+	if !isSecureEndpointURL(u) {
+		return "", output.ErrAuth(fmt.Sprintf("invalid authorization endpoint %q: must be an absolute https URL (or http on loopback)", authorizationEndpoint))
 	}
 
 	q := u.Query()
@@ -709,22 +917,22 @@ func (m *Manager) buildAuthURL(cfg *oauth.Config, oauthType, scope, state, codeC
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", opts.RedirectURI)
 	q.Set("state", state)
-
-	if oauthType == "bc3" {
-		q.Set("code_challenge", codeChallenge)
-		q.Set("code_challenge_method", "S256")
-		if scope != "" {
-			q.Set("scope", scope)
-		}
-	} else {
-		q.Set("type", "web_server")
-	}
+	q.Set("type", "web_server")
 
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
 
-func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType, code, codeVerifier string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
+func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, code string, clientCreds *ClientCredentials, opts *LoginOptions) (*Credentials, error) {
+	// The token endpoint comes from the server-controlled discovery document
+	// and receives the authorization code plus client credentials. The SDK's
+	// RequireSecureEndpoint only checks scheme==https, which lets userinfo
+	// (https://legit@evil.com/token) and empty-host forms through. Apply the
+	// same strict check used for the other OAuth endpoints.
+	if err := requireSecureOAuthEndpoint("token endpoint", cfg.TokenEndpoint); err != nil {
+		return nil, err
+	}
+
 	exchanger := oauth.NewExchanger(m.httpClient)
 
 	req := oauth.ExchangeRequest{
@@ -733,8 +941,7 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, oauthType
 		RedirectURI:     opts.RedirectURI,
 		ClientID:        clientCreds.ClientID,
 		ClientSecret:    clientCreds.ClientSecret,
-		CodeVerifier:    codeVerifier,
-		UseLegacyFormat: oauthType == "launchpad",
+		UseLegacyFormat: true,
 	}
 
 	token, err := exchanger.Exchange(ctx, req)
@@ -860,9 +1067,17 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 
 	oauthType := m.GetOAuthType()
 	switch oauthType {
-	case "bc3":
-		return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
-	case "launchpad", "":
+	case "bc3", oauthTypeBC5:
+		// resourceOrigin, not NormalizeBaseURL: the latter only trims a
+		// trailing slash, so a pathful BaseURL (https://host/api/v1 —
+		// explicitly supported by resourceOrigin) would yield a misrouted
+		// https://host/api/v1/authorization.json.
+		origin, err := resourceOrigin(m.cfg.BaseURL)
+		if err != nil {
+			return "", err
+		}
+		return origin + "/authorization.json", nil
+	case oauthTypeLaunchpad, "":
 		// "launchpad" = stored credentials; "" = no stored credentials and
 		// no env token (shouldn't normally reach here since IsAuthenticated
 		// would have caught it, but handle gracefully).
@@ -876,7 +1091,8 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 	}
 }
 
-// GetOAuthType returns the OAuth type for the current credential key ("bc3" or "launchpad").
+// GetOAuthType returns the OAuth type for the current credential key
+// ("bc5", "launchpad", or legacy "bc3").
 func (m *Manager) GetOAuthType() string {
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
@@ -884,6 +1100,50 @@ func (m *Manager) GetOAuthType() string {
 		return ""
 	}
 	return creds.OAuthType
+}
+
+// accountResourceURNPrefix is the RFC 8707 resource indicator BC5 binds an
+// account-scoped token to. The trailing segment is the account's public ID —
+// the same one that appears in Basecamp URLs.
+const accountResourceURNPrefix = "urn:bc:account:"
+
+// AccountID returns the account a BC5 token is bound to, derived from its
+// stored RFC 8707 resource indicator, or "" when the credentials carry no
+// account binding (Launchpad tokens, or a resource naming the service
+// origin rather than one account).
+//
+// The binding is authoritative: the token grants access to exactly this
+// account, so there is nothing to discover over the network and no picker to
+// show. It also works where account discovery cannot — /authorization.json
+// is served only on the API host, which beta deployments don't route.
+//
+// BASECAMP_TOKEN wins — match AccessToken() precedence. Requests carry the
+// environment token, which is bound to whatever the operator issued it for;
+// answering with a stored token's account would silently address the wrong
+// one. Fall through to discovery, which asks using the token in play.
+func (m *Manager) AccountID() string {
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return ""
+	}
+
+	creds, err := m.store.Load(m.credentialKey())
+	if err != nil {
+		return ""
+	}
+
+	id := strings.TrimPrefix(creds.Resource, accountResourceURNPrefix)
+	if id == creds.Resource || id == "" {
+		return ""
+	}
+
+	// Digits only: this feeds URL construction, and a resource indicator is
+	// server-controlled data.
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return id
 }
 
 // GetUserEmail returns the stored user email for the current credential key.

@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -55,39 +58,45 @@ use --message-board <id> to specify which one.`,
 func newMessagesListCmd(project *string, messageBoard *string) *cobra.Command {
 	var limit, page int
 	var all bool
+	var allProjects bool
 	var sortField string
 	var reverse bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List messages",
-		Long:  "List all messages in a project's message board.",
+		Long: `List all messages in a project's message board.
+
+With no project in scope, lists every message across all accessible projects,
+newest first. --all-projects asks for that listing explicitly, overriding a
+configured project.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMessagesList(cmd, *project, *messageBoard, limit, page, all, sortField, reverse)
+			return runMessagesList(cmd, *project, *messageBoard, limit, page, all, allProjects, sortField, reverse)
 		},
 	}
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of messages to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all messages (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().BoolVar(&allProjects, "all-projects", false, "List messages across every accessible project")
 	cmd.Flags().StringVar(&sortField, "sort", "", "Sort by field (title, created, updated)")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 
 	return cmd
 }
 
-func runMessagesList(cmd *cobra.Command, project string, messageBoard string, limit, page int, all bool, sortField string, reverse bool) error {
+func runMessagesList(cmd *cobra.Command, project string, messageBoard string, limit, page int, all, allProjects bool, sortField string, reverse bool) error {
 	app := appctx.FromContext(cmd.Context())
 
-	// Validate flag combinations
+	// Flag combinations that mean the same thing in either scope. The page
+	// rules are scope-specific and live on the branches below: a project's
+	// message board only serves page 1, while the account-wide feed serves any
+	// positive page.
 	if all && limit > 0 {
 		return output.ErrUsage("--all and --limit are mutually exclusive")
 	}
 	if page > 0 && (all || limit > 0) {
 		return output.ErrUsage("--page cannot be combined with --all or --limit")
-	}
-	if page > 1 {
-		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 	if sortField != "" {
 		if err := validateSortField(sortField, []string{"title", "created", "updated"}); err != nil {
@@ -100,21 +109,30 @@ func runMessagesList(cmd *cobra.Command, project string, messageBoard string, li
 		return err
 	}
 
-	// Resolve project from CLI flags and config, with interactive fallback
-	projectID := project
-	if projectID == "" {
-		projectID = app.Flags.Project
+	// Select the scope before validating against it. An explicit project wins,
+	// then a configured one; with neither, the account-wide feed answers the
+	// same question across every project rather than prompting for one.
+	// --all-projects pins that intent, so it overrides a configured project and
+	// conflicts with an explicit one.
+	explicitProject := project
+	if explicitProject == "" {
+		explicitProject = app.Flags.Project
 	}
+	switch {
+	case allProjects && explicitProject != "":
+		return output.ErrUsageHint("--all-projects conflicts with --project/--in",
+			"drop one: --all-projects lists every project, --project lists one")
+	case allProjects, !projectKnown(app, project):
+		return runMessagesListAccountWide(cmd, app, messageBoard, limit, page, all, sortField, reverse)
+	}
+
+	projectID := explicitProject
 	if projectID == "" {
 		projectID = app.Config.ProjectID
 	}
 
-	// If no project specified, try interactive resolution
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
+	if page > 1 {
+		return output.ErrUsage("only --page 1 is supported; use --all to fetch everything")
 	}
 
 	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
@@ -176,6 +194,151 @@ func messagesListBreadcrumbs(resolvedProjectID string) []output.Breadcrumb {
 		{Action: "show", Cmd: "basecamp messages show <id>", Description: "Show message details"},
 		{Action: "post", Cmd: fmt.Sprintf("basecamp messages create <title> --in %s", resolvedProjectID), Description: "Post new message"},
 		{Action: "archived", Cmd: fmt.Sprintf("basecamp recordings messages --status archived --in %s", resolvedProjectID), Description: "Browse archived messages"},
+	}
+}
+
+// runMessagesListAccountWide lists every message across all accessible
+// projects. The feed is flat []Recording, and each item carries its own
+// bucket — which the generic renderers skip by name, so human-facing output
+// reads flattened rows that keep the project while machine formats get the
+// raw payload.
+func runMessagesListAccountWide(cmd *cobra.Command, app *appctx.App, messageBoard string, limit, page int, all bool, sortField string, reverse bool) error {
+	if err := rejectAccountWideTodolist(app, "message"); err != nil {
+		return err
+	}
+	// --message-board names one project's board, so it cannot narrow a listing
+	// that spans every project. It reaches here from the group's persistent
+	// flag, whichever side of the subcommand it was written on.
+	if messageBoard != "" {
+		return output.ErrUsageHint("--message-board applies to a single project's message board",
+			"drop --message-board, or pass --project/--in to list that board")
+	}
+	if reverse && sortField == "" {
+		return output.ErrUsage("--reverse requires --sort")
+	}
+	if limit < 0 {
+		return output.ErrUsage("--limit must be a positive number of messages")
+	}
+	if page < 0 || (page == 0 && cmd.Flags().Changed("page")) {
+		return output.ErrUsageHint("--page must be a positive page number",
+			"use --all to follow every page")
+	}
+
+	// bounded reports that this invocation applies a cap at all; capped
+	// reports that the walk actually stopped short of the listing. They are
+	// different questions — --all is unbounded, and a bounded walk that
+	// reaches the end of a short listing is not truncated.
+	bounded := !all && page == 0
+	wanted := limit
+	if wanted == 0 {
+		wanted = accountWideDefaultLimit
+	}
+
+	recordings, capped, meta, err := messagesAccountWideFetch(cmd.Context(), app, wanted, page, all, sortField != "")
+	if err != nil {
+		return err
+	}
+
+	// Sort before truncating: capping first would sort only the window that
+	// happened to survive.
+	if sortField != "" {
+		sortMessagesAccountWide(recordings, sortField, reverse)
+	}
+	if bounded && len(recordings) > wanted {
+		// A sorted listing arrives whole and is capped here, so the trim is
+		// itself the truncation the notice has to report.
+		capped = true
+		recordings = recordings[:wanted]
+	}
+
+	respOpts := accountWideRespOpts(len(recordings), "message", "messages", meta, limit > 0)
+	if notice := accountWideCapNotice(capped, meta, len(recordings), "messages"); notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
+	}
+	respOpts = append(respOpts, output.WithDisplayData(flattenAccountWideRecordings(recordings)))
+	respOpts = append(respOpts, output.WithBreadcrumbs(messagesAccountWideBreadcrumbs()...))
+
+	return app.OK(recordings, respOpts...)
+}
+
+// messagesAccountWideFetch collects the account-wide feed, which takes a single
+// page number: N returns exactly page N, and 0 follows the Link header across
+// every page.
+//
+// A capped listing collects one page at a time and stops once it has enough,
+// rather than crawling the whole account and discarding most of it. A sorted
+// listing cannot do that — the cap applies after the sort, so every page has to
+// be in hand first.
+func messagesAccountWideFetch(ctx context.Context, app *appctx.App, wanted, page int, all, sorted bool) ([]basecamp.Recording, bool, basecamp.ListMeta, error) {
+	everything := app.Account().Everything()
+
+	fetch := func(p int32) ([]basecamp.Recording, basecamp.ListMeta, error) {
+		result, err := everything.Messages(ctx, p)
+		if err != nil {
+			return nil, basecamp.ListMeta{}, convertSDKError(err)
+		}
+		return result.Recordings, result.Meta, nil
+	}
+
+	// An explicit page or --all is exactly what was asked for, and a sorted
+	// listing needs every page before the cap can apply (I4). Neither is a
+	// bounded walk, so neither can report one stopping short.
+	if page > 0 || all {
+		sdkPage, err := accountWidePage(page, all)
+		if err != nil {
+			return nil, false, basecamp.ListMeta{}, err
+		}
+		recordings, meta, err := fetch(sdkPage)
+		return recordings, false, meta, err
+	}
+	if sorted {
+		recordings, meta, err := fetch(0)
+		return recordings, false, meta, err
+	}
+
+	recordings, capped, meta, err := accountWideCollect(fetch, accountWideFlatCount[basecamp.Recording], wanted)
+	if err != nil {
+		return nil, false, basecamp.ListMeta{}, err
+	}
+	return recordings, capped, meta, nil
+}
+
+func messagesAccountWideBreadcrumbs() []output.Breadcrumb {
+	return []output.Breadcrumb{
+		{Action: "show", Cmd: "basecamp messages show <id>", Description: "Show message details"},
+		{Action: "project", Cmd: "basecamp messages list --in <project>", Description: "List one project's message board"},
+		{Action: "search", Cmd: "basecamp search <query> --type message", Description: "Search messages"},
+	}
+}
+
+// messagesAccountWideTitle returns the display title for a message recording.
+// The /messages.json feed renders the message partial on top of the base
+// recording projection, so Subject is the message's own title; Title is the
+// generic fallback.
+func messagesAccountWideTitle(r basecamp.Recording) string {
+	if r.Subject != nil && *r.Subject != "" {
+		return *r.Subject
+	}
+	return r.Title
+}
+
+// sortMessagesAccountWide sorts account-wide message recordings, matching the
+// fields and default directions sortMessages applies to project-scoped
+// messages.
+func sortMessagesAccountWide(recordings []basecamp.Recording, field string, reverse bool) {
+	sort.SliceStable(recordings, func(i, j int) bool {
+		switch field {
+		case "title":
+			return strings.ToLower(messagesAccountWideTitle(recordings[i])) < strings.ToLower(messagesAccountWideTitle(recordings[j]))
+		case "created":
+			return recordings[i].CreatedAt.After(recordings[j].CreatedAt)
+		case "updated":
+			return recordings[i].UpdatedAt.After(recordings[j].UpdatedAt)
+		}
+		return false
+	})
+	if reverse {
+		slices.Reverse(recordings)
 	}
 }
 
@@ -263,11 +426,18 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
 		Short: "Create a new message",
-		Long:  "Post a new message to a project's message board.",
+		Long: `Post a new message to a project's message board.
+
+Use - as the body argument to read the body from stdin:
+  printf 'Long **Markdown** body' | basecamp messages create "Title" -`,
+		// Bounded so a stray third token is a usage error rather than being
+		// silently dropped after "-" has already drained stdin.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Show help when invoked with no title
 			if len(args) == 0 {
@@ -285,9 +455,28 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				return cmd.Help()
 			}
 
-			// Validate user input first, before checking account
+			// Validate user input first, before checking account. The --edit
+			// exclusion runs before "-" resolution so --edit … - errors
+			// without consuming stdin.
 			if edit && body != "" {
 				return output.ErrUsage("cannot combine --edit and body argument")
+			}
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
+				return err
+			}
+			if err := requireNumericID(*messageBoard, "message board ID"); err != nil {
+				return err
+			}
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
+			var err error
+			body, err = resolveContentValue(cmd, body, 1, "[body]")
+			if err != nil {
+				return err
 			}
 			if edit {
 				fi, err := os.Stdin.Stat()
@@ -384,6 +573,14 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 				req.Status = "active"
 			}
 
+			// Set client visibility only when the flag was provided. Omitting it
+			// uses the server's default: team-only when posting as a team member,
+			// but a client-authenticated caller always creates client-visible
+			// records (an explicit false is overridden server-side).
+			if cmd.Flags().Changed("visible-to-clients") {
+				req.VisibleToClients = &visibleToClients
+			}
+
 			message, err := app.Account().Messages().Create(cmd.Context(), boardID, req)
 			if err != nil {
 				return convertSDKError(err)
@@ -417,6 +614,9 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+
+	allowDash(cmd, "arg:1")
 
 	return cmd
 }
@@ -439,18 +639,26 @@ You can pass either a message ID or a Basecamp URL:
 				return noChanges(cmd)
 			}
 
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			// Extract ID from URL if provided
 			messageIDStr := extractID(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid message ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
+			body, err = resolveContentValue(cmd, body, -1, "--body")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// Build SDK request
@@ -499,7 +707,9 @@ You can pass either a message ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
-	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content")
+	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content; use - to read from stdin")
+
+	allowDash(cmd, "flag:body")
 
 	return cmd
 }

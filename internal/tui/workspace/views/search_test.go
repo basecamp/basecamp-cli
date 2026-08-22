@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
@@ -284,6 +286,46 @@ func TestTruncateExcerpt(t *testing.T) {
 	assert.Equal(t, "hello", truncateExcerpt("hello", 10))
 	assert.Equal(t, "hello worl…", truncateExcerpt("hello world here", 10))
 	assert.Equal(t, "clean text", truncateExcerpt("<b>clean</b> text", 20))
+}
+
+// The plain-text search fields are HTML fragments despite their name: BC3
+// wraps each query match in <mark class="circled-text">. Both the description
+// and the content fallback have to be stripped before they reach the list.
+func TestSearchResultToInfo_StripsMarkupFromDescription(t *testing.T) {
+	r := basecamp.SearchResult{
+		PlainTextDescription: `the <mark class="circled-text"><span></span>login</mark> form crashes`,
+	}
+
+	info := searchResultToInfo(r, "1", "Acme")
+
+	assert.Equal(t, "the login form crashes", info.Excerpt)
+}
+
+func TestSearchResultToInfo_StripsMarkupFromContentFallback(t *testing.T) {
+	r := basecamp.SearchResult{
+		PlainTextContent: `a <mark class="circled-text"><span></span>login</mark> attempt failed`,
+	}
+
+	info := searchResultToInfo(r, "1", "Acme")
+
+	assert.Equal(t, "a login attempt failed", info.Excerpt)
+}
+
+func TestSearchResultToInfo_PrefersDescriptionOverContent(t *testing.T) {
+	r := basecamp.SearchResult{
+		PlainTextDescription: "from description",
+		PlainTextContent:     "from content",
+	}
+
+	info := searchResultToInfo(r, "1", "Acme")
+
+	assert.Equal(t, "from description", info.Excerpt)
+}
+
+func TestSearchResultToInfo_NoExcerptFields(t *testing.T) {
+	info := searchResultToInfo(basecamp.SearchResult{}, "1", "Acme")
+
+	assert.Empty(t, info.Excerpt)
 }
 
 // --- FocusMsg ---

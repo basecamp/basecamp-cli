@@ -58,10 +58,33 @@ You can pass either an ID or a Basecamp URL:
   basecamp boost list 789 --project my-project
   basecamp boost list https://3.basecamp.com/123/buckets/456/todos/789
 
-Use --event to list boosts on a specific event within the item.`,
-		Args: cobra.ExactArgs(1),
+Use --event to list boosts on a specific event within the item.
+
+Boosts hang off a single item, so an item ID is required: there is no
+account-wide boost listing. An item's boosts arrive in one unpaginated
+response, so there is nothing to page through either.`,
+		Example: `  basecamp boost list 789 --project my-project`,
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if len(args) == 0 {
+				// An explicitly named project cannot stand in for the item ID,
+				// but it is a statement of intent the hint can honor: carry it
+				// forward into the corrected invocation. Otherwise the generic
+				// missing-argument path answers (help when interactive).
+				explicitProject := *project
+				if explicitProject == "" {
+					explicitProject = app.Flags.Project
+				}
+				if explicitProject != "" {
+					hint := fmt.Sprintf("Pass the item's ID or URL: basecamp boost list <id> --project %s", explicitProject)
+					if eventID != "" {
+						hint = fmt.Sprintf("%s --event %s", hint, eventID)
+					}
+					return output.ErrUsageHint("Boosts belong to an item, so listing them needs one", hint)
+				}
+				return missingArg(cmd, "<id|url>")
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -75,6 +98,16 @@ Use --event to list boosts on a specific event within the item.`,
 }
 
 func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, eventID string) error {
+	// Boosts hang off a single recording, so only an item ID can scope this
+	// listing — a project cannot, and there is no account-wide equivalent to
+	// fall back to: BC5 withdrew /boosts.json (basecamp/bc3#12464) because its
+	// cost scaled with accessible recordings rather than with boosts.
+	//
+	// The feed is expected back later on a boost-proportional query
+	// (basecamp/bc3#12463), but the endpoint is genuinely gone in the meantime
+	// and the SDK dropped Everything().Boosts() with it in v0.11.0
+	// (basecamp/basecamp-sdk#504). When it returns, this is where the
+	// account-wide branch goes back, along with --all-projects.
 	recordingID, urlProjectID := extractWithProject(recording)
 
 	projectID := project
@@ -238,14 +271,34 @@ Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Both identifiers are decidable from the arguments alone, so they
+			// are checked before the pipe is drained; runBoostCreate parses
+			// them again once the project is known.
+			recordingID, _ := extractWithProject(args[0])
+			if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
+				return output.ErrUsage("Invalid ID")
+			}
+			if eventID != "" {
+				if _, err := strconv.ParseInt(eventID, 10, 64); err != nil {
+					return output.ErrUsage("Invalid event ID")
+				}
+			}
+
+			content, err := resolveContentValue(cmd, args[1], 1, "<content>")
+			if err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			return runBoostCreate(cmd, app, args[0], *project, args[1], eventID)
+			return runBoostCreate(cmd, app, args[0], *project, content, eventID)
 		},
 	}
 
 	cmd.Flags().StringVar(&eventID, "event", "", "Event ID (for event-specific boosts)")
+
+	allowDash(cmd, "arg:1")
 
 	return cmd
 }

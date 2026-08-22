@@ -1,14 +1,12 @@
 package resolve
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
-	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/format"
 )
@@ -127,27 +125,4 @@ func stripCommentHTML(s string) string {
 	}
 	// Normalize whitespace and trim
 	return strings.TrimSpace(strings.Join(strings.Fields(result.String()), " "))
-}
-
-// FetchCommentThread fetches and returns a comment thread for a recording.
-func FetchCommentThread(ctx context.Context, r *Resolver, projectID, recordingID int64) (*CommentThread, error) {
-	if r.config.AccountID == "" {
-		return nil, output.ErrUsage("Account must be resolved before fetching comments")
-	}
-
-	accountClient := r.sdk.ForAccount(r.config.AccountID)
-
-	// Fetch the recording
-	recording, err := accountClient.Recordings().Get(ctx, recordingID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recording: %w", err)
-	}
-
-	// Fetch comments
-	commentsResult, err := accountClient.Comments().List(ctx, recordingID, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch comments: %w", err)
-	}
-
-	return NewCommentThread(recording, commentsResult.Comments), nil
 }

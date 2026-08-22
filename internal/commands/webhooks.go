@@ -302,8 +302,13 @@ func newWebhooksUpdateCmd() *cobra.Command {
 						typeArray = append(typeArray, t)
 					}
 				}
-				req.Types = typeArray
-				hasChanges = true
+				// An all-blank --types (e.g. ",") must not reach the wire: a
+				// non-nil empty slice serializes as "types": [] since SDK
+				// v0.13.0, which would clear the webhook's subscriptions.
+				if len(typeArray) > 0 {
+					req.Types = typeArray
+					hasChanges = true
+				}
 			}
 
 			// Show help when invoked with no flags

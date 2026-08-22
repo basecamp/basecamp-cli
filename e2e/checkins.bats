@@ -55,13 +55,24 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
-@test "checkins answers without question id shows error" {
+@test "checkins answers with a project but no question id shows error" {
   create_credentials
-  create_global_config '{"account_id": 99999, "project_id": 123}'
+  create_global_config '{"account_id": 99999}'
 
-  run basecamp checkins answers
+  run basecamp checkins answers --in 123
   assert_failure
-  assert_output_contains "ID required"
+  assert_output_contains "A project alone cannot select check-in answers"
+  assert_json_value '.code' 'usage'
+}
+
+@test "checkins answers rejects --all-projects alongside a question id" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp checkins answers 789 --all-projects
+  assert_failure
+  assert_output_contains "cannot be combined with a question ID"
+  assert_json_value '.code' 'usage'
 }
 
 @test "checkins answer without id shows error" {

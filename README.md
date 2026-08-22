@@ -5,7 +5,7 @@
 - Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
 - JSON output with breadcrumbs for easy navigation
 - OAuth authentication with automatic token refresh
-- Includes agent skill and Claude plugin
+- Includes agent skills plus native Claude Code and Codex plugins
 
 ## Quick Start
 
@@ -20,6 +20,8 @@ curl -fsSL https://basecamp.com/install-cli | bash
 ```powershell
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
+
+On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
 
 That's it. You now have full access to Basecamp from your terminal.
 
@@ -71,6 +73,29 @@ go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 
 </details>
 
+## Upgrading
+
+```bash
+basecamp upgrade
+```
+
+What happens depends on how the CLI was installed:
+
+- **Installer script / tarball** (a binary under your home directory, e.g. `~/bin` or `~/.local/bin`): upgrades in place. The CLI downloads the release for your platform, verifies its Sigstore signature (the keyless `checksums.txt.bundle` published by the release pipeline, identity-pinned to the release workflow and tag) and SHA-256 checksum, swaps the executable transactionally, and confirms the installed binary reports the new version. On failure the previous binary is restored; in the worst case — restoration itself fails mid-swap — the error names the preserved backup file next to the binary so you can put it back by hand.
+- **Homebrew / Scoop**: delegates to `brew upgrade --cask` / `scoop update`, then verifies the manager-installed binary actually reports the new version.
+- **System packages** (apt/dnf/apk, AUR, Nix) and **`go install` builds**: never touched. `basecamp upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. `go install`; otherwise which package manager to use).
+
+`basecamp upgrade` exits 0 only when there is no update, or the update was applied *and confirmed*. Every other outcome is a structured failure (`"ok": false` in JSON) with one of these codes:
+
+| Code | Meaning |
+|---|---|
+| `upgrade_required` | An update exists but the CLI won't apply it for this install method — the hint carries the right next step |
+| `upgrade_incomplete` | The package manager exited 0 but the binary still reports the old version |
+| `upgrade_unverified` | The upgrade may have worked, but the installed version could not be confirmed |
+| `upgrade_failed` | The update check, download, signature/checksum verification, or executable swap failed — the previous binary remains installed (or the error names the preserved backup if restoration also failed) |
+
+The install scripts verify release signatures when `cosign` is available: cosign v3 verifies the published bundle format as-is, v2.6+ is driven with `--new-bundle-format=true`, and older versions skip signature verification with a warning (SHA-256 checksums are always verified).
+
 ## Usage
 
 ```bash
@@ -111,12 +136,17 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 
 ## Authentication
 
-OAuth 2.1 with automatic token refresh. First login opens your browser:
+OAuth 2.1 with automatic token refresh. First login opens your browser.
+When the server advertises the OAuth device flow, login uses it
+automatically: you approve a short code in the browser instead of a
+redirect. Login falls back to Launchpad's authorization-code flow only when
+no modern OAuth issuer is advertised for the server; once a modern issuer is
+selected, login failures surface loudly rather than silently falling back.
 
 ```bash
-basecamp auth login              # Authenticate with Basecamp
-basecamp auth login --scope read # Read-only access (BC3 OAuth only, default)
-basecamp auth login --scope full # Full read+write access (BC3 OAuth only)
+basecamp auth login              # Authenticate with Basecamp (full access)
+basecamp auth login --scope read # Read-only access (ignored by Launchpad)
+basecamp auth login --scope full # Full read+write access (default; ignored by Launchpad)
 basecamp auth token              # Print token for scripts
 ```
 
@@ -148,7 +178,27 @@ Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set t
 
 `basecamp` works with any AI agent that can run shell commands.
 
+Both plugins require the `basecamp` CLI installed and on your PATH.
+
+The plugin hooks additionally need a CLI new enough to carry the `agent-hook`
+command. If hook errors appear after installing or refreshing the plugin, the
+CLI is older than the hooks: run `basecamp upgrade`, then start a new session.
+Check with `basecamp agent-hook --help` — an "unknown command" reply means the
+CLI needs upgrading.
+
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
+
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks.
+
+Manual Codex installation uses the same marketplace:
+
+```bash
+codex plugin marketplace add basecamp/claude-plugins
+codex plugin add basecamp@37signals
+```
+
+To pick up a newer plugin version later, refresh the marketplace with
+`codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
 
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
@@ -161,7 +211,6 @@ See [install.md](install.md) for step-by-step setup instructions.
 ```
 ~/.config/basecamp/           # Your Basecamp identity
 ├── credentials.json          #   OAuth tokens (fallback when keyring unavailable)
-├── client.json               #   DCR client registration
 └── config.json               #   Global preferences
 
 ~/.config/basecamp/theme/     # Tool display (optional)
@@ -175,12 +224,46 @@ See [install.md](install.md) for step-by-step setup instructions.
 └── config.json               #   Project, account defaults
 ```
 
+A leftover `~/.config/basecamp/client.json` (from the removed development
+client-registration flow) is obsolete and safe to delete.
+
 ## Troubleshooting
 
 ```bash
 basecamp doctor              # Check CLI health and diagnose issues
 basecamp doctor --verbose    # Verbose output with details
+basecamp doctor --json       # Structured checks, including Claude and Codex
 ```
+
+### Windows: Smart App Control and SmartScreen
+
+Releases up to v0.8.0-rc.1 ship an unsigned `basecamp.exe`. To check whether
+your installed binary is signed:
+
+```powershell
+Get-AuthenticodeSignature (Get-Command basecamp).Source
+```
+
+**Smart App Control** (Windows 11) blocks unsigned executables no matter where
+they were downloaded from, and it has no per-app exceptions — this applies to
+the PowerShell installer, Scoop installs, and manual downloads alike. If it
+blocks an unsigned `basecamp.exe`, two options:
+
+1. **Use WSL2 (preferred).** Install the Linux build inside WSL2 — Smart App
+   Control doesn't apply there and your Windows security setup is untouched:
+   `wsl --install`, then inside the WSL terminal:
+   `curl -fsSL https://basecamp.com/install-cli | bash`
+2. **Turn Smart App Control off** (Windows Security → App & browser control →
+   Smart App Control settings) **and leave it off while using the unsigned
+   build.** Because there are no per-app exceptions, turning it back on
+   re-blocks `basecamp.exe` on its next run — only re-enable after upgrading
+   to a signed build. Windows 11 with the March/April 2026 updates can
+   re-enable Smart App Control from Windows Security without a reset; on older
+   builds re-enabling requires resetting Windows, so prefer WSL2 there.
+
+**SmartScreen** (without Smart App Control) may warn on first run of an
+unrecognized executable — choose "More info" → "Run anyway" if you downloaded
+the release from this repository.
 
 ## Development
 

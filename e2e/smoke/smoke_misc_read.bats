@@ -28,10 +28,8 @@ setup_file() {
 
 @test "search metadata returns metadata" {
   run_smoke basecamp search metadata --json
-  # Search metadata requires projects with search enabled
-  if [[ "$status" -ne 0 ]]; then
-    mark_unverifiable "Search metadata not available"
-    return 0
-  fi
+  # Empty metadata is deliberate success now (SDK schema drift, not an error);
+  # only genuine transport/API failures should fail here.
+  assert_success
   assert_json_value '.ok' 'true'
 }

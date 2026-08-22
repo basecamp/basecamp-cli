@@ -13,8 +13,9 @@ import (
 // Account resolves the account ID using the following precedence:
 // 1. CLI flag (--account)
 // 2. Config file (account_id)
-// 3. Interactive prompt (if terminal is interactive)
-// 4. Error (if no account can be determined)
+// 3. The account a BC5 token is bound to (RFC 8707 resource indicator)
+// 4. Interactive prompt (if terminal is interactive)
+// 5. Error (if no account can be determined)
 //
 // Returns the resolved account ID and the source it came from.
 func (r *Resolver) Account(ctx context.Context) (*ResolvedValue, error) {
@@ -34,7 +35,16 @@ func (r *Resolver) Account(ctx context.Context) (*ResolvedValue, error) {
 		}, nil
 	}
 
-	// 3. Try interactive prompt if available
+	// 3. A BC5 token is bound to one account by its RFC 8707 resource
+	// indicator. That binding is the answer — no fetch, no picker.
+	if accountID := r.auth.AccountID(); accountID != "" {
+		return &ResolvedValue{
+			Value:  accountID,
+			Source: SourceDefault,
+		}, nil
+	}
+
+	// 4. Try interactive prompt if available
 	if !r.IsInteractive() {
 		return nil, output.ErrUsage("--account is required (or set account_id in config)")
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -296,11 +297,11 @@ func buildLoginCmd(use string) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (BC3 only)")
+	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
-	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless mode: display auth URL and paste callback (alias for --remote)")
+	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 
@@ -332,18 +333,38 @@ func buildLogoutCmd(use string) *cobra.Command {
 }
 
 // printAgentNudge prints a hint about coding agent setup after login.
+//
+// Detection proves presence, not intent: with a single detected-unhealthy agent
+// it points at that agent; with several, it never guesses — it prints every
+// `basecamp setup <id>` choice so the user picks.
 func printAgentNudge(w io.Writer, r *output.Renderer) {
+	type nudgeAgent struct{ id, name string }
+	var unhealthy []nudgeAgent
 	for _, agent := range harness.DetectedAgents() {
 		if agent.Checks == nil {
 			continue
 		}
 		for _, c := range agent.Checks() {
 			if c.Status != "pass" {
-				fmt.Fprintln(w)
-				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("  %s detected. Connect it to Basecamp:", agent.Name)))
-				fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", agent.ID)))
-				return // one nudge is enough
+				unhealthy = append(unhealthy, nudgeAgent{id: agent.ID, name: agent.Name})
+				break
 			}
+		}
+	}
+	sort.Slice(unhealthy, func(i, j int) bool { return unhealthy[i].id < unhealthy[j].id })
+
+	switch len(unhealthy) {
+	case 0:
+		return
+	case 1:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("  %s detected. Connect it to Basecamp:", unhealthy[0].name)))
+		fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", unhealthy[0].id)))
+	default:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, r.Muted.Render("  Multiple coding agents detected. Choose one:"))
+		for _, a := range unhealthy {
+			fmt.Fprintln(w, r.Data.Render(fmt.Sprintf("  basecamp setup %s", a.id)))
 		}
 	}
 }

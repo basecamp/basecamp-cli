@@ -757,6 +757,10 @@ func (v *Detail) startCommentEdit() tea.Cmd {
 		return nil
 	}
 	c := v.data.comments[v.focusedComment]
+	// Fail closed on table-bearing content (see startEditBody).
+	if richtext.HasTableHTML(c.content) {
+		return workspace.SetStatus("This comment contains a table — edit it on Basecamp web", true)
+	}
 	v.editingComment = true
 	v.commentEditComposer = widget.NewComposer(v.styles,
 		widget.WithMode(widget.ComposerRich),
@@ -879,7 +883,7 @@ func (v *Detail) setDetailDueDate(dueOn string) tea.Cmd {
 		switch rt {
 		case "card":
 			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
-				&basecamp.UpdateCardRequest{DueOn: dueOn})
+				&basecamp.UpdateCardRequest{DueOn: &dueOn})
 		default:
 			err = hub.UpdateTodo(ctx, scope.AccountID, scope.ProjectID, recordingID,
 				&basecamp.UpdateTodoRequest{DueOn: dueOn})
@@ -1060,7 +1064,7 @@ func (v *Detail) submitEditTitle(title string) tea.Cmd {
 				&basecamp.UpdateTodoRequest{Content: title})
 		case "card":
 			err = hub.UpdateCard(ctx, scope.AccountID, scope.ProjectID, recordingID,
-				&basecamp.UpdateCardRequest{Title: title})
+				&basecamp.UpdateCardRequest{Title: &title})
 		default:
 			err = fmt.Errorf("editing %s titles is not supported", recordType)
 		}
@@ -1073,6 +1077,11 @@ func (v *Detail) submitEditTitle(title string) tea.Cmd {
 func (v *Detail) startEditBody() tea.Cmd {
 	if v.data == nil {
 		return nil
+	}
+	// Fail closed on table-bearing content: HTMLToMarkdown has no table handling,
+	// so entering edit mode and resubmitting would strip the table. Block the edit.
+	if richtext.HasTableHTML(v.data.content) {
+		return workspace.SetStatus("This message contains a table — edit it on Basecamp web", true)
 	}
 	v.editingBody = true
 	v.bodyEditComposer = widget.NewComposer(v.styles,

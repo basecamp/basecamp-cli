@@ -10,6 +10,15 @@
 #                        otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 #   BASECAMP_VERSION    Specific version to install (default: latest)
 #   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
+#                       (still runs `basecamp setup agents` to install the skill
+#                        and connect coding agents)
+#   BASECAMP_SETUP_AGENT
+#                       Which coding agent(s) `setup agents` connects:
+#                       claude | codex | all | none. Unset = auto-detect (connect
+#                       a single detected agent; if several, install the skill
+#                       only and surface the per-agent commands).
+#                       Piped install sets it for the interpreter, not the fetch:
+#                         curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash
 
 set -euo pipefail
 
@@ -185,6 +194,41 @@ get_latest_version() {
   error "Could not determine latest version. ${CURL_LAST_ERROR:+curl said: ${CURL_LAST_ERROR}. }If native Windows curl fails, try Scoop or PowerShell. If using Git Bash, try /usr/bin/curl instead."
 }
 
+# cosign_version prints the installed cosign's version (e.g. "v2.6.0"), empty
+# when it can't be determined. The trailing `|| true` is load-bearing: under
+# `set -euo pipefail` a broken cosign (nonzero `cosign version`) would
+# otherwise abort the whole installer from inside the caller's command
+# substitution — an unusable cosign must degrade to warn-and-skip, not abort.
+cosign_version() {
+  cosign version 2>/dev/null | awk -F': *' '/^GitVersion/ {print $2; exit}' || true
+}
+
+# cosign_bundle_support decides how to verify the release's Sigstore bundle,
+# which is the new (protobuf, v0.3+json) format. Prints the extra verify-blob
+# flag to use ("" for none) and returns 0 when verification can proceed:
+#   v3+          → new-format parsing is the default; no flag
+#   v2.6 – v2.x  → needs --new-bundle-format=true (v2.x defaults it to false)
+#   < v2.6       → cannot verify (v2.4 chokes on the bundle's tlog key type,
+#                  v2.2 lacks the flag entirely); caller warns and skips
+cosign_bundle_support() {
+  local version="$1" major minor
+
+  if [[ "$version" =~ ^v?([0-9]+)\.([0-9]+)\. ]]; then
+    major="${BASH_REMATCH[1]}"
+    minor="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+
+  if (( major >= 3 )); then
+    echo ""
+  elif (( major == 2 && minor >= 6 )); then
+    echo "--new-bundle-format=true"
+  else
+    return 1
+  fi
+}
+
 verify_checksums() {
   local version="$1"
   local tmp_dir="$2"
@@ -205,22 +249,33 @@ verify_checksums() {
 
   info "Checksum verified"
 
-  # If cosign is available, verify the signature
+  # If cosign is available and understands the bundle format, verify the signature
   if command -v cosign &>/dev/null; then
-    step "Verifying cosign signature..."
+    local cosign_ver bundle_flag
+    cosign_ver=$(cosign_version)
+    if bundle_flag=$(cosign_bundle_support "$cosign_ver"); then
+      step "Verifying cosign signature..."
 
-    if ! curl_run -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
-      error "Failed to download checksums.txt.bundle${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
+      if ! curl_run -fsSL "${base_url}/checksums.txt.bundle" -o "${tmp_dir}/checksums.txt.bundle"; then
+        error "Failed to download checksums.txt.bundle${CURL_LAST_ERROR:+ (${CURL_LAST_ERROR})}"
+      fi
+
+      local -a cosign_args=(verify-blob --bundle "${tmp_dir}/checksums.txt.bundle")
+      if [[ -n "$bundle_flag" ]]; then
+        cosign_args+=("$bundle_flag")
+      fi
+      cosign_args+=( \
+        --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
+        --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+        "${tmp_dir}/checksums.txt")
+
+      cosign "${cosign_args[@]}" \
+        || error "Cosign signature verification failed"
+
+      info "Signature verified"
+    else
+      step "Skipping signature verification: cosign ${cosign_ver:-unknown} can't verify this release's bundle format (need cosign >= 2.6)"
     fi
-
-    cosign verify-blob \
-      --bundle "${tmp_dir}/checksums.txt.bundle" \
-      --certificate-identity "https://github.com/basecamp/basecamp-cli/.github/workflows/release.yml@refs/tags/v${version}" \
-      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-      "${tmp_dir}/checksums.txt" \
-      || error "Cosign signature verification failed"
-
-    info "Signature verified"
   fi
 }
 
@@ -309,13 +364,29 @@ verify_install() {
     binary_name="basecamp.exe"
   fi
 
-  local installed_version
-  if installed_version=$("$BIN_DIR/$binary_name" --version 2>/dev/null); then
+  local installed_version err_file
+  err_file=$(mktemp)
+  if installed_version=$("$BIN_DIR/$binary_name" --version 2>"$err_file"); then
+    rm -f "$err_file"
     info "$(green "${installed_version} installed")"
     return 0
   fi
 
-  error "Installation failed - basecamp not working"
+  local run_error
+  run_error=$(cat "$err_file")
+  rm -f "$err_file"
+
+  local detail="Installation failed - basecamp not working"
+  if [[ -n "$run_error" ]]; then
+    detail="$detail: $run_error"
+  fi
+  if [[ "$platform" == windows_* ]]; then
+    detail="$detail
+  Windows may have blocked the unsigned executable: Smart App Control only runs code-signed binaries.
+  Either install inside WSL2 (curl -fsSL https://basecamp.com/install-cli | bash) or see
+  https://github.com/basecamp/basecamp-cli#windows-smart-app-control-and-smartscreen"
+  fi
+  error "$detail"
 }
 
 setup_theme() {
@@ -443,12 +514,13 @@ main() {
   echo ""
 
   # Run interactive setup wizard only when stdin is a TTY and not explicitly skipped.
-  # Non-interactive environments (CI, piped input, coding agents like Claude Code)
-  # get the agent skill installed and next-step instructions instead — the wizard
-  # requires interactive prompts that don't work without a terminal.
+  # Non-interactive environments (CI, piped input, coding agents like Claude Code
+  # or Codex) get the baseline skill installed, a best-effort agent connection via
+  # `setup agents`, and next-step instructions instead — the wizard requires
+  # interactive prompts that don't work without a terminal.
   if [[ "${BASECAMP_SKIP_SETUP:-}" == "1" ]]; then
     step "Skipping setup wizard (BASECAMP_SKIP_SETUP=1)"
-    "$BIN_DIR/$binary_name" setup claude || true
+    post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
@@ -458,7 +530,7 @@ main() {
     "$BIN_DIR/$binary_name" setup
   else
     info "Skipping interactive setup (no terminal detected)."
-    "$BIN_DIR/$binary_name" setup claude || true
+    post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
@@ -467,4 +539,79 @@ main() {
   fi
 }
 
-main "$@"
+# binary_supports_setup_agents reports whether the installed binary exposes the
+# `setup agents` subcommand (added after v0.7.2). The hosted install.sh from main
+# can outrun the latest release, so we probe rather than assume.
+binary_supports_setup_agents() {
+  "$1" setup --help 2>/dev/null | grep -qE '^[[:space:]]+agents[[:space:]]'
+}
+
+# binary_supports_setup_agent reports whether the binary exposes a per-agent
+# `setup <id>` subcommand for the given agent id (claude or codex).
+binary_supports_setup_agent() {
+  "$1" setup --help 2>/dev/null | grep -qE "^[[:space:]]+$2[[:space:]]"
+}
+
+# post_install_setup installs the baseline skill and connects coding agents
+# without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# unset = auto-detect). Never runs the interactive wizard.
+#
+# Cross-version: newer binaries get the intent-neutral `setup agents`. Older
+# release binaries (no `setup agents`) fall back WITHOUT reintroducing the
+# Claude-first bug — only an *explicitly* selected agent is connected. `all`
+# runs every per-agent setup the binary supports; an unset, auto, or ambiguous
+# selector installs the shared skill only (`skill install`).
+#
+# Every real invocation carries BASECAMP_NO_KEYRING=1, per-command rather than
+# exported: these calls never touch credentials, but release binaries up to
+# v0.7.2 probe the OS keyring on startup for every command, and on a locked
+# headless keychain (CI, ssh) that probe blocks forever. The `setup --help`
+# capability probes stay bare — help short-circuits before the probe.
+post_install_setup() {
+  local binary_name="$1"
+  local bin="$BIN_DIR/$binary_name"
+
+  if binary_supports_setup_agents "$bin"; then
+    BASECAMP_NO_KEYRING=1 "$bin" setup agents || true
+    return 0
+  fi
+
+  case "${BASECAMP_SETUP_AGENT:-}" in
+    claude|codex)
+      # Capability-check first: an old `setup` parent accepts an unadvertised
+      # agent id as a stray positional arg and launches the INTERACTIVE wizard,
+      # violating the non-interactive contract. Degrade to the shared skill.
+      if binary_supports_setup_agent "$bin" "${BASECAMP_SETUP_AGENT}"; then
+        BASECAMP_NO_KEYRING=1 "$bin" setup "${BASECAMP_SETUP_AGENT}" || true
+      else
+        BASECAMP_NO_KEYRING=1 "$bin" skill install || true
+      fi
+      ;;
+    all)
+      # Explicit "every agent": dispatch each per-agent setup the binary knows,
+      # falling back to the shared skill if it supports none of them.
+      local ran_agent=0 agent
+      for agent in claude codex; do
+        if binary_supports_setup_agent "$bin" "$agent"; then
+          BASECAMP_NO_KEYRING=1 "$bin" setup "$agent" || true
+          ran_agent=1
+        fi
+      done
+      [[ "$ran_agent" -eq 1 ]] || BASECAMP_NO_KEYRING=1 "$bin" skill install || true
+      ;;
+    *)
+      # Intent-neutral on old binaries: install the shared skill, never pick an
+      # agent. The user connects one via the printed "Next steps".
+      BASECAMP_NO_KEYRING=1 "$bin" skill install || true
+      ;;
+  esac
+}
+
+# Guard so sourcing the script (e.g. from tests) doesn't run the installer.
+# The if-form is required: `[[ … ]] && main` returns 1 when sourced, which
+# trips `set -e` in the sourcing shell. The `:-$0` fallback is also
+# required: bash executing from stdin (curl | bash) or -c leaves BASH_SOURCE
+# unset, and the bare expansion aborts under `set -u` (#568).
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+  main "$@"
+fi

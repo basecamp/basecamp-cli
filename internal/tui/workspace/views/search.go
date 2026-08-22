@@ -515,9 +515,22 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		title = r.Subject
 	}
 
-	excerpt := r.Description
-	if excerpt == "" && r.Content != "" {
-		excerpt = truncateExcerpt(r.Content, 120)
+	// SDK v0.10.0 made Content and Description nullable and moved the
+	// highlighted excerpt to the plain-text variants. Those are HTML fragments
+	// despite the name — BC3 wraps each query match in <mark> — so both
+	// branches have to go through truncateExcerpt, which strips the markup.
+	excerpt := r.PlainTextDescription
+	if excerpt == "" {
+		excerpt = r.PlainTextContent
+	}
+	excerpt = truncateExcerpt(excerpt, 120)
+
+	// CreatedAt is a pointer since SDK v0.13.0 — search results may omit it.
+	createdAt := ""
+	var createdAtTS int64
+	if r.CreatedAt != nil {
+		createdAt = r.CreatedAt.Format("Jan 2")
+		createdAtTS = r.CreatedAt.Unix()
 	}
 
 	return workspace.SearchResultInfo{
@@ -529,8 +542,8 @@ func searchResultToInfo(r basecamp.SearchResult, accountID, accountName string) 
 		ProjectID:   projectID,
 		Account:     accountName,
 		AccountID:   accountID,
-		CreatedAt:   r.CreatedAt.Format("Jan 2"),
-		CreatedAtTS: r.CreatedAt.Unix(),
+		CreatedAt:   createdAt,
+		CreatedAtTS: createdAtTS,
 	}
 }
 

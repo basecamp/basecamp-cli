@@ -97,7 +97,7 @@ func newBoostTestApp(transport http.RoundTripper) (*appctx.App, *bytes.Buffer) {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &boostTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -213,6 +213,149 @@ func TestBoostCreateAcceptsMaxContent(t *testing.T) {
 	err := executeBoostCommand(cmd, app, "create", "456", "exactly16chars!!")
 	require.NoError(t, err)
 	assert.Equal(t, "POST", transport.capturedMethod)
+}
+
+// --- item-scoped boost listing ---
+
+// recordingBoostsRoute serves the item-scoped boost listing.
+func recordingBoostsRoute() stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/recordings/456/boosts.json",
+		status: http.StatusOK,
+		body:   `[{"id":1,"content":"🎉","created_at":"2024-01-01T00:00:00Z"}]`,
+	}
+}
+
+// setupBoostListTest builds a command and app wired to the boost routes.
+func setupBoostListTest(t *testing.T, buf *bytes.Buffer) (*cobra.Command, *appctx.App, *recordingTransport) {
+	t.Helper()
+
+	app, transport := setupRecordingTestApp(t, projectsRoute(), recordingBoostsRoute())
+	if buf != nil {
+		app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+	}
+	return NewBoostsCmd(), app, transport
+}
+
+// requireBoostUsageError asserts that err is a usage error mentioning want.
+func requireBoostUsageError(t *testing.T, err error, want string) {
+	t.Helper()
+
+	require.Error(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Message, want)
+}
+
+// TestBoostListWithIDStaysItemScoped verifies that passing an ID lists that
+// item's boosts.
+func TestBoostListWithIDStaysItemScoped(t *testing.T) {
+	cmd, app, transport := setupBoostListTest(t, nil)
+
+	require.NoError(t, executeBoostCommand(cmd, app, "list", "456", "--project", "123"))
+	assert.Equal(t, "/99999/recordings/456/boosts.json", transport.last(t).Path)
+}
+
+// Boosts hang off a single item, so an ID is required. The account-wide feed
+// that used to answer a bare `boost list` was an unlinked easter egg on the
+// web side and BC5 has withdrawn it (basecamp/bc3#12464), so there is nothing
+// to fall back to. If it returns (basecamp/bc3#12463), this test is the one
+// that says so.
+//
+// A machine-output invocation gets a structured usage error; an interactive one
+// gets help. Either way the point is that nothing is fetched — silently listing
+// something else is the failure mode worth pinning.
+func TestBoostListWithoutIDAsksForAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	buf := &bytes.Buffer{}
+	cmd, app, transport := setupBoostListTest(t, buf)
+
+	err := executeBoostCommand(cmd, app, "list")
+
+	requireBoostUsageError(t, err, "<id|url> required")
+	assert.Empty(t, transport.recorded(), "a missing argument must not reach the API")
+}
+
+// A configured project cannot scope a per-item listing, so it must not be
+// silently promoted into one.
+func TestBoostListConfiguredProjectStillNeedsAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	buf := &bytes.Buffer{}
+	cmd, app, transport := setupBoostListTest(t, buf)
+	app.Config.ProjectID = "123"
+
+	err := executeBoostCommand(cmd, app, "list")
+
+	requireBoostUsageError(t, err, "<id|url> required")
+	assert.Empty(t, transport.recorded())
+}
+
+// An explicitly named project cannot stand in for the item ID either, but it
+// is a statement of intent: the hint carries it forward into the corrected
+// invocation — through --project, its --in alias, and the root-level form
+// that lands in app.Flags.Project.
+func TestBoostListExplicitProjectWithoutIDCarriesProjectIntoHint(t *testing.T) {
+	assertHintCarriesProject := func(t *testing.T, err error, transport *recordingTransport) {
+		t.Helper()
+		requireBoostUsageError(t, err, "listing them needs one")
+		var e *output.Error
+		require.True(t, errors.As(err, &e))
+		assert.Contains(t, e.Hint, "--project 123")
+		assert.Empty(t, transport.recorded(), "a usage error must not reach the API")
+	}
+
+	cmd, app, transport := setupBoostListTest(t, nil)
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list", "--project", "123"), transport)
+
+	cmd, app, transport = setupBoostListTest(t, nil)
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list", "--in", "123"), transport)
+
+	cmd, app, transport = setupBoostListTest(t, nil)
+	app.Flags.Project = "123"
+	assertHintCarriesProject(t, executeBoostCommand(cmd, app, "list"), transport)
+
+	// --event is explicit intent too: when the structured hint fires, it
+	// rides along rather than being silently dropped from the correction.
+	cmd, app, transport = setupBoostListTest(t, nil)
+	err := executeBoostCommand(cmd, app, "list", "--project", "123", "--event", "5")
+	assertHintCarriesProject(t, err, transport)
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Contains(t, e.Hint, "--event 5")
+}
+
+// The pagination flags existed only for the account-wide feed. With that gone
+// they must not linger: an item's boosts arrive in one unpaginated response,
+// and the SDK documents BoostListOptions.Page as not honoring a page number.
+func TestBoostListHasNoPaginationFlags(t *testing.T) {
+	list, _, err := NewBoostsCmd().Find([]string{"list"})
+	require.NoError(t, err)
+
+	for _, name := range []string{"limit", "page", "all", "all-projects"} {
+		assert.Nil(t, list.Flags().Lookup(name), "boost list must not carry --%s", name)
+	}
+}
+
+// --event names an event inside the item, so it still needs that item's ID.
+func TestBoostListEventWithoutIDAsksForAnID(t *testing.T) {
+	// missingArg shows help interactively and errors otherwise; pin the
+	// non-interactive branch so the assertion is about the contract, not
+	// about whether the test process happens to look like a terminal.
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	buf := &bytes.Buffer{}
+	cmd, app, transport := setupBoostListTest(t, buf)
+
+	err := executeBoostCommand(cmd, app, "list", "--event", "999")
+
+	requireBoostUsageError(t, err, "<id|url> required")
+	assert.Empty(t, transport.recorded())
 }
 
 // mockBoostNilBoosterTransport returns a boost with no booster field.

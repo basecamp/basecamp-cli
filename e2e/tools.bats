@@ -31,3 +31,14 @@ load test_helper
   assert_success
   assert_output_contains "basecamp tools <command>"
 }
+
+# Create validation
+
+@test "tools create --visible-to-clients without --type shows usage error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp tools create --visible-to-clients
+  assert_failure
+  assert_output_contains "--type is required"
+}

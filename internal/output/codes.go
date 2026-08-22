@@ -28,5 +28,25 @@ const (
 	CodeAmbiguous = clioutput.CodeAmbiguous
 )
 
+// Codes the shared module does not know yet. The SDK started emitting both at
+// v0.13.0/v0.14.0 (422 validation, 507 account limits); values match the SDK's
+// own exit-code mapping. Local arms below keep them from collapsing into the
+// shared table's ExitAPI default until the shared module catches up.
+const (
+	CodeValidation    = "validation"
+	CodeLimitExceeded = "limit_exceeded"
+
+	ExitValidation = 9  // Validation error (422)
+	ExitLimit      = 10 // Account limit reached (507)
+)
+
 // ExitCodeFor returns the exit code for a given error code.
-func ExitCodeFor(code string) int { return clioutput.ExitCodeFor(code) }
+func ExitCodeFor(code string) int {
+	switch code {
+	case CodeValidation:
+		return ExitValidation
+	case CodeLimitExceeded:
+		return ExitLimit
+	}
+	return clioutput.ExitCodeFor(code)
+}

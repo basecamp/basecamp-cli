@@ -4,6 +4,7 @@ package commands
 import (
 	"bufio"
 	"context"
+	"debug/pe"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,6 +80,7 @@ func NewDoctorCmd() *cobra.Command {
 
 The doctor command helps troubleshoot common issues by checking:
   - CLI version (and whether updates are available)
+  - Binary signature (Windows: Authenticode presence)
   - Configuration files (existence and validity)
   - Authentication credentials
   - Token validity and expiration
@@ -131,22 +133,27 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	// 1. Version check
 	checks = append(checks, checkVersion(verbose)) //nolint:contextcheck // checkVersion uses fetchLatestVersion which creates its own bounded context intentionally
 
-	// 2. SDK provenance
+	// 2. Binary signature (Windows release builds only)
+	if sigCheck := checkBinarySignature(); sigCheck != nil {
+		checks = append(checks, *sigCheck)
+	}
+
+	// 3. SDK provenance
 	checks = append(checks, checkSDKProvenance(verbose))
 
-	// 3. Go runtime info (verbose only, always passes)
+	// 4. Go runtime info (verbose only, always passes)
 	if verbose {
 		checks = append(checks, checkRuntime())
 	}
 
-	// 4. Config files check
+	// 5. Config files check
 	checks = append(checks, checkConfigFiles(app, verbose)...)
 
-	// 5. Credentials check
+	// 6. Credentials check
 	credCheck := checkCredentials(app, verbose)
 	checks = append(checks, credCheck)
 
-	// 6. Authentication check (only if credentials exist)
+	// 7. Authentication check (only if credentials exist)
 	var canTestAPI bool
 	if credCheck.Status == "pass" || credCheck.Status == "warn" {
 		authCheck := checkAuthentication(ctx, app, verbose)
@@ -161,7 +168,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 7. API connectivity (only if authenticated)
+	// 8. API connectivity (only if authenticated)
 	if canTestAPI {
 		checks = append(checks, checkAPIConnectivity(ctx, app, verbose))
 	} else {
@@ -172,7 +179,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 8. Account access (only if API works)
+	// 9. Account access (only if API works)
 	if canTestAPI && app.Config.AccountID != "" {
 		checks = append(checks, checkAccountAccess(ctx, app, verbose))
 	} else if app.Config.AccountID == "" {
@@ -190,44 +197,36 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		})
 	}
 
-	// 9. Cache health
+	// 10. Cache health
 	checks = append(checks, checkCacheHealth(app, verbose))
 
-	// 10. Shell completion
+	// 11. Shell completion
 	checks = append(checks, checkShellCompletion(verbose))
 
-	// 11. Legacy bcq detection
+	// 12. Legacy bcq detection
 	if legacyCheck := checkLegacyInstall(); legacyCheck != nil {
 		checks = append(checks, *legacyCheck)
 	}
 
-	// 12. AI Agent integration (for each detected agent)
+	// 13. AI Agent integration (for each detected agent)
 	if baselineSkillInstalled() {
 		checks = append(checks, checkSkillVersion())
 	}
 	for _, agent := range harness.DetectedAgents() {
-		if agent.Checks != nil {
-			for _, c := range agent.Checks() {
-				checks = append(checks, Check{
-					Name:    c.Name,
-					Status:  c.Status,
-					Message: c.Message,
-					Hint:    c.Hint,
-				})
-			}
+		var agentChecks []*harness.StatusCheck
+		if agent.Diagnostics != nil {
+			agentChecks = agent.Diagnostics(ctx)
+		} else if agent.Checks != nil {
+			agentChecks = agent.Checks()
 		}
-	}
-
-	// 13. Claude plugin version (doctor-only, not part of generic agent checks
-	//     which gate setup wizard behavior)
-	if harness.DetectClaude() {
-		pvc := harness.CheckClaudePluginVersion()
-		checks = append(checks, Check{
-			Name:    pvc.Name,
-			Status:  pvc.Status,
-			Message: pvc.Message,
-			Hint:    pvc.Hint,
-		})
+		for _, c := range agentChecks {
+			checks = append(checks, Check{
+				Name:    c.Name,
+				Status:  c.Status,
+				Message: c.Message,
+				Hint:    c.Hint,
+			})
+		}
 	}
 
 	return checks
@@ -260,6 +259,86 @@ func checkVersion(verbose bool) Check {
 	}
 
 	return check
+}
+
+// checkBinarySignature reports whether the running Windows executable carries
+// an Authenticode signature. It is a signing-regression canary for pipeline
+// drift (a release that shipped unsigned), not a validity check: if doctor
+// runs at all, Smart App Control didn't block this binary, and Windows — not
+// this probe — enforces signature validity and expiry.
+func checkBinarySignature() *Check {
+	return binarySignatureCheck(runtime.GOOS)
+}
+
+// binarySignatureCheck is the platform-injectable core of
+// checkBinarySignature. Nil off-Windows and for dev builds (built from
+// source; never signed, and a warn there would be pure noise).
+func binarySignatureCheck(goos string) *Check {
+	if goos != "windows" || version.IsDev() {
+		return nil
+	}
+
+	var check Check
+	exe, err := os.Executable()
+	if err == nil {
+		var signed bool
+		if signed, err = hasAuthenticodeSignature(exe); err == nil {
+			check = signatureCheck(signed)
+		}
+	}
+	if err != nil {
+		check = Check{
+			Name:    "Binary Signature",
+			Status:  "warn",
+			Message: fmt.Sprintf("Could not inspect executable for a signature: %v", err),
+		}
+	}
+	return &check
+}
+
+// signatureCheck composes the Binary Signature result. Presence-only wording:
+// never claim the signature is valid or unexpired — the probe cannot see that.
+func signatureCheck(signed bool) Check {
+	if signed {
+		return Check{
+			Name:    "Binary Signature",
+			Status:  "pass",
+			Message: "Authenticode signature present",
+		}
+	}
+	return Check{
+		Name:    "Binary Signature",
+		Status:  "warn",
+		Message: "No Authenticode signature (unsigned executable)",
+		Hint:    "Windows can block unsigned executables (Smart App Control, SmartScreen). Run: basecamp upgrade",
+	}
+}
+
+// hasAuthenticodeSignature reports whether the PE file at path has a
+// WIN_CERTIFICATE overlay, i.e. a nonzero security data directory
+// (IMAGE_DIRECTORY_ENTRY_SECURITY). Pure debug/pe — works on any platform.
+func hasAuthenticodeSignature(path string) (bool, error) {
+	f, err := pe.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	var dirs []pe.DataDirectory
+	switch oh := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader32:
+		dirs = oh.DataDirectory[:]
+	case *pe.OptionalHeader64:
+		dirs = oh.DataDirectory[:]
+	default:
+		return false, fmt.Errorf("unrecognized PE optional header type %T", f.OptionalHeader)
+	}
+
+	if len(dirs) <= pe.IMAGE_DIRECTORY_ENTRY_SECURITY {
+		return false, nil
+	}
+	sec := dirs[pe.IMAGE_DIRECTORY_ENTRY_SECURITY]
+	return sec.VirtualAddress != 0 && sec.Size != 0, nil
 }
 
 // checkSDKProvenance reports the embedded SDK version and revision.
@@ -317,38 +396,98 @@ func formatSDKProvenance(p *version.SDKProvenance, verbose bool) Check {
 	return check
 }
 
-// fetchLatestVersion attempts to fetch the latest release version from GitHub.
+// releaseAsset is a downloadable file attached to a GitHub release.
+type releaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+}
+
+// releaseInfo describes the latest GitHub release: its version (tag without
+// the "v" prefix) and downloadable assets.
+type releaseInfo struct {
+	Version string
+	Assets  []releaseAsset
+}
+
+// asset returns the release asset with the given exact name.
+func (r releaseInfo) asset(name string) (releaseAsset, bool) {
+	for _, a := range r.Assets {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return releaseAsset{}, false
+}
+
+// releasesLatestURL is swappable so tests can point release fetching at a
+// local httptest server.
+var releasesLatestURL = "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest"
+
+// fetchLatestRelease fetches the latest release metadata from GitHub.
 // Uses its own context since version checks are best-effort and independent of caller lifecycle.
-func fetchLatestVersion() (string, error) { //nolint:contextcheck // intentionally creates bounded context for best-effort check
+func fetchLatestRelease() (releaseInfo, error) { //nolint:contextcheck // intentionally creates bounded context for best-effort check
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/basecamp/basecamp-cli/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", releasesLatestURL, nil)
 	if err != nil {
-		return "", err
+		return releaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", version.UserAgent())
+	attachGitHubAuth(req)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return releaseInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return releaseInfo{}, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
 	var release struct {
-		TagName string `json:"tag_name"`
+		TagName string         `json:"tag_name"`
+		Assets  []releaseAsset `json:"assets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil { // 1 MB limit
-		return "", err
+		return releaseInfo{}, err
 	}
 
 	// Strip "v" prefix if present
-	return strings.TrimPrefix(release.TagName, "v"), nil
+	return releaseInfo{
+		Version: strings.TrimPrefix(release.TagName, "v"),
+		Assets:  release.Assets,
+	}, nil
+}
+
+// attachGitHubAuth adds a bearer token to api.github.com requests when the
+// environment carries one (GH_TOKEN, then GITHUB_TOKEN — the gh CLI's
+// precedence). Anonymous requests are rate-limited per source IP, which
+// bites shared CI runner egress. Host-guarded so a token is never sent to
+// any other host (tests point releasesLatestURL at local servers).
+func attachGitHubAuth(req *http.Request) {
+	if req.URL.Host != "api.github.com" {
+		return
+	}
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := os.Getenv(name); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+			return
+		}
+	}
+}
+
+// fetchLatestVersion returns just the latest release version, for callers
+// that don't need asset metadata.
+func fetchLatestVersion() (string, error) {
+	release, err := releaseFetcher()
+	if err != nil {
+		return "", err
+	}
+	return release.Version, nil
 }
 
 // checkRuntime returns Go runtime information.
@@ -984,6 +1123,18 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Action:      "install",
 				Cmd:         "basecamp skill install",
 				Description: "Update installed skill",
+			})
+		case "Binary Signature":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "upgrade",
+				Cmd:         "basecamp upgrade",
+				Description: "Upgrade to a signed release",
+			})
+		case "Codex Plugin", "Codex Plugin Version":
+			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+				Action:      "setup_codex",
+				Cmd:         "basecamp setup codex",
+				Description: "Install or update the Codex plugin",
 			})
 		}
 	}

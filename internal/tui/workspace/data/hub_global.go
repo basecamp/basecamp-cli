@@ -609,11 +609,16 @@ func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, ac
 		if r := []rune(excerpt); len(r) > 100 {
 			excerpt = string(r[:97]) + "…"
 		}
+		createdAt, createdAtTS := "", int64(0)
+		if e.CreatedAt != nil {
+			createdAt = e.CreatedAt.Format("Jan 2 3:04pm")
+			createdAtTS = e.CreatedAt.Unix()
+		}
 		infos = append(infos, TimelineEventInfo{
 			ID:             e.ID,
 			RecordingID:    e.ParentRecordingID,
-			CreatedAt:      e.CreatedAt.Format("Jan 2 3:04pm"),
-			CreatedAtTS:    e.CreatedAt.Unix(),
+			CreatedAt:      createdAt,
+			CreatedAtTS:    createdAtTS,
 			Kind:           e.Kind,
 			Action:         e.Action,
 			Target:         e.Target,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -409,6 +410,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var subscribe string
 	var noSubscribe bool
 	var attachFiles []string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <summary>",
@@ -426,19 +428,45 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return missingArg(cmd, "<summary>")
 			}
 
-			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			if startsAt == "" {
 				return output.ErrUsage("--starts-at required (ISO 8601 datetime)")
 			}
 			if endsAt == "" {
 				return output.ErrUsage("--ends-at required (ISO 8601 datetime)")
 			}
+			if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
+				return err
+			}
+			if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
+				return err
+			}
 
-			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, participants, subscribe, noSubscribe, attachFiles)
+			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
+				return err
+			}
+			if err := requireNumericID(*scheduleID, "schedule ID"); err != nil {
+				return err
+			}
+
+			// Attachment paths are readable or not regardless of the body, so
+			// check them before the pipe is drained.
+			if err := validateAttachPaths(attachFiles); err != nil {
+				return err
+			}
+
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
 		},
 	}
 
@@ -448,20 +476,23 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringVar(&startsAt, "start", "", "Start time (alias)")
 	cmd.Flags().StringVar(&endsAt, "ends-at", "", "End time (ISO 8601)")
 	cmd.Flags().StringVar(&endsAt, "end", "", "End time (alias)")
-	cmd.Flags().StringVar(&description, "description", "", "Detailed description")
+	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringVar(&subscribe, "subscribe", "", "Subscribe specific people (comma-separated names, emails, IDs, or \"me\")")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
 
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
 	// Resolve subscription flags early (fail fast on bad input)
 	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 	if err != nil {
@@ -534,6 +565,14 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		Subscriptions: subs,
 	}
 
+	// Set client visibility only when the flag was provided. Omitting it uses the
+	// server's default: team-only when posting as a team member, but a
+	// client-authenticated caller always creates client-visible records (an
+	// explicit false is overridden server-side).
+	if cmd.Flags().Changed("visible-to-clients") {
+		req.VisibleToClients = &visibleToClients
+	}
+
 	if participants != "" {
 		var ids []int64
 		for idStr := range strings.SplitSeq(participants, ",") {
@@ -596,12 +635,47 @@ You can pass either an entry ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			if err := ensureAccount(cmd, app); err != nil {
+
+			// Extract ID and project from URL if provided. Purely syntactic,
+			// so it precedes the stdin read like every other target-ID check.
+			entryID, urlProjectID := extractWithProject(args[0])
+
+			// This command used to send a malformed ID to the server as 0 —
+			// the ParseInt further down discarded its error. Reject it here
+			// instead, like every sibling update command, and before the pipe
+			// is drained.
+			entryIDInt, err := strconv.ParseInt(entryID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid schedule entry ID")
+			}
+
+			// The timestamp formats and the attachment paths are decidable from
+			// the flags alone, as they already are on the create path — so they
+			// precede the read rather than following account and project
+			// resolution.
+			if startsAt != "" {
+				if err := validateScheduleTimestamp("starts-at", startsAt); err != nil {
+					return err
+				}
+			}
+			if endsAt != "" {
+				if err := validateScheduleTimestamp("ends-at", endsAt); err != nil {
+					return err
+				}
+			}
+			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			entryID, urlProjectID := extractWithProject(args[0])
+			// Syntactic checks first, then "-", then account and network.
+			description, err = resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -626,22 +700,20 @@ You can pass either an entry ID or a Basecamp URL:
 				return err
 			}
 
-			entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
-
 			// Build request with provided fields only
 			req := &basecamp.UpdateScheduleEntryRequest{}
 			hasChanges := false
 
 			if summary != "" {
-				req.Summary = summary
+				req.Summary = basecamp.Ptr(summary)
 				hasChanges = true
 			}
 			if startsAt != "" {
-				req.StartsAt = startsAt
+				req.StartsAt = basecamp.Ptr(startsAt)
 				hasChanges = true
 			}
 			if endsAt != "" {
-				req.EndsAt = endsAt
+				req.EndsAt = basecamp.Ptr(endsAt)
 				hasChanges = true
 			}
 			var mentionNotice string
@@ -667,7 +739,7 @@ You can pass either an entry ID or a Basecamp URL:
 					html = richtext.EmbedAttachments(html, refs)
 				}
 
-				req.Description = html
+				req.Description = basecamp.Ptr(html)
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("all-day") {
@@ -675,7 +747,7 @@ You can pass either an entry ID or a Basecamp URL:
 				hasChanges = true
 			}
 			if cmd.Flags().Changed("notify") {
-				req.Notify = notify
+				req.Notify = basecamp.Ptr(notify)
 				hasChanges = true
 			}
 			if participants != "" {
@@ -687,7 +759,7 @@ You can pass either an entry ID or a Basecamp URL:
 					}
 				}
 				if len(ids) > 0 {
-					req.ParticipantIDs = ids
+					req.ParticipantIDs = basecamp.Ptr(ids)
 					hasChanges = true
 				}
 			}
@@ -703,7 +775,7 @@ You can pass either an entry ID or a Basecamp URL:
 				if fetchErr != nil {
 					return convertSDKError(fetchErr)
 				}
-				req.Description = richtext.EmbedAttachments(existing.Description, refs)
+				req.Description = basecamp.Ptr(richtext.EmbedAttachments(existing.Description, refs))
 				hasChanges = true
 			}
 
@@ -741,13 +813,15 @@ You can pass either an entry ID or a Basecamp URL:
 	cmd.Flags().StringVar(&startsAt, "start", "", "Start time (alias)")
 	cmd.Flags().StringVar(&endsAt, "ends-at", "", "End time (ISO 8601)")
 	cmd.Flags().StringVar(&endsAt, "end", "", "End time (alias)")
-	cmd.Flags().StringVar(&description, "description", "", "Detailed description")
+	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 
 	return cmd
 }
@@ -833,4 +907,19 @@ func newScheduleSettingsCmd(project, scheduleID *string) *cobra.Command {
 // getScheduleID retrieves the schedule ID from a project's dock, handling multi-dock projects.
 func getScheduleID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "schedule", "", "schedule", "schedule")
+}
+
+// validateScheduleTimestamp accepts what bc3 accepts: an RFC 3339 timestamp,
+// or a bare date (2026-06-01), which renders the entry all-day. The SDK
+// stopped validating these client-side at v0.13.0 so bare dates could
+// round-trip; the CLI still fails garbage locally as a usage error rather
+// than spending a request to surface it as a 422.
+func validateScheduleTimestamp(flag, value string) error {
+	if _, err := time.Parse(time.RFC3339, value); err == nil {
+		return nil
+	}
+	if _, err := time.Parse("2006-01-02", value); err == nil {
+		return nil
+	}
+	return output.ErrUsage(fmt.Sprintf("Invalid --%s: %q is neither an RFC 3339 timestamp (2026-06-01T09:00:00Z) nor a date (2026-06-01)", flag, value))
 }

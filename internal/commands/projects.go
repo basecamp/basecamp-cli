@@ -274,6 +274,11 @@ func newProjectsCreateCmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			// Resolve account if not configured (enables interactive prompt)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -296,7 +301,9 @@ func newProjectsCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Project description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Project description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -324,14 +331,20 @@ Examples:
 				return fmt.Errorf("app not initialized")
 			}
 
-			// Resolve account if not configured (enables interactive prompt)
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
 			projectID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid project ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			// Resolve account if not configured (enables interactive prompt)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// For update, we need to provide name (required by SDK)
@@ -372,7 +385,9 @@ Examples:
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }

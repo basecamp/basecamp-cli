@@ -201,6 +201,11 @@ func newTemplatesCreateCmd() *cobra.Command {
 
 			app := appctx.FromContext(cmd.Context())
 
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -234,8 +239,10 @@ func newTemplatesCreateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Template name")
-	cmd.Flags().StringVar(&description, "description", "", "Template description")
+	cmd.Flags().StringVar(&description, "description", "", "Template description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Template description (alias)")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 
 	return cmd
 }
@@ -250,10 +257,8 @@ func newTemplatesUpdateCmd() *cobra.Command {
 		Long:  "Update an existing template's name or description.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			if name == "" && description == "" {
+				return noChanges(cmd)
 			}
 
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
@@ -261,8 +266,16 @@ func newTemplatesUpdateCmd() *cobra.Command {
 				return output.ErrUsage("Invalid template ID")
 			}
 
-			if name == "" && description == "" {
-				return noChanges(cmd)
+			// Syntactic checks first, then "-", then account and network.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			// SDK requires name for update, fetch current if not provided
@@ -299,8 +312,10 @@ func newTemplatesUpdateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "New name")
-	cmd.Flags().StringVar(&description, "description", "", "New description")
+	cmd.Flags().StringVar(&description, "description", "", "New description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "New description (alias)")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 
 	return cmd
 }
@@ -360,10 +375,8 @@ This is an asynchronous operation. The command returns a construction ID
 which can be polled via 'templates construction' until the status is "completed".`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			if projectName == "" {
+				return output.ErrUsage("--name is required (project name)")
 			}
 
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
@@ -371,8 +384,16 @@ which can be polled via 'templates construction' until the status is "completed"
 				return output.ErrUsage("Invalid template ID")
 			}
 
-			if projectName == "" {
-				return output.ErrUsage("--name is required (project name)")
+			// Syntactic checks first, then "-", then account and network.
+			projectDesc, err := resolveContentValue(cmd, projectDesc, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			construction, err := app.Account().Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)
@@ -394,9 +415,11 @@ which can be polled via 'templates construction' until the status is "completed"
 	}
 
 	cmd.Flags().StringVar(&projectName, "name", "", "Project name (required)")
-	cmd.Flags().StringVar(&projectDesc, "description", "", "Project description")
+	cmd.Flags().StringVar(&projectDesc, "description", "", "Project description; use - to read from stdin")
 	cmd.Flags().StringVar(&projectDesc, "desc", "", "Project description (alias)")
 	_ = cmd.MarkFlagRequired("name")
+
+	allowDash(cmd, "flag:description", "flag:desc")
 
 	return cmd
 }

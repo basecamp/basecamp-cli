@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewTodolistsCmd creates the todolists command group.
@@ -36,6 +39,7 @@ to disambiguate when needed.`,
 		newTodolistsShowCmd(&project),
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
+		newTodolistsPositionCmd(&project),
 		newRecordableTrashCmd("todolist"),
 		newRecordableArchiveCmd("todolist"),
 		newRecordableRestoreCmd("todolist"),
@@ -265,6 +269,7 @@ You can pass either a todolist ID or a Basecamp URL:
 
 func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	var description string
+	var visibleToClients bool
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -281,6 +286,15 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
+			}
+
+			if err := requireNumericID(*todosetID, "todoset ID"); err != nil {
+				return err
+			}
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -325,6 +339,14 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 				Description: description,
 			}
 
+			// Set client visibility only when the flag was provided. Omitting it
+			// uses the server's default: team-only when posting as a team member,
+			// but a client-authenticated caller always creates client-visible
+			// records (an explicit false is overridden server-side).
+			if cmd.Flags().Changed("visible-to-clients") {
+				req.VisibleToClients = &visibleToClients
+			}
+
 			// Create todolist via SDK
 			todolist, err := app.Account().Todolists().Create(cmd.Context(), tsID, req)
 			if err != nil {
@@ -353,7 +375,10 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description; use - to read from stdin")
+	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -381,12 +406,26 @@ You can pass either a todolist ID or a Basecamp URL:
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := ensureAccount(cmd, app); err != nil {
+			// Extract ID and project from URL if provided
+			todolistIDStr, urlProjectID := extractWithProject(args[0])
+
+			// Parse todolist ID as int64
+			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todolist ID")
+			}
+
+			// Syntactic checks first, then "-", then account and network: a
+			// malformed ID is answered without waiting on the producer, and a
+			// blank pipe cannot mask it.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			todolistIDStr, urlProjectID := extractWithProject(args[0])
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -403,12 +442,6 @@ You can pass either a todolist ID or a Basecamp URL:
 				if err := ensureProject(cmd, app); err != nil {
 					return err
 				}
-			}
-
-			// Parse todolist ID as int64
-			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid todolist ID")
 			}
 
 			// Build SDK request
@@ -443,7 +476,243 @@ You can pass either a todolist ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New description; use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
+
+	return cmd
+}
+
+func newTodolistsPositionCmd(project *string) *cobra.Command {
+	var position int
+
+	cmd := &cobra.Command{
+		Use:     "position <id|url>...",
+		Aliases: []string{"move", "reorder"},
+		Short:   "Change todolist position",
+		Long: `Reorder a todolist within its todoset. Position is 1-based (1 = top).
+
+  basecamp todolists position 789 --to 1
+  basecamp todolists position https://3.basecamp.com/1/buckets/2/todolists/789 --to 1
+
+Pass several todolists to set their order, top to bottom. Bulk reordering always
+places them at the top of the todoset; every list must live in the same todoset
+and be incomplete (completed lists are positioned separately by Basecamp):
+
+  basecamp todolists position 701 702 703 704 705
+
+Positioning is relative and cascades: sibling lists shift to make room, and the
+server translates the position for loose to-dos and hidden completed lists.
+Confirm with ` + "`basecamp todolists list`" + `.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			// A pasted URL for a different recording type (a todo, card, or a
+			// collection URL) still extracts a trailing numeric ID, which would
+			// silently reposition an unrelated todolist. Require any URL arg to
+			// be a non-collection todolists URL before trusting its ID.
+			for _, arg := range args {
+				for _, token := range strings.Split(arg, ",") {
+					token = strings.TrimSpace(token)
+					if token == "" {
+						continue
+					}
+					if parsed := urlarg.Parse(token); parsed != nil {
+						if parsed.RecordingID == "" || parsed.Type != "todolists" || parsed.IsCollection {
+							return output.ErrUsage("Expected a todolist URL (.../todolists/<id>), or pass a todolist ID.")
+						}
+					}
+				}
+			}
+
+			// ExtractIDs drops empty segments, so a bare "," yields zero IDs.
+			ids := extractIDs(args)
+			if len(ids) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+
+			// Distinguish an omitted flag from an explicit --to 0.
+			supplied := cmd.Flags().Changed("to") || cmd.Flags().Changed("position")
+			if supplied && position < 1 {
+				return output.ErrUsage("--to must be at least 1 (1 = top)")
+			}
+			switch {
+			case len(ids) == 1 && !supplied:
+				return output.ErrUsage("--to is required (1 = top)")
+			case len(ids) > 1 && supplied && position != 1:
+				return output.ErrUsage("Reordering multiple todolists is only supported at position 1; " +
+					"drop --to or pass --to 1")
+			case !supplied:
+				position = 1 // bulk default
+			}
+
+			// Validate every ID and reject duplicates before mutating anything.
+			parsed := make([]int64, 0, len(ids))
+			seen := make(map[int64]bool, len(ids))
+			for _, idStr := range ids {
+				id, err := strconv.ParseInt(idStr, 10, 64)
+				if err != nil {
+					return output.ErrUsage("Invalid todolist ID")
+				}
+				if seen[id] {
+					return output.ErrUsage(fmt.Sprintf("Duplicate todolist ID %d", id))
+				}
+				seen[id] = true
+				parsed = append(parsed, id)
+			}
+
+			// Sibling preflight (bulk only): every list must belong to the same
+			// todoset and bucket, and be incomplete, before any PUT is issued.
+			var bucketID, parentID int64
+			if len(parsed) > 1 {
+				for _, id := range parsed {
+					tl, err := app.Account().Todolists().Get(cmd.Context(), id)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					if tl.Parent == nil || tl.Bucket == nil {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d is missing its todoset or project context.", id),
+							"Reorder one todoset at a time.",
+						)
+					}
+					if tl.Completed {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d (%s) is completed; bulk reordering accepts incomplete lists only.", id, tl.Name),
+							"Basecamp positions completed lists separately — reorder the incomplete lists on their own.",
+						)
+					}
+					if parentID == 0 {
+						parentID = tl.Parent.ID
+						bucketID = tl.Bucket.ID
+					} else if tl.Parent.ID != parentID || tl.Bucket.ID != bucketID {
+						return output.ErrUsageHint(
+							fmt.Sprintf("Todolist #%d belongs to a different todoset (#%d) than the others.", id, tl.Parent.ID),
+							"Reorder one todoset at a time.",
+						)
+					}
+				}
+			}
+
+			// Apply in reverse so the typed order lands top→bottom onto position 1.
+			// Stop at the first failure: a half-applied reorder is a wrong order.
+			applied := 0
+			for i := len(parsed) - 1; i >= 0; i-- {
+				if err := app.Account().Todolists().Reposition(cmd.Context(), parsed[i], position); err != nil {
+					converted := convertSDKError(err)
+					// No PUT has landed yet (single-list mode always takes this
+					// path): the todoset is untouched. Surface the underlying
+					// error unchanged — keep its code/category/hint and don't
+					// claim an intermediate order that doesn't exist.
+					if applied == 0 {
+						return converted
+					}
+					// A partial reorder has landed: the todoset is now in an
+					// intermediate order. Add applied-count accounting and a
+					// rerun hint while preserving the underlying error's
+					// classification (never reclassify a transport/runtime
+					// failure as a usage error).
+					msg := fmt.Sprintf("Reordered %d of %d todolists; failed at #%d", applied, len(parsed), parsed[i])
+					const rerun = "Rerun the whole command once the cause is fixed; the todoset is now in an intermediate order."
+					var outErr *output.Error
+					if errors.As(converted, &outErr) {
+						hint := rerun
+						if outErr.Hint != "" {
+							hint = outErr.Hint + " " + rerun
+						}
+						return &output.Error{
+							Code:       outErr.Code,
+							Message:    fmt.Sprintf("%s: %s", msg, outErr.Message),
+							Hint:       hint,
+							HTTPStatus: outErr.HTTPStatus,
+							Retryable:  outErr.Retryable,
+							Cause:      outErr,
+						}
+					}
+					// Raw transport/runtime failure (e.g. a dropped connection or
+					// a canceled context): no *output.Error to preserve, but the
+					// partial reorder still demands the rerun warning. Wrap it in
+					// a non-usage structured error that carries the hint and the
+					// raw cause (Unwrap keeps errors.Is/As working).
+					return &output.Error{
+						Code:    output.CodeAPI,
+						Message: fmt.Sprintf("%s: %s", msg, converted.Error()),
+						Hint:    rerun,
+						Cause:   converted,
+					}
+				}
+				applied++
+			}
+
+			var summary string
+			var breadcrumbs []output.Breadcrumb
+			if len(parsed) == 1 {
+				summary = fmt.Sprintf("Moved todolist #%d to position %d", parsed[0], position)
+				// No preflight Get in single mode: resolve project from ambient
+				// context (URL > group flag > flags > config) for the breadcrumbs.
+				_, urlProjectID := extractWithProject(args[0])
+				proj := urlProjectID
+				if proj == "" {
+					proj = *project
+				}
+				if proj == "" {
+					proj = app.Flags.Project
+				}
+				if proj == "" {
+					proj = app.Config.ProjectID
+				}
+				if proj != "" {
+					breadcrumbs = []output.Breadcrumb{
+						{
+							Action:      "show",
+							Cmd:         fmt.Sprintf("basecamp todolists show %d --in %s", parsed[0], proj),
+							Description: "View todolist",
+						},
+						{
+							Action:      "list",
+							Cmd:         fmt.Sprintf("basecamp todolists list --in %s", proj),
+							Description: "List todolists",
+						},
+					}
+				}
+			} else {
+				summary = fmt.Sprintf("Reordered %d todolists to the top of the todoset", len(parsed))
+				// Build from authoritative preflight data, not ambient project.
+				breadcrumbs = []output.Breadcrumb{
+					{
+						Action:      "list",
+						Cmd:         fmt.Sprintf("basecamp todolists list --in %d --todoset %d", bucketID, parentID),
+						Description: "List todolists",
+					},
+				}
+			}
+
+			opts := []output.ResponseOption{output.WithSummary(summary)}
+			if len(breadcrumbs) > 0 {
+				opts = append(opts, output.WithBreadcrumbs(breadcrumbs...))
+			}
+
+			return app.OK(map[string]any{
+				"repositioned": true,
+				"position":     position,
+				"todolist_ids": parsed,
+			}, opts...)
+		},
+	}
+
+	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
+	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 
 	return cmd
 }

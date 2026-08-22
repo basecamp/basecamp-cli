@@ -8,10 +8,10 @@ setup_file() {
   ensure_project || return 1
 }
 
-# --- Message types (account-wide) ---
+# --- Message types (per-project) ---
 
 @test "messagetypes list returns message types" {
-  run_smoke basecamp messagetypes list --json
+  run_smoke basecamp messagetypes list -p "$QA_PROJECT" --json
   # Message types may not exist on all environments
   [[ "$status" -ne 0 ]] && mark_unverifiable "Message types not available"
   assert_json_value '.ok' 'true'
@@ -27,7 +27,7 @@ setup_file() {
   mt_id=$(<"$id_file")
   [[ -n "$mt_id" ]] || mark_unverifiable "Messagetype ID is empty"
 
-  run_smoke basecamp messagetypes show "$mt_id" --json
+  run_smoke basecamp messagetypes show "$mt_id" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'

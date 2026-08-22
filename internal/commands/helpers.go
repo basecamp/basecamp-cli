@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -87,25 +86,6 @@ func isMachineOutput(cmd *cobra.Command) bool {
 	return false
 }
 
-func readPipedStdin(cmd *cobra.Command) (string, bool, error) {
-	stdin := cmd.InOrStdin()
-	if f, ok := stdin.(*os.File); ok {
-		fi, _ := f.Stat()
-		if fi == nil {
-			return "", false, nil
-		}
-		if (fi.Mode() & os.ModeCharDevice) != 0 {
-			return "", false, nil
-		}
-	}
-
-	data, err := io.ReadAll(stdin)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to read stdin: %w", err)
-	}
-	return string(data), true, nil
-}
-
 // DockTool represents a tool in a project's dock.
 type DockTool struct {
 	Name    string `json:"name"`
@@ -157,6 +137,21 @@ func dockToolNotFoundError(all []DockTool, dockName, projectID, friendlyName str
 		}
 	}
 	return output.ErrNotFoundHint(friendlyName, projectID, fmt.Sprintf("Project has no %s", friendlyName))
+}
+
+// requireNumericID rejects an explicitly supplied dock or container ID that is
+// not numeric. getDockToolID returns an explicit value verbatim — there is no
+// name resolution for these — so the check needs neither an account nor the
+// network, and commands that also read a "-" input run it before the read
+// rather than discovering it after a request is already being built.
+func requireNumericID(value, label string) error {
+	if value == "" {
+		return nil
+	}
+	if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+		return output.ErrUsage("Invalid " + label)
+	}
+	return nil
 }
 
 // getDockToolID retrieves a dock tool ID from a project, handling the multi-dock case.
@@ -448,6 +443,32 @@ func extractIDs(args []string) []string {
 	return urlarg.ExtractIDs(args)
 }
 
+// requireOneParseableTarget rejects a recording argument whose every
+// comma-separated token fails to parse. Callers tolerate individual bad IDs so
+// a mixed batch still posts what it can, but an all-invalid argument creates
+// nothing — and extractIDs is pure, so that is decidable from the argument
+// alone, before a "-" drains the producer.
+func requireOneParseableTarget(arg string) error {
+	for _, id := range extractIDs([]string{arg}) {
+		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
+			return nil
+		}
+	}
+	return output.ErrUsage(fmt.Sprintf("no valid recording ID in %q", arg))
+}
+
+// hasPersonToken reports whether input holds at least one token resolvePersonIDs
+// would attempt to resolve. It splits the same way, so the pre-read guard and
+// the resolver cannot disagree about what counts as empty.
+func hasPersonToken(input string) bool {
+	for token := range strings.SplitSeq(input, ",") {
+		if strings.TrimSpace(token) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // resolvePersonIDs splits a comma-separated input string and resolves each
 // token (name, email, ID, or "me") to a person ID via the name resolver.
 func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input string) ([]int64, error) {
@@ -480,9 +501,27 @@ func resolvePersonIDs(ctx context.Context, resolver *names.Resolver, input strin
 //
 // subscribeChanged should be true when the --subscribe flag was explicitly
 // provided on the command line (i.e. cmd.Flags().Changed("subscribe")).
-func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
+// rejectSubscribeConflict answers the one part of applySubscribeFlags that
+// needs neither the network nor an account, so callers that read stdin can
+// settle it first: draining a pipe for an invocation this rejects makes the
+// caller wait on a producer whose output is discarded, and lets a blank pipe
+// answer "stdin is empty" instead of naming the conflict.
+func rejectSubscribeConflict(subscribeChanged, noSubscribe bool, subscribe string) error {
 	if subscribeChanged && noSubscribe {
-		return nil, output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+		return output.ErrUsage("--subscribe and --no-subscribe are mutually exclusive")
+	}
+	// resolvePersonIDs skips blank tokens, so a value with no resolvable token
+	// can never name anyone — ",,," reaches the same error as "". Deciding it
+	// here rather than after the lookup keeps it ahead of any stdin read.
+	if subscribeChanged && !hasPersonToken(subscribe) {
+		return output.ErrUsage("--subscribe requires at least one person")
+	}
+	return nil
+}
+
+func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscribe string, subscribeChanged, noSubscribe bool) (*[]int64, error) {
+	if err := rejectSubscribeConflict(subscribeChanged, noSubscribe, subscribe); err != nil {
+		return nil, err
 	}
 	if noSubscribe {
 		empty := []int64{}

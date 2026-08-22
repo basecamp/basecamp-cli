@@ -215,19 +215,33 @@ func runTodosetShow(cmd *cobra.Command, project, todosetID string) error {
 		completedRatio = "0.0"
 	}
 
+	summary := fmt.Sprintf("%d todolists (%s%% complete)", todoset.TodolistsCount, completedRatio)
+	if todoset.TodosCount > 0 {
+		summary += fmt.Sprintf(", %d todos", todoset.TodosCount)
+	}
+
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "todolists",
+			Cmd:         fmt.Sprintf("basecamp todolists --in %s", resolvedProjectID),
+			Description: "List all todolists",
+		},
+		{
+			Action:      "project",
+			Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
+			Description: "View project details",
+		},
+	}
+	if todoset.TodosURL != "" {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "todos",
+			Cmd:         fmt.Sprintf("basecamp todos list --in %s", resolvedProjectID),
+			Description: "List all todos, including listless ones",
+		})
+	}
+
 	return app.OK(todoset,
-		output.WithSummary(fmt.Sprintf("%d todolists (%s%% complete)", todoset.TodolistsCount, completedRatio)),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "todolists",
-				Cmd:         fmt.Sprintf("basecamp todolists --in %s", resolvedProjectID),
-				Description: "List all todolists",
-			},
-			output.Breadcrumb{
-				Action:      "project",
-				Cmd:         fmt.Sprintf("basecamp projects show %s", resolvedProjectID),
-				Description: "View project details",
-			},
-		),
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(breadcrumbs...),
 	)
 }

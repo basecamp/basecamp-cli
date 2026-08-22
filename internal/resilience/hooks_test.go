@@ -269,9 +269,8 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	// Use longer timeouts for CI stability
-	openTimeout := 50 * time.Millisecond
-	staleTimeout := 100 * time.Millisecond
+	openTimeout := 30 * time.Second
+	staleTimeout := 2 * time.Minute
 
 	cfg := &Config{
 		CircuitBreaker: CircuitBreakerConfig{
@@ -291,7 +290,16 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 		},
 	}
 
-	hooks := NewGatingHooksFromConfig(store, cfg)
+	// Assemble the hooks by hand rather than via NewGatingHooksFromConfig so
+	// the circuit breaker runs on a clock this test advances.
+	clock := newFakeClock()
+	newHooks := func() *GatingHooks {
+		cb := NewCircuitBreaker(store, cfg.CircuitBreaker)
+		cb.nowFn = clock.Now
+		return NewGatingHooks(cb, NewRateLimiter(store, cfg.RateLimiter), NewBulkhead(store, cfg.Bulkhead))
+	}
+
+	hooks := newHooks()
 
 	op := basecamp.OperationInfo{
 		Service:   "Todos",
@@ -305,8 +313,8 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	ctx2, _ := hooks.OnOperationGate(context.Background(), op)
 	hooks.OnOperationEnd(ctx2, op, networkErr, time.Millisecond)
 
-	// Wait for timeout to allow half-open
-	time.Sleep(openTimeout * 2)
+	// Move past the open timeout to allow half-open
+	clock.Advance(openTimeout * 2)
 
 	// First request transitions to half-open and reserves the slot
 	ctx3, err := hooks.OnOperationGate(context.Background(), op)
@@ -325,12 +333,12 @@ func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	store.Update(func(state *State) error {
 		state.CircuitBreaker.State = CircuitHalfOpen
 		state.CircuitBreaker.HalfOpenAttempts = 1
-		state.CircuitBreaker.HalfOpenLastAttemptAt = time.Now().Add(-staleTimeout * 2) // Beyond stale threshold
+		state.CircuitBreaker.HalfOpenLastAttemptAt = clock.Now().Add(-staleTimeout * 2) // Beyond stale threshold
 		return nil
 	})
 
 	// Create fresh hooks to simulate new process
-	hooks2 := NewGatingHooksFromConfig(store, cfg)
+	hooks2 := newHooks()
 
 	// This should detect stale attempts and allow the request
 	_, err = hooks2.OnOperationGate(context.Background(), op)

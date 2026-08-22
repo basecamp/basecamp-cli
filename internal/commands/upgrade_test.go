@@ -32,6 +32,7 @@ func stubScoopPrefixResolver(t *testing.T, resolve func(context.Context, string)
 
 type upgradeCheckersStub struct {
 	latestVersion   string
+	release         *releaseInfo // optional richer release (assets); read at call time so tests can mutate
 	isBrew          bool
 	hasLegacyCask   bool
 	isScoop         bool
@@ -46,8 +47,22 @@ func stubUpgradeCheckers(t *testing.T, stub upgradeCheckersStub) {
 	t.Helper()
 
 	origVC := versionChecker
-	versionChecker = func() (string, error) { return stub.latestVersion, nil }
+	versionChecker = func() (string, error) {
+		if stub.release != nil {
+			return stub.release.Version, nil
+		}
+		return stub.latestVersion, nil
+	}
 	t.Cleanup(func() { versionChecker = origVC })
+
+	origRF := releaseFetcher
+	releaseFetcher = func() (releaseInfo, error) {
+		if stub.release != nil {
+			return *stub.release, nil
+		}
+		return releaseInfo{Version: stub.latestVersion}, nil
+	}
+	t.Cleanup(func() { releaseFetcher = origRF })
 
 	origHC := homebrewChecker
 	homebrewChecker = func(context.Context) bool { return stub.isBrew }
@@ -129,19 +144,24 @@ func TestUpgradeAlreadyCurrent(t *testing.T) {
 	assert.Contains(t, appBuf.String(), "up_to_date")
 }
 
-func TestUpgradeAvailable(t *testing.T) {
-	app, appBuf := setupPeopleTestApp(t)
+// An available update the CLI can't apply is a failure, not a success with a
+// link (#589 lineage: "ok": true + release URL read as a completed upgrade).
+func TestUpgradeAvailableButUnappliableFails(t *testing.T) {
+	app, _ := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
 	t.Cleanup(func() { version.Version = orig })
 
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0"})
+	stubGoInstallChecker(t, false)
+	stubSelfUpdateTarget(t, "", assert.AnError)
 
 	cmdOut, err := executeUpgradeCommand(t, app)
-	require.NoError(t, err)
+	apiErr := requireUpgradeError(t, err, "upgrade_required")
 	assert.Contains(t, cmdOut, "update available: 1.3.0")
-	assert.Contains(t, appBuf.String(), "releases/tag/v1.3.0")
+	assert.Contains(t, cmdOut, "releases/tag/v1.3.0")
+	assert.Contains(t, apiErr.Hint, "releases/tag/v1.3.0")
 }
 
 func TestUpgradeSuppressesOlderLatestRelease(t *testing.T) {
@@ -202,16 +222,18 @@ func TestUpgradePrefersRenamedHomebrewCaskOverLegacyMigration(t *testing.T) {
 	t.Cleanup(func() { version.Version = orig })
 
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isBrew: true, hasLegacyCask: true})
+	stubBrewPrefixResolver(t, func(context.Context) (string, error) { return "/opt/homebrew", nil })
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "Upgrading via Homebrew…")
 	assert.Contains(t, appBuf.String(), "upgraded")
-	assert.NotContains(t, appBuf.String(), "migration_required")
+	assert.NotContains(t, appBuf.String(), "migration")
 }
 
 func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
-	app, appBuf := setupPeopleTestApp(t)
+	app, _ := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -220,11 +242,12 @@ func TestUpgradeLegacyCaskMigrationInstructions(t *testing.T) {
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyCask: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
-	require.NoError(t, err)
+	apiErr := requireUpgradeError(t, err, "upgrade_required")
 	assert.Contains(t, cmdOut, "The CLI cask has been renamed. To upgrade, run:")
 	assert.Contains(t, cmdOut, "  brew uninstall --cask basecamp/tap/basecamp\n")
 	assert.Contains(t, cmdOut, "  brew install --cask basecamp/tap/basecamp-cli\n")
-	assert.Contains(t, appBuf.String(), "migration_required")
+	assert.Contains(t, apiErr.Message, "migration required")
+	assert.Contains(t, apiErr.Hint, "brew uninstall --cask basecamp/tap/basecamp")
 }
 
 func TestUpgradePrefersRenamedScoopAppOverLegacyMigration(t *testing.T) {
@@ -235,16 +258,20 @@ func TestUpgradePrefersRenamedScoopAppOverLegacyMigration(t *testing.T) {
 	t.Cleanup(func() { version.Version = orig })
 
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", isScoop: true, hasLegacyScoop: true})
+	stubScoopPrefixResolver(t, func(context.Context, string) (string, bool) {
+		return "c:/users/alice/scoop/apps/basecamp-cli/current", true
+	})
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
 
 	cmdOut, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
 	assert.Contains(t, cmdOut, "Upgrading via Scoop…")
 	assert.Contains(t, appBuf.String(), "upgraded")
-	assert.NotContains(t, appBuf.String(), "migration_required")
+	assert.NotContains(t, appBuf.String(), "migration")
 }
 
 func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
-	app, appBuf := setupPeopleTestApp(t)
+	app, _ := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -253,11 +280,11 @@ func TestUpgradeLegacyScoopMigrationInstructions(t *testing.T) {
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyScoop: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
-	require.NoError(t, err)
+	apiErr := requireUpgradeError(t, err, "upgrade_required")
 	assert.Contains(t, cmdOut, "The CLI Scoop manifest has been renamed. To upgrade, run:")
 	assert.Contains(t, cmdOut, "  scoop uninstall basecamp\n")
 	assert.Contains(t, cmdOut, "  scoop install basecamp-cli\n")
-	assert.Contains(t, appBuf.String(), "migration_required")
+	assert.Contains(t, apiErr.Message, "migration required")
 }
 
 func TestUpgradeGlobalScoopUsesGlobalUpdate(t *testing.T) {
@@ -277,6 +304,10 @@ func TestUpgradeGlobalScoopUsesGlobalUpdate(t *testing.T) {
 			return nil
 		},
 	})
+	stubScoopPrefixResolver(t, func(context.Context, string) (string, bool) {
+		return "c:/programdata/scoop/apps/basecamp-cli/current", true
+	})
+	stubBinaryVersionProber(t, func(context.Context, string) (string, error) { return "1.3.0", nil })
 
 	_, err := executeUpgradeCommand(t, app)
 	require.NoError(t, err)
@@ -285,7 +316,7 @@ func TestUpgradeGlobalScoopUsesGlobalUpdate(t *testing.T) {
 }
 
 func TestUpgradeGlobalLegacyScoopMigrationInstructions(t *testing.T) {
-	app, appBuf := setupPeopleTestApp(t)
+	app, _ := setupPeopleTestApp(t)
 
 	orig := version.Version
 	version.Version = "1.2.3"
@@ -294,11 +325,11 @@ func TestUpgradeGlobalLegacyScoopMigrationInstructions(t *testing.T) {
 	stubUpgradeCheckers(t, upgradeCheckersStub{latestVersion: "1.3.0", hasLegacyScoop: true, isGlobalScoop: true})
 
 	cmdOut, err := executeUpgradeCommand(t, app)
-	require.NoError(t, err)
+	apiErr := requireUpgradeError(t, err, "upgrade_required")
 	assert.Contains(t, cmdOut, "The CLI Scoop manifest has been renamed. To upgrade, run:")
 	assert.Contains(t, cmdOut, "  scoop uninstall -g basecamp\n")
 	assert.Contains(t, cmdOut, "  scoop install -g basecamp-cli\n")
-	assert.Contains(t, appBuf.String(), "migration_required")
+	assert.Contains(t, apiErr.Hint, "scoop uninstall -g basecamp")
 }
 
 func TestIsHomebrewUsesExecutablePathProvenance(t *testing.T) {

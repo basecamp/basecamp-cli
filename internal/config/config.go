@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +145,9 @@ func Load(overrides FlagOverrides) (*Config, error) {
 	}
 
 	// Load from environment
-	LoadFromEnv(cfg)
+	if err := LoadFromEnv(cfg); err != nil {
+		return nil, err
+	}
 
 	// Apply flag overrides
 	ApplyOverrides(cfg, overrides)
@@ -196,12 +199,24 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		cfg.Sources["scope"] = string(source)
 	}
 	if v, ok := fileCfg["cache_dir"].(string); ok && v != "" {
-		cfg.CacheDir = v
-		cfg.Sources["cache_dir"] = string(source)
+		// cache_dir redirects every cache write (completion, resilience, TUI
+		// workspace, recents, traces). An untrusted local/repo config could
+		// point it at any user-writable path, so gate it like other authority
+		// keys. filepath.Clean normalizes the accepted value.
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring cache_dir %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+		} else {
+			cfg.CacheDir = filepath.Clean(v)
+			cfg.Sources["cache_dir"] = string(source)
+		}
 	}
 	if v, ok := fileCfg["cache_enabled"].(bool); ok {
-		cfg.CacheEnabled = v
-		cfg.Sources["cache_enabled"] = string(source)
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring cache_enabled from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+		} else {
+			cfg.CacheEnabled = v
+			cfg.Sources["cache_enabled"] = string(source)
+		}
 	}
 	if v, ok := fileCfg["format"].(string); ok && v != "" {
 		cfg.Format = v
@@ -237,8 +252,14 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		}
 	}
 	if v, ok := fileCfg["llm_model"].(string); ok && v != "" {
-		cfg.LLMModel = v
-		cfg.Sources["llm_model"] = string(source)
+		// Gate like other LLM authority keys: an untrusted config could
+		// silently substitute a costlier paid model.
+		if untrusted {
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_model %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+		} else {
+			cfg.LLMModel = v
+			cfg.Sources["llm_model"] = string(source)
+		}
 	}
 	if v, ok := fileCfg["llm_api_key"].(string); ok && v != "" {
 		// Secret: only from global/system config, never local/repo
@@ -253,6 +274,13 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		if untrusted {
 			fmt.Fprintf(os.Stderr, "warning: ignoring llm_endpoint %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
 		} else {
+			// Keep the value even if malformed (non-http(s)/hostless):
+			// summarize.ValidateEndpoint rejects it at the point of
+			// consumption (the TUI's LLM path) when the provider sends
+			// llm_api_key to the endpoint, failing closed rather than
+			// silently dropping it and falling back to the default provider.
+			// Other commands never consume it, so `config unset llm_endpoint`
+			// can always repair.
 			cfg.LLMEndpoint = v
 			cfg.Sources["llm_endpoint"] = string(source)
 		}
@@ -260,7 +288,11 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	if v, ok := fileCfg["llm_max_concurrent"]; ok {
 		if fv, ok := v.(float64); ok {
 			iv := int(fv)
-			if iv >= 1 && iv <= 10 && fv == float64(iv) {
+			// Gate like other LLM authority keys: block a malicious repo from
+			// inflating paid-LLM concurrency (cost amplification).
+			if untrusted {
+				fmt.Fprintf(os.Stderr, "warning: ignoring llm_max_concurrent from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+			} else if iv >= 1 && iv <= 10 && fv == float64(iv) {
 				cfg.LLMMaxConcurrent = iv
 				cfg.Sources["llm_max_concurrent"] = string(source)
 			}
@@ -269,7 +301,10 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	if v, ok := fileCfg["llm_token_budget"]; ok {
 		if fv, ok := v.(float64); ok {
 			iv := int(fv)
-			if iv >= 100 && iv <= 100000 && fv == float64(iv) {
+			// Gate like other LLM authority keys (cost amplification).
+			if untrusted {
+				fmt.Fprintf(os.Stderr, "warning: ignoring llm_token_budget from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+			} else if iv >= 100 && iv <= 100000 && fv == float64(iv) {
 				cfg.LLMTokenBudget = iv
 				cfg.Sources["llm_token_budget"] = string(source)
 			}
@@ -335,7 +370,20 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 
 // LoadFromEnv loads configuration from environment variables.
 // Exported so root.go can re-apply after profile overlay.
-func LoadFromEnv(cfg *Config) {
+//
+// Values are stored as-is, malformed or not — mirroring the trusted-file
+// path in loadFromFile. Validation happens at use-time in
+// summarize.ValidateEndpoint (the TUI's LLM path, the only consumer of
+// llm_endpoint), which fails closed for providers that send llm_api_key
+// to the endpoint. Other commands never consume the value, so
+// `basecamp config unset llm_endpoint` (or unsetting the env var) can
+// always repair a bad value. Erroring here would block every command —
+// including the repair path — for all providers, even ones that never
+// consume the endpoint.
+//
+// Always returns nil today; the error return is kept so validation can be
+// reintroduced for a specific variable without churning every caller.
+func LoadFromEnv(cfg *Config) error {
 	if v := os.Getenv("BASECAMP_BASE_URL"); v != "" {
 		cfg.BaseURL = v
 		cfg.Sources["base_url"] = string(SourceEnv)
@@ -385,9 +433,17 @@ func LoadFromEnv(cfg *Config) {
 		cfg.Sources["llm_api_key"] = string(SourceEnv)
 	}
 	if v := os.Getenv("BASECAMP_LLM_ENDPOINT"); v != "" {
+		// Keep the value even if malformed (non-http(s)/hostless), mirroring
+		// the trusted-file path in loadFromFile: summarize.ValidateEndpoint
+		// rejects it at the point of consumption (the TUI's LLM path) for
+		// providers that send llm_api_key to the endpoint, failing closed
+		// rather than silently dropping it and falling back to the default
+		// provider. Other commands never consume it, so
+		// `config unset llm_endpoint` can always repair.
 		cfg.LLMEndpoint = v
 		cfg.Sources["llm_endpoint"] = string(SourceEnv)
 	}
+	return nil
 }
 
 // NonInteractiveEnv reports whether BASECAMP_NONINTERACTIVE is set to a truthy
@@ -673,6 +729,19 @@ func GlobalConfigDir() string {
 // NormalizeBaseURL ensures consistent URL format (no trailing slash).
 func NormalizeBaseURL(url string) string {
 	return strings.TrimSuffix(url, "/")
+}
+
+// IsHTTPURL reports whether rawURL is an absolute http(s) URL with a host.
+// Used to reject non-web schemes (file://, etc.) and hostless forms
+// (e.g. "https:example.com", which url.Parse accepts with an empty Host)
+// for llm_endpoint, since those would later be concatenated into a request
+// URL and produce confusing/invalid requests.
+func IsHTTPURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }
 
 // ShellQuote returns a POSIX single-quoted string safe for copy-paste into

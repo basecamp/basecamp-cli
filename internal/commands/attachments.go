@@ -395,6 +395,9 @@ Options:
 	cmd.Flags().IntVar(&index, "index", 0, "Select attachment by 1-based index")
 	cmd.Flags().StringVarP(&recordType, "type", "t", "", "Recording type hint (todo, todolist, message, comment, card, card-table, document, schedule-entry, checkin, answer, forward, upload)")
 
+	// --out - means stream to stdout — exempt from the stdin dash guard.
+	allowDash(cmd, "flag:out")
+
 	return cmd
 }
 

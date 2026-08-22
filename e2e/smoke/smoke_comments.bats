@@ -40,6 +40,27 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
+@test "comments thread returns reply-ready context" {
+  local id_file="$BATS_FILE_TMPDIR/comment_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"
+  local comment_id
+  comment_id=$(<"$id_file")
+
+  run_smoke basecamp comments thread "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+
+  # A reply routes to the parent recording, never the comment.
+  assert_json_value '.data.recording_full' 'true'
+  assert_json_not_null '.data.focus'
+
+  local reply_target recording_id
+  reply_target=$(echo "$output" | jq -r '.data.reply_target.recording_id')
+  recording_id=$(echo "$output" | jq -r '.data.recording.id')
+  [[ "$reply_target" == "$recording_id" ]] \
+    || fail "reply_target.recording_id ($reply_target) != recording.id ($recording_id)"
+}
+
 @test "comments update updates a comment" {
   local id_file="$BATS_FILE_TMPDIR/comment_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"

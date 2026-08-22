@@ -32,6 +32,10 @@ load smoke_helper
   mark_out_of_scope "Modifies Claude Code config"
 }
 
+@test "setup agents is out of scope" {
+  mark_out_of_scope "Modifies coding-agent config"
+}
+
 @test "quick-start is out of scope" {
   mark_out_of_scope "Interactive onboarding wizard"
 }
@@ -155,6 +159,22 @@ load smoke_helper
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
 
+@test "docs versions is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "docs replace is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "docs new-version is out of scope" {
+  mark_out_of_scope "Alias of files replace (tested)"
+}
+
+@test "files new-version is out of scope" {
+  mark_out_of_scope "Alias of files replace (tested)"
+}
+
 @test "docs uploads create is out of scope" {
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
@@ -195,6 +215,18 @@ load smoke_helper
 
 @test "vaults update is out of scope" {
   mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults versions is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults replace is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults new-version is out of scope" {
+  mark_out_of_scope "Alias of files replace (tested)"
 }
 
 @test "vaults uploads create is out of scope" {

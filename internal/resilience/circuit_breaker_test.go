@@ -3,12 +3,37 @@ package resilience
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeClock is a hand-advanced clock for driving circuit breaker timeouts.
+// Tests assign its Now to CircuitBreaker.nowFn so open/half-open transitions
+// happen because the test moved time, not because it slept long enough.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
 
 func TestCircuitBreakerDefaultsClosed(t *testing.T) {
 	dir := t.TempDir()
@@ -61,19 +86,21 @@ func TestCircuitBreakerClosesAfterSuccesses(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
+	clock := newFakeClock()
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold: 3,
 		SuccessThreshold: 2,
-		OpenTimeout:      1 * time.Millisecond, // Very short timeout for testing
+		OpenTimeout:      30 * time.Second,
 	})
+	cb.nowFn = clock.Now
 
 	// Open the circuit
 	for range 3 {
 		cb.RecordFailure()
 	}
 
-	// Wait for timeout to allow transition to half-open
-	time.Sleep(10 * time.Millisecond)
+	// Move past the open timeout to allow transition to half-open
+	clock.Advance(31 * time.Second)
 
 	// This Allow() should trigger transition to half-open
 	allowed, _ := cb.Allow()
@@ -246,11 +273,13 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
+	clock := newFakeClock()
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold: 2,
 		SuccessThreshold: 1,
-		OpenTimeout:      500 * time.Millisecond,
+		OpenTimeout:      30 * time.Second,
 	})
+	cb.nowFn = clock.Now
 
 	// Start closed
 	state, _ := cb.State()
@@ -262,8 +291,8 @@ func TestCircuitBreakerStateTransitionsCorrectly(t *testing.T) {
 	state, _ = cb.State()
 	assert.Equal(t, CircuitOpen, state)
 
-	// Wait -> half-open
-	time.Sleep(600 * time.Millisecond)
+	// Past the open timeout -> half-open
+	clock.Advance(31 * time.Second)
 	state, _ = cb.State()
 	assert.Equal(t, CircuitHalfOpen, state)
 
@@ -278,10 +307,10 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	// Use longer timeouts for CI stability (50ms instead of 10ms)
-	openTimeout := 50 * time.Millisecond
-	staleTimeout := 100 * time.Millisecond
+	openTimeout := 30 * time.Second
+	staleTimeout := 2 * time.Minute
 
+	clock := newFakeClock()
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold:    2,
 		SuccessThreshold:    1,
@@ -289,13 +318,14 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 		HalfOpenMaxRequests: 1,
 		StaleAttemptTimeout: staleTimeout,
 	})
+	cb.nowFn = clock.Now
 
 	// Open the circuit
 	cb.RecordFailure()
 	cb.RecordFailure()
 
-	// Wait for timeout to allow half-open
-	time.Sleep(openTimeout * 2)
+	// Move past the open timeout to allow half-open
+	clock.Advance(openTimeout * 2)
 
 	// First Allow() transitions to half-open and reserves a slot
 	allowed, err := cb.Allow()
@@ -310,8 +340,8 @@ func TestCircuitBreakerResetsStaleHalfOpenAttempts(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, allowed, "expected second request to be rejected when half-open slots exhausted")
 
-	// Wait for stale timeout period
-	time.Sleep(staleTimeout + 50*time.Millisecond)
+	// Move past the stale timeout
+	clock.Advance(staleTimeout + time.Second)
 
 	// Now Allow() should reset stale attempts and allow
 	allowed, err = cb.Allow()
@@ -323,38 +353,37 @@ func TestCircuitBreakerSetsHalfOpenLastAttemptAt(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
 
-	// Use longer timeouts for CI stability
-	openTimeout := 50 * time.Millisecond
+	openTimeout := 30 * time.Second
 
+	clock := newFakeClock()
 	cb := NewCircuitBreaker(store, CircuitBreakerConfig{
 		FailureThreshold:    2,
 		SuccessThreshold:    1,
 		OpenTimeout:         openTimeout,
 		HalfOpenMaxRequests: 1,
 	})
+	cb.nowFn = clock.Now
 
 	// Open the circuit
 	cb.RecordFailure()
 	cb.RecordFailure()
 
-	// Wait for timeout to allow half-open
-	time.Sleep(openTimeout * 2)
+	// Move past the open timeout to allow half-open
+	clock.Advance(openTimeout * 2)
 
 	// Check that HalfOpenLastAttemptAt is zero before Allow()
 	state, _ := store.Load()
 	assert.True(t, state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero(), "expected HalfOpenLastAttemptAt to be zero before Allow()")
 
 	// First Allow() transitions to half-open and reserves a slot
-	before := time.Now()
 	allowed, err := cb.Allow()
-	after := time.Now()
 	require.NoError(t, err)
 	assert.True(t, allowed, "expected first request to be allowed")
 
-	// HalfOpenLastAttemptAt should be set
+	// HalfOpenLastAttemptAt should be stamped with the reservation time
 	state, _ = store.Load()
 	assert.False(t, state.CircuitBreaker.HalfOpenLastAttemptAt.IsZero(), "expected HalfOpenLastAttemptAt to be set after Allow()")
-	assert.False(t, state.CircuitBreaker.HalfOpenLastAttemptAt.Before(before) || state.CircuitBreaker.HalfOpenLastAttemptAt.After(after), "HalfOpenLastAttemptAt should be between before and after Allow()")
+	assert.True(t, state.CircuitBreaker.HalfOpenLastAttemptAt.Equal(clock.Now()), "expected HalfOpenLastAttemptAt to be the time of the Allow() that reserved the slot")
 }
 
 func TestCircuitBreakerResetsStaleAttemptsWithZeroTimestamp(t *testing.T) {

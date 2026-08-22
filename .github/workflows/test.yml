@@ -18,12 +18,12 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -58,17 +58,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
+      # Runs before the linter: if the pins have drifted, say so plainly rather
+      # than letting the odd job out fail later on a version-specific finding.
+      - name: Check golangci-lint pins are in lockstep
+        run: make check-lint-lockstep
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.11.1
           args: --build-tags dev
@@ -80,7 +85,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -88,7 +93,7 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
           advanced-security: false
 
@@ -98,12 +103,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -122,12 +127,12 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -142,12 +147,12 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -179,13 +184,13 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -216,13 +221,13 @@ jobs:
       contents: read
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Check for skill or eval changes
         id: filter
-        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             skill:
@@ -231,7 +236,7 @@ jobs:
 
       - name: Set up Ruby
         if: steps.filter.outputs.skill == 'true'
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1.314.0
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: '3.3'
 
@@ -246,6 +251,146 @@ jobs:
           fi
           make skill-eval
 
+  installer-bash32:
+    name: Installer (bash 3.2)
+    runs-on: macos-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read  # dorny/paths-filter enumerates PR files via the REST API
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check for installer changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # test.yml is in its own filter so the job proves itself on the PR
+          # that introduces or edits it.
+          filters: |
+            installer:
+              - 'scripts/install.sh'
+              - 'e2e/installer.bats'
+              - '.github/workflows/test.yml'
+
+      - name: Assert /bin/bash is Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # Same guard as the installer-smoke canary: honest 3.2 coverage
+          # instead of silently degrading if a future runner image changes
+          # /bin/bash. The e2e bats suite cannot provide this — bats 1.11.0
+          # execs `env bash` at every layer, so the interpreter is not
+          # pinnable through it.
+          /bin/bash -c '[[ "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}" == "3.2" ]]' \
+            || { echo "/bin/bash is not Bash 3.2:" >&2; /bin/bash --version >&2; exit 1; }
+
+      - name: Syntax-check installer under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: /bin/bash -n scripts/install.sh
+
+      - name: Piped execution under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # PATH=/nonexistent forces the curl guard: the run must fail with
+          # the guard's own message, never with an unbound-variable error
+          # (the #558 regression class). A bare out=$(...) assignment of the
+          # failing pipeline would exit this step immediately under the
+          # runner's `bash -e -o pipefail`, so capture via if-else.
+          status=0
+          if out=$(cat scripts/install.sh | PATH=/nonexistent /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "expected the curl guard to fail without curl on PATH" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'curl is required but not installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+
+      - name: Offline full install under Bash 3.2
+        if: steps.filter.outputs.installer == 'true'
+        run: |
+          # The curl-guard step above never gets past the prerequisite check,
+          # and `bash -n` only checks grammar — neither catches Bash-4-only
+          # constructs (declare -A, mapfile, 4.x expansions) in the download,
+          # checksum, extract, or post-install code. Run one complete install
+          # under real 3.2: a fixture curl serves a local release from disk,
+          # and a pinned BASECAMP_VERSION skips version resolution. PATH is
+          # restricted to fixture + system dirs so Homebrew tools (bash 4+,
+          # cosign) cannot leak in.
+          fixture_root=$(mktemp -d)
+          mkdir -p "$fixture_root/bin" "$fixture_root/release" "$fixture_root/home" "$fixture_root/install"
+
+          cat > "$fixture_root/release/basecamp" <<'STUB'
+          #!/bin/bash
+          if [ "$1" = "--version" ]; then echo "basecamp version 9.9.9"; fi
+          exit 0
+          STUB
+          chmod +x "$fixture_root/release/basecamp"
+          for arch in arm64 amd64; do
+            tar -czf "$fixture_root/release/basecamp_9.9.9_darwin_${arch}.tar.gz" -C "$fixture_root/release" basecamp
+          done
+          (cd "$fixture_root/release" && shasum -a 256 ./*.tar.gz | sed 's|\./||' > checksums.txt)
+
+          cat > "$fixture_root/bin/curl" <<'STUB'
+          #!/bin/bash
+          # Fixture curl: serves the local release dir. Handles the two shapes
+          # install.sh uses: `--version` and `[-flags] <url> -o <dest>`.
+          out=""; url=""
+          while [ $# -gt 0 ]; do
+            case "$1" in
+              --version) echo "curl 8.0.0 (fixture)"; exit 0 ;;
+              -o) out="$2"; shift ;;
+              http://*|https://*) url="$1" ;;
+            esac
+            shift
+          done
+          name="${url##*/}"
+          if [ -n "$out" ] && [ -f "$FIXTURE_RELEASE_DIR/$name" ]; then
+            cp "$FIXTURE_RELEASE_DIR/$name" "$out"
+            exit 0
+          fi
+          echo "fixture curl: no fixture for: $url" >&2
+          exit 22
+          STUB
+          chmod +x "$fixture_root/bin/curl"
+
+          status=0
+          if out=$(cat scripts/install.sh | \
+              HOME="$fixture_root/home" \
+              FIXTURE_RELEASE_DIR="$fixture_root/release" \
+              BASECAMP_BIN_DIR="$fixture_root/install" \
+              BASECAMP_VERSION=9.9.9 \
+              BASECAMP_SKIP_SETUP=1 \
+              BASECAMP_SETUP_AGENT=none \
+              PATH="$fixture_root/bin:/usr/bin:/bin" \
+              /bin/bash 2>&1); then
+            status=0
+          else
+            status=$?
+          fi
+          printf '%s\n' "$out"
+          if [ "$status" -ne 0 ]; then
+            echo "offline install failed under Bash 3.2 (exit $status)" >&2
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'Installed basecamp to'
+          printf '%s\n' "$out" | grep -q 'version 9.9.9 installed'
+          if printf '%s\n' "$out" | grep -q 'unbound variable'; then
+            echo "installer emitted an unbound variable error under Bash 3.2" >&2
+            exit 1
+          fi
+          "$fixture_root/install/basecamp" --version
+
   benchmarks:
     name: Benchmarks
     runs-on: ubuntu-latest
@@ -256,14 +401,14 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
 
       - name: Check for benchmark-relevant changes
         id: filter
-        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             bench:
@@ -276,7 +421,7 @@ jobs:
 
       - name: Set up Go
         if: steps.filter.outputs.bench == 'true'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
@@ -332,3 +477,52 @@ jobs:
           name: benchmarks
           path: benchmarks.txt
           retention-days: 30
+
+  # The flake broke on 2026-07-13 when #533 raised go.mod to 1.26.5 while
+  # flake.lock still pinned a nixpkgs carrying 1.26.4, and nothing noticed for
+  # three weeks: nix-verify only runs on tags, and the release-time hash check
+  # was reporting success on a failed build. Catch the drift where it is
+  # introduced instead — a Go bump that outpaces the lock now fails its own PR.
+  #
+  # This job is *meant* to fail on a dependency bump: any go.mod or go.sum
+  # change invalidates vendorHash, and dependabot does not update it, so every
+  # weekly `gomod` PR lands here red. That is the check working. nix-build-check.sh
+  # exists so it lands red with the correct hash and `make update-nix-hash`
+  # attached, instead of a raw nix dump.
+  #
+  # The filter includes this file: a PR that changes only the job would
+  # otherwise skip the job it changed.
+  nix-build:
+    name: Nix flake builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # dorny/paths-filter enumerates PR files via the REST API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check for flake-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            nix:
+              - 'go.mod'
+              - 'go.sum'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'nix/**'
+              - 'scripts/nix-build-check.sh'
+              - 'scripts/extract-nix-vendor-hash.sh'
+              - '.github/workflows/test.yml'
+
+      - name: Install Nix
+        if: steps.filter.outputs.nix == 'true'
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+
+      - name: Build the flake
+        if: steps.filter.outputs.nix == 'true'
+        run: scripts/nix-build-check.sh

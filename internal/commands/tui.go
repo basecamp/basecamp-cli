@@ -90,7 +90,10 @@ func NewTUICmd() *cobra.Command {
 				}
 			}
 
-			session := workspace.NewSession(app)
+			session, err := workspace.NewSession(app)
+			if err != nil {
+				return err
+			}
 			defer session.Shutdown()
 
 			// Deep-link: parse URL argument and set initial navigation target.
@@ -111,7 +114,7 @@ func NewTUICmd() *cobra.Command {
 
 			p := tea.NewProgram(model)
 
-			_, err := p.Run()
+			_, err = p.Run()
 			model.CloseWatcher()
 			return err
 		},

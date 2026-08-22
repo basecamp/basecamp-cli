@@ -30,9 +30,23 @@ var skillLocations = []skillLocation{
 	{Name: "Agents (Shared)", Path: "~/.agents/skills/basecamp/SKILL.md"},
 	{Name: "Claude Code (Global)", Path: "~/.claude/skills/basecamp/SKILL.md"},
 	{Name: "Claude Code (Project)", Path: ".claude/skills/basecamp/SKILL.md"},
-	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skill/basecamp/SKILL.md"},
-	{Name: "OpenCode (Project)", Path: ".opencode/skill/basecamp/SKILL.md"},
+	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skills/basecamp/SKILL.md"},
+	{Name: "OpenCode (Project)", Path: ".opencode/skills/basecamp/SKILL.md"},
 	{Name: "Codex (Global)", Path: codexGlobalSkillPath()},
+}
+
+// legacySkillLocations are paths an agent still reads but that we no longer
+// offer as install targets. They are refreshed, never suggested.
+//
+// opencode accepts both spellings — its own docs table reads
+// `~/.config/opencode/skill(s)/<name>/SKILL.md`, the same `agent(s)`/`command(s)`
+// optional plural it uses elsewhere. #624 moved the install targets to the
+// plural form and dropped the singular entirely, which left anyone who had
+// picked OpenCode in the wizard with a file opencode still loads but that
+// nothing updates: working, and silently frozen at the version that wrote it.
+var legacySkillLocations = []skillLocation{
+	{Name: "OpenCode (Global, legacy path)", Path: "~/.config/opencode/skill/basecamp/SKILL.md"},
+	{Name: "OpenCode (Project, legacy path)", Path: ".opencode/skill/basecamp/SKILL.md"},
 }
 
 // NewSkillCmd creates the skill command.
@@ -344,7 +358,8 @@ func RefreshSkillsIfVersionChanged() bool {
 	// On transient failure, leave the sentinel stale so the next run retries.
 	needsRefresh := baselineSkillInstalled()
 	if !needsRefresh || refreshed {
-		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o755)             //nolint:gosec // G301: config dir
+		// 0o700: GlobalConfigDir can hold credentials.json; keep it owner-only.
+		_ = os.MkdirAll(filepath.Dir(sentinelPath), 0o700)
 		_ = os.WriteFile(sentinelPath, []byte(version.Version), 0o644) //nolint:gosec // G306: not a secret
 	}
 
@@ -359,7 +374,7 @@ func refreshAllInstalledSkills() bool {
 
 	updated := 0
 	failed := 0
-	for _, loc := range skillLocations {
+	for _, loc := range append(append([]skillLocation{}, skillLocations...), legacySkillLocations...) {
 		// Skip project-relative paths — no reliable project root in PostRunE.
 		if !strings.HasPrefix(loc.Path, "~") && !filepath.IsAbs(loc.Path) {
 			continue

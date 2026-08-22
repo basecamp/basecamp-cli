@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +48,39 @@ func TestNewAppSetsCombinedUserAgent(t *testing.T) {
 
 	_, err := app.SDK.Get(context.Background(), "/test.json")
 	require.NoError(t, err)
+}
+
+// TestCheckAuthClientRedirect_StopsLoop verifies the auth client's redirect
+// guard caps idempotent (GET) follows at Go's default 10-hop limit. A looping
+// endpoint would otherwise spin until the 30s client timeout instead of failing
+// fast, since the guard only blocks non-GET/HEAD redirects.
+func TestCheckAuthClientRedirect_StopsLoop(t *testing.T) {
+	var hops atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hops.Add(1)
+		http.Redirect(w, r, "/", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{CheckRedirect: checkAuthClientRedirect, Timeout: 5 * time.Second}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err, "redirect loop must fail rather than hang")
+	assert.Contains(t, err.Error(), "stopped after 10 redirects")
+	assert.LessOrEqual(t, hops.Load(), int32(11), "client must give up around the 10-redirect cap")
+}
+
+// TestCheckAuthClientRedirect_BlocksCredentialPOST verifies a non-GET/HEAD
+// initial request never follows a redirect: the guard returns ErrUseLastResponse
+// so a credential-bearing POST body is not replayed to the redirect target.
+func TestCheckAuthClientRedirect_BlocksCredentialPOST(t *testing.T) {
+	post := &http.Request{Method: http.MethodPost}
+	err := checkAuthClientRedirect(nil, []*http.Request{post})
+	assert.ErrorIs(t, err, http.ErrUseLastResponse)
 }
 
 func TestWithAppAndFromContext(t *testing.T) {

@@ -174,6 +174,11 @@ func isCircuitBreakerError(err error) bool {
 	case basecamp.CodeAuth, basecamp.CodeForbidden, basecamp.CodeNotFound, basecamp.CodeUsage, basecamp.CodeAmbiguous:
 		// Client errors shouldn't trip the circuit
 		return false
+	case basecamp.CodeValidation, basecamp.CodeLimitExceeded:
+		// A 422 is the caller's input; a 507 is a plan limit no retry can
+		// satisfy. Neither says the server is unhealthy. (A 507 tripped the
+		// circuit before SDK v0.14.0 only because it arrived as CodeAPI.)
+		return false
 	default:
 		return false
 	}

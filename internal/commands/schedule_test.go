@@ -83,6 +83,11 @@ func (t *mockScheduleCreateTransport) RoundTrip(req *http.Request) (*http.Respon
 			body = `[{"id": 123, "name": "Test Project"}]`
 		} else if strings.Contains(req.URL.Path, "/projects/") {
 			body = `{"id": 123, "dock": [{"name": "schedule", "id": 777, "enabled": true}]}`
+		} else if strings.Contains(req.URL.Path, "/schedule_entries/") {
+			// UpdateEntry is a merge-safe composite since SDK v0.13.0: it GETs
+			// the entry first and refuses one missing required fields, so the
+			// stub must serve a complete entry rather than `{}`.
+			body = `{"id": 999, "summary": "Event", "starts_at": "2026-03-04T09:00:00Z", "ends_at": "2026-03-04T09:30:00Z", "all_day": false, "participants": []}`
 		} else {
 			body = `{}`
 		}
@@ -151,6 +156,71 @@ func TestScheduleUpdateDescriptionIsHTML(t *testing.T) {
 	desc, ok := body["description"].(string)
 	require.True(t, ok)
 	assert.Contains(t, desc, "<strong>details</strong>")
+}
+
+func TestScheduleCreateHasVisibleToClientsFlag(t *testing.T) {
+	cmd := NewScheduleCmd()
+	createCmd, _, err := cmd.Find([]string{"create"})
+	require.NoError(t, err)
+
+	flag := createCmd.Flags().Lookup("visible-to-clients")
+	require.NotNil(t, flag, "expected --visible-to-clients flag on schedule create")
+}
+
+func TestScheduleCreateDefaultOmitsVisibleToClients(t *testing.T) {
+	transport := &mockScheduleCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	err := executeMessagesCommand(cmd, app, "create", "Event",
+		"--starts-at", "2026-03-04T09:00:00Z",
+		"--ends-at", "2026-03-04T09:30:00Z")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	_, ok := body["visible_to_clients"]
+	assert.False(t, ok, "expected visible_to_clients to be omitted when flag is not set")
+}
+
+func TestScheduleCreateVisibleToClientsTrue(t *testing.T) {
+	transport := &mockScheduleCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	err := executeMessagesCommand(cmd, app, "create", "Event",
+		"--starts-at", "2026-03-04T09:00:00Z",
+		"--ends-at", "2026-03-04T09:30:00Z",
+		"--visible-to-clients")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	assert.Equal(t, true, body["visible_to_clients"])
+}
+
+func TestScheduleCreateVisibleToClientsFalse(t *testing.T) {
+	transport := &mockScheduleCreateTransport{}
+	app, _ := setupMessagesMockApp(t, transport)
+
+	cmd := NewScheduleCmd()
+	err := executeMessagesCommand(cmd, app, "create", "Event",
+		"--starts-at", "2026-03-04T09:00:00Z",
+		"--ends-at", "2026-03-04T09:30:00Z",
+		"--visible-to-clients=false")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+
+	val, ok := body["visible_to_clients"]
+	require.True(t, ok, "expected visible_to_clients present for explicit --visible-to-clients=false")
+	assert.Equal(t, false, val)
 }
 
 func TestScheduleCreateLocalImageErrors(t *testing.T) {

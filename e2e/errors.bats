@@ -348,6 +348,44 @@ load test_helper
   assert_output_contains "required"
 }
 
+@test "todolists position without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todolists position --to 1
+  assert_failure
+  assert_json_value '.error' '<id|url>... required'
+  assert_json_value '.code' 'usage'
+}
+
+@test "todolists position without --to shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todolists position 123
+  assert_failure
+  assert_output_contains "required"
+}
+
+@test "todolists position multiple ids with --to 2 shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todolists position 123 456 --to 2
+  assert_failure
+  assert_output_contains "position 1"
+}
+
+@test "todolists position with only a comma shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp todolists position ","
+  assert_failure
+  assert_json_value '.error' '<id|url>... required'
+  assert_json_value '.code' 'usage'
+}
+
 @test "comments without subcommand shows help" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'

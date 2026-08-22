@@ -34,6 +34,9 @@ SECRETS_MANIFEST=(
   "basecamp/basecamp-cli|MACOS_NOTARY_KEY_ID|macOS Notarization/key-id"
   "basecamp/basecamp-cli|MACOS_NOTARY_ISSUER_ID|macOS Notarization/issuer-id"
   "basecamp/basecamp-cli|AUR_KEY|AUR SSH Key/private-key"
+  "basecamp/basecamp-cli|SM_API_KEY|DigiCert CodeSigning Cert/SM_API_KEY"
+  "basecamp/basecamp-cli|SM_CLIENT_CERT_FILE_B64|DigiCert CodeSigning Cert/SM_CLIENT_CERT_FILE_B64"
+  "basecamp/basecamp-cli|SM_CLIENT_CERT_PASSWORD|DigiCert CodeSigning Cert/SM_CLIENT_CERT_PASSWORD"
   "basecamp/hey-cli|RELEASE_APP_PRIVATE_KEY|Release GitHub App/private-key"
   "basecamp/hey-cli|MACOS_SIGN_P12|macOS Code Signing/p12-base64"
   "basecamp/hey-cli|MACOS_SIGN_PASSWORD|macOS Code Signing/password"
@@ -41,6 +44,9 @@ SECRETS_MANIFEST=(
   "basecamp/hey-cli|MACOS_NOTARY_KEY_ID|macOS Notarization/key-id"
   "basecamp/hey-cli|MACOS_NOTARY_ISSUER_ID|macOS Notarization/issuer-id"
   "basecamp/hey-cli|AUR_KEY|AUR SSH Key/private-key"
+  "basecamp/hey-cli|SM_API_KEY|DigiCert CodeSigning Cert/SM_API_KEY"
+  "basecamp/hey-cli|SM_CLIENT_CERT_FILE_B64|DigiCert CodeSigning Cert/SM_CLIENT_CERT_FILE_B64"
+  "basecamp/hey-cli|SM_CLIENT_CERT_PASSWORD|DigiCert CodeSigning Cert/SM_CLIENT_CERT_PASSWORD"
   "basecamp/fizzy-cli|RELEASE_APP_PRIVATE_KEY|Release GitHub App/private-key"
   "basecamp/fizzy-cli|MACOS_SIGN_P12|macOS Code Signing/p12-base64"
   "basecamp/fizzy-cli|MACOS_SIGN_PASSWORD|macOS Code Signing/password"
@@ -54,7 +60,7 @@ SECRETS_MANIFEST=(
 # Vars to migrate per repo (repo|var_name)
 VARS_MANIFEST=(
   "basecamp/basecamp-cli|RELEASE_CLIENT_ID"
-  "basecamp/hey-cli|RELEASE_APP_ID"
+  "basecamp/hey-cli|RELEASE_CLIENT_ID"
   "basecamp/fizzy-cli|RELEASE_CLIENT_ID"
   "basecamp/cli|SKILLS_APP_ID"
 )

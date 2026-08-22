@@ -6,7 +6,17 @@ project_name: basecamp
 before:
   hooks:
     - sh -c 'mkdir -p completions && go run ./cmd/basecamp completion bash > completions/basecamp.bash && go run ./cmd/basecamp completion zsh > completions/_basecamp && go run ./cmd/basecamp completion fish > completions/basecamp.fish'
-    - sh -c '{{ if .Prerelease }}echo "Skipping Claude plugin version stamp for prerelease {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh {{ .Version }}{{ end }}'
+    - sh -c '{{ if .Prerelease }}echo "Skipping plugin version stamps for prerelease {{ .Version }}"{{ else }}scripts/stamp-plugin-version.sh {{ .Version }} && scripts/stamp-codex-plugin-version.sh {{ .Version }}{{ end }}'
+    # Authenticode-sign a copy of the PowerShell installer inside the pipeline
+    # so it lands in checksums.txt (cosign-signed, provenance-attested) and on
+    # the release as basecamp_installer.ps1. Staged outside dist/ because
+    # goreleaser requires dist to be empty after before-hooks run. Unsigned
+    # copy when the SM_* env is absent (forks, make test-release). Raw-main
+    # install.ps1 stays unsigned and LF -- that is the `irm | iex` path,
+    # which needs neither. The staging step converts to CRLF and rejects
+    # non-ASCII, without which PowerShell reports HashMismatch (see the
+    # script for why both invariants are load-bearing).
+    - sh -c 'scripts/stage-installer-ps1.sh scripts/install.ps1 .release-extra/basecamp_installer.ps1 && scripts/sign-windows.sh windows .release-extra/basecamp_installer.ps1'
 
 builds:
   - id: basecamp
@@ -30,6 +40,14 @@ builds:
       - -X github.com/basecamp/basecamp-cli/internal/version.Version={{.Version}}
       - -X github.com/basecamp/basecamp-cli/internal/version.Commit={{.Commit}}
       - -X github.com/basecamp/basecamp-cli/internal/version.Date={{.Date}}
+    hooks:
+      post:
+        # Authenticode-sign Windows binaries in place before archiving, so the
+        # zip, checksums.txt, cosign bundle, and provenance attestation all
+        # cover the signed binary. No-op for non-windows targets and when the
+        # SM_* signing env is absent (forks, make test-release).
+        - cmd: scripts/sign-windows.sh "{{ .Target }}" "{{ .Path }}"
+          output: true
 
 archives:
   - id: default
@@ -76,6 +94,8 @@ nfpms:
 checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
+  extra_files:
+    - glob: .release-extra/basecamp_installer.ps1
 
 # Generate SBOM for supply chain transparency
 sboms:
@@ -89,6 +109,10 @@ signs:
     args:
       - sign-blob
       - '--bundle=${signature}'
+      # Pin the published bundle format explicitly (protobuf, v0.3+json) so it
+      # no longer depends on the CI cosign default. Installers and `basecamp
+      # upgrade` verify this format; cosign v3 defaults to it anyway.
+      - '--new-bundle-format=true'
       - '${artifact}'
       - '--yes'
     artifacts: checksum
@@ -122,9 +146,9 @@ release:
   prerelease: auto
   make_latest: "{{ if .Prerelease }}false{{ else }}auto{{ end }}"
   replace_existing_artifacts: true
+  extra_files:
+    - glob: .release-extra/basecamp_installer.ps1
   name_template: "{{.ProjectName}} v{{.Version}}"
-  header: |
-    {{ if .Env.RELEASE_CHANGELOG }}{{ .Env.RELEASE_CHANGELOG }}{{ end }}
 
 homebrew_casks:
   - name: basecamp-cli

@@ -104,3 +104,20 @@ func TestGetSDKProvenanceIsCached(t *testing.T) {
 		t.Error("GetSDKProvenance() should return the same pointer on repeated calls")
 	}
 }
+
+func TestIsGoInstall(t *testing.T) {
+	original := fromBuildInfo
+	defer func() { fromBuildInfo = original }()
+
+	fromBuildInfo = false
+	if IsGoInstall() {
+		t.Error("IsGoInstall() = true for ldflags-stamped build, want false")
+	}
+
+	// Build-info provenance applies to stable versions and pseudo-versions
+	// alike — the flag, not the version shape, is the signal.
+	fromBuildInfo = true
+	if !IsGoInstall() {
+		t.Error("IsGoInstall() = false for build-info-derived version, want true")
+	}
+}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 )
@@ -291,10 +292,21 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 			case "llm_provider":
 				validProviders := map[string]bool{
 					"anthropic": true, "openai": true, "ollama": true,
-					"apple": true, "none": true, "auto": true,
+					"apple": true, "none": true, "disabled": true, "auto": true,
 				}
 				if !validProviders[value] {
-					return output.ErrUsage(fmt.Sprintf("llm_provider must be one of: anthropic, openai, ollama, apple, none, auto (got %q)", value))
+					return output.ErrUsage(fmt.Sprintf("llm_provider must be one of: anthropic, openai, ollama, apple, none, disabled, auto (got %q)", value))
+				}
+				configData[key] = value
+			case "llm_endpoint":
+				if !config.IsHTTPURL(value) {
+					return output.ErrUsage("llm_endpoint must be an http:// or https:// URL with a host")
+				}
+				// Warn (don't reject) on plain-http non-localhost endpoints: they're
+				// fine for ollama, but the LLM path fails closed for credentialed
+				// providers (openai) when an API key is set.
+				if err := hostutil.RequireSecureURL(value); err != nil {
+					fmt.Fprintln(os.Stderr, "warning: llm_endpoint is plain http on a non-localhost host; the LLM feature will refuse it if an API key is set with the openai provider")
 				}
 				configData[key] = value
 			case "llm_max_concurrent":
@@ -343,12 +355,13 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 				return fmt.Errorf("failed to write config: %w", err)
 			}
 
-			// Warn when writing authority keys to local config without trust
-			if !global && isAuthorityKey(key) {
+			// Warn when writing trust-gated keys to local config without trust —
+			// otherwise the value is silently ignored on the next load.
+			if !global && isTrustGatedKey(key) {
 				absPath, _ := filepath.Abs(configPath)
 				ts := config.LoadTrustStore(config.GlobalConfigDir())
 				if ts == nil || !ts.IsTrusted(configPath) {
-					fmt.Fprintf(os.Stderr, "warning: authority key %q in local config requires trust to take effect; run:\n  basecamp config trust %s\n", key, config.ShellQuote(absPath))
+					fmt.Fprintf(os.Stderr, "warning: %q in local config requires trust to take effect; run:\n  basecamp config trust %s\n", key, config.ShellQuote(absPath))
 				}
 			}
 
@@ -401,6 +414,21 @@ func resolveKeyAlias(key string) string {
 func isAuthorityKey(key string) bool {
 	switch key {
 	case "base_url", "default_profile", "profiles", "llm_provider", "llm_endpoint":
+		return true
+	}
+	return false
+}
+
+// isTrustGatedKey reports whether key is ignored when loaded from an untrusted
+// local/repo config. It's the authority keys plus the cache/LLM keys gated for
+// the same reason (cache redirection, paid-model substitution, cost
+// amplification), so `config set` warns before a local write silently no-ops.
+func isTrustGatedKey(key string) bool {
+	if isAuthorityKey(key) {
+		return true
+	}
+	switch key {
+	case "cache_dir", "cache_enabled", "llm_model", "llm_max_concurrent", "llm_token_budget":
 		return true
 	}
 	return false

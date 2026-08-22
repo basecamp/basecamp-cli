@@ -337,10 +337,80 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	stderr := string(buf[:n])
 	absPath := filepath.Join(tmpDir, ".basecamp", "config.json")
 
-	assert.Contains(t, stderr, "authority key")
+	assert.Contains(t, stderr, `"base_url"`)
 	assert.Contains(t, stderr, "requires trust")
 	assert.Contains(t, stderr, absPath, "warning must include the exact config path")
 	assert.Contains(t, stderr, "'"+absPath+"'", "path must be single-quoted for shell safety")
+}
+
+// TestConfigSet_GatedNonAuthorityKeyWarns verifies the trust warning also fires
+// for the cache/LLM keys gated on load (cache_dir, llm_model, …), so a local
+// `config set` doesn't silently produce a value that's ignored next run.
+func TestConfigSet_GatedNonAuthorityKeyWarns(t *testing.T) {
+	app, _ := setupConfigTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := executeConfigCommand(app, "set", "cache_dir", "/tmp/somewhere")
+	require.NoError(t, err)
+
+	w.Close()
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	stderr := string(buf[:n])
+	assert.Contains(t, stderr, `"cache_dir"`)
+	assert.Contains(t, stderr, "requires trust")
+}
+
+// --- config set llm_endpoint insecure-endpoint warning tests ---
+
+// setLLMEndpointCapturingStderr runs `config set --global llm_endpoint <value>`
+// and returns what was written to stderr. Global scope keeps the trust-gated
+// local-config warning (llm_endpoint is an authority key) out of the capture.
+func setLLMEndpointCapturingStderr(t *testing.T, value string) string {
+	t.Helper()
+	app, _ := setupConfigTestApp(t)
+
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := executeConfigCommand(app, "set", "--global", "llm_endpoint", value)
+
+	w.Close()
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	require.NoError(t, err)
+	return string(buf[:n])
+}
+
+// TestConfigSet_LLMEndpointInsecureWarns verifies that a plain-http
+// non-localhost llm_endpoint is accepted (ollama legitimately uses http) but
+// warns that the LLM path will refuse it for credentialed providers.
+func TestConfigSet_LLMEndpointInsecureWarns(t *testing.T) {
+	stderr := setLLMEndpointCapturingStderr(t, "http://remote:8080")
+	assert.Contains(t, stderr, "warning: llm_endpoint is plain http on a non-localhost host")
+	assert.Contains(t, stderr, "the LLM feature will refuse it")
+}
+
+func TestConfigSet_LLMEndpointSecureNoWarning(t *testing.T) {
+	assert.Empty(t, setLLMEndpointCapturingStderr(t, "https://remote:8080"))
+}
+
+func TestConfigSet_LLMEndpointLocalhostHTTPNoWarning(t *testing.T) {
+	assert.Empty(t, setLLMEndpointCapturingStderr(t, "http://localhost:11434"))
 }
 
 // --- Config project tests ---
@@ -421,6 +491,32 @@ func TestConfigSet_ProjectAlias(t *testing.T) {
 	var saved map[string]any
 	require.NoError(t, json.Unmarshal(data, &saved))
 	assert.Equal(t, "12345", saved["project_id"])
+}
+
+func TestConfigSet_LLMProviderValidation(t *testing.T) {
+	app, _ := setupConfigTestApp(t)
+
+	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	origDir, _ := os.Getwd()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer os.Chdir(origDir)
+
+	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+
+	// "disabled" is valid: DetectProvider treats it like "none".
+	err := executeConfigCommand(app, "set", "llm_provider", "disabled")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(tmpDir, ".basecamp", "config.json"))
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(data, &saved))
+	assert.Equal(t, "disabled", saved["llm_provider"])
+
+	// Unknown providers are rejected, and the error lists "disabled".
+	err = executeConfigCommand(app, "set", "llm_provider", "bogus")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
 }
 
 func TestConfigUnset_ProjectAlias(t *testing.T) {

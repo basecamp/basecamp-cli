@@ -21,12 +21,24 @@ var (
 	Date = "unknown"
 )
 
+// fromBuildInfo records whether Version was derived from debug.ReadBuildInfo
+// rather than stamped via ldflags. Build-info versions come from `go install`
+// (stable tags and pseudo-versions alike) and cannot be self-updated in place.
+var fromBuildInfo bool
+
 func init() {
 	if Version == "dev" {
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
 			Version = strings.TrimPrefix(info.Main.Version, "v")
+			fromBuildInfo = true
 		}
 	}
+}
+
+// IsGoInstall reports whether this binary's version came from Go module build
+// info (a `go install` build) instead of release ldflags.
+func IsGoInstall() bool {
+	return fromBuildInfo
 }
 
 //go:embed sdk-provenance.json

@@ -164,7 +164,7 @@ func setupHillchartsMockApp(t *testing.T, transport http.RoundTripper) (*appctx.
 		AccountID: "99999",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &hillchartsTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),

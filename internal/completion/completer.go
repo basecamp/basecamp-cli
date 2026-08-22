@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // CacheDirFunc returns the cache directory to use for completion.
@@ -91,7 +92,7 @@ func (c *Completer) ProjectCompletion() cobra.CompletionFunc {
 				// Use ID as completion value with name as description
 				completion := cobra.CompletionWithDesc(
 					fmt.Sprintf("%d", p.ID),
-					p.Name,
+					sanitizeCompletionDesc(p.Name),
 				)
 				completions = append(completions, completion)
 			}
@@ -114,6 +115,12 @@ func (c *Completer) ProjectNameCompletion() cobra.CompletionFunc {
 		toCompleteLower := strings.ToLower(toComplete)
 		var completions []cobra.Completion
 		for _, p := range ranked {
+			// Skip names carrying control characters: the value must round-trip
+			// verbatim for name resolution, so it can't be sanitized. The
+			// project stays reachable by ID.
+			if hasControlChars(p.Name) {
+				continue
+			}
 			nameLower := strings.ToLower(p.Name)
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
@@ -164,7 +171,7 @@ func (c *Completer) PeopleCompletion() cobra.CompletionFunc {
 				}
 				completion := cobra.CompletionWithDesc(
 					fmt.Sprintf("%d", p.ID),
-					desc,
+					sanitizeCompletionDesc(desc),
 				)
 				completions = append(completions, completion)
 			}
@@ -199,6 +206,12 @@ func (c *Completer) PeopleNameCompletion() cobra.CompletionFunc {
 		})
 
 		for _, p := range sorted {
+			// Skip names carrying control characters: the value must round-trip
+			// verbatim for name resolution, so it can't be sanitized. The
+			// person stays reachable by ID.
+			if hasControlChars(p.Name) {
+				continue
+			}
 			nameLower := strings.ToLower(p.Name)
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
@@ -237,7 +250,7 @@ func (c *Completer) AccountCompletion() cobra.CompletionFunc {
 				strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Use ID as completion value with name as description
-				completions = append(completions, cobra.CompletionWithDesc(idStr, a.Name))
+				completions = append(completions, cobra.CompletionWithDesc(idStr, sanitizeCompletionDesc(a.Name)))
 			}
 		}
 
@@ -266,16 +279,54 @@ func (c *Completer) ProfileCompletion() cobra.CompletionFunc {
 		toCompleteLower := strings.ToLower(toComplete)
 		var completions []cobra.Completion
 		for _, p := range sorted {
+			// Skip names carrying control characters: the profile name is the
+			// completion value and must round-trip verbatim, so it can't be
+			// sanitized.
+			if hasControlChars(p.Name) {
+				continue
+			}
 			nameLower := strings.ToLower(p.Name)
 			if strings.HasPrefix(nameLower, toCompleteLower) ||
 				strings.Contains(nameLower, toCompleteLower) {
 				// Use name as completion value with base URL as description
-				completions = append(completions, cobra.CompletionWithDesc(p.Name, p.BaseURL))
+				completions = append(completions, cobra.CompletionWithDesc(p.Name, sanitizeCompletionDesc(p.BaseURL)))
 			}
 		}
 
 		return completions, cobra.ShellCompDirectiveNoFileComp
 	}
+}
+
+// sanitizeCompletionDesc strips terminal escape sequences and control
+// characters from a completion description. Descriptions can carry API- or
+// config-controlled strings (project/person/account names, profile base_url)
+// which the shell renders to the terminal; stripping them prevents terminal
+// injection.
+//
+// It delegates to richtext.SanitizeTerminal for the ANSI-aware pass so a full
+// escape sequence like ESC[31m is removed whole (rather than leaving "[31m"
+// litter after only the ESC byte is dropped), then drops any newlines, carriage
+// returns, and tabs that SanitizeTerminal preserves so descriptions stay on a
+// single line. Ordinary spaces and other printable text are left untouched, so
+// hasControlChars only flags genuine control/escape content.
+func sanitizeCompletionDesc(s string) string {
+	s = richtext.SanitizeTerminal(s)
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// hasControlChars reports whether s would be altered by sanitizeCompletionDesc:
+// it contains control characters (C0 including ESC, DEL, or C1) or invalid
+// UTF-8 (strings.Map rewrites invalid bytes to U+FFFD, so a raw C1 byte like
+// \x9b also differs). Used to SKIP name-valued completion candidates outright —
+// sanitizing a completion VALUE would break resolution, which matches by the
+// exact name string.
+func hasControlChars(s string) bool {
+	return s != sanitizeCompletionDesc(s)
 }
 
 // rankProjects returns projects sorted by priority:

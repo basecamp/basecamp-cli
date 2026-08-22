@@ -267,20 +267,22 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 
 	// Slim output
 	type personListItem struct {
-		ID       int64  `json:"id"`
-		Name     string `json:"name"`
-		Title    string `json:"title"`
-		Employee bool   `json:"employee"`
-		Admin    bool   `json:"admin"`
+		ID           int64  `json:"id"`
+		Name         string `json:"name"`
+		EmailAddress string `json:"email_address"`
+		Title        string `json:"title"`
+		Employee     bool   `json:"employee"`
+		Admin        bool   `json:"admin"`
 	}
 	items := make([]personListItem, len(people))
 	for i, p := range people {
 		items[i] = personListItem{
-			ID:       p.ID,
-			Name:     p.Name,
-			Title:    p.Title,
-			Employee: p.Employee,
-			Admin:    p.Admin,
+			ID:           p.ID,
+			Name:         p.Name,
+			EmailAddress: p.EmailAddress,
+			Title:        p.Title,
+			Employee:     p.Employee,
+			Admin:        p.Admin,
 		}
 	}
 

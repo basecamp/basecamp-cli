@@ -20,6 +20,21 @@ jobs:
       security-events: write
       pull-requests: read
 
+  # Invoked here rather than merely run beforehand: scripts/release.sh commits
+  # and pushes a release-prep commit to main *before* tagging, so anything run
+  # ahead of time covers the wrong SHA. As a called workflow this runs against
+  # the exact tag SHA.
+  #
+  # contents: read is required and cannot be inherited — this workflow sets
+  # permissions: {} above, and a called workflow can only maintain or reduce
+  # the caller's token permissions, never elevate them. Without it,
+  # actions/checkout inside the reusable workflow has no repository access.
+  headless-probe:
+    name: Headless keyring probe
+    uses: ./.github/workflows/headless-probe-composition.yml
+    permissions:
+      contents: read
+
   test:
     name: Test before release
     runs-on: ubuntu-latest
@@ -28,25 +43,27 @@ jobs:
     env:
       BASECAMP_NO_KEYRING: "1"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.4.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           go-version-file: 'go.mod'
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.9.0
+          version: v2.11.1  # keep in lockstep with test.yml Lint
           install-only: true
 
       - name: Cache BATS
         id: cache-bats
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5.0.5 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           path: ~/.local
           key: bats-1.11.0-home
@@ -62,7 +79,7 @@ jobs:
 
       - name: Run release quality gate
         run: |
-          make fmt-check vet lint test test-e2e provenance-check check-naming check-surface
+          make check-lint-lockstep fmt-check vet lint test test-e2e provenance-check check-naming check-surface
           go test -tags dev -race -count=1 ./...
 
       - name: Run govulncheck
@@ -101,17 +118,16 @@ jobs:
 
   release:
     name: Release
-    needs: [test, security]
+    needs: [test, security, headless-probe]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release
     permissions:
       contents: write
       id-token: write
-      models: read
       attestations: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -120,14 +136,15 @@ jobs:
         id: sdk-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: homebrew-tap
           permission-contents: write
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.4.0 # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        # zizmor: ignore[cache-poisoning] -- cache is branch-isolated; fork PRs cannot write to the cache used by tag-push workflows
         with:
           go-version-file: 'go.mod'
 
@@ -141,68 +158,6 @@ jobs:
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-
-      - name: Build changelog context
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          DIFF_FILE=/tmp/diff.txt
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --oneline --no-decorate)
-            git diff --stat 4b825dc642cb6eb9a060e54bf899d69f82a3ef17 HEAD > "$DIFF_FILE"
-          else
-            COMMITS=$(git log --oneline --no-decorate "${PREV_TAG}..HEAD")
-            git diff "${PREV_TAG}..HEAD" -- '*.go' 'go.mod' > "$DIFF_FILE"
-          fi
-          {
-            echo "Commits:"
-            echo "$COMMITS"
-            echo ""
-            echo "Diff summary:"
-            head -c 80000 "$DIFF_FILE"
-          } > /tmp/user-message.txt
-          # Splice into prompt YAML
-          python3 -c "
-          with open('.github/prompts/summarize-changelog.prompt.yml') as f:
-              lines = f.readlines()
-          with open('/tmp/user-message.txt') as f:
-              user_msg = f.read()
-          insert_at = len(lines)
-          for i, line in enumerate(lines):
-              if i == 0: continue
-              if line.strip() and not line[0].isspace():
-                  insert_at = i
-                  break
-          entry = ['  - role: user\n', '    content: |\n']
-          for ln in user_msg.splitlines():
-              entry.append('      ' + ln + '\n')
-          lines[insert_at:insert_at] = entry
-          with open('/tmp/prompt.yml', 'w') as f:
-              f.writelines(lines)
-          try:
-              import yaml
-              doc = yaml.safe_load(open('/tmp/prompt.yml'))
-              assert doc['messages'][-1]['role'] == 'user', 'prompt splice failed'
-          except ImportError:
-              pass
-          "
-        continue-on-error: true
-
-      - name: Generate AI changelog
-        id: ai-changelog
-        uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
-        continue-on-error: true
-        with:
-          prompt-file: /tmp/prompt.yml
-
-      - name: Set changelog path
-        id: changelog
-        env:
-          RESPONSE_FILE: ${{ steps.ai-changelog.outputs.response-file }}
-        run: |
-          if [ -n "$RESPONSE_FILE" ] && [ -f "$RESPONSE_FILE" ]; then
-            sed -i '/^```\(markdown\)\?$/d' "$RESPONSE_FILE"
-            echo "file=$RESPONSE_FILE" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Verify macOS signing secrets
         if: github.repository == 'basecamp/basecamp-cli'
@@ -225,17 +180,81 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
 
+      - name: Verify Windows signing secrets
+        if: github.repository == 'basecamp/basecamp-cli'
+        run: |
+          missing=()
+          for var in SM_API_KEY SM_CLIENT_CERT_FILE_B64 SM_CLIENT_CERT_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              missing+=("$var")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing Windows signing secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "All Windows signing secrets present"
+        env:
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+
+      - name: Set up Java for jsign
+        if: github.repository == 'basecamp/basecamp-cli'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Guarded like the preflight above: on forks this must not run at all —
+      # decoding an empty secret would export a nonempty SM_CLIENT_CERT_FILE,
+      # which the wrapper correctly treats as partial configuration and fails.
+      # With no SM_* env exported, forks take the wrapper's skip path instead
+      # and release unsigned.
+      - name: Prepare Windows signing
+        if: github.repository == 'basecamp/basecamp-cli'
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+        run: |
+          # jsign >= 7.5 is mandatory: 7.1-7.3 are broken against DigiCert
+          # ONE's current API (bc3-desktop commit 59d6453).
+          JSIGN_VERSION=7.5
+          JSIGN_SHA256=602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
+          umask 077
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/jsign-$JSIGN_VERSION.jar" \
+            "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign-$JSIGN_VERSION.jar"
+          echo "$JSIGN_SHA256  $RUNNER_TEMP/jsign-$JSIGN_VERSION.jar" | sha256sum -c -
+          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 -d > "$RUNNER_TEMP/digicert-client-cert.p12"
+          {
+            echo "JSIGN_JAR=$RUNNER_TEMP/jsign-$JSIGN_VERSION.jar"
+            echo "SM_CLIENT_CERT_FILE=$RUNNER_TEMP/digicert-client-cert.p12"
+          } >> "$GITHUB_ENV"
+
       - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           # Keep in sync with .mise.toml goreleaser version pin.
           version: 'v2.15.4'
           install-only: true
 
+      - name: Resolve the previous stable tag for release notes
+        run: |
+          # Stable releases must diff against the last STABLE tag, not the last
+          # rc, or the notes come out empty. Mirrors update-nix-flake.sh:32.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease — leaving previous-tag detection to goreleaser"
+            exit 0
+          fi
+          PREV=$(git tag --merged "$GITHUB_SHA" --sort=-version:refname \
+                   --list 'v[0-9]*.[0-9]*.[0-9]*' \
+                 | awk -v cur="$GITHUB_REF_NAME" '!/-/ && $0 != cur { print; exit }')
+          [ -n "$PREV" ] || { echo "::error::no previous stable tag resolved"; exit 1; }
+          echo "Release notes will diff against $PREV"
+          echo "GORELEASER_PREVIOUS_TAG=$PREV" >> "$GITHUB_ENV"
+
       - name: Run GoReleaser
         env:
-          CHANGELOG_FILE: ${{ steps.changelog.outputs.file }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ steps.sdk-token.outputs.token }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -243,22 +262,55 @@ jobs:
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        run: |
-          RELEASE_CHANGELOG=""
-          if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
-            RELEASE_CHANGELOG=$(cat "$CHANGELOG_FILE")
-          fi
-          export RELEASE_CHANGELOG
-          goreleaser release --clean
+          # Windows Authenticode signing via DigiCert KeyLocker (jsign).
+          # JSIGN_JAR and SM_CLIENT_CERT_FILE arrive via GITHUB_ENV from the
+          # "Prepare Windows signing" step above.
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          # DigiCert ONE certificate ID (not the keypair alias) for the OV cert
+          # CN=37signals LLC, expires 2027-04-30. Keep in sync with bc3-desktop.
+          SIGN_ALIAS: 1346fa41-d9f0-4580-b7b9-a95cf5674354
+        run: goreleaser release --clean
+
+      - name: Clean up Windows signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/digicert-client-cert.p12" "$RUNNER_TEMP"/jsign-*.jar
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: ./dist/checksums.txt
 
+  # AUR publishing runs as its own job, not a step in `release`. As a step it
+  # sat *after* GoReleaser and attestation, so an AUR-side outage turned the
+  # whole job red with the release already published — and that took the four
+  # `needs: [release]` verification jobs down with it as skipped. Isolated and
+  # continue-on-error, an AUR outage can no longer mask signing verification.
+  # Recover a missed publish with the aur-publish workflow (workflow_dispatch).
+  aur-publish:
+    name: Publish to AUR
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Shared with the aur-publish workflow's recovery runs. Without this, a
+    # recovery that already passed its version check could clone after a newer
+    # automatic publish landed and push the older PKGBUILD as a fast-forward.
+    concurrency:
+      group: aur-publish
+      cancel-in-progress: false
+    environment: release
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Check AUR publishing configuration
-        id: aur-publish
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+        id: aur-config
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
         run: |
@@ -269,7 +321,7 @@ jobs:
           fi
 
       - name: Publish to AUR
-        if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && steps.aur-publish.outputs.enabled == 'true'
+        if: steps.aur-config.outputs.enabled == 'true'
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
         run: |
@@ -280,7 +332,47 @@ jobs:
           echo -e "Host aur.archlinux.org\n  IdentityFile ~/.ssh/aur\n  User aur\n  StrictHostKeyChecking accept-new" >> ~/.ssh/config
           git config --global user.name "37signals"
           git config --global user.email "dev@37signals.com"
-          scripts/publish-aur.sh "$VERSION"
+          # publish-aur.sh derives everything from the published release assets
+          # and no-ops when the PKGBUILD is already current, so retrying is safe.
+          for attempt in 1 2 3; do
+            if scripts/publish-aur.sh "$VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "AUR publish attempt ${attempt} failed; retrying in $((attempt * 60))s"
+              sleep $((attempt * 60))
+            fi
+          done
+          echo "AUR publish failed after 3 attempts"
+          exit 1
+
+      - name: Notify on AUR publish failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_SLUG: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          RUN_URL="https://github.com/${REPO_SLUG}/actions/runs/${RUN_ID}"
+          BODY="Publishing [${REF_NAME}](${RUN_URL}) to the AUR failed. The GitHub release is unaffected — only the Arch package is stale. Re-run the \`Publish to AUR\` workflow with version \`${REF_NAME#v}\` once the AUR is reachable."
+
+          # Dedup lives in notify-issue.sh, shared with aur-publish.yml. Both
+          # files used to carry their own title-based lookup; when the canonical
+          # issue was retitled, the release path opened a duplicate and fixing
+          # only the recovery path would have left this one broken.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label aur-publish \
+            --title "AUR publish failure" \
+            --body "$BODY" || notify_status=$?
+
+          # Always emit the annotation, whatever the notifier did. It now fails
+          # closed rather than filing a duplicate, so on a lookup failure this
+          # is the only signal left.
+          echo "::error::AUR publish failed for ${REF_NAME}. See ${RUN_URL}"
+          exit "$notify_status"
 
   macos-verify:
     name: Verify macOS signing
@@ -335,22 +427,103 @@ jobs:
             echo "::warning::Notarization not yet accepted for ${{ matrix.arch }} (ticket propagation may lag)"
           fi
 
+  windows-verify:
+    name: Verify Windows signing
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Download release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\verify" | Out-Null
+          gh release download $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern "basecamp_*_windows_${{ matrix.arch }}.zip" `
+            --dir "$env:RUNNER_TEMP\verify"
+          if ($LASTEXITCODE -ne 0) { throw 'gh release download failed' }
+          $zip = Get-ChildItem "$env:RUNNER_TEMP\verify\basecamp_*_windows_${{ matrix.arch }}.zip"
+          Expand-Archive -Path $zip.FullName -DestinationPath "$env:RUNNER_TEMP\verify\extract" -Force
+
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          # Signature validation of an arm64 PE needs no execution, so both
+          # arches verify on the x64 runner.
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\extract\basecamp.exe"
+          Write-Host "Status (${{ matrix.arch }}): $($sig.Status) - $($sig.StatusMessage)"
+          Write-Host "Signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::error::Authenticode status (${{ matrix.arch }}): $($sig.Status) - $($sig.StatusMessage)"
+            exit 1
+          }
+          if ($sig.SignerCertificate.Subject -notmatch 'CN=37signals LLC') {
+            Write-Host "::error::Unexpected signer (${{ matrix.arch }}): $($sig.SignerCertificate.Subject)"
+            exit 1
+          }
+          if (-not $sig.TimeStamperCertificate) {
+            Write-Host "::error::No timestamp countersignature (${{ matrix.arch }}) - signature would expire with the cert on 2027-04-30"
+            exit 1
+          }
+          Write-Host "Signature valid, signer and timestamp verified (${{ matrix.arch }})"
+
+      - name: Download installer asset
+        if: matrix.arch == 'amd64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release download $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern 'basecamp_installer.ps1' `
+            --dir "$env:RUNNER_TEMP\verify"
+          if ($LASTEXITCODE -ne 0) { throw 'gh release download failed' }
+
+      # Both engines: confirms jsign's ps1 content-hash encoding matches what
+      # PowerShell computes, on Core and on Windows PowerShell 5.1.
+      - name: Verify installer signature (pwsh)
+        if: matrix.arch == 'amd64'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\basecamp_installer.ps1"
+          Write-Host "Installer status (pwsh): $($sig.Status) - $($sig.StatusMessage)"
+          if ($sig.Status -ne 'Valid') { exit 1 }
+
+      - name: Verify installer signature (Windows PowerShell 5.1)
+        if: matrix.arch == 'amd64'
+        shell: powershell
+        run: |
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\verify\basecamp_installer.ps1"
+          Write-Host "Installer status (powershell): $($sig.Status) - $($sig.StatusMessage)"
+          if ($sig.Status -ne 'Valid') { exit 1 }
+
+  # Not continue-on-error. It was, and that is half of why v0.8.0 published a
+  # flake that could not build: the job could not fail the run, and the AUR
+  # outage skipped it outright. A broken flake is a broken release artifact, so
+  # it should colour the run even though it lands after publication.
   nix-verify:
     name: Verify Nix flake
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
 
       - name: Build and verify
         run: |
@@ -372,7 +545,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -380,7 +553,7 @@ jobs:
         id: skills-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_CLIENT_ID }}
+          client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: basecamp
           repositories: skills

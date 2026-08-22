@@ -20,15 +20,24 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+          # SHA-256 of gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz from the
+          # release checksums.txt — update alongside GITLEAKS_VERSION. Pinning
+          # the artifact hash prevents a tampered or swapped release tarball
+          # from running in CI (supply-chain guard).
+          GITLEAKS_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz
-          sudo mv gitleaks /usr/local/bin/
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
 
       - name: Run gitleaks
         run: make secrets
@@ -43,7 +52,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -59,7 +68,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         if: always()
         continue-on-error: true  # Requires GitHub Advanced Security
         with:
@@ -73,22 +82,43 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
-      - name: Run gosec
+      # SARIF comes from golangci-lint (gosec linter only), not the standalone
+      # gosec binary, so the Security tab reflects exactly what the required
+      # Lint gate enforces: the standalone binary can't read `//nolint:gosec`
+      # suppressions or .golangci.yml gosec excludes, so it perpetually
+      # reported every accepted site and turned the code-scanning "gosec"
+      # check red on any PR touching an annotated line. One suppression
+      # convention, one source of truth. To audit accepted findings:
+      # `grep -rn 'nolint:gosec'` — justifications are inline at each site.
+      # --issues-exit-code 0 keeps this job advisory; a real escape still
+      # fails the required Lint check, and code scanning still alerts on it.
+      - name: Run gosec (via golangci-lint)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.11.1  # keep in lockstep with test.yml Lint
+          args: --enable-only gosec --build-tags dev --issues-exit-code 0 --output.sarif.path gosec-results.sarif
+
+      - name: Keep code-scanning tool continuity
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
-          gosec -tags dev -no-fail -fmt sarif -out gosec-results.sarif ./...
+          # Rewrite the driver name so this upload supersedes the historical
+          # standalone-gosec analyses (first main upload closes their alerts as
+          # "fixed"), and restore per-rule identity: golangci-lint flattens every
+          # finding to ruleId "gosec", but the G### code leads each message.
+          jq '.runs[].tool.driver.name = "Golang security checks by gosec"
+              | .runs[].results[]? |= (.ruleId = ((.message.text // "" | capture("^(?<g>G[0-9]{3}):").g)? // .ruleId))' \
+            gosec-results.sarif > tmp.sarif && mv tmp.sarif gosec-results.sarif
 
       - name: Upload gosec scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         if: always()
         continue-on-error: true  # Requires GitHub Advanced Security
         with:
@@ -104,7 +134,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

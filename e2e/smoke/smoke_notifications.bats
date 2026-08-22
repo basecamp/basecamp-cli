@@ -18,3 +18,10 @@ setup_file() {
   assert_failure
   assert_output_contains "not found"
 }
+
+@test "notifications bubbleups lists bubble ups" {
+  run_smoke basecamp notifications bubbleups --json
+  # Bubble Ups are a BC5-added endpoint; may not exist on all QA environments
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Bubble Ups endpoint not available"
+  assert_json_value '.ok' 'true'
+}

@@ -58,10 +58,11 @@ func newGaugesListCmd() *cobra.Command {
 				return err
 			}
 
-			gauges, err := app.Account().Gauges().List(cmd.Context())
+			result, err := app.Account().Gauges().List(cmd.Context(), nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			gauges := result.Gauges
 
 			return app.OK(gauges,
 				output.WithSummary(fmt.Sprintf("%d gauge(s)", len(gauges))),
@@ -101,10 +102,11 @@ func newGaugesNeedlesCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			needles, err := app.Account().Gauges().ListNeedles(cmd.Context(), projectID)
+			result, err := app.Account().Gauges().ListNeedles(cmd.Context(), projectID, nil)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			needles := result.Needles
 
 			return app.OK(needles,
 				output.WithSummary(fmt.Sprintf("%d needle(s)", len(needles))),
@@ -176,6 +178,27 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
   basecamp gauges create --position 75 --color green --in MyProject
   basecamp gauges create --position 50 --color yellow --description "Halfway there" --in MyProject`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("position") {
+				return output.ErrUsage("--position is required")
+			}
+			if position < 0 || position > 100 {
+				return output.ErrUsage("--position must be between 0 and 100")
+			}
+
+			// --notify custom without --subscriptions cannot succeed, and that
+			// is knowable from the flags alone, so it is decided before the pipe
+			// is drained rather than at request-building time.
+			if notify == "custom" && len(subscriptions) == 0 {
+				return output.ErrUsage("--subscriptions required when using --notify custom")
+			}
+
+			// Local validation, then "-", then account: a bad stdin gets the
+			// stdin error rather than "--account is required".
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -192,13 +215,6 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 				return output.ErrUsage("Invalid project ID")
 			}
 
-			if !cmd.Flags().Changed("position") {
-				return output.ErrUsage("--position is required")
-			}
-			if position < 0 || position > 100 {
-				return output.ErrUsage("--position must be between 0 and 100")
-			}
-
 			req := &basecamp.CreateGaugeNeedleRequest{
 				Position: position,
 			}
@@ -211,9 +227,6 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 			if notify != "" {
 				req.Notify = notify
 				if notify == "custom" {
-					if len(subscriptions) == 0 {
-						return output.ErrUsage("--subscriptions required when using --notify custom")
-					}
 					req.Subscriptions = subscriptions
 				}
 			}
@@ -238,9 +251,11 @@ func newGaugesCreateCmd(project *string) *cobra.Command {
 
 	cmd.Flags().Int32Var(&position, "position", 0, "Position on gauge (0-100, required)")
 	cmd.Flags().StringVar(&color, "color", "", "Needle color: green, yellow, or red")
-	cmd.Flags().StringVar(&description, "description", "", "Description (rich text HTML)")
+	cmd.Flags().StringVar(&description, "description", "", "Description (rich text HTML); use - to read from stdin")
 	cmd.Flags().StringVar(&notify, "notify", "", "Notification mode: everyone, working_on, or custom")
 	cmd.Flags().Int64SliceVar(&subscriptions, "subscriptions", nil, "Person IDs to notify (used with --notify custom)")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }
@@ -256,10 +271,8 @@ func newGaugesUpdateCmd() *cobra.Command {
   basecamp gauges update 12345 --description "Updated status"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
+			if !cmd.Flags().Changed("description") {
+				return output.ErrUsage("No changes specified (use --description)")
 			}
 
 			needleID, err := strconv.ParseInt(args[0], 10, 64)
@@ -267,12 +280,20 @@ func newGaugesUpdateCmd() *cobra.Command {
 				return output.ErrUsage("Invalid needle ID")
 			}
 
-			if !cmd.Flags().Changed("description") {
-				return output.ErrUsage("No changes specified (use --description)")
+			// Syntactic checks first, then "-", then account and network.
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
 			}
 
 			req := &basecamp.UpdateGaugeNeedleRequest{
-				Description: description,
+				Description: basecamp.Ptr(description),
 			}
 
 			needle, err := app.Account().Gauges().UpdateNeedle(cmd.Context(), needleID, req)
@@ -293,7 +314,9 @@ func newGaugesUpdateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&description, "description", "", "New description (rich text HTML)")
+	cmd.Flags().StringVar(&description, "description", "", "New description (rich text HTML); use - to read from stdin")
+
+	allowDash(cmd, "flag:description")
 
 	return cmd
 }

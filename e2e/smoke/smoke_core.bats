@@ -78,3 +78,21 @@ setup_file() {
   assert_success
   assert_output_contains "USAGE"
 }
+
+@test "todos create --loose rejects --list" {
+  # --loose creates outside any list, so naming one contradicts it.
+  run_smoke basecamp todos create "smoke loose conflict" --loose --list 999999 --json
+  assert_failure
+}
+
+@test "todos list rejects --assignee with --unassigned" {
+  # The server makes the intersection necessarily empty, so it is refused
+  # rather than answered with zero rows that look real.
+  run_smoke basecamp todos list --unassigned --assignee me --json
+  assert_failure
+}
+
+@test "todos list rejects an unknown --due token" {
+  run_smoke basecamp todos list --due tomorrow --json
+  assert_failure
+}

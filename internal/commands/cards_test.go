@@ -87,7 +87,7 @@ func setupTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create SDK client with mock token provider and no-network transport
 	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
 		basecamp.WithTransport(noNetworkTransport{}),
 		basecamp.WithMaxRetries(1), // Disable retries for instant failure
@@ -241,10 +241,11 @@ func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}, nil
 }
 
-// TestCardsStepUpdateAssigneesOnlyCarriesTitle verifies that updating only
-// assignees fetches the current step and includes its title in the request —
-// the API rejects step updates without a title.
-func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
+// TestCardsStepUpdateAssigneesOnlySendsNoTitle verifies that updating only
+// assignees sends assignees and nothing else. The server preserves attributes
+// the request omits, so there is no title to carry over — and getCount is what
+// proves the extra read is gone, since the body alone cannot.
+func TestCardsStepUpdateAssigneesOnlySendsNoTitle(t *testing.T) {
 	transport := &mockStepUpdateTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -252,17 +253,17 @@ func TestCardsStepUpdateAssigneesOnlyCarriesTitle(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--assignees", "789")
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, transport.getCount)
+	assert.Equal(t, 0, transport.getCount, "expected no read-before-write")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Current title", body["title"])
+	assert.NotContains(t, body, "title", "must not echo back a field the caller never changed")
 	assert.Equal(t, []any{float64(789)}, body["assignee_ids"])
 }
 
-// TestCardsStepUpdateDueOnlyCarriesTitle verifies that updating only the due
-// date fetches the current step and includes its title in the request.
-func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
+// TestCardsStepUpdateDueOnlySendsNoTitle verifies the same for a due-date-only
+// update.
+func TestCardsStepUpdateDueOnlySendsNoTitle(t *testing.T) {
 	transport := &mockStepUpdateTransport{}
 	app := setupCardsMockApp(t, transport)
 
@@ -270,11 +271,11 @@ func TestCardsStepUpdateDueOnlyCarriesTitle(t *testing.T) {
 	err := executeCommand(cmd, app, "456", "--due", "2026-07-04")
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, transport.getCount)
+	assert.Equal(t, 0, transport.getCount, "expected no read-before-write")
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(transport.capturedPut, &body))
-	assert.Equal(t, "Current title", body["title"])
+	assert.NotContains(t, body, "title", "must not echo back a field the caller never changed")
 	assert.Equal(t, "2026-07-04", body["due_on"])
 }
 
@@ -325,19 +326,16 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 }
 
 // TestCardsCmdRequiresProject tests that Project ID required when not in config.
-func TestCardsCmdRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
+// TestCardsCmdWithoutProjectListsAccountWide tests that a bare `cards list`
+// with no project anywhere lists account-wide rather than prompting.
+func TestCardsCmdWithoutProjectListsAccountWide(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, cardsOpenRoute())
 	// No project in config
 
 	cmd := NewCardsCmd()
 
-	err := executeCommand(cmd, app, "list")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
+	require.NoError(t, executeRecordingCommand(cmd, app, "list"))
+	assert.Equal(t, "/99999/cards/open.json", transport.last(t).Path)
 }
 
 // TestCardsListColumnNameRequiresCardTable tests that column name requires --card-table.
@@ -1542,7 +1540,7 @@ func setupCardsMockApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 		ProjectID: "123",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &testTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -1941,4 +1939,885 @@ func TestCardsColumnColorURLBucketBeatsFlag(t *testing.T) {
 	err := executeCommand(newCardsColumnColorCmd(&project), app, url, "--color", "blue")
 	require.NoError(t, err)
 	assert.Contains(t, tr.mutatePath, "/buckets/123/card_tables/columns/789/color.json")
+}
+
+// --- Wormholes (cross-project card move, #342) ---
+
+func wormholePtr[T any](v T) *T { return &v }
+
+// mockWormholeTransport serves the dock/card/card-table fixtures the wormhole
+// commands need and records the last mutating (POST/PUT/DELETE) request.
+//
+//   - Card 456 lives in project (bucket) 123, parent column 777, on card table 555.
+//   - destinationURL controls the single wormhole's destination column.
+//   - linked controls whether that wormhole is linked.
+//   - secondTable adds a board 666 (columns [888], no wormholes) so tests can
+//     exercise an explicit --card-table that doesn't contain the card.
+type mockWormholeTransport struct {
+	destinationURL string
+	linked         *bool
+	secondTable    bool
+	cardNoParent   bool // card 456 comes back without a parent column
+	method         string
+	path           string
+	body           []byte
+}
+
+func (t *mockWormholeTransport) wormholeJSON() string {
+	dest := t.destinationURL
+	if dest == "" {
+		dest = "https://3.basecampapi.com/99999/buckets/999/card_tables/columns/888.json"
+	}
+	linked := true
+	if t.linked != nil {
+		linked = *t.linked
+	}
+	return fmt.Sprintf(`{"id":111,"status":"active","title":"Anniversary › Card Table › Triage",`+
+		`"type":"Kanban::Wormhole","color":null,"linked":%t,"destination_url":"%s",`+
+		`"parent":{"id":555,"title":"Board","type":"Kanban::Board"}}`, linked, dest)
+}
+
+func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	if req.Method == "GET" {
+		var body string
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/projects.json"):
+			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.Contains(req.URL.Path, "/projects/123"):
+			if t.secondTable {
+				body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"},{"name": "kanban_board", "id": 666, "title": "Other"}]}`
+			} else {
+				body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`
+			}
+		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
+			if t.cardNoParent {
+				body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}}`
+			} else {
+				body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}, "parent": {"id": 777, "title": "Developing", "type": "Kanban::Column"}}`
+			}
+		case strings.Contains(req.URL.Path, "/card_tables/555"):
+			body = `{"id": 555, "lists": [{"id": 777, "title": "Developing", "position": 1}], "wormholes": [` + t.wormholeJSON() + `]}`
+		case strings.Contains(req.URL.Path, "/card_tables/666"):
+			// A real wormhole (222) that lives on a sibling board, not the card's table.
+			body = `{"id": 666, "lists": [{"id": 888, "title": "Elsewhere", "position": 1}], "wormholes": [{"id":222,"status":"active","title":"Sibling › Board › Col","type":"Kanban::Wormhole","color":null,"linked":true,"destination_url":"https://3.basecampapi.com/99999/buckets/999/card_tables/columns/321.json"}]}`
+		default:
+			body = `{}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+
+	t.method = req.Method
+	t.path = req.URL.Path
+	if req.Body != nil {
+		b, _ := io.ReadAll(req.Body)
+		t.body = b
+		req.Body.Close()
+	}
+
+	switch req.Method {
+	case "POST":
+		if strings.Contains(req.URL.Path, "/moves.json") {
+			return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+		}
+		return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(t.wormholeJSON())), Header: header}, nil
+	case "PUT":
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(t.wormholeJSON())), Header: header}, nil
+	case "DELETE":
+		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
+	}
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+}
+
+// wormholeMoveError runs `cards move <card> --to-wormhole ...`, asserts it failed
+// with an *output.Error, and asserts no mutating request was issued — a rejected
+// teleport must never touch the server, since the move is irreversible.
+func wormholeMoveError(t *testing.T, transport *mockWormholeTransport, project string, args ...string) *output.Error {
+	t.Helper()
+	app, _ := newTestAppWithTransport(t, transport)
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+	err := executeCommand(cmd, app, args...)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
+	return e
+}
+
+// TestCardsMoveToWormholeByID verifies a numeric --to-wormhole is still validated
+// against the card's own source table (fail-closed) and moved through the
+// wormhole's id.
+func TestCardsMoveToWormholeByID(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	err := executeCommand(cmd, app, "456", "--to-wormhole", "111")
+	require.NoError(t, err)
+
+	assert.Equal(t, "POST", transport.method)
+	assert.Contains(t, transport.path, "/card_tables/cards/456/moves.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.body, &body))
+	assert.Equal(t, float64(111), body["column_id"])
+
+	// Output reports source_id (not id) and status teleporting, and carries no
+	// same-id "view card" breadcrumb (that id is about to 404).
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Equal(t, "456", envelope.Data["source_id"])
+	assert.Equal(t, "teleporting", envelope.Data["status"])
+	assert.NotContains(t, envelope.Data, "id")
+	assert.NotContains(t, buf.String(), "cards show 456")
+}
+
+// TestCardsMoveToWormholeByDestinationURL verifies a destination-column URL is
+// matched against the card's source table wormholes[] and moved through the
+// matching wormhole's id (111), not the destination column id (888). The
+// breadcrumb pins the resolved --card-table.
+func TestCardsMoveToWormholeByDestinationURL(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+
+	url := "https://3.basecamp.com/99999/buckets/999/card_tables/columns/888"
+	err := executeCommand(cmd, app, "456", "--to-wormhole", url)
+	require.NoError(t, err)
+
+	assert.Contains(t, transport.path, "/card_tables/cards/456/moves.json")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.body, &body))
+	assert.Equal(t, float64(111), body["column_id"])
+}
+
+// TestCardsMoveToWormholeSiblingBoardRejected verifies that a real wormhole (222)
+// which exists on a sibling board — not the card's own card table — is rejected
+// (fail-closed) with no move issued. The server would otherwise honor it, since
+// it resolves column_id against the whole project bucket.
+func TestCardsMoveToWormholeSiblingBoardRejected(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{secondTable: true}, "", "456", "--to-wormhole", "222")
+	assert.Contains(t, e.Message, "Wormhole 222 is not on this card's card table")
+	assert.Contains(t, e.Hint, "#111")
+}
+
+// TestCardsMoveToWormholeUnlinkedRejected verifies an unlinked wormhole is
+// rejected before any move.
+func TestCardsMoveToWormholeUnlinkedRejected(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{linked: wormholePtr(false)}, "", "456", "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "unlinked")
+	// The fix-it hint must be copy/pasteable — include --in with the source project.
+	assert.Contains(t, e.Hint, "--in 123")
+}
+
+// TestCardsMoveToWormholeNoMatch verifies a destination-column URL that no
+// wormhole targets errors with a hint listing the reachable wormholes.
+func TestCardsMoveToWormholeNoMatch(t *testing.T) {
+	transport := &mockWormholeTransport{destinationURL: "https://3.basecampapi.com/99999/buckets/999/card_tables/columns/222.json"}
+	url := "https://3.basecamp.com/99999/buckets/999/card_tables/columns/888"
+	e := wormholeMoveError(t, transport, "", "456", "--to-wormhole", url)
+	assert.Contains(t, e.Message, "column 888")
+	assert.Contains(t, e.Hint, "#111")
+}
+
+// TestCardsMoveToWormholeProjectConflict verifies an explicit --in that
+// contradicts the card's own project is rejected.
+func TestCardsMoveToWormholeProjectConflict(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "999", "456", "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "points at project 999")
+}
+
+// TestCardsMoveToWormholeTableConflict verifies an explicit --card-table that
+// doesn't contain the card is rejected.
+func TestCardsMoveToWormholeTableConflict(t *testing.T) {
+	transport := &mockWormholeTransport{secondTable: true}
+	app, _ := newTestAppWithTransport(t, transport)
+	project := ""
+	cardTable := "666"
+	cmd := newCardsMoveCmd(&project, &cardTable)
+	err := executeCommand(cmd, app, "456", "--to-wormhole", "111")
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "not on the specified card table")
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
+}
+
+// TestCardsMoveToWormholeRejectsNonColumnURL verifies a non-column Basecamp URL
+// is rejected rather than having its trailing id accepted.
+func TestCardsMoveToWormholeRejectsNonColumnURL(t *testing.T) {
+	cardURL := "https://3.basecamp.com/99999/buckets/999/card_tables/cards/456"
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", "456", "--to-wormhole", cardURL)
+	assert.Contains(t, e.Message, "Invalid destination column")
+}
+
+// TestCardsMoveToWormholeRejectsNonPositiveID verifies a zero/negative wormhole
+// id is rejected.
+func TestCardsMoveToWormholeRejectsNonPositiveID(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", "456", "--to-wormhole", "0")
+	assert.Contains(t, e.Message, "positive wormhole ID")
+}
+
+// TestCardsMoveToWormholeMutuallyExclusive verifies --to-wormhole rejects each of
+// --to, --on-hold, and --position.
+func TestCardsMoveToWormholeMutuallyExclusive(t *testing.T) {
+	for _, extra := range [][]string{
+		{"--to", "Done"},
+		{"--on-hold"},
+		{"--position", "2"},
+	} {
+		args := append([]string{"456", "--to-wormhole", "111"}, extra...)
+		e := wormholeMoveError(t, &mockWormholeTransport{}, "", args...)
+		assert.Contains(t, e.Message, "--to-wormhole cannot be combined")
+	}
+}
+
+// TestCardsWormholesList verifies list reads wormholes[] from the card table.
+func TestCardsWormholesList(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	err := executeCommand(newCardsWormholesListCmd(&project, &cardTable), app)
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 1)
+	assert.Equal(t, float64(111), envelope.Data[0]["id"])
+	assert.Contains(t, buf.String(), "1 wormholes")
+}
+
+// TestCardsWormholesCreate verifies create POSTs destination_recording_id to the
+// board-scoped wormholes endpoint.
+func TestCardsWormholesCreate(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	err := executeCommand(newCardsWormholesCreateCmd(&project, &cardTable), app, "--to-column", "888")
+	require.NoError(t, err)
+
+	assert.Equal(t, "POST", transport.method)
+	assert.Contains(t, transport.path, "/buckets/123/card_tables/555/wormholes.json")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.body, &body))
+	assert.Equal(t, float64(888), body["destination_recording_id"])
+}
+
+// TestCardsWormholesCreateFromColumnURL verifies --to-column accepts a column URL.
+func TestCardsWormholesCreateFromColumnURL(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	url := "https://3.basecamp.com/99999/buckets/999/card_tables/columns/888"
+	err := executeCommand(newCardsWormholesCreateCmd(&project, &cardTable), app, "--to-column", url)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.body, &body))
+	assert.Equal(t, float64(888), body["destination_recording_id"])
+}
+
+// TestCardsWormholesCreateRejectsNonColumnURL verifies create rejects a
+// non-column Basecamp URL for --to-column.
+func TestCardsWormholesCreateRejectsNonColumnURL(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	cardTable := ""
+	cardURL := "https://3.basecamp.com/99999/buckets/999/card_tables/cards/456"
+	err := executeCommand(newCardsWormholesCreateCmd(&project, &cardTable), app, "--to-column", cardURL)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "Invalid destination column")
+}
+
+// TestCardsWormholesUpdate verifies update PUTs to the wormhole-scoped endpoint.
+func TestCardsWormholesUpdate(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	err := executeCommand(newCardsWormholesUpdateCmd(&project), app, "111", "--to-column", "888")
+	require.NoError(t, err)
+
+	assert.Equal(t, "PUT", transport.method)
+	// NB: the merged SDK's generated Update/Delete routes omit the .json suffix
+	// that create and the bc-api docs use; assert the path the SDK actually issues.
+	assert.Contains(t, transport.path, "/buckets/123/card_tables/wormholes/111")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.body, &body))
+	assert.Equal(t, float64(888), body["destination_recording_id"])
+}
+
+// TestCardsWormholesDelete verifies delete DELETEs the wormhole-scoped endpoint.
+func TestCardsWormholesDelete(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	project := ""
+	err := executeCommand(newCardsWormholesDeleteCmd(&project), app, "111")
+	require.NoError(t, err)
+
+	assert.Equal(t, "DELETE", transport.method)
+	assert.Contains(t, transport.path, "/buckets/123/card_tables/wormholes/111")
+}
+
+// TestFindWormholeByDestinationColumn verifies destination-column matching skips
+// unlinked wormholes and matches by the destination_url's column id.
+func TestFindWormholeByDestinationColumn(t *testing.T) {
+	wormholes := []basecamp.Wormhole{
+		{ID: 100, DestinationURL: nil}, // unlinked — never matches
+		{ID: 111, DestinationURL: wormholePtr("https://3.basecampapi.com/99999/buckets/999/card_tables/columns/888.json")},
+	}
+
+	assert.Equal(t, int64(111), findWormholeByDestinationColumn(wormholes, 888).ID)
+	assert.Nil(t, findWormholeByDestinationColumn(wormholes, 999))
+}
+
+// TestWormholeMoveBreadcrumbs verifies the move breadcrumb pins the resolved
+// --card-table (multi-table safety) and offers no same-id view action.
+func TestWormholeMoveBreadcrumbs(t *testing.T) {
+	crumbs := wormholeMoveBreadcrumbs("123", "555")
+	require.Len(t, crumbs, 1)
+	assert.Contains(t, crumbs[0].Cmd, "--in 123")
+	assert.Contains(t, crumbs[0].Cmd, "--card-table 555")
+	assert.NotContains(t, crumbs[0].Cmd, "cards show")
+}
+
+// TestWormholeListBreadcrumb verifies the list follow-up pins --card-table from
+// the wormhole's parent, and omits it when the parent is unknown.
+func TestWormholeListBreadcrumb(t *testing.T) {
+	withParent := wormholeListBreadcrumb(123, &basecamp.Wormhole{ID: 111, Parent: &basecamp.Parent{ID: 555}})
+	assert.Contains(t, withParent.Cmd, "--in 123")
+	assert.Contains(t, withParent.Cmd, "--card-table 555")
+
+	noParent := wormholeListBreadcrumb(123, &basecamp.Wormhole{ID: 111})
+	assert.Contains(t, noParent.Cmd, "--in 123")
+	assert.NotContains(t, noParent.Cmd, "--card-table")
+}
+
+// TestParseColumnID covers numeric IDs, column URLs, and rejections.
+func TestParseColumnID(t *testing.T) {
+	id, err := parseColumnID("888")
+	require.NoError(t, err)
+	assert.Equal(t, int64(888), id)
+
+	id, err = parseColumnID("https://3.basecamp.com/99999/buckets/999/card_tables/columns/888")
+	require.NoError(t, err)
+	assert.Equal(t, int64(888), id)
+
+	_, err = parseColumnID("0")
+	require.Error(t, err)
+
+	_, err = parseColumnID("-4")
+	require.Error(t, err)
+
+	// A card URL is not a column URL — reject rather than accept its trailing id.
+	_, err = parseColumnID("https://3.basecamp.com/99999/buckets/999/card_tables/cards/456")
+	require.Error(t, err)
+}
+
+// TestCardsMoveToWormholeRootProjectConflict verifies a root-level --project
+// (which lands in app.Flags.Project, not the card command's own flag) that
+// contradicts the card's project is still rejected before the destructive move.
+func TestCardsMoveToWormholeRootProjectConflict(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Flags.Project = "999" // e.g. `basecamp --project 999 cards move …`
+
+	project := ""
+	cardTable := ""
+	cmd := newCardsMoveCmd(&project, &cardTable)
+	err := executeCommand(cmd, app, "456", "--to-wormhole", "111")
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "points at project 999")
+	assert.Empty(t, transport.method, "a rejected wormhole move must not issue a mutating request")
+}
+
+// TestCardsMoveToWormholeEmptyValue verifies --to-wormhole= (present but empty)
+// errors explicitly instead of falling back to the normal move path.
+func TestCardsMoveToWormholeEmptyValue(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", "456", "--to-wormhole=")
+	assert.Contains(t, e.Message, "requires a wormhole ID or destination-column URL")
+}
+
+// TestCardsWormholesUpdateRejectsNonPositiveID verifies update rejects id <= 0.
+func TestCardsWormholesUpdateRejectsNonPositiveID(t *testing.T) {
+	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	project := ""
+	err := executeCommand(newCardsWormholesUpdateCmd(&project), app, "0", "--to-column", "888")
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "Invalid wormhole ID")
+}
+
+// TestCardsWormholesDeleteRejectsNonPositiveID verifies delete rejects id <= 0.
+func TestCardsWormholesDeleteRejectsNonPositiveID(t *testing.T) {
+	app, _ := newTestAppWithTransport(t, &mockWormholeTransport{})
+	project := ""
+	err := executeCommand(newCardsWormholesDeleteCmd(&project), app, "0")
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, "Invalid wormhole ID")
+}
+
+// TestCardsMoveToWormholeUnverifiableTableRejected verifies that when the card's
+// parent column is unavailable (so its table placement can't be confirmed) the
+// teleport fails closed at the command level with no mutation.
+func TestCardsMoveToWormholeUnverifiableTableRejected(t *testing.T) {
+	e := wormholeMoveError(t, &mockWormholeTransport{cardNoParent: true}, "", "456", "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "Could not verify which card table")
+}
+
+// TestCardsMoveToWormholeURLProjectConflict verifies a project encoded in the
+// card URL that contradicts the card's own project is rejected (urlProjectID
+// path, distinct from the --in flag and root --project paths).
+func TestCardsMoveToWormholeURLProjectConflict(t *testing.T) {
+	cardURL := "https://3.basecamp.com/99999/buckets/777/card_tables/cards/456"
+	e := wormholeMoveError(t, &mockWormholeTransport{}, "", cardURL, "--to-wormhole", "111")
+	assert.Contains(t, e.Message, "the card URL")
+	assert.Contains(t, e.Message, "777")
+}
+
+// TestCardsWormholesUpdateBreadcrumbPinsCardTable verifies the follow-up
+// breadcrumb emitted by the update command (not just the helper) pins
+// --card-table from the wormhole's parent, so command wiring can't regress
+// unnoticed. Flags.Hints keeps breadcrumbs in the envelope (app.OK strips them
+// otherwise).
+func TestCardsWormholesUpdateBreadcrumbPinsCardTable(t *testing.T) {
+	transport := &mockWormholeTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+
+	project := ""
+	err := executeCommand(newCardsWormholesUpdateCmd(&project), app, "111", "--to-column", "888")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Contains(t, envelope.Breadcrumbs[0].Cmd, "cards wormholes list --in 123 --card-table 555")
+}
+
+// --- account-wide card listings ---
+
+// cardsGroupsFixture is a two-project grouped response, two cards each.
+const cardsGroupsFixture = `[
+	{"bucket":{"id":1,"name":"Alpha","type":"Project"},
+	 "cards":[{"id":11,"title":"Alpha one","status":"active","due_on":"2026-01-01"},
+	          {"id":12,"title":"Alpha two","status":"active"}]},
+	{"bucket":{"id":2,"name":"Beta","type":"Project"},
+	 "cards":[{"id":21,"title":"Beta one","status":"active"},
+	          {"id":22,"title":"Beta two","status":"active","due_on":"2026-03-01"}]}
+]`
+
+// cardsOverdueFixture is the flat, unpaginated overdue payload.
+const cardsOverdueFixture = `[
+	{"id":31,"title":"Zeta late","status":"active","due_on":"2025-02-01"},
+	{"id":32,"title":"Alpha late","status":"active","due_on":"2025-01-01"}
+]`
+
+func cardsAggregateRoute(name, body string) stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   fmt.Sprintf("/99999/cards/%s.json", name),
+		status: http.StatusOK,
+		body:   body,
+		// The whole fixture is page 1; page 2 is where the listing runs out.
+		// Without a page-aware route the bounded walk would never see an empty
+		// page and would keep asking until it hit the cap.
+		pages: []string{body},
+	}
+}
+
+// cardsAggregatePath is the path cardsAggregateRoute serves, for tests that
+// assert on the request sequence.
+func cardsAggregatePath(name string) string {
+	return fmt.Sprintf("/99999/cards/%s.json", name)
+}
+
+func cardsOpenRoute() stubRoute { return cardsAggregateRoute("open", cardsGroupsFixture) }
+
+// cardsAllAggregateRoutes serves every account-wide card endpoint, so a test
+// that dispatches to the wrong one fails on the recorded path rather than on a
+// missing stub.
+func cardsAllAggregateRoutes() []stubRoute {
+	return []stubRoute{
+		cardsAggregateRoute("open", cardsGroupsFixture),
+		cardsAggregateRoute("completed", cardsGroupsFixture),
+		cardsAggregateRoute("unassigned", cardsGroupsFixture),
+		cardsAggregateRoute("no_due_date", cardsGroupsFixture),
+		cardsAggregateRoute("not_now", cardsGroupsFixture),
+		cardsAggregateRoute("overdue", cardsOverdueFixture),
+	}
+}
+
+// setupCardsAccountWideApp wires the recording harness to an output writer the
+// test can read back.
+func setupCardsAccountWideApp(t *testing.T, format output.Format, routes ...stubRoute) (*appctx.App, *recordingTransport, *bytes.Buffer) {
+	t.Helper()
+	app, transport := setupRecordingTestApp(t, routes...)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: format, Writer: buf})
+	return app, transport, buf
+}
+
+// cardsUsageError asserts the command failed with a usage error and returns it.
+func cardsUsageError(t *testing.T, err error) *output.Error {
+	t.Helper()
+	require.Error(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	return e
+}
+
+// TestCardsListProjectScopedUnchanged pins that a project in scope still lists
+// through the project-scoped column endpoint.
+func TestCardsListProjectScopedUnchanged(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{method: http.MethodGet, path: "/99999/card_tables/lists/12345/cards.json", status: http.StatusOK, body: `[]`},
+	)
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--project", "123", "--column", "12345"))
+	assert.Equal(t, "/99999/card_tables/lists/12345/cards.json", transport.last(t).Path)
+}
+
+// TestCardsListAllProjectsOverridesConfiguredProject tests that --all-projects
+// beats an ambient configured project rather than conflicting with it.
+func TestCardsListAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, cardsOpenRoute())
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+	assert.Equal(t, "/99999/cards/open.json", transport.last(t).Path)
+}
+
+// TestCardsListAllProjectsConflictsWithExplicitProject tests the conflict for
+// both the after-the-noun and root-level spellings of an explicit project.
+func TestCardsListAllProjectsConflictsWithExplicitProject(t *testing.T) {
+	for _, spelling := range []string{"--project", "--in"} {
+		app, _ := setupRecordingTestApp(t)
+		err := executeRecordingCommand(NewCardsCmd(), app, "list", spelling, "123", "--all-projects")
+		assert.Equal(t, "--all-projects cannot be combined with --project", cardsUsageError(t, err).Message, spelling)
+	}
+
+	app, _ := setupRecordingTestApp(t)
+	app.Flags.Project = "123" // basecamp --project 123 cards list
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects")
+	assert.Equal(t, "--all-projects cannot be combined with --project", cardsUsageError(t, err).Message)
+}
+
+// TestCardsListAccountWideSelectorEndpoints tests that each selector flag
+// reaches its own endpoint.
+func TestCardsListAccountWideSelectorEndpoints(t *testing.T) {
+	cases := []struct {
+		args []string
+		path string
+	}{
+		{[]string{"--all-projects"}, "/99999/cards/open.json"},
+		{[]string{"--all-projects", "--status", "completed"}, "/99999/cards/completed.json"},
+		{[]string{"--all-projects", "--unassigned"}, "/99999/cards/unassigned.json"},
+		{[]string{"--all-projects", "--no-due-date"}, "/99999/cards/no_due_date.json"},
+		{[]string{"--all-projects", "--not-now"}, "/99999/cards/not_now.json"},
+		{[]string{"--all-projects", "--overdue"}, "/99999/cards/overdue.json"},
+	}
+	for _, tc := range cases {
+		app, transport := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...), tc.args)
+		assert.Equal(t, tc.path, transport.last(t).Path, tc.args)
+	}
+}
+
+// TestCardsListSelectorsRejectedWithProject tests that the account-wide-only
+// selectors are a usage error whenever a project is in scope — explicit,
+// root-level, or configured.
+func TestCardsListSelectorsRejectedWithProject(t *testing.T) {
+	selectors := [][]string{
+		{"--status", "completed"},
+		{"--unassigned"},
+		{"--no-due-date"},
+		{"--not-now"},
+		{"--overdue"},
+	}
+	for _, selector := range selectors {
+		// Explicit --project after the group noun.
+		app, _ := setupRecordingTestApp(t, projectsRoute())
+		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list", "--project", "123"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+
+		// Root-level --project, which lands in app.Flags.Project.
+		app, _ = setupRecordingTestApp(t, projectsRoute())
+		app.Flags.Project = "123"
+		err = executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+
+		// Configured project.
+		app, _ = setupRecordingTestApp(t, projectsRoute())
+		app.Config.ProjectID = "123"
+		err = executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, selector...)...)
+		assert.Contains(t, cardsUsageError(t, err).Message, "cannot be combined with a project", selector)
+	}
+}
+
+// TestCardsListSelectorsMutuallyExclusive tests that two selectors name the
+// conflicting pair rather than silently picking one.
+func TestCardsListSelectorsMutuallyExclusive(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--unassigned", "--overdue")
+	msg := cardsUsageError(t, err).Message
+	assert.Contains(t, msg, "--unassigned")
+	assert.Contains(t, msg, "--overdue")
+	assert.Contains(t, msg, "mutually exclusive")
+}
+
+// TestCardsListStatusRejectsUnsupportedValue tests that only completed is a
+// recognized --status.
+func TestCardsListStatusRejectsUnsupportedValue(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--status", "archived")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--status archived is not a card listing")
+}
+
+// TestCardsListAccountWideRejectsScopeChildren tests that --column and
+// --card-table are rejected account-wide, including via the shorthand and the
+// group's persistent flag.
+func TestCardsListAccountWideRejectsScopeChildren(t *testing.T) {
+	cases := []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"list", "--all-projects", "--column", "9"}, "--column names a column"},
+		{[]string{"list", "--all-projects", "-c", "9"}, "--column names a column"},
+		{[]string{"list", "--all-projects", "--card-table", "7"}, "--card-table names one project's"},
+		{[]string{"--card-table", "7", "list", "--all-projects"}, "--card-table names one project's"},
+		{[]string{"list", "--column", "9"}, "--column names a column"},
+	}
+	for _, tc := range cases {
+		app, _ := setupRecordingTestApp(t)
+		err := executeRecordingCommand(NewCardsCmd(), app, tc.args...)
+		assert.Contains(t, cardsUsageError(t, err).Message, tc.message, tc.args)
+	}
+}
+
+// TestCardsListAccountWidePagination pins the request sequence, not just the
+// last call. The old default asked for page 0 — one request that made the
+// server walk the whole account — and --limit did the same before throwing most
+// of the result away. Both now walk positive pages and stop as soon as they
+// can, so the sequence is the behavior under test.
+func TestCardsListAccountWidePagination(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		queries []string
+	}{
+		{
+			"the default walks positive pages until the listing runs out",
+			[]string{"--all-projects"},
+			[]string{"page=1", "page=2"},
+		},
+		{
+			"--all is the only spelling that asks for the full crawl",
+			[]string{"--all-projects", "--all"},
+			[]string{""},
+		},
+		{
+			"--page N asks for exactly N",
+			[]string{"--all-projects", "--page", "3"},
+			[]string{"page=3"},
+		},
+		{
+			"--limit stops at the first page that satisfies it",
+			[]string{"--all-projects", "--limit", "2"},
+			[]string{"page=1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, cardsOpenRoute())
+			require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...))
+			assert.Equal(t, tc.queries, transport.queriesFor(cardsAggregatePath("open")))
+		})
+	}
+}
+
+// TestCardsListAccountWideRejectsBadPaging tests that the page and limit values
+// with no account-wide meaning are usage errors rather than surprises.
+func TestCardsListAccountWideRejectsBadPaging(t *testing.T) {
+	cases := []struct {
+		args    []string
+		message string
+	}{
+		{[]string{"--all-projects", "--page", "0"}, "--page 0 is not a page number"},
+		{[]string{"--all-projects", "--page", "-1"}, "--page cannot be negative"},
+		{[]string{"--all-projects", "--limit", "-1"}, "--limit cannot be negative"},
+		{[]string{"--all-projects", "--all", "--limit", "2"}, "--all and --limit are mutually exclusive"},
+		{[]string{"--all-projects", "--page", "2", "--limit", "2"}, "--page cannot be combined with --all or --limit"},
+	}
+	for _, tc := range cases {
+		app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+		err := executeRecordingCommand(NewCardsCmd(), app, append([]string{"list"}, tc.args...)...)
+		assert.Equal(t, tc.message, cardsUsageError(t, err).Message, tc.args)
+	}
+}
+
+// TestCardsListOverdueRejectsPage tests that --page is refused rather than
+// accepted and dropped: there is no page to address on an unpaginated endpoint.
+func TestCardsListOverdueRejectsPage(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--page", "1")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--page is not supported with --overdue")
+}
+
+// --all is a different question from --page. The overdue listing is capped at
+// 100 by default, so rejecting --all as well would leave card 101 unreachable —
+// capped with no escape hatch is the defect, not the fix. The endpoint is
+// unpaginated, so honoring --all costs nothing: the complete array is already
+// in hand.
+func TestCardsListOverdueAcceptsAll(t *testing.T) {
+	app, transport, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsAllAggregateRoutes()...)
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--all"))
+
+	var envelope struct {
+		Data   []basecamp.Card `json:"data"`
+		Notice string          `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Len(t, envelope.Data, 2, "--all returns the complete array")
+	assert.Empty(t, envelope.Notice, "nothing was withheld, so there is nothing to warn about")
+	assert.Len(t, transport.queriesFor(cardsAggregatePath("overdue")), 1,
+		"--all costs no extra request on an unpaginated endpoint")
+}
+
+// TestCardsListAccountWideSorting tests that sorting is rejected for the
+// grouped aggregates and honored for the flat overdue list.
+func TestCardsListAccountWideSorting(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--sort", "due")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--sort is not supported for grouped")
+
+	app, _ = setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
+	err = executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--sort", "position")
+	assert.Contains(t, cardsUsageError(t, err).Message, "--sort position requires --column")
+
+	// Sorting precedes truncation: the earliest-titled card survives --limit 1.
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsAllAggregateRoutes()...)
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app,
+		"list", "--all-projects", "--overdue", "--sort", "title", "--limit", "1"))
+
+	var envelope struct {
+		Data   []basecamp.Card `json:"data"`
+		Notice string          `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 1)
+	assert.Equal(t, "Alpha late", envelope.Data[0].Title)
+	assert.Contains(t, envelope.Notice, "first 1 of 2")
+}
+
+// TestCardsListReverseRequiresSort tests that --reverse alone is an error
+// rather than a no-op.
+func TestCardsListReverseRequiresSort(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, cardsOpenRoute())
+	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--reverse")
+	assert.Equal(t, "--reverse requires --sort", cardsUsageError(t, err).Message)
+}
+
+// TestCardsListAccountWideLimitCountsCards tests that --limit truncates inner
+// cards, keeping the groups that hold them, rather than dropping projects.
+func TestCardsListAccountWideLimitCountsCards(t *testing.T) {
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--limit", "3"))
+
+	var envelope struct {
+		Data    []basecamp.BucketCardsGroup `json:"data"`
+		Summary string                      `json:"summary"`
+		Notice  string                      `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 2, "both projects survive a card-counted limit")
+	assert.Equal(t, 3, countAccountWideCards(envelope.Data))
+	assert.Equal(t, "Alpha", envelope.Data[0].Bucket.Name)
+	assert.Len(t, envelope.Data[1].Cards, 1)
+	assert.Contains(t, envelope.Summary, "3 open cards across 2 projects")
+	// The walk stops at the cap, so the account-wide total is unknown by
+	// construction — claiming "of 4" would be reporting the size of the one
+	// page that happened to be fetched.
+	assert.Contains(t, envelope.Notice, "Showing the first 3 cards; more may exist")
+}
+
+// TestCardsListAccountWideOutputBranches tests that machine formats keep the
+// grouping and styled output gets flattened rows.
+func TestCardsListAccountWideOutputBranches(t *testing.T) {
+	app, _, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+
+	var envelope struct {
+		Data []basecamp.BucketCardsGroup `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.Len(t, envelope.Data, 2)
+	assert.Equal(t, 4, countAccountWideCards(envelope.Data))
+
+	app, _, styled := setupCardsAccountWideApp(t, output.FormatStyled, cardsOpenRoute())
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects"))
+	rendered := styled.String()
+	assert.Contains(t, rendered, "Alpha")
+	assert.Contains(t, rendered, "Beta")
+	assert.Contains(t, rendered, "Alpha one")
+	assert.NotContains(t, rendered, "bucket")
+}
+
+// TestFlattenAccountWideCards tests that flattening carries the project name
+// alongside each card.
+func TestFlattenAccountWideCards(t *testing.T) {
+	groups := []basecamp.BucketCardsGroup{
+		{Bucket: basecamp.Bucket{ID: 1, Name: "Alpha"}, Cards: []basecamp.Card{{ID: 11, Title: "One", Status: "active", DueOn: "2026-01-01"}}},
+		{Bucket: basecamp.Bucket{ID: 2, Name: "Beta"}},
+	}
+
+	rows := flattenAccountWideCards(groups)
+	require.Len(t, rows, 1)
+	assert.Equal(t, map[string]any{
+		"id": int64(11), "title": "One", "project": "Alpha", "status": "active", "due": "2026-01-01",
+	}, rows[0])
+}
+
+// TestTruncateAccountWideCards tests that truncation trims from the tail and
+// never keeps more cards than asked for.
+func TestTruncateAccountWideCards(t *testing.T) {
+	groups := []basecamp.BucketCardsGroup{
+		{Bucket: basecamp.Bucket{Name: "Alpha"}, Cards: []basecamp.Card{{ID: 1}, {ID: 2}}},
+		{Bucket: basecamp.Bucket{Name: "Beta"}, Cards: []basecamp.Card{{ID: 3}, {ID: 4}}},
+	}
+
+	assert.Equal(t, 1, countAccountWideCards(truncateAccountWideCards(groups, 1)))
+	assert.Len(t, truncateAccountWideCards(groups, 1), 1)
+	assert.Len(t, truncateAccountWideCards(groups, 2), 1)
+	assert.Len(t, truncateAccountWideCards(groups, 3), 2)
+	assert.Equal(t, 4, countAccountWideCards(truncateAccountWideCards(groups, 9)))
 }

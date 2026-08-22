@@ -117,7 +117,7 @@ func TestLoadFromEnv(t *testing.T) {
 	os.Setenv("BASECAMP_CACHE_ENABLED", "false")
 
 	cfg := Default()
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	// Verify values loaded
 	assert.Equal(t, "http://env.example.com", cfg.BaseURL)
@@ -149,7 +149,7 @@ func TestLoadFromEnvPrecedence(t *testing.T) {
 	os.Setenv("BASECAMP_BASE_URL", "http://basecamp.example.com")
 
 	cfg := Default()
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	assert.Equal(t, "http://basecamp.example.com", cfg.BaseURL)
 }
@@ -286,7 +286,7 @@ func TestFullLayeringPrecedence(t *testing.T) {
 	// Apply layers in order
 	loadFromFile(cfg, globalConfig, SourceGlobal, nil)
 	loadFromFile(cfg, localConfig, SourceLocal, nil)
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 	ApplyOverrides(cfg, FlagOverrides{
 		// No flag overrides
 	})
@@ -382,7 +382,7 @@ func TestCacheEnabledEnvParsing(t *testing.T) {
 
 			cfg := Default()
 			cfg.CacheEnabled = tt.startValue
-			LoadFromEnv(cfg)
+			require.NoError(t, LoadFromEnv(cfg))
 
 			assert.Equal(t, tt.expected, cfg.CacheEnabled)
 		})
@@ -404,7 +404,7 @@ func TestCacheEnabledEnvEmpty(t *testing.T) {
 
 	cfg := Default()
 	cfg.CacheEnabled = true
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	// Should remain true (env var not set, so doesn't change)
 	assert.True(t, cfg.CacheEnabled)
@@ -781,6 +781,195 @@ func TestLoadFromFile_BaseURLRejectedFromLocal(t *testing.T) {
 	assert.Equal(t, "https://3.basecampapi.com", cfg.BaseURL, "local config should not override base_url")
 }
 
+// TestLoadFromFile_AuthorityKeysRejectedFromLocal verifies the sibling
+// authority keys closed by the security audit (cache_dir, cache_enabled,
+// llm_model, llm_max_concurrent, llm_token_budget) are ignored — with a
+// warning — when they appear in an untrusted local/repo config, while their
+// default values are preserved.
+func TestLoadFromFile_AuthorityKeysRejectedFromLocal(t *testing.T) {
+	defaults := Default()
+
+	cases := []struct {
+		name      string
+		json      string
+		warnFrag  string
+		assertDef func(t *testing.T, cfg *Config)
+	}{
+		{
+			name:     "cache_dir",
+			json:     `{"cache_dir":"/home/victim/.ssh"}`,
+			warnFrag: "ignoring cache_dir",
+			assertDef: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, defaults.CacheDir, cfg.CacheDir)
+				assert.Empty(t, cfg.Sources["cache_dir"])
+			},
+		},
+		{
+			name:     "cache_enabled",
+			json:     `{"cache_enabled":false}`,
+			warnFrag: "ignoring cache_enabled",
+			assertDef: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, defaults.CacheEnabled, cfg.CacheEnabled)
+				assert.Empty(t, cfg.Sources["cache_enabled"])
+			},
+		},
+		{
+			name:     "llm_model",
+			json:     `{"llm_model":"gpt-4-turbo-expensive"}`,
+			warnFrag: "ignoring llm_model",
+			assertDef: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, defaults.LLMModel, cfg.LLMModel)
+				assert.Empty(t, cfg.Sources["llm_model"])
+			},
+		},
+		{
+			name:     "llm_max_concurrent",
+			json:     `{"llm_max_concurrent":10}`,
+			warnFrag: "ignoring llm_max_concurrent",
+			assertDef: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, defaults.LLMMaxConcurrent, cfg.LLMMaxConcurrent)
+				assert.Empty(t, cfg.Sources["llm_max_concurrent"])
+			},
+		},
+		{
+			name:     "llm_token_budget",
+			json:     `{"llm_token_budget":100000}`,
+			warnFrag: "ignoring llm_token_budget",
+			assertDef: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, defaults.LLMTokenBudget, cfg.LLMTokenBudget)
+				assert.Empty(t, cfg.Sources["llm_token_budget"])
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+			require.NoError(t, os.WriteFile(configPath, []byte(tc.json), 0644))
+
+			origStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			cfg := Default()
+			loadFromFile(cfg, configPath, SourceLocal, nil) // nil trust → untrusted
+
+			w.Close()
+			var buf [1024]byte
+			n, _ := r.Read(buf[:])
+			os.Stderr = origStderr
+
+			assert.Contains(t, string(buf[:n]), tc.warnFrag)
+			tc.assertDef(t, cfg)
+		})
+	}
+}
+
+// TestLoadFromFile_AuthorityKeysAcceptedFromGlobal confirms the same keys are
+// honored from a trusted (global) source, so the gating doesn't over-reach.
+func TestLoadFromFile_AuthorityKeysAcceptedFromGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{
+		"cache_dir":"/var/cache/basecamp",
+		"cache_enabled":false,
+		"llm_model":"gpt-4",
+		"llm_max_concurrent":7,
+		"llm_token_budget":5000
+	}`), 0644))
+
+	cfg := Default()
+	loadFromFile(cfg, configPath, SourceGlobal, nil)
+
+	assert.Equal(t, "/var/cache/basecamp", cfg.CacheDir)
+	assert.False(t, cfg.CacheEnabled)
+	assert.Equal(t, "gpt-4", cfg.LLMModel)
+	assert.Equal(t, 7, cfg.LLMMaxConcurrent)
+	assert.Equal(t, 5000, cfg.LLMTokenBudget)
+}
+
+// TestLoadFromFile_LLMEndpointMalformedKept verifies a malformed (non-http(s) or
+// hostless) llm_endpoint from a trusted source is KEPT rather than warned+dropped.
+// Dropping it would silently fall back to the default provider; keeping it lets
+// the dev-gated TUI summarize path fail closed at consumption
+// (summarize.ValidateEndpoint in workspace.NewSession) while config subcommands
+// can still repair via `config unset llm_endpoint`.
+func TestLoadFromFile_LLMEndpointMalformedKept(t *testing.T) {
+	for _, bad := range []string{"file:///etc/passwd", "https:example.com", "ssh://host/x"} {
+		t.Run(bad, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+			body, _ := json.Marshal(map[string]any{"llm_endpoint": bad})
+			require.NoError(t, os.WriteFile(configPath, body, 0644))
+
+			cfg := Default()
+			loadFromFile(cfg, configPath, SourceGlobal, nil)
+
+			assert.Equal(t, bad, cfg.LLMEndpoint)
+			assert.Equal(t, "global", cfg.Sources["llm_endpoint"])
+		})
+	}
+}
+
+// TestLoadFromEnv_LLMEndpointMalformedKept verifies a non-http(s) or hostless
+// BASECAMP_LLM_ENDPOINT is stored as-is rather than erroring at load time,
+// mirroring the trusted-file path. Erroring here would block every command —
+// including the `config unset llm_endpoint` repair path — for all providers.
+// summarize.ValidateEndpoint (called from workspace.NewSession, the only
+// consumer of llm_endpoint) rejects the value at use time for providers that
+// send llm_api_key to the endpoint, so the typo still surfaces instead of
+// silently falling back to the default provider.
+func TestLoadFromEnv_LLMEndpointMalformedKept(t *testing.T) {
+	for _, bad := range []string{"file:///etc/passwd", "https:example.com", "ssh://host/x"} {
+		t.Run(bad, func(t *testing.T) {
+			t.Setenv("BASECAMP_LLM_ENDPOINT", bad)
+
+			cfg := Default()
+			require.NoError(t, LoadFromEnv(cfg))
+
+			assert.Equal(t, bad, cfg.LLMEndpoint)
+			assert.Equal(t, "env", cfg.Sources["llm_endpoint"])
+		})
+	}
+}
+
+// TestLoadFromEnv_LLMEndpointAccepted verifies a valid endpoint loads with env
+// provenance and no error.
+func TestLoadFromEnv_LLMEndpointAccepted(t *testing.T) {
+	t.Setenv("BASECAMP_LLM_ENDPOINT", "https://api.openai.com/v1")
+
+	cfg := Default()
+	require.NoError(t, LoadFromEnv(cfg))
+
+	assert.Equal(t, "https://api.openai.com/v1", cfg.LLMEndpoint)
+	assert.Equal(t, "env", cfg.Sources["llm_endpoint"])
+}
+
+// TestLoadFromEnv_LLMEndpointEmpty verifies an unset BASECAMP_LLM_ENDPOINT is a
+// no-op: no error, and no endpoint or provenance recorded.
+func TestLoadFromEnv_LLMEndpointEmpty(t *testing.T) {
+	t.Setenv("BASECAMP_LLM_ENDPOINT", "")
+
+	cfg := Default()
+	require.NoError(t, LoadFromEnv(cfg))
+
+	assert.Empty(t, cfg.LLMEndpoint)
+	assert.Empty(t, cfg.Sources["llm_endpoint"])
+}
+
+// TestIsHTTPURL covers the scheme+host validation reused at llm_endpoint's
+// call sites: config-set acceptance (internal/commands/config.go) and
+// consumption-time validation (summarize.ValidateEndpoint).
+func TestIsHTTPURL(t *testing.T) {
+	for _, ok := range []string{"http://localhost:11434", "https://api.openai.com/v1", "http://127.0.0.1:8080/x", "http://host:8080", "https://host", "http://[::1]:8080"} {
+		assert.True(t, IsHTTPURL(ok), "%q should be accepted", ok)
+	}
+	for _, bad := range []string{"", "file:///etc/passwd", "ssh://h/x", "https:example.com", "https://", "not a url", "/relative", "http://:8080", "https://:443"} {
+		assert.False(t, IsHTTPURL(bad), "%q should be rejected", bad)
+	}
+}
+
 func TestLoadFromFile_BaseURLNoWarningForGlobal(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")
@@ -961,7 +1150,7 @@ func TestPreferencesFromEnv(t *testing.T) {
 	os.Setenv("BASECAMP_STATS", "0")
 
 	cfg := Default()
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	require.NotNil(t, cfg.Hints)
 	assert.True(t, *cfg.Hints)
@@ -994,7 +1183,7 @@ func TestPreferencesEnvOverridesFile(t *testing.T) {
 
 	cfg := Default()
 	loadFromFile(cfg, configPath, SourceGlobal, nil)
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	require.NotNil(t, cfg.Hints)
 	assert.False(t, *cfg.Hints, "env should override file")
@@ -1042,7 +1231,7 @@ func TestEnvInvalidBoolIgnored(t *testing.T) {
 	os.Setenv("BASECAMP_HINTS", "banana")
 
 	cfg := Default()
-	LoadFromEnv(cfg)
+	require.NoError(t, LoadFromEnv(cfg))
 
 	assert.Nil(t, cfg.Hints, "invalid env bool should leave pointer nil")
 }

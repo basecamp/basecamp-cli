@@ -1042,6 +1042,12 @@ func (v *Todos) startEditDescription() tea.Cmd {
 		}
 	}
 
+	// Fail closed on table-bearing content: HTMLToMarkdown has no table handling,
+	// so entering edit mode and resubmitting would strip the table. Block the edit.
+	if richtext.HasTableHTML(description) {
+		return workspace.SetStatus("This to-do description contains a table — edit it on Basecamp web", true)
+	}
+
 	v.editingDesc = true
 	v.descTodoID = todoID
 	v.descComposer.Reset()

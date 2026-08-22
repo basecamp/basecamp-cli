@@ -29,7 +29,8 @@ You can pass either an ID or a Basecamp URL:
 
 Events track all changes to an item. Common event actions:
 - created - Item was created
-- completed/uncompleted - Todo completion state changed
+- completed/uncompleted - Todo or card completion state changed
+- adopted - A card moved to another column
 - assignment_changed - Assignees were added/removed
 - content_changed - Content was edited
 - archived/unarchived - Status changed

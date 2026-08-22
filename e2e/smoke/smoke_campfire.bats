@@ -44,6 +44,28 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
+@test "campfire update edits a message" {
+  local id_file="$BATS_FILE_TMPDIR/campfire_line_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No campfire line created in prior test"
+  local line_id new_content
+  line_id=$(<"$id_file")
+  new_content="Edited smoke test $(date +%s)"
+
+  run_smoke basecamp campfire update "$line_id" "$new_content" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+
+  # Re-fetch the line and verify its content actually changed (guards against
+  # a no-op update silently passing).
+  run_smoke basecamp campfire line "$line_id" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  echo "$output" | jq -e --arg expected "$new_content" '.data.content | contains($expected)' >/dev/null \
+    || fail "expected updated line content to contain '$new_content', got: $(echo "$output" | jq -r '.data.content')"
+}
+
 @test "campfire delete deletes a message" {
   local id_file="$BATS_FILE_TMPDIR/campfire_line_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No campfire line created in prior test"

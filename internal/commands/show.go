@@ -356,7 +356,25 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return ""
 	}
 
-	switch t {
+	// Inbox forward replies need the parent forward ID for the nested endpoint.
+	if t == "Inbox::Forward::Reply" {
+		if parentID := parentRecordingID(data); parentID != "" {
+			return fmt.Sprintf("/inbox_forwards/%s/replies/%s.json", parentID, id)
+		}
+		return ""
+	}
+
+	return canonicalEndpointForType(t, id)
+}
+
+// canonicalEndpointForType maps an ordinary recording type to its type-specific
+// endpoint path. It handles only context-free types — those whose endpoint is a
+// pure function of (type, id). Contextual types that additionally need a parent
+// ID (Chat::Lines::*, Inbox::Forward::Reply) are layered on by
+// recordingTypeEndpoint and are intentionally absent here. Returns "" for
+// unrecognized types, letting callers fall through to sparse recording data.
+func canonicalEndpointForType(recType, id string) string {
+	switch recType {
 	case "Todo", "Todolist::Todo":
 		return fmt.Sprintf("/todos/%s.json", id)
 	case "Todolist":
@@ -397,11 +415,6 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 		return fmt.Sprintf("/card_tables/columns/%s.json", id)
 	case "Kanban::Step":
 		return fmt.Sprintf("/card_tables/steps/%s.json", id)
-	case "Inbox::Forward::Reply":
-		if parentID := parentRecordingID(data); parentID != "" {
-			return fmt.Sprintf("/inbox_forwards/%s/replies/%s.json", parentID, id)
-		}
-		return ""
 	default:
 		return ""
 	}

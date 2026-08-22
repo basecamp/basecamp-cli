@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,18 +16,23 @@ func init() {
 		Name:   "Claude Code",
 		ID:     "claude",
 		Detect: DetectClaude,
-		Checks: func() []*StatusCheck {
-			checks := []*StatusCheck{CheckClaudePlugin()}
-			// Only check the skill link if ~/.claude exists (i.e. Claude is dir-detected)
-			home, err := os.UserHomeDir()
-			if err == nil {
-				if info, statErr := os.Stat(filepath.Join(home, ".claude")); statErr == nil && info.IsDir() {
-					checks = append(checks, CheckClaudeSkillLink())
-				}
-			}
-			return checks
+		Checks: claudeChecks,
+		Diagnostics: func(_ context.Context) []*StatusCheck {
+			return append(claudeChecks(), CheckClaudePluginVersion())
 		},
 	})
+}
+
+func claudeChecks() []*StatusCheck {
+	checks := []*StatusCheck{CheckClaudePlugin()}
+	// Only check the skill link if ~/.claude exists (i.e. Claude is dir-detected)
+	home, err := os.UserHomeDir()
+	if err == nil {
+		if info, statErr := os.Stat(filepath.Join(home, ".claude")); statErr == nil && info.IsDir() {
+			checks = append(checks, CheckClaudeSkillLink())
+		}
+	}
+	return checks
 }
 
 // ClaudeMarketplaceSource is the marketplace repository for the Basecamp plugin.

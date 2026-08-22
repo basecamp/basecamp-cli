@@ -1,0 +1,32 @@
+name: Sync Dependabot action pin comments
+
+# Post-merge backstop. Dependabot maintains the bare `# vX.Y.Z` comments on
+# its own PRs natively (pins restructured to one-line-pin + standalone zizmor
+# ignore). After workflow-file pushes land on main, the SHA-pinned reusable
+# workflow recomputes the comments and, when drifted, opens a comment-only
+# repair PR that auto-merges once checks pass. Only reviewed default-branch
+# code executes; nothing is ever pushed to a Dependabot branch, so the
+# Dependabot sandbox on its PRs is never disturbed.
+
+on:
+  push:
+    branches: [main]
+    # GitHub path filters don't do {yml,yaml} brace expansion — list both.
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  sync:
+    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@d7a98882c52e021fa0d4ae31e92e56d03dcce774
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+    # The deploy key is scoped to this repo's dependabot-sync environment
+    # (deployment branches: default branch only); environment secrets cannot
+    # be forwarded explicitly to a reusable workflow, so inherit is required.
+    secrets: inherit # zizmor: ignore[secrets-inherit] -- see above; the called workflow is SHA-pinned and reads only SYNC_ACTIONS_DEPLOY_KEY, gated by the dependabot-sync environment

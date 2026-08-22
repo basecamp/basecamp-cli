@@ -85,6 +85,7 @@ if [[ "${PRERELEASE}" == "true" ]]; then
   info "Skipping stable release metadata for prerelease"
   echo "  nix flake: unchanged"
   echo "  Claude plugin metadata: unchanged"
+  echo "  Codex plugin metadata: unchanged"
 else
   # --- Update Nix flake ---
   info "Updating Nix flake"
@@ -108,12 +109,13 @@ else
     echo "  (skipped — dry run)"
   else
     scripts/stamp-plugin-version.sh "${VERSION}"
+    scripts/stamp-codex-plugin-version.sh "${VERSION}"
   fi
 fi
 
 # --- Commit release prep ---
 if [[ "${PRERELEASE}" != "true" && "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1" ]]; then
-  git add nix/package.nix .claude-plugin/plugin.json
+  git add nix/package.nix .claude-plugin/plugin.json .codex-plugin/plugin.json
   if ! git diff --cached --quiet; then
     STAGED=$(git diff --cached --name-only)
     HAS_NIX=false
@@ -121,7 +123,7 @@ if [[ "${PRERELEASE}" != "true" && "${DRY_RUN}" != "true" && "${DRY_RUN}" != "1"
     if echo "${STAGED}" | grep -q "^nix/package\.nix$"; then
       HAS_NIX=true
     fi
-    if echo "${STAGED}" | grep -q "^\.claude-plugin/plugin\.json$"; then
+    if echo "${STAGED}" | grep -qE "^\.(claude|codex)-plugin/plugin\.json$"; then
       HAS_PLUGIN=true
     fi
     if [[ "${HAS_NIX}" == "true" && "${HAS_PLUGIN}" == "true" ]]; then

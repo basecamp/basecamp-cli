@@ -12,8 +12,34 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
+
+// TestBadLLMEndpointDoesNotBlockUnrelatedCommands is a regression test for
+// the startup-validation lockout: llm_endpoint is consumed only by the
+// dev-gated TUI's summarize path (which fail-closes via
+// summarize.ValidateEndpoint in workspace.NewSession — see TestValidateEndpoint
+// there), so PersistentPreRunE must not reject an endpoint that would fail
+// that validation. Here the openai provider + API key + plain-http remote
+// endpoint is the worst case, and an ordinary command still runs.
+func TestBadLLMEndpointDoesNotBlockUnrelatedCommands(t *testing.T) {
+	isolateRootTest(t)
+	t.Setenv("BASECAMP_LLM_PROVIDER", "openai")
+	t.Setenv("BASECAMP_LLM_API_KEY", "secret")
+	t.Setenv("BASECAMP_LLM_ENDPOINT", "http://remote-host:1234")
+
+	root := NewRootCmd()
+	root.AddCommand(&cobra.Command{
+		Use:  "noop",
+		RunE: func(cmd *cobra.Command, args []string) error { return nil },
+	})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"noop"})
+
+	require.NoError(t, root.Execute())
+}
 
 func TestResolvePreferences(t *testing.T) {
 	boolPtr := func(b bool) *bool { return &b }
@@ -140,16 +166,7 @@ func isolateRootTest(t *testing.T) {
 }
 
 func TestIsInteractiveTTYWithNonInteractiveEnv(t *testing.T) {
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skip(os.DevNull + " not available")
-	}
-	origStdout := os.Stdout
-	os.Stdout = devNull
-	t.Cleanup(func() {
-		os.Stdout = origStdout
-		devNull.Close()
-	})
+	stubCharDeviceStdio(t)
 
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}))
@@ -259,4 +276,90 @@ func TestVersionWithJQReturnsUsageError(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--jq is not supported by the version command")
+}
+
+// The profile picker runs from PersistentPreRunE, before any command reads its
+// own input. Piped stdin can never drive a TUI, and when the invocation is
+// feeding a "-" content input the picker would eat that body as keystrokes —
+// so a terminal stdout is not on its own enough to open one.
+func TestIsInteractiveTTYRequiresUnpipedStdin(t *testing.T) {
+	stubCharDeviceStdio(t)
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+
+	require.True(t, isInteractiveTTY(appctx.GlobalFlags{}), "char-device stdio is interactive")
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	origStdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		reader.Close()
+		writer.Close()
+	})
+
+	assert.False(t, isInteractiveTTY(appctx.GlobalFlags{}),
+		"piped stdin must not open the profile picker")
+}
+
+// The root's dash guard hangs off the front of its persistent pre-run (its Args
+// must stay nil for cobra's unknown-command handling), so quick-start's own
+// interactive paths sit behind it. The e2e suite always has a piped stdout,
+// which takes the machine-output branch and never reaches them — this covers
+// the other side: a character-device stdout, the terminal stand-in, with a
+// piped stdin. The root carries a subcommand so InstallDashGuard takes the
+// pre-run branch production uses, not the Args branch for a childless root.
+func TestRootDashGuardWithTerminalStdout(t *testing.T) {
+	isolateRootTest(t)
+
+	stubCharDeviceStdio(t)
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	origStdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		reader.Close()
+		writer.Close()
+	})
+	_, _ = writer.WriteString("piped body")
+	writer.Close()
+
+	// Terminal stdout plus piped stdin: no TUI may open, and the stray "-"
+	// must be rejected rather than quietly quick-starting.
+	assert.False(t, stdinarg.InteractiveStdio(),
+		"piped stdin must close every TUI gate even with a terminal stdout")
+
+	root := NewRootCmd()
+	root.AddCommand(commands.NewConfigCmd())
+	commands.InstallDashGuard(root)
+	require.Nil(t, root.Args, "the root must keep nil Args for cobra's unknown-command lookup")
+	root.SetIn(reader)
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"-"})
+
+	err = root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not read stdin")
+}
+
+// stubCharDeviceStdio points both stdout and stdin at /dev/null, a character
+// device, so interactivity assertions do not depend on how `go test` itself was
+// invoked — a piped stdin on the test runner would otherwise fail the
+// interactive baseline now that both streams are checked.
+func stubCharDeviceStdio(t *testing.T) {
+	t.Helper()
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(os.DevNull + " not available")
+	}
+	origStdout, origStdin := os.Stdout, os.Stdin
+	os.Stdout, os.Stdin = devNull, devNull
+	t.Cleanup(func() {
+		os.Stdout, os.Stdin = origStdout, origStdin
+		devNull.Close()
+	})
 }

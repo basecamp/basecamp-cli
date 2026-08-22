@@ -34,19 +34,25 @@ const (
 	CodeNetwork   = "network"
 	CodeAPI       = "api_error"
 	CodeAmbiguous = "ambiguous"
+	// SDK v0.13.0/v0.14.0 additions: 422s report validation, 507s report a
+	// non-retryable account limit.
+	CodeValidation    = "validation"
+	CodeLimitExceeded = "limit_exceeded"
 )
 
 // Exit codes.
 const (
-	ExitOK        = 0 // Success
-	ExitUsage     = 1 // Invalid arguments or flags
-	ExitNotFound  = 2 // Resource not found
-	ExitAuth      = 3 // Not authenticated
-	ExitForbidden = 4 // Access denied (scope issue)
-	ExitRateLimit = 5 // Rate limited (429)
-	ExitNetwork   = 6 // Connection/DNS/timeout error
-	ExitAPI       = 7 // Server returned error
-	ExitAmbiguous = 8 // Multiple matches for name
+	ExitOK         = 0  // Success
+	ExitUsage      = 1  // Invalid arguments or flags
+	ExitNotFound   = 2  // Resource not found
+	ExitAuth       = 3  // Not authenticated
+	ExitForbidden  = 4  // Access denied (scope issue)
+	ExitRateLimit  = 5  // Rate limited (429)
+	ExitNetwork    = 6  // Connection/DNS/timeout error
+	ExitAPI        = 7  // Server returned error
+	ExitAmbiguous  = 8  // Multiple matches for name
+	ExitValidation = 9  // Validation error (422)
+	ExitLimit      = 10 // Account limit reached (507)
 )
 
 // ExitCodeFor returns the exit code for a given error code.
@@ -68,6 +74,10 @@ func ExitCodeFor(code string) int {
 		return ExitAPI
 	case CodeAmbiguous:
 		return ExitAmbiguous
+	case CodeValidation:
+		return ExitValidation
+	case CodeLimitExceeded:
+		return ExitLimit
 	default:
 		return ExitAPI
 	}

@@ -5,12 +5,12 @@ package resolve
 
 import (
 	"context"
-	"os"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -101,11 +101,11 @@ func (r *Resolver) Flags() *Flags {
 }
 
 // IsInteractive returns true if interactive prompts can be shown.
-// This checks both stdout and machine-output flags.
+// This checks stdout, stdin, and machine-output flags.
 // Returns false if BASECAMP_NONINTERACTIVE is set, if any machine-output flag is
-// set (--agent, --json, --quiet, --ids-only, --count), or if stdout is not a
-// character device (the guard treats any char device — a terminal, /dev/null,
-// etc. — as interactive-capable).
+// set (--agent, --json, --quiet, --ids-only, --count), or if stdout or stdin is
+// not a character device (the guard treats any char device — a terminal,
+// /dev/null, etc. — as interactive-capable).
 func (r *Resolver) IsInteractive() bool {
 	// Explicit escape hatch: BASECAMP_NONINTERACTIVE forces non-interactive mode
 	// even under a PTY, without changing the output format.
@@ -120,12 +120,11 @@ func (r *Resolver) IsInteractive() bool {
 		}
 	}
 
-	// Check if stdout is a character device (e.g. a terminal)
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	// Both stdout and stdin must be character devices: pickers draw to
+	// stdout and read keystrokes from stdin, so a pipe on either end can
+	// never drive one — and when the command is consuming piped content
+	// (a "-" stdin input), a picker would eat that content as key events.
+	return stdinarg.InteractiveStdio()
 }
 
 // ResolvedValue represents a value that was resolved, along with metadata

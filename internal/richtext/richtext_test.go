@@ -216,6 +216,14 @@ func TestMarkdownToHTML(t *testing.T) {
 			input:    "intro\n\n```\n<div>hello</div>\n```",
 			expected: "<p>intro</p>\n<p><br></p>\n<pre><code>&lt;div&gt;hello&lt;/div&gt;\n</code></pre>",
 		},
+		{
+			// Issue #405: a GFM table renders as a bare <table> (BC3's
+			// WrapTablesFilter supplies the figure wrapper). Doubles as the
+			// heading+table regression.
+			name:     "gfm table with heading (issue #405)",
+			input:    "# Report\n\n| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+			expected: "<h1>Report</h1>\n<table>\n<thead>\n<tr>\n<th>Foo</th>\n<th>Bar</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>Baz</td>\n<td>Qux</td>\n</tr>\n</tbody>\n</table>",
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +233,21 @@ func TestMarkdownToHTML(t *testing.T) {
 				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestMarkdownToHTMLTableAlignment(t *testing.T) {
+	// Column alignment must survive BC3's sanitizer, which whitelists the `align`
+	// attribute but strips inline `style` (only color/background-color survive).
+	got := MarkdownToHTML("| a | b |\n|:--|--:|\n| 1 | 2 |")
+	if !strings.Contains(got, `align="left"`) {
+		t.Errorf("expected align=\"left\" in %q", got)
+	}
+	if !strings.Contains(got, `align="right"`) {
+		t.Errorf("expected align=\"right\" in %q", got)
+	}
+	if strings.Contains(got, "style=") {
+		t.Errorf("expected no style= (stripped by BC3 sanitizer) in %q", got)
 	}
 }
 
@@ -1159,6 +1182,31 @@ func TestIsMarkdown(t *testing.T) {
 			input:    "> Quote",
 			expected: true,
 		},
+		{
+			name:     "multi-column table",
+			input:    "| Foo | Bar |\n| --- | --- |\n| Baz | Qux |",
+			expected: true,
+		},
+		{
+			name:     "single-column table",
+			input:    "| value |\n| --- |\n| item |",
+			expected: true,
+		},
+		{
+			name:     "table with CRLF line endings",
+			input:    "| Foo | Bar |\r\n| --- | --- |\r\n| Baz | Qux |",
+			expected: true,
+		},
+		{
+			name:     "lone delimiter line is not a table",
+			input:    "---|---",
+			expected: false,
+		},
+		{
+			name:     "prose containing pipes is not a table",
+			input:    "run foo | grep bar to filter the output",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1262,6 +1310,14 @@ func TestIsHTML(t *testing.T) {
 			input:    `\<bc-attachment sgid="x">\</bc-attachment>`,
 			expected: false,
 		},
+		{
+			// A plain BC3 table response carries no other formatting tags, so
+			// IsHTML must recognize <table> itself, or the raw markup would leak
+			// to the reader instead of being converted for display.
+			name:     "bc3-wrapped table",
+			input:    "<figure><table><thead><tr><th>Foo</th></tr></thead><tbody><tr><td>Baz</td></tr></tbody></table></figure>",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1269,6 +1325,30 @@ func TestIsHTML(t *testing.T) {
 			result := IsHTML(tt.input)
 			if result != tt.expected {
 				t.Errorf("IsHTML(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHasTableHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "lowercase table tag", input: "<table><tr><td>x</td></tr></table>", expected: true},
+		{name: "uppercase table tag with attrs", input: `<TABLE class="x"><tr></tr></TABLE>`, expected: true},
+		{name: "self-closing table tag", input: "<table/>", expected: true},
+		{name: "wrapped table", input: "<figure><table></table></figure>", expected: true},
+		{name: "plain text", input: "just some text", expected: false},
+		{name: "pipe markdown", input: "| a | b |\n| --- | --- |\n| 1 | 2 |", expected: false},
+		{name: "word starting with table", input: "the tablet is here", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasTableHTML(tt.input); got != tt.expected {
+				t.Errorf("HasTableHTML(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
 		})
 	}
@@ -1592,6 +1672,16 @@ func TestResolveMentions(t *testing.T) {
 			name:     "mention inside pre block is skipped",
 			input:    `<pre>@John example</pre>`,
 			expected: `<pre>@John example</pre>`,
+		},
+		{
+			name:     "mention after closed code block is resolved",
+			input:    `<code>@John</code> @John`,
+			expected: `<code>@John</code> ` + MentionToHTML("sgid-john", "John Doe"),
+		},
+		{
+			name:     "mention after closed attachment is resolved",
+			input:    `<bc-attachment sgid="x">@John</bc-attachment> @John`,
+			expected: `<bc-attachment sgid="x">@John</bc-attachment> ` + MentionToHTML("sgid-john", "John Doe"),
 		},
 		{
 			name:     "mention after self-closing bc-attachment is resolved",
@@ -2376,5 +2466,189 @@ func TestMarkdownToHTMLEmitsNoBareTopLevelBreaks(t *testing.T) {
 	}
 	if want := strings.Count(markdown, "\n\n"); strings.Count(html, paragraphSeparator) != want {
 		t.Errorf("got %d separator paragraphs, want %d in %q", strings.Count(html, paragraphSeparator), want, html)
+	}
+}
+
+// TestResolveMentions_MarkdownLinkInHTMLBlock covers the regression from the
+// "broken @mention rendering" report: a [@Name](mention:SGID) link authored
+// inside an HTML block is passed through verbatim by MarkdownToHTML (never
+// becoming an anchor), and must be converted to a single clean mention chip
+// rather than being mangled by the fuzzy @Name matcher.
+func TestResolveMentions_MarkdownLinkInHTMLBlock(t *testing.T) {
+	lookup := func(name string) (sgid, displayName string, err error) {
+		// "Jorge" resolves — this is what the fuzzy pass would latch onto if the
+		// literal link were not handled first, producing the reported garbage.
+		if name == "Jorge" || name == "Jorge Manrubia" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("%w: not found: %s", ErrMentionSkip, name)
+	}
+	lookupByID := func(id string) (sgid, canonicalName string, err error) {
+		if id == "42" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("not found: %s", id)
+	}
+
+	sgid := "BAh7CEkiCG9pZA__c122645233a25510b54af45164e6002c0f99e870"
+	mentionChip := MentionToHTML(sgid, "Jorge Manrubia")
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "mention scheme inside div block",
+			input:    `<div dir="auto">Ready for your review. [@Jorge Manrubia](mention:` + sgid + `)</div>`,
+			expected: `<div dir="auto">Ready for your review. ` + mentionChip + `</div>`,
+		},
+		{
+			name:     "person scheme inside div block",
+			input:    `<div dir="auto">cc [@Jorge Manrubia](person:42)</div>`,
+			expected: `<div dir="auto">cc ` + MentionToHTML("sgid-jorge", "Jorge Manrubia") + `</div>`,
+		},
+		{
+			name:     "literal link inside code is documentation, left untouched",
+			input:    `<p>Use <code>[@Name](mention:SGID)</code> for mentions</p>`,
+			expected: `<p>Use <code>[@Name](mention:SGID)</code> for mentions</p>`,
+		},
+		{
+			name:     "literal link inside pre is documentation, left untouched",
+			input:    `<pre>[@Name](mention:SGID)</pre>`,
+			expected: `<pre>[@Name](mention:SGID)</pre>`,
+		},
+		{
+			name:     "literal link inside attachment is left untouched",
+			input:    `<bc-attachment sgid="existing">[@Name](mention:SGID)</bc-attachment>`,
+			expected: `<bc-attachment sgid="existing">[@Name](mention:SGID)</bc-attachment>`,
+		},
+		{
+			name:     "literal link inside quoted attribute is left untouched",
+			input:    `<div data-example="> [@Name](mention:SGID)">body</div>`,
+			expected: `<div data-example="> [@Name](mention:SGID)">body</div>`,
+		},
+		{
+			name:     "literal link after quoted less-than resolves",
+			input:    `<div data-example="<sample">body</div>[@Jorge](person:42)`,
+			expected: `<div data-example="<sample">body</div>` + MentionToHTML("sgid-jorge", "Jorge Manrubia"),
+		},
+		{
+			name:     "entity-bearing display name is not double encoded",
+			input:    `<div>[@AT&amp;T](mention:` + sgid + `)</div>`,
+			expected: `<div>` + MentionToHTML(sgid, "AT&T") + `</div>`,
+		},
+		{
+			name:  "multiple literal links resolve from right to left",
+			input: `<div>[@Jorge Manrubia](mention:` + sgid + `) [@Jorge](person:42)</div>`,
+			expected: `<div>` + mentionChip + ` ` +
+				MentionToHTML("sgid-jorge", "Jorge Manrubia") + `</div>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ResolveMentions(tt.input, lookup, lookupByID)
+			if err != nil {
+				t.Fatalf("ResolveMentions() error = %v", err)
+			}
+			if result.HTML != tt.expected {
+				t.Errorf("ResolveMentions() =\n  %q\nwant:\n  %q", result.HTML, tt.expected)
+			}
+			// No half-formed chip: the raw markdown-link residue must be gone.
+			if tt.expected != tt.input &&
+				(strings.Contains(result.HTML, "](mention:") || strings.Contains(result.HTML, "](person:")) {
+				t.Errorf("residual markdown mention link left in output: %q", result.HTML)
+			}
+		})
+	}
+}
+
+func TestResolveMentions_MarkdownLinkDoesNotCrossHTML(t *testing.T) {
+	input := `<div>[@Jorge <strong>Manrubia</strong>](mention:SGID)</div>`
+	result, err := ResolveMentions(input, nil, nil)
+	if err != nil {
+		t.Fatalf("ResolveMentions() error = %v", err)
+	}
+	if result.HTML != input {
+		t.Errorf("ResolveMentions() = %q, want unchanged input", result.HTML)
+	}
+}
+
+func TestResolveMentions_MarkdownPersonLinkErrors(t *testing.T) {
+	input := `<div>[@Jane](person:42)</div>`
+
+	t.Run("nil lookup", func(t *testing.T) {
+		_, err := ResolveMentions(input, nil, nil)
+		if err == nil || !strings.Contains(err.Error(), "requires a person lookup function") {
+			t.Fatalf("ResolveMentions() error = %v", err)
+		}
+	})
+
+	t.Run("lookup error", func(t *testing.T) {
+		lookupByID := func(id string) (string, string, error) {
+			return "", "", fmt.Errorf("not pingable: %s", id)
+		}
+		_, err := ResolveMentions(input, nil, lookupByID)
+		if err == nil || !strings.Contains(err.Error(), "failed to resolve person:42") {
+			t.Fatalf("ResolveMentions() error = %v", err)
+		}
+	})
+}
+
+// TestMentionInHTMLBlock_FullPipeline exercises the exact production sequence
+// (MarkdownToHTML then ResolveMentions) against the reported card payload and
+// asserts the output carries exactly one mention chip and no literal residue.
+func TestMentionInHTMLBlock_FullPipeline(t *testing.T) {
+	lookup := func(name string) (sgid, displayName string, err error) {
+		if name == "Jorge" || name == "Jorge Manrubia" {
+			return "sgid-jorge", "Jorge Manrubia", nil
+		}
+		return "", "", fmt.Errorf("%w: not found: %s", ErrMentionSkip, name)
+	}
+
+	sgid := "BAh7CEkiCG9pZA__c122645233a25510b54af45164e6002c0f99e870"
+	input := `<div dir="auto">Ready for your review. [@Jorge Manrubia](mention:` + sgid + `)</div>`
+
+	html := MarkdownToHTML(input)
+	res, err := ResolveMentions(html, lookup, nil)
+	if err != nil {
+		t.Fatalf("pipeline error = %v", err)
+	}
+
+	if n := strings.Count(res.HTML, "<bc-attachment"); n != 1 {
+		t.Errorf("want exactly 1 mention chip, got %d: %q", n, res.HTML)
+	}
+	if strings.Contains(res.HTML, "Manrubia](mention:") {
+		t.Errorf("literal mention-link residue survived: %q", res.HTML)
+	}
+	if !strings.Contains(res.HTML, `sgid="`+sgid+`"`) {
+		t.Errorf("chip does not carry the supplied SGID: %q", res.HTML)
+	}
+}
+
+func TestPlainToHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"plain text", "hello world", "hello world"},
+		{"escapes HTML special chars", "<strong>x</strong> & y", "&lt;strong&gt;x&lt;/strong&gt; &amp; y"},
+		{"preserves line breaks as <br>", "line1\nline2", "line1<br>line2"},
+		{"collapses CRLF to a single break", "line1\r\nline2", "line1<br>line2"},
+		{"normalizes bare CR", "line1\rline2", "line1<br>line2"},
+		{"leaves @mentions literal", "ping @Jane.Smith now", "ping @Jane.Smith now"},
+		{"escapes then breaks multiline markup", "<b>a</b>\n<i>b</i>", "&lt;b&gt;a&lt;/b&gt;<br>&lt;i&gt;b&lt;/i&gt;"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PlainToHTML(tt.input)
+			if got != tt.want {
+				t.Errorf("PlainToHTML(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

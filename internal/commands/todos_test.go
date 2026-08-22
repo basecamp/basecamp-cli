@@ -55,7 +55,7 @@ func setupTodosTestApp(t *testing.T) (*appctx.App, *bytes.Buffer) {
 	// Create SDK client with mock token provider and no-network transport
 	// The transport prevents real HTTP calls - fails instantly instead of timing out
 	authMgr := auth.NewManager(cfg, nil)
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(todosNoNetworkTransport{}),
 		basecamp.WithMaxRetries(1), // Disable retries for instant failure
@@ -98,19 +98,17 @@ func TestTodosShowsHelp(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestTodosListRequiresProject tests that todos list requires --project.
-func TestTodosListRequiresProject(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
-	// No project in config
+// TestTodosListWithoutProjectListsAcrossProjects tests that todos list with no
+// project anywhere lists account-wide instead of prompting for one.
+func TestTodosListWithoutProjectListsAcrossProjects(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(accountWideDefaultLimit)))
 
-	cmd := NewTodosCmd()
+	err := executeRecordingCommand(NewTodosCmd(), app, "list")
+	require.NoError(t, err)
 
-	err := executeTodosCommand(cmd, app, "list")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
-	assert.Equal(t, "Project ID required", e.Message)
+	require.Len(t, transport.recorded(), 1, "the default cap of 100 is met by the first page")
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
 }
 
 // TestTodosCreateRequiresContent tests that todos create requires content.
@@ -383,7 +381,7 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 		TodolistID: "456",
 	}
 
-	sdkCfg := &basecamp.Config{}
+	sdkCfg := &basecamp.Config{BaseURL: "https://3.basecampapi.com"}
 	sdkClient := basecamp.NewClient(sdkCfg, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
@@ -405,7 +403,7 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	cmd := NewTodosCmd()
 	plainTextContent := "Fix the authentication bug"
 
-	err := executeTodosCommand(cmd, app, "create", plainTextContent)
+	err := executeTodosCommand(cmd, app, "create", plainTextContent, "--notify-on-completion", "7,8")
 	require.NoError(t, err, "command should succeed with mock transport")
 	require.NotEmpty(t, transport.capturedBody, "expected request body to be captured")
 
@@ -419,32 +417,35 @@ func TestTodosCreateContentIsPlainText(t *testing.T) {
 	// The content should be exactly what was passed in - plain text, no HTML wrapping
 	assert.Equal(t, plainTextContent, content,
 		"Todo content should be plain text, not HTML-wrapped")
+
+	assert.Equal(t, []any{float64(7), float64(8)}, requestBody["completion_subscriber_ids"],
+		"--notify-on-completion must map to completion_subscriber_ids")
 }
 
-func TestTodosListAssigneeWithoutProjectErrors(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
+// --assignee used to be rejected account-wide, because the aggregates had no
+// assignee parameter to map it onto. SDK v0.12.0 added one, so the flag now
+// works in both scopes and the rejection is gone.
+func TestTodosListAssigneeWithoutProjectIsAccountWide(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
 
-	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "list", "--assignee", "me")
-	require.Error(t, err)
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "list", "--assignee", "42"))
 
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Contains(t, e.Message, "--assignee requires a project")
-	assert.Contains(t, e.Hint, "reports assigned")
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+	assert.Contains(t, transport.last(t).Query, "assignee_ids")
 }
 
-func TestTodosListOverdueWithoutProjectErrors(t *testing.T) {
-	app, _ := setupTodosTestApp(t)
+// TestTodosListOverdueWithoutProjectListsAcrossProjects covers the behavior
+// change: --overdue without a project used to redirect to reports overdue, and
+// now answers from the account-wide overdue listing.
+func TestTodosListOverdueWithoutProjectListsAcrossProjects(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/overdue.json", `[{"id":1,"title":"Late","due_on":"2020-01-01"}]`))
 
-	cmd := NewTodosCmd()
-	err := executeTodosCommand(cmd, app, "list", "--overdue")
-	require.Error(t, err)
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue")
+	require.NoError(t, err)
 
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Contains(t, e.Message, "--overdue requires a project")
-	assert.Contains(t, e.Hint, "reports overdue")
+	assert.Equal(t, "/99999/todos/overdue.json", transport.last(t).Path)
 }
 
 func TestTodosListAssigneeWithConfigDefaultProceeds(t *testing.T) {
@@ -539,7 +540,7 @@ func setupMultiTodosetApp(t *testing.T) *appctx.App {
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(multiTodosetTransport{}),
 		basecamp.WithMaxRetries(1),
 	)
@@ -632,7 +633,7 @@ func setupTodos404App(t *testing.T) *appctx.App {
 
 	cfg := &config.Config{AccountID: "99999"}
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(todos404Transport{}),
 	)
 
@@ -748,7 +749,7 @@ func setupScopedTodosetApp(t *testing.T, transport *scopedTodosetTransport) *app
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1006,7 +1007,7 @@ func setupGroupTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.App, 
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1212,7 +1213,7 @@ func setupStatusTestApp(t *testing.T, transport *statusCapturingTransport) (*app
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1462,7 +1463,7 @@ func TestSweepCommentContentIsHTML(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1504,7 +1505,7 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 		ProjectID: "123",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1532,20 +1533,47 @@ func TestSweepCommentLocalImageErrors(t *testing.T) {
 // Todos Update Tests
 // =============================================================================
 
-// mockTodoUpdateTransport handles GET and PUT for todo update tests.
+// mockTodoUpdateTransport handles GET and PUT for todo update tests. It
+// records every request as "METHOD path" so tests can assert which routes
+// were hit and in what order. The typed todo GET (Edit's read-before-write)
+// serves a configurable body/status so tests can exercise the fail-closed
+// contract.
 type mockTodoUpdateTransport struct {
 	capturedBody []byte
+	requests     []string
+
+	todoGetStatus int    // 0 → 200
+	todoGetBody   string // "" → default with completion_subscribers [7, 8]
 }
 
 func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.requests = append(t.requests, req.Method+" "+req.URL.Path)
+
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 
-	if req.Method == "GET" {
-		mockTodo := `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}]}`
+	if req.Method == "GET" && req.URL.Path == "/99999/todos/999" {
+		// Typed todo GET — exact match so no other route can satisfy it.
+		status := t.todoGetStatus
+		if status == 0 {
+			status = 200
+		}
+		body := t.todoGetBody
+		if body == "" {
+			body = `{"id": 999, "title": "Test", "content": "Test todo", "status": "active", "completed": false, "description": "Existing desc", "due_on": "2026-04-01", "starts_on": "2026-03-25", "bucket": {"id": 456, "name": "Test Project", "type": "Project"}, "assignees": [{"id": 42, "name": "Test User"}], "completion_subscribers": [{"id": 7}, {"id": 8}]}`
+		}
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     header,
+		}, nil
+	}
+
+	if req.Method == "GET" && strings.Contains(req.URL.Path, "/people") {
+		// Empty people directory so name resolution deterministically misses.
 		return &http.Response{
 			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(mockTodo)),
+			Body:       io.NopCloser(strings.NewReader(`[]`)),
 			Header:     header,
 		}, nil
 	}
@@ -1567,7 +1595,18 @@ func (t *mockTodoUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}, nil
 	}
 
-	return nil, errors.New("unexpected request")
+	return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+}
+
+// hasRequest reports whether any recorded request matches the given method
+// and path predicate.
+func (t *mockTodoUpdateTransport) hasRequest(method, pathSubstr string) bool {
+	for _, r := range t.requests {
+		if strings.HasPrefix(r, method+" ") && strings.Contains(r, pathSubstr) {
+			return true
+		}
+	}
+	return false
 }
 
 func setupTodoUpdateApp(t *testing.T, transport http.RoundTripper) *appctx.App {
@@ -1578,7 +1617,7 @@ func setupTodoUpdateApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 		AccountID: "99999",
 	}
 
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -1694,6 +1733,8 @@ func TestTodosUpdateLocalImageErrors(t *testing.T) {
 	err := executeTodosCommand(cmd, app, "update", "999", "--description", "![alt](./missing.png)")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing.png")
+	assert.False(t, transport.hasRequest("PUT", "/"),
+		"upload failure inside the Edit closure must abort before the PUT, got: %v", transport.requests)
 }
 
 func TestTodosUpdateNoDueOmitsField(t *testing.T) {
@@ -1720,7 +1761,7 @@ func TestTodosUpdateNoDueOmitsField(t *testing.T) {
 	assert.False(t, startsExists, "starts_on must also be omitted when clearing due")
 }
 
-func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
+func TestTodosUpdateNoDescriptionSendsEmpty(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1733,8 +1774,9 @@ func TestTodosUpdateNoDescriptionOmitsField(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	_, exists := body["description"]
-	assert.False(t, exists, "description must be omitted to clear")
+	desc, exists := body["description"]
+	require.True(t, exists, "description must be present as empty string to clear")
+	assert.Equal(t, "", desc)
 
 	// Other fields preserved
 	assert.Equal(t, "2026-04-01", body["due_on"])
@@ -1796,7 +1838,7 @@ func TestTodosUpdateEmptyStartsOnClearsField(t *testing.T) {
 	assert.False(t, exists, "starts_on must be omitted when --starts-on is empty")
 }
 
-func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
+func TestTodosUpdateEmptyDescriptionSendsEmpty(t *testing.T) {
 	transport := &mockTodoUpdateTransport{}
 	app := setupTodoUpdateApp(t, transport)
 
@@ -1809,8 +1851,9 @@ func TestTodosUpdateEmptyDescriptionClearsField(t *testing.T) {
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	_, exists := body["description"]
-	assert.False(t, exists, "description must be omitted when --description is empty")
+	desc, exists := body["description"]
+	require.True(t, exists, "description must be present as empty string when --description is empty")
+	assert.Equal(t, "", desc)
 }
 
 func TestTodosUpdateConflictingNoDueAndDue(t *testing.T) {
@@ -1924,6 +1967,9 @@ func TestTodosUpdateDueDatePreservesExistingFields(t *testing.T) {
 	require.True(t, ok, "assignee_ids must be preserved")
 	require.Len(t, ids, 1)
 	assert.Equal(t, float64(42), ids[0])
+
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved")
 }
 
 func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
@@ -1943,6 +1989,222 @@ func TestTodosUpdateTitlePreservesExistingFields(t *testing.T) {
 	assert.Equal(t, "Existing desc", body["description"])
 	assert.Equal(t, "2026-04-01", body["due_on"])
 	assert.Equal(t, "2026-03-25", body["starts_on"])
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved")
+}
+
+func TestTodosUpdateSingleTypedRoundTrip(t *testing.T) {
+	// The collapse onto Edit means exactly one typed GET followed by one
+	// typed PUT — no raw flat-route preservation read, no raw bucket PUT,
+	// no post-PUT re-Get.
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "New title")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"GET /99999/todos/999", "PUT /99999/todos/999"}, transport.requests)
+}
+
+func TestTodosUpdateExplicitSubscribersSendsResolvedIDs(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "42")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{float64(42)}, body["completion_subscriber_ids"])
+}
+
+func TestTodosUpdateNoNotifyOnCompletionClearsSubscribers(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-notify-on-completion")
+	require.NoError(t, err, "--no-notify-on-completion alone must pass the no-op guard")
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	ids, exists := body["completion_subscriber_ids"]
+	require.True(t, exists, "completion_subscriber_ids must be present as an empty list to clear")
+	assert.Equal(t, []any{}, ids)
+}
+
+func TestTodosUpdateNoDuePreservesSubscribers(t *testing.T) {
+	transport := &mockTodoUpdateTransport{}
+	app := setupTodoUpdateApp(t, transport)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-due")
+	require.NoError(t, err)
+	require.NotEmpty(t, transport.capturedBody)
+
+	var body map[string]any
+	err = json.Unmarshal(transport.capturedBody, &body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{float64(7), float64(8)}, body["completion_subscriber_ids"],
+		"completion subscribers must be preserved in the clear branch")
+}
+
+func TestTodosUpdateSubscriberReadFailsClosed(t *testing.T) {
+	// Edit's read failing — or succeeding with subscriber state the CLI
+	// can't trust — must abort the update before any PUT. A missing
+	// completion_subscribers key is deliberately not a case here: field
+	// presence is the server/SDK contract (BC3 always serializes it and
+	// the SDK model pins nil-vs-empty); the CLI guard covers invalid IDs.
+	cases := map[string]struct {
+		todoGetStatus  int
+		todoGetBody    string
+		wantSubscriber bool // error mentions completion subscribers (CLI closure guard)
+	}{
+		"http error":            {todoGetStatus: 500, todoGetBody: `{}`},
+		"malformed json":        {todoGetBody: `{not json`},
+		"invalid subscriber id": {todoGetBody: `{"id": 999, "content": "Test todo", "completion_subscribers": [{"name": "No ID"}]}`, wantSubscriber: true},
+	}
+	argSets := map[string][]string{
+		"title update": {"update", "999", "New title"},
+		"clear due":    {"update", "999", "--no-due"},
+	}
+
+	for argsName, cmdArgs := range argSets {
+		for caseName, tc := range cases {
+			t.Run(argsName+"/"+caseName, func(t *testing.T) {
+				transport := &mockTodoUpdateTransport{
+					todoGetStatus: tc.todoGetStatus,
+					todoGetBody:   tc.todoGetBody,
+				}
+				app := setupTodoUpdateApp(t, transport)
+
+				cmd := NewTodosCmd()
+				err := executeTodosCommand(cmd, app, cmdArgs...)
+				require.Error(t, err)
+				if tc.wantSubscriber {
+					assert.Contains(t, err.Error(), "completion subscribers")
+				}
+				assert.False(t, transport.hasRequest("PUT", "/"),
+					"no PUT may occur when the Edit read fails, got: %v", transport.requests)
+			})
+		}
+	}
+}
+
+func TestTodosUpdateInvalidDateFailsWithoutHTTP(t *testing.T) {
+	// Date validation happens before any HTTP: dateparse passes
+	// unrecognized input through as-is, so without pre-validation garbage
+	// (or an impossible calendar date) would reach the server.
+	cases := map[string][]string{
+		"due unrecognized":       {"update", "999", "--due", "garbage"},
+		"due impossible":         {"update", "999", "--due", "2026-99-99"},
+		"starts-on unrecognized": {"update", "999", "--starts-on", "garbage"},
+		"starts-on impossible":   {"update", "999", "--starts-on", "2026-99-99"},
+	}
+
+	for name, cmdArgs := range cases {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoUpdateTransport{}
+			app := setupTodoUpdateApp(t, transport)
+
+			cmd := NewTodosCmd()
+			err := executeTodosCommand(cmd, app, cmdArgs...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "Invalid")
+
+			var outErr *output.Error
+			require.ErrorAs(t, err, &outErr)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+
+			assert.Empty(t, transport.requests, "invalid date must fail before any HTTP")
+		})
+	}
+}
+
+func TestTodosUpdateNotifySendsNotify(t *testing.T) {
+	t.Run("with --notify", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "New title", "--notify")
+		require.NoError(t, err)
+		require.NotEmpty(t, transport.capturedBody)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+		assert.Equal(t, true, body["notify"])
+	})
+
+	t.Run("without --notify", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "New title")
+		require.NoError(t, err)
+		require.NotEmpty(t, transport.capturedBody)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+		_, exists := body["notify"]
+		assert.False(t, exists, "notify must be absent unless requested")
+	})
+}
+
+func TestTodosUpdateSubscriberErrorsUseSubscriberWording(t *testing.T) {
+	// Resolution failures for --notify-on-completion must talk about
+	// completion subscribers, not assignees.
+	t.Run("invalid id", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Completion subscriber ID must be a positive number")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("no valid people", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", ",")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "No valid completion subscribers provided")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+
+	t.Run("unresolvable name", func(t *testing.T) {
+		transport := &mockTodoUpdateTransport{}
+		app := setupTodoUpdateApp(t, transport)
+
+		cmd := NewTodosCmd()
+		err := executeTodosCommand(cmd, app, "update", "999", "--notify-on-completion", "nonexistent")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to resolve completion subscriber 'nonexistent'")
+		assert.False(t, transport.hasRequest("PUT", "/"), "no PUT on resolution failure")
+	})
+}
+
+func TestTodosUpdateConflictingNotifyOnCompletionFlags(t *testing.T) {
+	app, _ := setupTodosTestApp(t)
+
+	cmd := NewTodosCmd()
+	err := executeTodosCommand(cmd, app, "update", "999", "--no-notify-on-completion", "--notify-on-completion", "42")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--no-notify-on-completion and --notify-on-completion cannot be used together")
 }
 
 // =============================================================================
@@ -2020,7 +2282,7 @@ func setupAssigneeTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 	}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -2248,7 +2510,7 @@ func setupListlessTodoApp(t *testing.T, transport http.RoundTripper) (*appctx.Ap
 	cfg := &config.Config{AccountID: "99999", ProjectID: "123"}
 
 	authMgr := auth.NewManager(cfg, nil)
-	sdkClient := basecamp.NewClient(&basecamp.Config{}, &todosTestTokenProvider{},
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, &todosTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
@@ -2657,4 +2919,463 @@ func TestTodosListAggregateSortGuard(t *testing.T) {
 	appA, _ := setupListlessTodoApp(t, transport)
 	errA := executeTodosCommand(NewTodosCmd(), appA, "list", "--in", "123", "--assignee", "Alice", "--sort", "title")
 	require.NoError(t, errA)
+}
+
+// populatedTodoTransport serves a single fully-populated todo from the GET
+// endpoint so that todos show exercises every field #449 reported as missing.
+// The description carries no bc-attachment markup, so no download path fires;
+// description_attachments rides along as SDK metadata independent of the
+// rich-text body.
+type populatedTodoTransport struct{}
+
+func (populatedTodoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Fail closed: this transport only knows how to answer the todo GET. Any
+	// other route or method means `todos show` took an unexpected path, which
+	// should fail the test rather than silently pass on the canned body.
+	if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "/todos/999") {
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+	}
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	body := `{
+		"id": 999,
+		"status": "active",
+		"title": "Populated todo",
+		"type": "Todo",
+		"content": "Populated todo",
+		"description": "<div>Plain description, no attachments</div>",
+		"completed": false,
+		"position": 1,
+		"starts_on": "2026-08-01",
+		"due_on": "2026-08-15",
+		"comments_count": 4,
+		"boosts_count": 3,
+		"completion_subscribers": [
+			{"id": 5551, "name": "Reviewer One"},
+			{"id": 5552, "name": "Reviewer Two"}
+		],
+		"description_attachments": [
+			{
+				"id": 8801,
+				"sgid": "sgid-abc",
+				"filename": "spec.pdf",
+				"content_type": "application/pdf",
+				"byte_size": 2048,
+				"download_url": "https://example.com/spec.pdf",
+				"previewable": false,
+				"preview_url": "",
+				"thumbnail_url": ""
+			}
+		]
+	}`
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     header,
+	}, nil
+}
+
+// TestTodosShowJSONSurfacesSDKFields is a regression guard for #449: the
+// fields that report (due_on, starts_on, comments_count, boosts_count,
+// completion_subscribers, description_attachments) must all surface in the
+// --json output of todos show. The fix landed on main via the SDK model
+// (SDK #375/#400) absorbed by CLI #552/#554; this test keeps the omitempty
+// date/count fields exercised with nonzero values so a future SDK bump can't
+// silently drop them.
+func TestTodosShowJSONSurfacesSDKFields(t *testing.T) {
+	app, buf := setupGroupTodoApp(t, populatedTodoTransport{})
+
+	err := executeTodosCommand(NewTodosCmd(), app, "show", "999")
+	require.NoError(t, err)
+
+	var resp struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+
+	// Every reported field must be present as a key in the emitted JSON.
+	for _, key := range []string{
+		"due_on", "starts_on", "comments_count", "boosts_count",
+		"completion_subscribers", "description_attachments",
+	} {
+		require.Contains(t, resp.Data, key, "todos show --json must surface %q (#449)", key)
+	}
+
+	var dueOn, startsOn string
+	require.NoError(t, json.Unmarshal(resp.Data["due_on"], &dueOn))
+	require.NoError(t, json.Unmarshal(resp.Data["starts_on"], &startsOn))
+	assert.Equal(t, "2026-08-15", dueOn)
+	assert.Equal(t, "2026-08-01", startsOn)
+
+	var commentsCount, boostsCount int
+	require.NoError(t, json.Unmarshal(resp.Data["comments_count"], &commentsCount))
+	require.NoError(t, json.Unmarshal(resp.Data["boosts_count"], &boostsCount))
+	assert.Equal(t, 4, commentsCount)
+	assert.Equal(t, 3, boostsCount)
+
+	var subscribers []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Data["completion_subscribers"], &subscribers))
+	require.Len(t, subscribers, 2)
+	assert.Equal(t, int64(5551), subscribers[0].ID)
+	assert.Equal(t, "Reviewer One", subscribers[0].Name)
+	assert.Equal(t, int64(5552), subscribers[1].ID)
+	assert.Equal(t, "Reviewer Two", subscribers[1].Name)
+
+	var attachments []struct {
+		ID          int64  `json:"id"`
+		Filename    string `json:"filename"`
+		DownloadURL string `json:"download_url"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Data["description_attachments"], &attachments))
+	require.Len(t, attachments, 1)
+	assert.Equal(t, int64(8801), attachments[0].ID)
+	assert.Equal(t, "spec.pdf", attachments[0].Filename)
+	assert.Equal(t, "https://example.com/spec.pdf", attachments[0].DownloadURL)
+}
+
+// --- account-wide listings ---------------------------------------------------
+
+// accountWideTodosRoute stubs one of the account-wide todo aggregate endpoints.
+func accountWideTodosRoute(path, body string) stubRoute {
+	return stubRoute{method: http.MethodGet, path: path, status: http.StatusOK, body: body}
+}
+
+// todosGroupsBody builds a project-grouped aggregate payload with todosPerGroup
+// todos in each named project (one "Test Project" group by default).
+func todosGroupsBody(todosPerGroup int, projects ...string) string {
+	if len(projects) == 0 {
+		projects = []string{"Test Project"}
+	}
+
+	id := 0
+	groups := make([]string, 0, len(projects))
+	for i, name := range projects {
+		todos := make([]string, 0, todosPerGroup)
+		for range todosPerGroup {
+			id++
+			todos = append(todos, fmt.Sprintf(
+				`{"id":%d,"title":"Todo %d","due_on":"2026-01-01","completed":false}`, id, id))
+		}
+		groups = append(groups, fmt.Sprintf(
+			`{"bucket":{"id":%d,"name":%q,"type":"Project"},"todos":[%s]}`, 100+i, name, strings.Join(todos, ",")))
+	}
+	return "[" + strings.Join(groups, ",") + "]"
+}
+
+// requireTodosListUsageError runs todos list and asserts it failed with a usage
+// error naming the flag, rather than silently ignoring it. The app is stubbed
+// with no matching routes, so a flag that leaks through to the network fails too.
+func requireTodosListUsageError(t *testing.T, app *appctx.App, wantMessage string, args ...string) {
+	t.Helper()
+
+	err := executeRecordingCommand(NewTodosCmd(), app, append([]string{"list"}, args...)...)
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Contains(t, e.Message, wantMessage)
+}
+
+// decodeTodosEnvelope decodes the JSON response envelope a list command wrote.
+func decodeTodosEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
+	t.Helper()
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	return envelope
+}
+
+// setupAccountWideTodosApp stubs the given routes and captures output in the
+// requested format.
+func setupAccountWideTodosApp(t *testing.T, format output.Format, routes ...stubRoute) (*appctx.App, *recordingTransport, *bytes.Buffer) {
+	t.Helper()
+
+	app, transport := setupRecordingTestApp(t, routes...)
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: format, Writer: buf})
+	return app, transport, buf
+}
+
+func TestTodosListWithProjectStaysProjectScoped(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{method: http.MethodGet, path: "/99999/projects/123.json", status: http.StatusOK,
+			body: `{"id":123,"name":"Test Project","dock":[{"name":"todoset","id":700,"enabled":true}]}`},
+		stubRoute{method: http.MethodGet, path: "/99999/todosets/700/todolists.json", status: http.StatusOK,
+			body: `[{"id":456,"name":"My List"}]`},
+		stubRoute{method: http.MethodGet, path: "/99999/todolists/456/groups.json", status: http.StatusOK, body: `[]`},
+		stubRoute{method: http.MethodGet, path: "/99999/todolists/456/todos.json", status: http.StatusOK,
+			body: `[{"id":9,"title":"In a list"}]`},
+	)
+	app.Config.ProjectID = "123"
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--list", "456")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/todolists/456/todos.json", transport.last(t).Path)
+	for _, req := range transport.recorded() {
+		assert.NotContains(t, req.Path, "/todos/open.json")
+	}
+}
+
+func TestTodosListAllProjectsOverridesConfiguredProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(accountWideDefaultLimit)))
+	app.Config.ProjectID = "123"
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--all-projects")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+}
+
+func TestTodosListAllProjectsConflictsWithExplicitProject(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, app, "--all-projects cannot be combined with a project", "--all-projects", "--in", "123")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Project = "123"
+	requireTodosListUsageError(t, rootFlagApp, "--all-projects cannot be combined with a project", "--all-projects")
+}
+
+func TestTodosListAccountWideSelectsEndpointPerFilter(t *testing.T) {
+	assertEndpoint := func(path string, args ...string) {
+		t.Helper()
+
+		app, transport := setupRecordingTestApp(t, accountWideTodosRoute(path, todosGroupsBody(accountWideDefaultLimit)))
+		require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, append([]string{"list"}, args...)...))
+		assert.Equal(t, path, transport.last(t).Path)
+	}
+
+	assertEndpoint("/99999/todos/open.json")
+	assertEndpoint("/99999/todos/open.json", "--status", "incomplete")
+	assertEndpoint("/99999/todos/completed.json", "--completed")
+	assertEndpoint("/99999/todos/completed.json", "--status", "completed")
+	assertEndpoint("/99999/todos/unassigned.json", "--unassigned")
+	assertEndpoint("/99999/todos/no_due_date.json", "--no-due-date")
+}
+
+func TestTodosListAccountWideRejectsTodolistScope(t *testing.T) {
+	flagApp, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, flagApp, "--list names a todolist inside one project", "--list", "456")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Todolist = "456"
+	requireTodosListUsageError(t, rootFlagApp, "--todolist names a todolist inside one project")
+
+	configApp, _ := setupRecordingTestApp(t)
+	configApp.Config.TodolistID = "456"
+	requireTodosListUsageError(t, configApp, "a default todolist is configured")
+}
+
+// --all-projects overrides a configured todolist the same way it overrides a
+// configured project: the flag is the user saying to ignore ambient scope.
+func TestTodosListAllProjectsOverridesConfiguredTodolist(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+	app.Config.TodolistID = "456"
+
+	cmd := newTodosListCmd()
+	require.NoError(t, executeRecordingCommand(cmd, app, "--all-projects"))
+	assert.Equal(t, "/99999/todos/open.json", transport.last(t).Path)
+}
+
+func TestTodosListAccountWideRejectsProjectOnlyFilters(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--todoset names a todoset inside one project", "--todoset", "789")
+	requireTodosListUsageError(t, app, "--status archived has no account-wide equivalent", "--status", "archived")
+	requireTodosListUsageError(t, app, "--status trashed has no account-wide equivalent", "--status", "trashed")
+	requireTodosListUsageError(t, app, `unknown --status value "nonsense"`, "--status", "nonsense")
+}
+
+func TestTodosListAccountWideOnlyFiltersRejectedWithProject(t *testing.T) {
+	configApp, _ := setupRecordingTestApp(t)
+	configApp.Config.ProjectID = "123"
+	requireTodosListUsageError(t, configApp, "--unassigned lists across all projects", "--unassigned")
+	requireTodosListUsageError(t, configApp, "--no-due-date lists across all projects", "--no-due-date")
+
+	flagApp, _ := setupRecordingTestApp(t)
+	requireTodosListUsageError(t, flagApp, "--unassigned lists across all projects", "--in", "123", "--unassigned")
+
+	rootFlagApp, _ := setupRecordingTestApp(t)
+	rootFlagApp.Flags.Project = "123"
+	requireTodosListUsageError(t, rootFlagApp, "--no-due-date lists across all projects", "--no-due-date")
+}
+
+func TestTodosListAccountWideRejectsCombinedSelectors(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--unassigned and --no-due-date are mutually exclusive", "--unassigned", "--no-due-date")
+	requireTodosListUsageError(t, app, "--completed and --overdue are mutually exclusive", "--completed", "--overdue")
+	requireTodosListUsageError(t, app, "--status completed and --unassigned are mutually exclusive", "--status", "completed", "--unassigned")
+}
+
+func TestTodosListAccountWideRejectsSorting(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--sort is not supported when listing across all projects", "--sort", "title")
+	requireTodosListUsageError(t, app, "--reverse requires --sort", "--reverse")
+}
+
+func TestTodosListAccountWideRejectsInvalidPagination(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--page must be 1 or greater", "--page", "0")
+	requireTodosListUsageError(t, app, "--page must be 1 or greater", "--page=-2")
+	requireTodosListUsageError(t, app, "--limit cannot be negative", "--limit=-5")
+}
+
+func TestTodosListAccountWideAcceptsAnyPositivePage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--page", "3")
+	require.NoError(t, err)
+
+	require.Len(t, transport.recorded(), 1)
+	assert.Contains(t, transport.last(t).Query, "page=3")
+}
+
+func TestTodosListAccountWideAllFetchesEveryPage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--all")
+	require.NoError(t, err)
+
+	require.Len(t, transport.recorded(), 1)
+	assert.Empty(t, transport.last(t).Query, "--all maps to page 0, which sends no page parameter")
+}
+
+func TestTodosListAccountWideLimitCountsTodosNotGroups(t *testing.T) {
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2, "Alpha", "Beta")))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "3")
+	require.NoError(t, err)
+
+	// The single page carried 4 todos, so the walk stopped there and capped at
+	// 3 — keeping both project groups rather than dropping a whole project.
+	require.Len(t, transport.recorded(), 1)
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "3 todos across 2 projects", envelope["summary"])
+	assert.Contains(t, envelope["notice"], "Showing the first 3 todos")
+
+	groups, ok := envelope["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 2)
+	assert.Len(t, groups[0].(map[string]any)["todos"], 2)
+	assert.Len(t, groups[1].(map[string]any)["todos"], 1)
+}
+
+func TestTodosListAccountWideWalksPagesUntilLimitIsMet(t *testing.T) {
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(2)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "4")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	require.Len(t, requests, 2, "two todos per page, so a limit of 4 needs a second page")
+	assert.Contains(t, requests[0].Query, "page=1")
+	assert.Contains(t, requests[1].Query, "page=2")
+
+	assert.Equal(t, "4 todos across 2 projects", decodeTodosEnvelope(t, buf)["summary"])
+}
+
+func TestTodosListAccountWideKeepsGroupingForMachineFormats(t *testing.T) {
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "1")
+	require.NoError(t, err)
+
+	groups, ok := decodeTodosEnvelope(t, buf)["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, groups, 1)
+
+	group, ok := groups[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Test Project", group["bucket"].(map[string]any)["name"])
+	assert.Len(t, group["todos"], 1)
+}
+
+func TestTodosListAccountWideFlattensForStyledOutput(t *testing.T) {
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatStyled,
+		accountWideTodosRoute("/99999/todos/open.json", todosGroupsBody(1)))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--limit", "1")
+	require.NoError(t, err)
+
+	rendered := buf.String()
+	assert.Contains(t, rendered, "Test Project")
+	assert.Contains(t, rendered, "Todo 1")
+	assert.NotContains(t, rendered, "bucket", "styled output renders flat rows, not the nested groups")
+}
+
+func TestFlattenAccountWideTodosCarriesProjectAndStatus(t *testing.T) {
+	rows := flattenAccountWideTodos([]basecamp.BucketTodosGroup{{
+		Bucket: basecamp.Bucket{ID: 1, Name: "Alpha"},
+		Todos: []basecamp.Todo{
+			{ID: 7, Title: "Open one", DueOn: "2026-02-01"},
+			{ID: 8, Title: "Done one", Completed: true},
+		},
+	}})
+
+	require.Len(t, rows, 2)
+	assert.Equal(t, map[string]any{
+		"project": "Alpha", "id": int64(7), "title": "Open one", "status": "incomplete", "due": "2026-02-01",
+	}, rows[0])
+	assert.Equal(t, "completed", rows[1]["status"])
+}
+
+func TestTodosListAccountWideOverdueIsUnpaginated(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+
+	requireTodosListUsageError(t, app, "--page is not supported with --overdue", "--overdue", "--page", "2")
+}
+
+// --all is a different question from --page. The overdue listing caps at 100 by
+// default, so refusing --all too would leave todo 101 unreachable. The endpoint
+// is unpaginated, so honoring it costs nothing: the array is already in hand.
+func TestTodosListAccountWideOverdueAcceptsAll(t *testing.T) {
+	body := `[{"id":1,"title":"Bravo","due_on":"2020-03-01"},
+		{"id":2,"title":"Alpha","due_on":"2020-01-01"}]`
+	app, transport, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/overdue.json", body))
+
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue", "--all"))
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "2 overdue todos across all projects", envelope["summary"])
+	assert.Empty(t, envelope["notice"], "nothing was withheld, so there is nothing to warn about")
+	assert.Len(t, transport.queriesFor("/99999/todos/overdue.json"), 1,
+		"--all costs no extra request on an unpaginated endpoint")
+}
+
+func TestTodosListAccountWideOverdueSortsBeforeTruncating(t *testing.T) {
+	body := `[{"id":1,"title":"Bravo","due_on":"2020-03-01"},
+		{"id":2,"title":"Alpha","due_on":"2020-01-01"},
+		{"id":3,"title":"Charlie","due_on":"2020-02-01"}]`
+	app, _, buf := setupAccountWideTodosApp(t, output.FormatJSON,
+		accountWideTodosRoute("/99999/todos/overdue.json", body))
+
+	err := executeRecordingCommand(NewTodosCmd(), app, "list", "--overdue", "--sort", "title", "--limit", "2")
+	require.NoError(t, err)
+
+	envelope := decodeTodosEnvelope(t, buf)
+	assert.Equal(t, "2 overdue todos across all projects", envelope["summary"])
+	assert.Contains(t, envelope["notice"], "Showing 2 of 3 overdue todos")
+
+	todos, ok := envelope["data"].([]any)
+	require.True(t, ok)
+	require.Len(t, todos, 2)
+	assert.Equal(t, "Alpha", todos[0].(map[string]any)["title"])
+	assert.Equal(t, "Bravo", todos[1].(map[string]any)["title"])
 }

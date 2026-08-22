@@ -302,7 +302,7 @@ or YYYY-MM-DD format.`,
 
 			// Count items
 			entryCount := len(result.ScheduleEntries)
-			recurringCount := len(result.RecurringOccurrences)
+			recurringCount := len(result.RecurringScheduleEntryOccurrences)
 			assignableCount := len(result.Assignables)
 			total := entryCount + recurringCount + assignableCount
 

@@ -256,7 +256,7 @@ func (t *dockTestTransport) RoundTrip(req *http.Request) (*http.Response, error)
 func newDockTestApp(t *testing.T, transport http.RoundTripper) *appctx.App {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	sdk := basecamp.NewClient(&basecamp.Config{}, dockTestTokenProvider{},
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, dockTestTokenProvider{},
 		basecamp.WithTransport(transport),
 		basecamp.WithMaxRetries(1),
 	)
