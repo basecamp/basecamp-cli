@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -82,34 +81,13 @@ func (a *authAdapter) AccessToken(ctx context.Context) (string, error) {
 	return a.mgr.AccessToken(ctx)
 }
 
-// checkAuthClientRedirect is the CheckRedirect guard for the auth manager's HTTP
-// client (OAuth discovery, token refresh). Refuse to follow redirects for
-// non-idempotent requests: RFC 6749 token endpoints don't legitimately
-// 3xx-redirect POSTs, and because the exchange/refresh requests set GetBody, Go
-// would replay the auth code / refresh_token to the redirect target (only the
-// initial endpoint is origin-validated). Idempotent GET/HEAD requests (e.g.
-// OAuth discovery) carry no credential body, so they may follow redirects
-// normally — blocking those would needlessly fail discovery and force the
-// Launchpad fallback. Still cap the hop count so a looping endpoint fails fast
-// instead of spinning until the client timeout.
-func checkAuthClientRedirect(_ *http.Request, via []*http.Request) error {
-	if len(via) > 0 && via[0].Method != http.MethodGet && via[0].Method != http.MethodHead {
-		return http.ErrUseLastResponse
-	}
-	if len(via) >= 10 {
-		return fmt.Errorf("stopped after 10 redirects")
-	}
-	return nil
-}
-
 // NewApp creates a new App with the given configuration.
 func NewApp(cfg *config.Config) *App {
-	// Create HTTP client for auth manager (OAuth discovery, token refresh).
-	httpClient := &http.Client{
-		Timeout:       30 * time.Second,
-		CheckRedirect: checkAuthClientRedirect,
-	}
-	authMgr := auth.NewManager(cfg, httpClient)
+	// nil client: the auth Manager builds its own per-provenance OAuth
+	// clients (address-policed, redirect-guarded, 30s timeout) — see
+	// internal/auth/client.go. Passing a client here would replace them
+	// wholesale, enforcement included.
+	authMgr := auth.NewManager(cfg, nil)
 
 	// Create observability components
 	// Collector always runs to gather stats; hooks control output verbosity

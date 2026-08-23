@@ -63,14 +63,43 @@ const (
 
 // Manager handles OAuth authentication.
 type Manager struct {
-	cfg        *config.Config
-	store      *Store
+	cfg   *config.Config
+	store *Store
+
+	// httpClient is the caller-owned injection seam, used by tests to stub
+	// OAuth traffic. When non-nil it carries EVERY OAuth request: it
+	// collapses the per-provenance lanes below and bypasses the SDK's
+	// address enforcement by design (the SDK's "yours, enforcement
+	// included" contract). Production construction (appctx) passes nil and
+	// the Manager builds the per-lane policed clients itself.
 	httpClient *http.Client
+
+	// Per-provenance OAuth egress lanes (see client.go): BC5 traffic rides a
+	// client whose address policy derives from cfg.BaseURL, Launchpad
+	// traffic one derived from launchpadURL(). Built lazily so a malformed
+	// anchor fails the OAuth operation that needed it, cached for the
+	// Manager's lifetime.
+	bc5Lane oauthLane
+	lpLane  oauthLane
+
+	// proxyEnv is the one construction-time proxy-environment snapshot both
+	// lanes share, built under proxyOnce on first lane use.
+	proxyOnce sync.Once
+	proxyEnv  *proxyEnvState
+
+	// Warnf receives transport-policy warnings (a proxy ignored for OAuth
+	// traffic, a malformed opt-out value). Test seam; nil means stderr.
+	Warnf func(format string, args ...any)
 
 	mu sync.Mutex
 }
 
 // NewManager creates a new auth manager.
+//
+// A nil httpClient is the production configuration: OAuth requests ride
+// per-provenance clients that enforce the SDK's address policy at dial time.
+// A non-nil httpClient is caller-owned (test-only in this codebase) and
+// carries every OAuth request as-is — no address policy is applied on top.
 func NewManager(cfg *config.Config, httpClient *http.Client) *Manager {
 	return &Manager{
 		cfg:        cfg,
@@ -245,7 +274,18 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 		}
 	}
 
-	exchanger := oauth.NewExchanger(m.httpClient)
+	// The refresh lane follows the stored credential's provenance: bc5-typed
+	// credentials refresh against a BC5-discovered endpoint, everything else
+	// is Launchpad. OAuthType and TokenEndpoint are persisted independently —
+	// this selects a policy anchor, it does not validate their binding.
+	laneClient, laneErr := m.launchpadClient()
+	if creds.OAuthType == oauthTypeBC5 {
+		laneClient, laneErr = m.bc5Client()
+	}
+	if laneErr != nil {
+		return laneErr
+	}
+	exchanger := oauth.NewExchanger(laneClient)
 
 	req := oauth.RefreshRequest{
 		TokenEndpoint: tokenEndpoint,
@@ -260,7 +300,7 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 
 	token, err := exchanger.Refresh(ctx, req)
 	if err != nil {
-		return output.ErrAPI(0, fmt.Sprintf("token refresh failed: %v", err))
+		return wrapOAuthError("token refresh failed", err)
 	}
 
 	creds.AccessToken = token.AccessToken
@@ -568,9 +608,17 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		requestedScope = scopeFull
 	}
 
+	// The device-authorization POST and the token polling both ride the BC5
+	// lane client (the SDK carries them on the one WithDeviceHTTPClient
+	// client), so both endpoints the discovery document named are judged by
+	// the policy cfg.BaseURL earned.
+	deviceClient, err := m.bc5Client()
+	if err != nil {
+		return nil, err
+	}
 	devOpts := make([]oauth.DeviceOption, 0, 2+len(opts.deviceOptions))
 	devOpts = append(devOpts,
-		oauth.WithDeviceHTTPClient(m.httpClient),
+		oauth.WithDeviceHTTPClient(deviceClient),
 		oauth.WithDeviceScope(requestedScope),
 	)
 	devOpts = append(devOpts, opts.deviceOptions...)
@@ -706,7 +754,19 @@ func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*discove
 		return nil, err
 	}
 
-	discoverer := oauth.NewDiscoverer(m.httpClient)
+	// Both discovery hops ride the BC5 lane client. Hop 2 (the advertised
+	// issuer's metadata) would otherwise ride the SDK's internal default
+	// client, whose policy blocks loopback and knows nothing of the CLI's
+	// local configuration — a local resource's local advertised issuer would
+	// be refused right after hop 1 succeeded. The lane client carries the
+	// per-provenance policy (AllowLoopback iff cfg.BaseURL is local), so
+	// enforcement is preserved in both modes, and the SDK still adds its own
+	// redirect suppression around it.
+	discoveryClient, err := m.bc5Client()
+	if err != nil {
+		return nil, err
+	}
+	discoverer := oauth.NewDiscoverer(discoveryClient, oauth.WithIssuerHTTPClient(discoveryClient))
 	res, err := discoverer.DiscoverFromResource(ctx, origin)
 	if err != nil {
 		// Hard selection failure: propagate unchanged. output.AsError at the
@@ -933,7 +993,13 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, code stri
 		return nil, err
 	}
 
-	exchanger := oauth.NewExchanger(m.httpClient)
+	// The web-flow code exchange is Launchpad-provenance traffic (BC5 logins
+	// go through the device flow), so it rides the Launchpad lane client.
+	laneClient, laneErr := m.launchpadClient()
+	if laneErr != nil {
+		return nil, laneErr
+	}
+	exchanger := oauth.NewExchanger(laneClient)
 
 	req := oauth.ExchangeRequest{
 		TokenEndpoint:   cfg.TokenEndpoint,
@@ -946,7 +1012,7 @@ func (m *Manager) exchangeCode(ctx context.Context, cfg *oauth.Config, code stri
 
 	token, err := exchanger.Exchange(ctx, req)
 	if err != nil {
-		return nil, output.ErrAPI(0, fmt.Sprintf("token exchange failed: %v", err))
+		return nil, wrapOAuthError("token exchange failed", err)
 	}
 
 	creds := &Credentials{

@@ -125,7 +125,11 @@ func newToolsShowCmd(project *string) *cobra.Command {
 			if tool.Position != nil {
 				posStr = fmt.Sprintf("%d", *tool.Position)
 			}
-			summary := fmt.Sprintf("%s (%s) at position %s", tool.Title, tool.Name, posStr)
+			name := ""
+			if tool.Name != nil {
+				name = *tool.Name
+			}
+			summary := fmt.Sprintf("%s (%s) at position %s", tool.Title, name, posStr)
 
 			crumbs := []output.Breadcrumb{
 				{

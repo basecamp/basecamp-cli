@@ -1362,9 +1362,12 @@ func TestRefreshLocked_LaunchpadSendsClientID(t *testing.T) {
 	assert.Contains(t, body, "client_secret="+launchpadClientSecret)
 }
 
-// guardedClient mirrors the CheckRedirect guard appctx.NewApp installs on the
-// auth manager's HTTP client: non-GET/HEAD redirects are refused so the client
-// never replays a credential-bearing POST body to a redirect target.
+// guardedClient mirrors the CheckRedirect guard the Manager installs on its
+// per-provenance lane clients (checkAuthClientRedirect in client.go):
+// non-GET/HEAD redirects are refused so the client never replays a
+// credential-bearing POST body to a redirect target. Injected here so these
+// tests exercise the guard against live httptest redirects without the lane
+// policy refusing the loopback servers.
 func guardedClient() *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Second,

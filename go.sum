@@ -87,12 +87,14 @@ github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
-github.com/basecamp/basecamp-sdk/go v0.14.0 h1:Jyzmu3ucqwVe+YNC1zWJBOdPjBaTapyZWX7y0cAvaYo=
-github.com/basecamp/basecamp-sdk/go v0.14.0/go.mod h1:BlEtZTW78rOY5geVtKaCiccYT9Jz+QGgPuXLo2pROWk=
+github.com/basecamp/basecamp-sdk/go v0.15.0 h1:Yxp3WM7rZ7PDcXrOTc4dI9EFOqwHojpqVJ/zbdXnoVg=
+github.com/basecamp/basecamp-sdk/go v0.15.0/go.mod h1:00mgcmi89PlnHnLJNwcJjwryo4W5bYJtA2FoqVgHP54=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d h1:jAzDrCCzDpIwhbFT1xVVs0z2xpXoDEkomHfKB2bUUp8=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d/go.mod h1:iTBTaWvsPEFIcZfkxQHEfISyJ6sZ7036K6bNx0RY3EE=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
+github.com/basecamp/surfguard/go v0.1.0 h1:JMo+MZQEOBRqnUylzD0/jS9S42Fp+XKWMG+4LWfu/XE=
+github.com/basecamp/surfguard/go v0.1.0/go.mod h1:y5MWhE5S/CZAPzUOS0LoOYGUVxTeWFByFDssE3/l4b4=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=
 github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnwebNt5EWlYSAyrTnjyyk=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
