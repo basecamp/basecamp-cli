@@ -23,7 +23,7 @@ irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install
 
 On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
 
-That's it. You now have full access to Basecamp from your terminal.
+On an interactive terminal, the installer opens Basecamp setup: approve OAuth in your browser and the CLI selects the first available account, saves it globally, skips a default project, and connects every detected coding agent. Use `basecamp setup --customize` to choose those settings instead.
 
 <details>
 <summary>Other installation methods</summary>
@@ -69,6 +69,11 @@ nix profile install github:basecamp/basecamp-cli
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
+**mise:**
+```bash
+mise use --global github:basecamp/basecamp-cli@latest
+```
+
 **GitHub Release:** download from [Releases](https://github.com/basecamp/basecamp-cli/releases).
 
 </details>
@@ -83,7 +88,7 @@ What happens depends on how the CLI was installed:
 
 - **Installer script / tarball** (a binary under your home directory, e.g. `~/bin` or `~/.local/bin`): upgrades in place. The CLI downloads the release for your platform, verifies its Sigstore signature (the keyless `checksums.txt.bundle` published by the release pipeline, identity-pinned to the release workflow and tag) and SHA-256 checksum, swaps the executable transactionally, and confirms the installed binary reports the new version. On failure the previous binary is restored; in the worst case — restoration itself fails mid-swap — the error names the preserved backup file next to the binary so you can put it back by hand.
 - **Homebrew / Scoop**: delegates to `brew upgrade --cask` / `scoop update`, then verifies the manager-installed binary actually reports the new version.
-- **System packages** (apt/dnf/apk, AUR, Nix) and **`go install` builds**: never touched. `basecamp upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. `go install`; otherwise which package manager to use).
+- **System packages** (apt/dnf/apk, AUR, Nix), **mise**, and **`go install` builds**: never touched. `basecamp upgrade` exits nonzero with upgrade guidance for that install method (the exact command where it can be known, e.g. mise or `go install`; otherwise which package manager to use).
 
 `basecamp upgrade` exits 0 only when there is no update, or the update was applied *and confirmed*. Every other outcome is a structured failure (`"ok": false` in JSON) with one of these codes:
 
@@ -95,6 +100,20 @@ What happens depends on how the CLI was installed:
 | `upgrade_failed` | The update check, download, signature/checksum verification, or executable swap failed — the previous binary remains installed (or the error names the preserved backup if restoration also failed) |
 
 The install scripts verify release signatures when `cosign` is available: cosign v3 verifies the published bundle format as-is, v2.6+ is driven with `--new-bundle-format=true`, and older versions skip signature verification with a warning (SHA-256 checksums are always verified).
+
+## First-time setup
+
+The first interactive `basecamp` run applies the recommended setup automatically after browser approval:
+
+- First available account, saved globally
+- No default project
+- Every detected Claude Code or Codex integration
+
+Run the same setup directly with `basecamp setup`. To choose the account, default project, config scope, and agent integrations, run:
+
+```bash
+basecamp setup --customize
+```
 
 ## Usage
 

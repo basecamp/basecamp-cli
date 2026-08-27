@@ -2,7 +2,7 @@
 
 Install the Basecamp CLI and connect it to your AI agent. Execute all steps autonomously.
 
-The piped installer (Step 1) already installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent. The optional "Connect Your Agent" section below is for forcing a specific agent, handling multiple detected agents, or verifying the connection.
+On an interactive terminal, the installer runs the recommended setup after download: browser authentication, the first available account saved globally, no default project, and every detected coding agent connected. Use `basecamp setup --customize` when you want to choose those settings. In non-interactive environments, the installer installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent.
 
 **DONE WHEN:** `basecamp --version && basecamp auth status` both succeed.
 
@@ -30,7 +30,7 @@ curl -fsSL https://basecamp.com/install-cli | bash
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
-> **Note:** The install scripts auto-detect non-interactive environments (CI, piped input, coding agents) and skip the interactive setup wizard. In that case they still run `basecamp setup agents`, which installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping the wizard with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`.
+> **Note:** On an interactive terminal, the install scripts run `basecamp setup` with the recommended defaults. In non-interactive environments (CI, piped input, coding agents), they skip authentication and run `basecamp setup agents`, which installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping first-time setup with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`.
 >
 > Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `all`, or `none`). Set it for the interpreter, not the fetch:
 > - Bash: `curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash`
@@ -77,7 +77,12 @@ nix profile install github:basecamp/basecamp-cli
 go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest
 ```
 
-### Option G: GitHub Release
+### Option G: mise
+```bash
+mise use --global github:basecamp/basecamp-cli@latest
+```
+
+### Option H: GitHub Release
 Download the archive for your platform from [Releases](https://github.com/basecamp/basecamp-cli/releases), extract, and move `basecamp` to a directory on your PATH.
 
 **Verify:**
@@ -96,17 +101,19 @@ export PATH="$HOME/go/bin:$PATH"
 
 ### Upgrading later
 
-Run `basecamp upgrade`. Installer-script installs upgrade in place (Sigstore-verified download, transactional executable swap, post-upgrade version confirmation). Homebrew and Scoop installs delegate to their package manager, then verify the installed binary reports the new version. System packages (apt/dnf/apk, AUR, Nix) and `go install` builds are never touched — the command exits nonzero with upgrade guidance for that install method instead. Treat any nonzero exit as **not upgraded** and follow the hint in the error (`upgrade_required`, `upgrade_incomplete`, `upgrade_unverified`, or `upgrade_failed`).
+Run `basecamp upgrade`. Installer-script installs upgrade in place (Sigstore-verified download, transactional executable swap, post-upgrade version confirmation). Homebrew and Scoop installs delegate to their package manager, then verify the installed binary reports the new version. System packages (apt/dnf/apk, AUR, Nix), mise, and `go install` builds are never touched — the command exits nonzero with upgrade guidance for that install method instead. Treat any nonzero exit as **not upgraded** and follow the hint in the error (`upgrade_required`, `upgrade_incomplete`, `upgrade_unverified`, or `upgrade_failed`).
 
 ---
 
 ## Step 2: Authenticate
 
+Interactive installs authenticate during Step 1. If setup was skipped or the installer had no terminal, run:
+
 ```bash
 basecamp auth login
 ```
 
-Opens browser for OAuth. Grant access when prompted.
+This opens browser OAuth. Grant access when prompted.
 
 **Verify:**
 ```bash
@@ -124,7 +131,7 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
 
-The piped installer (Step 1) already installs the baseline skill and attempts to connect a single detected agent. Run the commands here to force a specific agent, connect a second one, or when several agents were detected and the installer connected none. Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
+Interactive setup in Step 1 connects every detected agent. Without a controlling terminal, the installer still installs the baseline skill and attempts to connect one detected agent. Run the commands here to force a specific agent, repair a connection, or connect agents that were not available during installation. Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
 
 ### Claude Code
 

@@ -9,7 +9,7 @@
 #                       (default: ~/bin if on PATH, else ~/.local/bin if on PATH;
 #                        otherwise ~/bin on Windows, ~/.local/bin elsewhere)
 #   BASECAMP_VERSION    Specific version to install (default: latest)
-#   BASECAMP_SKIP_SETUP Set to 1 to skip the interactive setup wizard after install
+#   BASECAMP_SKIP_SETUP Set to 1 to skip first-time setup after install
 #                       (still runs `basecamp setup agents` to install the skill
 #                        and connect coding agents)
 #   BASECAMP_SETUP_AGENT
@@ -513,28 +513,29 @@ main() {
 
   echo ""
 
-  # Run interactive setup wizard only when stdin is a TTY and not explicitly skipped.
-  # Non-interactive environments (CI, piped input, coding agents like Claude Code
-  # or Codex) get the baseline skill installed, a best-effort agent connection via
-  # `setup agents`, and next-step instructions instead — the wizard requires
-  # interactive prompts that don't work without a terminal.
+  # Run first-time setup when a controlling terminal can handle OAuth approval.
+  # Non-interactive environments (CI, redirected output, coding agents like Claude
+  # Code or Codex) get the baseline skill installed, a best-effort agent connection
+  # via `setup agents`, and next-step instructions instead.
   if [[ "${BASECAMP_SKIP_SETUP:-}" == "1" ]]; then
-    step "Skipping setup wizard (BASECAMP_SKIP_SETUP=1)"
+    step "Skipping first-time setup (BASECAMP_SKIP_SETUP=1)"
     post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
-    echo "    $(bold "basecamp setup")             Run interactive setup wizard"
+    echo "    $(bold "basecamp setup")             Run first-time setup"
     echo ""
-  elif [[ -t 0 ]] && [[ -t 1 ]]; then
-    "$BIN_DIR/$binary_name" setup
+  elif [[ "${BASECAMP_NONINTERACTIVE:-}" != "1" ]] && [[ -t 1 ]] && [[ -t 2 ]] && [[ -c /dev/tty ]]; then
+    # The canonical `curl ... | bash` install owns stdin while Bash reads the
+    # script. Give setup the controlling terminal so OAuth can complete.
+    "$BIN_DIR/$binary_name" setup </dev/tty
   else
-    info "Skipping interactive setup (no terminal detected)."
+    info "Skipping first-time setup (no terminal detected)."
     post_install_setup "$binary_name"
     echo ""
     echo "  Next steps:"
     echo "    $(bold "basecamp auth login")        Authenticate with Basecamp"
-    echo "    $(bold "basecamp setup")             Run interactive setup wizard"
+    echo "    $(bold "basecamp setup")             Run first-time setup"
     echo ""
   fi
 }

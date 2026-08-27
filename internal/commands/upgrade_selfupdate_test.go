@@ -499,6 +499,15 @@ func TestSelfUpdateIneligibleNixStore(t *testing.T) {
 	assert.Contains(t, hint, "Nix")
 }
 
+func TestSelfUpdateIneligibleMiseInstall(t *testing.T) {
+	for _, euid := range []int{1000, 0} {
+		stubEuid(t, euid)
+		reason, hint := selfUpdateIneligibility("/home/user/.local/share/mise/installs/github-basecamp-basecamp-cli/0.9.1/basecamp")
+		assert.Equal(t, "mise_install", reason)
+		assert.Contains(t, hint, "mise use --global github:basecamp/basecamp-cli@latest")
+	}
+}
+
 func TestSelfUpdateIneligibleSiblingPrefixHomeEscape(t *testing.T) {
 	stubEuid(t, 1000)
 	base := t.TempDir()

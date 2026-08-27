@@ -9,7 +9,7 @@ try {
 # Environment options:
 #   BASECAMP_VERSION      Specific version to install (default: latest)
 #   BASECAMP_BIN_DIR      Where to install the binary
-#   BASECAMP_SKIP_SETUP   Set to 1 to skip the interactive wizard (still runs
+#   BASECAMP_SKIP_SETUP   Set to 1 to skip first-time setup (still runs
 #                         `basecamp setup agents`)
 #   BASECAMP_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
 #                         claude | codex | all | none. Unset = auto-detect.
@@ -416,22 +416,18 @@ function Main {
 
     Write-Host ''
     if ($SkipSetup -eq '1') {
-      Step 'Skipping setup wizard (BASECAMP_SKIP_SETUP=1)'
+      Step 'Skipping first-time setup (BASECAMP_SKIP_SETUP=1)'
       # Still install the baseline skill and connect coding agents (best-effort).
       Invoke-PostInstallSetup $installedBinary
       Write-Host ''
       Write-Host '  Next steps:'
       Write-Host '    basecamp auth login        Authenticate with Basecamp'
-      Write-Host '    basecamp setup             Run interactive setup wizard'
+      Write-Host '    basecamp setup             Run first-time setup'
       Write-Host ''
     } elseif ($isInteractive) {
       & $installedBinary setup
-      Write-Host ''
-      Write-Host '  Next steps:'
-      Write-Host '    basecamp auth login        Authenticate with Basecamp'
-      Write-Host ''
     } else {
-      Info 'Skipping interactive setup because PowerShell is running non-interactively.'
+      Info 'Skipping first-time setup because PowerShell is running non-interactively.'
       # Install the baseline skill and connect coding agents (best-effort).
       Invoke-PostInstallSetup $installedBinary
       Write-Host ''

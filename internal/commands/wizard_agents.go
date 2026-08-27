@@ -59,9 +59,10 @@ type agentIssue struct {
 // authoritative for the wizard's completion status; Skipped is metadata only (a
 // deliberate skip records no issues, so it stays "complete").
 type agentSetupOutcome struct {
-	Skipped bool
-	Checks  []agentCheck
-	Issues  []agentIssue
+	Skipped  bool
+	Detected int
+	Checks   []agentCheck
+	Issues   []agentIssue
 }
 
 // snapshotAgentChecks captures every check across the given agents in one pass.
@@ -249,8 +250,32 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	return nil
 }
 
+// automaticAgents sets up every detected coding agent without asking questions.
+func automaticAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, error) {
+	agents := harness.DetectedAgents()
+	if len(agents) == 0 {
+		return agentSetupOutcome{}, nil
+	}
+
+	preChecks := snapshotAgentChecks(agents)
+	if detectedAgentsReady(preChecks) {
+		return agentSetupOutcome{Detected: len(agents), Checks: preChecks}, nil
+	}
+
+	return installDetectedAgentsQuietly(cmd, styles, agents)
+}
+
+// installDetectedAgentsQuietly suppresses setup chatter while preserving the
+// post-install health result for the final summary.
+func installDetectedAgentsQuietly(cmd *cobra.Command, styles *tui.Styles, agents []harness.AgentInfo) (agentSetupOutcome, error) {
+	quietCmd := &cobra.Command{}
+	quietCmd.SetContext(cmd.Context())
+	quietCmd.SetOut(io.Discard)
+	quietCmd.SetErr(io.Discard)
+	return installDetectedAgents(quietCmd, styles, agents)
+}
+
 // wizardAgents offers to set up detected coding agents.
-// Replaces the old wizardClaude() — works for any registered agent.
 func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, error) {
 	agents := harness.DetectedAgents()
 	if len(agents) == 0 {
@@ -258,40 +283,31 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	}
 
 	w := cmd.OutOrStdout()
-
-	// One pre-setup snapshot drives both the all-good gate below and the checklist
-	// rendered in the summary for the paths that do not run setup.
 	preChecks := snapshotAgentChecks(agents)
-
-	// Check if all detected agents are already fully set up
-	// (agent checks pass AND baseline skill is installed)
-	allGood := baselineSkillInstalled() && len(harness.StalePluginKeys()) == 0 && len(issuesFromChecks(preChecks)) == 0
-	if allGood {
-		for _, a := range agents {
-			fmt.Fprintln(w, styles.RenderStatus(true, a.Name+" plugin installed"))
+	if detectedAgentsReady(preChecks) {
+		for _, agent := range agents {
+			fmt.Fprintln(w, styles.RenderStatus(true, agent.Name+" plugin installed"))
 		}
 		fmt.Fprintln(w)
-		return agentSetupOutcome{Checks: preChecks}, nil
+		return agentSetupOutcome{Detected: len(agents), Checks: preChecks}, nil
 	}
 
 	fmt.Fprintln(w, styles.Heading.Render("  Step 5: Coding Agent Setup"))
 	fmt.Fprintln(w)
 
-	// Show detected agents
 	var names []string
-	for _, a := range agents {
-		names = append(names, a.Name)
+	for _, agent := range agents {
+		names = append(names, agent.Name)
 	}
 	fmt.Fprintln(w, styles.Body.Render(fmt.Sprintf("  Detected: %s", joinNames(names))))
 	fmt.Fprintln(w)
 
-	// Build numbered list of what will happen
 	fmt.Fprintln(w, styles.Body.Render("  This will:"))
 	step := 1
 	fmt.Fprintln(w, styles.Muted.Render(fmt.Sprintf("    %d. Install Basecamp agent skill to ~/.agents/skills/basecamp/", step)))
 	step++
-	for _, a := range agents {
-		handler, ok := agentSetupHandlers[a.ID]
+	for _, agent := range agents {
+		handler, ok := agentSetupHandlers[agent.ID]
 		if !ok {
 			continue
 		}
@@ -309,34 +325,39 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	if confirmErr != nil || !install {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, styles.Muted.Render("  You can set up agents later:"))
-		for _, a := range agents {
-			if _, ok := agentSetupHandlers[a.ID]; ok {
-				fmt.Fprintln(w, styles.Bold.Render(fmt.Sprintf("    basecamp setup %s", a.ID)))
+		for _, agent := range agents {
+			if _, ok := agentSetupHandlers[agent.ID]; ok {
+				fmt.Fprintln(w, styles.Bold.Render(fmt.Sprintf("    basecamp setup %s", agent.ID)))
 			}
 		}
 		fmt.Fprintln(w)
-		// Skipped carries the current snapshot for the checklist but records no
-		// issues, so a deliberate skip stays "complete".
-		return agentSetupOutcome{Skipped: true, Checks: preChecks}, nil
+		return agentSetupOutcome{Skipped: true, Detected: len(agents), Checks: preChecks}, nil
 	}
 
 	fmt.Fprintln(w)
+	return installDetectedAgents(cmd, styles, agents)
+}
 
+// detectedAgentsReady reports whether every detected integration and the shared
+// skill are ready to use.
+func detectedAgentsReady(checks []agentCheck) bool {
+	return baselineSkillInstalled() && len(harness.StalePluginKeys()) == 0 && len(issuesFromChecks(checks)) == 0
+}
+
+// installDetectedAgents installs the shared skill and every supplied agent integration.
+func installDetectedAgents(cmd *cobra.Command, styles *tui.Styles, agents []harness.AgentInfo) (agentSetupOutcome, error) {
+	w := cmd.OutOrStdout()
 	var issues []agentIssue
 
-	// Install baseline skill (always, for any agent)
 	if _, err := installSkillFiles(); err != nil {
 		fmt.Fprintln(w, styles.Warning.Render(fmt.Sprintf("  Skill install failed: %s", err)))
-		// Not "basecamp setup": this runs inside it, so that advice is circular.
-		// `setup agents` retries exactly the step that failed, and needs no terminal.
 		issues = append(issues, agentIssue{Check: "Agent skill", Hint: "Run: basecamp setup agents"})
 	} else {
 		fmt.Fprintln(w, styles.RenderStatus(true, "Agent skill installed"))
 	}
 
-	// Run each detected agent's handler
-	for _, a := range agents {
-		handler, ok := agentSetupHandlers[a.ID]
+	for _, agent := range agents {
+		handler, ok := agentSetupHandlers[agent.ID]
 		if !ok {
 			continue
 		}
@@ -345,21 +366,12 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 		}
 	}
 
-	// Re-snapshot the agents after setup ran so failed installs (e.g. a plugin
-	// that could not be cloned) surface as issues rather than a silent "complete".
-	// The same snapshot renders the summary checklist, so status and checklist
-	// can never disagree.
 	postChecks := snapshotAgentChecks(agents)
 	issues = append(issues, issuesFromChecks(postChecks)...)
-
-	// Post-condition: the all-good gate also requires stale-plugin cleanup, but a
-	// current-plugin health check can pass while stale entries survive (removal
-	// failed). Re-check so leftover stale keys mark the run incomplete instead of
-	// reporting "complete".
 	issues = append(issues, claudeStaleIssues()...)
 
 	fmt.Fprintln(w)
-	return agentSetupOutcome{Checks: postChecks, Issues: issues}, nil
+	return agentSetupOutcome{Detected: len(agents), Checks: postChecks, Issues: issues}, nil
 }
 
 // claudeStaleIssues reports leftover stale plugin entries as an issue so the

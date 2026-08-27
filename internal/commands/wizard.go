@@ -19,7 +19,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
-	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
 // WizardResult holds the outcome of the first-run wizard, for showSuccess to
@@ -27,25 +26,36 @@ import (
 // structured envelope it once emitted is unreachable and nothing serializes
 // this.
 type WizardResult struct {
-	Status      string // "complete" or "incomplete"
-	AccountID   string
-	AccountName string
-	ProjectID   string
-	ProjectName string
-	ConfigScope string // "global", "local", or "" if skipped
+	Status          string // "complete" or "incomplete"
+	AuthenticatedAs string
+	AccountID       string
+	AccountName     string
+	ProjectID       string
+	ProjectName     string
+	ConfigScope     string // "global", "local", or "" if skipped
 }
 
-// NewSetupCmd creates the setup command (explicit wizard invocation).
+// NewSetupCmd creates the setup command.
 func NewSetupCmd() *cobra.Command {
+	var customize bool
+	var minimal bool
+
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Interactive first-time setup",
-		Long:  "Walk through authentication, account selection, project configuration, and coding agent integration.",
+		Short: "First-time setup with recommended defaults",
+		Long: "Authenticate with Basecamp, select the first available account, save it globally, " +
+			"and connect detected coding agents. Use --customize to choose each setting or --minimal for a concise completion message.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runWizard(cmd, app)
+			if customize {
+				return runWizard(cmd, app)
+			}
+			return runFastSetup(cmd, app, minimal)
 		},
 	}
+	cmd.Flags().BoolVar(&customize, "customize", false, "Choose the account, default project, config scope, and coding agent setup")
+	cmd.Flags().BoolVar(&minimal, "minimal", false, "Show a concise completion message without starter commands")
+	cmd.MarkFlagsMutuallyExclusive("customize", "minimal")
 	for _, sub := range newSetupAgentCmds() {
 		cmd.AddCommand(sub)
 	}
@@ -53,7 +63,69 @@ func NewSetupCmd() *cobra.Command {
 	return cmd
 }
 
-// runWizard runs the interactive first-run setup wizard.
+// runFastSetup authenticates and applies the recommended first-run defaults.
+func runFastSetup(cmd *cobra.Command, app *appctx.App, minimal bool) error {
+	if app == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	app.SuppressPostRunNotices = true
+	if app.Flags.JQFilter != "" {
+		return output.ErrJQNotSupported("the setup command")
+	}
+	if app.Flags.Project != "" {
+		return output.ErrUsageHint("choosing a default project uses customized setup", "Run: basecamp setup --customize --project "+app.Flags.Project)
+	}
+	if !setupCanRun(app) {
+		return output.ErrUsageHint("basecamp setup needs an interactive terminal", wizardEscapeHint())
+	}
+
+	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))
+	waitAnim := showWelcome(cmd.OutOrStdout(), styles)
+	waitAnim()
+
+	authenticatedAs, err := wizardAuth(cmd, app, styles, false)
+	if err != nil {
+		return err
+	}
+
+	accountID, _, err := automaticAccount(cmd, app)
+	if err != nil {
+		return err
+	}
+	if err := resolve.PersistValue("account_id", accountID, "global"); err != nil {
+		return fmt.Errorf("saving the default account: %w", err)
+	}
+
+	showFastAuthenticated(cmd.OutOrStdout(), styles, authenticatedAs)
+
+	var agentOutcome agentSetupOutcome
+	err = tui.RunWithSpinner(cmd.OutOrStdout(), styles.Theme(), "Setting up AI coding agents...", func() error {
+		var setupErr error
+		agentOutcome, setupErr = automaticAgents(cmd, styles)
+		return setupErr
+	})
+	if err != nil {
+		return err
+	}
+	showFastAgentStatus(cmd.OutOrStdout(), styles, agentOutcome)
+
+	var omarchyOutcome omarchyPluginOutcome
+	if detectOmarchy() {
+		_ = tui.RunWithSpinner(cmd.OutOrStdout(), styles.Theme(), "Setting up Basecamp for Omarchy...", func() error {
+			omarchyOutcome = setupOmarchyPlugin(cmd.Context())
+			return nil
+		})
+	}
+
+	if err := resolve.PersistValue("onboarded", "true", "global"); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist onboarding flag: %v\n", err)
+	}
+
+	showFastCompletion(cmd.OutOrStdout(), styles, omarchyOutcome, minimal)
+	return nil
+}
+
+// runWizard runs the customizable first-run setup wizard.
 // It walks the user through authentication, account selection, and project selection.
 func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	if app == nil {
@@ -72,7 +144,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// The gate belongs to this RunE alone: `setup claude`, `setup codex` and
 	// `setup agents` are the supported non-interactive paths and must keep
 	// working, which a persistent hook here would have broken.
-	if !wizardCanRun(app) {
+	if !setupCanRun(app) {
 		return output.ErrUsageHint("basecamp setup needs an interactive terminal", wizardEscapeHint())
 	}
 
@@ -83,12 +155,13 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	waitAnim()
 
 	// Step 2: Auth
-	if err := wizardAuth(cmd, app, styles); err != nil {
+	authenticatedAs, err := wizardAuth(cmd, app, styles, true)
+	if err != nil {
 		return err
 	}
 
 	// Step 3: Account selection
-	result := WizardResult{Status: "complete"}
+	result := WizardResult{Status: "complete", AuthenticatedAs: authenticatedAs}
 	accountID, err := wizardAccount(cmd, app, styles)
 	if err != nil {
 		return err
@@ -126,6 +199,17 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	}
 	result.Status = statusFromOutcome(agentOutcome)
 
+	omarchyOutcome := setupOmarchyPlugin(cmd.Context())
+	if omarchyOutcome.Detected {
+		fmt.Fprintln(w, styles.Heading.Render("  Omarchy Integration"))
+		fmt.Fprintln(w)
+		showOmarchyPluginStatus(w, styles, omarchyOutcome)
+		fmt.Fprintln(w)
+		if omarchyOutcome.failed() {
+			result.Status = "incomplete"
+		}
+	}
+
 	// Persist onboarded flag (always global so it applies everywhere)
 	if err := resolve.PersistValue("onboarded", "true", "global"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist onboarding flag: %v\n", err)
@@ -137,35 +221,57 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// structured-envelope branch that used to sit here was reachable only under
 	// machine output, which the gate now refuses; it and its two helpers went
 	// with it rather than being kept alive for nobody.
-	showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped)
+	showSuccess(cmd.OutOrStdout(), styles, result, agentOutcome.Checks, agentOutcome.Issues, agentOutcome.Skipped, omarchyOutcome)
 	return nil
 }
 
-// wizardEscapeHint names the non-interactive paths that cover what the wizard
-// would have prompted for, rather than restating that a terminal is missing.
-// Modeled on stdinEscapeHint: point at the real alternatives.
+// wizardEscapeHint names the non-interactive paths that cover setup work,
+// rather than restating that a terminal is missing. Modeled on stdinEscapeHint:
+// point at the real alternatives.
 func wizardEscapeHint() string {
 	return "Agent setup runs without a terminal: basecamp setup agents (or basecamp setup claude / basecamp setup codex). " +
-		"Set the defaults the wizard would ask for with basecamp config set account_id <id> (or basecamp accounts use <id>) and basecamp config set project_id <id>. " +
+		"Set defaults directly with basecamp config set account_id <id> (or basecamp accounts use <id>) and basecamp config set project_id <id>. " +
 		"Check authentication with basecamp auth status."
 }
 
-// showWelcome displays the welcome screen with animated logo.
-// Returns a wait function that must be called before interactive prompts.
+// showWelcome displays the welcome screen with the current snowglobe mark.
 // All output goes to w so the command fully honors its output writer.
 func showWelcome(w io.Writer, styles *tui.Styles) func() {
-	aw, waitAnim := tui.AnimateWordmarkAsync(w, styles.Theme())
-	fmt.Fprintln(aw)
-	fmt.Fprintln(aw, styles.Title.Render("Welcome to Basecamp"))
-	fmt.Fprintln(aw)
-	fmt.Fprintln(aw, styles.Body.Render(fmt.Sprintf("The command-line interface for Basecamp (v%s).", version.Version)))
-	fmt.Fprintln(aw, styles.Body.Render("Let's get you set up. This will only take a moment."))
-	fmt.Fprintln(aw)
-	return waitAnim
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, tui.RenderSnowglobe(styles.Theme()))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, styles.Title.Render("Basecamp at your command (line)."))
+	fmt.Fprintln(w, styles.Body.Render("Let's get you set up. It’ll only take a moment."))
+	fmt.Fprintln(w)
+	return func() {}
 }
 
-// wizardAuth handles the authentication flow.
-func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
+func showAuthenticationStart(w io.Writer, styles *tui.Styles, stepByStep bool) string {
+	if !stepByStep {
+		return ""
+	}
+
+	fmt.Fprintln(w, styles.Heading.Render("  Step 1: Authentication"))
+	fmt.Fprintln(w)
+	return "  "
+}
+
+func authenticationLogger(w io.Writer, prefix string) func(string) {
+	launchpadOpeningShown := false
+	return func(message string) {
+		if strings.HasPrefix(message, "Authenticating via launchpad (") {
+			message = "Opening browser for Basecamp login..."
+			launchpadOpeningShown = true
+		} else if launchpadOpeningShown && strings.TrimSpace(message) == "Opening browser for authentication..." {
+			return
+		}
+		fmt.Fprintln(w, prefix+message)
+	}
+}
+
+// wizardAuth handles authentication. showResult enables the step-by-step
+// presentation and renders the authenticated identity immediately.
+func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles, showResult bool) (string, error) {
 	w := cmd.OutOrStdout()
 
 	if app.Auth.IsAuthenticated() {
@@ -178,34 +284,30 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 				FilterProduct: "bc3",
 			})
 		}
-		if epErr == nil && err == nil {
-			name := fmt.Sprintf("%s %s", info.Identity.FirstName, info.Identity.LastName)
-			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s (%s)", name, info.Identity.EmailAddress)))
-			if len(info.Accounts) > 0 {
-				var lines string
-				for _, acct := range info.Accounts {
-					lines += fmt.Sprintf("    • %s\n", acct.Name)
-				}
-				fmt.Fprint(w, styles.Muted.Render(lines))
+		if showResult {
+			if epErr == nil && err == nil {
+				name := strings.TrimSpace(fmt.Sprintf("%s %s", info.Identity.FirstName, info.Identity.LastName))
+				fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s (%s)", name, info.Identity.EmailAddress)))
+			} else {
+				fmt.Fprintln(w, styles.Success.Render("  Already authenticated."))
 			}
-		} else {
-			fmt.Fprintln(w, styles.Success.Render("  Already authenticated."))
+			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w)
-		return nil
+		if epErr == nil && err == nil {
+			return identityLabel(info.Identity.FirstName, info.Identity.LastName, info.Identity.EmailAddress), nil
+		}
+		return app.Auth.GetUserEmail(), nil
 	}
 
-	fmt.Fprintln(w, styles.Heading.Render("  Step 1: Authentication"))
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, styles.Muted.Render("  Opening browser for Basecamp login..."))
-	fmt.Fprintln(w)
-
+	loggerPrefix := showAuthenticationStart(w, styles, showResult)
 	result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
-		Logger: func(msg string) { fmt.Fprintln(w, "  "+msg) },
+		Logger: authenticationLogger(w, loggerPrefix),
 	})
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return "", fmt.Errorf("authentication failed: %w", err)
 	}
+
+	authenticatedAs := app.Auth.GetUserEmail()
 
 	// Try to fetch user profile for a friendly greeting
 	resp, profileErr := app.SDK.Get(cmd.Context(), "/my/profile.json")
@@ -217,18 +319,80 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles) error {
 		}
 		if err := resp.UnmarshalData(&profile); err == nil {
 			_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email)
-			fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s.", profile.Name)))
+			authenticatedAs = strings.TrimSpace(profile.Name)
+			if authenticatedAs == "" {
+				authenticatedAs = profile.Email
+			}
+			if showResult {
+				fmt.Fprintln(w, styles.Success.Render(fmt.Sprintf("  Logged in as %s.", profile.Name)))
+			}
 		}
-	} else {
+	} else if showResult {
 		fmt.Fprintln(w, styles.Success.Render("  Authentication successful."))
 	}
 
-	if result.Scope != "" {
+	if showResult && result.Scope != "" {
 		fmt.Fprintln(w, styles.Muted.Render(fmt.Sprintf("  Access: %s", result.Scope)))
 	}
-	fmt.Fprintln(w)
+	if showResult {
+		fmt.Fprintln(w)
+	}
 
-	return nil
+	return authenticatedAs, nil
+}
+
+// identityLabel returns the most useful concise identity available.
+func identityLabel(firstName, lastName, email string) string {
+	name := strings.TrimSpace(strings.TrimSpace(firstName) + " " + strings.TrimSpace(lastName))
+	if name != "" {
+		return name
+	}
+	return strings.TrimSpace(email)
+}
+
+// automaticAccount selects an explicit account, the OAuth-bound account, or
+// the first authorized account in that order.
+func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, error) {
+	explicitAccountID := app.Flags.Account
+	boundAccountID := app.Auth.AccountID()
+	var accounts []basecamp.AuthorizedAccount
+	if explicitAccountID == "" && boundAccountID == "" {
+		var err error
+		accounts, err = app.Resolve().ListAccounts(cmd.Context())
+		if err != nil {
+			return "", "", err
+		}
+	}
+
+	accountID, accountName, err := chooseAutomaticAccount(explicitAccountID, boundAccountID, accounts)
+	if err != nil {
+		return "", "", err
+	}
+	if accountName == "" {
+		accountName = fetchAccountName(cmd, app, accountID)
+	}
+
+	app.Config.AccountID = accountID
+	if err := app.RequireAccount(); err != nil {
+		return "", "", err
+	}
+	app.Names.SetAccountID(accountID)
+	return accountID, accountName, nil
+}
+
+// chooseAutomaticAccount prefers an explicit account, then an OAuth-bound
+// account, then the first account returned by the authorization service.
+func chooseAutomaticAccount(explicitAccountID, boundAccountID string, accounts []basecamp.AuthorizedAccount) (string, string, error) {
+	if explicitAccountID != "" {
+		return explicitAccountID, "", nil
+	}
+	if boundAccountID != "" {
+		return boundAccountID, "", nil
+	}
+	if len(accounts) == 0 {
+		return "", "", output.ErrNotFound("account", "any")
+	}
+	return fmt.Sprintf("%d", accounts[0].ID), accounts[0].Name, nil
 }
 
 // wizardAccount resolves the account using the existing interactive picker.
@@ -356,14 +520,96 @@ func successHeadline(status string, issueCount int) string {
 	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
 }
 
-// showSuccess displays the completion summary with example commands. checks is
-// the agent-health snapshot rendered as the checklist; issues holds every
-// unresolved problem — snapshot failures plus standalone setup failures such as
-// the baseline skill install or surviving stale entries — and drives the
-// headline and remediation. When the user skipped agent setup the checks are
-// reported as skipped rather than as failures, so the summary never shows red
-// checks under a "complete" headline.
-func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue, skipped bool) {
+// showFastAuthenticated displays the authenticated identity before coding-agent setup.
+func showFastAuthenticated(w io.Writer, styles *tui.Styles, authenticatedAs string) {
+	authLabel := "Authenticated"
+	if authenticatedAs != "" {
+		authLabel += " as " + authenticatedAs
+	}
+	fmt.Fprintln(w, styles.RenderStatus(true, authLabel))
+}
+
+// showFastAgentStatus displays the durable result that replaces the coding-agent spinner.
+func showFastAgentStatus(w io.Writer, styles *tui.Styles, agents agentSetupOutcome) {
+	switch {
+	case len(agents.Issues) > 0:
+		fmt.Fprintln(w, styles.RenderStatus(false, "AI coding agents need attention — run: basecamp doctor"))
+	case agents.Detected == 0:
+		fmt.Fprintln(w, styles.Muted.Render("  AI coding agents: none detected"))
+	default:
+		fmt.Fprintln(w, styles.RenderStatus(true, "AI coding agents set up"))
+	}
+}
+
+// showFastCompletion displays the Omarchy result and setup next steps.
+func showFastCompletion(w io.Writer, styles *tui.Styles, omarchy omarchyPluginOutcome, minimal bool) {
+	if omarchy.Detected {
+		showOmarchyPluginStatus(w, styles, omarchy)
+	}
+	fmt.Fprintln(w)
+
+	if minimal {
+		fmt.Fprintln(w, fastSetupTitleStyle(styles).Render("SETUP COMPLETE"))
+		fmt.Fprintln(w)
+		return
+	}
+	showFastSetupExamples(w, styles)
+}
+
+func showOmarchyPluginStatus(w io.Writer, styles *tui.Styles, outcome omarchyPluginOutcome) {
+	switch outcome.Status {
+	case "installed":
+		fmt.Fprintln(w, styles.RenderStatus(true, "Basecamp plugin installed for Omarchy"))
+	case "updated":
+		fmt.Fprintln(w, styles.RenderStatus(true, "Basecamp plugin updated for Omarchy"))
+	case "failed":
+		message := "Basecamp plugin setup needs attention"
+		if outcome.Manual != "" {
+			message += " — run: " + outcome.Manual
+		}
+		fmt.Fprintln(w, styles.RenderStatus(false, message))
+	}
+}
+
+func fastSetupTitleStyle(styles *tui.Styles) lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(styles.Theme().Primary)
+}
+
+// showFastSetupExamples prints account-wide commands that work with the
+// recommended setup's intentionally empty default project.
+func showFastSetupExamples(w io.Writer, styles *tui.Styles) {
+	titleStyle := fastSetupTitleStyle(styles)
+	descStyle := lipgloss.NewStyle().Italic(true)
+	examples := []struct{ cmd, desc string }{
+		{"basecamp projects list", "List your projects"},
+		{"basecamp assignments", "View your assignments"},
+		{"basecamp timeline", "See recent activity"},
+		{`basecamp search "quarterly planning"`, "Search across Basecamp"},
+	}
+
+	fmt.Fprintln(w, titleStyle.Render("Try it out!"))
+	fmt.Fprintln(w)
+
+	width := 0
+	for _, example := range examples {
+		width = max(width, len(example.cmd))
+	}
+	for _, example := range examples {
+		fmt.Fprintf(w, "%s%s  %s\n",
+			example.cmd,
+			strings.Repeat(" ", width-len(example.cmd)),
+			descStyle.Render(example.desc),
+		)
+	}
+	fmt.Fprintln(w)
+}
+
+// showSuccess displays the customizable setup summary with example commands.
+// checks is the agent-health snapshot rendered as the checklist; issues holds
+// every unresolved problem and drives the headline and remediation. When the
+// user skipped agent setup the checks are reported as skipped rather than as
+// failures.
+func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []agentCheck, issues []agentIssue, skipped bool, omarchy omarchyPluginOutcome) {
 	divider := styles.Muted.Render("─────────────────────────────────")
 
 	headlineStyle := styles.Success
@@ -371,8 +617,13 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []
 		headlineStyle = styles.Warning
 	}
 
+	issueCount := len(issues)
+	if omarchy.failed() {
+		issueCount++
+	}
+
 	fmt.Fprintln(w, divider)
-	fmt.Fprintln(w, headlineStyle.Render("  "+successHeadline(result.Status, len(issues))))
+	fmt.Fprintln(w, headlineStyle.Render("  "+successHeadline(result.Status, issueCount)))
 	fmt.Fprintln(w, divider)
 	fmt.Fprintln(w)
 
@@ -398,12 +649,15 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []
 			fmt.Fprintln(w, styles.RenderStatus(check.Status == "pass", check.Name))
 		}
 	}
+	if omarchy.Detected {
+		showOmarchyPluginStatus(w, styles, omarchy)
+	}
 	fmt.Fprintln(w)
 
 	// Remediation for anything that did not complete. Each issue carries its own
-	// check's hint, so guidance stays specific to the failing agent instead of
-	// hardcoding one agent's commands.
-	if len(issues) > 0 {
+	// check's hint, so guidance stays agent-specific; Omarchy carries the exact
+	// plugin command that completes its setup.
+	if len(issues) > 0 || omarchy.failed() {
 		fmt.Fprintln(w, styles.Body.Render("  Some steps need attention:"))
 		for _, issue := range issues {
 			// Check names usually already carry the agent (e.g. "Claude Code
@@ -419,7 +673,16 @@ func showSuccess(w io.Writer, styles *tui.Styles, result WizardResult, checks []
 			}
 			fmt.Fprintln(w, styles.Warning.Render(line))
 		}
-		fmt.Fprintln(w, styles.Muted.Render("    Then verify with: basecamp doctor"))
+		if omarchy.failed() {
+			line := "    Omarchy — " + omarchy.Detail
+			if omarchy.Manual != "" {
+				line += ": " + omarchy.Manual
+			}
+			fmt.Fprintln(w, styles.Warning.Render(line))
+		}
+		if len(issues) > 0 {
+			fmt.Fprintln(w, styles.Muted.Render("    Then verify coding agents with: basecamp doctor"))
+		}
 		fmt.Fprintln(w)
 	}
 
@@ -478,31 +741,24 @@ func fetchProjectName(cmd *cobra.Command, app *appctx.App, projectID string) str
 	return project.Name
 }
 
-// wizardCanRun reports whether the interactive wizard can actually be shown.
+// setupCanRun reports whether human first-time setup can run safely.
 //
-// The wizard is prompts end to end, and redirecting stdin does not skip one —
-// bubbletea falls back to /dev/tty and waits on the real terminal (see
-// tui.ErrNotInteractive). Asking a caller who requested machine output to answer
-// a question is the same mistake with a terminal attached. Three checks, because
-// no one of them sees everything: IsInteractive covers non-terminal
-// stdin/stdout, the machine-output flags and the BASECAMP_NONINTERACTIVE escape
-// hatch; IsMachineOutput adds the config-driven json/quiet formats it does not
-// look at (standing down when an explicit --styled/--md overrides them, since
-// ApplyFlags renders those human); InteractivePrompt adds stderr, which is
-// where huh actually draws.
+// Recommended setup opens browser OAuth, while customized setup also uses huh
+// prompts that draw to stderr. The combined checks keep setup in human-output
+// terminal contexts: IsInteractive covers stdin/stdout, flags, and
+// BASECAMP_NONINTERACTIVE; IsMachineOutput adds config-driven json/quiet formats
+// while honoring explicit --styled/--md overrides; InteractivePrompt adds stderr.
 //
-// Two callers, deliberately different responses. `basecamp setup` was asked for
-// by name, so it refuses out loud. Bare `basecamp` never asked for a wizard at
-// all, so isFirstRun simply declines to start one and the caller falls through
-// to help or the quick-start envelope — answering a question the user did not
-// ask with an error about a command they did not type.
-func wizardCanRun(app *appctx.App) bool {
+// Two callers deliberately respond differently. Explicit `basecamp setup`
+// refuses out loud. Bare `basecamp` quietly declines first-time setup and falls
+// through to help or the quick-start envelope.
+func setupCanRun(app *appctx.App) bool {
 	return app.IsInteractive() && !app.IsMachineOutput() && stdinarg.InteractivePrompt()
 }
 
 // isFirstRun returns true if this appears to be a first-time run.
 // Checks: onboarded flag, stored credentials, BASECAMP_TOKEN env, and whether
-// the wizard could be shown at all.
+// first-time setup can run safely.
 func isFirstRun(app *appctx.App) bool {
 	if app.Config.Onboarded != nil && *app.Config.Onboarded {
 		return false
@@ -513,5 +769,5 @@ func isFirstRun(app *appctx.App) bool {
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return false
 	}
-	return wizardCanRun(app)
+	return setupCanRun(app)
 }

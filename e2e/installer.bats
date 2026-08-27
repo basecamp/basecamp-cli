@@ -95,6 +95,13 @@ run_post_install_setup() {
   [[ "$output" != *"BASH_SOURCE[0]: unbound variable"* ]]
 }
 
+@test "install.sh gives piped first-time setup the controlling terminal" {
+  run grep -F '"$BIN_DIR/$binary_name" setup </dev/tty' "$INSTALL_SH"
+  [[ "$status" -eq 0 ]]
+  run grep -F '[[ -t 1 ]] && [[ -t 2 ]] && [[ -c /dev/tty ]]' "$INSTALL_SH"
+  [[ "$status" -eq 0 ]]
+}
+
 @test "new binary: post_install_setup dispatches to 'setup agents', never 'setup claude'" {
   run_post_install_setup
   [[ "$status" -eq 0 ]]

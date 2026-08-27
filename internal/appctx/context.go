@@ -36,6 +36,10 @@ type App struct {
 	Names  *names.Resolver
 	Output *output.Writer
 
+	// SuppressPostRunNotices keeps maintenance notices out of a command's
+	// intentional final output.
+	SuppressPostRunNotices bool
+
 	// Observability
 	Collector *observability.SessionCollector
 	Hooks     *observability.CLIHooks

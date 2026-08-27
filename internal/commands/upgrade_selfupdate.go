@@ -122,16 +122,22 @@ func resolveSelfUpdateTarget() (string, error) {
 // non-empty reason (and a reason-specific hint) when the target must not be
 // self-updated; empty reason means eligible.
 func selfUpdateIneligibility(target string) (reason, hint string) {
+	// Managed installs get method-specific guidance before the generic root and
+	// home-directory checks. Every branch still refuses self-mutation.
+	normalizedTarget := filepath.ToSlash(target)
+	if strings.HasPrefix(normalizedTarget, "/nix/store/") {
+		return "nix_store",
+			"This binary lives in the Nix store. Upgrade it the Nix way, e.g.: nix profile upgrade basecamp-cli (or update your flake pin)"
+	}
+
+	if strings.Contains(normalizedTarget, "/installs/github-basecamp-basecamp-cli/") {
+		return "mise_install",
+			"This binary is managed by mise. Upgrade it with: mise use --global github:basecamp/basecamp-cli@latest"
+	}
+
 	if runtime.GOOS != "windows" && euidResolver() == 0 {
 		return "running_as_root",
 			"Re-run basecamp upgrade as the user who installed the CLI, or upgrade via your system package manager"
-	}
-
-	// Nix gets its own message before the generic home test: /nix/store paths
-	// are immutable by design, and "outside your home" would mislead.
-	if strings.HasPrefix(filepath.ToSlash(target), "/nix/store/") {
-		return "nix_store",
-			"This binary lives in the Nix store. Upgrade it the Nix way, e.g.: nix profile upgrade basecamp-cli (or update your flake pin)"
 	}
 
 	home, err := homeDirResolver()

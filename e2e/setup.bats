@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
-# setup.bats - `basecamp setup` refuses to prompt when nothing can answer it.
+# setup.bats - `basecamp setup` refuses when first-time setup cannot run safely.
 #
-# The wizard is prompts end to end, and huh runs them as a bubbletea program.
-# Redirecting stdin does not make that program fail: bubbletea sees a
-# non-terminal stdin and opens /dev/tty instead, so the prompt waits on the real
-# terminal — `basecamp setup --json < /dev/null` hung forever.
+# Recommended setup opens browser OAuth, while `--customize` also uses huh
+# prompts. Redirecting stdin does not make a bubbletea prompt fail: it can open
+# /dev/tty instead and wait on the real terminal. The setup gate keeps both
+# modes out of contexts that cannot complete them.
 #
 # Every case runs under a timeout, and the timeout is the assertion: exit 124 is
 # the bug reproducing. A unit test with a fake reader cannot catch this, because

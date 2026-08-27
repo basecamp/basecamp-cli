@@ -18,6 +18,20 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+func TestPostRunNoticesEnabled(t *testing.T) {
+	assert.True(t, postRunNoticesEnabled(nil))
+
+	app := &appctx.App{}
+	assert.True(t, postRunNoticesEnabled(app))
+
+	app.SuppressPostRunNotices = true
+	assert.False(t, postRunNoticesEnabled(app))
+
+	app.SuppressPostRunNotices = false
+	app.Flags.JSON = true
+	assert.False(t, postRunNoticesEnabled(app))
+}
+
 // TestBadLLMEndpointDoesNotBlockUnrelatedCommands is a regression test for
 // the startup-validation lockout: llm_endpoint is consumed only by the
 // dev-gated TUI's summarize path (which fail-closes via

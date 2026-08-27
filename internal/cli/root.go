@@ -204,7 +204,7 @@ func NewRootCmd() *cobra.Command {
 			app.Close()
 		}
 		if commands.RefreshSkillsIfVersionChanged() {
-			if app == nil || !app.IsMachineOutput() {
+			if postRunNoticesEnabled(app) {
 				fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)
 
 				// One-time hint: if plugin/CLI version mismatch after upgrade, nudge the user
@@ -218,7 +218,7 @@ func NewRootCmd() *cobra.Command {
 		// Skip after upgrade (just acted on it) and doctor (has its own version check).
 		if updateCheck != nil && cmd.Name() != "upgrade" && cmd.Name() != "doctor" {
 			if notice := updateCheck.Notice(); notice != "" {
-				if app != nil && app.IsInteractive() && !app.IsMachineOutput() {
+				if app != nil && app.IsInteractive() && postRunNoticesEnabled(app) {
 					fmt.Fprintln(os.Stderr, notice)
 				}
 			}
@@ -283,6 +283,12 @@ func NewRootCmd() *cobra.Command {
 	})
 
 	return cmd
+}
+
+// postRunNoticesEnabled reports whether maintenance notices belong after the
+// command's intentional output.
+func postRunNoticesEnabled(app *appctx.App) bool {
+	return app == nil || (!app.IsMachineOutput() && !app.SuppressPostRunNotices)
 }
 
 // Execute runs the root command.

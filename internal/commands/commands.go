@@ -125,7 +125,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "logout", Category: "auth", Description: "Remove stored credentials"},
 				{Name: "config", Category: "auth", Description: "Manage configuration", Actions: []string{"show", "init", "set", "unset", "project", "trust", "untrust"}},
 				{Name: "me", Category: "auth", Description: "Show current user profile"},
-				{Name: "setup", Category: "auth", Description: "Interactive first-time setup"},
+				{Name: "setup", Category: "auth", Description: "First-time setup with recommended defaults"},
 				{Name: "quick-start", Category: "auth", Description: "Show getting started guide"},
 				{Name: "doctor", Category: "auth", Description: "Check CLI health and diagnose issues"},
 				{Name: "upgrade", Category: "auth", Description: "Upgrade to the latest version"},
