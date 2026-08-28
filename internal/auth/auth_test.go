@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+	"github.com/basecamp/cli/credstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -258,6 +259,23 @@ func TestSetUserEmail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test@example.com", loaded.UserEmail)
 	assert.Equal(t, "original-id", loaded.UserID)
+}
+
+// Regression: `basecamp people me` on BASECAMP_TOKEN stored the fetched
+// email through SetUserEmail, the one read path with no env-token guard.
+// That both mislabeled any stored credentials with the env token's user and
+// ran the keyring probe — so a CI host with a locked keychain now warned
+// about plaintext credentials it neither stored nor read.
+func TestSetUserEmailSkipsStoreOnEnvToken(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_from_environment")
+	swapNewCredStore(t, func(credstore.StoreOptions) credStore {
+		t.Error("a token session must not construct the credential store")
+		return &fallenBackStore{}
+	})
+	manager := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com"}, http.DefaultClient)
+	manager.store = NewStore(t.TempDir())
+
+	require.NoError(t, manager.SetUserEmail("someone@example.com"))
 }
 
 func TestSetUserIdentity(t *testing.T) {

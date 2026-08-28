@@ -1158,7 +1158,17 @@ func (m *Manager) GetUserEmail() string {
 
 // SetUserEmail stores the user email for the current credential key
 // without modifying the stored user ID.
+//
+// BASECAMP_TOKEN wins — match AccessToken() precedence. The email was
+// fetched with the environment token, so it names that token's user, not
+// whoever the stored credentials belong to; writing it there would
+// mislabel them. Skipping the store also keeps a token session off the
+// keyring probe and the fallback warning it can raise.
 func (m *Manager) SetUserEmail(email string) error {
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return nil
+	}
+
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
