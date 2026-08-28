@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/basecamp-sdk/go v0.14.0
-	github.com/basecamp/cli v0.2.2-0.20260828032417-844e9f965144
+	github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d
 	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v1.0.0
