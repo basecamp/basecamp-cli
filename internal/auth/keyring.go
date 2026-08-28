@@ -45,7 +45,7 @@ type Store struct {
 }
 
 // credStore is the slice of credstore.Store this wrapper uses, as an
-// interface so tests can stand in a store that fell back to file storage
+// interface so tests can substitute a store that fell back to file storage
 // without failing a real keyring probe.
 type credStore interface {
 	Load(key string) ([]byte, error)
