@@ -1,15 +1,13 @@
 module github.com/basecamp/basecamp-cli
 
-go 1.26.5
-
-toolchain go1.26.7
+go 1.26.7
 
 require (
 	charm.land/bubbles/v2 v2.2.0
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/basecamp-sdk/go v0.14.0
-	github.com/basecamp/cli v0.2.2-0.20260728023309-04e401b12c6c
+	github.com/basecamp/cli v0.2.2-0.20260828032417-844e9f965144
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/huh v1.0.0
