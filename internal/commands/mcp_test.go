@@ -25,6 +25,11 @@ func TestMCPCommandFlags(t *testing.T) {
 	require.NotNil(t, readOnly)
 	assert.Equal(t, "false", readOnly.DefValue, "full surface is the default, matching basecamp-mcp-server")
 	require.NotNil(t, cmd.Flags().Lookup("domains"))
+
+	// Stdout is the MCP JSON-RPC transport: the stdout_wire annotation makes
+	// cli.Execute report this command's errors on stderr instead of writing
+	// an error envelope into the protocol stream.
+	assert.NotEmpty(t, cmd.Annotations["stdout_wire"], "basecamp mcp must keep errors off the MCP wire")
 }
 
 // setupMCPTestApp builds the app the way the root command would: real

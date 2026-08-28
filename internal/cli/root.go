@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -392,6 +393,14 @@ func Execute() {
 		// Convert error to structured output
 		apiErr := output.AsError(err)
 
+		// Commands whose stdout speaks a wire protocol (basecamp mcp:
+		// JSON-RPC) keep errors off stdout entirely — an error envelope
+		// there is a malformed protocol message that hides the real failure
+		// behind the client's parse error. Report on stderr and exit.
+		if executedCmd.Annotations["stdout_wire"] != "" {
+			os.Exit(reportWireError(os.Stderr, err))
+		}
+
 		// jq-related errors (validation failures, unsupported commands, conflicts)
 		// must never be fed through the jq filter. Skip app.Err() entirely and
 		// render with a plain writer.
@@ -477,6 +486,22 @@ func Execute() {
 
 		os.Exit(output.ExitCodeFor(apiErr.Code))
 	}
+}
+
+// reportWireError renders err for a command whose stdout speaks a wire
+// protocol: plain lines on w (stderr), nothing on stdout. Returns the
+// process exit code for the error. Message and hint can carry SDK- or
+// transport-controlled text, so both are sanitized to single terminal-safe
+// lines, the same treatment the styled error renderer applies.
+func reportWireError(w io.Writer, err error) int {
+	apiErr := output.AsError(err)
+	message := richtext.SanitizeSingleLine(apiErr.Message)
+	hint := richtext.SanitizeSingleLine(apiErr.Hint)
+	fmt.Fprintln(w, "Error: "+message)
+	if hint != "" && !strings.Contains(message, hint) {
+		fmt.Fprintln(w, hint)
+	}
+	return output.ExitCodeFor(apiErr.Code)
 }
 
 // jqUsable reports whether a filter parses and compiles. Only these failures

@@ -13,6 +13,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -369,4 +370,27 @@ func stubTerminalStdio(t *testing.T) {
 		os.Stdout, os.Stdin = origStdout, origStdin
 		pty.Close()
 	})
+}
+
+// TestReportWireError pins the error rendering for wire commands (see the
+// stdout_wire annotation): plain lines suitable for an MCP client's stderr
+// log, with the structured error's hint when it has one, and the same exit
+// code the envelope path would produce. A hint the message already carries
+// (ErrAuth bakes its own into the message) is not repeated.
+func TestReportWireError(t *testing.T) {
+	var buf bytes.Buffer
+	code := reportWireError(&buf, output.ErrAuth("Not authenticated. Run: basecamp auth login"))
+	assert.Equal(t, "Error: Not authenticated. Run: basecamp auth login\n", buf.String())
+	assert.Equal(t, output.ExitCodeFor(output.CodeAuth), code)
+
+	buf.Reset()
+	code = reportWireError(&buf, output.ErrUsageHint("subcommand required", "Usage: basecamp mcp"))
+	assert.Equal(t, "Error: subcommand required\nUsage: basecamp mcp\n", buf.String())
+	assert.Equal(t, output.ExitCodeFor(output.CodeUsage), code)
+
+	// Server- or transport-controlled text is sanitized to a single
+	// terminal-safe line, like the styled error renderer does.
+	buf.Reset()
+	reportWireError(&buf, output.ErrAPI(502, "bad\x1b[31mgateway\r\ninjected"))
+	assert.Equal(t, "Error: badgateway injected\n", buf.String())
 }

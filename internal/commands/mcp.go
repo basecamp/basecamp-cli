@@ -37,6 +37,10 @@ func NewMCPCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running server; stdout speaks the MCP wire protocol. Not for interactive use.",
+			// cli.Execute keeps errors off stdout for wire commands: an
+			// error envelope there would be a malformed JSON-RPC message,
+			// hiding the real failure behind the client's parse error.
+			"stdout_wire": "mcp",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
