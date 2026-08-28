@@ -180,11 +180,12 @@ func TestNextPage(t *testing.T) {
 		return h
 	}
 
-	assert.Equal(t, "4",
+	assert.Equal(t, 4,
 		nextPage(link(`<https://3.basecampapi.com/999/projects.json?page=4>; rel="next"`)))
-	assert.Equal(t, "2",
+	assert.Equal(t, 2,
 		nextPage(link(`<https://x.test/a.json?page=1>; rel="prev", <https://x.test/a.json?page=2>; rel="next"`)))
-	assert.Empty(t, nextPage(link(`<https://x.test/a.json?page=1>; rel="prev"`)), "no next link")
-	assert.Empty(t, nextPage(link(`<https://x.test/a.json>; rel="next"`)), "next link without page")
-	assert.Empty(t, nextPage(http.Header{}), "no Link header")
+	assert.Zero(t, nextPage(link(`<https://x.test/a.json?page=1>; rel="prev"`)), "no next link")
+	assert.Zero(t, nextPage(link(`<https://x.test/a.json>; rel="next"`)), "next link without page")
+	assert.Zero(t, nextPage(link(`<https://x.test/a.json?page=bogus>; rel="next"`)), "non-numeric page")
+	assert.Zero(t, nextPage(http.Header{}), "no Link header")
 }

@@ -71,7 +71,7 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 		return gateway.JSONResult(result)
 	}
-	if next := nextPage(resp.Headers); next != "" {
+	if next := nextPage(resp.Headers); next > 0 {
 		// Paginated listings surface the Link rel="next" page to pass back
 		// as the action's page parameter.
 		wrapped, err := json.Marshal(map[string]any{"next_page": next, "results": resp.Data})
@@ -82,11 +82,12 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
 }
 
-// nextPage extracts the page parameter from a geared_pagination Link
-// rel="next" header. Basecamp pages by number: when a listing has more, the
-// result is wrapped as {"next_page": N, "results": ...} and the caller
-// passes N back as the action's page parameter.
-func nextPage(headers http.Header) string {
+// nextPage extracts the page number from a geared_pagination Link
+// rel="next" header, 0 when there is none. Basecamp pages by number: when a
+// listing has more, the result is wrapped as {"next_page": N, "results": ...}
+// and the caller passes N back as the action's page parameter — a number, to
+// match the page parameter's integer schema.
+func nextPage(headers http.Header) int {
 	for _, link := range headers.Values("Link") {
 		for part := range strings.SplitSeq(link, ",") {
 			if !strings.Contains(part, `rel="next"`) {
@@ -101,12 +102,12 @@ func nextPage(headers http.Header) string {
 			if err != nil {
 				continue
 			}
-			if page := u.Query().Get("page"); page != "" {
+			if page, err := strconv.Atoi(u.Query().Get("page")); err == nil && page > 0 {
 				return page
 			}
 		}
 	}
-	return ""
+	return 0
 }
 
 func (d dispatcher) call(ctx context.Context, method, path string, body any) (*basecamp.Response, error) {

@@ -158,12 +158,52 @@ func TestServerSurfacesPagination(t *testing.T) {
 	})
 	require.False(t, isError, "list_projects failed: %s", text)
 	var wrapped struct {
-		NextPage string          `json:"next_page"`
+		NextPage int             `json:"next_page"`
 		Results  json.RawMessage `json:"results"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(text), &wrapped))
-	assert.Equal(t, "2", wrapped.NextPage)
+	assert.Equal(t, 2, wrapped.NextPage, "next_page is a number, matching the page parameter's integer schema")
 	assert.JSONEq(t, `[{"id":1}]`, string(wrapped.Results))
+}
+
+// TestServerAcceptsSynthesizedPageParam drives the pagination round trip
+// through list_webhooks, one of the operations the model marks paginated
+// without declaring a page parameter: the next_page a listing returns must
+// be acceptable as the follow-up call's page parameter.
+func TestServerAcceptsSynthesizedPageParam(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/999/buckets/1/webhooks.json", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"id":2}]`))
+			return
+		}
+		w.Header().Set("Link", `<http://`+r.Host+`/999/buckets/1/webhooks.json?page=2>; rel="next"`)
+		_, _ = w.Write([]byte(`[{"id":1}]`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	srv, err := New(newTestAPI(upstream), Config{})
+	require.NoError(t, err)
+	session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
+
+	text, isError := mcptest.CallText(t, session, "basecamp_automation", map[string]any{
+		"action": "list_webhooks",
+		"params": map[string]any{"bucketId": "1"},
+	})
+	require.False(t, isError, "list_webhooks failed: %s", text)
+	var wrapped struct {
+		NextPage int `json:"next_page"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &wrapped))
+	require.Equal(t, 2, wrapped.NextPage)
+
+	text, isError = mcptest.CallText(t, session, "basecamp_automation", map[string]any{
+		"action": "list_webhooks",
+		"params": map[string]any{"bucketId": "1", "page": wrapped.NextPage},
+	})
+	require.False(t, isError, "passing next_page back must dispatch, got: %s", text)
+	assert.JSONEq(t, `[{"id":2}]`, text)
 }
 
 func TestServerSurfacesAPIErrorsInBand(t *testing.T) {
