@@ -1,0 +1,29 @@
+README.md
+  s_cb8638fd4deb07::t_efe2dbec260039 137-155
+e2e/errors.bats
+  s_cb8638fd4deb07::t_4ab3c3dbbc1587 484,487-566
+internal/commands/projects_test.go
+  s_cb8638fd4deb07::t_bd078c2c6f78b2 9,154-192
+internal/output/envelope.go
+  s_cb8638fd4deb07::t_8d0272a33504da 58-65,67-72,168-172
+internal/output/output_test.go
+  s_cb8638fd4deb07::t_a85bb7b2b1cc21 473-587
+skills/basecamp/SKILL.md
+  s_cb8638fd4deb07::t_b77f33f3db6e37 150,1352,1356,1361-1366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "06ba912883892611b17fdd0f490fc0aa27a3f5d1",
+  "prompts": {},
+  "sessions": {
+    "s_cb8638fd4deb07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7799bc4b-8db5-43d6-af8e-1895e0ebc853",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
