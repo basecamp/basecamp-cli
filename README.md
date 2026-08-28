@@ -134,6 +134,25 @@ Every command supports `--json` for structured output:
 
 Breadcrumbs suggest next commands, making it easy for humans and agents to navigate.
 
+Errors use the same envelope with `ok: false`, a stable `code`, and `retryable`,
+which says whether a retry can change the outcome:
+
+```json
+{
+  "ok": false,
+  "error": "Gateway error (503)",
+  "code": "api_error",
+  "retryable": true,
+  "hint": "..."
+}
+```
+
+`retryable` is present on every error envelope — `true` for transient failures
+(network, timeout, rate limit, 5xx/gateway, circuit open), `false` for a verdict
+(usage, not found, auth, forbidden, validation, account limit) — and never on a
+success envelope. Key on it rather than on the code or message when deciding
+whether to retry.
+
 ## Authentication
 
 OAuth 2.1 with automatic token refresh. First login opens your browser.

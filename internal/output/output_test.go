@@ -470,6 +470,121 @@ func TestWriterErrIncludesRequestIDMeta(t *testing.T) {
 	assert.Equal(t, "req-cli-123", resp.Meta["request_id"])
 }
 
+// The error envelope carries a top-level "retryable" that mirrors the
+// error's Retryable classification. A consumer deciding whether to retry keys
+// on it, not on the code or message — so it must be present (as false) on
+// every error envelope, not just the transient ones, and never leak onto a
+// success envelope.
+func TestWriterErrEmitsRetryableForTransientError(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	err := w.Err(&basecamp.Error{
+		Code:       basecamp.CodeAPI,
+		Message:    "Gateway error (503)",
+		HTTPStatus: 503,
+		Retryable:  true,
+	})
+	require.NoError(t, err, "Err() failed")
+
+	decoded := decodeErrorEnvelope(t, buf.Bytes())
+	assert.Equal(t, false, decoded["ok"])
+	assert.Equal(t, CodeAPI, decoded["code"])
+	assert.Equal(t, true, decoded["retryable"])
+}
+
+func TestWriterErrEmitsRetryableFalseForVerdict(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	require.NoError(t, w.Err(ErrNotFound("project", "123")))
+
+	decoded := decodeErrorEnvelope(t, buf.Bytes())
+	retryable, present := decoded["retryable"]
+	assert.True(t, present, "retryable must be present on every error envelope, false included")
+	assert.Equal(t, false, retryable)
+}
+
+func TestWriterErrRetryableForCLIClassifiedErrors(t *testing.T) {
+	for name, err := range map[string]error{
+		"rate limit": ErrRateLimit(30),
+		"network":    ErrNetwork(errors.New("dial tcp: connection refused")),
+		"wrapped":    fmt.Errorf("listing projects: %w", ErrNetwork(errors.New("timeout"))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := New(Options{Format: FormatJSON, Writer: &buf})
+
+			require.NoError(t, w.Err(err))
+
+			assert.Equal(t, true, decodeErrorEnvelope(t, buf.Bytes())["retryable"])
+		})
+	}
+}
+
+func TestWriterErrRetryableFalseForUnclassifiedError(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	require.NoError(t, w.Err(errors.New("something unexpected")))
+
+	decoded := decodeErrorEnvelope(t, buf.Bytes())
+	assert.Equal(t, CodeAPI, decoded["code"])
+	assert.Equal(t, false, decoded["retryable"], "no positive signal means not retryable")
+}
+
+// Field order is part of the envelope contract: retryable sits between code
+// and hint, and the existing fields keep their positions.
+func TestWriterErrRetryableFieldOrder(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	require.NoError(t, w.Err(ErrRateLimit(30)))
+
+	out := buf.String()
+	positions := []int{
+		strings.Index(out, `"ok"`),
+		strings.Index(out, `"error"`),
+		strings.Index(out, `"code"`),
+		strings.Index(out, `"retryable"`),
+		strings.Index(out, `"hint"`),
+	}
+	for i, pos := range positions {
+		require.NotEqual(t, -1, pos, "field %d missing from %s", i, out)
+		if i > 0 {
+			assert.Greater(t, pos, positions[i-1], "field order drifted in %s", out)
+		}
+	}
+}
+
+func TestWriterErrQuietModeCarriesRetryable(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatQuiet, Writer: &buf})
+
+	require.NoError(t, w.Err(ErrRateLimit(30)))
+
+	assert.Equal(t, true, decodeErrorEnvelope(t, buf.Bytes())["retryable"])
+}
+
+func TestWriterOKOmitsRetryable(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatJSON, Writer: &buf})
+
+	require.NoError(t, w.OK(map[string]string{"id": "123"}))
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded))
+	_, present := decoded["retryable"]
+	assert.False(t, present, "retryable is an error-envelope field only")
+}
+
+func decodeErrorEnvelope(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(raw, &decoded), "Failed to unmarshal %s", raw)
+	return decoded
+}
+
 func TestWriterQuietFormat(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{

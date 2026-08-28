@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -149,4 +150,43 @@ type projectUpdateEnvelope struct {
 		Description string `json:"description"`
 		UpdatedAt   string `json:"updated_at"`
 	} `json:"data"`
+}
+
+// A failed command reaches the JSON error envelope with a top-level
+// "retryable" that carries the SDK's classification end to end (SDK error →
+// convertSDKError → app.Err): a transient 503 says retry, a 404 verdict says
+// don't. Consumers deciding whether to retry key on that field rather than
+// on the code or message. A mutation is used because the generated client
+// retries idempotent operations on its own schedule, which is not the
+// behavior under test here.
+func TestProjectsCreateErrorEnvelopeCarriesRetryable(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		code      string
+		retryable bool
+	}{
+		{"gateway 503", http.StatusServiceUnavailable, basecamp.CodeAPI, true},
+		{"not found 404", http.StatusNotFound, basecamp.CodeNotFound, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, `{"error":"upstream said no"}`)
+			}))
+			t.Cleanup(server.Close)
+			app, buf := newRequestLevelApp(t, server.URL)
+
+			err := executeCommand(NewProjectsCmd(), app, "create", "Launch plan")
+			require.Error(t, err)
+			require.NoError(t, app.Err(err))
+
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "envelope: %s", buf.String())
+			assert.Equal(t, false, decoded["ok"])
+			assert.Equal(t, tc.code, decoded["code"])
+			assert.Equal(t, tc.retryable, decoded["retryable"], "envelope: %s", buf.String())
+		})
+	}
 }

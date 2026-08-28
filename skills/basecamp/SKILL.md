@@ -147,7 +147,7 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
 |------|------|--------|
 | Filter/extract JSON data | `--jq '<expr>'` | Built-in jq filter (no external jq needed). Implies `--json`; filter runs on the envelope. |
 | Filter in agent mode | `--agent --jq '<expr>'` | Filter runs on data-only payload (no envelope), matching `--agent` contract. |
-| Full JSON output | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}` |
+| Full JSON output | `--json` | JSON envelope: `{ok, data, summary, breadcrumbs, meta}`; errors: `{ok:false, error, code, retryable, hint, meta}` |
 | Show results to a user | `--md` / `-m` | GFM tables, task lists, structured Markdown |
 | Automation / scripting | `--agent` | Success: raw JSON data (no envelope); errors: `{ok:false,...}` object; no interactive prompts |
 
@@ -1349,14 +1349,20 @@ the specific argument. Use this for elicitation:
 
 ```bash
 $ basecamp todos create --json
-{"ok": false, "error": "<content> required", "code": "usage",
+{"ok": false, "error": "<content> required", "code": "usage", "retryable": false,
  "hint": "Usage: basecamp todos create <content>"}
 
 $ basecamp comments create 123 --json
-{"ok": false, "error": "<content> required", "code": "usage", ...}
+{"ok": false, "error": "<content> required", "code": "usage", "retryable": false, ...}
 ```
 
 The `error` field names the missing `<arg>` — use it to prompt the user for the specific value.
+
+**Retryable errors (`retryable`):** every error envelope carries a boolean `retryable` —
+`true` when the failure is transient (network, timeout, rate limit, 5xx/gateway, circuit
+open) and a retry can change the outcome, `false` for a verdict (usage, not found, auth,
+forbidden, validation, account limit). Key on it rather than on `code` or `error` when
+deciding whether to retry; it is never present on a success envelope.
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 

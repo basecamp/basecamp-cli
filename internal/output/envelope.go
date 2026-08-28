@@ -55,12 +55,21 @@ type Breadcrumb struct {
 }
 
 // ErrorResponse is the error envelope for JSON output.
+//
+// Retryable is always present on an error envelope and never on a success
+// one: true when the failure was classified transient (network, timeout,
+// rate limit, 5xx/gateway, circuit open, bulkhead full), false for a verdict
+// (usage, not found, auth, forbidden, validation, account limit) and for any
+// error nothing classified. Consumers key on the field rather than on the
+// code or message, which describe the failure and not whether a retry can
+// change it.
 type ErrorResponse struct {
-	OK    bool           `json:"ok"`
-	Error string         `json:"error"`
-	Code  string         `json:"code"`
-	Hint  string         `json:"hint,omitempty"`
-	Meta  map[string]any `json:"meta,omitempty"`
+	OK        bool           `json:"ok"`
+	Error     string         `json:"error"`
+	Code      string         `json:"code"`
+	Retryable bool           `json:"retryable"`
+	Hint      string         `json:"hint,omitempty"`
+	Meta      map[string]any `json:"meta,omitempty"`
 }
 
 // Format specifies the output format.
@@ -156,10 +165,11 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 func (w *Writer) Err(err error, opts ...ErrorResponseOption) error {
 	e := AsError(err)
 	resp := &ErrorResponse{
-		OK:    false,
-		Error: e.Message,
-		Code:  e.Code,
-		Hint:  e.Hint,
+		OK:        false,
+		Error:     e.Message,
+		Code:      e.Code,
+		Retryable: e.Retryable,
+		Hint:      e.Hint,
 	}
 	if requestID := RequestID(err); requestID != "" {
 		if resp.Meta == nil {

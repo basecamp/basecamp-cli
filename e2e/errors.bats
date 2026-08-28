@@ -481,5 +481,86 @@ load test_helper
   assert_failure
   assert_json_value '.ok' 'false'
   assert_json_value '.code' 'usage'
+  assert_json_value '.retryable' 'false'
   assert_output_contains '"error"'
+}
+
+# Every error envelope carries "retryable" so a consumer can tell a transient
+# failure from a verdict without parsing the code or message. A stub API that
+# answers 503 exercises the SDK classification end to end; a mutation is used
+# because the SDK retries idempotent reads on its own schedule.
+
+start_unavailable_api_stub() {
+  UNAVAILABLE_STUB_PORT_FILE="$TEST_TEMP_DIR/unavailable-stub.port"
+
+  local python_bin
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin=python3
+  elif command -v python >/dev/null 2>&1; then
+    python_bin=python
+  else
+    echo "Error: neither python3 nor python is available in PATH; cannot start unavailable API stub" >&2
+    return 1
+  fi
+
+  "$python_bin" - <<'PY' "$UNAVAILABLE_STUB_PORT_FILE" &
+import http.server
+import socketserver
+import sys
+
+port_file = sys.argv[1]
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def _unavailable(self):
+        self.send_response(503)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{"error":"service unavailable"}')
+
+    do_GET = _unavailable
+    do_POST = _unavailable
+
+    def log_message(self, format, *args):
+        pass
+
+with socketserver.TCPServer(('127.0.0.1', 0), Handler) as server:
+    with open(port_file, 'w', encoding='utf-8') as f:
+        f.write(str(server.server_address[1]))
+    server.serve_forever()
+PY
+  UNAVAILABLE_STUB_PID=$!
+
+  for _ in $(seq 1 50); do
+    [[ -s "$UNAVAILABLE_STUB_PORT_FILE" ]] && break
+    sleep 0.1
+  done
+
+  if [[ ! -s "$UNAVAILABLE_STUB_PORT_FILE" ]]; then
+    echo "failed to start unavailable API stub" >&2
+    return 1
+  fi
+
+  export BASECAMP_BASE_URL="http://127.0.0.1:$(cat "$UNAVAILABLE_STUB_PORT_FILE")"
+}
+
+stop_unavailable_api_stub() {
+  if [[ -n "${UNAVAILABLE_STUB_PID:-}" ]]; then
+    kill "$UNAVAILABLE_STUB_PID" 2>/dev/null || true
+    wait "$UNAVAILABLE_STUB_PID" 2>/dev/null || true
+    unset UNAVAILABLE_STUB_PID
+  fi
+}
+
+@test "transient API failure returns retryable JSON envelope" {
+  start_unavailable_api_stub
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp projects create "Launch plan" --json
+  stop_unavailable_api_stub
+
+  assert_failure
+  assert_json_value '.ok' 'false'
+  assert_json_value '.code' 'api_error'
+  assert_json_value '.retryable' 'true'
 }
