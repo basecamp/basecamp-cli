@@ -533,8 +533,12 @@ func TestWriterErrRetryableFalseForUnclassifiedError(t *testing.T) {
 	assert.Equal(t, false, decoded["retryable"], "no positive signal means not retryable")
 }
 
-// Field order is part of the envelope contract: retryable sits between code
-// and hint, and the existing fields keep their positions.
+// Field order is part of the piped-envelope contract: retryable sits between
+// code and hint, and the existing fields keep their positions. The pin covers
+// the non-TTY representation machine consumers read; on a TTY, writeJSON
+// re-encodes the envelope through map-backed sanitization, so keys come out
+// alphabetized there — that path serves a human reader and carries no order
+// contract.
 func TestWriterErrRetryableFieldOrder(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{Format: FormatJSON, Writer: &buf})

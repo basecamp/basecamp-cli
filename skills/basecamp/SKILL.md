@@ -1359,10 +1359,13 @@ $ basecamp comments create 123 --json
 The `error` field names the missing `<arg>` — use it to prompt the user for the specific value.
 
 **Retryable errors (`retryable`):** every error envelope carries a boolean `retryable` —
-`true` when the failure is transient (network, timeout, rate limit, 5xx/gateway, circuit
-open) and a retry can change the outcome, `false` for a verdict (usage, not found, auth,
-forbidden, validation, account limit). Key on it rather than on `code` or `error` when
-deciding whether to retry; it is never present on a success envelope.
+`true` when the CLI classified the failure transient (network, timeout, rate limit,
+circuit open, most 5xx/gateway responses — not all: 507 and some 500s are verdicts) and
+a retry can change the outcome, `false` for a verdict (usage, not found, auth, forbidden,
+validation, account limit) and for any error nothing classified. Key on it rather than
+on `code` or `error` when deciding whether to retry — `false` means no known reason a
+retry would help, not a guarantee of permanence; it is never present on a success
+envelope.
 
 **URL malformed (curl exit 3):** Special characters in content. Use plain text or properly escaped HTML.
 

@@ -58,7 +58,8 @@ type Breadcrumb struct {
 //
 // Retryable is always present on an error envelope and never on a success
 // one: true when the failure was classified transient (network, timeout,
-// rate limit, 5xx/gateway, circuit open, bulkhead full), false for a verdict
+// rate limit, circuit open, bulkhead full, and most 5xx/gateway responses —
+// not all: 507 and a raw-client 500 are verdicts), false for a verdict
 // (usage, not found, auth, forbidden, validation, account limit) and for any
 // error nothing classified. Consumers key on the field rather than on the
 // code or message, which describe the failure and not whether a retry can

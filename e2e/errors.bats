@@ -492,6 +492,7 @@ load test_helper
 
 start_unavailable_api_stub() {
   UNAVAILABLE_STUB_PORT_FILE="$TEST_TEMP_DIR/unavailable-stub.port"
+  local log_file="$TEST_TEMP_DIR/unavailable-stub.log"
 
   local python_bin
   if command -v python3 >/dev/null 2>&1; then
@@ -503,7 +504,7 @@ start_unavailable_api_stub() {
     return 1
   fi
 
-  "$python_bin" - <<'PY' "$UNAVAILABLE_STUB_PORT_FILE" &
+  "$python_bin" - <<'PY' "$UNAVAILABLE_STUB_PORT_FILE" >"$log_file" 2>&1 3>&- &
 import http.server
 import socketserver
 import sys
@@ -536,7 +537,9 @@ PY
   done
 
   if [[ ! -s "$UNAVAILABLE_STUB_PORT_FILE" ]]; then
-    echo "failed to start unavailable API stub" >&2
+    echo "failed to start unavailable API stub. Log:" >&2
+    cat "$log_file" >&2
+    stop_unavailable_api_stub
     return 1
   fi
 

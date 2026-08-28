@@ -147,11 +147,13 @@ which says whether a retry can change the outcome:
 }
 ```
 
-`retryable` is present on every error envelope — `true` for transient failures
-(network, timeout, rate limit, 5xx/gateway, circuit open), `false` for a verdict
-(usage, not found, auth, forbidden, validation, account limit) — and never on a
-success envelope. Key on it rather than on the code or message when deciding
-whether to retry.
+`retryable` is present on every error envelope — `true` when the CLI classified
+the failure transient (network, timeout, rate limit, circuit open, and most
+5xx/gateway responses — not all: 507 and some 500s are verdicts), `false` for a
+verdict (usage, not found, auth, forbidden, validation, account limit) and for
+any error nothing classified — and never on a success envelope. Key on it rather
+than on the code or message when deciding whether to retry; `false` means no
+known reason a retry would help, not a guarantee the failure is permanent.
 
 ## Authentication
 
