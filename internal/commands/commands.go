@@ -143,6 +143,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true, DevOnly: true},
 				{Name: "bonfire", Category: "additional", Description: "Multi-chat orchestration", Actions: []string{"split", "layout"}, Experimental: true, DevOnly: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
+				{Name: "mcp", Category: "additional", Description: "Serve Basecamp to MCP clients over stdio"},
 				{Name: "help", Category: "additional", Description: "Show help"},
 				{Name: "version", Category: "additional", Description: "Show version"},
 			},

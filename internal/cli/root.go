@@ -355,6 +355,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTUICmd())
 	cmd.AddCommand(commands.NewBonfireCmd())
 	cmd.AddCommand(commands.NewAgentHookCmd())
+	cmd.AddCommand(commands.NewMCPCmd())
 
 	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
 	// everywhere a command doesn't explicitly accept it — except cobra's

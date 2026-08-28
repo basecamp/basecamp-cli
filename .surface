@@ -873,6 +873,7 @@ CMD basecamp lineup list
 CMD basecamp lineup update
 CMD basecamp login
 CMD basecamp logout
+CMD basecamp mcp
 CMD basecamp me
 CMD basecamp messageboards
 CMD basecamp messageboards show
@@ -10701,6 +10702,29 @@ FLAG basecamp logout --stats type=bool
 FLAG basecamp logout --styled type=bool
 FLAG basecamp logout --todolist type=string
 FLAG basecamp logout --verbose type=count
+FLAG basecamp mcp --account type=string
+FLAG basecamp mcp --agent type=bool
+FLAG basecamp mcp --cache-dir type=string
+FLAG basecamp mcp --count type=bool
+FLAG basecamp mcp --domains type=stringSlice
+FLAG basecamp mcp --help type=bool
+FLAG basecamp mcp --hints type=bool
+FLAG basecamp mcp --ids-only type=bool
+FLAG basecamp mcp --in type=string
+FLAG basecamp mcp --jq type=string
+FLAG basecamp mcp --json type=bool
+FLAG basecamp mcp --markdown type=bool
+FLAG basecamp mcp --md type=bool
+FLAG basecamp mcp --no-hints type=bool
+FLAG basecamp mcp --no-stats type=bool
+FLAG basecamp mcp --profile type=string
+FLAG basecamp mcp --project type=string
+FLAG basecamp mcp --quiet type=bool
+FLAG basecamp mcp --read-only type=bool
+FLAG basecamp mcp --stats type=bool
+FLAG basecamp mcp --styled type=bool
+FLAG basecamp mcp --todolist type=string
+FLAG basecamp mcp --verbose type=count
 FLAG basecamp me --account type=string
 FLAG basecamp me --agent type=bool
 FLAG basecamp me --cache-dir type=string
@@ -18137,6 +18161,7 @@ SUB basecamp lineup list
 SUB basecamp lineup update
 SUB basecamp login
 SUB basecamp logout
+SUB basecamp mcp
 SUB basecamp me
 SUB basecamp messageboards
 SUB basecamp messageboards show

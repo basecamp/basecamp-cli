@@ -65,6 +65,10 @@ load smoke_helper
   mark_out_of_scope "Raw API passthrough — tested via specific commands"
 }
 
+@test "mcp is out of scope" {
+  mark_out_of_scope "Long-running MCP stdio server — covered by Go wire tests in internal/mcpserver and internal/commands"
+}
+
 @test "skill install is out of scope" {
   mark_out_of_scope "Modifies Claude Code config"
 }

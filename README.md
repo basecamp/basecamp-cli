@@ -206,6 +206,31 @@ To pick up a newer plugin version later, refresh the marketplace with
 
 See [install.md](install.md) for step-by-step setup instructions.
 
+### MCP Server
+
+`basecamp mcp` runs an MCP (Model Context Protocol) server on stdin/stdout,
+serving Basecamp as tools backed by your signed-in account — no separate
+binary or extra credentials. Register it with any MCP client as a stdio
+server:
+
+```bash
+claude mcp add basecamp -- basecamp mcp
+```
+
+Fifteen domain tools (`basecamp_projects`, `basecamp_todos`, `basecamp_cards`,
+`basecamp_messages`, `basecamp_campfires`, `basecamp_boosts`,
+`basecamp_schedules`, `basecamp_files`, `basecamp_people`,
+`basecamp_automation`, `basecamp_reports`, `basecamp_everything`,
+`basecamp_clientside`, `basecamp_forwards`, `basecamp_account`) cover the
+Basecamp API, scoped to the configured account. Each tool takes
+`{"action": "...", "params": {...}}` and serves per-action schemas through
+its `describe` action.
+
+```bash
+basecamp mcp --read-only                 # serve only read-only actions
+basecamp mcp --domains projects,todos    # narrow the served surface (fails closed on unknown keys)
+```
+
 ## Configuration
 
 ```

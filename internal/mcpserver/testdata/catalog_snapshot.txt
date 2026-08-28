@@ -1,0 +1,367 @@
+== basecamp_projects
+Basecamp projects: list, get, create, update, archive, unarchive, and trash.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- archive_project: Archive a project, removing it from the active project list (returns 204 No Content)
+- create_project: Create a new project
+- get_project (RO): Get a single project by id
+- list_projects (RO, paginated): List projects (active by default; optionally archived/trashed)
+- trash_project: Trash a project (returns 204 No Content)
+- unarchive_project: Restore a project to active status from trash as well as from the archive (returns 204 No Content)
+- update_project: Update an existing project
+
+== basecamp_todos
+Todos, todolists, todolist groups, and todosets — plus each todolist's hill chart.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- complete_todo: Mark a todo as complete
+- create_todo: Create a new todo in a todolist
+- create_todolist: Create a new todolist in a todoset
+- create_todolist_group: Create a new group in a todolist
+- create_todoset_todo: Create a to-do directly under a project's to-do set, outside any to-do list
+- get_hill_chart (RO): Get the hill chart for a todoset
+- get_todo (RO): Get a single todo by id
+- get_todolist_or_group (RO): Get a single todolist or todolist group by id The endpoint is polymorphic, but it answers with one shape: BC3 has no group model, so both variants come back as a flat Todolist (see the Todolist shape)
+- get_todoset (RO): Get a todoset (container for todolists in a project)
+- list_todolist_groups (RO, paginated): List groups in a todolist
+- list_todolists (RO, paginated): List todolists in a todoset
+- list_todos (RO, paginated): List todos in a todolist
+- replace_todo: Replace a todo with a new complete representation
+- reposition_todo: Reposition a todo within its todolist
+- reposition_todolist: Reposition a to-do list within its to-do set
+- reposition_todolist_group: Reposition a todolist group
+- uncomplete_todo: Mark a todo as incomplete
+- update_hill_chart_settings: Track or untrack todolists on a hill chart
+- update_todolist_or_group: Replace a todolist (or todolist group) with a new complete representation
+
+== basecamp_cards
+Card tables (kanban): cards, columns, steps, and wormholes, with moves, repositioning, and on-hold state.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_card: Create a card in a column
+- create_card_column: Create a column in a card table
+- create_card_step: Create a step on a card
+- create_wormhole: Create a wormhole linking this card table to a column on another card table
+- delete_wormhole: Delete a wormhole
+- disable_card_column_on_hold: Disable on-hold section in a column
+- enable_card_column_on_hold: Enable on-hold section in a column
+- get_card (RO): Get a card by ID
+- get_card_column (RO): Get a card column by ID
+- get_card_step (RO): Get a step by ID
+- get_card_table (RO): Get a card table by ID
+- list_cards (RO, paginated): List cards in a column
+- move_card: Move a card to a different column
+- move_card_column: Move a column within a card table
+- reposition_card_step: Reposition a step within a card
+- set_card_column_color: Set the color of a column
+- set_card_step_completion: Set card step completion status (PUT with completion: "on" to complete, "" to uncomplete)
+- subscribe_to_card_column: Subscribe to a card column (watch for changes)
+- unsubscribe_from_card_column: Unsubscribe from a card column (stop watching for changes)
+- update_card: Update an existing card
+- update_card_column: Update an existing column
+- update_card_step: Update an existing step
+- update_wormhole: Update a wormhole's destination column
+
+== basecamp_messages
+Message boards: messages, comments, message types (categories), and pinning.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_comment: Create a new comment on a recording
+- create_message: Create a new message on a message board
+- create_message_type: Create a new message type in a project
+- delete_message_type: Delete a message type
+- get_comment (RO): Get a single comment by id
+- get_message (RO): Get a single message by id
+- get_message_board (RO): Get a message board
+- get_message_type (RO): Get a single message type by id
+- list_comments (RO, paginated): List comments on a recording
+- list_message_types (RO, paginated): List message types in a project
+- list_messages (RO, paginated): List messages on a message board
+- pin_message: Pin a message to the top of the message board
+- unpin_message: Unpin a message from the message board
+- update_comment: Update an existing comment
+- update_message: Update an existing message
+- update_message_type: Update an existing message type
+
+== basecamp_campfires
+Campfire chat: rooms, chat lines, uploads, and chatbots.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_campfire_line: Create a new line (message) in a campfire
+- create_chatbot: Create a new chatbot for a campfire
+- delete_campfire_line: Delete a campfire line; allowed for the line's creator or an admin
+- delete_chatbot: Delete a chatbot
+- get_campfire (RO): Get a campfire by ID
+- get_campfire_line (RO): Get a campfire line by ID
+- get_chatbot (RO): Get a chatbot by ID
+- list_campfire_lines (RO, paginated): List all lines (messages) in a campfire
+- list_campfire_uploads (RO, paginated): List uploaded files in a campfire
+- list_campfires (RO, paginated): List all campfires across the account
+- list_chatbots (RO, paginated): List all chatbots for a campfire
+- update_campfire_line: Update an existing campfire line; the content is always treated as rich text (HTML)
+- update_chatbot: Update an existing chatbot
+
+== basecamp_boosts
+Boosts (emoji reactions) on recordings and their events: list, get, create, and delete.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_event_boost: Create a boost on a specific event within a recording
+- create_recording_boost: Create a boost on a recording
+- delete_boost: Delete a boost
+- get_boost (RO): Get a single boost
+- list_event_boosts (RO, paginated): List boosts on a specific event within a recording
+- list_recording_boosts (RO, paginated): List boosts on a recording
+
+== basecamp_schedules
+Schedules and schedule entries (calendar events), timesheets and time tracking, and per-account calendars.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_schedule_entry: Create a new schedule entry
+- create_timesheet_entry: Create a timesheet entry on a recording
+- destroy_timesheet_entry: Permanently delete a timesheet entry; answers 403 when the caller may not archive or trash it
+- get_calendar (RO): Get a calendar by its bucket id
+- get_project_timesheet (RO, paginated): Get timesheet for a specific project
+- get_recording_timesheet (RO, paginated): Get timesheet for a specific recording
+- get_schedule (RO): Get a schedule
+- get_schedule_entry (RO): Get a single schedule entry by id
+- get_schedule_entry_occurrence (RO): Get a specific occurrence of a recurring schedule entry
+- get_timesheet_entry (RO): Get a single timesheet entry
+- get_timesheet_report (RO): Get account-wide timesheet report
+- list_schedule_entries (RO, paginated): List entries on a schedule
+- replace_schedule_entry: Replace a schedule entry with a new complete representation
+- update_calendar: Update a calendar's display color
+- update_schedule_settings: Update schedule settings
+- update_timesheet_entry: Update a timesheet entry
+
+== basecamp_files
+Docs & Files: vaults (folders), documents, uploads, attachments, cloud file links, Google documents, and home-screen project folders.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_cloud_file: Create a new cloud file in a vault
+- create_document: Create a new document in a vault
+- create_folder: Create a folder for the authenticated user and file the given projects into it
+- create_google_document: Create a new Google document in a vault
+- create_upload: Create a new upload in a vault
+- create_upload_version: Replace an upload's file with a new version
+- create_vault: Create a new vault (subfolder) in a vault
+- delete_folder: Delete a folder and unpin its projects from the home screen (returns 204 No Content)
+- get_cloud_file (RO): Get a single cloud file by id
+- get_document (RO): Get a single document by id
+- get_folder (RO): Get one folder, with the projects grouped inside it expanded under `projects`
+- get_google_document (RO): Get a single Google document by id
+- get_upload (RO): Get a single upload by id
+- get_vault (RO): Get a single vault by id
+- list_documents (RO, paginated): List documents in a vault
+- list_folders (RO): List the authenticated user's folders in home-screen order
+- list_upload_versions (RO, paginated): List versions of an upload
+- list_uploads (RO, paginated): List uploads in a vault
+- list_vaults (RO, paginated): List vaults (subfolders) in a vault
+- replace_document: Replace a document with a new complete representation
+- update_cloud_file: Replace a cloud file with a new complete representation
+- update_folder: Rename a folder
+- update_google_document: Replace a Google document with a new complete representation
+- update_upload: Update an existing upload
+- update_vault: Update an existing vault
+
+== basecamp_people
+People and access: profiles, pingable people, project access, out-of-office, preferences, and notification subscriptions.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- disable_out_of_office: Disable out of office for a person
+- enable_out_of_office: Enable or replace out of office for a person
+- get_my_preferences (RO): Get the current user's preferences
+- get_my_profile (RO): Get the current authenticated user's profile
+- get_out_of_office (RO): Get the out of office status for a person
+- get_person (RO): Get a person by ID
+- get_subscription (RO): Get subscription information for a recording
+- list_people (RO, paginated): List all people visible to the current user
+- list_pingable_people (RO, paginated): List all account users who can be pinged
+- list_project_people (RO, paginated): List all active people on a project
+- subscribe: Subscribe the current user to a recording
+- unsubscribe: Unsubscribe the current user from a recording
+- update_my_preferences: Update the current user's preferences
+- update_my_profile: Update the current authenticated user's profile (returns 204 No Content)
+- update_project_access: Update project access (grant/revoke/create people)
+- update_subscription: Update subscriptions by adding or removing specific users
+
+== basecamp_automation
+Automatic check-ins (questionnaires, questions, answers, reminders), project templates, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- archive_recording: Archive a recording
+- create_answer: Create a new answer for a question
+- create_lineup_marker: Create a new lineup marker
+- create_project_from_template: Create a project from a template (asynchronous)
+- create_question: Create a new question in a questionnaire
+- create_template: Create a new template
+- create_tool: Create a tool in a project dock
+- create_webhook: Create a new webhook for a project
+- delete_lineup_marker: Delete a lineup marker
+- delete_template: Delete a template (trash it)
+- delete_tool: Delete a tool (trash it)
+- delete_webhook: Delete a webhook
+- disable_tool: Disable a tool (hide it from the project dock)
+- enable_tool: Enable a tool (show it on the project dock)
+- get_answer (RO): Get a single answer by id
+- get_answers_by_person (RO, paginated): Get all answers from a specific person for a question
+- get_project_construction (RO): Get the status of a project construction
+- get_question (RO): Get a single question by id
+- get_question_reminders (RO, paginated): Get pending check-in reminders for the current user
+- get_questionnaire (RO): Get a questionnaire (automatic check-ins container) by id
+- get_search_metadata (RO): Get search metadata (available filter options)
+- get_template (RO): Get a single template by id
+- get_tool (RO): Get a dock tool by id
+- get_webhook (RO): Get a single webhook by id
+- list_answers (RO, paginated): List all answers for a question
+- list_events (RO, paginated): List all events for a recording
+- list_lineup_markers (RO): List all lineup markers for the account
+- list_question_answerers (RO, paginated): List all people who have answered a question (answerers)
+- list_questions (RO, paginated): List all questions in a questionnaire
+- list_recordings (RO, paginated): List recordings of a given type across projects
+- list_templates (RO, paginated): List all templates visible to the current user
+- list_webhooks (RO, paginated): List all webhooks for a project
+- pause_question: Pause a check-in question (stops sending reminders)
+- reposition_tool: Reposition a tool on the project dock
+- resume_question: Resume a paused check-in question (resumes sending reminders)
+- search (RO, paginated): Search for content across the account
+- trash_recording: Trash a recording
+- unarchive_recording: Unarchive a recording (restore to active status)
+- update_answer: Update an existing answer
+- update_lineup_marker: Update an existing lineup marker
+- update_question: Update an existing question
+- update_question_notification_settings: Update notification settings for a check-in question
+- update_template: Update an existing template
+- update_tool: Update (rename) an existing tool
+- update_webhook: Update an existing webhook
+
+== basecamp_reports
+Reports and timelines: progress, assigned and overdue todos, upcoming schedule, per-person progress, and project timelines.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- get_assigned_todos (RO): Get todos assigned to a specific person
+- get_overdue_todos (RO): Get overdue todos grouped by lateness
+- get_person_progress (RO, paginated): Get a person's activity timeline
+- get_progress_report (RO, paginated): Get account-wide activity feed (progress report)
+- get_project_timeline (RO, paginated): Get project timeline
+- get_upcoming_schedule (RO): Get upcoming schedule entries and assignable items within a date window
+- list_assignable_people (RO): List people who can be assigned todos
+
+== basecamp_everything
+Account-wide feeds: every checkin, comment, file, forward, and message, and cards and todos filtered by state (open, completed, overdue, unassigned, no due date, not now).
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- get_everything_checkins (RO, paginated): Get every automatic check-in answer across all accessible projects, newest-first
+- get_everything_comments (RO, paginated): Get every comment across all accessible projects, newest-first (paginated)
+- get_everything_completed_cards (RO, paginated): Completed cards across all accessible projects, grouped by project (paginated)
+- get_everything_completed_todos (RO, paginated): Completed to-dos across all accessible projects, grouped by project (paginated)
+- get_everything_files (RO, paginated): Get every file recording across all accessible projects, newest-first (paginated)
+- get_everything_forwards (RO, paginated): Get every inbox forward across all accessible projects, newest-first (paginated)
+- get_everything_messages (RO, paginated): Get every message across all accessible projects, newest-first (paginated)
+- get_everything_no_due_date_cards (RO, paginated): Open cards with no due date across all accessible projects, grouped by project (paginated)
+- get_everything_no_due_date_todos (RO, paginated): Open to-dos with no due date across all accessible projects, grouped by project (paginated)
+- get_everything_not_now_cards (RO, paginated): Cards parked in a project's "Not now" column across all accessible projects, grouped by project (paginated)
+- get_everything_open_cards (RO, paginated): Incomplete cards in active columns across all accessible projects, grouped by project (paginated)
+- get_everything_open_todos (RO, paginated): Active, incomplete to-dos across all accessible projects, grouped by project (paginated)
+- get_everything_overdue_cards (RO): Get every overdue card across all accessible projects, oldest-due-date-first
+- get_everything_overdue_todos (RO): Get every overdue to-do across all accessible projects, oldest-due-date-first
+- get_everything_unassigned_cards (RO, paginated): Open, unassigned cards across all accessible projects, grouped by project (paginated)
+- get_everything_unassigned_todos (RO, paginated): Open, unassigned to-dos across all accessible projects, grouped by project (paginated)
+
+== basecamp_clientside
+The Clientside: client approvals, correspondences, replies, and client visibility of recordings.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- get_client_approval (RO): Get a single client approval by id
+- get_client_correspondence (RO): Get a single client correspondence by id
+- get_client_reply (RO): Get a single client reply by id
+- list_client_approvals (RO, paginated): List all client approvals in a project
+- list_client_correspondences (RO, paginated): List all client correspondences in a project
+- list_client_replies (RO, paginated): List all client replies for a recording (correspondence or approval)
+- set_client_visibility: Set client visibility for a recording
+
+== basecamp_forwards
+Email forwards: project inboxes, forwarded emails, and their replies.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- get_forward (RO): Get a forward by ID
+- get_forward_reply (RO): Get a forward reply by ID
+- get_inbox (RO): Get an inbox by ID
+- list_forward_replies (RO, paginated): List all replies to a forward
+- list_forwards (RO, paginated): List all forwards in an inbox
+
+== basecamp_account
+Account info and your personal surface: gauges and needles, my assignments and priorities, notifications and bubble-ups, bookmarks, personal note, and drafts.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- create_bookmark: Bookmark a recording for the current user
+- create_gauge_needle: Create a gauge needle (progress update) for a project
+- delete_bookmark: Remove the current user's bookmark from a recording (returns 204 No Content)
+- deprioritize_assignment: Remove a recording from Up Next (returns 204 No Content)
+- destroy_gauge_needle: Destroy a gauge needle
+- get_account (RO): Get the account for the current access token
+- get_bookmark (RO): Report whether the current user has bookmarked the recording
+- get_bubble_ups (RO, paginated): Get the current user's current and scheduled bubble-ups (paginated, 50 per page)
+- get_gauge_needle (RO): Get a gauge needle by ID
+- get_my_assignments (RO): Get the current user's active assignments grouped into priorities and non_priorities
+- get_my_completed_assignments (RO): Get the current user's completed assignments
+- get_my_due_assignments (RO): Get the current user's assignments filtered by due date scope
+- get_my_note (RO): Get the authenticated user's note — a per-person notebook singleton at /my/notes.json
+- get_my_notifications (RO): Get the current user's notification inbox (the "Hey!" menu)
+- list_gauge_needles (RO, paginated): List gauge needles for a project, ordered newest first
+- list_gauges (RO, paginated): List gauges across all projects the authenticated user has access to
+- list_my_bookmarks (RO, paginated): List the current user's bookmarks, most recently bookmarked first (paginated)
+- list_my_drafts (RO, paginated): List the current user's drafts across their active projects, most recently updated first (paginated, capped at 250 like /my/assignments)
+- mark_as_read: Mark specified items as read
+- prioritize_assignment: Add a recording to Up Next — the current user's ordered list of prioritized assignments (the priorities returned by GetMyAssignments)
+- remove_account_logo: Remove the account logo
+- reorder_up_next: Move an already-prioritized recording to a new 1-based position in Up Next (returns 204 No Content)
+- toggle_gauge: Enable or disable the gauge for a project
+- update_account_name: Rename the current account
+- update_gauge_needle: Update a gauge needle's description
+- update_my_note: Replace the note's content, recording a new revision server-side
+
