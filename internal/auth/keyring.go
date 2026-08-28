@@ -40,12 +40,24 @@ type Credentials struct {
 type Store struct {
 	fallbackDir string
 	initOnce    sync.Once
-	inner       *credstore.Store
+	inner       credStore
 	warnOnce    sync.Once
 }
 
+// credStore is the slice of credstore.Store this wrapper uses, as an
+// interface so tests can stand in a store that fell back to file storage
+// without failing a real keyring probe.
+type credStore interface {
+	Load(key string) ([]byte, error)
+	Save(key string, data []byte) error
+	Delete(key string) error
+	MigrateToKeyring() error
+	UsingKeyring() bool
+	FallbackWarning() string
+}
+
 // newCredStore is replaceable in tests to avoid real keyring access.
-var newCredStore = credstore.NewStore
+var newCredStore = func(opts credstore.StoreOptions) credStore { return credstore.NewStore(opts) }
 
 // sessionIsHeadless reports that no human can answer a keyring unlock
 // prompt: stdin, stdout, and stderr are all non-terminals AND no GUI
@@ -80,7 +92,7 @@ func NewStore(fallbackDir string) *Store {
 // ensure constructs the underlying store on first use. Callers reach here
 // from paths that don't hold Manager.mu (e.g. IsAuthenticated), so the
 // sync.Once provides the synchronization.
-func (s *Store) ensure() *credstore.Store {
+func (s *Store) ensure() credStore {
 	s.initOnce.Do(func() {
 		opts := credstore.StoreOptions{
 			ServiceName:   "basecamp",
@@ -95,7 +107,13 @@ func (s *Store) ensure() *credstore.Store {
 	return s.inner
 }
 
-// warnFallback prints the keyring fallback warning once, on first credential write.
+// warnFallback prints the keyring fallback warning once per process, on the
+// first credential read or write. Reads warn too: a fallback read returns
+// whatever an earlier fallback left in credentials.json — possibly months
+// stale — rather than the credentials the keyring holds, and the probe
+// failure behind it would otherwise stay invisible until the next login.
+// Hosts that mean to use file storage set BASECAMP_NO_KEYRING, which skips
+// the probe and so never warns.
 func (s *Store) warnFallback() {
 	inner := s.ensure()
 	s.warnOnce.Do(func() {
@@ -107,6 +125,7 @@ func (s *Store) warnFallback() {
 
 // Load retrieves credentials for the given origin.
 func (s *Store) Load(origin string) (*Credentials, error) {
+	s.warnFallback()
 	data, err := s.ensure().Load(origin)
 	if err != nil {
 		return nil, err
