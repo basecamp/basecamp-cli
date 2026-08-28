@@ -80,6 +80,35 @@ func TestCatalogIsAccountScoped(t *testing.T) {
 	}
 }
 
+// TestCatalogPaginatedActionsTakePage pins the synthesized page parameter:
+// every operation the behavior model marks paginated must declare a page
+// query parameter, whether the OpenAPI export supplies it or loadCatalog
+// synthesizes it. Otherwise the next_page value a listing returns could
+// never be passed back — the dispatcher rejects undeclared parameters.
+func TestCatalogPaginatedActionsTakePage(t *testing.T) {
+	cat := loadForTest(t)
+	paginated := 0
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if !op.Paginated {
+				continue
+			}
+			paginated++
+			pages := 0
+			for _, p := range op.Params {
+				if p.In != "query" || p.Name != "page" {
+					continue
+				}
+				pages++
+				assert.Equal(t, "integer", p.Schema["type"], "operation %q page schema", op.ID)
+				assert.NotEmpty(t, p.Description, "operation %q page description", op.ID)
+			}
+			assert.Equal(t, 1, pages, "operation %q must declare exactly one page query parameter", op.ID)
+		}
+	}
+	assert.Equal(t, 61, paginated, "paginated operation count")
+}
+
 // TestCatalogSnapshot renders the full served surface — every tool
 // description, action, and flag — so a model sync or curation change shows
 // its whole effect as a reviewable diff. Regenerate with -update.

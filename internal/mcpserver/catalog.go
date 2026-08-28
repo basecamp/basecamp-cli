@@ -42,6 +42,7 @@ func loadCatalog() (*catalog.Catalog, error) {
 	if err := rescopeToAccount(cat); err != nil {
 		return nil, err
 	}
+	synthesizePageParams(cat)
 	return cat, nil
 }
 
@@ -76,4 +77,37 @@ func rescopeToAccount(cat *catalog.Catalog) error {
 		}
 	}
 	return nil
+}
+
+// synthesizePageParams gives every paginated operation a page query
+// parameter. The SDK export marks a handful of operations paginated without
+// declaring one (ListWebhooks, ListChatbots, ...); left alone, that makes
+// every page after the first unreachable over MCP — the dispatcher rejects
+// parameters an operation does not declare, so the next_page value a listing
+// returns could never be passed back. Synthesizing from the paginated trait
+// covers whatever the model marks, and no-ops once the export declares the
+// parameter itself.
+func synthesizePageParams(cat *catalog.Catalog) {
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if !op.Paginated || declaresPage(op) {
+				continue
+			}
+			op.Params = append(op.Params, catalog.Param{
+				Name:        "page",
+				In:          "query",
+				Description: "Page number for paginating through results. Defaults to 1.",
+				Schema:      map[string]any{"type": "integer"},
+			})
+		}
+	}
+}
+
+func declaresPage(op *catalog.Operation) bool {
+	for _, p := range op.Params {
+		if p.In == "query" && p.Name == "page" {
+			return true
+		}
+	}
+	return false
 }
