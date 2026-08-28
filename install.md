@@ -255,6 +255,7 @@ cd basecamp-cli
 go build -o basecamp ./cmd/basecamp   # or: make build → bin/basecamp
 ```
 
-Then move the `basecamp` binary onto your PATH. Requires Go 1.26+; if your
-Termux Go is an earlier patch release, lower the `go` line in `go.mod` to
-match the version you have installed.
+Then move the `basecamp` binary onto your PATH. Requires Go 1.26.7+ — the
+pinned `github.com/basecamp/cli` module sets that floor, so lowering the `go`
+line in `go.mod` no longer helps. If your Termux Go is an earlier patch
+release, upgrade the `golang` package first (`pkg upgrade golang`).
