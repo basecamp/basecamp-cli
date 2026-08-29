@@ -1,0 +1,31 @@
+go.mod
+  s_cb8638fd4deb07::t_7e6cacec884b87 135
+go.sum
+  s_cb8638fd4deb07::t_5820485ef44ed1 475-476
+nix/package.nix
+  s_964922bad4d340::t_bf2a39073eb4bb 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "8e28ef8515b58b5b1cde6547bdff2ac007044771",
+  "prompts": {},
+  "sessions": {
+    "s_964922bad4d340": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b315b378-55b7-45e0-911e-b964de3ac103",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_cb8638fd4deb07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7799bc4b-8db5-43d6-af8e-1895e0ebc853",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
