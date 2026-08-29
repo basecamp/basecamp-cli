@@ -19,7 +19,9 @@ import (
 
 // oauthUseProxyEnv opts OAuth traffic out of the SSRF address policy for
 // requests the environment's proxy configuration actually routes to a proxy.
-// Only the exact value "1" enables it; anything else is refused with a
+// Only the exact value "1" enables it. Set-but-empty is treated as unset,
+// silently: env-scrubbing tooling (direnv, t.Setenv) writes "" and cannot
+// be told apart from intent. Any other non-empty value is refused with a
 // warning rather than guessed at.
 const oauthUseProxyEnv = "BASECAMP_OAUTH_USE_PROXY"
 
@@ -168,11 +170,11 @@ func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// every few seconds, and one downgrade notice per endpoint records
 		// the decision without drowning the terminal.
 		t.warnOnce(req.URL, "warning: OAuth request to %s routed through proxy %s WITHOUT the SSRF address policy (%s=1)",
-			redactedEndpoint(req.URL), proxyURL.Redacted(), oauthUseProxyEnv)
+			redactedEndpoint(req.URL), redactedProxy(proxyURL), oauthUseProxyEnv)
 		return t.proxied.RoundTrip(req)
 	default:
 		t.warnOnce(req.URL, "warning: ignoring proxy %s for OAuth request to %s: the SSRF address policy requires direct egress; set %s=1 to route OAuth through the proxy without address enforcement",
-			proxyURL.Redacted(), redactedEndpoint(req.URL), oauthUseProxyEnv)
+			redactedProxy(proxyURL), redactedEndpoint(req.URL), oauthUseProxyEnv)
 		return t.guarded.RoundTrip(req)
 	}
 }
@@ -190,9 +192,19 @@ func (t *oauthTransport) warnOnce(u *url.URL, format string, args ...any) {
 
 // redactedEndpoint renders a request URL for warnings and dedupe keys without
 // its query or userinfo — endpoint paths are diagnostic, query strings can
-// carry parameters that don't belong in a terminal.
+// carry parameters that don't belong in a terminal. The path is rendered in
+// its percent-encoded form: endpoints come from OAuth discovery documents,
+// and url.Parse decodes escapes into Path, so a hostile document could
+// otherwise put terminal control sequences or a newline into the warning.
 func redactedEndpoint(u *url.URL) string {
-	return u.Scheme + "://" + u.Host + u.Path
+	return u.Scheme + "://" + u.Host + u.EscapedPath()
+}
+
+// redactedProxy renders a proxy URL as scheme and host only. Proxy URLs come
+// from HTTP(S)_PROXY, where credentials may be encoded as a bare username or
+// as query parameters — neither of which url.URL.Redacted masks.
+func redactedProxy(u *url.URL) string {
+	return u.Scheme + "://" + u.Host
 }
 
 // proxiedTransport clones http.DefaultTransport (never mutating the global)

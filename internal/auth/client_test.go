@@ -441,8 +441,9 @@ func TestOptOutMode_NoProxyTargetStaysGuarded(t *testing.T) {
 }
 
 // TestOptOutMode_MalformedValuesAreOffWithWarning: only the exact value "1"
-// opts out. Anything else — including set-but-empty — is treated as off, with
-// a warning, and enforcement stays on.
+// opts out. Any other non-empty value is treated as off, with a warning, and
+// enforcement stays on. Set-but-empty is off too, but silently — see the
+// final subtest.
 func TestOptOutMode_MalformedValuesAreOffWithWarning(t *testing.T) {
 	for _, v := range []string{"yes", "2"} {
 		t.Run(fmt.Sprintf("value %q", v), func(t *testing.T) {
@@ -597,4 +598,24 @@ func TestExchangeCode_PreservesSDKErrorTaxonomy(t *testing.T) {
 // redirect reaches the caller as a typed error carrying the 3xx status.
 func TestRefreshLocked_RedirectStatusSurvives(t *testing.T) {
 	t.Skip("SDK pin predates token-endpoint redirect classification (basecamp-sdk branch harden-token-exchange); un-skip at the next re-pin")
+}
+
+// TestRedactedEndpoint_KeepsEscapesAndDropsSecrets: the endpoint comes from
+// a discovery document, so decoded control sequences must stay
+// percent-encoded, and query/userinfo must not reach the terminal.
+func TestRedactedEndpoint_KeepsEscapesAndDropsSecrets(t *testing.T) {
+	u, err := url.Parse("https://user:pw@issuer.example/token%1b%5b31m%0ainjected?code=secret#frag")
+	require.NoError(t, err)
+	got := redactedEndpoint(u)
+	assert.Equal(t, "https://issuer.example/token%1b%5b31m%0ainjected", got)
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\n")
+}
+
+// TestRedactedProxy_SchemeAndHostOnly: HTTP(S)_PROXY may carry a token as a
+// bare username or a query parameter, which url.URL.Redacted preserves.
+func TestRedactedProxy_SchemeAndHostOnly(t *testing.T) {
+	u, err := url.Parse("http://token123@proxy.corp.example:3128/?key=abc")
+	require.NoError(t, err)
+	assert.Equal(t, "http://proxy.corp.example:3128", redactedProxy(u))
 }
