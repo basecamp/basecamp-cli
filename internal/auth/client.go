@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // oauthUseProxyEnv opts OAuth traffic out of the SSRF address policy for
@@ -110,12 +111,19 @@ func (m *Manager) proxyState() *proxyEnvState {
 // warnf routes transport-policy warnings to the Manager's Warnf seam, or
 // stderr by default — these fire inside RoundTrip, where no command logger
 // is in scope.
+//
+// The rendered message is sanitized as a whole before it reaches either
+// sink: the endpoint host and path come from OAuth discovery documents, the
+// proxy host from the environment, and url.Parse admits UTF-8 C1 controls
+// (U+009B CSI and friends) in a host verbatim. Scrubbing once here covers
+// every field the warnings interpolate, including ones added later.
 func (m *Manager) warnf(format string, args ...any) {
+	msg := richtext.SanitizeSingleLine(fmt.Sprintf(format, args...))
 	if m.Warnf != nil {
-		m.Warnf(format, args...)
+		m.Warnf("%s", msg)
 		return
 	}
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	fmt.Fprintln(os.Stderr, msg)
 }
 
 // oauthTransport is the per-lane egress RoundTripper for OAuth traffic. It

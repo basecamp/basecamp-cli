@@ -619,3 +619,31 @@ func TestRedactedProxy_SchemeAndHostOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://proxy.corp.example:3128", redactedProxy(u))
 }
+
+// TestWarnf_SanitizesRenderedMessage: url.Parse admits UTF-8 C1 controls in
+// a host, and EscapedPath only covers the path — so the sink scrubs the
+// whole rendered warning, whichever field carried the control.
+func TestWarnf_SanitizesRenderedMessage(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("HTTP_PROXY", "http://proxy.corp.example:3128")
+
+	var warnings []string
+	m := laneManager(t, "https://3.basecampapi.com")
+	m.Warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+
+	client, err := m.bc5Client()
+	require.NoError(t, err)
+	resp, reqErr := doGet(t, client, "http://evil\u009b31m.example/token%1b%5b31m")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, reqErr)
+
+	require.NotEmpty(t, warnings, "the ignored-proxy warning fires before the request is refused")
+	for _, w := range warnings {
+		assert.NotContains(t, w, "\u009b")
+		assert.NotContains(t, w, "\x1b")
+		assert.NotContains(t, w, "\n")
+		assert.Contains(t, w, "evil31m.example", "C1 control stripped, host otherwise intact")
+	}
+}
