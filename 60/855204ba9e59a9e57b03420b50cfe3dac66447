@@ -1,0 +1,43 @@
+internal/auth/auth_test.go
+  s_c98c31426d75f9::t_23ff996146a01d 1365-1370
+internal/auth/client_test.go
+  s_c98c31426d75f9::t_23ff996146a01d 1-600
+internal/appctx/context.go
+  s_c98c31426d75f9::t_23ff996146a01d 86-90
+internal/commands/tools.go
+  s_c98c31426d75f9::t_23ff996146a01d 128-132
+internal/version/sdk-provenance.json
+  s_c98c31426d75f9::t_23ff996146a01d 4-6,10-11
+go.mod
+  s_c98c31426d75f9::t_9c69db3a82789d 29
+  s_db51b3b83615f0::t_2da9bad7421a4f 9
+  s_c98c31426d75f9::t_23ff996146a01d 12
+internal/auth/client.go
+  s_c98c31426d75f9::t_23ff996146a01d 1-294
+internal/auth/auth.go
+  s_c98c31426d75f9::t_23ff996146a01d 66-74,77-93,98-102,277-288,303,611-618,621,757-769,996-1002,1015
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "60855204ba9e59a9e57b03420b50cfe3dac66447",
+  "prompts": {},
+  "sessions": {
+    "s_c98c31426d75f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30dba562-1bea-4d70-8838-7f97ff1b7cce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    },
+    "s_db51b3b83615f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea2a1644-fe18-41aa-b09b-29942c64cde5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
