@@ -524,6 +524,11 @@ func (t *mockToolTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	switch {
 	case strings.Contains(req.URL.Path, "/projects.json"):
 		body = `[{"id": 123, "name": "Test Project"}]`
+	case strings.HasSuffix(req.URL.Path, "/tools/556"):
+		// The SDK v0.15.0 Get projection: no "name" key at all.
+		body = `{"id": 556, "title": "Chat", "enabled": true, "position": 2,` +
+			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
 	case strings.HasSuffix(req.URL.Path, "/tools/555"):
 		body = `{"id": 555, "title": "Chat", "name": "chat", "enabled": true, "position": 2,` +
 			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
@@ -646,4 +651,30 @@ func TestToolsCreateVisibleToClientsExplicitFalse(t *testing.T) {
 
 	require.True(t, transport.createCalled)
 	assert.Equal(t, false, transport.capturedBody["visible_to_clients"])
+}
+
+// TestToolsShowSummaryOmitsMissingName pins the summary shape on both sides
+// of SDK v0.15.0's Tool.Name becoming *string: a name renders in parentheses,
+// and a response without one renders no empty "()" parenthetical.
+func TestToolsShowSummaryOmitsMissingName(t *testing.T) {
+	for _, tc := range []struct{ id, want string }{
+		{"555", "Chat (chat) at position 2"},
+		{"556", "Chat at position 2"},
+	} {
+		t.Run("tool "+tc.id, func(t *testing.T) {
+			app, buf := newTestAppWithTransport(t, &mockToolTransport{})
+			app.Config.ProjectID = ""
+
+			project := ""
+			cmd := newToolsShowCmd(&project)
+			require.NoError(t, executeCommand(cmd, app, tc.id))
+
+			var envelope struct {
+				Summary string `json:"summary"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+			assert.Equal(t, tc.want, envelope.Summary)
+			assert.NotContains(t, envelope.Summary, "()")
+		})
+	}
 }
