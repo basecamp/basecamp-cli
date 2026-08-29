@@ -1,0 +1,21 @@
+internal/mcpserver/model/PROVENANCE.json
+  s_c98c31426d75f9::t_6dd64674a499a3 3-4
+internal/mcpserver/model/openapi.json
+  s_c98c31426d75f9::t_6dd64674a499a3 5,27435-27436,27445-27446,30419,30421-30425,31447,31463-31465,31758,31774-31776,33337,33341,33365-33366,33372-33373,33376-33377,33380-33381,33386-33389,33432,33443-33450,33453-33571,33576-33655,34665-34667,34685,34688-34690,34698-34712,34715-34725,34730,34732,34734-34736
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "53c210a79eec7a8c4ba3e4abd932b12622d447eb",
+  "prompts": {},
+  "sessions": {
+    "s_c98c31426d75f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "30dba562-1bea-4d70-8838-7f97ff1b7cce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Jeremy Daer <jeremy@37signals.com>"
+    }
+  }
+}
