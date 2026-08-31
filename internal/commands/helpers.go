@@ -112,10 +112,10 @@ func deleteNeedsForce(cmd *cobra.Command) bool {
 // Machine-output mode skips the prompt entirely, so the delete went through
 // unconfirmed — `basecamp chat delete <id> --json` destroyed a message with no
 // statement of intent anywhere in the invocation. And a terminal with stdin
-// redirected does not skip the prompt: isNonInteractiveCommand reads flags, the
-// env var and stdout, never stdin, so the confirmation is shown to an agent
-// that has nothing to type with, and bubbletea answers a non-terminal stdin by
-// opening /dev/tty and waiting on the real terminal.
+// redirected did not skip the prompt at all: the old gate looked at flags, the
+// env var and stdout, never stdin, so the confirmation was shown to an agent
+// with nothing to type, and bubbletea answers a non-terminal stdin by opening
+// /dev/tty and waiting on the real terminal.
 //
 // Both are the same failure — a destructive act with nobody affirming it — so
 // both get the same answer. Requiring the flag precisely where no human can
@@ -125,9 +125,11 @@ func deleteNeedsForce(cmd *cobra.Command) bool {
 // It asks InteractivePrompt rather than InteractiveStdio because the
 // confirmation is a huh form, which draws to stderr.
 //
-// isNonInteractiveCommand is read, never widened: its other callers (missingArg,
-// noChanges) use it to choose between help and a structured error, and changing
-// it would move behavior across many commands.
+// isNonInteractiveCommand is deliberately bypassed, not widened. The delete path
+// no longer consults it at all — machineReadsThisOutput asks the narrower
+// question this needs — and it is left untouched because its other callers
+// (missingArg, noChanges) use it to choose between help and a structured error,
+// where widening would move behavior across many commands.
 func ensureDeleteConfirmable(cmd *cobra.Command, force bool) error {
 	if force || !deleteNeedsForce(cmd) {
 		return nil
