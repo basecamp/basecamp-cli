@@ -131,7 +131,11 @@ jobs:
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # contents: read cannot be inherited — this workflow sets permissions: {}
+    # at the top, so without it the checkout that fetches notify-issue.sh has
+    # no repository access and the job dies before it can file the issue.
     permissions:
+      contents: read
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
