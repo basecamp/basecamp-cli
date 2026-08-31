@@ -16,7 +16,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
-	"github.com/basecamp/basecamp-cli/internal/tui/workspace/views"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -25,9 +24,10 @@ func NewTUICmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tui [url]",
 		Short: "Launch the Basecamp workspace [dev]",
-		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n" +
-			"Optionally pass a Basecamp URL to jump directly to a project or recording.\n\n" +
-			"This feature is under active development and may change between releases.",
+		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n\n" +
+			"A Basecamp URL is accepted but not yet routed: the workspace is being\n" +
+			"rebuilt and has only its home screen. This feature is under active\n" +
+			"development and may change between releases.",
 		Annotations: map[string]string{"dev_only": "true"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -40,7 +40,7 @@ func NewTUICmd() *cobra.Command {
 					`experimental feature "tui" is not enabled; run: basecamp config set experimental.tui true --global`)
 			}
 			printDevNotice(app.Config.CacheDir)
-			return ensureAccount(cmd, app)
+			return settleAccount(app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -48,74 +48,33 @@ func NewTUICmd() *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
-			trace, _ := cmd.Flags().GetBool("trace")
-
-			if trace {
-				if app.Tracer == nil {
-					// No tracer yet — create one with all categories
-					t, err := observability.NewTracer(observability.TraceAll,
-						observability.TracePath(app.Config.CacheDir))
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to start tracer: %v\n", err)
-					} else {
-						app.Tracer = t
-						if app.Hooks != nil {
-							app.Hooks.SetTracer(t)
-						}
-					}
-				} else {
-					// Env tracer exists but may be narrower (e.g. BASECAMP_TRACE=http).
-					// Widen to all categories so TUI events are captured too.
-					app.Tracer.EnableCategories(observability.TraceAll)
-				}
+			if trace, _ := cmd.Flags().GetBool("trace"); trace {
+				startTracing(app)
 			}
-
-			// Print trace path so devtools scripts can find it
 			if app.Tracer != nil {
 				fmt.Fprintf(os.Stderr, "Trace: %s\n", app.Tracer.Path())
 			}
 
-			// Suppress stderr TraceWriter during TUI (TUI owns stderr)
+			// The workspace owns stderr for as long as it runs, so the trace
+			// writer that shares it has to go quiet.
 			if app.Hooks != nil {
 				app.Hooks.SetLevel(0)
 			}
 
-			// Wire bubbletea debug logging to a separate file (plain text,
-			// not the structured JSON trace) so both remain parseable.
+			// Bubble Tea's own debug log goes to a file beside the trace rather
+			// than into it: one is plain text, the other structured JSON, and
+			// both stay parseable apart.
 			if app.Tracer != nil && app.Tracer.Enabled(observability.TraceTUI) {
 				debugPath := strings.TrimSuffix(app.Tracer.Path(), ".log") + ".debug.log"
-				f, err := tea.LogToFile(debugPath, "bubbletea")
-				if err == nil {
+				if f, err := tea.LogToFile(debugPath, "bubbletea"); err == nil {
 					defer f.Close()
 				}
 			}
 
-			session, err := workspace.NewSession(app)
-			if err != nil {
-				return err
-			}
-			defer session.Shutdown()
+			model, shutdown := workspace.New(app)
+			defer shutdown()
 
-			// Deep-link: parse URL argument and set initial navigation target.
-			if len(args) > 0 {
-				target, scope, err := parseBasecampURL(args[0])
-				if err != nil {
-					return err
-				}
-				session.SetInitialView(target, scope)
-			}
-
-			// Pass tracer to workspace
-			var wsOpts []workspace.Option
-			if app.Tracer != nil {
-				wsOpts = append(wsOpts, workspace.WithTracer(app.Tracer))
-			}
-			model := workspace.New(session, viewFactory, poolMonitorFactory(session), wsOpts...)
-
-			p := tea.NewProgram(model)
-
-			_, err = p.Run()
-			model.CloseWatcher()
+			_, err := tea.NewProgram(model).Run()
 			return err
 		},
 	}
@@ -125,74 +84,46 @@ func NewTUICmd() *cobra.Command {
 	return cmd
 }
 
-// poolMonitorFactory returns a factory that creates pool monitor views.
-func poolMonitorFactory(session *workspace.Session) func() workspace.View {
-	return func() workspace.View {
-		hub := session.Hub()
-		if hub == nil {
-			return nil
-		}
-		m := hub.Metrics()
-		return views.NewPoolMonitor(session.Styles(), m.PoolStatsList, m.Apdex, m.RecentEvents)
+// settleAccount takes the account the CLI can work out on its own — the config,
+// which the --account flag and BASECAMP_ACCOUNT_ID have already been folded
+// into, or the account a BC5 token is bound to by its resource indicator.
+//
+// It deliberately does not fall through to ensureAccount's prompt. The
+// workspace has a picker of its own, with the logo over it and the accounts
+// searchable; prompting here would stand a second one in front of it. An
+// account it cannot settle is left unset, which is the picker's cue.
+func settleAccount(app *appctx.App) error {
+	if app.Config.AccountID == "" {
+		app.Config.AccountID = app.Auth.AccountID()
 	}
+	if app.Config.AccountID == "" {
+		return nil
+	}
+
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+	app.Names.SetAccountID(app.Config.AccountID)
+	return nil
 }
 
-// viewFactory creates views for navigation targets.
-func viewFactory(target workspace.ViewTarget, session *workspace.Session, scope workspace.Scope) workspace.View {
-	switch target {
-	case workspace.ViewProjects:
-		return views.NewProjects(session)
-	case workspace.ViewDock:
-		return views.NewDock(session, scope.ProjectID)
-	case workspace.ViewTodos:
-		return views.NewTodos(session)
-	case workspace.ViewChat:
-		return views.NewChat(session)
-	case workspace.ViewCards:
-		return views.NewCards(session)
-	case workspace.ViewMessages:
-		return views.NewMessages(session)
-	case workspace.ViewSearch:
-		return views.NewSearch(session)
-	case workspace.ViewMyStuff:
-		return views.NewMyStuff(session)
-	case workspace.ViewPeople:
-		return views.NewPeople(session)
-	case workspace.ViewHey:
-		return views.NewHey(session)
-	case workspace.ViewSchedule:
-		return views.NewSchedule(session)
-	case workspace.ViewDocsFiles:
-		return views.NewDocsFiles(session)
-	case workspace.ViewCheckins:
-		return views.NewCheckins(session)
-	case workspace.ViewForwards:
-		return views.NewForwards(session)
-	case workspace.ViewDetail:
-		return views.NewDetail(session, scope.RecordingID, scope.RecordingType,
-			scope.OriginView, scope.OriginHint)
-	case workspace.ViewPulse:
-		return views.NewPulse(session)
-	case workspace.ViewAssignments:
-		return views.NewAssignments(session)
-	case workspace.ViewPings:
-		return views.NewPings(session)
-	case workspace.ViewCompose:
-		return views.NewCompose(session)
-	case workspace.ViewHome:
-		return views.NewHome(session)
-	case workspace.ViewActivity:
-		return views.NewActivity(session)
-	case workspace.ViewTimeline:
-		return views.NewTimeline(session, scope.ProjectID)
-	case workspace.ViewBonfire:
-		return views.NewRiver(session)
-	case workspace.ViewFrontPage:
-		return views.NewFrontPage(session)
-	case workspace.ViewBonfireSidebar:
-		return views.NewBonfireSidebar(session)
-	default:
-		return views.NewHome(session)
+// startTracing widens an existing tracer to every category, or starts one when
+// there is none. An env tracer may be narrower — BASECAMP_TRACE=http — and the
+// workspace's own events would fall outside it.
+func startTracing(app *appctx.App) {
+	if app.Tracer != nil {
+		app.Tracer.EnableCategories(observability.TraceAll)
+		return
+	}
+
+	tracer, err := observability.NewTracer(observability.TraceAll, observability.TracePath(app.Config.CacheDir))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to start tracer: %v\n", err)
+		return
+	}
+	app.Tracer = tracer
+	if app.Hooks != nil {
+		app.Hooks.SetTracer(tracer)
 	}
 }
 

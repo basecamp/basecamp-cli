@@ -161,11 +161,11 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 
-			// Note: llm_endpoint is deliberately NOT validated here. It is
-			// consumed only by the dev-gated TUI's summarize path, which
-			// fail-closes via summarize.ValidateEndpoint in
-			// workspace.NewSession — validating it at startup would brick
-			// unrelated commands over a value they never use.
+			// Note: llm_endpoint is deliberately NOT validated here. The
+			// summarize path that read it went with the old TUI workspace, so
+			// nothing consumes it today; whatever picks it back up validates it
+			// where it is used. Validating at startup would brick unrelated
+			// commands over a value they never touch.
 
 			// Resolve behavior preferences: explicit flag > config > version.IsDev()
 			resolvePreferences(cmd, cfg, &flags)
