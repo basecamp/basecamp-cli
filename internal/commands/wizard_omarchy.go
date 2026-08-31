@@ -87,7 +87,7 @@ func ensureOmarchyPlugin(ctx context.Context, run omarchySetupRunner) omarchyPlu
 			outcome.Manual = "omarchy plugin update " + omarchyBasecampPluginID
 			return outcome
 		}
-		outcome.Status = "updated"
+		outcome.Status = "ready"
 		return outcome
 	}
 

@@ -45,6 +45,7 @@ func NewSetupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "First-time setup with recommended defaults",
+		Args:  cobra.NoArgs,
 		Long: "Authenticate with Basecamp, use the OAuth-bound or existing configured account, save it globally without a global project default, " +
 			"and connect detected coding agents. With neither account available, setup selects the first authorized account. " +
 			"Use --account to choose an account compatible with the login, --customize to choose each setting, or --minimal for a concise completion message.",
@@ -675,8 +676,8 @@ func showOmarchyPluginStatus(w io.Writer, styles *tui.Styles, outcome omarchyPlu
 	switch outcome.Status {
 	case "installed":
 		fmt.Fprintln(w, styles.RenderStatus(true, "Basecamp plugin installed for Omarchy"))
-	case "updated":
-		fmt.Fprintln(w, styles.RenderStatus(true, "Basecamp plugin updated for Omarchy"))
+	case "ready":
+		fmt.Fprintln(w, styles.RenderStatus(true, "Basecamp plugin ready for Omarchy"))
 	case "failed":
 		message := "Basecamp plugin setup needs attention"
 		if outcome.Manual != "" {

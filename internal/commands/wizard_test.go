@@ -219,6 +219,23 @@ func TestNewSetupCmd(t *testing.T) {
 	assert.Equal(t, "false", minimal.DefValue)
 }
 
+func TestSetupRejectsUnknownSubcommandBeforeRunning(t *testing.T) {
+	app, _ := setupQuickstartTestApp(t, "", "")
+	var stdout, stderr bytes.Buffer
+
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"codxe"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "codxe"`)
+	assert.False(t, app.SuppressPostRunNotices)
+	assert.NotContains(t, stdout.String(), "Basecamp at your command")
+}
+
 func TestFastSetupNonInteractiveProjectUsesConfigHint(t *testing.T) {
 	app, _ := setupQuickstartTestApp(t, "", "")
 	app.Flags.Project = "123"
@@ -433,6 +450,14 @@ func TestShowFastCompletionReportsIntegrationOutcomes(t *testing.T) {
 		Status:   "installed",
 	}, false)
 	assert.Contains(t, installed.String(), "Basecamp plugin installed for Omarchy")
+
+	var ready bytes.Buffer
+	showFastCompletion(&ready, styles, agentSetupOutcome{}, omarchyPluginOutcome{
+		Detected: true,
+		Status:   "ready",
+	}, false)
+	assert.Contains(t, ready.String(), "Basecamp plugin ready for Omarchy")
+	assert.NotContains(t, ready.String(), "updated")
 
 	var omarchyFailed bytes.Buffer
 	showFastCompletion(&omarchyFailed, styles, agentSetupOutcome{}, omarchyPluginOutcome{

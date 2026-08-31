@@ -96,6 +96,14 @@ assert_refused() {
   assert_json_value '.hint | contains("--customize")' 'false'
 }
 
+@test "setup rejects an unknown subcommand before onboarding" {
+  run_guarded "basecamp setup codxe --json < /dev/null"
+  assert_not_timed_out
+  assert_failure
+  assert_json_value '.error | contains("unknown command")' 'true'
+  assert_json_value '.error | contains("interactive terminal")' 'false'
+}
+
 @test "setup without --json and stdin closed refuses instead of hanging" {
   create_credentials
   create_global_config '{"account_id": 99999}'

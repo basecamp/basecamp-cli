@@ -54,7 +54,7 @@ func TestEnsureOmarchyPluginInstallsMissingPlugin(t *testing.T) {
 	}, calls)
 }
 
-func TestEnsureOmarchyPluginUpdatesInstalledPlugin(t *testing.T) {
+func TestEnsureOmarchyPluginRefreshesInstalledPlugin(t *testing.T) {
 	var calls []string
 	run := func(_ context.Context, args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
@@ -65,7 +65,7 @@ func TestEnsureOmarchyPluginUpdatesInstalledPlugin(t *testing.T) {
 	}
 
 	outcome := ensureOmarchyPlugin(context.Background(), run)
-	assert.Equal(t, "updated", outcome.Status)
+	assert.Equal(t, "ready", outcome.Status)
 	assert.Equal(t, []string{
 		"plugin list --json",
 		"plugin update " + omarchyBasecampPluginID + " --yes",
