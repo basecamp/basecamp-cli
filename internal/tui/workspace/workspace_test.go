@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,17 @@ func keyPress(key string) tea.KeyPressMsg {
 // assertion reads the way the terminal does.
 func screen(m model) string {
 	return ansi.Strip(m.View().Content)
+}
+
+// columnOf is the display column text starts at on a line. strings.Index counts
+// bytes, and these rows are full of multi-byte box drawing — so the prefix is
+// measured rather than counted.
+func columnOf(t *testing.T, line, text string) int {
+	t.Helper()
+
+	at := strings.Index(line, text)
+	require.GreaterOrEqual(t, at, 0, "no %q in %q", text, line)
+	return lipgloss.Width(line[:at])
 }
 
 // deliver feeds one command's message back into the model, the way the Bubble

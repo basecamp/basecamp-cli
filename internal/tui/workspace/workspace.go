@@ -78,6 +78,7 @@ func newModel(app *appctx.App) model {
 		ctx:          viewContext,
 		cancel:       cancel,
 		nav:          stack,
+		menu:         newMenu(styles),
 		sidebar:      newSidebar(styles),
 		theme:        theme,
 		styles:       styles,
@@ -179,6 +180,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.appendReads(msg.page, msg.reads)
 		m.relayout()
 		return m, nil
+
+	case projectsLoadedMsg:
+		if msg.err != nil {
+			// The places above them are still reachable, so a page that failed
+			// to arrive says so under the list rather than closing the menu, and
+			// stops the walk rather than asking again.
+			m.menu.projectsPaging = false
+			m.menu.projectsLoaded = true
+			m.menu.projectsDone = true
+			m.menu.projectsNotice = errorNotice("Could not load the projects", msg.err)
+			m.relayout()
+			return m, nil
+		}
+		m.menu.appendProjects(msg)
+		m.relayout()
+		return m, m.loadMenuProjects()
 
 	case watchStartedMsg:
 		if msg.attempt != m.watchAttempt {
@@ -339,6 +356,26 @@ func (m *model) openSection(chosen section) tea.Cmd {
 	return m.push(newBlank(m.ctx, chosen.label))
 }
 
+// openProject goes to a project the menu listed. Projects hang off home the way
+// the sections do, so the trail reads Home › Website redesign.
+func (m *model) openProject(chosen project) tea.Cmd {
+	m.sidebar.leave()
+	m.popToHome()
+	return m.push(newBlank(m.ctx, chosen.name))
+}
+
+// loadMenuProjects asks for the next page of projects when the menu wants one:
+// on the first open, when the cursor nears the end of what is loaded, and when
+// there are not enough entries to fill the box. Never more than a page at a
+// time, and never a page nobody has scrolled far enough to see.
+func (m *model) loadMenuProjects() tea.Cmd {
+	if !m.menu.wantsMoreProjects() {
+		return nil
+	}
+	m.menu.projectsPaging = true
+	return loadProjects(m.ctx.Ctx(), m.ctx.app, m.menu.projectsPage+1)
+}
+
 // goHome unwinds the stack in one step, however deep the reader has walked.
 func (m *model) goHome() tea.Cmd {
 	if m.nav.depth() == 1 && !m.sidebar.focused {
@@ -405,7 +442,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.menu.handleKey(&m, msg)
 		m.relayout()
-		return m, m.syncLoading(cmd)
+		// Walking down the list, or narrowing it to a handful of matches, is
+		// what asks for the page below what is loaded.
+		return m, m.syncLoading(tea.Batch(cmd, m.loadMenuProjects()))
 	}
 
 	// A view with an open text field gets every key — esc, tab, letters and all.
@@ -427,7 +466,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == menuKey || key == menuAltKey {
 		m.menu.toggle()
 		m.relayout()
-		return m, nil
+		return m, m.loadMenuProjects()
 	}
 
 	// The numbers reach their sections with the menu shut. That is the point of
@@ -496,15 +535,19 @@ func (m model) View() tea.View {
 
 // withMenu hangs the menu one row under the top line, so the account and its
 // caret stay on screen above it — the caret turning over is what says the menu
-// is open. It goes on the whole rendered screen rather than on the content area
-// because the header is what it covers.
+// is open.
+//
+// Every row it covers is masked the full width of the screen. A box composited
+// straight onto the frame leaves the far end of a rule, half a hint and a slice
+// of the sidebar showing either side of it, which reads as a broken screen
+// rather than as a menu over one.
 func (m model) withMenu(rendered string) string {
-	dropdown := m.menu.view(m.styles, m.width)
+	dropdown := m.menu.view()
 	if dropdown == "" {
 		return rendered
 	}
-	x := max((m.width-lipgloss.Width(dropdown))/2, 0)
-	return overlayAt(rendered, dropdown, x, menuTopRow, m.width, lipgloss.Height(rendered))
+	masked := lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(dropdown)
+	return overlayAt(rendered, masked, 0, menuTopRow, m.width, lipgloss.Height(rendered))
 }
 
 // contentView is the content area on its own, which is what an overlay draws
@@ -572,6 +615,8 @@ func (m *model) relayout() {
 	m.ctx.width = m.contentWidth()
 	m.ctx.height = m.contentHeight()
 	m.nav.current().Resize(m.ctx.width, m.ctx.height)
+
+	m.menu.resize(m.width, m.height)
 
 	// A sidebar nobody can see cannot be the focused one, so a screen that wants
 	// the whole terminal takes focus back with it.

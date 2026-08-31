@@ -18,8 +18,12 @@ func newBlank(ctx *Context, title string) *blank {
 	return &blank{ctx: ctx, title: title}
 }
 
-// homeKey goes back to the bottom of the stack from wherever the reader is.
-const homeKey = "H"
+// homeKey goes back to the bottom of the stack from wherever the reader is, and
+// homeHintText is how the menu says so beside it.
+const (
+	homeKey      = "H"
+	homeHintText = "Shift + H"
+)
 
 // newHome is the bottom of the stack: the screen the workspace opens on and the
 // one esc always comes back to.
