@@ -13,7 +13,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
-	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 const (
@@ -55,6 +54,10 @@ type directoryLoadedMsg struct {
 type listScreen struct {
 	ctx *Context
 
+	// inside is the folder being looked into, and nil for the whole account.
+	// A folder holds active projects and nothing else, so it has no switch.
+	inside *folder
+
 	projects []project
 	loading  bool
 	notice   string
@@ -73,20 +76,37 @@ type listScreen struct {
 }
 
 func newAllProjects(ctx *Context) *listScreen {
+	return &listScreen{ctx: ctx, find: newFindField()}
+}
+
+// newFolder is the projects filed into one folder, which reads the same way the
+// whole directory does — the same rows, the same find field, the same order.
+func newFolder(ctx *Context, inside folder) *listScreen {
+	return &listScreen{ctx: ctx, inside: &inside, find: newFindField()}
+}
+
+func newFindField() textinput.Model {
 	find := textinput.New()
 	find.Prompt = ""
 	find.Placeholder = "Find a project…"
-
-	return &listScreen{ctx: ctx, find: find}
+	return find
 }
 
 func (l *listScreen) Init() tea.Cmd {
 	l.projects, l.notice = nil, ""
 	l.loading = true
+	if l.inside != nil {
+		return loadFolder(l.ctx.Ctx(), l.ctx.app, l.inside.id)
+	}
 	return loadDirectory(l.ctx.Ctx(), l.ctx.app, l.inactive)
 }
 
-func (l *listScreen) Title() string { return "All projects" }
+func (l *listScreen) Title() string {
+	if l.inside != nil {
+		return l.inside.name
+	}
+	return "All projects"
+}
 
 func (l *listScreen) Loading() bool { return l.loading }
 
@@ -129,7 +149,10 @@ func (l *listScreen) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	// Sorted here rather than in the read, so every source lands in the same
+	// order whether or not it remembered to.
 	l.projects = loaded.projects
+	sortProjects(l.projects)
 	l.clampCursor()
 	return nil, true
 }
@@ -143,8 +166,11 @@ func (l *listScreen) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case msg.String() == findKey:
 		l.finding = true
 		return l.find.Focus()
-	case msg.String() == inactiveKey:
+	case msg.String() == inactiveKey && l.inside == nil:
 		return l.toggleInactive()
+	case msg.String() == editFolderKey && l.inside != nil:
+		edited := *l.inside
+		return func() tea.Msg { return editFolderMsg{folder: edited} }
 	case msg.Key().Code == tea.KeyUp:
 		l.cursor = max(l.cursor-1, 0)
 	case msg.Key().Code == tea.KeyDown:
@@ -281,12 +307,17 @@ func (l *listScreen) layout() []homeRow {
 
 	plain(l.findRow())
 	plain(l.findRule())
-	plain(l.switchRow())
+	if l.inside == nil {
+		plain(l.switchRow())
+	}
 	plain("")
 
 	switch {
 	case l.loading:
 		plain(styles.Muted.Render("Loading…"))
+		return rows
+	case len(l.projects) == 0 && l.inside != nil:
+		plain(styles.Muted.Render("This folder is empty."))
 		return rows
 	case len(l.projects) == 0:
 		plain(styles.Muted.Render("No projects."))
@@ -296,19 +327,39 @@ func (l *listScreen) layout() []homeRow {
 		return rows
 	}
 
+	lettered := len(showing) > minRowsForLetters
 	initial := ""
 	for index, found := range showing {
-		if at := newSortName(found.name).initial(); at != initial {
+		if at := newSortName(found.name).initial(); lettered && at != initial {
 			initial = at
 			if index > 0 {
 				plain("")
 			}
 			plain(l.initialHeading(initial))
 		}
-		item(l.projectRow(found, index), index)
+		item(itemRow{
+			label:    found.name,
+			trailing: l.trailingFor(found),
+			indent:   initialWidth,
+			selected: index == l.cursor,
+		}.render(styles, l.width), index)
 	}
 	return rows
 }
+
+// trailingFor is the quieter half of a project's row: what it is for, and what
+// state it is in when that is not the ordinary one.
+func (l *listScreen) trailingFor(found project) string {
+	if found.status != "" && found.status != "active" {
+		return strings.Join(nonEmpty(found.status, found.description), " · ")
+	}
+	return found.description
+}
+
+// minRowsForLetters is how long a list has to be before the letter separators
+// are worth their space. They are an index — something to skim a hundred names
+// with — and a folder holding four is quicker to read without them.
+const minRowsForLetters = 20
 
 // findRow is the find box, laid out the way the jump menu's is: the field's own
 // name on the left and the key that reaches it on the right, until somebody is
@@ -374,48 +425,16 @@ func (l *listScreen) initialHeading(initial string) string {
 	return ruledHeading(styles, initial, heading, l.width, false)
 }
 
-// projectRow is one project: its name, then its description after a dash, the
-// way the web's directory reads. One line rather than two — a directory of every
-// project the reader can see is long enough without doubling it.
-func (l *listScreen) projectRow(found project, index int) string {
-	styles := l.ctx.Styles()
-	theme := styles.Theme()
-
-	marker := "  "
-	name := lipgloss.NewStyle().Foreground(theme.Foreground).Bold(true)
-	if index == l.cursor {
-		marker = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("› ")
-		name = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
-	}
-
-	indent := strings.Repeat(" ", initialWidth)
-	inner := max(l.width-2-initialWidth, 1)
-
-	trailing := found.description
-	if found.status != "" && found.status != "active" {
-		trailing = strings.Join(nonEmpty(found.status, found.description), " · ")
-	}
-
-	// The name is never cut to fit the description: a name the reader cannot
-	// read is not worth the description they could.
-	label := truncateToWidth(found.name, inner)
-	room := inner - tui.DisplayWidth(label) - 3
-	if trailing == "" || room < minDescriptionRoom {
-		return marker + indent + name.Render(label)
-	}
-	return marker + indent + name.Render(label) +
-		styles.Muted.Render(" — "+truncateToWidth(trailing, room))
-}
-
-// minDescriptionRoom is the least a description may be cut to before it is
-// dropped instead. Three letters and an ellipsis says nothing.
-const minDescriptionRoom = 12
-
 func (l *listScreen) HelpBindings() []helpBinding {
 	if l.finding {
 		return []helpBinding{{"enter", "apply"}, {"esc", "clear"}}
 	}
-	return []helpBinding{{"↑↓", "move"}, {"enter", "open"}, {"/", "find"}, {"a", "archived"}}
+
+	bindings := []helpBinding{{"↑↓", "move"}, {"enter", "open"}, {findKey, "find"}}
+	if l.inside != nil {
+		return append(bindings, helpBinding{editFolderKey, "edit folder"})
+	}
+	return append(bindings, helpBinding{inactiveKey, "archived"})
 }
 
 // --- Reading ---
@@ -456,8 +475,27 @@ func loadDirectory(ctx context.Context, app *appctx.App, inactive bool) tea.Cmd 
 			}
 		}
 
-		sortProjects(projects)
 		return directoryLoadedMsg{inactive: inactive, projects: projects}
+	}
+}
+
+// loadFolder reads one folder with the projects filed into it expanded, which is
+// one request rather than one per project.
+func loadFolder(ctx context.Context, app *appctx.App, folderID int64) tea.Cmd {
+	return func() tea.Msg {
+		if err := app.RequireAccount(); err != nil {
+			return directoryLoadedMsg{err: err}
+		}
+		found, err := app.Account().Folders().Get(ctx, folderID)
+		if err != nil {
+			return directoryLoadedMsg{err: err}
+		}
+
+		projects := make([]project, 0, len(found.Projects))
+		for _, p := range found.Projects {
+			projects = append(projects, toProject(p))
+		}
+		return directoryLoadedMsg{projects: projects}
 	}
 }
 

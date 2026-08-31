@@ -37,6 +37,16 @@ func (n *nav) depth() int {
 	return len(n.stack)
 }
 
+// at is the screen at a depth, counting from home at 0, and nil past the top.
+// It is how something that changed one screen reaches another that is showing
+// the same thing.
+func (n *nav) at(depth int) View {
+	if depth < 0 || depth >= len(n.stack) {
+		return nil
+	}
+	return n.stack[depth]
+}
+
 // trail is the titles of every screen from home up, which is what the
 // breadcrumb draws.
 func (n *nav) trail() []string {

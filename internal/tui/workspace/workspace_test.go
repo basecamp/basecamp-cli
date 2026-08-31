@@ -92,16 +92,26 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: 'a', Mod: tea.ModCtrl}
 	case "ctrl+r":
 		k = tea.Key{Code: 'r', Mod: tea.ModCtrl}
+	case "ctrl+j":
+		k = tea.Key{Code: 'j', Mod: tea.ModCtrl}
+	case "ctrl+k":
+		k = tea.Key{Code: 'k', Mod: tea.ModCtrl}
 	case "esc":
 		k = tea.Key{Code: tea.KeyEscape}
 	case "enter":
 		k = tea.Key{Code: tea.KeyEnter}
 	case "tab":
 		k = tea.Key{Code: tea.KeyTab}
+	case "backspace":
+		k = tea.Key{Code: tea.KeyBackspace}
 	case "up":
 		k = tea.Key{Code: tea.KeyUp}
 	case "down":
 		k = tea.Key{Code: tea.KeyDown}
+	case "left":
+		k = tea.Key{Code: tea.KeyLeft}
+	case "right":
+		k = tea.Key{Code: tea.KeyRight}
 	default:
 		runes := []rune(key)
 		if len(runes) == 1 {

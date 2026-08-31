@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,8 +12,6 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
-	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 const (
@@ -22,44 +19,12 @@ const (
 	// against what is already rendered rather than asking the server again, so
 	// the same key does the same job here.
 	findKey = "/"
-
-	// The gutter down the left, where the web puts its "3m ago". Wide enough for
-	// the longest thing that goes there — "yesterday" is spelled as a day, so the
-	// worst case is a count of weeks.
-	gutterWidth = 9
 )
-
-// activityEvent is one entry of the feed.
-type activityEvent struct {
-	who   string
-	what  string
-	where string
-
-	// at is local time. The API answers in UTC, and which day an event belongs
-	// to is a question about the reader's clock, not the server's.
-	at time.Time
-}
-
-// matches reports whether the quick-find text is anywhere in the event. The
-// project and the person are searched along with the sentence: "what did anyone
-// do in Ops" is the same question as "what did Jorge do".
-func (e activityEvent) matches(needle string) bool {
-	if needle == "" {
-		return true
-	}
-	needle = strings.ToLower(needle)
-	for _, field := range []string{e.what, e.who, e.where} {
-		if strings.Contains(strings.ToLower(field), needle) {
-			return true
-		}
-	}
-	return false
-}
 
 // activityPageMsg is a page of the feed.
 type activityPageMsg struct {
 	page   int
-	events []activityEvent
+	events []activity
 	err    error
 }
 
@@ -74,7 +39,7 @@ type activityPageMsg struct {
 type activityScreen struct {
 	ctx *Context
 
-	events []activityEvent
+	events []activity
 	page   int
 	paging bool
 	// done is the end of the feed; stalled is a page that did not arrive, which
@@ -222,13 +187,13 @@ func (a *activityScreen) clearFind() {
 
 // showing is the events the quick-find leaves, which is what the cursor walks
 // and what the days are built from.
-func (a *activityScreen) showing() []activityEvent {
+func (a *activityScreen) showing() []activity {
 	needle := strings.TrimSpace(a.find.Value())
 	if needle == "" {
 		return a.events
 	}
 
-	kept := make([]activityEvent, 0, len(a.events))
+	kept := make([]activity, 0, len(a.events))
 	for _, event := range a.events {
 		if event.matches(needle) {
 			kept = append(kept, event)
@@ -346,7 +311,7 @@ func (a *activityScreen) layout() []homeRow {
 			}
 			plain(a.dayHeading(at, now))
 		}
-		for _, line := range a.eventRows(event, now, index) {
+		for _, line := range activityRows(styles, event, now, a.width, index == a.cursor) {
 			item(line, index)
 		}
 	}
@@ -417,122 +382,11 @@ func (a *activityScreen) dayHeading(at, now time.Time) string {
 	return ruledHeading(styles, dayLabel(at, now), heading, a.width, false)
 }
 
-// eventRows is one entry: what happened, then where and who, with the time down
-// the left. The web puts the project above the sentence, where a smaller type
-// size marks it as a label — a terminal has no smaller type, so the sentence
-// leads and the quieter line goes underneath, the way every other list here
-// reads.
-//
-// The relative time is what the web shows and what a reader actually wants; the
-// clock time under it is what a terminal has instead of a tooltip, and the day
-// heading above carries the date.
-func (a *activityScreen) eventRows(event activityEvent, now time.Time, index int) []string {
-	styles := a.ctx.Styles()
-	theme := styles.Theme()
-
-	marker := "  "
-	what := lipgloss.NewStyle().Foreground(theme.Foreground)
-	if index == a.cursor {
-		marker = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("› ")
-		what = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
-	}
-
-	inner := max(a.width-2-gutterWidth-1, 1)
-	where := strings.Join(nonEmpty(event.where, event.who), " · ")
-
-	return []string{
-		marker + styles.Muted.Render(gutter(since(event.at, now))) + " " +
-			what.Render(truncateToWidth(event.what, inner)),
-		"  " + styles.Muted.Render(gutter(clockOf(event.at))) + " " +
-			styles.Muted.Render(truncateToWidth(where, inner)),
-	}
-}
-
 func (a *activityScreen) HelpBindings() []helpBinding {
 	if a.finding {
 		return []helpBinding{{"enter", "apply"}, {"esc", "clear"}}
 	}
 	return []helpBinding{{"↑↓", "move"}, {"/", "filter"}}
-}
-
-// --- Time ---
-
-// sameDay is whether two instants fall on the same local day. Both sides are
-// moved to local time first: the API answers in UTC, and an event at 01:00 UTC
-// belongs to the day the reader was living in, not the one Greenwich was.
-func sameDay(a, b time.Time) bool {
-	if a.IsZero() || b.IsZero() {
-		return a.IsZero() && b.IsZero()
-	}
-	a, b = a.Local(), b.Local()
-	return a.Year() == b.Year() && a.YearDay() == b.YearDay()
-}
-
-// dayLabel words a day the way the web's separator does — TODAY, MONDAY, AUGUST
-// 31 — dropping the year while it is the current one.
-func dayLabel(at, now time.Time) string {
-	if at.IsZero() {
-		return "SOMETIME"
-	}
-	at, now = at.Local(), now.Local()
-
-	date := at.Format("Monday, January 2")
-	if at.Year() != now.Year() {
-		date = at.Format("Monday, January 2, 2006")
-	}
-
-	switch {
-	case sameDay(at, now):
-		date = "Today, " + date
-	case sameDay(at, now.AddDate(0, 0, -1)):
-		date = "Yesterday, " + date
-	}
-	return strings.ToUpper(date)
-}
-
-// since is how long ago an instant was, in the shortest words that still say it:
-// 3m, 4h, 2d. Anything the same minute is "now".
-func since(at, now time.Time) string {
-	if at.IsZero() {
-		return ""
-	}
-
-	elapsed := now.Sub(at)
-	switch {
-	case elapsed < time.Minute:
-		return "now"
-	case elapsed < time.Hour:
-		return plural(int(elapsed.Minutes()), "m") + " ago"
-	case elapsed < 24*time.Hour:
-		return plural(int(elapsed.Hours()), "h") + " ago"
-	case elapsed < 7*24*time.Hour:
-		return plural(int(elapsed.Hours()/24), "d") + " ago"
-	default:
-		return plural(int(elapsed.Hours()/(24*7)), "w") + " ago"
-	}
-}
-
-func plural(count int, unit string) string {
-	return strconv.Itoa(count) + unit
-}
-
-// clockOf is the time of day an event happened, which is the rest of the
-// timestamp the day heading started.
-func clockOf(at time.Time) string {
-	if at.IsZero() {
-		return ""
-	}
-	return at.Local().Format("15:04")
-}
-
-// gutter right-aligns a time in the left-hand column, so the numbers line up
-// down the screen rather than ragged against the text.
-func gutter(text string) string {
-	pad := gutterWidth - tui.DisplayWidth(text)
-	if pad <= 0 {
-		return truncateToWidth(text, gutterWidth)
-	}
-	return strings.Repeat(" ", pad) + text
 }
 
 // --- Reading ---
@@ -548,43 +402,10 @@ func loadActivityPage(ctx context.Context, app *appctx.App, page int) tea.Cmd {
 			return activityPageMsg{page: page, err: err}
 		}
 
-		events := make([]activityEvent, 0, len(result.Events))
+		events := make([]activity, 0, len(result.Events))
 		for _, event := range result.Events {
-			events = append(events, toActivityEvent(event))
+			events = append(events, toActivity(event))
 		}
 		return activityPageMsg{page: page, events: events}
-	}
-}
-
-func toActivityEvent(event basecamp.TimelineEvent) activityEvent {
-	who := ""
-	if event.Creator != nil {
-		who = event.Creator.Name
-	}
-	where := ""
-	if event.Bucket != nil {
-		where = event.Bucket.Name
-	}
-	at := time.Time{}
-	if event.CreatedAt != nil {
-		at = event.CreatedAt.Local()
-	}
-
-	// Basecamp words the event itself, and words it with the actor's name in it
-	// — "Jorge M. commented on …". Putting the creator in front of that says it
-	// twice, so who goes quietly beside the project instead.
-	what := strings.TrimSpace(event.Title)
-	if what == "" {
-		what = strings.TrimSpace(event.Action)
-	}
-	if what == "" {
-		what = event.Kind
-	}
-
-	return activityEvent{
-		who:   richtext.SanitizeSingleLine(who),
-		what:  richtext.SanitizeSingleLine(what),
-		where: richtext.SanitizeSingleLine(where),
-		at:    at,
 	}
 }

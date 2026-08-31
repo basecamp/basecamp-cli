@@ -14,8 +14,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
-func testDirectory() []project {
-	found := []project{
+// testSortCases are the names that pin down the order: the ones a plain string
+// compare gets wrong.
+func testSortCases() []project {
+	return []project{
 		{id: 1, name: "@basecamp.com → @37signals.com", description: "Retiring basecamp.com"},
 		{id: 2, name: "[Test Project] #2026"},
 		{id: 3, name: "37signals HQ", description: "36signals.com was taken"},
@@ -24,6 +26,19 @@ func testDirectory() []project {
 		{id: 6, name: "All Cars", description: "This is now a Volvo stan account"},
 		{id: 7, name: "Basecamp Web", description: "HQ for the Basecamp Web team"},
 		{id: 8, name: "Ángel's project", description: "Accents fold"},
+	}
+}
+
+// testDirectory is a directory long enough to earn its letter separators, with
+// the interesting names among the filler. The filler files under C so the groups
+// the tests name — #, 0-9, A, B — are the ones the fixture puts there.
+func testDirectory() []project {
+	found := testSortCases()
+	for index := range minRowsForLetters {
+		found = append(found, project{
+			id:   int64(100 + index),
+			name: fmt.Sprintf("Cycle %d", index+1),
+		})
 	}
 	sortProjects(found)
 	return found
@@ -58,7 +73,8 @@ func load(t *testing.T, m model, msg tea.Msg) model {
 // The directory comes out in Basecamp's own order, which is not the order a
 // plain string compare gives.
 func TestDirectorySortsLikeBasecamp(t *testing.T) {
-	found := testDirectory()
+	found := testSortCases()
+	sortProjects(found)
 
 	names := make([]string, len(found))
 	for index, one := range found {
@@ -244,6 +260,89 @@ func TestADirectoryReadForTheOtherSwitchIsDropped(t *testing.T) {
 	assert.Len(t, l.projects, before)
 }
 
+// --- Looking into a folder ---
+
+// openFolderScreen is one folder's projects on screen.
+func openFolderScreen(t *testing.T, projects []project) (model, *listScreen) {
+	t.Helper()
+
+	m := resize(t, newTestModel(t), 96, 26)
+	l := newFolder(m.ctx, folder{id: 7, name: "Ops", projects: []int64{1, 2}})
+	m.push(l)
+
+	m = load(t, m, directoryLoadedMsg{projects: projects})
+	return m, l
+}
+
+// A folder used to open onto nothing. It shows what is filed in it, sorted and
+// laid out the way the directory is.
+func TestAFolderShowsWhatIsFiledInIt(t *testing.T) {
+	m, l := openFolderScreen(t, []project{
+		{id: 1, name: "Zebra"},
+		{id: 2, name: "Anchor", description: "First by name, second by id"},
+	})
+
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "Anchor")
+	assert.Contains(t, rendered, "First by name, second by id")
+	assert.Less(t, strings.Index(rendered, "Anchor"), strings.Index(rendered, "Zebra"),
+		"a folder's projects came back unsorted")
+	assert.Equal(t, []string{"Home", "Ops"}, m.nav.trail())
+}
+
+// A folder holds active projects and nothing else, so it has no switch — and
+// pressing the key that would flick one does nothing.
+func TestAFolderHasNoArchivedSwitch(t *testing.T) {
+	m, l := openFolderScreen(t, []project{{id: 1, name: "Anchor"}})
+
+	rendered := ansi.Strip(l.View())
+	assert.NotContains(t, rendered, "Show archived and trashed")
+	assert.NotContains(t, screen(m), "a archived")
+
+	_, cmd := press(t, m, inactiveKey)
+	assert.False(t, l.inactive)
+	assert.Nil(t, cmd, "a folder read itself again over a switch it does not have")
+}
+
+func TestAnEmptyFolderSaysSo(t *testing.T) {
+	_, l := openFolderScreen(t, nil)
+
+	assert.Contains(t, ansi.Strip(l.View()), "This folder is empty.")
+}
+
+// A folder still has the find field — it is the same list, just a shorter one.
+func TestAFolderCanBeSearched(t *testing.T) {
+	m, l := openFolderScreen(t, []project{
+		{id: 1, name: "Anchor"},
+		{id: 2, name: "Zebra"},
+	})
+
+	m, _ = press(t, m, findKey)
+	for _, key := range strings.Split("zeb", "") {
+		m, _ = press(t, m, key)
+	}
+
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "Zebra")
+	assert.NotContains(t, rendered, "Anchor")
+}
+
+// --- Letter separators earn their space ---
+
+// A short list reads quicker without an index. The separators are for skimming
+// a hundred names, and a folder holding four is not that.
+func TestAShortListSkipsTheLetters(t *testing.T) {
+	_, l := openFolderScreen(t, []project{
+		{id: 1, name: "Anchor"},
+		{id: 2, name: "Zebra"},
+	})
+
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "Anchor")
+	assert.NotContains(t, rendered, "A ─")
+	assert.NotContains(t, rendered, "Z ─")
+}
+
 // --- Finding ---
 
 func TestDirectoryFind(t *testing.T) {
@@ -303,12 +402,13 @@ func TestDirectoryEscapeClearsTheFind(t *testing.T) {
 func TestDirectoryCursorWalksAndStops(t *testing.T) {
 	m, l := openDirectory(t, 40)
 
-	for range 20 {
+	steps := len(testDirectory()) + 5
+	for range steps {
 		m, _ = press(t, m, "down")
 	}
 	assert.Equal(t, len(testDirectory())-1, l.cursor)
 
-	for range 20 {
+	for range steps {
 		m, _ = press(t, m, "up")
 	}
 	assert.Equal(t, 0, l.cursor)

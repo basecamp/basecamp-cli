@@ -16,7 +16,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
-	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 const (
@@ -67,23 +66,6 @@ var folderColors = map[string]color.Color{
 	"brown":  lipgloss.BrightYellow,
 }
 
-// activity is one entry of the recent-activity feed.
-type activity struct {
-	who   string
-	what  string
-	where string
-	when  string
-}
-
-// naming is which thing the reader is typing a name for, if either.
-type naming int
-
-const (
-	namingNothing naming = iota
-	namingProject
-	namingFolder
-)
-
 // home is the screen the workspace opens on, and the one esc always comes back
 // to: the folders and projects the web's home grid shows, and the recent
 // activity its right-hand column shows.
@@ -107,21 +89,26 @@ type home struct {
 	pending int
 	notice  string
 
-	// The name being typed for a new project or folder.
-	naming naming
+	// The name being typed for a new project, and whether one is being typed. A
+	// folder needs no name to be made, so this is only ever a project's.
+	naming bool
 	name   textinput.Model
 
 	cursor int
 	offset int
 	width  int
 	height int
+
+	// now is what every "3m ago" on the feed is relative to, read at render time
+	// so the numbers keep up with the clock.
+	now func() time.Time
 }
 
 func newHome(ctx *Context) *home {
 	name := textinput.New()
 	name.Prompt = ""
 
-	return &home{ctx: ctx, name: name}
+	return &home{ctx: ctx, name: name, now: time.Now}
 }
 
 func (h *home) Init() tea.Cmd {
@@ -129,7 +116,7 @@ func (h *home) Init() tea.Cmd {
 	return tea.Batch(
 		loadFolders(h.ctx.Ctx(), h.ctx.app),
 		loadHomeProjects(h.ctx.Ctx(), h.ctx.app),
-		loadActivity(h.ctx.Ctx(), h.ctx.app, time.Now()),
+		loadActivity(h.ctx.Ctx(), h.ctx.app),
 	)
 }
 
@@ -146,7 +133,7 @@ func (h *home) Resize(width, height int) {
 
 // CapturingInput is true only while a name is being typed, when every key is
 // part of that name rather than a shortcut.
-func (h *home) CapturingInput() bool { return h.naming != namingNothing }
+func (h *home) CapturingInput() bool { return h.naming }
 
 // --- Reading ---
 
@@ -290,7 +277,7 @@ func loadHomeProjects(ctx context.Context, app *appctx.App) tea.Cmd {
 
 // loadActivity reads the same feed the web's home column reads, capped where the
 // web caps it.
-func loadActivity(ctx context.Context, app *appctx.App, now time.Time) tea.Cmd {
+func loadActivity(ctx context.Context, app *appctx.App) tea.Cmd {
 	return func() tea.Msg {
 		if err := app.RequireAccount(); err != nil {
 			return homeActivityMsg{err: err}
@@ -303,58 +290,24 @@ func loadActivity(ctx context.Context, app *appctx.App, now time.Time) tea.Cmd {
 
 		entries := make([]activity, 0, len(result.Events))
 		for _, event := range result.Events {
-			entries = append(entries, toActivity(event, now))
+			entries = append(entries, toActivity(event))
 		}
 		return homeActivityMsg{entries: entries}
-	}
-}
-
-func toActivity(event basecamp.TimelineEvent, now time.Time) activity {
-	who := ""
-	if event.Creator != nil {
-		who = event.Creator.Name
-	}
-	where := ""
-	if event.Bucket != nil {
-		where = event.Bucket.Name
-	}
-	when := time.Time{}
-	if event.CreatedAt != nil {
-		when = *event.CreatedAt
-	}
-
-	// Basecamp words the event itself, and words it with the actor's name in it
-	// — "Jorge M. commented on …". Putting the creator in front of that says it
-	// twice, and putting the action in front too says it three times. The title
-	// is the sentence; who and when go quietly underneath, the way they do in
-	// the sidebar.
-	what := strings.TrimSpace(event.Title)
-	if what == "" {
-		what = strings.TrimSpace(event.Action)
-	}
-	if what == "" {
-		what = event.Kind
-	}
-	return activity{
-		who:   richtext.SanitizeSingleLine(who),
-		what:  richtext.SanitizeSingleLine(what),
-		where: richtext.SanitizeSingleLine(where),
-		when:  stamp(when, now),
 	}
 }
 
 // --- Keys ---
 
 func (h *home) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
-	if h.naming != namingNothing {
+	if h.naming {
 		return h.handleNamingKey(msg)
 	}
 
 	switch msg.String() {
 	case newProjectKey:
-		return h.startNaming(namingProject, "New project name")
+		return h.startNaming()
 	case newFolderKey:
-		return h.startNaming(namingFolder, "New folder name")
+		return createFolder(h.ctx.Ctx(), h.ctx.app)
 	case invitePeople:
 		return h.openWeb("account/enrollments/new", "the invite page")
 	case adminlandKey:
@@ -372,15 +325,17 @@ func (h *home) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-func (h *home) startNaming(kind naming, placeholder string) tea.Cmd {
-	h.naming = kind
+// startNaming opens the field for a new project's name. A project is named for
+// what it is for, and there is no useful default for that.
+func (h *home) startNaming() tea.Cmd {
+	h.naming = true
 	h.name.SetValue("")
-	h.name.Placeholder = placeholder
+	h.name.Placeholder = "New project name"
 	return h.name.Focus()
 }
 
 func (h *home) stopNaming() {
-	h.naming = namingNothing
+	h.naming = false
 	h.name.SetValue("")
 	h.name.Blur()
 }
@@ -392,13 +347,9 @@ func (h *home) handleNamingKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case tea.KeyEnter:
 		name := strings.TrimSpace(h.name.Value())
-		kind := h.naming
 		h.stopNaming()
 		if name == "" {
 			return nil
-		}
-		if kind == namingFolder {
-			return createFolder(h.ctx.Ctx(), h.ctx.app, name)
 		}
 		return createProject(h.ctx.Ctx(), h.ctx.app, name)
 	}
@@ -415,10 +366,22 @@ func createProject(ctx context.Context, app *appctx.App, name string) tea.Cmd {
 	}
 }
 
-func createFolder(ctx context.Context, app *appctx.App, name string) tea.Cmd {
+// createFolder makes an empty one and lets the server name it. A folder is a
+// place to put things rather than a thing in itself, and asking for its name
+// before it exists puts a form between the reader and a keystroke that could
+// have just worked. Rename it from inside it if the name matters.
+//
+// The name is left off the request rather than sent as "New folder": blank is
+// what CreateFolderRequest documents as the default, so the folder is called
+// whatever the web would have called it and stays called that when the web
+// changes its mind.
+func createFolder(ctx context.Context, app *appctx.App) tea.Cmd {
 	return func() tea.Msg {
-		_, err := app.Account().Folders().Create(ctx, basecamp.CreateFolderRequest{Name: name})
-		return homeMadeMsg{what: "the folder", name: name, err: err}
+		made, err := app.Account().Folders().Create(ctx, basecamp.CreateFolderRequest{})
+		if err != nil {
+			return homeMadeMsg{what: "the folder", err: err}
+		}
+		return homeMadeMsg{what: "the folder", name: made.Name}
 	}
 }
 
@@ -588,7 +551,7 @@ func (h home) layout() []homeRow {
 	plain := func(text string) { rows = append(rows, homeRow{text: text, item: noItem}) }
 	item := func(text string, index int) { rows = append(rows, homeRow{text: text, item: index}) }
 
-	if h.naming != namingNothing {
+	if h.naming {
 		plain(h.name.View())
 		plain("")
 	}
@@ -606,8 +569,11 @@ func (h home) layout() []homeRow {
 	// the button under it goes where a reader who has run out of entries is
 	// already looking.
 	plain(ruledHeading(styles, "Recent activity", heading, h.width, loading))
+	now := h.now()
 	for _, entry := range h.activity {
-		for _, line := range h.activityRows(entry) {
+		// The feed is read-only here — the screen behind "View all" is where its
+		// entries can be walked — so no row is ever the selected one.
+		for _, line := range activityRows(styles, entry, now, h.width, false) {
 			plain(line)
 		}
 	}
@@ -620,68 +586,26 @@ func (h home) layout() []homeRow {
 	// Folders and projects are one list, as they are on the web's card grid: a
 	// folder is a project you have not opened yet.
 	for _, f := range h.folders {
-		rowsFor := h.tintedItemRows(folderIcon, h.folderColor(f), f.name,
-			fmt.Sprintf("%d projects", len(f.projects)), index)
-		for _, line := range rowsFor {
-			item(line, index)
-		}
+		item(itemRow{
+			icon:     folderIcon,
+			tint:     h.folderColor(f),
+			label:    f.name,
+			trailing: fmt.Sprintf("%d projects", len(f.projects)),
+			selected: index == h.cursor,
+		}.render(styles, h.width), index)
 		index++
 	}
 	for _, p := range h.projects {
-		for _, line := range h.itemRows("", p.name, p.description, index) {
-			item(line, index)
-		}
+		item(itemRow{
+			label:    p.name,
+			trailing: p.description,
+			selected: index == h.cursor,
+		}.render(styles, h.width), index)
 		index++
 	}
 
 	item(h.buttonRow("See all projects", index), index)
 	return rows
-}
-
-// itemRows is one row of the list: its name, and the quieter line under it. A
-// project with no description still gets that line, so every row is the same
-// height and the column reads as a list rather than a paragraph.
-func (h home) itemRows(icon, label, subtitle string, index int) []string {
-	return h.tintedItemRows(icon, nil, label, subtitle, index)
-}
-
-// tintedItemRows is itemRows with a color of the reader's own choosing on it,
-// which is what a folder has and nothing else does.
-//
-// The color goes on the name rather than on the icon. A folder's icon is an
-// emoji, and an emoji carries its own colors: the terminal paints it from the
-// font and ignores the foreground it was handed, so a color put there is a
-// color nobody ever sees. It is the card the web colors anyway, not the glyph
-// on it.
-func (h home) tintedItemRows(icon string, tint color.Color, label, subtitle string, index int) []string {
-	theme := h.ctx.Styles().Theme()
-
-	marker := "  "
-	style := lipgloss.NewStyle().Foreground(theme.Foreground)
-	if tint != nil {
-		style = style.Foreground(tint)
-	}
-	// The cursor wins the row it is on: where the reader is standing has to read
-	// at a glance, and a folder's color is not that.
-	if index == h.cursor {
-		marker = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("› ")
-		style = lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
-	}
-
-	// A project has no icon and takes the space one would, so the names line up
-	// with the folders'. The line underneath is always blank there: an icon
-	// repeated under itself reads as a second row rather than the same one.
-	blank := strings.Repeat(" ", iconColumns)
-	badge := blank
-	if icon != "" {
-		badge = icon + strings.Repeat(" ", max(iconColumns-tui.DisplayWidth(icon), 1))
-	}
-
-	inner := max(h.width-2-iconColumns, 1)
-	return []string{
-		marker + badge + style.Render(truncateToWidth(label, inner)),
-		"  " + blank + h.ctx.Styles().Muted.Render(truncateToWidth(subtitle, inner)),
-	}
 }
 
 // folderColor is the color the reader gave a folder, or nil — white is
@@ -697,26 +621,6 @@ func (h home) folderColor(f folder) color.Color {
 	return nil
 }
 
-// iconColumns is the room the folder icon takes, plus the space after it. An
-// emoji is two cells wide wherever the terminal was asked — see CalibrateWidths.
-const iconColumns = 3
-
-// activityRows is one entry of the feed: who did what, then when and where.
-// The feed is read-only, so its rows carry no cursor.
-func (h home) activityRows(entry activity) []string {
-	styles := h.ctx.Styles()
-	inner := max(h.width-2, 1)
-
-	rows := []string{"  " + lipgloss.NewStyle().
-		Foreground(styles.Theme().Foreground).
-		Render(truncateToWidth(entry.what, inner))}
-
-	if meta := strings.Join(nonEmpty(entry.when, entry.who, entry.where), " · "); meta != "" {
-		rows = append(rows, "  "+styles.Muted.Render(truncateToWidth(meta, inner)))
-	}
-	return rows
-}
-
 // buttonRow is one of the two rows that lead to a screen of their own.
 func (h home) buttonRow(label string, index int) string {
 	style := h.ctx.Styles().Muted
@@ -729,7 +633,7 @@ func (h home) buttonRow(label string, index int) string {
 }
 
 func (h home) HelpBindings() []helpBinding {
-	if h.naming != namingNothing {
+	if h.naming {
 		return []helpBinding{{"enter", "create"}, {"esc", "cancel"}}
 	}
 	return []helpBinding{

@@ -36,6 +36,10 @@ type model struct {
 	sidebar sidebar
 	theme   tui.Theme
 
+	// modal is the form open over the screen, and nil when none is. It holds
+	// every key while it is up.
+	modal modal
+
 	// styles is a pointer every view holds, so a theme switch reaches all of
 	// them by rewriting what it points at rather than by walking the stack.
 	styles *tui.Styles
@@ -227,6 +231,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openFolderMsg:
 		return m, m.openFolder(msg.folder)
 
+	case editFolderMsg:
+		return m, m.openModal(newFolderEdit(m.ctx, msg.folder))
+
+	case folderRenamedMsg:
+		m.closeModal()
+		return m, m.folderRenamed(msg)
+
+	case folderGoneMsg:
+		m.closeModal()
+		// The folder is gone, so the screen showing it is a screen showing
+		// nothing. Home is where it was opened from and where its row was.
+		return m, tea.Batch(m.goHome(), notify("Deleted "+msg.name))
+
 	case openProjectMsg:
 		return m, m.openProject(msg.project)
 
@@ -238,6 +255,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.relayout()
 		return m, nil
+	}
+
+	// A modal takes the answers to its own writes, and its cursor blink, before
+	// the screen underneath sees them.
+	if m.modal != nil {
+		if cmd, took := m.modal.Update(msg); took {
+			m.relayout()
+			return m, m.syncLoading(cmd)
+		}
 	}
 
 	cmd, _ := m.nav.current().Update(msg)
@@ -401,7 +427,27 @@ func (m *model) openAll(kind listKind) tea.Cmd {
 func (m *model) openFolder(chosen folder) tea.Cmd {
 	m.sidebar.leave()
 	m.popToHome()
-	return m.push(newBlank(m.ctx, chosen.name))
+	return m.push(newFolder(m.ctx, chosen))
+}
+
+// folderRenamed carries the new name to the screen showing the folder, so the
+// breadcrumb and the heading say what the folder is now called without reading
+// it again. Home is behind it and holds the old name too, so it re-reads.
+func (m *model) folderRenamed(msg folderRenamedMsg) tea.Cmd {
+	if open, ok := m.nav.current().(*listScreen); ok && open.inside != nil {
+		open.inside.name = msg.name
+	}
+	m.relayout()
+	return tea.Batch(m.refreshHome(), notify("Renamed to "+msg.name))
+}
+
+// refreshHome reads the home screen again, for when something it lists has
+// changed underneath it.
+func (m *model) refreshHome() tea.Cmd {
+	if at, ok := m.nav.at(0).(*home); ok {
+		return at.Init()
+	}
+	return nil
 }
 
 // loadMenuProjects asks for the next page of projects when the menu wants one:
@@ -471,6 +517,18 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.relayout()
 		}
 		return m, nil
+	}
+
+	// A modal stands over everything, the menu included: it is what the reader
+	// is doing, so it answers first and keeps every key.
+	if m.modal != nil {
+		cmd, stays := m.modal.HandleKey(msg)
+		if !stays {
+			m.closeModal()
+			return m, m.syncLoading(cmd)
+		}
+		m.relayout()
+		return m, m.syncLoading(cmd)
 	}
 
 	// The menu stands over the screen while it is up, so it answers first.
@@ -568,7 +626,7 @@ func (m model) View() tea.View {
 		b.WriteString("\n" + help)
 	}
 
-	view := tea.NewView(m.withMenu(b.String()))
+	view := tea.NewView(m.withModal(m.withMenu(b.String())))
 	view.AltScreen = true
 	return view
 }
@@ -674,6 +732,11 @@ func (m *model) relayout() {
 
 	m.menu.resize(m.width, m.menuRows())
 
+	if m.modal != nil {
+		m.modal.Resize(max(modalWidth(m.width)-modalChromeWidth, 1),
+			max(m.contentHeight()-modalChromeRows, 1))
+	}
+
 	// A sidebar nobody can see cannot be the focused one, so a screen that wants
 	// the whole terminal takes focus back with it.
 	if width := m.sidebarWidth(); width > 0 {
@@ -724,6 +787,9 @@ func (m *model) updateHelp() {
 	switch {
 	case m.err != nil:
 		m.help.setBindings([]helpBinding{{"esc/q", "dismiss"}, quit})
+		return
+	case m.modal != nil:
+		m.help.setBindings(append(m.modal.HelpBindings(), quit))
 		return
 	case m.menu.open:
 		m.help.setBindings(append(m.menu.helpBindings(), quit))

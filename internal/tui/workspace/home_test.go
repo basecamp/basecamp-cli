@@ -34,8 +34,10 @@ func testProjects() []project {
 // Basecamp words an event itself, and words it with the actor's name in it.
 func testActivity() []activity {
 	return []activity{
-		{who: "Rob Zolkos", what: "Rob Z. posted Platform Documentation", where: "CLIs", when: "Aug 30"},
-		{who: "Andy Smith", what: "Andy S. completed Ship the installer", where: "Cycle 4", when: "09:14"},
+		{who: "Rob Zolkos", what: "Rob Z. posted Platform Documentation", where: "CLIs",
+			at: testNow.Add(-3 * time.Minute)},
+		{who: "Andy Smith", what: "Andy S. completed Ship the installer", where: "Cycle 4",
+			at: testNow.AddDate(0, 0, -2)},
 	}
 }
 
@@ -46,6 +48,7 @@ func filledHome(t *testing.T) (model, *home) {
 	m := resize(t, newTestModel(t), 96, 26)
 	h, ok := m.nav.current().(*home)
 	require.True(t, ok)
+	h.now = func() time.Time { return testNow }
 
 	h.Update(homeFoldersMsg{folders: testFolders()})
 	h.Update(homeProjectsMsg{projects: testProjects()})
@@ -70,10 +73,42 @@ func TestHomeSections(t *testing.T) {
 	assert.Less(t, viewAll, projects)
 	assert.Less(t, projects, seeAll, "the button is under the list it belongs to")
 
-	// The event's own wording is the line; who and when go quietly underneath.
-	assert.Contains(t, rendered, "Rob Z. posted Platform Documentation")
-	assert.Contains(t, rendered, "Aug 30 · Rob Zolkos · CLIs")
+	// The event's own wording is the line; who and where go quietly underneath,
+	// with the times in a gutter down the left — the same row the Latest Activity
+	// screen draws, from the same code.
+	assert.Contains(t, rendered, "3m ago Rob Z. posted Platform Documentation")
+	assert.Contains(t, rendered, "14:27 CLIs · Rob Zolkos")
+	assert.Contains(t, rendered, "2d ago Andy S. completed Ship the installer")
 	assert.NotContains(t, rendered, "Rob Zolkos Rob Z.", "the actor was named twice")
+}
+
+// The home screen's feed and the Latest Activity screen draw an entry with the
+// same code, so the two cannot drift apart.
+func TestBothFeedsDrawTheSameRow(t *testing.T) {
+	m, h := filledHome(t)
+	entry := testActivity()[0]
+
+	assert.Equal(t,
+		activityRows(h.ctx.Styles(), entry, testNow, h.width, false),
+		activityRows(m.ctx.Styles(), entry, testNow, h.width, false))
+
+	// And it is the row that is actually on screen.
+	for _, line := range activityRows(h.ctx.Styles(), entry, testNow, h.width, false) {
+		assert.Contains(t, ansi.Strip(h.View()), ansi.Strip(line))
+	}
+}
+
+// The relative time is worked out at render, so a home screen left open all
+// afternoon does not go on saying "3m ago".
+func TestHomeActivityTimeKeepsUp(t *testing.T) {
+	m, h := filledHome(t)
+	require.Contains(t, screen(m), "3m ago")
+
+	h.now = func() time.Time { return testNow.Add(2 * time.Hour) }
+	m.relayout()
+
+	assert.Contains(t, screen(m), "2h ago")
+	assert.NotContains(t, screen(m), "3m ago")
 }
 
 // Folders and projects are one list, the way the web's card grid is.
@@ -97,36 +132,45 @@ func TestHomeFolderAndProjectRows(t *testing.T) {
 	h.projects[0].description = "A redesign of the marketing site"
 	m.relayout()
 
-	lines := strings.Split(screen(m), "\n")
-	var folderName, folderCount, projectName string
-	for index, line := range lines {
+	var folderRow, projectRow string
+	for _, line := range strings.Split(screen(m), "\n") {
 		switch {
 		case strings.Contains(line, "Cycle 4") && strings.Contains(line, folderIcon):
-			folderName, folderCount = line, lines[index+1]
+			folderRow = line
 		case strings.Contains(line, "Website redesign"):
-			projectName = line
+			projectRow = line
 		}
 	}
-	require.NotEmpty(t, folderName)
-	require.NotEmpty(t, projectName)
+	require.NotEmpty(t, folderRow)
+	require.NotEmpty(t, projectRow)
 
-	assert.Contains(t, folderCount, "6 projects")
-	assert.NotContains(t, folderCount, folderIcon, "the icon repeated under itself")
-	assert.NotContains(t, projectName, folderIcon)
+	// One line each: the count and the description follow the name after a dash
+	// rather than sitting under it.
+	assert.Contains(t, folderRow, "Cycle 4 — 6 projects")
+	assert.Contains(t, projectRow, "Website redesign — A redesign of the marketing site")
+	assert.NotContains(t, projectRow, folderIcon)
 
 	// The names line up: a project takes the room an icon would.
-	assert.Equal(t, columnOf(t, folderName, "Cycle 4"), columnOf(t, projectName, "Website redesign"))
-	assert.Contains(t, screen(m), "A redesign of the marketing site")
+	assert.Equal(t, columnOf(t, folderRow, "Cycle 4"), columnOf(t, projectRow, "Website redesign"))
 }
 
-// A project with no description still gets the line under it, so every row is
-// the same height and the column reads as a list.
+// A project with no description is just its name — no dash trailing off into
+// nothing.
 func TestHomeProjectWithoutADescription(t *testing.T) {
 	_, h := filledHome(t)
 
-	rows := h.itemRows("", "Marketing site", "", 99)
-	assert.Len(t, rows, 2)
-	assert.Equal(t, "", strings.TrimSpace(ansi.Strip(rows[1])))
+	row := itemRow{label: "Marketing site"}.render(h.ctx.Styles(), h.width)
+	assert.Equal(t, "Marketing site", strings.TrimSpace(ansi.Strip(row)))
+}
+
+// A row is one line, so a list of names is read by running an eye straight down
+// the left edge.
+func TestHomeRowsAreOneLine(t *testing.T) {
+	_, h := filledHome(t)
+
+	row := itemRow{label: "Marketing site", trailing: "A redesign"}.render(h.ctx.Styles(), h.width)
+	assert.NotContains(t, row, "\n")
+	assert.Contains(t, ansi.Strip(row), "Marketing site — A redesign")
 }
 
 // Each read answers on its own, so the screen fills in as they land rather than
@@ -236,7 +280,7 @@ func TestHomeNamingAProject(t *testing.T) {
 	m, h := filledHome(t)
 
 	m, _ = press(t, m, newProjectKey)
-	assert.Equal(t, namingProject, h.naming)
+	assert.True(t, h.naming)
 	assert.True(t, h.CapturingInput())
 	assert.Contains(t, screen(m), "New project name")
 	assert.Contains(t, screen(m), "enter create")
@@ -248,12 +292,17 @@ func TestHomeNamingAProject(t *testing.T) {
 	assert.Equal(t, "Fizzy", h.name.Value())
 }
 
-func TestHomeNamingAFolder(t *testing.T) {
+// A folder needs no name to be made: f makes one and the server names it. A
+// folder is a place to put things rather than a thing in itself, and asking for
+// its name first puts a form between the reader and a keystroke that could have
+// just worked.
+func TestHomeMakesAFolderOutright(t *testing.T) {
 	m, h := filledHome(t)
 
-	m, _ = press(t, m, newFolderKey)
-	assert.Equal(t, namingFolder, h.naming)
-	assert.Contains(t, screen(m), "New folder name")
+	m, cmd := press(t, m, newFolderKey)
+	assert.False(t, h.naming, "f opened a form instead of making a folder")
+	assert.NotContains(t, screen(m), "New folder name")
+	assert.NotNil(t, cmd, "f made nothing")
 }
 
 // Escape drops the name and leaves the screen as it was.
@@ -264,7 +313,7 @@ func TestHomeNamingCancels(t *testing.T) {
 
 	m, cmd := press(t, m, "esc")
 	assert.Nil(t, cmd)
-	assert.Equal(t, namingNothing, h.naming)
+	assert.False(t, h.naming)
 	assert.Equal(t, "", h.name.Value())
 	assert.Equal(t, 1, m.nav.depth(), "esc canceled the name and popped a screen too")
 }
@@ -276,13 +325,13 @@ func TestHomeNamingNothingCreatesNothing(t *testing.T) {
 
 	_, cmd := press(t, m, "enter")
 	assert.Nil(t, cmd)
-	assert.Equal(t, namingNothing, h.naming)
+	assert.False(t, h.naming)
 }
 
 // While a name is being typed every key belongs to it, shortcuts included.
 func TestHomeNamingTakesEveryKey(t *testing.T) {
 	m, h := filledHome(t)
-	m, _ = press(t, m, newFolderKey)
+	m, _ = press(t, m, newProjectKey)
 
 	for _, key := range []string{"n", "f", "i", "a", "1"} {
 		m, _ = press(t, m, key)
@@ -290,7 +339,7 @@ func TestHomeNamingTakesEveryKey(t *testing.T) {
 
 	assert.Equal(t, "nfia1", h.name.Value())
 	assert.Equal(t, "Home", m.nav.current().Title())
-	assert.Equal(t, namingFolder, h.naming)
+	assert.True(t, h.naming)
 }
 
 // What was made goes into the list it was made for, which means reading that
@@ -358,7 +407,6 @@ func TestHomeKeepsTheFirstNotice(t *testing.T) {
 // --- Turning timeline events into activity ---
 
 func TestToActivity(t *testing.T) {
-	now := time.Date(2026, 8, 31, 9, 0, 0, 0, time.Local)
 	created := time.Date(2026, 8, 31, 8, 29, 0, 0, time.Local)
 
 	entry := toActivity(basecamp.TimelineEvent{
@@ -368,23 +416,25 @@ func TestToActivity(t *testing.T) {
 		Creator:   &basecamp.Person{Name: "Rob Zolkos"},
 		Bucket:    &basecamp.Bucket{Name: "CLIs"},
 		CreatedAt: &created,
-	}, now)
+	})
 
+	// The instant is kept rather than pre-formatted: how long ago something was
+	// is a different answer every minute.
 	assert.Equal(t, activity{
 		who:   "Rob Zolkos",
 		what:  "Rob Z. posted Platform Documentation",
 		where: "CLIs",
-		when:  "08:29",
+		at:    created,
 	}, entry)
 }
 
 // An event with no title of its own falls back to its action, then to its kind,
 // rather than drawing a blank row.
 func TestToActivityFallsBack(t *testing.T) {
-	action := toActivity(basecamp.TimelineEvent{Kind: "dock_created", Action: "added the dock"}, time.Now())
+	action := toActivity(basecamp.TimelineEvent{Kind: "dock_created", Action: "added the dock"})
 	assert.Equal(t, "added the dock", action.what)
 
-	kind := toActivity(basecamp.TimelineEvent{Kind: "dock_created"}, time.Now())
+	kind := toActivity(basecamp.TimelineEvent{Kind: "dock_created"})
 	assert.Equal(t, "dock_created", kind.what)
 	assert.Equal(t, "", kind.who)
 }
@@ -396,7 +446,7 @@ func TestToActivitySanitizes(t *testing.T) {
 		Action:  "posted",
 		Title:   "Ship\x1b[2Jit",
 		Creator: &basecamp.Person{Name: "Rob\x1b[2JZolkos"},
-	}, time.Now())
+	})
 
 	assert.NotContains(t, entry.what, "\x1b")
 	assert.NotContains(t, entry.who, "\x1b")

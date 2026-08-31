@@ -17,8 +17,8 @@ import (
 // Monday, so the day labels read the way they would on the web.
 var testNow = time.Date(2026, time.August, 31, 14, 30, 0, 0, time.Local)
 
-func testEvents() []activityEvent {
-	return []activityEvent{
+func testEvents() []activity {
+	return []activity{
 		{who: "Clawdito", what: "H1 #3982365: HEY name-tag HTML", where: "App Security",
 			at: testNow.Add(-3 * time.Minute)},
 		{who: "Jorge M.", what: "added a webhook", where: "BC5 Accessibility",
@@ -275,9 +275,9 @@ func TestActivityPagesInAsYouWalk(t *testing.T) {
 	a.now = func() time.Time { return testNow }
 	m.push(a)
 
-	many := make([]activityEvent, 40)
+	many := make([]activity, 40)
 	for index := range many {
-		many[index] = activityEvent{what: "Event", at: testNow}
+		many[index] = activity{what: "Event", at: testNow}
 	}
 	a.Update(activityPageMsg{page: 1, events: many})
 	a.paging = false
