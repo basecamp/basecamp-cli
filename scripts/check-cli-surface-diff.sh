@@ -3,7 +3,10 @@
 # Usage: scripts/check-cli-surface-diff.sh <baseline> <current>
 #
 # Intentional breaking changes can be listed in .surface-breaking (one per line).
-# Clear that file after each release.
+# The allowlist is cumulative: entries stay after release, recording every
+# removal acknowledged since the baseline. No release step clears it, and
+# nothing depends on it being cleared — an entry only ever excuses the removal
+# it names.
 set -euo pipefail
 BASELINE="$1"
 CURRENT="$2"

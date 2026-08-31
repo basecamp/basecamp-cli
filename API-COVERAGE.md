@@ -6,28 +6,25 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 49 | 183 |
-| ⚠️ Blocked | 1 | 1 |
+| ✅ Implemented | 50 | 184 |
+| ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
 | **Total tracked** | **54** | **196** |
 
-**183 of 184 tracked in-scope endpoints.** The one gap is `GET
-/uploads/:id/versions.json` in the `uploads` section, and it is not a missing
-command — the command is written. The SDK's `UploadsService.ListVersions`
-decodes the response with the wrong type: the API returns version *events*
-(`action`, `details`, `recording_id`), the OpenAPI spec models them as
-`[]Upload`, so a caller gets Upload structs with blank `title`/`filename`/
-`status` and an `id` that is the event id and does not resolve as an upload.
-Shipping a command on that would mean shipping wrong data, so it is held.
-Reported to the SDK; the command lands when `ListVersions` returns an event
-type.
+**184 of 184 tracked in-scope endpoints.** The last gap — `GET
+/uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
+(`files versions`) was written earlier but held: the SDK's
+`UploadsService.ListVersions` decoded the response as `[]Upload` when the API
+returns version *events*, so shipping it would have meant shipping wrong data.
+basecamp/basecamp-sdk#683 (v0.14.0) returns a typed version, and the command
+ships — see the `uploads` row.
 
-This file previously read "100% coverage of tracked in-scope API (184/184)".
-That was wrong, and the matrix had no way to say so — with only ✅ and ⏭️
-available, a partly-covered section had to be recorded as fully covered. Hence
-the third status above. It is deliberately narrow: ⚠️ means the CLI cannot
-faithfully cover an endpoint for a reason outside the CLI, and it names the
-blocker.
+An earlier revision of this file read "100% coverage of tracked in-scope API
+(184/184)" while that gap was open. That was wrong, and the matrix had no way
+to say so — with only ✅ and ⏭️ available, a partly-covered section had to be
+recorded as fully covered. Hence the third status above, currently marking
+nothing. It is deliberately narrow: ⚠️ means the CLI cannot faithfully cover an
+endpoint for a reason outside the CLI, and it names the blocker.
 
 This is not a complete bc-api parity figure. The five BC5 sections introduced by bc-api#410
 that were previously untracked — `my_bookmarks`, `drafts`, `my_notes`,
@@ -46,10 +43,15 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.12.0 — adds 20 exported Go methods over 13 new backend
-operations. The extra seven wrap endpoints that already existed but were
-reachable only through the raw generated client, which the andon-cord rule
-forbids the CLI from calling.
+**SDK version:** v0.15.0 (`internal/version/sdk-provenance.json` is
+authoritative). The command surface below largely dates to the v0.12.0 bump,
+which added 20 exported Go methods over 13 new backend operations; the extra
+seven wrapped endpoints that already existed but were reachable only through
+the raw generated client, which the andon-cord rule forbids the CLI from
+calling. v0.13.0–v0.15.0 corrected shapes and routes (pointerized optional
+fields, page-selection semantics, field-keyed 422 payloads) rather than opening
+new sections; their additions here are `files replace` and the un-held
+`files versions`, both from v0.14.0's upload work (basecamp/basecamp-sdk#683).
 
 Those methods land as four new command groups (`bookmarks`, `drafts`, `notes`,
 `calendars`) and three extensions (`assignments` gains the Up Next verbs,
@@ -61,12 +63,13 @@ v0.12.0 also gave 11 `EverythingService` methods a trailing
 plus the two unpaginated overdue endpoints. The family is 5 unchanged + 11
 changed = 16.
 
-One v0.12.0 defect shapes a command rather than just a call: `parseErrorBody`
-reads only `error`/`error_description`, so a calendar 422 carrying
-`{"errors":{"color":[…]}}` arrives as a bare `validation error` naming neither
-field nor value. `calendars update` therefore validates its eleven colors
-client-side. The SDK fixes this past this pin (#541 returns a `fieldErrors`
-map), so a later bump could surface the server's own message.
+One v0.12.0 defect shaped a command rather than just a call: its
+`parseErrorBody` read only `error`/`error_description`, so a calendar 422
+carrying `{"errors":{"color":[…]}}` arrived as a bare `validation error` naming
+neither field nor value. `calendars update` therefore validates its eleven
+colors client-side. The SDK fix is inside the pin as of v0.13.0
+(basecamp/basecamp-sdk#541 returns a field-keyed map); the client-side check
+stays as a fast local answer, and the server's own message now backs it up.
 
 It carries `EverythingService` (`AccountClient.Everything()`,
 basecamp/basecamp-sdk#435 and #438), a 16-method account-wide aggregate family

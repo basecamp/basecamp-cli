@@ -157,3 +157,26 @@ jobs:
 
           # Always emit annotation so the failure is visible in the workflow summary
           echo "::error::Installer canary failed. See ${RUN_URL}"
+
+  recover:
+    name: Close canary issue on recovery
+    needs: [linux, macos, windows]
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Close open canary failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          TITLE="Installer canary failure"
+
+          # Same title lookup as the notify job: exact-match on the open issue.
+          existing=$(gh issue list --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "All installer legs are green again: ${RUN_URL}" || true
+          fi

@@ -2,7 +2,7 @@ changelog:
   exclude:
     labels:
       - dependencies
-      - github-actions
+      - github_actions
     authors:
       - dependabot[bot]
   categories:
