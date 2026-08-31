@@ -6,189 +6,403 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
-func listItems(n int) []listItem {
-	items := make([]listItem, n)
-	for index := range items {
-		chosen := project{id: int64(index), name: fmt.Sprintf("Project %02d", index)}
-		items[index] = listItem{
-			label:    chosen.name,
-			subtitle: fmt.Sprintf("Description %02d", index),
-			project:  &chosen,
-		}
+func testDirectory() []project {
+	found := []project{
+		{id: 1, name: "@basecamp.com → @37signals.com", description: "Retiring basecamp.com"},
+		{id: 2, name: "[Test Project] #2026"},
+		{id: 3, name: "37signals HQ", description: "36signals.com was taken"},
+		{id: 4, name: "2025-12-05 Cloudflare Outage", description: "Plan remediations"},
+		{id: 5, name: "Accessibility"},
+		{id: 6, name: "All Cars", description: "This is now a Volvo stan account"},
+		{id: 7, name: "Basecamp Web", description: "HQ for the Basecamp Web team"},
+		{id: 8, name: "Ángel's project", description: "Accents fold"},
 	}
-	return items
+	sortProjects(found)
+	return found
 }
 
-func openList(t *testing.T, count int) (model, *listScreen) {
+// openDirectory is the project directory on screen, filled and sized. The read
+// is delivered through the model rather than straight to the screen: the model
+// owns the spinner, and only its own Update puts it away.
+func openDirectory(t *testing.T, height int) (model, *listScreen) {
 	t.Helper()
 
-	m := resize(t, newTestModel(t), 96, 26)
-	screen := newAllProjects(m.ctx)
-	m.push(screen)
-	screen.Update(listPageMsg{kind: listProjects, page: 1, items: listItems(count)})
-	screen.Update(listPageMsg{kind: listProjects, page: 2})
-	m.relayout()
-	return m, screen
+	m := resize(t, newTestModel(t), 96, height)
+	l := newAllProjects(m.ctx)
+	m.push(l)
+
+	m = load(t, m, directoryLoadedMsg{projects: testDirectory()})
+	return m, l
 }
 
-// Every row is its label and the quieter line under it.
-func TestListRendersRows(t *testing.T) {
-	m, _ := openList(t, 4)
+// load hands a message to the model and lays the frame out again.
+func load(t *testing.T, m model, msg tea.Msg) model {
+	t.Helper()
+
+	updated, _ := m.Update(msg)
+	m = updated.(model)
+	m.relayout()
+	return m
+}
+
+// --- Sorting ---
+
+// The directory comes out in Basecamp's own order, which is not the order a
+// plain string compare gives.
+func TestDirectorySortsLikeBasecamp(t *testing.T) {
+	found := testDirectory()
+
+	names := make([]string, len(found))
+	for index, one := range found {
+		names[index] = one.name
+	}
+
+	assert.Equal(t, []string{
+		// Names that do not start with a letter or a digit sort above the
+		// alphabet.
+		"@basecamp.com → @37signals.com",
+		"[Test Project] #2026",
+		// 37 is less than 2025, however the two read character by character.
+		"37signals HQ",
+		"2025-12-05 Cloudflare Outage",
+		"Accessibility",
+		"All Cars",
+		// Á folds to A, so it files with the As rather than after Z.
+		"Ángel's project",
+		"Basecamp Web",
+	}, names)
+}
+
+func TestSortNameInitial(t *testing.T) {
+	assert.Equal(t, "#", newSortName("@basecamp.com").initial())
+	assert.Equal(t, "#", newSortName("[Test Project]").initial())
+	assert.Equal(t, "#", newSortName("🚨🚨🚨").initial())
+	assert.Equal(t, "0-9", newSortName("37signals HQ").initial())
+	assert.Equal(t, "0-9", newSortName("2025-12-05 Cloudflare").initial())
+	assert.Equal(t, "A", newSortName("All Cars").initial())
+	assert.Equal(t, "A", newSortName("Ángel").initial())
+	assert.Equal(t, "A", newSortName("  accessibility").initial())
+	assert.Equal(t, "#", newSortName("").initial())
+}
+
+// Runs of digits compare as numbers, so 2 files before 10.
+func TestSortNameCountsNaturally(t *testing.T) {
+	assert.True(t, newSortName("Cycle 2").before(newSortName("Cycle 10")))
+	assert.False(t, newSortName("Cycle 10").before(newSortName("Cycle 2")))
+
+	// A number sorts above a letter, which is what puts the digits between the
+	// symbols and the alphabet.
+	assert.True(t, newSortName("2025 Review").before(newSortName("Accessibility")))
+}
+
+// A name is only a prefix of the other, so the shorter one comes first.
+func TestSortNamePrefixes(t *testing.T) {
+	assert.True(t, newSortName("All").before(newSortName("All Cars")))
+	assert.False(t, newSortName("All Cars").before(newSortName("All")))
+	assert.False(t, newSortName("All").before(newSortName("All")))
+}
+
+// --- Letter separators ---
+
+func TestDirectoryGroupsByInitial(t *testing.T) {
+	_, l := openDirectory(t, 40)
+	rendered := ansi.Strip(l.View())
+
+	for _, initial := range []string{"#", "0-9", "A", "B"} {
+		assert.Contains(t, rendered, initial+" ─", "no separator for %q", initial)
+	}
+
+	// One separator per letter, not one per project.
+	assert.Equal(t, 1, strings.Count(rendered, "\nA ─"))
+}
+
+// A separator runs a rule out to the right edge.
+func TestDirectorySeparatorsAreRuled(t *testing.T) {
+	_, l := openDirectory(t, 40)
+
+	for _, line := range strings.Split(ansi.Strip(l.View()), "\n") {
+		if strings.HasPrefix(line, "A ─") {
+			assert.Equal(t, l.width, tui.DisplayWidth(line))
+			return
+		}
+	}
+	t.Fatal("no letter separator on screen")
+}
+
+// --- Rows ---
+
+// A project is one line: its name, then its description after a dash.
+func TestDirectoryRows(t *testing.T) {
+	m, _ := openDirectory(t, 40)
 	rendered := screen(m)
 
-	assert.Contains(t, rendered, "Project 00")
-	assert.Contains(t, rendered, "Description 00")
-	assert.Contains(t, rendered, "› Project 00")
+	assert.Contains(t, rendered, "All Cars")
+	assert.Contains(t, rendered, "This is now a Volvo stan account")
+	assert.Contains(t, rendered, "› ")
 	assert.Contains(t, m.nav.trail(), "All projects")
 }
 
-func TestListCursorWalksAndStops(t *testing.T) {
-	m, l := openList(t, 4)
+// A name is never cut to make room for a description.
+func TestDirectoryKeepsTheNameWhole(t *testing.T) {
+	m := resize(t, newTestModel(t), 48, 26)
+	l := newAllProjects(m.ctx)
+	m.push(l)
+	m = load(t, m, directoryLoadedMsg{projects: []project{
+		{id: 1, name: "A project with a rather long name", description: "and a description"},
+	}})
 
-	for range 10 {
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "A project with a rather long name")
+	assert.NotContains(t, rendered, "and a description")
+}
+
+func TestDirectoryRowsFitTheColumn(t *testing.T) {
+	for _, width := range []int{40, 60, 96} {
+		m := resize(t, newTestModel(t), width, 26)
+		l := newAllProjects(m.ctx)
+		m.push(l)
+		m = load(t, m, directoryLoadedMsg{projects: testDirectory()})
+
+		for _, line := range strings.Split(ansi.Strip(l.View()), "\n") {
+			assert.LessOrEqual(t, tui.DisplayWidth(line), l.width, "at terminal width %d", width)
+		}
+	}
+}
+
+// --- Archived and trashed ---
+
+func TestArchivedAndTrashedAreOffToStart(t *testing.T) {
+	_, l := openDirectory(t, 40)
+
+	assert.False(t, l.inactive)
+	assert.Contains(t, ansi.Strip(l.View()), "Show archived and trashed")
+}
+
+// The switch is a switch: the knob sits at one end of its track and moves to
+// the other when it is flicked.
+func TestTheSwitchLooksLikeOne(t *testing.T) {
+	_, l := openDirectory(t, 40)
+	assert.Equal(t, "⬤━", ansi.Strip(l.toggle()))
+
+	l.inactive = true
+	assert.Equal(t, "━⬤", ansi.Strip(l.toggle()))
+
+	// One column per glyph, so the label beside it lines up either way.
+	assert.Equal(t, 2, tui.DisplayWidth(ansi.Strip(l.toggle())))
+}
+
+// The find field is laid out the way the jump menu's is: its name on the left,
+// the key that reaches it on the right.
+func TestFindRowNamesItselfAndItsKey(t *testing.T) {
+	_, l := openDirectory(t, 40)
+
+	row := ansi.Strip(l.findRow())
+	assert.True(t, strings.HasPrefix(row, "Find a project"), "row was %q", row)
+	assert.True(t, strings.HasSuffix(row, findKey), "row was %q", row)
+	assert.Equal(t, l.width-2, tui.DisplayWidth(row))
+
+	// The rule under it is the bottom of the box the web draws around its input.
+	assert.Equal(t, strings.Repeat("─", l.width), ansi.Strip(l.findRule()))
+}
+
+// The key flips the switch and reads the directory again — the inactive ones
+// come from their own reads, so there is nothing here to filter.
+func TestTogglingArchivedRereads(t *testing.T) {
+	m, l := openDirectory(t, 40)
+
+	m, cmd := press(t, m, inactiveKey)
+	assert.True(t, l.inactive)
+	assert.True(t, l.loading)
+	require.NotNil(t, cmd, "flipping the switch did not read again")
+	assert.Contains(t, ansi.Strip(l.View()), "━⬤", "the switch did not move")
+
+	_ = load(t, m, directoryLoadedMsg{inactive: true, projects: []project{
+		{id: 9, name: "Cycle 3: Video", status: "archived"},
+	}})
+
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "Cycle 3: Video")
+	assert.Contains(t, rendered, "archived", "an inactive project did not say so")
+}
+
+// An answer to the previous state of the switch is dropped rather than shown
+// under the new one.
+func TestADirectoryReadForTheOtherSwitchIsDropped(t *testing.T) {
+	_, l := openDirectory(t, 40)
+	before := len(l.projects)
+
+	_, claimed := l.Update(directoryLoadedMsg{inactive: true, projects: []project{{id: 9, name: "Late"}}})
+	assert.True(t, claimed)
+	assert.Len(t, l.projects, before)
+}
+
+// --- Finding ---
+
+func TestDirectoryFind(t *testing.T) {
+	m, l := openDirectory(t, 40)
+	require.Contains(t, ansi.Strip(l.View()), "Accessibility")
+
+	m, _ = press(t, m, findKey)
+	require.True(t, l.finding)
+	for _, key := range strings.Split("volvo", "") {
+		m, _ = press(t, m, key)
+	}
+
+	rendered := ansi.Strip(l.View())
+	assert.Contains(t, rendered, "All Cars", "the description was not searched")
+	assert.NotContains(t, rendered, "Accessibility")
+}
+
+func TestDirectoryFindSaysWhenNothingMatches(t *testing.T) {
+	m, l := openDirectory(t, 40)
+
+	m, _ = press(t, m, findKey)
+	for _, key := range strings.Split("zzz", "") {
+		m, _ = press(t, m, key)
+	}
+	assert.Contains(t, ansi.Strip(l.View()), "Nothing matches zzz.")
+}
+
+// While the box has the keys, a is a letter rather than the archived switch.
+func TestDirectoryFindCapturesInput(t *testing.T) {
+	m, l := openDirectory(t, 40)
+
+	m, _ = press(t, m, findKey)
+	_, _ = press(t, m, inactiveKey)
+
+	assert.Equal(t, "a", l.find.Value())
+	assert.False(t, l.inactive)
+}
+
+// Esc clears the filter before it pops the screen.
+func TestDirectoryEscapeClearsTheFind(t *testing.T) {
+	m, l := openDirectory(t, 26)
+	require.Equal(t, 2, m.nav.depth())
+
+	m, _ = press(t, m, findKey)
+	m, _ = press(t, m, "a")
+	m, _ = press(t, m, "esc")
+
+	assert.Equal(t, "", l.find.Value())
+	assert.Equal(t, 2, m.nav.depth())
+
+	m, _ = press(t, m, "esc")
+	assert.Equal(t, 1, m.nav.depth())
+}
+
+// --- Walking ---
+
+func TestDirectoryCursorWalksAndStops(t *testing.T) {
+	m, l := openDirectory(t, 40)
+
+	for range 20 {
 		m, _ = press(t, m, "down")
 	}
-	assert.Equal(t, 3, l.cursor)
+	assert.Equal(t, len(testDirectory())-1, l.cursor)
 
-	for range 10 {
+	for range 20 {
 		m, _ = press(t, m, "up")
 	}
 	assert.Equal(t, 0, l.cursor)
 }
 
-func TestListEnterOpensAProject(t *testing.T) {
-	m, _ := openList(t, 4)
+func TestDirectoryEnterOpensAProject(t *testing.T) {
+	m, _ := openDirectory(t, 40)
 	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "enter")
 	m = deliver(t, m, cmd)
 
-	assert.Equal(t, []string{"Home", "Project 01"}, m.nav.trail())
+	assert.Equal(t, []string{"Home", "[Test Project] #2026"}, m.nav.trail())
 }
 
-// A row with nothing behind it leads nowhere, so enter does nothing rather than
-// pretending it went somewhere.
-func TestListRowsWithNoProjectDoNotOpen(t *testing.T) {
-	m, l := openList(t, 4)
-	l.items[0].project = nil
-
-	_, cmd := press(t, m, "enter")
-	assert.Nil(t, cmd)
-}
-
-// A page for the other list is dropped rather than appended to whatever is on
-// screen now.
-func TestListIgnoresTheOtherListsPages(t *testing.T) {
-	_, l := openList(t, 4)
-	before := len(l.items)
-
-	cmd, claimed := l.Update(listPageMsg{kind: listActivity, page: 2, items: listItems(3)})
-	assert.False(t, claimed)
-	assert.Nil(t, cmd)
-	assert.Len(t, l.items, before)
-}
-
-// An empty page is the end of the list, and the walk stops.
-func TestListEmptyPageEndsTheWalk(t *testing.T) {
-	_, l := openList(t, 4)
-
-	assert.True(t, l.done)
-	assert.Nil(t, l.readMore())
-}
-
-// Walking into the tail asks for the page below it.
-func TestListPagesInAsYouWalk(t *testing.T) {
-	m := resize(t, newTestModel(t), 96, 26)
-	l := newAllProjects(m.ctx)
-	m.push(l)
-
-	l.Update(listPageMsg{kind: listProjects, page: 1, items: listItems(40)})
-	l.paging = false
-	m.relayout()
-
-	// Near the top there is nothing to ask for yet.
-	assert.Nil(t, l.readMore())
-
-	for range len(l.items) {
-		m, _ = press(t, m, "down")
-	}
-	assert.True(t, l.paging, "reaching the end did not ask for another page")
-	assert.Equal(t, 2, l.page+1)
-}
-
-// A page that failed to arrive stops the walk and leaves the rows already on
-// screen alone — they are still good.
-func TestListFailedPageKeepsWhatItHas(t *testing.T) {
-	m, l := openList(t, 4)
-	l.done = false
-
-	l.Update(listPageMsg{kind: listProjects, page: 2, err: errors.New("no route to host")})
-	m.relayout()
-
-	assert.True(t, l.done)
-	assert.Empty(t, l.notice, "a failed page put a notice over rows that were fine")
-	assert.Contains(t, screen(m), "Project 00")
-}
-
-// A first page that fails has nothing to keep, so it says why.
-func TestListFirstPageFailure(t *testing.T) {
-	m := resize(t, newTestModel(t), 96, 26)
-	l := newAllProjects(m.ctx)
-	m.push(l)
-
-	l.Update(listPageMsg{kind: listProjects, page: 1, err: errors.New("no route to host")})
-	m.relayout()
-
-	assert.Contains(t, l.notice, "Could not load all projects")
-	assert.Contains(t, screen(m), "Could not load")
-	assert.Nil(t, m.err, "a list read put an error box over the screen")
-}
-
-// Every row fits the content column.
-func TestListRowsFitTheColumn(t *testing.T) {
-	for _, width := range []int{40, 60, 96} {
-		m := resize(t, newTestModel(t), width, 26)
-		l := newAllProjects(m.ctx)
-		m.push(l)
-		l.Update(listPageMsg{kind: listProjects, page: 1, items: listItems(10)})
-		m.relayout()
-
-		for _, line := range strings.Split(ansi.Strip(l.View()), "\n") {
-			assert.LessOrEqual(t, len([]rune(line)), l.width, "at terminal width %d", width)
-		}
-	}
-}
-
-// A list longer than the column scrolls to keep the cursor on screen.
-func TestListScrollsToTheCursor(t *testing.T) {
-	m := resize(t, newTestModel(t), 96, 12)
-	l := newAllProjects(m.ctx)
-	m.push(l)
-	l.Update(listPageMsg{kind: listProjects, page: 1, items: listItems(30)})
-	l.done = true
-	m.relayout()
-
-	for range 20 {
+// A find that hides where the cursor was standing brings it back in range, and
+// enter still opens what is under it rather than what used to be.
+func TestDirectoryFindMovesWhatEnterOpens(t *testing.T) {
+	m, l := openDirectory(t, 40)
+	for range 5 {
 		m, _ = press(t, m, "down")
 	}
 
-	require.GreaterOrEqual(t, l.cursor, l.offset, "the cursor scrolled off the top")
-	assert.Less(t, l.cursor, l.offset+l.height/rowsPerListItem, "the cursor scrolled off the bottom")
+	m, _ = press(t, m, findKey)
+	for _, key := range strings.Split("volvo", "") {
+		m, _ = press(t, m, key)
+	}
+	require.Equal(t, 1, l.visible())
+	assert.Equal(t, 0, l.cursor)
+
+	m, _ = press(t, m, "enter")
+	m, cmd := press(t, m, "enter")
+	m = deliver(t, m, cmd)
+	assert.Equal(t, []string{"Home", "All Cars"}, m.nav.trail())
 }
 
-func TestListWhileEmpty(t *testing.T) {
+// Scrolling back up to a project brings its letter with it.
+func TestDirectoryScrollingUpBringsTheLetterBack(t *testing.T) {
+	m, l := openDirectory(t, 14)
+	require.Less(t, l.height, len(l.layout()), "the directory fits, so nothing scrolls")
+
+	for range 6 {
+		m, _ = press(t, m, "down")
+	}
+	for range 6 {
+		m, _ = press(t, m, "up")
+	}
+
+	assert.Contains(t, ansi.Strip(l.View()), "# ─")
+}
+
+// --- Loading and failure ---
+
+func TestDirectoryWhileLoading(t *testing.T) {
 	m := resize(t, newTestModel(t), 96, 26)
 	l := newAllProjects(m.ctx)
+	l.loading = true
 	m.push(l)
 	m.relayout()
 
 	assert.Contains(t, ansi.Strip(l.View()), "Loading…")
+}
 
-	l.Update(listPageMsg{kind: listProjects, page: 1})
-	assert.Contains(t, ansi.Strip(l.View()), "Nothing here.")
+func TestDirectoryWhileEmpty(t *testing.T) {
+	m := resize(t, newTestModel(t), 96, 26)
+	l := newAllProjects(m.ctx)
+	m.push(l)
+	m = load(t, m, directoryLoadedMsg{})
+
+	assert.Contains(t, ansi.Strip(l.View()), "No projects.")
+}
+
+func TestDirectoryFailure(t *testing.T) {
+	m := resize(t, newTestModel(t), 96, 26)
+	l := newAllProjects(m.ctx)
+	m.push(l)
+
+	m = load(t, m, directoryLoadedMsg{err: errors.New("no route to host")})
+
+	assert.Contains(t, l.notice, "Could not load the projects")
+	assert.Contains(t, screen(m), "Could not load")
+	assert.Nil(t, m.err, "a directory read put an error box over the screen")
+}
+
+// A directory of every project is long. It is read in one go rather than a page
+// at a time, because a list sorted a page at a time is sorted only against
+// itself.
+func TestDirectoryIsSortedAcrossTheWholeList(t *testing.T) {
+	many := make([]project, 60)
+	for index := range many {
+		many[index] = project{id: int64(index), name: fmt.Sprintf("Project %02d", 59-index)}
+	}
+	sortProjects(many)
+
+	assert.Equal(t, "Project 00", many[0].name)
+	assert.Equal(t, "Project 59", many[len(many)-1].name)
 }

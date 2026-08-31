@@ -100,6 +100,10 @@ type project struct {
 	name        string
 	description string
 	appURL      string
+
+	// status is active, archived or trashed. The directory shows the inactive
+	// ones on request and says which they are; everywhere else reads active.
+	status string
 }
 
 // projectsLoadedMsg is one page of projects, the first or a later one.
