@@ -577,7 +577,7 @@ func (h home) layout() []homeRow {
 			plain(line)
 		}
 	}
-	item(h.buttonRow("View all", index), index)
+	item(button{label: "View all", selected: index == h.cursor}.render(styles, h.width), index)
 	index++
 
 	plain("")
@@ -604,7 +604,7 @@ func (h home) layout() []homeRow {
 		index++
 	}
 
-	item(h.buttonRow("See all projects", index), index)
+	item(button{label: "See all projects", selected: index == h.cursor}.render(styles, h.width), index)
 	return rows
 }
 
@@ -619,17 +619,6 @@ func (h home) folderColor(f folder) color.Color {
 		return slot
 	}
 	return nil
-}
-
-// buttonRow is one of the two rows that lead to a screen of their own.
-func (h home) buttonRow(label string, index int) string {
-	style := h.ctx.Styles().Muted
-	marker := "  "
-	if index == h.cursor {
-		style = lipgloss.NewStyle().Foreground(h.ctx.Styles().Theme().Primary).Bold(true)
-		marker = style.Render("› ")
-	}
-	return marker + style.Render(truncateToWidth(label+" →", max(h.width-2, 1)))
 }
 
 func (h home) HelpBindings() []helpBinding {

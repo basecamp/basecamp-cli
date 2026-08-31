@@ -373,6 +373,24 @@ func TestTheEndOfATodayOnlyFeed(t *testing.T) {
 	assert.Contains(t, ansi.Strip(a.View()), "That's everything from today, monday, august 31.")
 }
 
+// A project's own feed reaches the end of its history, not the end of a day:
+// projects/:id/timeline.json pages all the way back. So it says so plainly,
+// where the account-wide feed has to name the day it got stuck on.
+func TestTheEndOfAProjectsFeed(t *testing.T) {
+	m := resize(t, newTestModel(t), 96, 26)
+	a := newProjectActivity(m.ctx, project{id: 48521764, name: "CLIs"})
+	a.now = func() time.Time { return testNow }
+	m.push(a)
+
+	a.Update(activityPageMsg{page: 1, events: testEvents()})
+	a.Update(activityPageMsg{page: 2})
+	m.relayout()
+
+	rendered := ansi.Strip(a.View())
+	assert.Contains(t, rendered, "That's everything.")
+	assert.NotContains(t, rendered, "everything from")
+}
+
 // A first page that fails has nothing to keep, so it says why.
 func TestActivityFirstPageFailure(t *testing.T) {
 	m := resize(t, newTestModel(t), 96, 26)

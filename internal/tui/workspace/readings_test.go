@@ -280,3 +280,54 @@ func TestReadingsPings(t *testing.T) {
 	assert.False(t, quiet.pings())
 	assert.False(t, readings{}.pings())
 }
+
+// --- Labels ---
+
+// A chat's title is only the transcript's own — "Chat", or "Chat room" for a
+// standalone one — so the room it is in joins it. "Chat" alone tells the reader
+// nothing, and there is usually more than one.
+func TestAChatSaysWhichRoom(t *testing.T) {
+	title, where := readingLabel(basecamp.Notification{
+		Type: "Chat", Title: "Chat", BucketName: "Ops: On Call",
+	})
+	assert.Equal(t, "Chat: Ops: On Call", title)
+	assert.Equal(t, "", where, "the project was said twice")
+
+	// A standalone chat room words itself, from the same two fields.
+	title, _ = readingLabel(basecamp.Notification{
+		Type: "Chat", Title: "Chat room", BucketName: "37signals HQ",
+	})
+	assert.Equal(t, "Chat room: 37signals HQ", title)
+}
+
+// Every other kind arrives already worded, so it is left alone and its project
+// goes on the line underneath.
+func TestOtherReadingsKeepTheirOwnTitle(t *testing.T) {
+	for _, n := range []basecamp.Notification{
+		{Type: "Event", Title: "Added: [BC5] Document editing toolbar", BucketName: "On Call"},
+		{Type: "Mention", Title: "@mentioned you in: Re: [BC5 Android]", BucketName: "QA"},
+		{Type: "Question", Title: "Answer to “Commercial: What will you be working on?”", BucketName: "What Works"},
+		{Type: "Completion", Title: "Completed: [CLI] The skill tells agents", BucketName: "CLIs"},
+	} {
+		title, where := readingLabel(n)
+		assert.Equal(t, n.Title, title)
+		assert.Equal(t, n.BucketName, where)
+	}
+}
+
+// A chat with no room named has nothing to join, so it is left as it came.
+func TestAChatWithNoRoom(t *testing.T) {
+	title, where := readingLabel(basecamp.Notification{Type: "Chat", Title: "Chat"})
+	assert.Equal(t, "Chat", title)
+	assert.Equal(t, "", where)
+}
+
+// And the joined label is what the sidebar actually draws.
+func TestTheSidebarDrawsTheJoinedLabel(t *testing.T) {
+	s := loadedSidebar(t, 40, 20)
+	s.replace(readings{unreads: toReadings([]basecamp.Notification{
+		{Type: "Chat", Title: "Chat", BucketName: "Ops", Creator: &basecamp.Person{Name: "Eron"}},
+	}, testNow)})
+
+	assert.Contains(t, ansi.Strip(s.view()), "Chat: Ops")
+}

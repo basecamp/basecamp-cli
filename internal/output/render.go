@@ -1523,3 +1523,17 @@ func extractStats(meta map[string]any) map[string]any {
 	stats, _ := meta["stats"].(map[string]any)
 	return stats
 }
+
+// HumanSize formats a byte count the way a file listing says it — "9.1mb".
+func HumanSize(bytes int64) string {
+	switch {
+	case bytes >= 1_000_000_000:
+		return fmt.Sprintf("%.1fgb", float64(bytes)/1_000_000_000)
+	case bytes >= 1_000_000:
+		return fmt.Sprintf("%.1fmb", float64(bytes)/1_000_000)
+	case bytes >= 1_000:
+		return fmt.Sprintf("%.1fkb", float64(bytes)/1_000)
+	default:
+		return fmt.Sprintf("%db", bytes)
+	}
+}

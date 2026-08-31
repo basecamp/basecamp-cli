@@ -660,7 +660,7 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 	}
 	summary := fmt.Sprintf("Uploaded %s (#%d)", uploadName, line.ID)
 	if len(line.Attachments) > 0 && line.Attachments[0].ByteSize > 0 {
-		summary = fmt.Sprintf("Uploaded %s (%s) (#%d)", uploadName, humanSize(line.Attachments[0].ByteSize), line.ID)
+		summary = fmt.Sprintf("Uploaded %s (%s) (#%d)", uploadName, output.HumanSize(line.Attachments[0].ByteSize), line.ID)
 	}
 
 	return app.OK(line,
@@ -1300,7 +1300,7 @@ func injectAttachmentSizes(text string, attachments []basecamp.CampfireLineAttac
 		size := entry.sizes[entry.idx]
 		entry.idx++
 		if size > 0 {
-			lines[i] = fmt.Sprintf("📎 %s (%s)", filename, humanSize(size))
+			lines[i] = fmt.Sprintf("📎 %s (%s)", filename, output.HumanSize(size))
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -1321,7 +1321,7 @@ func formatChatAttachments(attachments []basecamp.CampfireLineAttachment) string
 			b.WriteByte('\n')
 		}
 		if att.ByteSize > 0 {
-			fmt.Fprintf(&b, "📎 %s (%s)", name, humanSize(att.ByteSize))
+			fmt.Fprintf(&b, "📎 %s (%s)", name, output.HumanSize(att.ByteSize))
 		} else {
 			fmt.Fprintf(&b, "📎 %s", name)
 		}

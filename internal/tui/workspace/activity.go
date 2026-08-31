@@ -29,15 +29,25 @@ type activityPageMsg struct {
 }
 
 // activityScreen is the Latest Activity feed, read a page at a time and broken
-// into days.
+// into days. It serves the whole account, and one project when it was opened
+// from that project's own screen.
 //
-// It shows one day, because that is all reports/progress.json will serve. The
-// endpoint takes a `date`, a `project_ids[]` and a `people_ids[]`, and honors
-// all three — the SDK passes none of them, only `page`. So the day walk the web
-// does, and its two filter dropdowns, are not buildable here yet. See "[SDK]
-// Pass the activity date and filters through" on the CLIs board.
+// The account-wide feed shows one day, because that is all
+// reports/progress.json will serve. The endpoint takes a `date`, a
+// `project_ids[]` and a `people_ids[]`, and honors all three — the SDK passes
+// none of them, only `page`. So the day walk the web does, and its two filter
+// dropdowns, are not buildable here yet. See "[SDK] Pass the activity date and
+// filters through" on the CLIs board.
+//
+// A project's own feed has no such limit: projects/:id/timeline.json pages back
+// through the whole history, so that walk really does reach the end.
 type activityScreen struct {
 	ctx *Context
+
+	// inside is the project this feed belongs to, and nil for the account-wide
+	// one. It decides which endpoint is read and how far back the walk can
+	// honestly claim to have gone.
+	inside *project
 
 	events []activity
 	page   int
@@ -69,6 +79,15 @@ func newActivity(ctx *Context) *activityScreen {
 	find.Placeholder = "Filter…"
 
 	return &activityScreen{ctx: ctx, find: find, now: time.Now}
+}
+
+// newProjectActivity is the same feed read through one project. The breadcrumb
+// already says which project, so the screen is called what it is called
+// everywhere else.
+func newProjectActivity(ctx *Context, inside project) *activityScreen {
+	screen := newActivity(ctx)
+	screen.inside = &inside
+	return screen
 }
 
 func (a *activityScreen) Init() tea.Cmd {
@@ -224,6 +243,9 @@ func (a *activityScreen) readMore() tea.Cmd {
 	}
 
 	a.paging = true
+	if a.inside != nil {
+		return loadProjectActivityPage(a.ctx.Ctx(), a.ctx.app, a.inside.id, a.page+1)
+	}
 	return loadActivityPage(a.ctx.Ctx(), a.ctx.app, a.page+1)
 }
 
@@ -325,10 +347,12 @@ func (a *activityScreen) layout() []homeRow {
 // that stopped. A reader who cannot tell "that is everything" from "something
 // broke" assumes the worse one.
 //
-// The end it reports is the end of a day, not the end of history:
+// What the end means depends on which feed this is. A project's timeline pages
+// back through its whole history, so the bottom of it is the bottom. The
+// account-wide feed reaches only the end of a day:
 // reports/progress.json serves one day per request and defaults to today, and
 // the day it serves is chosen by a `date` parameter the SDK does not pass. Until
-// it does, this screen cannot walk back past midnight, and saying "that's
+// it does, that screen cannot walk back past midnight, and saying "that's
 // everything" would be a lie.
 func (a *activityScreen) footer() string {
 	styles := a.ctx.Styles()
@@ -338,6 +362,8 @@ func (a *activityScreen) footer() string {
 	case a.stalled:
 		return lipgloss.NewStyle().Foreground(styles.Theme().Error).
 			Render("Could not load more. Press ↓ to try again.")
+	case a.done && a.inside != nil:
+		return styles.Muted.Render("That's everything.")
 	case a.done:
 		return styles.Muted.Render("That's everything from " + a.oldestDay() + ".")
 	default:

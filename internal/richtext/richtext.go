@@ -1,5 +1,5 @@
 // Package richtext provides utilities for converting between Markdown and HTML.
-// It uses glamour for terminal-friendly Markdown rendering.
+// Rendering Markdown for a terminal is internal/markdown's job.
 package richtext
 
 import (
@@ -12,11 +12,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
@@ -593,69 +591,6 @@ func escapeAttr(s string) string {
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	s = strings.ReplaceAll(s, "'", "&#39;")
 	return s
-}
-
-// glamourCache caches glamour renderers by width to avoid repeated construction.
-var (
-	glamourMu    sync.Mutex
-	glamourCache = make(map[int]*glamour.TermRenderer)
-)
-
-func cachedRenderer(width int) (*glamour.TermRenderer, error) {
-	glamourMu.Lock()
-	defer glamourMu.Unlock()
-
-	if r, ok := glamourCache[width]; ok {
-		return r, nil
-	}
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-	)
-	if err != nil {
-		return nil, err
-	}
-	glamourCache[width] = r
-	return r, nil
-}
-
-// RenderMarkdown renders Markdown for terminal display using glamour.
-// It returns styled output suitable for CLI display.
-func RenderMarkdown(md string) (string, error) {
-	if md == "" {
-		return "", nil
-	}
-
-	r, err := cachedRenderer(80)
-	if err != nil {
-		return "", err
-	}
-
-	out, err := r.Render(md)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(LinkifyURLs(out)), nil
-}
-
-// RenderMarkdownWithWidth renders Markdown for terminal display with a custom width.
-func RenderMarkdownWithWidth(md string, width int) (string, error) {
-	if md == "" {
-		return "", nil
-	}
-
-	r, err := cachedRenderer(width)
-	if err != nil {
-		return "", err
-	}
-
-	out, err := r.Render(md)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(LinkifyURLs(out)), nil
 }
 
 // HTMLToMarkdown converts HTML content to Markdown.

@@ -752,7 +752,7 @@ func downloadParsedAttachments(ctx context.Context, app *appctx.App, attachments
 				ByteSize:    bytes,
 			}
 			if progress != nil {
-				fmt.Fprintf(progress, "  [%d/%d] Downloaded %s (%s)\n", seq, total, path, humanSize(bytes))
+				fmt.Fprintf(progress, "  [%d/%d] Downloaded %s (%s)\n", seq, total, path, output.HumanSize(bytes))
 			}
 		}(i, att, dlURL, fname)
 	}

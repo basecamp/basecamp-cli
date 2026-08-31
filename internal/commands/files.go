@@ -302,7 +302,7 @@ func runFilesList(cmd *cobra.Command, project, vaultID string, allProjects bool,
 		items = append(items, fileListItem{ID: f.ID, Name: f.Title, Type: "Folder"})
 	}
 	for _, u := range uploads {
-		items = append(items, fileListItem{ID: u.ID, Name: u.Title, Type: "Upload", Size: humanSize(u.ByteSize)})
+		items = append(items, fileListItem{ID: u.ID, Name: u.Title, Type: "Upload", Size: output.HumanSize(u.ByteSize)})
 	}
 	for _, d := range documents {
 		items = append(items, fileListItem{ID: d.ID, Name: d.Title, Type: "Document"})
@@ -523,7 +523,7 @@ func flattenAccountWideFiles(files []basecamp.EverythingFile) []map[string]any {
 			row["type"] = *f.Type
 		}
 		if f.ByteSize != nil {
-			row["size"] = humanSize(*f.ByteSize)
+			row["size"] = output.HumanSize(*f.ByteSize)
 		}
 		if f.CreatedAt != nil {
 			row["created"] = relativeTime(*f.CreatedAt)
@@ -2510,20 +2510,6 @@ func isStorageURL(arg string) bool {
 		strings.HasPrefix(u.Hostname(), "storage.") &&
 		strings.Contains(u.Path, "/blobs/") &&
 		strings.Contains(u.Path, "/download/")
-}
-
-// humanSize formats bytes as a human-readable string (e.g., "9.1mb").
-func humanSize(bytes int64) string {
-	switch {
-	case bytes >= 1_000_000_000:
-		return fmt.Sprintf("%.1fgb", float64(bytes)/1_000_000_000)
-	case bytes >= 1_000_000:
-		return fmt.Sprintf("%.1fmb", float64(bytes)/1_000_000)
-	case bytes >= 1_000:
-		return fmt.Sprintf("%.1fkb", float64(bytes)/1_000)
-	default:
-		return fmt.Sprintf("%db", bytes)
-	}
 }
 
 // getVaultID retrieves the root vault ID from a project's dock, handling multi-dock projects.

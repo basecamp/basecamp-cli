@@ -145,15 +145,39 @@ func toReading(n basecamp.Notification, now time.Time) reading {
 	if n.Creator != nil {
 		who = n.Creator.Name
 	}
+
+	title, where := readingLabel(n)
 	return reading{
-		title:   richtext.SanitizeSingleLine(n.Title),
+		title:   richtext.SanitizeSingleLine(title),
 		excerpt: richtext.SanitizeSingleLine(n.ContentExcerpt),
 		who:     richtext.SanitizeSingleLine(who),
-		where:   richtext.SanitizeSingleLine(n.BucketName),
+		where:   richtext.SanitizeSingleLine(where),
 		when:    stamp(readingTime(n), now),
 		unread:  int(n.UnreadCount),
 		ping:    n.Section == pingsSection,
 	}
+}
+
+// chatType is the one notification whose title does not say what it is on its
+// own. Every other kind arrives already worded — "Added: …", "Completed: …",
+// "@mentioned you in: …", "Answer to “…”" — but a chat's title is only the
+// transcript's own, which is "Chat" for a project's and "Chat room" for a
+// standalone one.
+const chatType = "Chat"
+
+// readingLabel is the heading a notification gets, and what is left for the line
+// under it.
+//
+// A chat says which room it is in — "Chat: Ops", "Chat room: 37signals HQ" —
+// because "Chat" on its own tells the reader nothing, and there is usually more
+// than one. The web joins the two the same way, in
+// my/readings/readables/_chat: `transcript.title: transcript.bucket.name`. The
+// project then drops out of the line underneath rather than being said twice.
+func readingLabel(n basecamp.Notification) (title, where string) {
+	if n.Type != chatType || n.BucketName == "" {
+		return n.Title, n.BucketName
+	}
+	return n.Title + ": " + n.BucketName, ""
 }
 
 // pingsSection is the section a reading carries when it was addressed to the

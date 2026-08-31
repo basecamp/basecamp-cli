@@ -247,6 +247,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openProjectMsg:
 		return m, m.openProject(msg.project)
 
+	case openToolMsg:
+		return m, m.openTool(msg.tool)
+
+	case openProjectActivityMsg:
+		return m, m.openProjectActivity(msg.project)
+
 	case pickerCanceledMsg:
 		return m, m.pop()
 
@@ -407,7 +413,24 @@ func (m *model) openSection(chosen section) tea.Cmd {
 func (m *model) openProject(chosen project) tea.Cmd {
 	m.sidebar.leave()
 	m.popToHome()
+	return m.push(newProject(m.ctx, chosen))
+}
+
+// openTool goes into one of a project's dock tools, which hangs off the project
+// rather than off home: the trail reads Home › CLIs › HEY CLI.
+func (m *model) openTool(chosen tool) tea.Cmd {
+	m.sidebar.leave()
+	if chosen.kind == chatKind {
+		return m.push(newChat(m.ctx, chosen))
+	}
 	return m.push(newBlank(m.ctx, chosen.name))
+}
+
+// openProjectActivity goes to the project's whole feed, which hangs off the
+// project the same way a tool does: Home › CLIs › Latest activity.
+func (m *model) openProjectActivity(chosen project) tea.Cmd {
+	m.sidebar.leave()
+	return m.push(newProjectActivity(m.ctx, chosen))
 }
 
 // openAll goes to one of the two screens the home screen's buttons lead to: the

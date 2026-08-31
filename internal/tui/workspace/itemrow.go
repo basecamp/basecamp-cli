@@ -82,3 +82,22 @@ func (r itemRow) render(styles *tui.Styles, width int) string {
 	return marker + indent + badge + name.Render(label) +
 		styles.Muted.Render(" — "+truncateToWidth(r.trailing, room))
 }
+
+// button is a row that leads to a screen of its own — home's "View all" and "See
+// all projects", a project's "View all activity". Quieter than a name and with an
+// arrow after it, so a row that goes somewhere does not read as one more of the
+// things listed above it.
+type button struct {
+	label    string
+	selected bool
+}
+
+func (b button) render(styles *tui.Styles, width int) string {
+	style := styles.Muted
+	marker := "  "
+	if b.selected {
+		style = lipgloss.NewStyle().Foreground(styles.Theme().Primary).Bold(true)
+		marker = style.Render("› ")
+	}
+	return marker + style.Render(truncateToWidth(b.label+" →", max(width-2, 1)))
+}

@@ -100,6 +100,8 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: tea.KeyEscape}
 	case "enter":
 		k = tea.Key{Code: tea.KeyEnter}
+	case "alt+enter":
+		k = tea.Key{Code: tea.KeyEnter, Mod: tea.ModAlt}
 	case "tab":
 		k = tea.Key{Code: tea.KeyTab}
 	case "backspace":
