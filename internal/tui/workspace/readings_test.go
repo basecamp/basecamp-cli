@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 func testReadings() readings {
@@ -34,13 +36,22 @@ func testReadings() readings {
 	}
 }
 
-func loadedSidebar() sidebar {
-	return sidebar{loaded: true, readings: testReadings()}
+// loadedSidebar is a sidebar holding the test readings, laid out for a column
+// of the given size. It holds its own styles and dimensions now, so a test sizes
+// it once rather than passing them to every call.
+func loadedSidebar(t *testing.T, width, height int) sidebar {
+	t.Helper()
+
+	s := newSidebar(plainStyles(t))
+	s.loaded = true
+	s.replace(testReadings())
+	s.resize(width, height)
+	return s
 }
 
 // The three groups come in the order the web shows them, headings and all.
 func TestSidebarSections(t *testing.T) {
-	rendered := ansi.Strip(loadedSidebar().view(plainStyles(t), 36, 40))
+	rendered := ansi.Strip(loadedSidebar(t, 36, 40).view())
 
 	bubbles := strings.Index(rendered, "Recently Bubbled Up")
 	unreads := strings.Index(rendered, "New for you")
@@ -51,23 +62,64 @@ func TestSidebarSections(t *testing.T) {
 	assert.Less(t, unreads, reads)
 }
 
+// Each heading carries a rule out to the right edge, so the groups read as
+// separate rather than as one long list.
+func TestSidebarSectionHeadingsRuleToTheEdge(t *testing.T) {
+	for _, width := range []int{20, 28, 36} {
+		rendered := ansi.Strip(loadedSidebar(t, width, 40).view())
+
+		found := 0
+		for _, line := range strings.Split(rendered, "\n") {
+			if !strings.Contains(line, "─") {
+				continue
+			}
+			found++
+			assert.Equal(t, width, len([]rune(strings.TrimRight(line, " "))),
+				"the rule stopped short of the edge at width %d: %q", width, line)
+		}
+		assert.Equal(t, 3, found, "expected three ruled headings at width %d", width)
+	}
+}
+
+// Blue means one thing here — where the cursor is. What is new is orange and
+// what is unread is red, the way the web colors them, so the three are not one
+// wash of accent.
+func TestSidebarColorsTellThemApart(t *testing.T) {
+	theme := tui.DefaultTheme(true)
+	s := newSidebar(tui.NewStylesWithTheme(theme))
+	s.loaded = true
+	s.focused = true
+	s.replace(testReadings())
+	s.resize(36, 40)
+
+	rendered := s.view()
+	accent := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true)
+
+	assert.Contains(t, rendered,
+		lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).Render("New for you"))
+	assert.Contains(t, rendered,
+		lipgloss.NewStyle().Foreground(theme.Error).Bold(true).Render("2"))
+	assert.Contains(t, rendered, accent.Render("› "), "the cursor is not the accent")
+
+	assert.NotContains(t, rendered, accent.Render("New for you"))
+	assert.NotContains(t, rendered, accent.Render("2"))
+}
+
 // The heading carries what the web's "View N more" link carries.
 func TestSidebarSaysHowManyBubbleUpsAreBehindTheTwo(t *testing.T) {
-	styles := plainStyles(t)
-
-	assert.Contains(t, ansi.Strip(loadedSidebar().view(styles, 36, 40)),
+	assert.Contains(t, ansi.Strip(loadedSidebar(t, 36, 40).view()),
 		"Recently Bubbled Up · 1 more")
 
-	none := loadedSidebar()
+	none := loadedSidebar(t, 36, 40)
 	none.readings.moreBubbleUps = 0
-	rendered := ansi.Strip(none.view(styles, 36, 40))
+	rendered := ansi.Strip(none.view())
 	assert.Contains(t, rendered, "Recently Bubbled Up")
 	assert.NotContains(t, rendered, "more")
 }
 
 // A row is its title, an excerpt when it has one, and who it was from and when.
 func TestSidebarRendersAReading(t *testing.T) {
-	rendered := ansi.Strip(loadedSidebar().view(plainStyles(t), 36, 40))
+	rendered := ansi.Strip(loadedSidebar(t, 36, 40).view())
 
 	assert.Contains(t, rendered, "Platform Documentation")
 	assert.Contains(t, rendered, "With the release of the HEY CLI")
@@ -76,7 +128,7 @@ func TestSidebarRendersAReading(t *testing.T) {
 
 // The unread count sits at the right of its row, the way the web's badge does.
 func TestSidebarRendersTheUnreadCount(t *testing.T) {
-	lines := strings.Split(ansi.Strip(loadedSidebar().view(plainStyles(t), 36, 40)), "\n")
+	lines := strings.Split(ansi.Strip(loadedSidebar(t, 36, 40).view()), "\n")
 
 	var row string
 	for _, line := range lines {
@@ -100,7 +152,7 @@ func TestSidebarRendersTheUnreadCount(t *testing.T) {
 // out of its own half of the screen.
 func TestSidebarRowsFitTheColumn(t *testing.T) {
 	for _, width := range []int{20, 28, 36} {
-		rendered := loadedSidebar().view(plainStyles(t), width, 40)
+		rendered := loadedSidebar(t, width, 40).view()
 		for _, line := range strings.Split(ansi.Strip(rendered), "\n") {
 			assert.LessOrEqual(t, len([]rune(line)), width, "at column width %d", width)
 		}
@@ -110,7 +162,7 @@ func TestSidebarRowsFitTheColumn(t *testing.T) {
 // A column too short for everything draws what fits and stops. Nothing scrolls
 // yet, so the order is what decides: bubble-ups first, reads last.
 func TestSidebarClipsToItsHeight(t *testing.T) {
-	rendered := loadedSidebar().view(plainStyles(t), 36, 6)
+	rendered := loadedSidebar(t, 36, 6).view()
 
 	lines := strings.Split(rendered, "\n")
 	assert.Len(t, lines, 6)
@@ -119,13 +171,18 @@ func TestSidebarClipsToItsHeight(t *testing.T) {
 }
 
 func TestSidebarWhileLoading(t *testing.T) {
-	assert.Contains(t, ansi.Strip(sidebar{}.view(plainStyles(t), 36, 10)), "Loading…")
+	loading := newSidebar(plainStyles(t))
+	loading.resize(36, 10)
+
+	assert.Contains(t, ansi.Strip(loading.view()), "Loading…")
 }
 
 func TestSidebarWithNothingNew(t *testing.T) {
-	empty := sidebar{loaded: true}
+	empty := newSidebar(plainStyles(t))
+	empty.loaded = true
+	empty.resize(36, 10)
 
-	assert.Contains(t, ansi.Strip(empty.view(plainStyles(t), 36, 10)), "Nothing new for you")
+	assert.Contains(t, ansi.Strip(empty.view()), "Nothing new for you")
 }
 
 // A sidebar that could not be read says so in its own column and leaves the

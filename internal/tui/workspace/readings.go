@@ -48,6 +48,19 @@ func (r readings) pings() bool {
 	return false
 }
 
+// items is every reading in the order they are drawn, which is the order the
+// cursor moves through them.
+func (r readings) items() []reading {
+	items := make([]reading, 0, len(r.bubbleUps)+len(r.unreads)+len(r.reads))
+	items = append(items, r.bubbleUps...)
+	items = append(items, r.unreads...)
+	return append(items, r.reads...)
+}
+
+func (r readings) count() int {
+	return len(r.bubbleUps) + len(r.unreads) + len(r.reads)
+}
+
 // readingsLoadedMsg is the answer to a read of the notifications.
 type readingsLoadedMsg struct {
 	readings readings
@@ -80,6 +93,43 @@ func loadReadings(ctx context.Context, app *appctx.App, now time.Time) tea.Cmd {
 			moreBubbleUps: max(int(result.BubbleUpsCount)-len(bubbleUps), 0),
 		}}
 	}
+}
+
+// moreReadingsLoadedMsg is a further page of previous notifications, to go under
+// the ones already on screen.
+type moreReadingsLoadedMsg struct {
+	page  int32
+	reads []reading
+	err   error
+}
+
+// loadMorePreviousNotifications reads the page below what the sidebar is showing.
+// It rides its own request rather than the one the sidebar was filled by: a page
+// arriving late must not replace the list it was appended to, and must never
+// show the spinner over rows the reader is already looking at.
+func loadMorePreviousNotifications(ctx context.Context, app *appctx.App, page int32, now time.Time) tea.Cmd {
+	return func() tea.Msg {
+		if err := app.RequireAccount(); err != nil {
+			return moreReadingsLoadedMsg{page: page, err: err}
+		}
+
+		result, err := app.Account().MyNotifications().
+			GetWithOptions(ctx, page, basecamp.WithLimitBubbleUps())
+		if err != nil {
+			return moreReadingsLoadedMsg{page: page, err: err}
+		}
+		return moreReadingsLoadedMsg{page: page, reads: toReadings(result.Reads, now)}
+	}
+}
+
+// nextPage is the page after this one. Basecamp's notifications endpoint treats
+// 0 and 1 as the same first page, so the first step is to 2 — the same walk
+// `basecamp notifications list --page` takes.
+func nextPage(page int32) int32 {
+	if page == 0 {
+		return 2
+	}
+	return page + 1
 }
 
 func toReadings(notifications []basecamp.Notification, now time.Time) []reading {

@@ -45,20 +45,26 @@ func TestSidebarKeepsEveryRowTheTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestSidebarTogglesOnShiftS(t *testing.T) {
+// Shift+S walks the three states in one key: show it, focus it, put it away.
+func TestShiftSShowsThenFocusesThenHides(t *testing.T) {
 	m := resize(t, newTestModel(t), 84, 20)
 	require.Greater(t, m.sidebarWidth(), 0)
-	require.Contains(t, screen(m), "│")
+	require.False(t, m.sidebar.focused)
+
+	m, _ = press(t, m, sidebarKey)
+	assert.True(t, m.sidebar.focused, "the first press did not focus a sidebar already on screen")
+	assert.Greater(t, m.sidebarWidth(), 0)
 
 	m, _ = press(t, m, sidebarKey)
 	assert.True(t, m.sidebar.hidden)
+	assert.False(t, m.sidebar.focused)
 	assert.Equal(t, 0, m.sidebarWidth())
 	assert.Equal(t, 84, m.contentWidth())
 	assert.NotContains(t, screen(m), "│")
 
 	m, _ = press(t, m, sidebarKey)
 	assert.False(t, m.sidebar.hidden)
-	assert.Greater(t, m.sidebarWidth(), 0)
+	assert.True(t, m.sidebar.focused, "coming back from hidden did not focus it")
 }
 
 // Hiding the sidebar hands the screen the columns it gave up, so a screen laid
@@ -68,7 +74,8 @@ func TestHidingTheSidebarResizesTheScreen(t *testing.T) {
 	home := m.nav.current().(*blank)
 	require.Equal(t, m.contentWidth(), home.width)
 
-	m, _ = press(t, m, sidebarKey)
+	m, _ = press(t, m, sidebarKey) // focus
+	m, _ = press(t, m, sidebarKey) // hide
 	assert.Equal(t, 84, home.width)
 }
 
@@ -121,7 +128,9 @@ func TestDividerSaysNothingOnAFullWidthScreen(t *testing.T) {
 // withUnreads is a loaded sidebar holding count unread readings, the first of
 // them a ping when asked for. The badge counts what is in the sidebar rather
 // than carrying a number of its own, so a test has to fill it.
-func withUnreads(count int, ping bool) sidebar {
+func withUnreads(t *testing.T, count int, ping bool) sidebar {
+	t.Helper()
+
 	items := make([]reading, count)
 	for index := range items {
 		items[index] = reading{title: fmt.Sprintf("Notification %d", index+1), unread: 1}
@@ -129,19 +138,23 @@ func withUnreads(count int, ping bool) sidebar {
 	if ping && count > 0 {
 		items[0].ping = true
 	}
-	return sidebar{loaded: true, readings: readings{unreads: items}}
+
+	s := newSidebar(plainStyles(t))
+	s.loaded = true
+	s.replace(readings{unreads: items})
+	return s
 }
 
 func TestDividerCarriesTheBadge(t *testing.T) {
 	m := resize(t, newTestModel(t), 84, 20)
 	assert.NotContains(t, screen(m), "new")
 
-	m.sidebar = withUnreads(4, false)
+	m.sidebar = withUnreads(t, 4, false)
 	divider := strings.Split(screen(m), "\n")[2]
 	assert.Contains(t, divider, "4 new")
 	assert.NotContains(t, divider, "ping")
 
-	m.sidebar = withUnreads(4, true)
+	m.sidebar = withUnreads(t, 4, true)
 	divider = strings.Split(screen(m), "\n")[2]
 	assert.Contains(t, divider, "4 new + ping")
 
@@ -153,7 +166,7 @@ func TestDividerCarriesTheBadge(t *testing.T) {
 // before, and the count is news.
 func TestDividerGivesUpTheHintBeforeTheBadge(t *testing.T) {
 	styles := plainStyles(t)
-	badge := withUnreads(4, true).badge(styles)
+	badge := withUnreads(t, 4, true).badge(styles)
 
 	tight := ansi.Strip(renderDivider(30, styles, badge, sidebarHintText))
 	assert.Equal(t, 30, lipgloss.Width(tight))
@@ -164,7 +177,7 @@ func TestDividerGivesUpTheHintBeforeTheBadge(t *testing.T) {
 // Whatever it gives up, the divider is exactly the width it was given.
 func TestDividerAlwaysFillsTheWidth(t *testing.T) {
 	styles := plainStyles(t)
-	badge := withUnreads(12, true).badge(styles)
+	badge := withUnreads(t, 12, true).badge(styles)
 
 	for width := 1; width <= 120; width++ {
 		divider := ansi.Strip(renderDivider(width, styles, badge, sidebarHintText))
@@ -178,33 +191,35 @@ func TestBadgeIsSilentWithNothingNew(t *testing.T) {
 	styles := plainStyles(t)
 
 	assert.Equal(t, "", sidebar{}.badge(styles))
-	assert.Equal(t, "", withUnreads(0, true).badge(styles))
+	assert.Equal(t, "", withUnreads(t, 0, true).badge(styles))
 }
 
 func TestBadgeText(t *testing.T) {
 	styles := plainStyles(t)
 
-	assert.Equal(t, "1 new", ansi.Strip(withUnreads(1, false).badge(styles)))
-	assert.Equal(t, "4 new", ansi.Strip(withUnreads(4, false).badge(styles)))
-	assert.Equal(t, "3 new + ping", ansi.Strip(withUnreads(3, true).badge(styles)))
+	assert.Equal(t, "1 new", ansi.Strip(withUnreads(t, 1, false).badge(styles)))
+	assert.Equal(t, "4 new", ansi.Strip(withUnreads(t, 4, false).badge(styles)))
+	assert.Equal(t, "3 new + ping", ansi.Strip(withUnreads(t, 3, true).badge(styles)))
 }
 
-// The count takes the accent and the ping takes the error color, which on an
-// Omarchy palette is the theme's own red. Both come from the theme, so a retint
-// carries them.
+// Orange for what is new, matching the heading it counts, and red for the one
+// aimed at the reader. Both come from the theme, so an Omarchy retint carries
+// them — and neither is the accent, which belongs to the cursor.
 func TestBadgeTakesItsColorsFromTheTheme(t *testing.T) {
 	theme := tui.DefaultTheme(true)
-	badge := withUnreads(3, true).badge(tui.NewStylesWithTheme(theme))
+	badge := withUnreads(t, 3, true).badge(tui.NewStylesWithTheme(theme))
 
 	assert.Contains(t, badge,
-		lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("3 new"))
+		lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).Render("3 new"))
 	assert.Contains(t, badge,
 		lipgloss.NewStyle().Foreground(theme.Error).Bold(true).Render("ping"))
+	assert.NotContains(t, badge,
+		lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render("3 new"))
 }
 
 // NO_COLOR takes the color out and leaves the words, like everything else here.
 func TestBadgeWithoutColor(t *testing.T) {
-	badge := withUnreads(3, true).badge(plainStyles(t))
+	badge := withUnreads(t, 3, true).badge(plainStyles(t))
 
 	assert.NotContains(t, badge, "\x1b[38")
 	assert.Contains(t, ansi.Strip(badge), "3 new + ping")

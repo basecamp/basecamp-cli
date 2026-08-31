@@ -78,6 +78,7 @@ func newModel(app *appctx.App) model {
 		ctx:          viewContext,
 		cancel:       cancel,
 		nav:          stack,
+		sidebar:      newSidebar(styles),
 		theme:        theme,
 		styles:       styles,
 		help:         newHelpBar(styles),
@@ -161,8 +162,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// leaves the screen alone: it is not what the reader was doing.
 			m.sidebar.notice = errorNotice("Could not load notifications", msg.err)
 		} else {
-			m.sidebar.readings = msg.readings
+			m.sidebar.replace(msg.readings)
 		}
+		m.relayout()
+		return m, nil
+
+	case moreReadingsLoadedMsg:
+		m.sidebar.paging = false
+		if msg.err != nil {
+			// The rows already on screen are still good, so a page that failed
+			// to arrive stops the walk rather than replacing them with a notice.
+			m.sidebar.exhausted = true
+			m.relayout()
+			return m, nil
+		}
+		m.sidebar.appendReads(msg.page, msg.reads)
 		m.relayout()
 		return m, nil
 
@@ -284,6 +298,33 @@ func (m *model) rememberAccountName(msg accountsLoadedMsg) {
 	}
 }
 
+// handleSidebarKey walks the notifications while the sidebar has focus, and
+// answers whether it took the key.
+func (m *model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch {
+	case msg.String() == sidebarLeaveKey, msg.Key().Code == tea.KeyEscape:
+		m.sidebar.leave()
+		m.relayout()
+		return nil, true
+	case msg.Key().Code == tea.KeyUp:
+		return m.moveSidebarCursor(-1), true
+	case msg.Key().Code == tea.KeyDown:
+		return m.moveSidebarCursor(1), true
+	}
+	return nil, false
+}
+
+// moveSidebarCursor walks the list, and asks for the next page of previous
+// notifications when the reader gets near the end of what is there.
+func (m *model) moveSidebarCursor(by int) tea.Cmd {
+	if !m.sidebar.moveCursor(by) {
+		return nil
+	}
+	m.sidebar.paging = true
+	return loadMorePreviousNotifications(
+		m.ctx.Ctx(), m.ctx.app, nextPage(m.sidebar.page), time.Now())
+}
+
 // openSection goes to one of the top-level destinations. They are siblings, not
 // a ladder, so this comes back to home before opening one: the trail reads
 // Home › Calendar however deep the reader was when they pressed the key.
@@ -291,15 +332,19 @@ func (m *model) openSection(chosen section) tea.Cmd {
 	if m.nav.depth() == 2 && m.nav.current().Title() == chosen.label {
 		return nil
 	}
+	// Focus follows the reader: they asked for a screen, so that is where the
+	// keys should go.
+	m.sidebar.leave()
 	m.popToHome()
 	return m.push(newBlank(m.ctx, chosen.label))
 }
 
 // goHome unwinds the stack in one step, however deep the reader has walked.
 func (m *model) goHome() tea.Cmd {
-	if m.nav.depth() == 1 {
+	if m.nav.depth() == 1 && !m.sidebar.focused {
 		return nil
 	}
+	m.sidebar.leave()
 	m.popToHome()
 	return m.syncLoading(nil)
 }
@@ -370,6 +415,15 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.syncLoading(m.nav.current().HandleKey(msg))
 	}
 
+	// The sidebar takes the keys that walk it while it has focus. Everything
+	// else falls through, so the menu and the section keys still work from over
+	// there — and going somewhere hands focus back to the screen it lands on.
+	if m.sidebar.focused {
+		if cmd, claimed := m.handleSidebarKey(msg); claimed {
+			return m, cmd
+		}
+	}
+
 	if key == menuKey || key == menuAltKey {
 		m.menu.toggle()
 		m.relayout()
@@ -387,7 +441,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if key == sidebarKey {
-		m.sidebar.toggle()
+		m.sidebar.summon()
 		m.relayout()
 		return m, nil
 	}
@@ -463,7 +517,7 @@ func (m model) contentView() string {
 		content = lipgloss.JoinHorizontal(lipgloss.Top,
 			content,
 			m.sidebar.gutter(m.styles, height),
-			m.sidebar.view(m.styles, width, height))
+			m.sidebar.view())
 	}
 
 	// The toast goes on last, over everything — the sidebar included: it is the
@@ -518,6 +572,14 @@ func (m *model) relayout() {
 	m.ctx.width = m.contentWidth()
 	m.ctx.height = m.contentHeight()
 	m.nav.current().Resize(m.ctx.width, m.ctx.height)
+
+	// A sidebar nobody can see cannot be the focused one, so a screen that wants
+	// the whole terminal takes focus back with it.
+	if width := m.sidebarWidth(); width > 0 {
+		m.sidebar.resize(width, m.contentHeight())
+	} else {
+		m.sidebar.focused = false
+	}
 }
 
 // contentWidth is the columns left for the screen once the sidebar and the
@@ -536,7 +598,7 @@ func (m model) sidebarWidth() int {
 	if !m.sidebarAvailable() {
 		return 0
 	}
-	return m.sidebar.width(m.width)
+	return m.sidebar.columns(m.width)
 }
 
 // sidebarAvailable is whether the frame has a sidebar to talk about at all,
@@ -567,6 +629,13 @@ func (m *model) updateHelp() {
 		return
 	case m.capturingInput():
 		m.help.setBindings(append(m.nav.current().HelpBindings(), quit))
+		return
+	case m.sidebar.focused:
+		m.help.setBindings([]helpBinding{
+			{"↑↓", "notification"},
+			{sidebarLeaveKey, "back to screen"},
+			quit,
+		})
 		return
 	}
 
