@@ -238,24 +238,75 @@ func TestChooseAutomaticAccount(t *testing.T) {
 		{ID: 456, Name: "Second Account"},
 	}
 
-	id, name, err := chooseAutomaticAccount("", "", accounts)
+	id, name, err := chooseAutomaticAccount("", "", "", accounts)
 	require.NoError(t, err)
 	assert.Equal(t, "123", id)
 	assert.Equal(t, "First Account", name)
 
-	id, name, err = chooseAutomaticAccount("", "789", accounts)
+	id, name, err = chooseAutomaticAccount("", "", "456", accounts)
+	require.NoError(t, err)
+	assert.Equal(t, "456", id)
+	assert.Empty(t, name)
+
+	id, name, err = chooseAutomaticAccount("", "789", "456", accounts)
 	require.NoError(t, err)
 	assert.Equal(t, "789", id)
 	assert.Empty(t, name)
 
-	id, name, err = chooseAutomaticAccount("999", "789", accounts)
+	id, name, err = chooseAutomaticAccount("789", "789", "456", accounts)
+	require.NoError(t, err)
+	assert.Equal(t, "789", id)
+	assert.Empty(t, name)
+
+	id, name, err = chooseAutomaticAccount("999", "", "456", accounts)
 	require.NoError(t, err)
 	assert.Equal(t, "999", id)
 	assert.Empty(t, name)
 
-	_, _, err = chooseAutomaticAccount("", "", nil)
+	_, _, err = chooseAutomaticAccount("999", "789", "456", accounts)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+	assert.Contains(t, output.AsError(err).Hint, "--account 789")
+
+	_, _, err = chooseAutomaticAccount("", "", "", nil)
 	require.Error(t, err)
 	assert.Equal(t, output.CodeNotFound, output.AsError(err).Code)
+}
+
+func TestPersistRecommendedDefaultsClearsOnlyTheGlobalProject(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	globalPath := filepath.Join(configHome, "basecamp", "config.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o700))
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"account_id":"111","project_id":"222","hints":true}`), 0o600))
+
+	workingDir := t.TempDir()
+	previousDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(workingDir))
+	t.Cleanup(func() { require.NoError(t, os.Chdir(previousDir)) })
+	localPath := filepath.Join(workingDir, ".basecamp", "config.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(localPath), 0o700))
+	require.NoError(t, os.WriteFile(localPath, []byte(`{"project_id":"333"}`), 0o600))
+
+	app, _ := setupQuickstartTestApp(t, "111", "333")
+	app.Config.Sources = map[string]string{"account_id": "global", "project_id": "local"}
+	require.NoError(t, persistRecommendedDefaults(app, "456"))
+
+	var global map[string]any
+	data, err := os.ReadFile(globalPath)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &global))
+	assert.Equal(t, "456", global["account_id"])
+	assert.Equal(t, true, global["hints"])
+	assert.NotContains(t, global, "project_id")
+
+	localData, err := os.ReadFile(localPath)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"project_id":"333"}`, string(localData))
+	assert.Equal(t, "456", app.Config.AccountID)
+	assert.Empty(t, app.Config.ProjectID)
+	assert.NotContains(t, app.Config.Sources, "project_id")
 }
 
 func TestShowWelcome(t *testing.T) {
@@ -299,13 +350,14 @@ func TestShowFastSuccess(t *testing.T) {
 	result := WizardResult{AuthenticatedAs: "Jane Smith"}
 
 	var buf bytes.Buffer
-	showFastAuthenticated(&buf, styles, result.AuthenticatedAs)
+	showFastAuthenticated(&buf, styles, result.AuthenticatedAs, "123", "Acme")
 	showFastAgentStatus(&buf, styles, agentSetupOutcome{Detected: 2})
 	showFastCompletion(&buf, styles, omarchyPluginOutcome{}, false)
 	out := buf.String()
 
 	assert.NotContains(t, out, "Setup complete!")
 	assert.Contains(t, out, "Authenticated as Jane Smith")
+	assert.Contains(t, out, "Using account Acme")
 	assert.Contains(t, out, "AI coding agents set up")
 	assert.NotContains(t, out, "Account: Acme")
 	assert.NotContains(t, out, "basecamp setup --customize")
@@ -324,12 +376,13 @@ func TestShowFastSuccess(t *testing.T) {
 func TestShowFastSuccessMinimal(t *testing.T) {
 	styles := tui.NewStylesWithTheme(tui.DefaultTheme(false))
 	var buf bytes.Buffer
-	showFastAuthenticated(&buf, styles, "Jane Smith")
+	showFastAuthenticated(&buf, styles, "Jane Smith", "123", "Acme")
 	showFastAgentStatus(&buf, styles, agentSetupOutcome{Detected: 2})
 	showFastCompletion(&buf, styles, omarchyPluginOutcome{}, true)
 
 	out := buf.String()
 	assert.Contains(t, out, "Authenticated as Jane Smith")
+	assert.Contains(t, out, "Using account Acme")
 	assert.Contains(t, out, "AI coding agents set up")
 	assert.Contains(t, out, fastSetupTitleStyle(styles).Render("SETUP COMPLETE"))
 	assert.NotContains(t, out, "Try it out!")

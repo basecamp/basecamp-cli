@@ -88,15 +88,15 @@ func runFastSetup(cmd *cobra.Command, app *appctx.App, minimal bool) error {
 		return err
 	}
 
-	accountID, _, err := automaticAccount(cmd, app)
+	accountID, accountName, err := automaticAccount(cmd, app)
 	if err != nil {
 		return err
 	}
-	if err := resolve.PersistValue("account_id", accountID, "global"); err != nil {
-		return fmt.Errorf("saving the default account: %w", err)
+	if err := persistRecommendedDefaults(app, accountID); err != nil {
+		return err
 	}
 
-	showFastAuthenticated(cmd.OutOrStdout(), styles, authenticatedAs)
+	showFastAuthenticated(cmd.OutOrStdout(), styles, authenticatedAs, accountID, accountName)
 
 	var agentOutcome agentSetupOutcome
 	err = tui.RunWithSpinner(cmd.OutOrStdout(), styles.Theme(), "Setting up AI coding agents...", func() error {
@@ -122,6 +122,19 @@ func runFastSetup(cmd *cobra.Command, app *appctx.App, minimal bool) error {
 	}
 
 	showFastCompletion(cmd.OutOrStdout(), styles, omarchyOutcome, minimal)
+	return nil
+}
+
+// persistRecommendedDefaults saves account-wide global defaults together.
+// Directory and environment project settings remain persisted at their own
+// higher-precedence sources and apply to later commands in those contexts.
+func persistRecommendedDefaults(app *appctx.App, accountID string) error {
+	if err := resolve.PersistValues(map[string]string{"account_id": accountID}, []string{"project_id"}, "global"); err != nil {
+		return fmt.Errorf("saving the recommended defaults: %w", err)
+	}
+	app.Config.AccountID = accountID
+	app.Config.ProjectID = ""
+	delete(app.Config.Sources, "project_id")
 	return nil
 }
 
@@ -350,13 +363,14 @@ func identityLabel(firstName, lastName, email string) string {
 	return strings.TrimSpace(email)
 }
 
-// automaticAccount selects an explicit account, the OAuth-bound account, or
-// the first authorized account in that order.
+// automaticAccount selects an explicit account, the OAuth-bound account, an
+// existing configured account, or the first authorized account in that order.
 func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, error) {
 	explicitAccountID := app.Flags.Account
 	boundAccountID := app.Auth.AccountID()
+	configuredAccountID := app.Config.AccountID
 	var accounts []basecamp.AuthorizedAccount
-	if explicitAccountID == "" && boundAccountID == "" {
+	if explicitAccountID == "" && boundAccountID == "" && configuredAccountID == "" {
 		var err error
 		accounts, err = app.Resolve().ListAccounts(cmd.Context())
 		if err != nil {
@@ -364,7 +378,7 @@ func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, erro
 		}
 	}
 
-	accountID, accountName, err := chooseAutomaticAccount(explicitAccountID, boundAccountID, accounts)
+	accountID, accountName, err := chooseAutomaticAccount(explicitAccountID, boundAccountID, configuredAccountID, accounts)
 	if err != nil {
 		return "", "", err
 	}
@@ -380,14 +394,24 @@ func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, erro
 	return accountID, accountName, nil
 }
 
-// chooseAutomaticAccount prefers an explicit account, then an OAuth-bound
-// account, then the first account returned by the authorization service.
-func chooseAutomaticAccount(explicitAccountID, boundAccountID string, accounts []basecamp.AuthorizedAccount) (string, string, error) {
+// chooseAutomaticAccount preserves explicit intent while honoring the account
+// boundary carried by OAuth credentials. Existing configuration keeps reruns
+// stable for unbound multi-account credentials.
+func chooseAutomaticAccount(explicitAccountID, boundAccountID, configuredAccountID string, accounts []basecamp.AuthorizedAccount) (string, string, error) {
 	if explicitAccountID != "" {
+		if boundAccountID != "" && explicitAccountID != boundAccountID {
+			return "", "", output.ErrUsageHint(
+				fmt.Sprintf("account %s does not match the OAuth-bound account %s", explicitAccountID, boundAccountID),
+				"Use --account "+boundAccountID+" or authenticate for the requested account.",
+			)
+		}
 		return explicitAccountID, "", nil
 	}
 	if boundAccountID != "" {
 		return boundAccountID, "", nil
+	}
+	if configuredAccountID != "" {
+		return configuredAccountID, "", nil
 	}
 	if len(accounts) == 0 {
 		return "", "", output.ErrNotFound("account", "any")
@@ -520,13 +544,20 @@ func successHeadline(status string, issueCount int) string {
 	return fmt.Sprintf("Setup finished — %d steps need attention", issueCount)
 }
 
-// showFastAuthenticated displays the authenticated identity before coding-agent setup.
-func showFastAuthenticated(w io.Writer, styles *tui.Styles, authenticatedAs string) {
+// showFastAuthenticated displays the authenticated identity and selected account.
+func showFastAuthenticated(w io.Writer, styles *tui.Styles, authenticatedAs, accountID, accountName string) {
 	authLabel := "Authenticated"
 	if authenticatedAs != "" {
 		authLabel += " as " + authenticatedAs
 	}
 	fmt.Fprintln(w, styles.RenderStatus(true, authLabel))
+	accountLabel := accountName
+	if accountLabel == "" {
+		accountLabel = accountID
+	}
+	if accountLabel != "" {
+		fmt.Fprintln(w, styles.RenderStatus(true, "Using account "+accountLabel))
+	}
 }
 
 // showFastAgentStatus displays the durable result that replaces the coding-agent spinner.

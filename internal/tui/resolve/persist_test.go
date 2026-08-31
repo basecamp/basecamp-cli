@@ -81,6 +81,26 @@ func TestPersistValueStringKeys(t *testing.T) {
 	assert.Equal(t, "12345", val, "string keys should remain strings")
 }
 
+func TestPersistValuesSetsAndRemovesInOneUpdate(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	configPath := filepath.Join(tmpDir, "basecamp", "config.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o700))
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"account_id":"111","project_id":"222","hints":true}`), 0o600))
+
+	err := PersistValues(map[string]string{"account_id": "333"}, []string{"project_id"}, "global")
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.Equal(t, "333", raw["account_id"])
+	assert.Equal(t, true, raw["hints"])
+	assert.NotContains(t, raw, "project_id")
+}
+
 func TestPersistValueBooleanWhitespaceTolerance(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)

@@ -50,55 +50,65 @@ func PromptAndPersist(opt PersistOption) (bool, error) {
 
 // PersistValue saves a config value to the specified scope.
 func PersistValue(key, value, scope string) error {
-	var configPath string
+	return PersistValues(map[string]string{key: value}, nil, scope)
+}
 
-	switch scope {
-	case "global":
-		configPath = filepath.Join(config.GlobalConfigDir(), "config.json")
-	case "local":
-		configPath = filepath.Join(".basecamp", "config.json")
-	default:
-		return fmt.Errorf("invalid scope: %s (must be 'local' or 'global')", scope)
+// PersistValues saves and removes config values in one atomic update.
+func PersistValues(values map[string]string, remove []string, scope string) error {
+	configPath, err := persistencePath(scope)
+	if err != nil {
+		return err
 	}
 
-	// Ensure directory exists
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Load existing config or create new
 	configData := make(map[string]any)
 	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
 		_ = json.Unmarshal(data, &configData) // Ignore error - start fresh if invalid
 	}
 
-	// Set the value (use native JSON types for boolean keys)
-	switch key {
-	case "onboarded", "hints", "stats", "cache_enabled":
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "true", "1":
-			configData[key] = true
-		case "false", "0":
-			configData[key] = false
-		default:
-			configData[key] = value
-		}
-	default:
-		configData[key] = value
+	for key, value := range values {
+		configData[key] = persistenceValue(key, value)
+	}
+	for _, key := range remove {
+		delete(configData, key)
 	}
 
-	// Write back (atomic: temp + rename)
 	data, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-
 	if err := atomicWriteFile(configPath, append(data, '\n')); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
-
 	return nil
+}
+
+func persistencePath(scope string) (string, error) {
+	switch scope {
+	case "global":
+		return filepath.Join(config.GlobalConfigDir(), "config.json"), nil
+	case "local":
+		return filepath.Join(".basecamp", "config.json"), nil
+	default:
+		return "", fmt.Errorf("invalid scope: %s (must be 'local' or 'global')", scope)
+	}
+}
+
+func persistenceValue(key, value string) any {
+	switch key {
+	case "onboarded", "hints", "stats", "cache_enabled":
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1":
+			return true
+		case "false", "0":
+			return false
+		}
+	}
+	return value
 }
 
 // atomicWriteFile writes data to a file atomically using temp+rename.
