@@ -147,15 +147,15 @@ func press(t *testing.T, m model, key string) (model, tea.Cmd) {
 	return updated.(model), cmd
 }
 
-func TestOpensOnABlankHome(t *testing.T) {
+func TestOpensOnHome(t *testing.T) {
 	m := newTestModel(t)
 
 	assert.Equal(t, "Home", m.nav.current().Title())
-	assert.Equal(t, "", m.nav.current().View())
 
 	view := screen(m)
 	assert.Contains(t, view, "1234567 "+chevronClosed)
 	assert.Contains(t, view, "ctrl+c ctrl+c quit")
+	assert.Contains(t, view, "Recent activity")
 }
 
 // A screen is handed its container, not the terminal: the chrome above and below
@@ -163,7 +163,7 @@ func TestOpensOnABlankHome(t *testing.T) {
 func TestWindowSizeGivesTheViewWhatTheFrameLeaves(t *testing.T) {
 	m := newTestModel(t)
 
-	home := m.nav.current().(*blank)
+	home := m.nav.current().(*home)
 	assert.Equal(t, m.contentWidth(), home.width)
 	assert.Equal(t, m.contentHeight(), home.height)
 	assert.Less(t, home.width, 80)

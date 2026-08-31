@@ -11,7 +11,6 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
@@ -93,10 +92,14 @@ type menu struct {
 	rows   int
 }
 
-// project is a project as the menu lists it.
+// project is a project as the menu and the home screen list it. appURL is the
+// address the server gave it on the web, which is the only thing that knows
+// where this account lives — config holds the API host, not that one.
 type project struct {
-	id   int64
-	name string
+	id          int64
+	name        string
+	description string
+	appURL      string
 }
 
 // projectsLoadedMsg is one page of projects, the first or a later one.
@@ -120,6 +123,17 @@ func (n *menu) appendProjects(msg projectsLoadedMsg) {
 	n.projectsPage = msg.page
 	n.projects = append(n.projects, msg.projects...)
 	n.clampCursor()
+}
+
+// forgetProjects drops the walk so far. The projects belonged to the account
+// that was open when they were read, and the next open starts again.
+func (n *menu) forgetProjects() {
+	n.projects = nil
+	n.projectsPage = 0
+	n.projectsLoaded = false
+	n.projectsPaging = false
+	n.projectsDone = false
+	n.projectsNotice = ""
 }
 
 // wantsMoreProjects is whether the next page is worth asking for. Two reasons to
@@ -521,7 +535,7 @@ func loadProjects(ctx context.Context, app *appctx.App, page int) tea.Cmd {
 
 		projects := make([]project, 0, len(result.Projects))
 		for _, p := range result.Projects {
-			projects = append(projects, project{id: p.ID, name: richtext.SanitizeSingleLine(p.Name)})
+			projects = append(projects, toProject(p))
 		}
 		return projectsLoadedMsg{page: page, projects: projects}
 	}

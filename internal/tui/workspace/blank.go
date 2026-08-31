@@ -5,8 +5,8 @@ import (
 )
 
 // blank is a screen with a name and nothing on it yet: the frame is drawn, the
-// content is still to come. Home is one, and so is every section the menu opens
-// until it grows something to show.
+// content is still to come. Every section the menu opens is one, until it grows
+// something of its own to show.
 type blank struct {
 	ctx    *Context
 	title  string
@@ -24,12 +24,6 @@ const (
 	homeKey      = "H"
 	homeHintText = "Shift + H"
 )
-
-// newHome is the bottom of the stack: the screen the workspace opens on and the
-// one esc always comes back to.
-func newHome(ctx *Context) *blank {
-	return newBlank(ctx, "Home")
-}
 
 func (b *blank) Init() tea.Cmd { return nil }
 

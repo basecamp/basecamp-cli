@@ -91,13 +91,14 @@ func TestSidebarCursorCrossesSections(t *testing.T) {
 	}
 }
 
-// A cursor on a column nobody is driving points at nothing.
+// A cursor on a column nobody is driving points at nothing. Checked against the
+// sidebar's own column: the home screen behind it draws a cursor of its own.
 func TestSidebarMarkerOnlyShowsWhileFocused(t *testing.T) {
 	m := focusedModel(t)
-	require.Contains(t, screen(m), "› ")
+	require.Contains(t, ansi.Strip(m.sidebar.view()), "› ")
 
 	m, _ = press(t, m, sidebarLeaveKey)
-	assert.NotContains(t, screen(m), "› ")
+	assert.NotContains(t, ansi.Strip(m.sidebar.view()), "› ")
 }
 
 // Keys the sidebar does not claim still work from over there.

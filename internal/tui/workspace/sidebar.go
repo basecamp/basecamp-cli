@@ -146,11 +146,22 @@ func (s *sidebar) scrollToCursor() {
 		return
 	}
 
-	s.offset = min(s.offset, first)
+	s.offset = min(s.offset, topOfSidebar(rows, first))
 	if last >= s.offset+s.height {
 		s.offset = last - s.height + 1
 	}
 	s.offset = max(min(s.offset, max(len(rows)-s.height, 0)), 0)
+}
+
+// topOfSidebar is the row to scroll to when the cursor lands on the reading
+// starting at `first`: the heading and the gap above it come with it, so
+// scrolling back up to the first reading of a section brings its heading along.
+func topOfSidebar(rows []sidebarRow, first int) int {
+	top := first
+	for top > 0 && rows[top-1].item == noItem {
+		top--
+	}
+	return top
 }
 
 // fits reports whether a terminal this wide has room for both columns. A

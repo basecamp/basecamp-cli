@@ -29,7 +29,7 @@ func TestSidebarSplitsTheFrame(t *testing.T) {
 	assert.Equal(t, 28, m.sidebarWidth())
 	assert.Equal(t, 84-sidebarGutter-28, m.contentWidth())
 
-	home := m.nav.current().(*blank)
+	home := m.nav.current().(*home)
 	assert.Equal(t, m.contentWidth(), home.width)
 	assert.Less(t, home.width, 84, "the screen was handed the terminal, not its column")
 }
@@ -71,7 +71,7 @@ func TestShiftSShowsThenFocusesThenHides(t *testing.T) {
 // out for one width is told about the other.
 func TestHidingTheSidebarResizesTheScreen(t *testing.T) {
 	m := resize(t, newTestModel(t), 84, 20)
-	home := m.nav.current().(*blank)
+	home := m.nav.current().(*home)
 	require.Equal(t, m.contentWidth(), home.width)
 
 	m, _ = press(t, m, sidebarKey) // focus
@@ -147,7 +147,9 @@ func withUnreads(t *testing.T, count int, ping bool) sidebar {
 
 func TestDividerCarriesTheBadge(t *testing.T) {
 	m := resize(t, newTestModel(t), 84, 20)
-	assert.NotContains(t, screen(m), "new")
+	// Nothing new, nothing said — checked on the divider itself, since the help
+	// bar has its own reasons to say "new".
+	assert.NotContains(t, strings.Split(screen(m), "\n")[2], "new")
 
 	m.sidebar = withUnreads(t, 4, false)
 	divider := strings.Split(screen(m), "\n")[2]

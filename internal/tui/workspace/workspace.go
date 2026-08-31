@@ -221,6 +221,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readingsRefreshDueMsg:
 		return m, m.refreshReadings()
 
+	case openAllMsg:
+		return m, m.openAll(msg.kind)
+
+	case openFolderMsg:
+		return m, m.openFolder(msg.folder)
+
+	case openProjectMsg:
+		return m, m.openProject(msg.project)
+
 	case pickerCanceledMsg:
 		return m, m.pop()
 
@@ -294,11 +303,21 @@ func (m *model) chooseAccount(chosen account) tea.Cmd {
 	if !switched {
 		return cmd
 	}
-	// The sidebar belongs to the account, so what it is showing is the old
-	// account's until this comes back.
+
+	// Everything on screen belonged to the account that was open a moment ago,
+	// so it all reads again. The screen underneath is one of them: popping back
+	// to it hands it over in the state it was left, which is the right thing
+	// when the reader walked back — and the wrong thing when the ground moved.
 	m.sidebar.loaded = false
 	m.sidebar.readings = readings{}
-	return tea.Batch(cmd, m.refreshReadings(), notify("Opened "+chosen.name))
+	m.menu.forgetProjects()
+
+	return tea.Batch(
+		cmd,
+		m.nav.current().Init(),
+		m.refreshReadings(),
+		notify("Opened "+chosen.name),
+	)
 }
 
 // rememberAccountName picks the open account's name out of a list read for
@@ -356,9 +375,30 @@ func (m *model) openSection(chosen section) tea.Cmd {
 	return m.push(newBlank(m.ctx, chosen.label))
 }
 
-// openProject goes to a project the menu listed. Projects hang off home the way
-// the sections do, so the trail reads Home › Website redesign.
+// openProject goes to a project the menu or the home screen listed. Projects
+// hang off home the way the sections do, so the trail reads
+// Home › Website redesign.
 func (m *model) openProject(chosen project) tea.Cmd {
+	m.sidebar.leave()
+	m.popToHome()
+	return m.push(newBlank(m.ctx, chosen.name))
+}
+
+// openAll goes to one of the two screens the home screen's buttons lead to: the
+// whole activity feed, or every project. Both hang off home the way a project
+// does, so the trail reads Home › All projects.
+func (m *model) openAll(kind listKind) tea.Cmd {
+	m.sidebar.leave()
+	m.popToHome()
+	if kind == listActivity {
+		return m.push(newActivity(m.ctx))
+	}
+	return m.push(newAllProjects(m.ctx))
+}
+
+// openFolder goes to one of the home screen's folders, which hangs off home the
+// same way a project does.
+func (m *model) openFolder(chosen folder) tea.Cmd {
 	m.sidebar.leave()
 	m.popToHome()
 	return m.push(newBlank(m.ctx, chosen.name))
