@@ -312,7 +312,7 @@ foreach ($value in @('1', 'true', 'TRUE', 'True')) {
 foreach ($value in @('0', 'false', 'yes', '')) {
   if (Test-TruthyEnvironmentValue $value) { throw "falsey value accepted: $value" }
 }
-if (Invoke-FirstTimeSetup $env:PS_SETUP_STUB) { throw 'failing setup reported success' }
+Invoke-FirstTimeSetup $env:PS_SETUP_STUB
 "WARN:$script:WarningMessage"
 'install-survived'
 EOF
@@ -326,6 +326,66 @@ EOF
   [[ "$output" == *"WARN:First-time setup did not finish"* ]]
   [[ "$output" == *"install-survived"* ]]
   grep -qF 'Test-TruthyEnvironmentValue $env:BASECAMP_NONINTERACTIVE' "$INSTALL_PS1"
+}
+
+@test "install.ps1 first-time setup preserves terminal streams and visible output" {
+  [[ "$(uname -s)" == "Linux" ]] || skip "PTY stream reproduction requires Linux"
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  command -v script >/dev/null 2>&1 || skip "script is required"
+
+  PS_TTY_LOG="$STUB_DIR/ps-setup-tty.log"
+  cat > "$STUB_DIR/ps-setup-probe" <<'EOF'
+#!/usr/bin/env bash
+stdin=redirected
+stdout=redirected
+stderr=redirected
+[[ -t 0 ]] && stdin=tty
+[[ -t 1 ]] && stdout=tty
+[[ -t 2 ]] && stderr=tty
+printf 'stdin=%s stdout=%s stderr=%s\n' "$stdin" "$stdout" "$stderr" > "$PS_TTY_LOG"
+echo SETUP_OUTPUT_VISIBLE
+EOF
+  chmod +x "$STUB_DIR/ps-setup-probe"
+
+  cat > "$STUB_DIR/ps-first-time-tty-driver.ps1" <<'EOF'
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALL_PS1_PATH, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "install.ps1 parse errors: $($parseErrors -join '; ')" }
+foreach ($name in @('Warn', 'Invoke-FirstTimeSetup')) {
+  $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+  if (-not $fn) { throw "$name not found in install.ps1" }
+  . ([scriptblock]::Create($fn.Extent.Text))
+}
+Invoke-FirstTimeSetup $env:PS_SETUP_STUB
+EOF
+
+  run script -qec "INSTALL_PS1_PATH='$INSTALL_PS1' PS_SETUP_STUB='$STUB_DIR/ps-setup-probe' PS_TTY_LOG='$PS_TTY_LOG' pwsh -NoProfile -File '$STUB_DIR/ps-first-time-tty-driver.ps1'" /dev/null
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"SETUP_OUTPUT_VISIBLE"* ]]
+  [[ "$(cat "$PS_TTY_LOG")" == "stdin=tty stdout=tty stderr=tty" ]]
+  run grep -F '[void](Invoke-FirstTimeSetup' "$INSTALL_PS1"
+  [[ "$status" -ne 0 ]]
+}
+
+@test "install.ps1 treats redirected stderr as non-interactive" {
+  [[ "$(uname -s)" == "Linux" ]] || skip "PTY stream reproduction requires Linux"
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  command -v script >/dev/null 2>&1 || skip "script is required"
+
+  cat > "$STUB_DIR/ps-interactive-driver.ps1" <<'EOF'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALL_PS1_PATH, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "install.ps1 parse errors: $($parseErrors -join '; ')" }
+$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-InteractiveSession' }, $true)
+if (-not $fn) { throw 'Test-InteractiveSession not found in install.ps1' }
+. ([scriptblock]::Create($fn.Extent.Text))
+"INTERACTIVE:$(Test-InteractiveSession)"
+EOF
+
+  run script -qec "INSTALL_PS1_PATH='$INSTALL_PS1' pwsh -NoProfile -File '$STUB_DIR/ps-interactive-driver.ps1' 2>'$STUB_DIR/ps-stderr.log'" /dev/null
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"INTERACTIVE:False"* ]]
 }
 
 # The Windows canary can never prove the ps1 belt — Credential Manager works

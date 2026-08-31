@@ -244,34 +244,67 @@ func TestChooseAutomaticAccount(t *testing.T) {
 	assert.Equal(t, "123", id)
 	assert.Equal(t, "First Account", name)
 
-	id, name, err = chooseAutomaticAccount("", "", "456", accounts)
+	id, name, err = chooseAutomaticAccount("", "", "0456", accounts)
 	require.NoError(t, err)
 	assert.Equal(t, "456", id)
-	assert.Empty(t, name)
+	assert.Equal(t, "Second Account", name)
 
-	id, name, err = chooseAutomaticAccount("", "789", "456", accounts)
+	id, name, err = chooseAutomaticAccount("", "789", "456", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "789", id)
 	assert.Empty(t, name)
 
-	id, name, err = chooseAutomaticAccount("789", "789", "456", accounts)
+	id, name, err = chooseAutomaticAccount("0789", "789", "456", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "789", id)
 	assert.Empty(t, name)
 
-	id, name, err = chooseAutomaticAccount("999", "", "456", accounts)
+	id, name, err = chooseAutomaticAccount("0123", "", "456", accounts)
 	require.NoError(t, err)
-	assert.Equal(t, "999", id)
-	assert.Empty(t, name)
+	assert.Equal(t, "123", id)
+	assert.Equal(t, "First Account", name)
 
-	_, _, err = chooseAutomaticAccount("999", "789", "456", accounts)
+	_, _, err = chooseAutomaticAccount("999", "", "456", accounts)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeNotFound, output.AsError(err).Code)
+
+	_, _, err = chooseAutomaticAccount("999", "789", "456", nil)
 	require.Error(t, err)
 	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
 	assert.Contains(t, output.AsError(err).Hint, "--account 789")
 
+	_, _, err = chooseAutomaticAccount("abc", "", "", accounts)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+
+	_, _, err = chooseAutomaticAccount("", "", "999", accounts)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeNotFound, output.AsError(err).Code)
+
 	_, _, err = chooseAutomaticAccount("", "", "", nil)
 	require.Error(t, err)
 	assert.Equal(t, output.CodeNotFound, output.AsError(err).Code)
+}
+
+func TestConfiguredAccountConflictWithOAuthBinding(t *testing.T) {
+	for _, source := range []string{"local", "repo", "env", "flag", "profile"} {
+		t.Run(source, func(t *testing.T) {
+			assert.True(t, configuredAccountOverridesGlobal(source))
+			err := configuredAccountMismatchError(source, "456", "123")
+			require.Error(t, err)
+			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			assert.Contains(t, err.Error(), "456")
+			assert.Contains(t, err.Error(), "123")
+		})
+	}
+
+	for _, source := range []string{"", "default", "system", "global", "prompt"} {
+		t.Run("safe-"+source, func(t *testing.T) {
+			assert.False(t, configuredAccountOverridesGlobal(source))
+		})
+	}
+	assert.True(t, accountIDsEqual("00123", "123"))
+	assert.False(t, accountIDsEqual("456", "123"))
 }
 
 func TestPersistRecommendedDefaultsClearsOnlyTheGlobalProject(t *testing.T) {

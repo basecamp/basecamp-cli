@@ -297,26 +297,27 @@ function Test-InteractiveSession {
   }
 
   try {
-    return -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected
+    return -not [Console]::IsInputRedirected -and
+      -not [Console]::IsOutputRedirected -and
+      -not [Console]::IsErrorRedirected
   } catch {
     return $false
   }
 }
 
 # Invoke-FirstTimeSetup runs optional onboarding without changing the successful
-# installation result. It returns true when onboarding completes and false after
-# printing the command that resumes setup.
+# installation result. The native process inherits the console streams so setup
+# can render and pass its terminal-safety gate.
 function Invoke-FirstTimeSetup([string]$Binary) {
   try {
     & $Binary setup
     if ($LASTEXITCODE -eq 0) {
-      return $true
+      return
     }
   } catch {
     # The retry guidance below covers process-launch and command failures alike.
   }
   Warn 'First-time setup did not finish. Run it again with: basecamp setup'
-  return $false
 }
 
 # Invoke-PostInstallSetup installs the baseline skill and connects coding agents
@@ -451,7 +452,7 @@ function Main {
       Write-Host '    basecamp setup             Run first-time setup'
       Write-Host ''
     } elseif ($isInteractive -and -not (Test-TruthyEnvironmentValue $env:BASECAMP_NONINTERACTIVE)) {
-      [void](Invoke-FirstTimeSetup $installedBinary)
+      Invoke-FirstTimeSetup $installedBinary
     } else {
       if (Test-TruthyEnvironmentValue $env:BASECAMP_NONINTERACTIVE) {
         Info 'Skipping first-time setup because BASECAMP_NONINTERACTIVE is enabled.'

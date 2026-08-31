@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -370,8 +372,15 @@ func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, erro
 	explicitAccountID := app.Flags.Account
 	boundAccountID := app.Auth.AccountID()
 	configuredAccountID := app.Config.AccountID
+	configuredSource := app.Config.Sources["account_id"]
+
+	if explicitAccountID == "" && boundAccountID != "" && configuredAccountID != "" &&
+		configuredAccountOverridesGlobal(configuredSource) && !accountIDsEqual(boundAccountID, configuredAccountID) {
+		return "", "", configuredAccountMismatchError(configuredSource, configuredAccountID, boundAccountID)
+	}
+
 	var accounts []basecamp.AuthorizedAccount
-	if explicitAccountID == "" && boundAccountID == "" && configuredAccountID == "" {
+	if boundAccountID == "" {
 		var err error
 		accounts, err = app.Resolve().ListAccounts(cmd.Context())
 		if err != nil {
@@ -396,28 +405,98 @@ func automaticAccount(cmd *cobra.Command, app *appctx.App) (string, string, erro
 }
 
 // chooseAutomaticAccount preserves explicit intent while honoring the account
-// boundary carried by OAuth credentials. Existing configuration keeps reruns
-// stable for unbound multi-account credentials.
+// boundary carried by OAuth credentials. Unbound credentials validate explicit
+// and configured candidates against the authorization service before setup
+// saves them.
 func chooseAutomaticAccount(explicitAccountID, boundAccountID, configuredAccountID string, accounts []basecamp.AuthorizedAccount) (string, string, error) {
 	if explicitAccountID != "" {
-		if boundAccountID != "" && explicitAccountID != boundAccountID {
-			return "", "", output.ErrUsageHint(
-				fmt.Sprintf("account %s does not match the OAuth-bound account %s", explicitAccountID, boundAccountID),
-				"Use --account "+boundAccountID+" or authenticate for the requested account.",
-			)
+		explicitAccountID, err := canonicalAutomaticAccountID(explicitAccountID)
+		if err != nil {
+			return "", "", err
 		}
-		return explicitAccountID, "", nil
+		if boundAccountID != "" {
+			boundAccountID, err = canonicalAutomaticAccountID(boundAccountID)
+			if err != nil {
+				return "", "", err
+			}
+			if explicitAccountID != boundAccountID {
+				return "", "", output.ErrUsageHint(
+					fmt.Sprintf("account %s does not match the OAuth-bound account %s", explicitAccountID, boundAccountID),
+					"Use --account "+boundAccountID+" or authenticate for the requested account.",
+				)
+			}
+			return boundAccountID, "", nil
+		}
+		return authorizedAutomaticAccount(explicitAccountID, accounts)
 	}
 	if boundAccountID != "" {
+		boundAccountID, err := canonicalAutomaticAccountID(boundAccountID)
+		if err != nil {
+			return "", "", err
+		}
 		return boundAccountID, "", nil
 	}
 	if configuredAccountID != "" {
-		return configuredAccountID, "", nil
+		configuredAccountID, err := canonicalAutomaticAccountID(configuredAccountID)
+		if err != nil {
+			return "", "", err
+		}
+		return authorizedAutomaticAccount(configuredAccountID, accounts)
 	}
 	if len(accounts) == 0 {
 		return "", "", output.ErrNotFound("account", "any")
 	}
 	return fmt.Sprintf("%d", accounts[0].ID), accounts[0].Name, nil
+}
+
+func authorizedAutomaticAccount(accountID string, accounts []basecamp.AuthorizedAccount) (string, string, error) {
+	for _, account := range accounts {
+		if fmt.Sprintf("%d", account.ID) == accountID {
+			return accountID, account.Name, nil
+		}
+	}
+	return "", "", output.ErrNotFound("account", accountID)
+}
+
+func canonicalAutomaticAccountID(accountID string) (string, error) {
+	for _, char := range accountID {
+		if char < '0' || char > '9' {
+			return "", output.ErrUsage(fmt.Sprintf("Invalid account ID %q: must contain only digits", accountID))
+		}
+	}
+	value, err := strconv.ParseInt(accountID, 10, 64)
+	if accountID == "" || err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("Invalid account ID %q", accountID))
+	}
+	return strconv.FormatInt(value, 10), nil
+}
+
+func accountIDsEqual(first, second string) bool {
+	first, firstErr := canonicalAutomaticAccountID(first)
+	second, secondErr := canonicalAutomaticAccountID(second)
+	return firstErr == nil && secondErr == nil && first == second
+}
+
+func configuredAccountOverridesGlobal(source string) bool {
+	switch config.Source(source) {
+	case config.SourceFlag, config.SourceEnv, config.SourceLocal, config.SourceRepo:
+		return true
+	case config.SourceDefault, config.SourceSystem, config.SourceGlobal, config.SourcePrompt:
+		return false
+	default:
+		return source == "profile"
+	}
+}
+
+func configuredAccountMismatchError(source, configuredAccountID, boundAccountID string) error {
+	hint := fmt.Sprintf("Set or remove account_id in the %s configuration before running setup again.", source)
+	if source == string(config.SourceEnv) {
+		hint = "Unset BASECAMP_ACCOUNT_ID or set it to " + boundAccountID + " before running setup again."
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("the %s account %s does not match the OAuth-bound account %s", source, configuredAccountID, boundAccountID),
+		hint,
+	)
 }
 
 // wizardAccount resolves the account using the existing interactive picker.
