@@ -72,11 +72,11 @@ func runFastSetup(cmd *cobra.Command, app *appctx.App, minimal bool) error {
 	if app.Flags.JQFilter != "" {
 		return output.ErrJQNotSupported("the setup command")
 	}
-	if app.Flags.Project != "" {
-		return output.ErrUsageHint("choosing a default project uses customized setup", "Run: basecamp setup --customize --project "+app.Flags.Project)
-	}
 	if !setupCanRun(app) {
 		return output.ErrUsageHint("basecamp setup needs an interactive terminal", wizardEscapeHint())
+	}
+	if app.Flags.Project != "" {
+		return output.ErrUsageHint("choosing a default project uses customized setup", "Run: basecamp setup --customize --project "+app.Flags.Project)
 	}
 
 	styles := tui.NewStylesWithTheme(tui.ResolveTheme(tui.DetectDark()))

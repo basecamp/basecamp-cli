@@ -68,6 +68,34 @@ assert_refused() {
   assert_refused
 }
 
+@test "setup --customize refuses under --json with redirected stdin" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run_guarded "basecamp setup --customize --json < /dev/null"
+  assert_refused
+}
+
+@test "setup --minimal refuses under --json with redirected stdin" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run_guarded "basecamp setup --minimal --json < /dev/null"
+  assert_refused
+}
+
+@test "setup --project gives non-interactive config guidance" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run_guarded "basecamp setup --project 123 --json < /dev/null"
+  assert_not_timed_out
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint | contains("basecamp config set project_id <id>")' 'true'
+  assert_json_value '.hint | contains("--customize")' 'false'
+}
+
 @test "setup without --json and stdin closed refuses instead of hanging" {
   create_credentials
   create_global_config '{"account_id": 99999}'

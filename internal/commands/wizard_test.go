@@ -219,7 +219,7 @@ func TestNewSetupCmd(t *testing.T) {
 	assert.Equal(t, "false", minimal.DefValue)
 }
 
-func TestFastSetupRejectsDefaultProjectFlag(t *testing.T) {
+func TestFastSetupNonInteractiveProjectUsesConfigHint(t *testing.T) {
 	app, _ := setupQuickstartTestApp(t, "", "")
 	app.Flags.Project = "123"
 	cmd := &cobra.Command{}
@@ -229,7 +229,8 @@ func TestFastSetupRejectsDefaultProjectFlag(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, app.SuppressPostRunNotices)
 	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
-	assert.Contains(t, output.AsError(err).Hint, "--customize --project 123")
+	assert.Contains(t, output.AsError(err).Hint, "basecamp config set project_id <id>")
+	assert.NotContains(t, output.AsError(err).Hint, "--customize")
 }
 
 func TestChooseAutomaticAccount(t *testing.T) {
