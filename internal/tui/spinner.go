@@ -19,7 +19,11 @@ var spinnerFrames = [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦",
 // transient line when task finishes, and returns the task error. Fast tasks and
 // non-terminal writers complete without transient output.
 func RunWithSpinner(w io.Writer, theme Theme, message string, task func() error) error {
-	if !isWriterTTY(w) {
+	return runWithSpinner(w, theme, message, task, isWriterTTY(w), spinnerDelay, spinnerInterval)
+}
+
+func runWithSpinner(w io.Writer, theme Theme, message string, task func() error, terminal bool, delayDuration, interval time.Duration) error {
+	if !terminal {
 		return task()
 	}
 
@@ -28,7 +32,7 @@ func RunWithSpinner(w io.Writer, theme Theme, message string, task func() error)
 		done <- task()
 	}()
 
-	delay := time.NewTimer(spinnerDelay)
+	delay := time.NewTimer(delayDuration)
 	defer delay.Stop()
 	select {
 	case err := <-done:
@@ -38,13 +42,11 @@ func RunWithSpinner(w io.Writer, theme Theme, message string, task func() error)
 
 	spinnerStyle := lipgloss.NewStyle().Foreground(theme.Primary)
 	messageStyle := lipgloss.NewStyle().Foreground(theme.Muted)
-	ticker := time.NewTicker(spinnerInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	defer fmt.Fprint(w, "\r\033[2K")
 
 	frame := 0
-	fmt.Fprint(w, "\033[?25l")
-	defer fmt.Fprint(w, "\r\033[2K\033[?25h")
-
 	for {
 		fmt.Fprintf(w, "\r%s %s", spinnerStyle.Render(spinnerFrames[frame]), messageStyle.Render(message))
 		select {

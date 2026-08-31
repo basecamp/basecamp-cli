@@ -352,7 +352,7 @@ func TestShowFastSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	showFastAuthenticated(&buf, styles, result.AuthenticatedAs, "123", "Acme")
 	showFastAgentStatus(&buf, styles, agentSetupOutcome{Detected: 2})
-	showFastCompletion(&buf, styles, omarchyPluginOutcome{}, false)
+	showFastCompletion(&buf, styles, agentSetupOutcome{}, omarchyPluginOutcome{}, false)
 	out := buf.String()
 
 	assert.NotContains(t, out, "Setup complete!")
@@ -378,7 +378,7 @@ func TestShowFastSuccessMinimal(t *testing.T) {
 	var buf bytes.Buffer
 	showFastAuthenticated(&buf, styles, "Jane Smith", "123", "Acme")
 	showFastAgentStatus(&buf, styles, agentSetupOutcome{Detected: 2})
-	showFastCompletion(&buf, styles, omarchyPluginOutcome{}, true)
+	showFastCompletion(&buf, styles, agentSetupOutcome{}, omarchyPluginOutcome{}, true)
 
 	out := buf.String()
 	assert.Contains(t, out, "Authenticated as Jane Smith")
@@ -390,24 +390,33 @@ func TestShowFastSuccessMinimal(t *testing.T) {
 	assert.True(t, strings.HasSuffix(out, "\n\n"), "completion message should have a blank line below it")
 }
 
-func TestShowFastCompletionShowsOmarchyPlugin(t *testing.T) {
+func TestShowFastCompletionReportsIntegrationOutcomes(t *testing.T) {
 	styles := tui.NewStylesWithTheme(tui.NoColorTheme())
 
 	var installed bytes.Buffer
-	showFastCompletion(&installed, styles, omarchyPluginOutcome{
+	showFastCompletion(&installed, styles, agentSetupOutcome{}, omarchyPluginOutcome{
 		Detected: true,
 		Status:   "installed",
 	}, false)
 	assert.Contains(t, installed.String(), "Basecamp plugin installed for Omarchy")
 
-	var failed bytes.Buffer
-	showFastCompletion(&failed, styles, omarchyPluginOutcome{
+	var omarchyFailed bytes.Buffer
+	showFastCompletion(&omarchyFailed, styles, agentSetupOutcome{}, omarchyPluginOutcome{
 		Detected: true,
 		Status:   "failed",
 		Manual:   "omarchy plugin update 37signals.basecamp",
 	}, true)
-	assert.Contains(t, failed.String(), "Basecamp plugin setup needs attention")
-	assert.Contains(t, failed.String(), "omarchy plugin update 37signals.basecamp")
+	assert.Contains(t, omarchyFailed.String(), "Basecamp plugin setup needs attention")
+	assert.Contains(t, omarchyFailed.String(), "omarchy plugin update 37signals.basecamp")
+	assert.Contains(t, omarchyFailed.String(), "SETUP NEEDS ATTENTION")
+	assert.NotContains(t, omarchyFailed.String(), "SETUP COMPLETE")
+
+	var agentsFailed bytes.Buffer
+	showFastCompletion(&agentsFailed, styles, agentSetupOutcome{
+		Issues: []agentIssue{{Check: "Claude Code Plugin"}},
+	}, omarchyPluginOutcome{}, true)
+	assert.Contains(t, agentsFailed.String(), "SETUP NEEDS ATTENTION")
+	assert.NotContains(t, agentsFailed.String(), "SETUP COMPLETE")
 }
 
 func TestShowFastSetupExamplesUseTerminalColor(t *testing.T) {

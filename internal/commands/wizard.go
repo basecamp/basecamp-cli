@@ -121,7 +121,7 @@ func runFastSetup(cmd *cobra.Command, app *appctx.App, minimal bool) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: failed to persist onboarding flag: %v\n", err)
 	}
 
-	showFastCompletion(cmd.OutOrStdout(), styles, omarchyOutcome, minimal)
+	showFastCompletion(cmd.OutOrStdout(), styles, agentOutcome, omarchyOutcome, minimal)
 	return nil
 }
 
@@ -572,15 +572,19 @@ func showFastAgentStatus(w io.Writer, styles *tui.Styles, agents agentSetupOutco
 	}
 }
 
-// showFastCompletion displays the Omarchy result and setup next steps.
-func showFastCompletion(w io.Writer, styles *tui.Styles, omarchy omarchyPluginOutcome, minimal bool) {
+// showFastCompletion displays the combined integration result and setup next steps.
+func showFastCompletion(w io.Writer, styles *tui.Styles, agents agentSetupOutcome, omarchy omarchyPluginOutcome, minimal bool) {
 	if omarchy.Detected {
 		showOmarchyPluginStatus(w, styles, omarchy)
 	}
 	fmt.Fprintln(w)
 
 	if minimal {
-		fmt.Fprintln(w, fastSetupTitleStyle(styles).Render("SETUP COMPLETE"))
+		title := "SETUP COMPLETE"
+		if len(agents.Issues) > 0 || omarchy.failed() {
+			title = "SETUP NEEDS ATTENTION"
+		}
+		fmt.Fprintln(w, fastSetupTitleStyle(styles).Render(title))
 		fmt.Fprintln(w)
 		return
 	}
