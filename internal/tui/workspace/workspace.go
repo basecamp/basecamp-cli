@@ -537,17 +537,21 @@ func (m model) View() tea.View {
 // caret stay on screen above it — the caret turning over is what says the menu
 // is open.
 //
-// Every row it covers is masked the full width of the screen. A box composited
-// straight onto the frame leaves the far end of a rule, half a hint and a slice
-// of the sidebar showing either side of it, which reads as a broken screen
-// rather than as a menu over one.
+// It is drawn over everything, centered on the terminal rather than on either
+// column: the reader opened it from the caret above it, and that is where they
+// are looking.
+//
+// Only the box itself is painted. The workspace stays where it was underneath —
+// the sidebar included, which the box crosses and so cuts the middle out of. A
+// line that runs under a panel reading as a line that runs under a panel is the
+// trade for not blanking half the screen every time the menu opens.
 func (m model) withMenu(rendered string) string {
 	dropdown := m.menu.view()
 	if dropdown == "" {
 		return rendered
 	}
-	masked := lipgloss.NewStyle().Width(m.width).Align(lipgloss.Center).Render(dropdown)
-	return overlayAt(rendered, masked, 0, menuTopRow, m.width, lipgloss.Height(rendered))
+	x := max((m.width-tui.DisplayWidth(dropdown))/2, 0)
+	return overlayAt(rendered, dropdown, x, menuTopRow, m.width, lipgloss.Height(rendered))
 }
 
 // contentView is the content area on its own, which is what an overlay draws
@@ -567,7 +571,7 @@ func (m model) contentView() string {
 	// answer to what the reader just did, and a box open over the screen does
 	// not make it less so.
 	if toast := m.toastView(); toast != "" {
-		x := max(m.width-lipgloss.Width(toast)-1, 0)
+		x := max(m.width-tui.DisplayWidth(toast)-1, 0)
 		content = overlayAt(content, toast, x, 0, m.width, height)
 	}
 	return content
@@ -594,11 +598,23 @@ func (m model) screenView() string {
 // contentHeight is every row that is not header or a visible help footer. The
 // footer carries a blank row above its rule.
 func (m model) contentHeight() int {
-	footer := 0
+	return max(m.height-headerHeight-m.footerHeight(), 1)
+}
+
+func (m model) footerHeight() int {
 	if height := m.help.height(); height > 0 {
-		footer = height + 2
+		return height + 2
 	}
-	return max(m.height-headerHeight-footer, 1)
+	return 0
+}
+
+// menuRows is how many rows of its list the menu may show: never so many that it
+// reaches the help bar, and never more than half the screen. It is a panel over
+// the workspace, and a panel that fills the terminal is just a screen.
+func (m model) menuRows() int {
+	room := m.height - menuTopRow - menuChrome - m.footerHeight() - 1
+	half := m.height * menuMaxRowsNumerator / menuMaxRowsDenominator
+	return max(min(room, half), menuMinRows)
 }
 
 // relayout rebuilds the help bar and hands the view on top whatever the frame
@@ -616,7 +632,7 @@ func (m *model) relayout() {
 	m.ctx.height = m.contentHeight()
 	m.nav.current().Resize(m.ctx.width, m.ctx.height)
 
-	m.menu.resize(m.width, m.height)
+	m.menu.resize(m.width, m.menuRows())
 
 	// A sidebar nobody can see cannot be the focused one, so a screen that wants
 	// the whole terminal takes focus back with it.

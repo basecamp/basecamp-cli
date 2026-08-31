@@ -37,6 +37,16 @@ const (
 
 	// Two border rows, the search field, and the rule under it.
 	menuChrome = 4
+
+	// The list takes at most half the screen's rows. A menu that grows to fill
+	// a tall terminal stops reading as a panel over the workspace and starts
+	// reading as a screen of its own, with nothing left to come back to.
+	menuMaxRowsNumerator   = 1
+	menuMaxRowsDenominator = 2
+
+	// Fewer rows than this and there is nothing worth showing, so a short
+	// terminal gets a cramped menu rather than none.
+	menuMinRows = 3
 )
 
 // menuEntry is one thing the menu can take you to: a place with a number, or a
@@ -80,7 +90,7 @@ type menu struct {
 	cursor int
 	offset int
 	width  int
-	height int
+	rows   int
 }
 
 // project is a project as the menu lists it.
@@ -155,12 +165,22 @@ func (n *menu) reset() {
 	n.search.Blur()
 }
 
-func (n *menu) resize(width, height int) {
-	n.width = width
-	n.height = height
-	n.search.SetWidth(menuInnerWidth(width))
+// resize sizes the box and tells it how many rows of list the frame will give
+// it: three fifths of the terminal, down to a floor where a label still fits
+// beside its key, and never wider than the terminal itself.
+//
+// The rows are not the terminal's height. A menu sized to that grows into a
+// screen of its own, with nothing left to come back to.
+func (n *menu) resize(screenWidth, rows int) {
+	width := min(max(screenWidth*menuWidthNumerator/menuWidthDenominator, menuMinWidth), screenWidth)
+	n.width = max(width, 1)
+	n.rows = rows
+	n.search.SetWidth(n.innerWidth())
 	n.scrollToCursor()
 }
+
+// innerWidth is what is left inside the border and its padding.
+func (n menu) innerWidth() int { return max(n.width-4, 1) }
 
 // --- Keys ---
 
@@ -326,7 +346,7 @@ func (n menu) view() string {
 		return ""
 	}
 	theme := n.styles.Theme()
-	inner := menuInnerWidth(n.width)
+	inner := n.innerWidth()
 
 	rows := n.layout(inner)
 	end := min(n.offset+n.visibleRows(), len(rows))
@@ -347,7 +367,7 @@ func (n menu) view() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.Border).
 		Padding(0, 1).
-		Width(inner + 4).
+		Width(n.width).
 		Render(b.String())
 }
 
@@ -428,7 +448,7 @@ func (n menu) entryRow(entry menuEntry, index, inner int) string {
 func ruledHeading(styles *tui.Styles, label string, style lipgloss.Style, width int, dashed bool) string {
 	label = truncateToWidth(label, max(width-2, 1))
 
-	rule := width - lipgloss.Width(label) - 1
+	rule := width - tui.DisplayWidth(label) - 1
 	if rule < 1 {
 		return style.Render(label)
 	}
@@ -441,14 +461,14 @@ func ruledHeading(styles *tui.Styles, label string, style lipgloss.Style, width 
 		lipgloss.NewStyle().Foreground(styles.Theme().Border).Render(strings.Repeat(dash, rule))
 }
 
-// visibleRows is how many rows of the list the box has room for, once the search
-// field, its rule and the border have taken theirs.
+// visibleRows is how many rows of the list the box shows, which the frame decided
+// when it sized the menu.
 func (n menu) visibleRows() int {
-	return max(n.height-menuTopRow-menuChrome, 1)
+	return max(n.rows, 1)
 }
 
 func (n *menu) scrollToCursor() {
-	rows := n.layout(menuInnerWidth(n.width))
+	rows := n.layout(n.innerWidth())
 	at := -1
 	for index, row := range rows {
 		if row.entry == n.cursor {
@@ -476,13 +496,6 @@ func (n menu) helpBindings() []helpBinding {
 	return []helpBinding{
 		{"↑↓", "move"}, {searchKey, "search"}, {"1-4", "go"}, {"enter", "open"}, {"esc", "close"},
 	}
-}
-
-// menuInnerWidth is the box's content width: three fifths of the screen, less
-// the border and padding around it, and never wider than the screen itself.
-func menuInnerWidth(screenWidth int) int {
-	width := min(max(screenWidth*menuWidthNumerator/menuWidthDenominator, menuMinWidth), screenWidth)
-	return max(width-4, 1)
 }
 
 // --- Reading the projects ---

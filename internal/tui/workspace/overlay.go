@@ -2,12 +2,14 @@ package workspace
 
 import (
 	"charm.land/lipgloss/v2"
+
+	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
 // overlayCentered draws a layer in the middle of the area beneath it, so the
 // screen it interrupted stays visible around its border.
 func overlayCentered(base, layer string, width, height int) string {
-	x := max((width-lipgloss.Width(layer))/2, 0)
+	x := max((width-tui.DisplayWidth(layer))/2, 0)
 	y := max((height-lipgloss.Height(layer))/2, 0)
 	return overlayAt(base, layer, x, y, width, height)
 }

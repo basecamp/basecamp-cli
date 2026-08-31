@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -58,22 +59,38 @@ func TestMenuDrawsBelowTheTopLine(t *testing.T) {
 	assert.Contains(t, screen(m), "Activity")
 }
 
-// Every row the menu covers is masked the full width of the screen: a box
-// composited straight onto the frame leaves the far end of a rule and a slice of
-// the sidebar showing beside it.
-func TestMenuMasksTheRowsItCovers(t *testing.T) {
-	m := resize(t, newTestModel(t), 92, 24)
+// Only the box itself is painted: the workspace stays where it was underneath,
+// rather than half the screen being blanked every time the menu opens.
+func TestMenuPaintsOnlyItsOwnBox(t *testing.T) {
+	m := resize(t, newTestModel(t), 92, 26)
 	updated, _ := m.Update(readingsLoadedMsg{readings: testReadings()})
 	m = updated.(model)
-	require.Contains(t, screen(m), sidebarHintText)
 
 	m, _ = press(t, m, menuKey)
+	rendered := screen(m)
+	lines := strings.Split(rendered, "\n")
 
-	lines := strings.Split(screen(m), "\n")
-	for index := menuTopRow; index < menuTopRow+3; index++ {
-		row := lines[index]
-		assert.NotContains(t, row, "sidebar", "the divider showed through row %d", index)
-		assert.NotContains(t, row, "Bubbled", "the sidebar showed through row %d", index)
+	assert.Contains(t, lines[0], "1234567", "the top line went with it")
+	assert.Contains(t, lines[1], "Home", "the breadcrumb went with it")
+	assert.Contains(t, rendered, "ctrl+c ctrl+c quit", "the help bar went with it")
+
+	// The sidebar is still there beside the box, cut where the box crosses it.
+	assert.Contains(t, rendered, "Previous notifications")
+}
+
+// The box is centered on the terminal, not on either column: the reader opened it
+// from the caret above it, and that is where they are looking.
+func TestMenuIsCenteredOnTheTerminal(t *testing.T) {
+	for _, width := range []int{80, 92, 120} {
+		m := resize(t, newTestModel(t), width, 30)
+		updated, _ := m.Update(readingsLoadedMsg{readings: testReadings()})
+		m = updated.(model)
+		m, _ = press(t, m, menuKey)
+
+		top := strings.Split(screen(m), "\n")[menuTopRow]
+		left := columnOf(t, top, "╭")
+		right := width - columnOf(t, top, "╮") - 1
+		assert.InDelta(t, left, right, 1, "at terminal width %d: %q", width, top)
 	}
 }
 
@@ -101,13 +118,13 @@ func underlined(rendered, text string) bool {
 	return slices.Contains(strings.Split(match[1], ";"), "4")
 }
 
-// openMenu is a menu laid out for a terminal of the given size.
-func openMenu(t *testing.T, width, height int) menu {
+// openMenu is a menu laid out for a terminal of the given width.
+func openMenu(t *testing.T, width, rows int) menu {
 	t.Helper()
 
 	n := newMenu(plainStyles(t))
 	n.open = true
-	n.resize(width, height)
+	n.resize(width, rows)
 	return n
 }
 
@@ -141,8 +158,8 @@ func TestMenuWidthHasAFloorAndACeiling(t *testing.T) {
 		assert.Equal(t, 20, lipgloss.Width(line))
 	}
 
-	assert.Equal(t, menuMinWidth-4, menuInnerWidth(40))
-	assert.Equal(t, 1, menuInnerWidth(1))
+	assert.Equal(t, menuMinWidth, openMenu(t, 40, 30).width, "the floor did not hold")
+	assert.Equal(t, 1, openMenu(t, 1, 30).width, "the box grew past the terminal")
 }
 
 func TestClosedMenuDrawsNothing(t *testing.T) {
@@ -172,10 +189,11 @@ func TestMenuListsHomeFirst(t *testing.T) {
 	assert.Contains(t, rendered, homeHintText)
 
 	// The label lines up with the numbered ones rather than with their numbers.
+	// Home is found by its hint: the breadcrumb behind the menu says "Home" too.
 	var home, activity string
 	for _, line := range strings.Split(rendered, "\n") {
 		switch {
-		case strings.Contains(line, "Home") && home == "":
+		case strings.Contains(line, homeHintText) && home == "":
 			home = line
 		case strings.Contains(line, "Activity") && activity == "":
 			activity = line
@@ -572,4 +590,64 @@ func TestProjectNamesAreSanitized(t *testing.T) {
 	m = updated.(model)
 
 	assert.NotContains(t, m.View().Content, "\x1b[2J")
+}
+
+// --- How much of the screen it takes ---
+
+// The menu is a panel over the workspace, not a screen of its own: on a tall
+// terminal it stops at half the rows and leaves the rest showing.
+func TestMenuDoesNotFillTheScreen(t *testing.T) {
+	for _, height := range []int{24, 40, 62} {
+		m := resize(t, newTestModel(t), 92, height)
+		updated, _ := m.Update(readingsLoadedMsg{readings: testReadings()})
+		m = updated.(model)
+		m, _ = press(t, m, menuKey)
+
+		many := make([]project, 60)
+		for index := range many {
+			many[index] = project{id: int64(index + 1), name: fmt.Sprintf("Project %02d", index+1)}
+		}
+		updated, _ = m.Update(projectsLoadedMsg{page: 1, projects: many})
+		m = updated.(model)
+
+		assert.LessOrEqual(t, m.menu.visibleRows(), height/2, "at terminal height %d", height)
+
+		rendered := screen(m)
+		assert.Contains(t, rendered, "ctrl+c ctrl+c quit", "the menu covered the help bar at height %d", height)
+		if m.sidebarAvailable() {
+			assert.Contains(t, rendered, "│", "the menu covered the whole workspace at height %d", height)
+		}
+	}
+}
+
+// A terminal too short to give it half its rows still gets a menu rather than
+// none of one.
+func TestMenuHasAFloorOnAShortTerminal(t *testing.T) {
+	m := resize(t, newTestModel(t), 92, 10)
+	m, _ = press(t, m, menuKey)
+
+	assert.GreaterOrEqual(t, m.menu.visibleRows(), menuMinRows)
+	assert.Contains(t, screen(m), "Home")
+}
+
+// Paging stops once the rows the frame gave it are full, rather than walking the
+// whole account.
+func TestPagingStopsWhenThePanelIsFull(t *testing.T) {
+	m := resize(t, newTestModel(t), 92, 40)
+	m, cmd := press(t, m, menuKey)
+
+	pages := 0
+	for cmd != nil && pages < 20 {
+		pages++
+		next := m.menu.projectsPage + 1
+		page := make([]project, 8)
+		for index := range page {
+			page[index] = project{id: int64(index), name: fmt.Sprintf("Page %d project %d", next, index)}
+		}
+		updated, c := m.Update(projectsLoadedMsg{page: next, projects: page})
+		m, cmd = updated.(model), c
+	}
+
+	assert.Less(t, pages, 4, "it asked for %d pages to fill %d rows", pages, m.menu.visibleRows())
+	assert.False(t, m.menu.projectsDone, "it walked to the end of the list to fill one panel")
 }

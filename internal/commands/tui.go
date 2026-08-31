@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -70,6 +71,12 @@ func NewTUICmd() *cobra.Command {
 					defer f.Close()
 				}
 			}
+
+			// Ask the terminal how wide it draws the clusters no width table
+			// agrees on — Devanagari and Thai combining marks, joined emoji —
+			// before Bubble Tea owns the terminal and the answers are no longer
+			// readable. It gives up quietly and keeps the safe guesses.
+			tui.CalibrateWidths(os.Stdin, os.Stdout)
 
 			model, shutdown := workspace.New(app)
 			defer shutdown()

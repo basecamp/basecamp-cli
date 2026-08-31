@@ -89,7 +89,7 @@ func (h helpBar) view() string {
 	keyStyle := lipgloss.NewStyle().Foreground(h.styles.Theme().Border).Bold(true)
 	descStyle := lipgloss.NewStyle().Foreground(h.styles.Theme().Border)
 	separator := descStyle.Render(" • ")
-	separatorWidth := lipgloss.Width(separator)
+	separatorWidth := tui.DisplayWidth(separator)
 
 	var lines []string
 	var line strings.Builder
@@ -97,7 +97,7 @@ func (h helpBar) view() string {
 
 	for _, binding := range h.bindings {
 		item := keyStyle.Render(binding.key) + " " + descStyle.Render(binding.desc)
-		itemWidth := lipgloss.Width(item)
+		itemWidth := tui.DisplayWidth(item)
 
 		if h.width > 0 && itemWidth > h.width {
 			if lineWidth > 0 {
@@ -107,7 +107,7 @@ func (h helpBar) view() string {
 			wrapped := strings.Split(ansi.Wrap(item, h.width, ""), "\n")
 			lines = append(lines, wrapped[:len(wrapped)-1]...)
 			line.WriteString(wrapped[len(wrapped)-1])
-			lineWidth = lipgloss.Width(wrapped[len(wrapped)-1])
+			lineWidth = tui.DisplayWidth(wrapped[len(wrapped)-1])
 			continue
 		}
 		if lineWidth > 0 && h.width > 0 && lineWidth+separatorWidth+itemWidth > h.width {

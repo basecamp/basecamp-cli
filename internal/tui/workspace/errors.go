@@ -41,21 +41,21 @@ func errorView(message string, width int, styles *tui.Styles) string {
 	lines := wrapText(message, inner)
 	innerWidth := 6
 	for _, line := range lines {
-		if lipgloss.Width(line) > innerWidth {
-			innerWidth = lipgloss.Width(line)
+		if tui.DisplayWidth(line) > innerWidth {
+			innerWidth = tui.DisplayWidth(line)
 		}
 	}
 
 	hintText := "  " + errorViewHint
-	blockWidth := max(innerWidth+4, lipgloss.Width(hintText))
+	blockWidth := max(innerWidth+4, tui.DisplayWidth(hintText))
 	padTo := func(rendered string) string {
-		return rendered + strings.Repeat(" ", max(blockWidth-lipgloss.Width(rendered), 0))
+		return rendered + strings.Repeat(" ", max(blockWidth-tui.DisplayWidth(rendered), 0))
 	}
 
 	var b strings.Builder
 	b.WriteString(padTo(border.Render("╭─ Error "+strings.Repeat("─", innerWidth-6)+"╮")) + "\n")
 	for _, line := range lines {
-		pad := strings.Repeat(" ", innerWidth-lipgloss.Width(line))
+		pad := strings.Repeat(" ", innerWidth-tui.DisplayWidth(line))
 		b.WriteString(padTo(border.Render("│")+" "+text.Render(line)+pad+" "+border.Render("│")) + "\n")
 	}
 	b.WriteString(padTo(border.Render("╰"+strings.Repeat("─", innerWidth+2)+"╯")) + "\n")
@@ -77,7 +77,7 @@ func wrapText(s string, width int) []string {
 	lines := make([]string, 0, 4)
 	line := words[0]
 	for _, word := range words[1:] {
-		if lipgloss.Width(line)+1+lipgloss.Width(word) > width {
+		if tui.DisplayWidth(line)+1+tui.DisplayWidth(word) > width {
 			lines = append(lines, line)
 			line = word
 		} else {

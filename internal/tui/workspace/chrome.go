@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -67,7 +66,7 @@ func renderDivider(width int, styles *tui.Styles, badge, hint string) string {
 				tail += " " + piece + " " + end
 			}
 		}
-		if fill := width - lipgloss.Width(tail); fill >= 1 {
+		if fill := width - tui.DisplayWidth(tail); fill >= 1 {
 			return rule.Render(strings.Repeat("─", fill)) + tail
 		}
 	}
@@ -126,7 +125,7 @@ func ruleWithSlots(width int, rule lipgloss.Style, center, right string) (string
 		if s == "" {
 			return 0
 		}
-		return lipgloss.Width(s) + 2
+		return tui.DisplayWidth(s) + 2
 	}
 	centerWidth, rightWidth := pad(center), pad(right)
 	fill := width - 2*ruleEnd - centerWidth - rightWidth
@@ -177,7 +176,7 @@ func renderRule(width int, styles *tui.Styles, label string) string {
 		return rule.Render(strings.Repeat("─", width))
 	}
 	padded := " " + truncateToWidth(label, width-2) + " "
-	ruleWidth := max(width-lipgloss.Width(padded), 0)
+	ruleWidth := max(width-tui.DisplayWidth(padded), 0)
 	left := ruleWidth / 2
 	return rule.Render(strings.Repeat("─", left) + padded + strings.Repeat("─", ruleWidth-left))
 }
@@ -205,7 +204,7 @@ func renderBreadcrumb(width int, styles *tui.Styles, trail []string) string {
 
 	for start := range rendered {
 		line := strings.Join(rendered[start:], separator)
-		if lipgloss.Width(line) <= width {
+		if tui.DisplayWidth(line) <= width {
 			if start > 0 {
 				line = crumb.Render("…"+breadcrumbSeparator) + line
 			}
@@ -215,20 +214,28 @@ func renderBreadcrumb(width int, styles *tui.Styles, trail []string) string {
 	return truncateToWidth(rendered[len(rendered)-1], width)
 }
 
-// truncateToWidth cuts a rendered string to a cell width, keeping whatever
-// escape sequences it already carries intact.
+// truncateToWidth cuts a string to a cell width, ending it with an ellipsis when
+// anything was taken off.
+//
+// The cut lands between grapheme clusters, never inside one: a Devanagari base
+// and its matra, or an emoji and the modifier that colors it, are one glyph to
+// the terminal, and a cut through the middle of one leaves a fragment the
+// terminal draws at some width nobody predicted.
 func truncateToWidth(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= width {
+	if tui.DisplayWidth(s) <= width {
 		return s
 	}
-	return ansi.Truncate(s, width, "…")
+	if width == 1 {
+		return "…"
+	}
+	return tui.FitGraphemes(s, width-1) + "…"
 }
 
 // centerText pads text so it sits in the middle of width.
 func centerText(text string, width int) string {
-	pad := max((width-lipgloss.Width(text))/2, 0)
+	pad := max((width-tui.DisplayWidth(text))/2, 0)
 	return strings.Repeat(" ", pad) + text
 }

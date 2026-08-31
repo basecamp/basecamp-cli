@@ -282,7 +282,7 @@ func (s sidebar) layout() []sidebarRow {
 func (s sidebar) sectionHeading(label string, style lipgloss.Style, dashed bool) string {
 	label = truncateToWidth(label, max(s.width-2, 1))
 
-	rule := s.width - lipgloss.Width(label) - 1
+	rule := s.width - tui.DisplayWidth(label) - 1
 	if rule < 1 {
 		return style.Render(label)
 	}
@@ -351,9 +351,9 @@ func fitRow(style lipgloss.Style, text, tag string, width int) string {
 	if tag == "" {
 		return style.Render(truncateToWidth(text, max(width, 1)))
 	}
-	tagWidth := lipgloss.Width(tag)
+	tagWidth := tui.DisplayWidth(tag)
 	text = truncateToWidth(text, max(width-tagWidth-1, 1))
-	gap := max(width-lipgloss.Width(text)-tagWidth, 1)
+	gap := max(width-tui.DisplayWidth(text)-tagWidth, 1)
 	return style.Render(text) + strings.Repeat(" ", gap) + tag
 }
 

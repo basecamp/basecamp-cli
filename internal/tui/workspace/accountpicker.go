@@ -299,8 +299,8 @@ func (p *accountPicker) row(a account, selected bool, inner int) string {
 		id = lipgloss.NewStyle().Foreground(theme.Primary)
 	}
 
-	width := max(inner-lipgloss.Width(marker), 1)
-	gap := width - lipgloss.Width(a.name) - lipgloss.Width(a.id)
+	width := max(inner-tui.DisplayWidth(marker), 1)
+	gap := width - tui.DisplayWidth(a.name) - tui.DisplayWidth(a.id)
 	if gap < 2 {
 		return marker + name.Render(truncateToWidth(a.name, width))
 	}
