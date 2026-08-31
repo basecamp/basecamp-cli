@@ -2,7 +2,7 @@
 
 Install the Basecamp CLI and connect it to your AI agent. Execute all steps autonomously.
 
-On an interactive terminal, the installer runs the recommended setup after download: browser authentication, the first available account saved globally, no default project, and every detected coding agent connected. Use `basecamp setup --customize` when you want to choose those settings. In non-interactive environments, the installer installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent.
+On an interactive terminal, the installer runs the recommended setup after download: browser authentication, the OAuth-bound account (otherwise the existing configured account or first available account) saved globally, the global project default cleared, and every detected coding agent connected. Directory-specific and environment project settings continue to apply. Use `basecamp setup --customize` when you want to choose those settings. Without a usable controlling terminal, the installer installs the baseline agent skill and, on a best-effort basis, attempts to connect a single detected coding agent.
 
 **DONE WHEN:** `basecamp --version && basecamp auth status` both succeed.
 
@@ -30,7 +30,7 @@ curl -fsSL https://basecamp.com/install-cli | bash
 irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 ```
 
-> **Note:** On an interactive terminal, the install scripts run `basecamp setup` with the recommended defaults. In non-interactive environments (CI, piped input, coding agents), they skip authentication and run `basecamp setup agents`, which installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping first-time setup with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`.
+> **Note:** The install scripts run `basecamp setup` whenever they can attach it to a usable interactive terminal, including the standard `curl | bash` command. When no usable controlling terminal is available, output is redirected, or `BASECAMP_NONINTERACTIVE=1`/`true` is set, they skip authentication and run `basecamp setup agents`. That command installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping first-time setup with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`. If optional first-time setup is cancelled or does not finish, the installed CLI remains ready and the installer prints the command to resume setup.
 >
 > Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `all`, or `none`). Set it for the interpreter, not the fetch:
 > - Bash: `curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash`
@@ -107,7 +107,7 @@ Run `basecamp upgrade`. Installer-script installs upgrade in place (Sigstore-ver
 
 ## Step 2: Authenticate
 
-Interactive installs authenticate during Step 1. If setup was skipped or the installer had no terminal, run:
+Interactive installs authenticate during Step 1. If setup was skipped, did not finish, or the installer had no usable terminal, run:
 
 ```bash
 basecamp auth login

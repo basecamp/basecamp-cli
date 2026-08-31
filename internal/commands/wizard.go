@@ -43,8 +43,9 @@ func NewSetupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "First-time setup with recommended defaults",
-		Long: "Authenticate with Basecamp, select the first available account, save it globally, " +
-			"and connect detected coding agents. Use --customize to choose each setting or --minimal for a concise completion message.",
+		Long: "Authenticate with Basecamp, use the OAuth-bound or existing configured account, save it globally without a global project default, " +
+			"and connect detected coding agents. With neither account available, setup selects the first authorized account. " +
+			"Use --account to choose an account compatible with the login, --customize to choose each setting, or --minimal for a concise completion message.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if customize {
@@ -610,8 +611,8 @@ func fastSetupTitleStyle(styles *tui.Styles) lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(styles.Theme().Primary)
 }
 
-// showFastSetupExamples prints account-wide commands that work with the
-// recommended setup's intentionally empty default project.
+// showFastSetupExamples prints account-wide commands after recommended setup
+// clears the active and global default project.
 func showFastSetupExamples(w io.Writer, styles *tui.Styles) {
 	titleStyle := fastSetupTitleStyle(styles)
 	descStyle := lipgloss.NewStyle().Italic(true)

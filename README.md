@@ -23,7 +23,7 @@ irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install
 
 On Windows 11 with Smart App Control, see [Troubleshooting](#windows-smart-app-control-and-smartscreen) if the install is blocked.
 
-On an interactive terminal, the installer opens Basecamp setup: approve OAuth in your browser and the CLI selects the first available account, saves it globally, skips a default project, and connects every detected coding agent. Use `basecamp setup --customize` to choose those settings instead.
+On an interactive terminal, the installer opens Basecamp setup: approve OAuth in your browser and the CLI uses the account granted by OAuth, otherwise preserves an existing account or selects the first available. It saves that account globally, clears the global project default, and connects every detected coding agent. Directory-specific and environment project settings continue to apply. Use `basecamp setup --customize` to choose those settings instead.
 
 <details>
 <summary>Other installation methods</summary>
@@ -105,8 +105,8 @@ The install scripts verify release signatures when `cosign` is available: cosign
 
 The first interactive `basecamp` run applies the recommended setup automatically after browser approval:
 
-- First available account, saved globally
-- No default project
+- Account granted by OAuth, otherwise the existing configured account or first available account, saved globally
+- No global default project; directory-specific and environment project settings continue to apply
 - Every detected Claude Code or Codex integration
 
 Run the same setup directly with `basecamp setup`. To choose the account, default project, config scope, and agent integrations, run:
