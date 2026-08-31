@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -207,6 +208,76 @@ func TestIsMachineOutput_JSONFlag(t *testing.T) {
 	cmd := newTestCmd(false, "")
 	_ = cmd.Root().PersistentFlags().Set("json", "true")
 	assert.True(t, isMachineOutput(cmd))
+}
+
+// TestMachinePredicatesAgree is the regression net for app.IsMachineOutput and
+// machineReadsThisOutput drifting apart. They answer the same question through
+// different lenses — flags+config vs the writer ApplyFlags built — and the chat
+// delete --force corner came from them disagreeing on `--styled` over a
+// configured json. Every flag/config combination must agree, with one
+// deliberate exception: FormatAuto on a pipe, where the renderer emits JSON
+// (machineReadsThisOutput true) while gates keep treating `basecamp foo | grep`
+// as human (IsMachineOutput false) so notices, progress, and wizard gating
+// don't flip on redirection alone. That row is asserted as a divergence, not
+// skipped, so a change to either side of it shows up here.
+func TestMachinePredicatesAgree(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	// Neither predicate may consult a real terminal: pin all three stdio
+	// streams to pipes and assert the precondition, so the FormatAuto rows
+	// resolve deterministically wherever the test runs.
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { r.Close(); w.Close() })
+	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = r, w, w
+	t.Cleanup(func() { os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr })
+	fi, err := os.Stdout.Stat()
+	require.NoError(t, err)
+	require.Zero(t, fi.Mode()&os.ModeCharDevice, "precondition: stdout must not be a terminal")
+
+	configFormats := []string{"", "json", "quiet", "markdown"}
+	flagSets := []struct {
+		name string
+		set  func(*appctx.App)
+	}{
+		{"none", func(a *appctx.App) {}},
+		{"json", func(a *appctx.App) { a.Flags.JSON = true }},
+		{"agent", func(a *appctx.App) { a.Flags.Agent = true }},
+		{"quiet", func(a *appctx.App) { a.Flags.Quiet = true }},
+		{"ids-only", func(a *appctx.App) { a.Flags.IDsOnly = true }},
+		{"count", func(a *appctx.App) { a.Flags.Count = true }},
+		{"jq", func(a *appctx.App) { a.Flags.JQFilter = ".x" }},
+		{"styled", func(a *appctx.App) { a.Flags.Styled = true }},
+		{"md", func(a *appctx.App) { a.Flags.MD = true }},
+		{"styled+json", func(a *appctx.App) { a.Flags.Styled = true; a.Flags.JSON = true }},
+	}
+
+	for _, format := range configFormats {
+		for _, flags := range flagSets {
+			name := "config=" + format + "/flags=" + flags.name
+			t.Run(name, func(t *testing.T) {
+				app := appctx.NewApp(&config.Config{Format: format})
+				flags.set(app)
+				app.ApplyFlags()
+
+				cmd := &cobra.Command{Use: "test"}
+				cmd.SetContext(appctx.WithApp(context.Background(), app))
+
+				gate := app.IsMachineOutput()
+				renderer := machineReadsThisOutput(cmd)
+
+				if format == "" && flags.name == "none" {
+					// The FormatAuto-on-a-pipe exception described above.
+					assert.False(t, gate, "IsMachineOutput must not flip on redirection alone")
+					assert.True(t, renderer, "FormatAuto on a pipe renders JSON")
+					return
+				}
+				assert.Equal(t, gate, renderer,
+					"IsMachineOutput=%v but machineReadsThisOutput=%v for %s", gate, renderer, name)
+			})
+		}
+	}
 }
 
 func TestIsNonInteractiveCommand_NonInteractiveEnv(t *testing.T) {

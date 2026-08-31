@@ -586,6 +586,35 @@ func TestIsMachineOutputConfigFormat(t *testing.T) {
 	}
 }
 
+// Test that an explicit --styled/--md overrides a configured machine format,
+// matching ApplyFlags: the flag rebuilds the writer as styled/markdown, so the
+// predicate must stand down too, or the same invocation is human to the
+// renderer and machine to every gate. Machine flags still win over style flags,
+// mirroring ApplyFlags' JSON-first ordering.
+func TestIsMachineOutputStyleFlagOverridesConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   string
+		setFlags func(*App)
+		expected bool
+	}{
+		{"styled over config json", "json", func(a *App) { a.Flags.Styled = true }, false},
+		{"md over config quiet", "quiet", func(a *App) { a.Flags.MD = true }, false},
+		{"config json with no style flag stays machine", "json", func(a *App) {}, true},
+		{"json flag beats styled flag", "json", func(a *App) { a.Flags.JSON = true; a.Flags.Styled = true }, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{Format: tt.format}
+			app := NewApp(cfg)
+			tt.setFlags(app)
+
+			assert.Equal(t, tt.expected, app.IsMachineOutput())
+		})
+	}
+}
+
 // Test that app.Err doesn't print stats in machine output modes
 func TestAppErrMachineOutputNoStats(t *testing.T) {
 	tests := []struct {

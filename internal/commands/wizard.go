@@ -487,7 +487,9 @@ func fetchProjectName(cmd *cobra.Command, app *appctx.App, projectID string) str
 // no one of them sees everything: IsInteractive covers non-terminal
 // stdin/stdout, the machine-output flags and the BASECAMP_NONINTERACTIVE escape
 // hatch; IsMachineOutput adds the config-driven json/quiet formats it does not
-// look at; InteractivePrompt adds stderr, which is where huh actually draws.
+// look at (standing down when an explicit --styled/--md overrides them, since
+// ApplyFlags renders those human); InteractivePrompt adds stderr, which is
+// where huh actually draws.
 //
 // Two callers, deliberately different responses. `basecamp setup` was asked for
 // by name, so it refuses out loud. Bare `basecamp` never asked for a wizard at

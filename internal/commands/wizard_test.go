@@ -756,7 +756,9 @@ func TestSetupRefusesUnderNonInteractiveEnv(t *testing.T) {
 // Terminal stdio is not enough: a caller that asked for machine output has
 // declared it is not there to answer questions, and the wizard is nothing but
 // questions. Config-driven json/quiet counts too — app.IsInteractive() does not
-// look at it, which is why the gate also asks IsMachineOutput().
+// look at it, which is why the gate also asks IsMachineOutput(). An explicit
+// --styled/--md overrides a configured machine format there, so that pairing
+// prompts like any human invocation.
 func TestSetupRefusesMachineOutputOnATerminal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no /dev/ptmx on Windows")

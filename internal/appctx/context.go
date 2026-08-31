@@ -318,6 +318,12 @@ func (a *App) IsMachineOutput() bool {
 	if a.Flags.Agent || a.Flags.Quiet || a.Flags.IDsOnly || a.Flags.Count || a.Flags.JSON || a.Flags.JQFilter != "" {
 		return true
 	}
+	// An explicit --styled/--md is what ApplyFlags honors over a configured
+	// machine format; this predicate must agree, or the same invocation is
+	// human to the renderer and machine to every gate.
+	if a.Flags.Styled || a.Flags.MD {
+		return false
+	}
 	// Config-driven machine output formats
 	if a.Config != nil {
 		switch a.Config.Format {
