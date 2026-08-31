@@ -134,29 +134,38 @@ jobs:
     permissions:
       issues: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: File or update canary failure issue
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          REPO_SLUG: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT_NAME: ${{ github.event_name }}
           LINUX_RESULT: ${{ needs.linux.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
         run: |
-          TITLE="Installer canary failure"
           BODY="The installer canary failed (event: ${EVENT_NAME}). Legs: linux=${LINUX_RESULT}, macos=${MACOS_RESULT}, windows=${WINDOWS_RESULT}. See ${RUN_URL} for details."
 
-          # Check for existing open issue before creating a new one
-          existing=$(gh issue list --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$BODY" || true
-          else
-            gh issue create --title "$TITLE" --body "$BODY" || true
-          fi
+          # Dedup lives in notify-issue.sh, shared with release.yml and
+          # aur-publish.yml, and keys on the installer-canary label rather
+          # than the title — a title lookup misses the moment someone
+          # retitles the issue while triaging it, and this job used to carry
+          # exactly that inline title-based copy.
+          notify_status=0
+          scripts/notify-issue.sh \
+            --repo "$REPO_SLUG" \
+            --label installer-canary \
+            --title "Installer canary failure" \
+            --body "$BODY" || notify_status=$?
 
-          # Always emit annotation so the failure is visible in the workflow summary
+          # Always emit the annotation, whatever the notifier did. It fails
+          # closed rather than filing a duplicate, so on a lookup failure
+          # this is the only signal left.
           echo "::error::Installer canary failed. See ${RUN_URL}"
+          exit "$notify_status"
 
   recover:
     name: Close canary issue on recovery
@@ -173,10 +182,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          TITLE="Installer canary failure"
-
-          # Same title lookup as the notify job: exact-match on the open issue.
-          existing=$(gh issue list --state open --search "in:title $TITLE" --json number,title --jq '[.[] | select(.title == "'"$TITLE"'")][0].number // empty' 2>/dev/null || true)
-          if [ -n "$existing" ]; then
-            gh issue close "$existing" --comment "All installer legs are green again: ${RUN_URL}" || true
+          # Same key as the notify job: the installer-canary label, which
+          # survives retitling. A green canary invalidates every open canary
+          # issue; one worth keeping open past recovery should shed the label.
+          #
+          # Lookup failure is not "nothing open": skip the close and let the
+          # next green run retry, but say so in the annotations.
+          if ! matches=$(gh issue list --state open --label installer-canary --json number --jq '.[].number'); then
+            echo "::warning::Could not list open installer-canary issues; leaving any open issue for the next green run."
+            exit 0
           fi
+          for number in $matches; do
+            gh issue close "$number" --comment "All installer legs are green again: ${RUN_URL}"
+          done

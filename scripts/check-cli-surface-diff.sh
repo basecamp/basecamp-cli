@@ -4,9 +4,11 @@
 #
 # Intentional breaking changes can be listed in .surface-breaking (one per line).
 # The allowlist is cumulative: entries stay after release, recording every
-# removal acknowledged since the baseline. No release step clears it, and
-# nothing depends on it being cleared — an entry only ever excuses the removal
-# it names.
+# removal acknowledged since the baseline — no release step clears it. Know the
+# cost: an entry excuses every future removal of the same surface line, so a
+# command removed, later reintroduced, and removed again passes on the old
+# acknowledgement. Scoping entries to one release would take a clear-at-release
+# step in RELEASING.md, which does not exist today.
 set -euo pipefail
 BASELINE="$1"
 CURRENT="$2"

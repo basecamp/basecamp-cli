@@ -220,7 +220,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |
-| calendars | 2 | `calendars` | ✅ | BC5 | - | show, update (color only). No index endpoint, so there is no `calendars list` — address one by id or pasted URL. The eleven colors are validated client-side, because the SDK at this pin cannot carry the server's 422 field message |
+| calendars | 2 | `calendars` | ✅ | BC5 | - | show, update (color only). No index endpoint, so there is no `calendars list` — address one by id or pasted URL. The eleven colors are validated client-side for an immediate answer that names the alternatives; since v0.13.0 the SDK also carries the server's field-keyed 422 message |
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |
 | schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
 | events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |

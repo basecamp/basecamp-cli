@@ -15,11 +15,12 @@ import (
 
 // calendarColors are the colors a calendar accepts.
 //
-// Validated client-side because the SDK cannot report what the server says: at
-// v0.12.0 its error parser reads only error/error_description, so a 422 whose
-// body is {"errors":{"color":[...]}} degrades to a bare "validation error" with
-// no mention of the field, the value, or the alternatives. Rejecting here turns
-// that into an answer the caller can act on.
+// Client-side validation began as a workaround: at SDK v0.12.0 the error
+// parser read only error/error_description, so a 422 whose body is
+// {"errors":{"color":[...]}} degraded to a bare "validation error" naming
+// neither field nor value. The SDK carries the field-keyed message since
+// v0.13.0 (basecamp/basecamp-sdk#541); the local check stays because it
+// answers before any request and names the alternatives.
 var calendarColors = []string{
 	"white", "red", "orange", "yellow", "green", "blue",
 	"aqua", "purple", "gray", "pink", "brown",
@@ -144,8 +145,9 @@ Colors: ` + strings.Join(calendarColors, ", ") + `
 }
 
 // validateCalendarColor rejects an unknown color before the request, naming the
-// alternatives. The server would reject it too, but the SDK cannot carry its
-// message back, so an unchecked value fails as a bare "validation error".
+// alternatives. The server would reject it too, and since SDK v0.13.0 its
+// field-keyed message does come back; checking here still answers without a
+// round trip. See calendarColors for the history.
 func validateCalendarColor(color string) error {
 	if color == "" {
 		return output.ErrUsageHint(
