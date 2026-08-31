@@ -354,6 +354,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewCalendarsCmd())
 	cmd.AddCommand(commands.NewNotificationsCmd())
 	cmd.AddCommand(commands.NewTUICmd())
+	cmd.AddCommand(commands.NewImageProbeCmd())
 	cmd.AddCommand(commands.NewBonfireCmd())
 	cmd.AddCommand(commands.NewAgentHookCmd())
 	cmd.AddCommand(commands.NewMCPCmd())

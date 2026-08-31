@@ -39,89 +39,121 @@ func testJPEG(t *testing.T, width, height int) []byte {
 	return encoded.Bytes()
 }
 
-// --- Which terminal can draw ---
+// --- Asking the terminal ---
 
-func TestDetectImageCapability(t *testing.T) {
-	for name, test := range map[string]struct {
-		env  map[string]string
-		want ImageProtocol
-	}{
-		"kitty by window id": {map[string]string{"KITTY_WINDOW_ID": "1"}, ImageProtocolKitty},
-		"kitty by term":      {map[string]string{"TERM": "xterm-kitty"}, ImageProtocolKitty},
-		"kitty by program":   {map[string]string{"TERM_PROGRAM": "kitty"}, ImageProtocolKitty},
+// A terminal that draws Kitty graphics answers the query with an OK for the id it
+// was asked about.
+func TestATerminalThatAnswersOKDrawsPictures(t *testing.T) {
+	draws, answered := readImageAnswer([]byte("\x1b_Gi=4242;OK\x1b\\\x1b[?62;c"))
 
-		// Ghostty's own TERM is xterm-ghostty, and its shell variables are there
-		// whatever the reader has set TERM to.
-		"ghostty by program":   {map[string]string{"TERM_PROGRAM": "ghostty"}, ImageProtocolKitty},
-		"ghostty by term":      {map[string]string{"TERM": "xterm-ghostty"}, ImageProtocolKitty},
-		"ghostty by resources": {map[string]string{"GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty", "TERM": "xterm-256color"}, ImageProtocolKitty},
+	assert.True(t, answered)
+	assert.True(t, draws)
+}
 
-		"foot":           {map[string]string{"TERM": "foot-extra"}, ImageProtocolSixel},
-		"anything else":  {map[string]string{"TERM": "xterm-256color"}, ImageProtocolText},
-		"nothing at all": {map[string]string{}, ImageProtocolText},
+// One that does not answers nothing to the query, and the device attributes request
+// behind it comes back on its own. That is the no — and it arrives in a round trip
+// rather than at the end of the deadline.
+func TestATerminalThatAnswersOnlyItsAttributesDrawsNone(t *testing.T) {
+	for name, reply := range map[string]string{
+		"xterm":      "\x1b[?1;2c",
+		"vt220":      "\x1b[?62;1;2;6;8;9;15c",
+		"bare":       "\x1b[?c",
+		"after keys": "q\x1b[?6c",
 	} {
-		got := DetectImageCapability(func(key string) string { return test.env[key] })
-		assert.Equal(t, test.want, got, name)
+		draws, answered := readImageAnswer([]byte(reply))
+		assert.True(t, answered, name)
+		assert.False(t, draws, name)
 	}
 }
 
-// No set of signals is going to be right about every terminal, so there is a way
-// to say outright — in both directions.
-func TestTheImageProtocolCanBeSaidOutright(t *testing.T) {
-	for name, test := range map[string]struct {
-		env  map[string]string
-		want ImageProtocol
-	}{
-		"forced on in a plain terminal": {
-			map[string]string{ImageProtocolVar: "kitty", "TERM": "xterm-256color"}, ImageProtocolKitty},
-		"forced on inside tmux": {
-			map[string]string{ImageProtocolVar: "kitty", "TMUX": "/tmp/tmux-1000/default,1,0"}, ImageProtocolKitty},
-		"forced off in ghostty": {
-			map[string]string{ImageProtocolVar: "text", "TERM_PROGRAM": "ghostty"}, ImageProtocolText},
-		"forced off, spelled none": {
-			map[string]string{ImageProtocolVar: "none", "KITTY_WINDOW_ID": "1"}, ImageProtocolText},
-		"a value nobody meant leaves the guessing alone": {
-			map[string]string{ImageProtocolVar: "yes please", "TERM_PROGRAM": "ghostty"}, ImageProtocolKitty},
+// Silence is not a no: it is a terminal that was not listening, and nothing is
+// decided on it.
+func TestATerminalThatSaysNothingDecidesNothing(t *testing.T) {
+	for name, reply := range map[string]string{
+		"empty":                             "",
+		"unrelated keys":                    "abc",
+		"a cursor report":                   "\x1b[12;40R",
+		"a half-finished attributes report": "\x1b[?62;1",
 	} {
-		got := DetectImageCapability(func(key string) string { return test.env[key] })
-		assert.Equal(t, test.want, got, name)
+		_, answered := readImageAnswer([]byte(reply))
+		assert.False(t, answered, name)
 	}
 }
 
-// A multiplexer passes graphics through only when it has been told to, and keeps
-// the outer terminal's own variables either way — GHOSTTY_RESOURCES_DIR is there in
-// a tmux pane. Drawing placeholders into one shows the cells for what they are made
-// of: a private-use character and two combining marks apiece, a screen of accent
-// soup where the picture should be.
-func TestAMultiplexerDrawsNoPictures(t *testing.T) {
+// The query is the one Kitty documents, and it never displays anything: a=q asks,
+// and the payload is a single transparent pixel.
+func TestTheProbeAsksAndShowsNothing(t *testing.T) {
+	request := imageProbeRequest()
+
+	assert.Contains(t, request, "\x1b_Ga=q,i=4242,s=1,v=1,f=24,t=d;AAAA\x1b\\")
+	assert.Contains(t, request, deviceAttrs)
+	assert.NotContains(t, request, "a=T", "the probe would have displayed the pixel")
+}
+
+// A relay that forwards the question but not the pixels is the one thing asking
+// cannot settle: the terminal behind it answers OK, the image data never arrives,
+// and the cells are drawn into empty space. Both of these were seen doing it.
+func TestARelayThatEatsPicturesIsNotAsked(t *testing.T) {
 	for name, env := range map[string]map[string]string{
-		"tmux by variable": {"TMUX": "/tmp/tmux-1000/default,1,0", "TERM_PROGRAM": "ghostty",
-			"GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"},
-		"tmux by term":   {"TERM": "tmux-256color", "GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"},
-		"screen by term": {"TERM": "screen.xterm-256color", "KITTY_WINDOW_ID": "1"},
-		"zellij":         {"ZELLIJ": "0", "TERM_PROGRAM": "ghostty"},
+		"herdr": {"HERDR_ENV": "1"},
+		"tmux":  {"TMUX": "/tmp/tmux-1000/default,1,0"},
 	} {
-		got := DetectImageCapability(func(key string) string { return env[key] })
-		assert.Equal(t, ImageProtocolText, got, name)
+		assert.True(t, insideARelayThatEatsPictures(func(key string) string { return env[key] }), name)
+	}
+
+	// Nothing else is on the list. A relay is not assumed from a variable that
+	// merely sounds like one.
+	for name, env := range map[string]map[string]string{
+		"a plain terminal": {"TERM": "xterm-256color"},
+		"ghostty":          {"TERM_PROGRAM": "ghostty", "GHOSTTY_RESOURCES_DIR": "/usr/share/ghostty"},
+		"kitty":            {"KITTY_WINDOW_ID": "1"},
+	} {
+		assert.False(t, insideARelayThatEatsPictures(func(key string) string { return env[key] }), name)
 	}
 }
 
-// Sixel is detected and then not used: the sequences are cursor-positioned, and
-// Bubble Tea redraws the grid after them, so the image would land wherever the
-// cursor was and survive one frame.
-func TestASixelTerminalGetsTheWords(t *testing.T) {
-	renderer := SelectImageRenderer(func(key string) string {
-		if key == "TERM" {
-			return "foot"
-		}
-		return ""
-	})
+// --- Which renderer that gets you ---
 
-	assert.Equal(t, ImageProtocolText, renderer.Protocol())
+// Nothing is guessed from the environment: a terminal's own variables outlive it,
+// and inside tmux or herdr they describe a terminal that is no longer on the other
+// end. Until the terminal answers, a picture is its filename.
+func TestNoAnswerMeansNoPictures(t *testing.T) {
+	t.Setenv(ImageProtocolVar, "")
+	drawsImages.Store(false)
+
+	assert.Equal(t, ImageProtocolText, NewImageRenderer().Protocol())
 }
 
-// A terminal that cannot draw a picture is told nothing at all, and what stands in
-// for it is the caller's business.
+func TestAnAnswerOfYesDrawsPictures(t *testing.T) {
+	t.Setenv(ImageProtocolVar, "")
+	drawsImages.Store(true)
+	defer drawsImages.Store(false)
+
+	assert.Equal(t, ImageProtocolKitty, NewImageRenderer().Protocol())
+}
+
+// No probe is going to be right about every terminal, so there is a way to say
+// outright — in both directions.
+func TestTheImageProtocolCanBeSaidOutright(t *testing.T) {
+	drawsImages.Store(false)
+
+	t.Setenv(ImageProtocolVar, "kitty")
+	assert.Equal(t, ImageProtocolKitty, NewImageRenderer().Protocol(), "a terminal that would not say so")
+
+	drawsImages.Store(true)
+	defer drawsImages.Store(false)
+
+	for _, off := range []string{"text", "none", "off", "TEXT"} {
+		t.Setenv(ImageProtocolVar, off)
+		assert.Equal(t, ImageProtocolText, NewImageRenderer().Protocol(), off)
+	}
+
+	t.Setenv(ImageProtocolVar, "yes please")
+	assert.Equal(t, ImageProtocolKitty, NewImageRenderer().Protocol(), "a value nobody meant")
+}
+
+// A terminal that cannot draw a picture is handed nothing and told nothing. What
+// stands in its place is the caller's business.
 func TestATerminalThatCannotDrawGetsNothing(t *testing.T) {
 	drawn := textImageRenderer{}.Render(testPNG(t, 100, 50), 1, 60)
 

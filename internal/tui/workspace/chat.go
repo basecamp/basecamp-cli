@@ -105,11 +105,9 @@ type chatScreen struct {
 	// chat is read from: older pages land above the window and leave it alone.
 	fromBottom int
 
-	// How a picture gets drawn, what this screen may spend on pictures, and
-	// whether it has already said that this terminal draws none.
-	images         tui.ImageRenderer
-	budget         *imageBudget
-	saidNoPictures bool
+	// How a picture gets drawn, and what this screen may spend on pictures.
+	images tui.ImageRenderer
+	budget *imageBudget
 
 	width  int
 	height int
@@ -265,31 +263,19 @@ func (c *chatScreen) append(line chatLine) {
 }
 
 // readImages asks for the pictures the transcript is carrying and has not read
-// yet. Nothing to read, or nothing left to spend, and no read is started.
+// yet. Nothing to read, nothing left to spend, or a terminal that draws none, and
+// no read is started — and nothing is said about it either way. A terminal that
+// cannot show a picture shows the filename, which was a whole message before any of
+// this, and a reader is not made to hear about what their terminal cannot do.
 func (c *chatScreen) readImages() tea.Cmd {
-	if c.images == nil || c.budget.spent() {
+	if c.images == nil || c.images.Protocol() == tui.ImageProtocolText || c.budget.spent() {
 		return nil
 	}
 	wanted := wantedImages(c.lines)
 	if len(wanted) == 0 {
 		return nil
 	}
-	// A terminal that cannot draw one is not asked to read one — but it does say
-	// so, once. A filename where a picture should be is otherwise indistinguishable
-	// from a picture that failed to arrive, which is a thing to know about your own
-	// terminal rather than to wonder about.
-	if c.images.Protocol() == tui.ImageProtocolText {
-		return c.sayPicturesAreNotDrawn()
-	}
 	return loadChatImages(c.ctx.Ctx(), c.ctx.app, c.budget, wanted)
-}
-
-func (c *chatScreen) sayPicturesAreNotDrawn() tea.Cmd {
-	if c.saidNoPictures {
-		return nil
-	}
-	c.saidNoPictures = true
-	return notify("This terminal can't show pictures — Kitty and Ghostty can")
 }
 
 // drawImages renders the pictures that arrived, sends the terminal their pixels,

@@ -32,6 +32,13 @@ func testImageBytes(t *testing.T, width, height int) []byte {
 	return encoded.Bytes()
 }
 
+// noImages is the renderer a terminal that draws none gets.
+type noImages struct{}
+
+func (noImages) Protocol() tui.ImageProtocol { return tui.ImageProtocolText }
+
+func (noImages) Render([]byte, int, int) tui.RenderedImage { return tui.RenderedImage{} }
+
 // drawnImage is a renderer that draws without a terminal, so a test can check what
 // the screen does with a picture rather than what Kitty does with one.
 type drawnImage struct{ cols, rows int }
@@ -292,24 +299,23 @@ func TestAPictureTooWideForTheColumnIsLeftOut(t *testing.T) {
 	assert.Contains(t, rendered, "image.png", "the filename went with it")
 }
 
-// A terminal that cannot draw a picture is never asked to read one, and says so
-// once — a filename where a picture should be reads the same as a picture that
-// failed to arrive, and which one it is is worth knowing.
-func TestATerminalThatCannotDrawSaysSoOnce(t *testing.T) {
+// A terminal that cannot draw a picture is never asked to read one, and is never
+// told about it either. The filename is a whole message; a reader is not made to
+// hear about what their terminal cannot do.
+func TestATerminalThatCannotDrawIsLeftAlone(t *testing.T) {
 	_, c := openChat(t, 96, 30)
-	c.images = tui.SelectImageRenderer(func(string) string { return "" })
+	c.images = noImages{}
 	c.lines = append(c.lines, chatLine{
-		id: 500, at: testNow, imageURL: "https://3.basecampapi.com/1/blobs/a/download/image.png",
+		id: 500, who: "Rob Zolkos", body: "📎 image.png (192.7kb)", at: testNow,
+		imageURL: "https://3.basecampapi.com/1/blobs/a/download/image.png",
 	})
 
-	cmd := c.readImages()
-	require.NotNil(t, cmd, "nothing was said about a picture that cannot be drawn")
-	assert.Contains(t, cmd().(notifyMsg).text, "can't show pictures")
-
-	// Said once. Every page of a busy chat carries pictures, and the reader has
-	// been told — and nothing was read for a terminal that cannot draw it.
-	assert.Nil(t, c.readImages())
+	assert.Nil(t, c.readImages(), "a picture was read for a terminal that cannot draw it")
 	assert.Nil(t, c.lines[len(c.lines)-1].imageData)
+
+	rendered := ansi.Strip(c.View())
+	assert.Contains(t, rendered, "image.png (192.7kb)")
+	assert.NotContains(t, rendered, "can't", "the reader was told off about their terminal")
 }
 
 // A picture already read is not read again.

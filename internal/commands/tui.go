@@ -74,9 +74,12 @@ func NewTUICmd() *cobra.Command {
 
 			// Ask the terminal how wide it draws the clusters no width table
 			// agrees on — Devanagari and Thai combining marks, joined emoji —
-			// before Bubble Tea owns the terminal and the answers are no longer
-			// readable. It gives up quietly and keeps the safe guesses.
+			// and whether it draws pictures at all. Both are asked before Bubble
+			// Tea owns the terminal and the answers are no longer readable, and
+			// both give up quietly: the widths keep their safe guesses, and a
+			// terminal that says nothing about pictures is shown none.
 			tui.CalibrateWidths(os.Stdin, os.Stdout)
+			tui.DetectImageSupport(os.Stdin, os.Stdout)
 
 			model, shutdown := workspace.New(app)
 			defer shutdown()

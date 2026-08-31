@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 // An image in a terminal is two things sent separately: the pixels, which go
@@ -17,8 +18,13 @@ type ImageProtocol string
 const (
 	ImageProtocolText  ImageProtocol = "text"
 	ImageProtocolKitty ImageProtocol = "kitty"
-	ImageProtocolSixel ImageProtocol = "sixel"
 )
+
+// ImageProtocolVar settles the question rather than leaving it to be answered:
+// BASECAMP_IMAGE_PROTOCOL=kitty draws pictures, =text never does. It is there for
+// the terminal that can draw but will not say so, and for the reader who would
+// rather have the filename.
+const ImageProtocolVar = "BASECAMP_IMAGE_PROTOCOL"
 
 // RenderedImage is one image ready to be shown: Content goes in the view, Raw
 // goes to the terminal ahead of it.
@@ -43,83 +49,42 @@ type ImageRenderer interface {
 	Render(data []byte, id, maxCols int) RenderedImage
 }
 
+// drawsImages is what the terminal answered when it was asked. Nothing has been
+// asked until DetectImageSupport runs, and until then nothing is drawn: a picture
+// nobody can see is a screenful of accent marks where the picture should be.
+var drawsImages atomic.Bool
+
+// NewImageRenderer is how a picture gets drawn here: the way the terminal said it
+// could, or not at all.
+//
+// Nothing is guessed from the environment. TERM_PROGRAM and a terminal's own
+// variables outlive the terminal that set them — they are still there inside tmux,
+// inside herdr, inside anything that runs a program in a pane — so what they say
+// about what is on the far end of the pty is not worth reading. What the terminal
+// answers is.
+func NewImageRenderer() ImageRenderer {
+	switch strings.ToLower(os.Getenv(ImageProtocolVar)) {
+	case string(ImageProtocolKitty):
+		return kittyImageRenderer{}
+	case string(ImageProtocolText), "none", "off":
+		return textImageRenderer{}
+	}
+	if drawsImages.Load() {
+		return kittyImageRenderer{}
+	}
+	return textImageRenderer{}
+}
+
 type textImageRenderer struct{}
 
 type kittyImageRenderer struct{}
 
-// NewImageRenderer picks the renderer for the terminal the environment describes.
-func NewImageRenderer() ImageRenderer { return SelectImageRenderer(os.Getenv) }
-
-func SelectImageRenderer(lookupEnv func(string) string) ImageRenderer {
-	switch DetectImageCapability(lookupEnv) {
-	case ImageProtocolKitty:
-		return kittyImageRenderer{}
-	case ImageProtocolSixel:
-		// Sixel graphics are cursor-positioned. Bubble Tea redraws the cell grid
-		// after raw output, so a Sixel image lands wherever the cursor happened to
-		// be and survives one frame. Until there is a stable placement for it, a
-		// Sixel terminal gets the same words a plain one does.
-		return textImageRenderer{}
-	default:
-		return textImageRenderer{}
-	}
-}
-
-// ImageProtocolVar is the environment variable that settles the question rather
-// than leaving it to be guessed: BASECAMP_IMAGE_PROTOCOL=kitty draws pictures,
-// =text never does.
-const ImageProtocolVar = "BASECAMP_IMAGE_PROTOCOL"
-
-// DetectImageCapability works out what the terminal on the other end can draw.
-//
-// Getting this wrong in either direction costs something. Guess too low and a
-// terminal that can show pictures shows filenames instead. Guess too high and the
-// placeholder cells are drawn as what they are made of — a private-use character
-// and two combining marks per cell — which is a screen of accent soup where a
-// picture should be. So every signal is read, a multiplexer in between is enough to
-// say no, and there is a variable to say outright, because no set of signals is
-// going to be right about every terminal.
-func DetectImageCapability(lookupEnv func(string) string) ImageProtocol {
-	switch strings.ToLower(lookupEnv(ImageProtocolVar)) {
-	case string(ImageProtocolKitty):
-		return ImageProtocolKitty
-	case string(ImageProtocolText), "none", "off":
-		return ImageProtocolText
-	}
-
-	term := strings.ToLower(lookupEnv("TERM"))
-	termProgram := strings.ToLower(lookupEnv("TERM_PROGRAM"))
-
-	// A multiplexer sits between this and the terminal that can draw, and passes
-	// graphics through only when it has been told to. It also keeps the outer
-	// terminal's own variables — GHOSTTY_RESOURCES_DIR survives into a tmux pane —
-	// so those cannot be trusted from inside one.
-	if lookupEnv("TMUX") != "" || strings.HasPrefix(term, "screen") ||
-		strings.HasPrefix(term, "tmux") || lookupEnv("ZELLIJ") != "" {
-		return ImageProtocolText
-	}
-
-	// Kitty and Ghostty both draw from a Unicode placeholder, and each says who it
-	// is more than one way: Ghostty's TERM is xterm-ghostty unless the reader has
-	// set it to something else, which is why its shell variables count too.
-	switch {
-	case lookupEnv("KITTY_WINDOW_ID") != "", strings.Contains(term, "kitty"), termProgram == "kitty":
-		return ImageProtocolKitty
-	case lookupEnv("GHOSTTY_RESOURCES_DIR") != "", strings.Contains(term, "ghostty"), termProgram == "ghostty":
-		return ImageProtocolKitty
-	}
-
-	if strings.HasPrefix(term, "foot") || termProgram == "foot" {
-		return ImageProtocolSixel
-	}
-	return ImageProtocolText
-}
-
 func (textImageRenderer) Protocol() ImageProtocol { return ImageProtocolText }
 
-// A terminal that cannot draw an image is told nothing. What stands in for it is
-// the caller's business: in a chat that is the filename and its size, which is
-// what the line said before images were drawn at all.
+// A terminal that cannot draw an image is handed nothing, and told nothing. What
+// stands in its place is the caller's business — in a chat that is the filename and
+// its size, which is a whole message on its own. A reader is not made to hear about
+// what their terminal cannot do.
 func (textImageRenderer) Render([]byte, int, int) RenderedImage { return RenderedImage{} }
 
 func (kittyImageRenderer) Protocol() ImageProtocol { return ImageProtocolKitty }
