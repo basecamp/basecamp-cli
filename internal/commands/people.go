@@ -176,15 +176,8 @@ func requireMeTarget(target string) error {
 		`This action only affects your own account; pass "me" or omit the target.`)
 }
 
-// firstWeekDays and timeFormats are the accepted enum values for the two
-// profile settings that are not free text. Validating them locally turns a
-// typo into a clear message instead of an opaque server rejection.
-var firstWeekDays = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
-
-var timeFormats = []string{"twelve_hour", "twenty_four_hour"}
-
 func newPeopleUpdateCmd() *cobra.Command {
-	var name, email, title, bio, location, timeZone, firstWeekDay, timeFormat string
+	var name, email, title, bio, location, timeZone string
 
 	cmd := &cobra.Command{
 		Use:   "update [me] [flags]",
@@ -201,8 +194,8 @@ empty value to clear that field:
   basecamp people update me --title "Staff Engineer" --location "Chicago, IL"
   basecamp people update me --bio ""
 
-first-week-day is one of: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday,
-Saturday. time-format is twelve_hour or twenty_four_hour.`,
+Week-start and time-format are account preferences, not profile fields, and
+are not edited here.`,
 		Example: `basecamp people update me --bio "Building the Basecamp CLI" --title "Staff Engineer"`,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -213,7 +206,7 @@ Saturday. time-format is twelve_hour or twenty_four_hour.`,
 			if err := requireMeTarget(target); err != nil {
 				return err
 			}
-			return runPeopleUpdate(cmd, name, email, title, bio, location, timeZone, firstWeekDay, timeFormat)
+			return runPeopleUpdate(cmd, name, email, title, bio, location, timeZone)
 		},
 	}
 
@@ -223,13 +216,11 @@ Saturday. time-format is twelve_hour or twenty_four_hour.`,
 	cmd.Flags().StringVar(&bio, "bio", "", "Short bio (tagline)")
 	cmd.Flags().StringVar(&location, "location", "", "Location")
 	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Rails time zone name (e.g. America/Chicago)")
-	cmd.Flags().StringVar(&firstWeekDay, "first-week-day", "", "First day of the week (Sunday..Saturday)")
-	cmd.Flags().StringVar(&timeFormat, "time-format", "", "Time format (twelve_hour or twenty_four_hour)")
 
 	return cmd
 }
 
-func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, timeZone, firstWeekDay, timeFormat string) error {
+func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, timeZone string) error {
 	app := appctx.FromContext(cmd.Context())
 
 	req := &basecamp.UpdateMyProfileRequest{}
@@ -248,19 +239,6 @@ func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, time
 	setStr("bio", bio, &req.Bio)
 	setStr("location", location, &req.Location)
 	setStr("time-zone", timeZone, &req.TimeZoneName)
-	setStr("time-format", timeFormat, &req.TimeFormat)
-
-	if cmd.Flags().Changed("time-format") && !slices.Contains(timeFormats, timeFormat) {
-		return output.ErrUsage("Invalid time-format (use twelve_hour or twenty_four_hour)")
-	}
-	if cmd.Flags().Changed("first-week-day") {
-		if !slices.Contains(firstWeekDays, firstWeekDay) {
-			return output.ErrUsage("Invalid first-week-day (use Sunday, Monday, ... Saturday)")
-		}
-		fwd := basecamp.FirstWeekDay(firstWeekDay)
-		req.FirstWeekDay = &fwd
-		changed = true
-	}
 
 	if !changed {
 		return noChanges(cmd)
@@ -300,11 +278,13 @@ func newPeopleOutOfOfficeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "out-of-office [me] [flags]",
 		Aliases: []string{"ooo"},
-		Short:   "Set or clear your out-of-office dates",
-		Long: `Set or clear your own out-of-office dates.
+		Short:   "Show, set, or clear your out-of-office dates",
+		Long: `Show, set, or clear your own out-of-office dates.
 
-Only your own out-of-office can be set here, so the target is always "me".
+Only your own out-of-office is addressed here, so the target is always "me".
+With no flags it reports your current status.
 
+  basecamp people out-of-office me
   basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18
   basecamp people out-of-office me --start today --end "in 2 weeks"
   basecamp people out-of-office me --clear
@@ -356,13 +336,13 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 	if clearFlag && datesGiven {
 		return output.ErrUsage("--clear cannot be combined with --start or --end")
 	}
-	if !clearFlag && !datesGiven {
-		return noChanges(cmd)
-	}
+
+	// With no flags, report current status rather than mutating anything.
+	showStatus := !clearFlag && !datesGiven
 
 	// Settle all input validation before any account resolution or request.
 	var startDate, endDate string
-	if !clearFlag {
+	if !clearFlag && datesGiven {
 		if !startChanged || !endChanged {
 			return output.ErrUsage("both --start and --end are required to set out-of-office")
 		}
@@ -388,6 +368,14 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 		return convertSDKError(err)
 	}
 
+	if showStatus {
+		ooo, err := app.Account().People().GetOutOfOffice(cmd.Context(), me.ID)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		return app.OK(ooo, output.WithSummary(outOfOfficeSummary(ooo)))
+	}
+
 	if clearFlag {
 		if err := app.Account().People().DisableOutOfOffice(cmd.Context(), me.ID); err != nil {
 			return convertSDKError(err)
@@ -405,9 +393,15 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 		return convertSDKError(err)
 	}
 
-	return app.OK(ooo,
-		output.WithSummary(fmt.Sprintf("Out of office %s to %s", startDate, endDate)),
-	)
+	return app.OK(ooo, output.WithSummary(outOfOfficeSummary(ooo)))
+}
+
+// outOfOfficeSummary renders a one-line status for an out-of-office record.
+func outOfOfficeSummary(ooo *basecamp.OutOfOffice) string {
+	if ooo == nil || !ooo.Enabled {
+		return "Not out of office"
+	}
+	return fmt.Sprintf("Out of office %s to %s", ooo.StartDate, ooo.EndDate)
 }
 
 func newPeopleListCmd() *cobra.Command {

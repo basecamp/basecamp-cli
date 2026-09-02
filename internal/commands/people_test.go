@@ -799,6 +799,12 @@ func setupProfileMockServer(t *testing.T, accountID string, capture *profileCapt
 			}
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{}`))
+		case strings.HasSuffix(r.URL.Path, "/out_of_office.json") && r.Method == http.MethodGet:
+			capture.oooMethod = http.MethodGet
+			capture.oooPath = r.URL.Path
+			json.NewEncoder(w).Encode(map[string]any{
+				"enabled": true, "start_date": "2026-09-14", "end_date": "2026-09-18",
+			})
 		case strings.HasSuffix(r.URL.Path, "/out_of_office.json") && r.Method == http.MethodPost:
 			capture.oooMethod = http.MethodPost
 			capture.oooPath = r.URL.Path
@@ -927,62 +933,17 @@ func TestPeopleUpdateRejectsOtherTarget(t *testing.T) {
 	assert.False(t, capture.putSeen)
 }
 
-// TestPeopleUpdateInvalidFirstWeekDay rejects an unknown enum value.
-func TestPeopleUpdateInvalidFirstWeekDay(t *testing.T) {
-	capture := &profileCapture{}
-	server := setupProfileMockServer(t, "99999", capture)
-	app, _ := setupPeopleMockApp(t, server)
-
-	cmd := NewPeopleCmd()
-	err := executePeopleCommand(cmd, app, "update", "me", "--first-week-day", "Frday")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Equal(t, output.CodeUsage, e.Code)
-	assert.False(t, capture.putSeen)
-}
-
-// TestPeopleUpdateFirstWeekDay sends a valid enum through to the body.
-func TestPeopleUpdateFirstWeekDay(t *testing.T) {
+// TestPeopleUpdateOmitsPreferenceFields verifies week-start and time-format are
+// not part of this command's surface (they are account preferences).
+func TestPeopleUpdateOmitsPreferenceFields(t *testing.T) {
 	capture := &profileCapture{}
 	server := setupProfileMockServer(t, "99999", capture)
 	app, _ := setupPeopleMockApp(t, server)
 
 	cmd := NewPeopleCmd()
 	err := executePeopleCommand(cmd, app, "update", "me", "--first-week-day", "Monday")
-	require.NoError(t, err)
-	require.True(t, capture.putSeen)
-	assert.Equal(t, "Monday", capture.putBody["first_week_day"])
-}
-
-// TestPeopleUpdateInvalidTimeFormat rejects an unknown time-format value.
-func TestPeopleUpdateInvalidTimeFormat(t *testing.T) {
-	capture := &profileCapture{}
-	server := setupProfileMockServer(t, "99999", capture)
-	app, _ := setupPeopleMockApp(t, server)
-
-	cmd := NewPeopleCmd()
-	err := executePeopleCommand(cmd, app, "update", "me", "--time-format", "military")
-	require.Error(t, err)
-
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Equal(t, output.CodeUsage, e.Code)
+	require.Error(t, err, "unknown flag should be rejected")
 	assert.False(t, capture.putSeen)
-}
-
-// TestPeopleUpdateTimeFormat sends a valid time-format through to the body.
-func TestPeopleUpdateTimeFormat(t *testing.T) {
-	capture := &profileCapture{}
-	server := setupProfileMockServer(t, "99999", capture)
-	app, _ := setupPeopleMockApp(t, server)
-
-	cmd := NewPeopleCmd()
-	err := executePeopleCommand(cmd, app, "update", "me", "--time-format", "twenty_four_hour")
-	require.NoError(t, err)
-	require.True(t, capture.putSeen)
-	assert.Equal(t, "twenty_four_hour", capture.putBody["time_format"])
 }
 
 // TestPeopleOutOfOfficeEnable posts resolved dates to the OOO endpoint.
@@ -1147,14 +1108,17 @@ func TestPeopleUpdateReadBackFailureStillSucceeds(t *testing.T) {
 	require.NoError(t, err, "output: %s", buf.String())
 
 	var result struct {
-		OK   bool `json:"ok"`
-		Data struct {
+		OK     bool   `json:"ok"`
+		Notice string `json:"notice"`
+		Data   struct {
 			Updated bool `json:"updated"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
 	assert.True(t, result.OK)
 	assert.True(t, result.Data.Updated)
+	assert.Contains(t, result.Notice, "reading it back failed",
+		"the read-back failure must surface as a diagnostic notice")
 }
 
 // TestPeopleOutOfOfficeNaturalLanguageDates resolves relative dates before
@@ -1176,19 +1140,25 @@ func TestPeopleOutOfOfficeNaturalLanguageDates(t *testing.T) {
 	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, payload["end_date"])
 }
 
-// TestPeopleOutOfOfficeNoArgs returns a usage error with no flags.
-func TestPeopleOutOfOfficeNoArgs(t *testing.T) {
-	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+// TestPeopleOutOfOfficeShowStatus verifies a no-flag invocation reads current
+// status via GET rather than mutating.
+func TestPeopleOutOfOfficeShowStatus(t *testing.T) {
 	capture := &profileCapture{}
 	server := setupProfileMockServer(t, "99999", capture)
-	app, _ := setupPeopleMockApp(t, server)
+	app, buf := setupPeopleMockApp(t, server)
 
 	cmd := NewPeopleCmd()
 	err := executePeopleCommand(cmd, app, "out-of-office", "me")
-	require.Error(t, err)
+	require.NoError(t, err)
 
-	var e *output.Error
-	require.True(t, errors.As(err, &e))
-	assert.Equal(t, output.CodeUsage, e.Code)
-	assert.Empty(t, capture.oooMethod)
+	assert.Equal(t, http.MethodGet, capture.oooMethod)
+	assert.Equal(t, "/99999/people/12345/out_of_office.json", capture.oooPath)
+
+	var result struct {
+		Data struct {
+			Enabled bool `json:"enabled"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.True(t, result.Data.Enabled)
 }
