@@ -209,7 +209,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | drafts | 1 | `drafts` | ✅ | BC5 | - | list unpublished drafts across projects (server caps at 250). Bounded like the account-wide listings; publishing happens through the command for the draft's type |
 | my_notes | 2 | `notes` | ✅ | BC5 | - | show, set. A singleton per person, so no id and no listing. Pre-first-write the record does not exist yet and renders as empty rather than 404. `set` writes Markdown as HTML; attachments are out of scope |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, update (edit your own profile via `PUT /my/profile.json`), out-of-office show/set/clear (`GetOutOfOffice`/`EnableOutOfOffice`/`DisableOutOfOffice`), pingable, add, remove (BC5: `tagline` alias of `bio` on person output). Not covered: `GetMyPreferences`/`UpdateMyPreferences` (week-start, time-format) — preferences are a separate follow-up command |
+| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, update (edit your own profile via `PUT /my/profile.json`), out-of-office show/set/clear (`GetOutOfOffice`/`EnableOutOfOffice`/`DisableOutOfOffice`), pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
 | my_assignments | 6 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter), prioritize, deprioritize, reorder. `list` surfaces `priority_recording_id`, which is the only way to address a prioritized card-table step — it appears in no URL |
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
