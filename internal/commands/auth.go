@@ -345,7 +345,9 @@ This build tells you the hint instead of sending it to the server.`,
 			}
 
 			if who := verifier.who; who != nil {
-				_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
+				if who.PersonID != 0 {
+					_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
+				}
 				fmt.Fprintln(w, r.Data.Render("Logged in as: "+who.label()))
 			}
 
@@ -397,19 +399,31 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
 	}
 
-	// The effective account is what every later command will address, so
-	// it is what the token must be able to reach: the profile's binding,
-	// overridden by --account / BASECAMP_ACCOUNT_ID exactly as at runtime.
+	// The effective account and base URL are what every later command will
+	// address under this profile, so they are what the token must be
+	// verified for — and they must be the profile's own. A --account /
+	// BASECAMP_ACCOUNT_ID / BASECAMP_BASE_URL override that disagrees with
+	// the binding would verify the token for one place and store it for
+	// another.
 	account := app.Config.AccountID
 	existing := app.Config.Profiles[name]
 	var created *config.ProfileConfig
+	bindAccount := false
 	switch {
 	case existing == nil && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
 			"Pass --account <id> to create it alongside the imported token.")
 	case existing == nil:
 		created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
-	case existing.AccountID != "" && account != existing.AccountID:
+	case existing.BaseURL != "" && config.NormalizeBaseURL(existing.BaseURL) != config.NormalizeBaseURL(app.Config.BaseURL):
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to %s, not %s", name, existing.BaseURL, app.Config.BaseURL),
+			"Import into a different profile, or drop the BASECAMP_BASE_URL override.")
+	case existing.AccountID == "" && !accountGivenExplicitly(app):
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
+			"Pass --account <id> to bind it alongside the imported token.")
+	case existing.AccountID == "":
+		bindAccount = true
+	case !accountIDsEqual(account, existing.AccountID):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, account),
 			"Import into a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
 	}
@@ -432,20 +446,29 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		scope = who.Scope
 	}
 
-	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email); err != nil {
-		return err
-	}
-
+	// The profile entry goes first: an entry without a credential is a
+	// visible, harmless state (profile list shows it unauthenticated), where
+	// a stored secret without an entry would be an orphan.
 	isDefault := app.Config.DefaultProfile == name
-	if created != nil {
+	switch {
+	case created != nil:
 		created.Scope = scope
 		if isDefault, err = registerProfile(name, created); err != nil {
-			return fmt.Errorf("the token was stored for profile %q but the profile entry could not be written (rerun the import): %w", name, err)
+			return err
 		}
 		if app.Config.Profiles == nil {
 			app.Config.Profiles = make(map[string]*config.ProfileConfig)
 		}
 		app.Config.Profiles[name] = created
+	case bindAccount:
+		if err := bindProfileAccount(name, account); err != nil {
+			return err
+		}
+		existing.AccountID = account
+	}
+
+	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email); err != nil {
+		return fmt.Errorf("profile %q is registered but the token could not be stored (rerun the import): %w", name, err)
 	}
 
 	data := map[string]any{
@@ -525,13 +548,18 @@ func readTokenFromStdin(cmd *cobra.Command) (string, error) {
 		return "", output.ErrUsage(fmt.Sprintf("Token on stdin is longer than %d bytes; expected a single access token", maxTokenBytes))
 	}
 
-	token := strings.TrimSpace(string(data))
+	// A pipe delivers the token with one line ending (`op read`, `echo`, a
+	// CRLF file on Windows); that one is stripped and nothing else is —
+	// any other whitespace is not a token, and quietly trimming it would
+	// hide a malformed secret rather than the secret store's exact value.
+	token := strings.TrimSuffix(string(data), "\n")
+	token = strings.TrimSuffix(token, "\r")
 	if token == "" {
 		return "", output.ErrUsageHint("No token on stdin",
 			"Pipe it in from a secret store: `op read \"op://<vault>/<item>/credential\" | basecamp auth login --with-token -P <profile> --account <id>`.")
 	}
 	if strings.IndexFunc(token, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) >= 0 {
-		return "", output.ErrUsage("Token on stdin must be a single line with no whitespace or control characters")
+		return "", output.ErrUsage("Token on stdin must be a single line with no whitespace or control characters (one trailing line ending is allowed)")
 	}
 	return token, nil
 }
@@ -602,10 +630,12 @@ func (l *loginIdentity) label() string {
 // credential or from BASECAMP_TOKEN.
 //
 // Strict mode is the assertive login: the authorization endpoint must
-// answer, the effective account (when there is one) must be among the
-// accounts the token can reach, and the identity must match any
-// expectation. Non-strict mode keeps the informational "Logged in as" line
-// best-effort: a lookup failure leaves who nil and the login proceeds.
+// answer with an identity, the effective account (when there is one) must
+// be among the accounts the token can reach and its person record must
+// resolve, and the identity must match any expectation. Non-strict mode
+// keeps the informational "Logged in as" line best-effort: a lookup failure
+// leaves who nil or without a person, and the login proceeds. A scope the
+// CLI cannot store and a stated expectation are refused in either mode.
 type loginVerifier struct {
 	app            *appctx.App
 	expectIdentity int64
@@ -640,6 +670,9 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 	if who.Scope != "" && who.Scope != "read" && who.Scope != "full" {
 		return output.ErrAuth(fmt.Sprintf("The server reports scope %q for this credential; only read or full can be stored", richtext.SanitizeSingleLine(who.Scope)))
 	}
+	if v.strict && who.IdentityID <= 0 {
+		return output.ErrAuth("The authorization endpoint did not report an identity for the new credential; nothing was stored")
+	}
 	if v.expectIdentity != 0 && who.IdentityID != v.expectIdentity {
 		return output.ErrAuth(fmt.Sprintf("Authenticated as %s, not identity %d; nothing was stored", who.label(), v.expectIdentity))
 	}
@@ -650,10 +683,18 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 	// account there is a clearer answer than a 404 from the person lookup.
 	if v.account != "" {
 		if !authorizesAccount(info, v.account) {
+			if !v.strict {
+				v.who = who
+				return nil
+			}
 			return output.ErrAuth(fmt.Sprintf("%s cannot access account %s (authorized: %s); nothing was stored", who.label(), v.account, authorizedAccountIDs(info)))
 		}
 		person, err := client.ForAccount(v.account).People().Me(ctx)
 		if err != nil {
+			if !v.strict {
+				v.who = who
+				return nil
+			}
 			return output.ErrAuth(fmt.Sprintf("Could not verify %s on account %s: %v", who.label(), v.account, err))
 		}
 		who.PersonID = person.ID
@@ -671,7 +712,7 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 // account as reachable (and not expired) by the credential.
 func authorizesAccount(info *basecamp.AuthorizationInfo, account string) bool {
 	for _, acct := range info.Accounts {
-		if strconv.FormatInt(acct.ID, 10) == account && !acct.Expired {
+		if !acct.Expired && accountIDsEqual(strconv.FormatInt(acct.ID, 10), account) {
 			return true
 		}
 	}

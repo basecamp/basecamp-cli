@@ -437,6 +437,24 @@ func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err 
 	return isDefault, atomicWriteJSON(configPath, configData)
 }
 
+// bindProfileAccount sets the account on an existing profile entry in the
+// global config file, leaving every other field of the entry as it is.
+func bindProfileAccount(name, account string) error {
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	configData := make(map[string]any)
+	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+		_ = json.Unmarshal(data, &configData)
+	}
+
+	profilesMap, _ := configData["profiles"].(map[string]any)
+	entry, _ := profilesMap[name].(map[string]any)
+	if entry == nil {
+		return output.ErrUsage(fmt.Sprintf("Profile %q not found in %s", name, configPath))
+	}
+	entry["account_id"] = account
+	return atomicWriteJSON(configPath, configData)
+}
+
 // unregisterProfile removes a profile entry from the global config file,
 // clearing default_profile when it named this profile. Credentials are the
 // caller's to remove.

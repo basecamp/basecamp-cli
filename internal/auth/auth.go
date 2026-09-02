@@ -875,8 +875,10 @@ const oauthIssuerEnv = "BASECAMP_OAUTH_ISSUER"
 // issuer origin, deriving the endpoints Basecamp mounts under /oauth. The
 // issuer is operator-supplied environment, so it passes the same endpoint
 // checks a discovery document would, and the derived endpoints are checked
-// again by loginDevice before any POST. The value is never echoed: like a
-// base URL, it can carry userinfo or a query string.
+// again by loginDevice before any POST. A rejected value is never echoed
+// (like a base URL, it can carry userinfo or a query string); the accepted
+// one is announced, reduced to one line, so the operator sees what was
+// pinned — as the discovered issuer is.
 func pinnedIssuerDiscovery(issuer string, log func(string)) (*discovery, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	u, err := url.Parse(issuer)

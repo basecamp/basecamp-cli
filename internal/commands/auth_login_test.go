@@ -600,12 +600,16 @@ func TestAuthLoginWithTokenRejectsBadStdin(t *testing.T) {
 		in   string
 		want string
 	}{
-		"empty":        {"", "No token on stdin"},
-		"whitespace":   {"  \n\t", "No token on stdin"},
-		"two lines":    {"bc_at_one\nbc_at_two\n", "single line"},
-		"inner space":  {"bc_at one", "single line"},
-		"control char": {"bc_at\x1bone", "single line"},
-		"oversized":    {strings.Repeat("x", maxTokenBytes+1), "longer than"},
+		"empty":                 {"", "No token on stdin"},
+		"bare newline":          {"\n", "No token on stdin"},
+		"whitespace":            {"  \n\t", "single line"},
+		"leading space":         {" bc_at_secret", "single line"},
+		"trailing space":        {"bc_at_secret ", "single line"},
+		"two trailing newlines": {"bc_at_secret\n\n", "single line"},
+		"two lines":             {"bc_at_one\nbc_at_two\n", "single line"},
+		"inner space":           {"bc_at one", "single line"},
+		"control char":          {"bc_at\x1bone", "single line"},
+		"oversized":             {strings.Repeat("x", maxTokenBytes+1), "longer than"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv := startLoginIdentityServer(t, "bc_at_secret")
@@ -804,4 +808,119 @@ func deviceGrantThen(t *testing.T, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+func TestAuthLoginWithTokenAcceptsOneTrailingLineEnding(t *testing.T) {
+	for name, in := range map[string]string{"LF": "bc_at_secret\n", "CRLF": "bc_at_secret\r\n", "none": "bc_at_secret"} {
+		t.Run(name, func(t *testing.T) {
+			srv := startLoginIdentityServer(t, "bc_at_secret")
+			app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+			withAccount(app, "999", "flag")
+			out, err := runLogin(t, app, strings.NewReader(in), "--with-token")
+			require.NoError(t, err, out)
+			for _, bearer := range srv.seenBearers() {
+				assert.Equal(t, "bc_at_secret", bearer)
+			}
+		})
+	}
+}
+
+func TestAuthLoginWithTokenFailsClosedWithoutAnIdentity(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	srv.identityID = 0
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not report an identity")
+	assertNothingStored(t, app, "bot")
+}
+
+func TestAuthLoginWithTokenBindsAnUnboundExistingProfile(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	cfg := &config.Config{
+		ActiveProfile: "bot",
+		Profiles:      map[string]*config.ProfileConfig{"bot": {ProjectID: "42"}},
+	}
+	app, _ := loginTestApp(t, srv, cfg)
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(config.GlobalConfigDir(), "config.json"),
+		[]byte(`{"profiles":{"bot":{"base_url":"`+srv.srv.URL+`","project_id":"42"}}}`), 0o600))
+
+	t.Run("without an explicit account the import is refused", func(t *testing.T) {
+		withAccount(app, "999", "global")
+		_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `Profile "bot" has no account`)
+		assert.Empty(t, srv.seenBearers())
+	})
+
+	t.Run("an explicit account is bound alongside the token", func(t *testing.T) {
+		withAccount(app, "999", "flag")
+		out, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+		require.NoError(t, err, out)
+		bot := readGlobalConfig(t)["profiles"].(map[string]any)["bot"].(map[string]any)
+		assert.Equal(t, "999", bot["account_id"], "the verified account is persisted on the profile")
+		assert.Equal(t, "42", bot["project_id"], "the rest of the entry is preserved")
+		assert.Equal(t, "999", app.Config.Profiles["bot"].AccountID)
+	})
+}
+
+func TestAuthLoginWithTokenRejectsBaseURLOverrideOnExistingProfile(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	cfg := &config.Config{
+		ActiveProfile: "bot",
+		Profiles:      map[string]*config.ProfileConfig{"bot": {BaseURL: "https://staging.example/", AccountID: "999"}},
+	}
+	// loginTestApp points the effective base URL at the identity server,
+	// which is what a BASECAMP_BASE_URL override would do.
+	app, _ := loginTestApp(t, srv, cfg)
+	withAccount(app, "999", "profile")
+
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `Profile "bot" is bound to https://staging.example/, not `+srv.srv.URL)
+	assert.Empty(t, srv.seenBearers())
+	_, loadErr := app.Auth.GetStore().Load("profile:bot")
+	assert.Error(t, loadErr)
+}
+
+func TestAuthLoginWithTokenComparesAccountsNumerically(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	cfg := &config.Config{
+		ActiveProfile: "bot",
+		Profiles:      map[string]*config.ProfileConfig{"bot": {AccountID: "0999"}},
+	}
+	app, _ := loginTestApp(t, srv, cfg)
+	withAccount(app, "999", "flag")
+
+	out, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.NoError(t, err, out)
+}
+
+// TestAuthLoginDeviceFlowWithoutExpectationKeepsBestEffortIdentity: an
+// ordinary login must not be lost to the informational lookups. When the
+// configured account is not one the token reaches, the credential is still
+// stored, the identity line falls back to the authorization document, and
+// no person id is fabricated.
+func TestAuthLoginDeviceFlowWithoutExpectationKeepsBestEffortIdentity(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	srv.accounts = []int64{111}
+	srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot", Profiles: map[string]*config.ProfileConfig{"bot": {AccountID: "999"}}})
+	withAccount(app, "999", "profile")
+	t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	out, err := runLogin(t, app, strings.NewReader(""), "--device-code")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "Authentication successful")
+	assert.Contains(t, out, "Logged in as: Claw Dito <identity@example.com> (identity 28142355)")
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok", creds.AccessToken)
+	assert.Empty(t, creds.UserID, "no person was resolved, so none is recorded")
 }
