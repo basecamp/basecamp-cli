@@ -33,6 +33,8 @@ ARG basecamp boosts create 01 <content>
 ARG basecamp boosts delete 00 <boost-id|url>
 ARG basecamp boosts list 00 <id|url>
 ARG basecamp boosts show 00 <boost-id|url>
+ARG basecamp bubble-up add 00 <id|url>
+ARG basecamp bubble-up remove 00 <id|url>
 ARG basecamp calendars show 00 <id|url>
 ARG basecamp calendars update 00 <id|url>
 ARG basecamp calendars update 01 <color>
@@ -536,6 +538,9 @@ CMD basecamp boosts create
 CMD basecamp boosts delete
 CMD basecamp boosts list
 CMD basecamp boosts show
+CMD basecamp bubble-up
+CMD basecamp bubble-up add
+CMD basecamp bubble-up remove
 CMD basecamp calendars
 CMD basecamp calendars show
 CMD basecamp calendars update
@@ -2483,6 +2488,70 @@ FLAG basecamp boosts show --stats type=bool
 FLAG basecamp boosts show --styled type=bool
 FLAG basecamp boosts show --todolist type=string
 FLAG basecamp boosts show --verbose type=count
+FLAG basecamp bubble-up --account type=string
+FLAG basecamp bubble-up --agent type=bool
+FLAG basecamp bubble-up --cache-dir type=string
+FLAG basecamp bubble-up --count type=bool
+FLAG basecamp bubble-up --help type=bool
+FLAG basecamp bubble-up --hints type=bool
+FLAG basecamp bubble-up --ids-only type=bool
+FLAG basecamp bubble-up --in type=string
+FLAG basecamp bubble-up --jq type=string
+FLAG basecamp bubble-up --json type=bool
+FLAG basecamp bubble-up --markdown type=bool
+FLAG basecamp bubble-up --md type=bool
+FLAG basecamp bubble-up --no-hints type=bool
+FLAG basecamp bubble-up --no-stats type=bool
+FLAG basecamp bubble-up --profile type=string
+FLAG basecamp bubble-up --project type=string
+FLAG basecamp bubble-up --quiet type=bool
+FLAG basecamp bubble-up --stats type=bool
+FLAG basecamp bubble-up --styled type=bool
+FLAG basecamp bubble-up --todolist type=string
+FLAG basecamp bubble-up --verbose type=count
+FLAG basecamp bubble-up add --account type=string
+FLAG basecamp bubble-up add --agent type=bool
+FLAG basecamp bubble-up add --at type=string
+FLAG basecamp bubble-up add --cache-dir type=string
+FLAG basecamp bubble-up add --count type=bool
+FLAG basecamp bubble-up add --help type=bool
+FLAG basecamp bubble-up add --hints type=bool
+FLAG basecamp bubble-up add --ids-only type=bool
+FLAG basecamp bubble-up add --in type=string
+FLAG basecamp bubble-up add --jq type=string
+FLAG basecamp bubble-up add --json type=bool
+FLAG basecamp bubble-up add --markdown type=bool
+FLAG basecamp bubble-up add --md type=bool
+FLAG basecamp bubble-up add --no-hints type=bool
+FLAG basecamp bubble-up add --no-stats type=bool
+FLAG basecamp bubble-up add --profile type=string
+FLAG basecamp bubble-up add --project type=string
+FLAG basecamp bubble-up add --quiet type=bool
+FLAG basecamp bubble-up add --stats type=bool
+FLAG basecamp bubble-up add --styled type=bool
+FLAG basecamp bubble-up add --todolist type=string
+FLAG basecamp bubble-up add --verbose type=count
+FLAG basecamp bubble-up remove --account type=string
+FLAG basecamp bubble-up remove --agent type=bool
+FLAG basecamp bubble-up remove --cache-dir type=string
+FLAG basecamp bubble-up remove --count type=bool
+FLAG basecamp bubble-up remove --help type=bool
+FLAG basecamp bubble-up remove --hints type=bool
+FLAG basecamp bubble-up remove --ids-only type=bool
+FLAG basecamp bubble-up remove --in type=string
+FLAG basecamp bubble-up remove --jq type=string
+FLAG basecamp bubble-up remove --json type=bool
+FLAG basecamp bubble-up remove --markdown type=bool
+FLAG basecamp bubble-up remove --md type=bool
+FLAG basecamp bubble-up remove --no-hints type=bool
+FLAG basecamp bubble-up remove --no-stats type=bool
+FLAG basecamp bubble-up remove --profile type=string
+FLAG basecamp bubble-up remove --project type=string
+FLAG basecamp bubble-up remove --quiet type=bool
+FLAG basecamp bubble-up remove --stats type=bool
+FLAG basecamp bubble-up remove --styled type=bool
+FLAG basecamp bubble-up remove --todolist type=string
+FLAG basecamp bubble-up remove --verbose type=count
 FLAG basecamp calendars --account type=string
 FLAG basecamp calendars --agent type=bool
 FLAG basecamp calendars --cache-dir type=string
@@ -17826,6 +17895,9 @@ SUB basecamp boosts create
 SUB basecamp boosts delete
 SUB basecamp boosts list
 SUB basecamp boosts show
+SUB basecamp bubble-up
+SUB basecamp bubble-up add
+SUB basecamp bubble-up remove
 SUB basecamp calendars
 SUB basecamp calendars show
 SUB basecamp calendars update

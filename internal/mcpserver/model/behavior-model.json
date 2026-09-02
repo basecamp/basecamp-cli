@@ -62,6 +62,18 @@
         ]
       }
     },
+    "CreateBubbleUp": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "CreateCampfireLine": {
       "retry": {
         "max": 2,
@@ -427,6 +439,18 @@
       }
     },
     "DeleteBoost": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteBubbleUp": {
       "idempotent": true,
       "retry": {
         "max": 3,
@@ -2204,6 +2228,18 @@
         ]
       }
     },
+    "ListRecentProjects": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "ListRecordingBoosts": {
       "readonly": true,
       "pagination": {
@@ -2449,6 +2485,18 @@
         ]
       }
     },
+    "RecordProjectVisit": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "RemoveAccountLogo": {
       "idempotent": true,
       "retry": {
@@ -2648,6 +2696,18 @@
         ]
       }
     },
+    "SpotlightRecording": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "Subscribe": {
       "idempotent": true,
       "retry": {
@@ -2745,6 +2805,18 @@
       }
     },
     "UnpinMessage": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UnspotlightRecording": {
       "idempotent": true,
       "retry": {
         "max": 3,

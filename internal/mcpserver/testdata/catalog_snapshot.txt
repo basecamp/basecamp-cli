@@ -9,6 +9,8 @@ ACTIONS (RO = read-only):
 - create_project: Create a new project
 - get_project (RO): Get a single project by id
 - list_projects (RO, paginated): List projects (active by default; optionally archived/trashed)
+- list_recent_projects (RO): List the projects the current user has most recently visited, most recent visit first
+- record_project_visit: Record that the current user visited a project, moving it to the front of ListRecentProjects (returns 204 No Content)
 - trash_project: Trash a project (returns 204 No Content)
 - unarchive_project: Restore a project to active status from trash as well as from the archive (returns 204 No Content)
 - update_project: Update an existing project
@@ -254,8 +256,10 @@ ACTIONS (RO = read-only):
 - reposition_tool: Reposition a tool on the project dock
 - resume_question: Resume a paused check-in question (resumes sending reminders)
 - search (RO, paginated): Search for content across the account
+- spotlight_recording: Put a recording's card in the spotlight area on its project or template home page
 - trash_recording: Trash a recording
 - unarchive_recording: Unarchive a recording (restore to active status)
+- unspotlight_recording: Remove a recording from the spotlight area
 - update_answer: Update an existing answer
 - update_lineup_marker: Update an existing lineup marker
 - update_question: Update an existing question
@@ -332,15 +336,17 @@ ACTIONS (RO = read-only):
 - list_forwards (RO, paginated): List all forwards in an inbox
 
 == basecamp_account
-Account info and your personal surface: gauges and needles, my assignments and priorities, notifications and bubble-ups, bookmarks, personal note, and drafts.
+Account info and your personal surface: gauges and needles, my assignments and priorities, notifications and bubble-ups, bookmarks, bubbling recordings up, personal note, and drafts.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
 - create_bookmark: Bookmark a recording for the current user
+- create_bubble_up: Bubble up a recording for the current user, resurfacing it in the current user's readings (the BC5 successor to "save")
 - create_gauge_needle: Create a gauge needle (progress update) for a project
 - delete_bookmark: Remove the current user's bookmark from a recording (returns 204 No Content)
+- delete_bubble_up: Remove the current user's bubble-up from a recording (returns 204 No Content)
 - deprioritize_assignment: Remove a recording from Up Next (returns 204 No Content)
 - destroy_gauge_needle: Destroy a gauge needle
 - get_account (RO): Get the account for the current access token

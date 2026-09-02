@@ -61,7 +61,7 @@ func TestCatalogExcludesBinaryUploads(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 247, total, "served operation count")
+	assert.Equal(t, 253, total, "served operation count")
 }
 
 // TestCatalogIsAccountScoped pins the rescope: the CLI's account-scoped SDK
