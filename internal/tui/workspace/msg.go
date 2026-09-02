@@ -14,6 +14,14 @@ func fail(err error) tea.Cmd {
 	return func() tea.Msg { return errMsg{err: err} }
 }
 
+// closeScreenMsg pops the screen that sent it. A screen cannot pop itself — the
+// stack belongs to the model.
+type closeScreenMsg struct{}
+
+func closeScreen() tea.Cmd {
+	return func() tea.Msg { return closeScreenMsg{} }
+}
+
 // ctrlCResetMsg forgets a first ctrl+c that was not followed by a second.
 type ctrlCResetMsg struct{}
 

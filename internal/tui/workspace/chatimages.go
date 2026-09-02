@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -58,27 +59,20 @@ const (
 // made, which is what a budget counting requests needs to know.
 var errImageRefused = errors.New("image URL refused")
 
-// wantedImage is one picture worth fetching: the line it belongs to, and where it
-// comes from.
-type wantedImage struct {
-	line int64
-	url  string
-}
-
-// chatImagesMsg is the image data that arrived, by the line it belongs to. A line
-// whose fetch failed is simply not in it: the message already says what the file
-// was called, which is what it said before images were drawn at all.
+// chatImagesMsg is the image data that arrived, by the address it came from. A
+// picture whose fetch failed is simply not in it: the message already says what
+// the file was called, which is what it said before images were drawn at all.
 type chatImagesMsg struct {
-	images map[int64][]byte
+	images map[string][]byte
 }
 
-// wantedImages picks the pictures out of a page of lines. An upload line carries
-// one attachment, so the first image on a line is its image.
-func wantedImages(lines []chatLine) []wantedImage {
-	wanted := make([]wantedImage, 0, len(lines))
+// wantedImages picks the addresses of the pictures on a page of lines. An upload
+// line carries one attachment, so the first image on a line is its image.
+func wantedImages(lines []chatLine) []string {
+	wanted := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if line.imageURL != "" && line.image.Content == "" && line.imageData == nil {
-			wanted = append(wanted, wantedImage{line: line.id, url: line.imageURL})
+			wanted = append(wanted, line.imageURL)
 		}
 	}
 	return wanted
@@ -103,7 +97,13 @@ func imageAttachment(line basecamp.CampfireLine) string {
 // imageBudget is what one chat screen may spend on pictures. One per screen, so a
 // reader walking a long way back through a busy chat stops fetching rather than
 // filling their memory with it.
+//
+// Guarded, because a budget is counted down inside commands and Bubble Tea runs
+// those on their own goroutines. Two reads over one budget corrupted the map of
+// what had been asked for, which lost pictures — and being a race, it lost
+// different ones each time and none of them on the next visit.
 type imageBudget struct {
+	guard          sync.Mutex
 	remaining      int
 	remainingBytes int64
 	seen           map[string]struct{}
@@ -120,18 +120,54 @@ func newImageBudget() *imageBudget {
 // spent reports whether there is nothing left to spend, so a caller can skip the
 // command rather than start one that will do nothing.
 func (b *imageBudget) spent() bool {
-	return b == nil || b.remaining <= 0 || b.remainingBytes <= 0
+	if b == nil {
+		return true
+	}
+	b.guard.Lock()
+	defer b.guard.Unlock()
+	return b.remaining <= 0 || b.remainingBytes <= 0
 }
 
 // admit reports whether a URL is one the budget will request: not asked for before.
 // A fragment never goes on the wire, so two URLs differing only there are one
 // request and one picture.
 func (b *imageBudget) admit(source string) bool {
+	b.guard.Lock()
+	defer b.guard.Unlock()
+
 	request, _, _ := strings.Cut(source, "#")
 	if _, seen := b.seen[request]; seen {
 		return false
 	}
 	b.seen[request] = struct{}{}
+	b.remaining--
+	return true
+}
+
+// refund puts back what a refusal did not spend: a URL pointing somewhere this
+// will not read from was never a request.
+func (b *imageBudget) refund() {
+	b.guard.Lock()
+	defer b.guard.Unlock()
+	b.remaining++
+}
+
+// left is what one picture may cost, which is whatever the budget has minus
+// nothing: a caller reads it to tell the reader when to stop.
+func (b *imageBudget) left() int64 {
+	b.guard.Lock()
+	defer b.guard.Unlock()
+	return b.remainingBytes
+}
+
+// charge takes the bytes a picture cost, and reports whether it fitted.
+func (b *imageBudget) charge(cost int64) bool {
+	b.guard.Lock()
+	defer b.guard.Unlock()
+	if cost > b.remainingBytes {
+		return false
+	}
+	b.remainingBytes -= cost
 	return true
 }
 
@@ -142,35 +178,33 @@ func (b *imageBudget) admit(source string) bool {
 // URLs, and one that fails is still a request it caused. A refusal is not a
 // request, so it costs nothing — a run of URLs pointing somewhere else cannot use
 // up the count and leave the real pictures unfetched.
-func (b *imageBudget) fetch(ctx context.Context, read imageReader, wanted []wantedImage) map[int64][]byte {
+func (b *imageBudget) fetch(ctx context.Context, read imageReader, wanted []string) map[string][]byte {
 	if read == nil || len(wanted) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, imageFetchDeadline)
 	defer cancel()
 
-	fetched := map[int64][]byte{}
-	for _, want := range wanted {
+	fetched := map[string][]byte{}
+	for _, source := range wanted {
 		if b.spent() || ctx.Err() != nil {
 			break
 		}
-		if !b.admit(want.url) {
+		if !b.admit(source) {
 			continue
 		}
-		b.remaining--
 
 		// The reader is told what is left, so an image that would not fit is
 		// stopped on the wire rather than downloaded whole and then discarded.
-		data, err := read(ctx, want.url, min(b.remainingBytes, maxImageBytes))
+		data, err := read(ctx, source, min(b.left(), maxImageBytes))
 		if errors.Is(err, errImageRefused) {
-			b.remaining++
+			b.refund()
 			continue
 		}
-		if err != nil || len(data) == 0 || int64(len(data)) > b.remainingBytes {
+		if err != nil || len(data) == 0 || !b.charge(int64(len(data))) {
 			continue
 		}
-		b.remainingBytes -= int64(len(data))
-		fetched[want.line] = data
+		fetched[source] = data
 	}
 	return fetched
 }
@@ -181,12 +215,30 @@ type imageReader func(ctx context.Context, source string, maxBytes int64) ([]byt
 
 // loadChatImages fetches what a page of lines carries, and answers with whatever
 // arrived. It answers even with nothing, so the screen can stop waiting.
-func loadChatImages(ctx context.Context, app *appctx.App, budget *imageBudget, wanted []wantedImage) tea.Cmd {
+func loadChatImages(ctx context.Context, app *appctx.App, budget *imageBudget, wanted []string) tea.Cmd {
 	return func() tea.Msg {
 		if err := app.RequireAccount(); err != nil {
 			return chatImagesMsg{}
 		}
 		return chatImagesMsg{images: budget.fetch(ctx, accountImageReader(app), wanted)}
+	}
+}
+
+// loadMessageImage reads one of the pictures inside a message's body.
+//
+// One at a time, rather than a page at a time the way a chat reads them: a
+// message can carry twenty screenshots, and a reader watching them arrive one by
+// one is waiting for the next picture instead of for all of them. The screen asks
+// for the next when this one lands, so the budget stays single-threaded.
+func loadMessageImage(ctx context.Context, app *appctx.App, budget *imageBudget, source string) tea.Cmd {
+	return func() tea.Msg {
+		if err := app.RequireAccount(); err != nil {
+			return messageImageMsg{source: source}
+		}
+		return messageImageMsg{
+			source: source,
+			data:   budget.fetch(ctx, accountImageReader(app), []string{source})[source],
+		}
 	}
 }
 

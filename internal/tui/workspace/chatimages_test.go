@@ -134,9 +134,9 @@ func TestTheImageBudgetStopsAtItsCount(t *testing.T) {
 		return data, nil
 	}
 
-	wanted := make([]wantedImage, 0, maxImagesPerScreen*2)
+	wanted := make([]string, 0, maxImagesPerScreen*2)
 	for index := range maxImagesPerScreen * 2 {
-		wanted = append(wanted, wantedImage{line: int64(index), url: fmt.Sprintf("https://x/%d.png", index)})
+		wanted = append(wanted, fmt.Sprintf("https://x/%d.png", index))
 	}
 
 	got := budget.fetch(context.Background(), read, wanted)
@@ -156,13 +156,13 @@ func TestTheImageBudgetStopsAtItsBytes(t *testing.T) {
 		return bytes.Repeat([]byte("x"), 60), nil
 	}
 
-	got := budget.fetch(context.Background(), read, []wantedImage{
-		{line: 1, url: "https://x/1.png"},
-		{line: 2, url: "https://x/2.png"},
+	got := budget.fetch(context.Background(), read, []string{
+		"https://x/1.png",
+		"https://x/2.png",
 	})
 
 	assert.Len(t, got, 1, "the second picture did not fit and was kept anyway")
-	assert.Contains(t, got, int64(1))
+	assert.Contains(t, got, "https://x/1.png")
 	assert.Equal(t, int64(40), budget.remainingBytes, "the first picture was not charged for")
 }
 
@@ -175,9 +175,9 @@ func TestTheSamePictureIsReadOnce(t *testing.T) {
 		return testImageBytes(t, 4, 4), nil
 	}
 
-	budget.fetch(context.Background(), read, []wantedImage{
-		{line: 1, url: "https://x/1.png"},
-		{line: 2, url: "https://x/1.png#again"},
+	budget.fetch(context.Background(), read, []string{
+		"https://x/1.png",
+		"https://x/1.png#again",
 	})
 
 	assert.Equal(t, 1, asked)
@@ -194,15 +194,15 @@ func TestARefusedURLCostsNothing(t *testing.T) {
 		return testImageBytes(t, 4, 4), nil
 	}
 
-	wanted := make([]wantedImage, 0, maxImagesPerScreen+1)
+	wanted := make([]string, 0, maxImagesPerScreen+1)
 	for index := range maxImagesPerScreen {
-		wanted = append(wanted, wantedImage{line: int64(index), url: fmt.Sprintf("https://elsewhere/%d.png", index)})
+		wanted = append(wanted, fmt.Sprintf("https://elsewhere/%d.png", index))
 	}
-	wanted = append(wanted, wantedImage{line: 99, url: "https://x/real.png"})
+	wanted = append(wanted, "https://x/real.png")
 
 	got := budget.fetch(context.Background(), read, wanted)
 	assert.Len(t, got, 1)
-	assert.Contains(t, got, int64(99))
+	assert.Contains(t, got, "https://x/real.png")
 }
 
 // A read that fails is still a request the conversation caused, and what is on
@@ -213,7 +213,7 @@ func TestAFailedReadIsStillCharged(t *testing.T) {
 		return nil, errors.New("no route to host")
 	}
 
-	got := budget.fetch(context.Background(), read, []wantedImage{{line: 1, url: "https://x/1.png"}})
+	got := budget.fetch(context.Background(), read, []string{"https://x/1.png"})
 	assert.Empty(t, got)
 	assert.Equal(t, maxImagesPerScreen-1, budget.remaining)
 }
@@ -233,7 +233,7 @@ func withPicture(t *testing.T, cols, rows, width int) (model, *chatScreen) {
 	})
 	m.relayout()
 
-	cmd := c.drawImages(map[int64][]byte{500: testImageBytes(t, cols*10, rows*20)})
+	cmd := c.drawImages(map[string][]byte{"https://3.basecampapi.com/1/blobs/a/download/image.png": testImageBytes(t, cols*10, rows*20)})
 	require.NotNil(t, cmd, "the pixels were never sent to the terminal")
 	return place(t, m, c), c
 }
@@ -266,7 +266,7 @@ func TestThePixelsGoOutBeforeTheCells(t *testing.T) {
 	})
 	m.relayout()
 
-	require.NotNil(t, c.drawImages(map[int64][]byte{500: testImageBytes(t, 200, 100)}))
+	require.NotNil(t, c.drawImages(map[string][]byte{"https://3.basecampapi.com/1/blobs/a/download/image.png": testImageBytes(t, 200, 100)}))
 	assert.Empty(t, c.lines[len(c.lines)-1].image.Content,
 		"the cells went on screen in the same frame the pixels were sent in")
 	assert.NotContains(t, ansi.Strip(c.View()), "▒")
@@ -330,7 +330,7 @@ func TestAPictureIsReadOnce(t *testing.T) {
 
 	// Charged when the data lands, not when the cells do: the pixels are still on
 	// their way out at this point, and nothing should ask for them again meanwhile.
-	c.drawImages(map[int64][]byte{500: testImageBytes(t, 40, 40)})
+	c.drawImages(map[string][]byte{"https://3.basecampapi.com/1/blobs/a/download/image.png": testImageBytes(t, 40, 40)})
 	assert.Empty(t, wantedImages(c.lines), "a picture already read was asked for again")
 	assert.Nil(t, c.readImages())
 }

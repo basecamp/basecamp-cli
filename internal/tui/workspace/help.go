@@ -40,6 +40,12 @@ type helpBar struct {
 	styles   *tui.Styles
 	hidden   bool
 	notice   string
+
+	// urgentKey is the one binding drawn in the error color. The bar is
+	// deliberately quiet — it sits under every screen and must not compete with
+	// them — so this is for a binding that has stopped being a reminder and
+	// become a question: a first ctrl+c waiting on a second.
+	urgentKey string
 }
 
 func newHelpBar(styles *tui.Styles) helpBar {
@@ -48,6 +54,14 @@ func newHelpBar(styles *tui.Styles) helpBar {
 
 func (h *helpBar) setWidth(width int) {
 	h.width = width
+}
+
+func (h *helpBar) setUrgent(urgent bool, key string) {
+	if urgent {
+		h.urgentKey = key
+	} else {
+		h.urgentKey = ""
+	}
 }
 
 func (h *helpBar) setBindings(bindings []helpBinding) {
@@ -96,7 +110,12 @@ func (h helpBar) view() string {
 	lineWidth := 0
 
 	for _, binding := range h.bindings {
-		item := keyStyle.Render(binding.key) + " " + descStyle.Render(binding.desc)
+		key, desc := keyStyle, descStyle
+		if h.urgentKey != "" && binding.key == h.urgentKey {
+			key = key.Foreground(h.styles.Theme().Error)
+			desc = desc.Foreground(h.styles.Theme().Error)
+		}
+		item := key.Render(binding.key) + " " + desc.Render(binding.desc)
 		itemWidth := tui.DisplayWidth(item)
 
 		if h.width > 0 && itemWidth > h.width {

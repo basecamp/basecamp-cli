@@ -224,7 +224,8 @@ func (p *projectScreen) open() tea.Cmd {
 		return func() tea.Msg { return openProjectActivityMsg{project: open} }
 	case spotProjectTool:
 		chosen := p.tools[index]
-		return func() tea.Msg { return openToolMsg{tool: chosen} }
+		open := p.project
+		return func() tea.Msg { return openToolMsg{tool: chosen, inside: open} }
 	case spotProjectLink:
 		if index < len(p.links) {
 			return p.openLink(p.links[index])
@@ -244,7 +245,12 @@ func (p *projectScreen) openLink(chosen link) tea.Cmd {
 
 // openToolMsg asks the model for the screen behind one of the dock's tools, and
 // openProjectActivityMsg for the project's whole feed.
-type openToolMsg struct{ tool tool }
+// inside is the project the tool hangs off. A board needs it for the project's
+// message categories, which are a project's rather than a board's.
+type openToolMsg struct {
+	tool   tool
+	inside project
+}
 
 type openProjectActivityMsg struct{ project project }
 

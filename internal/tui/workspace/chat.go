@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -94,9 +93,10 @@ type chatScreen struct {
 	stalled bool
 	notice  string
 
-	// The composer, and whether the reader is typing in it. A text area rather
-	// than a field: a message can be a paragraph, and Markdown needs the lines.
-	compose textarea.Model
+	// The composer, and whether the reader is typing in it. It grows with what is
+	// typed and stops at composerMaxRows, so a short message takes one line and
+	// the transcript keeps the rest of the screen.
+	compose composer
 	writing bool
 	sending bool
 
@@ -116,51 +116,17 @@ type chatScreen struct {
 }
 
 func newChat(ctx *Context, open tool) *chatScreen {
+	compose := newComposer("Write a message… Markdown works here")
+	compose.growWith(composerMaxRows)
+
 	return &chatScreen{
 		ctx:     ctx,
 		tool:    open,
-		compose: newComposer(),
+		compose: compose,
 		images:  tui.NewImageRenderer(),
 		budget:  newImageBudget(),
 		now:     time.Now,
 	}
-}
-
-// newComposer is the field a message is written in. It grows with what is typed
-// and stops growing at composerMaxRows, so a short message takes one line and the
-// transcript keeps the rest of the screen.
-func newComposer() textarea.Model {
-	compose := textarea.New()
-	compose.Prompt = ""
-	compose.ShowLineNumbers = false
-	compose.Placeholder = "Write a message… Markdown works here"
-	compose.DynamicHeight = true
-	compose.MinHeight = 1
-	compose.MaxHeight = composerMaxRows
-	compose.SetHeight(1)
-	compose.SetStyles(composerStyles())
-	return compose
-}
-
-// composerStyles leave the text alone. What is being typed is Markdown, and
-// styleInlineMarkdown is what says so — a band under the cursor line or a color on
-// the text itself would fight it. The cursor says where the cursor is.
-func composerStyles() textarea.Styles {
-	plain := lipgloss.NewStyle()
-	muted := lipgloss.NewStyle().Faint(true)
-
-	focused := textarea.StyleState{
-		Base:             plain,
-		Text:             plain,
-		LineNumber:       muted,
-		CursorLineNumber: plain,
-		CursorLine:       plain,
-		EndOfBuffer:      muted,
-		Placeholder:      muted,
-		Prompt:           plain,
-		Selection:        lipgloss.NewStyle().Reverse(true),
-	}
-	return textarea.Styles{Focused: focused, Blurred: focused}
 }
 
 func (c *chatScreen) Init() tea.Cmd {
@@ -224,9 +190,7 @@ func (c *chatScreen) Update(msg tea.Msg) (tea.Cmd, bool) {
 	}
 
 	if c.writing {
-		compose, cmd := c.compose.Update(msg)
-		c.compose = compose
-		return cmd, false
+		return c.compose.edit(msg), false
 	}
 	return nil, false
 }
@@ -298,13 +262,13 @@ func (c *chatScreen) readImages() tea.Cmd {
 // a resize: the cells are what the terminal matches the image against, so a
 // narrower window leaves the picture out rather than showing part of one — see
 // lineRows.
-func (c *chatScreen) drawImages(arrived map[int64][]byte) tea.Cmd {
+func (c *chatScreen) drawImages(arrived map[string][]byte) tea.Cmd {
 	drawn := make(map[int64]tui.RenderedImage, len(arrived))
 	var pixels strings.Builder
 
 	for index, line := range c.lines {
-		data, ok := arrived[line.id]
-		if !ok || len(data) == 0 {
+		data, ok := arrived[line.imageURL]
+		if !ok || len(data) == 0 || line.imageData != nil {
 			continue
 		}
 		rendered := c.images.Render(data, tui.NextImageID(), c.bodyWidth())
@@ -403,9 +367,7 @@ func (c *chatScreen) handleWritingKey(msg tea.KeyPressMsg) tea.Cmd {
 		return c.send()
 	}
 
-	compose, cmd := c.compose.Update(msg)
-	c.compose = compose
-	return cmd
+	return c.compose.edit(msg)
 }
 
 // send posts what was typed. The composer stays open: a chat is a conversation,
@@ -454,7 +416,7 @@ func (c *chatScreen) readMore() tea.Cmd {
 // taken its rows. The composer grows with what is being typed, so this shrinks as
 // a longer message is written.
 func (c *chatScreen) transcriptHeight() int {
-	return max(c.height-len(c.composer()), 1)
+	return max(c.height-len(c.composerRows()), 1)
 }
 
 func (c *chatScreen) View() string {
@@ -473,7 +435,7 @@ func (c *chatScreen) View() string {
 		lines = append(lines, "")
 	}
 	lines = append(lines, rows[start:end]...)
-	return strings.Join(append(lines, c.composer()...), "\n")
+	return strings.Join(append(lines, c.composerRows()...), "\n")
 }
 
 // rows is the whole transcript as drawn lines: a rule for each new day, then
@@ -588,13 +550,10 @@ func (c *chatScreen) dayHeading(at, now time.Time) string {
 	return ruledHeading(styles, dayLabel(at, now), heading, c.width, false)
 }
 
-// composer is the rule and the rows the reader writes on. It is as tall as what
-// is being typed, so the transcript keeps everything the message does not need.
-//
-// What is in the field is restyled on the way out: the Markdown reads the way it
-// will arrive, and its delimiters dim. Only styling is added — every character the
-// field drew, the cursor included, stays where it was.
-func (c *chatScreen) composer() []string {
+// composerRows is the rule and the rows the reader writes on. It is as tall as
+// what is being typed, so the transcript keeps everything the message does not
+// need.
+func (c *chatScreen) composerRows() []string {
 	styles := c.ctx.Styles()
 	rule := lipgloss.NewStyle().Foreground(styles.Theme().Border).
 		Render(strings.Repeat("─", max(c.width, 1)))
@@ -602,7 +561,7 @@ func (c *chatScreen) composer() []string {
 	switch {
 	case c.writing:
 		marker := lipgloss.NewStyle().Foreground(styles.Theme().Primary).Bold(true).Render("› ")
-		rows := strings.Split(styleInlineMarkdown(c.compose.View()), "\n")
+		rows := c.compose.rows()
 		for index, row := range rows {
 			if index == 0 {
 				rows[index] = marker + row

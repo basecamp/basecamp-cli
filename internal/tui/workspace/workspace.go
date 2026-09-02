@@ -234,6 +234,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editFolderMsg:
 		return m, m.openModal(newFolderEdit(m.ctx, msg.folder))
 
+	case commentActionsMsg:
+		return m, m.openModal(newCommentActions(m.ctx, msg))
+
+	case boostMenuMsg:
+		return m, m.openModal(newBoostMenu(m.ctx, msg))
+
+	case personCardMsg:
+		return m, m.openModal(newPersonCard(m.ctx, msg.who))
+
+	case newMessageMsg:
+		return m, m.push(newMessageForm(m.ctx, msg))
+
+	case editMessageMsg:
+		return m, m.push(newMessageEdit(m.ctx, msg.message))
+
+	case messageSavedMsg:
+		// The form is done, and what was under it reads again so the change is
+		// there on the way back rather than appearing on the next visit. A screen
+		// showing the very message that was edited takes the new one directly:
+		// the server has just handed it over, so there is nothing to ask for.
+		cmd := m.pop()
+		if post, ok := m.nav.current().(*messageScreen); ok && post.post.id == msg.saved.id {
+			post.replace(msg.saved)
+		}
+		return m, tea.Batch(cmd, notify(msg.said), m.nav.current().Init())
+
+	case commentChangedMsg:
+		// The write landed, so the modal is done and the screen under it reads
+		// its comments again rather than being patched from here.
+		m.closeModal()
+		return m, tea.Batch(notify(msg.said), m.nav.current().Init())
+
 	case folderRenamedMsg:
 		m.closeModal()
 		return m, m.folderRenamed(msg)
@@ -248,12 +280,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.openProject(msg.project)
 
 	case openToolMsg:
-		return m, m.openTool(msg.tool)
+		return m, m.openTool(msg.tool, msg.inside)
+
+	case openMessageMsg:
+		return m, m.openMessage(msg.message)
 
 	case openProjectActivityMsg:
 		return m, m.openProjectActivity(msg.project)
 
-	case pickerCanceledMsg:
+	case closeScreenMsg:
 		return m, m.pop()
 
 	case errMsg:
@@ -418,12 +453,22 @@ func (m *model) openProject(chosen project) tea.Cmd {
 
 // openTool goes into one of a project's dock tools, which hangs off the project
 // rather than off home: the trail reads Home › CLIs › HEY CLI.
-func (m *model) openTool(chosen tool) tea.Cmd {
+func (m *model) openTool(chosen tool, inside project) tea.Cmd {
 	m.sidebar.leave()
-	if chosen.kind == chatKind {
+	switch chosen.kind {
+	case chatKind:
 		return m.push(newChat(m.ctx, chosen))
+	case messageBoardKind:
+		return m.push(newMessageBoard(m.ctx, chosen, inside))
 	}
 	return m.push(newBlank(m.ctx, chosen.name))
+}
+
+// openMessage goes to one post on a board, which hangs off the board the same way
+// the board hangs off the project: Home › CLIs › Message Board › Shipping Friday.
+func (m *model) openMessage(post message) tea.Cmd {
+	m.sidebar.leave()
+	return m.push(newMessage(m.ctx, post))
 }
 
 // openProjectActivity goes to the project's whole feed, which hangs off the
@@ -756,7 +801,7 @@ func (m *model) relayout() {
 	m.menu.resize(m.width, m.menuRows())
 
 	if m.modal != nil {
-		m.modal.Resize(max(modalWidth(m.width)-modalChromeWidth, 1),
+		m.modal.Resize(max(modalWidthFor(m.modal, m.width)-modalChromeWidth, 1),
 			max(m.contentHeight()-modalChromeRows, 1))
 	}
 
@@ -806,6 +851,7 @@ func (m *model) updateHelp() {
 	if m.ctrlCOnce {
 		quit = helpBinding{"ctrl+c", "press again to quit"}
 	}
+	m.help.setUrgent(m.ctrlCOnce, quit.key)
 
 	switch {
 	case m.err != nil:

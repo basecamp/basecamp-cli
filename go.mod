@@ -24,6 +24,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/image v0.45.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0

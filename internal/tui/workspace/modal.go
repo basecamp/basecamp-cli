@@ -59,6 +59,26 @@ func modalWidth(width int) int {
 
 const minModalWidth = 24
 
+// slimModal is implemented by a modal whose content has a width of its own —
+// a card about one person is a name and a couple of lines under it, and a frame
+// three fifths of the terminal wide around that is mostly empty frame.
+//
+// The share above is still the ceiling: this asks for less, never for more.
+type slimModal interface {
+	Widest() int
+}
+
+// modalWidthFor is how wide the frame around one modal is drawn: the share of
+// the terminal it may take, narrowed to what the modal asked for.
+func modalWidthFor(open modal, width int) int {
+	room := modalWidth(width)
+	slim, ok := open.(slimModal)
+	if !ok {
+		return room
+	}
+	return max(min(room, slim.Widest()+modalChromeWidth), minModalWidth)
+}
+
 // openModal puts a modal up. Focus goes with it: whatever the screen underneath
 // was doing, the reader is doing this now.
 func (m *model) openModal(open modal) tea.Cmd {
@@ -80,7 +100,7 @@ func (m model) modalFrame() string {
 		return ""
 	}
 	theme := m.ctx.Styles().Theme()
-	inner := max(modalWidth(m.width)-modalChromeWidth, 1)
+	inner := max(modalWidthFor(m.modal, m.width)-modalChromeWidth, 1)
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).

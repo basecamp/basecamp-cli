@@ -46,10 +46,6 @@ type accountChosenMsg struct {
 	account account
 }
 
-// pickerCanceledMsg closes the picker. It cannot pop itself — the stack belongs
-// to the model.
-type pickerCanceledMsg struct{}
-
 // accountPicker is the list of accounts the credential can open: the logo, then
 // a box with a search field over the names.
 //
@@ -148,7 +144,7 @@ func (p *accountPicker) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.Key().Code {
 	case tea.KeyEscape:
 		if p.canCancel {
-			return func() tea.Msg { return pickerCanceledMsg{} }
+			return closeScreen()
 		}
 		return nil
 	case tea.KeyEnter:

@@ -381,7 +381,7 @@ func TestTheComposerStylesTheMarkdownBeingWritten(t *testing.T) {
 	}
 	m.relayout()
 
-	rows := c.composer()
+	rows := c.composerRows()
 	require.Len(t, rows, 2)
 	assert.Contains(t, rows[1], "\x1b[", "the composer drew no styling")
 	// The characters all stay: this is styling laid over the field, not a rewrite.

@@ -104,6 +104,12 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: tea.KeyEnter, Mod: tea.ModAlt}
 	case "tab":
 		k = tea.Key{Code: tea.KeyTab}
+	case "shift+tab":
+		k = tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}
+	case "ctrl+s":
+		k = tea.Key{Code: 's', Mod: tea.ModCtrl}
+	case "ctrl+d":
+		k = tea.Key{Code: 'd', Mod: tea.ModCtrl}
 	case "backspace":
 		k = tea.Key{Code: tea.KeyBackspace}
 	case "up":
@@ -156,6 +162,23 @@ func deliver(t *testing.T, m model, cmd tea.Cmd) model {
 func press(t *testing.T, m model, key string) (model, tea.Cmd) {
 	t.Helper()
 	updated, cmd := m.Update(keyPress(key))
+	return updated.(model), cmd
+}
+
+// helpKeys is the keys a view offers, which is what says whether an action is on
+// offer at all.
+func helpKeys(bindings []helpBinding) []string {
+	keys := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		keys = append(keys, binding.key)
+	}
+	return keys
+}
+
+// update hands the model one message and returns what it did with it.
+func update(t *testing.T, m model, msg tea.Msg) (model, tea.Cmd) {
+	t.Helper()
+	updated, cmd := m.Update(msg)
 	return updated.(model), cmd
 }
 
@@ -241,6 +264,23 @@ func TestQuitTakesTwoCtrlC(t *testing.T) {
 	_, cmd = press(t, m, "ctrl+c")
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
+}
+
+// The armed chord is the one thing in the bar that is a question rather than a
+// reminder, so it is the one thing drawn in the error color. Which binding that
+// is rather than what it looks like: a test theme carries no colors, so the
+// rendered escape sequences say nothing.
+func TestTheArmedCtrlCIsHighlighted(t *testing.T) {
+	m := newTestModel(t)
+	assert.Empty(t, m.help.urgentKey, "the bar started out shouting")
+
+	m, _ = press(t, m, "ctrl+c")
+	assert.Equal(t, "ctrl+c", m.help.urgentKey)
+
+	// Forgetting the first press puts the bar back to its quiet self.
+	updated, _ := m.Update(ctrlCResetMsg{})
+	m = updated.(model)
+	assert.Empty(t, m.help.urgentKey)
 }
 
 // A first ctrl+c that is not followed by a second is forgotten, so the next one
