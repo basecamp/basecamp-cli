@@ -149,7 +149,9 @@ func TestProjectShowsItsExternalLinks(t *testing.T) {
 
 	links := strings.Index(rendered, "External links")
 	tools := strings.Index(rendered, "Tools ")
+	activity := strings.Index(rendered, "Recent activity")
 	assert.Less(t, tools, links, "the links are under the dock they hang off")
+	assert.Less(t, links, activity, "the feed is under the whole dock, as it is on the web")
 }
 
 // A project with no links out of it gets no heading for them.
@@ -190,12 +192,13 @@ func TestProjectWithoutADescription(t *testing.T) {
 	lines := strings.Split(ansi.Strip(p.View()), "\n")
 	assert.Equal(t, "Bare", strings.TrimSpace(lines[0]))
 	assert.Equal(t, "", strings.TrimSpace(lines[1]))
-	assert.Contains(t, lines[2], "Recent activity")
+	assert.Contains(t, lines[2], "Tools")
 }
 
 // The feed is the project's own, drawn with the same row as everywhere else.
 func TestProjectFeed(t *testing.T) {
 	m, p := openProjectScreen(t, 110)
+	m = resize(t, m, 110, 44)
 	rendered := ansi.Strip(screen(m))
 
 	assert.Contains(t, rendered, "3m ago On “Basecamp CLI”, Stanko K. added a card")
@@ -224,8 +227,12 @@ func TestProjectWithAQuietFeed(t *testing.T) {
 // never the end of what happened.
 func TestProjectFeedOpensInFull(t *testing.T) {
 	m, _ := openProjectScreen(t, 110)
+	m = resize(t, m, 110, 44)
 	assert.Contains(t, ansi.Strip(screen(m)), "View all activity →")
 
+	for range 30 {
+		m, _ = press(t, m, "down")
+	}
 	m, cmd := press(t, m, "enter")
 	m = deliver(t, m, cmd)
 
@@ -238,34 +245,33 @@ func TestProjectFeedOpensInFull(t *testing.T) {
 
 // --- Walking ---
 
-// The cursor walks the button, then the dock, then the links. The feed's own rows
+// The cursor walks the dock, then the links, then the button. The feed's own rows
 // are not among them: there is no screen for one entry.
 func TestProjectCursorWalksTheRows(t *testing.T) {
 	m, p := openProjectScreen(t, 110)
+
+	spot, index := p.spotAt(p.cursor)
+	assert.Equal(t, spotProjectTool, spot)
+	assert.Equal(t, 0, index)
 
 	for range 30 {
 		m, _ = press(t, m, "down")
 	}
 	assert.Equal(t, len(toTools(testDock()))+len(testDoors()), p.cursor)
 
-	spot, index := p.spotAt(p.cursor)
-	assert.Equal(t, spotProjectLink, spot)
-	assert.Equal(t, "HEY repo", p.links[index].title)
+	spot, _ = p.spotAt(p.cursor)
+	assert.Equal(t, spotProjectActivity, spot)
 
 	for range 30 {
 		m, _ = press(t, m, "up")
 	}
 	assert.Equal(t, 0, p.cursor)
-
-	spot, _ = p.spotAt(p.cursor)
-	assert.Equal(t, spotProjectActivity, spot)
 }
 
 // A tool hangs off the project rather than off home, so the trail says where the
 // reader came from.
 func TestOpeningAToolHangsOffTheProject(t *testing.T) {
 	m, _ := openProjectScreen(t, 110)
-	m, _ = press(t, m, "down")
 	m, _ = press(t, m, "down")
 
 	m, cmd := press(t, m, "enter")

@@ -16,7 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
-// How much of the project's own feed the screen shows before the tools. The web
+// How much of the project's own feed the screen shows under the dock. The web
 // shows three lines and a link to the rest; a terminal has room for a few more,
 // and "View all activity" under them opens the whole thing.
 const projectActivityLimit = 5
@@ -90,8 +90,8 @@ type projectLinksMsg struct {
 	err   error
 }
 
-// projectScreen is a project: what it is called, what it is for, what has
-// happened in it lately, the tools on its dock, and the links out of it.
+// projectScreen is a project: what it is called, what it is for, the tools on
+// its dock, the links out of it, and what has happened in it lately.
 //
 // The web draws the dock as a grid of cards, each previewing what is inside it —
 // the last few messages, a card table's columns and their counts, the newest
@@ -200,18 +200,18 @@ const (
 	spotProjectLink
 )
 
-// itemCount is how many places the cursor can stand: the button that opens the
-// whole feed, then the dock, then the links.
-func (p *projectScreen) itemCount() int { return 1 + len(p.tools) + len(p.links) }
+// itemCount is how many places the cursor can stand: the dock, then the links,
+// then the button that opens the whole feed.
+func (p *projectScreen) itemCount() int { return len(p.tools) + len(p.links) + 1 }
 
 func (p *projectScreen) spotAt(index int) (projectSpot, int) {
 	switch {
-	case index == 0:
-		return spotProjectActivity, 0
-	case index <= len(p.tools):
-		return spotProjectTool, index - 1
+	case index < len(p.tools):
+		return spotProjectTool, index
+	case index < len(p.tools)+len(p.links):
+		return spotProjectLink, index - len(p.tools)
 	default:
-		return spotProjectLink, index - 1 - len(p.tools)
+		return spotProjectActivity, 0
 	}
 }
 
@@ -319,22 +319,6 @@ func (p *projectScreen) layout() []homeRow {
 	loading := p.pending > 0
 	index := 0
 
-	plain(ruledHeading(styles, "Recent activity", heading, p.width, loading))
-	now := p.now()
-	for _, entry := range p.activity {
-		// The feed is read-only here — the screen behind "View all activity" is
-		// where its entries can be walked — so no row is ever the selected one.
-		for _, line := range activityRows(styles, entry, now, p.width, false) {
-			plain(line)
-		}
-	}
-	if len(p.activity) == 0 && !loading {
-		plain(styles.Muted.Render("  Nothing yet."))
-	}
-	item(button{label: "View all activity", selected: index == p.cursor}.render(styles, p.width), index)
-	index++
-
-	plain("")
 	plain(ruledHeading(styles, "Tools", heading, p.width, loading))
 	for _, on := range p.tools {
 		name, kind := on.label()
@@ -364,6 +348,22 @@ func (p *projectScreen) layout() []homeRow {
 			index++
 		}
 	}
+
+	plain("")
+	plain(ruledHeading(styles, "Recent activity", heading, p.width, loading))
+	now := p.now()
+	for _, entry := range p.activity {
+		// The feed is read-only here — the screen behind "View all activity" is
+		// where its entries can be walked — so no row is ever the selected one.
+		for _, line := range activityRows(styles, entry, now, p.width, false) {
+			plain(line)
+		}
+	}
+	if len(p.activity) == 0 && !loading {
+		plain(styles.Muted.Render("  Nothing yet."))
+	}
+	item(button{label: "View all activity", selected: index == p.cursor}.render(styles, p.width), index)
+
 	return rows
 }
 

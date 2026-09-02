@@ -441,7 +441,7 @@ func TestEscLeavesTheChatComposer(t *testing.T) {
 // project the way any other tool does.
 func TestTheChatToolOpensTheChat(t *testing.T) {
 	m, _ := openProjectScreen(t, 110)
-	for range 4 {
+	for range 3 {
 		m, _ = press(t, m, "down")
 	}
 
