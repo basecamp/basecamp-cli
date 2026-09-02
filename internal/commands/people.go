@@ -315,9 +315,11 @@ independently from today, so prefer explicit dates for a precise range.`,
 
 // resolveOOODate turns a natural-language or YYYY-MM-DD date into a calendar
 // date the API accepts, rejecting both unparseable input and impossible dates
-// (e.g. 2026-13-45) locally rather than sending them to the server.
-func resolveOOODate(label, input string) (string, error) {
-	parsed := dateparse.Parse(input)
+// (e.g. 2026-13-45) locally rather than sending them to the server. The caller
+// passes one reference time so both ends of a range resolve against the same
+// day even if the command runs across local midnight.
+func resolveOOODate(label, input string, now time.Time) (string, error) {
+	parsed := dateparse.ParseFrom(input, now)
 	if _, err := time.Parse("2006-01-02", parsed); err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("Invalid %s date %q (use natural language or YYYY-MM-DD)", label, input))
 	}
@@ -346,11 +348,12 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 		if !startChanged || !endChanged {
 			return output.ErrUsage("both --start and --end are required to set out-of-office")
 		}
+		now := time.Now()
 		var err error
-		if startDate, err = resolveOOODate("start", start); err != nil {
+		if startDate, err = resolveOOODate("start", start, now); err != nil {
 			return err
 		}
-		if endDate, err = resolveOOODate("end", end); err != nil {
+		if endDate, err = resolveOOODate("end", end, now); err != nil {
 			return err
 		}
 		// ISO YYYY-MM-DD sorts chronologically, so a lexical compare orders them.
