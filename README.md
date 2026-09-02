@@ -207,8 +207,8 @@ A [personal access token](https://app.basecamp.com/my/access_tokens) can be
 imported instead of running OAuth — the shape for bots, CI, and any machine
 that should never sign in interactively. The token is read from stdin (never
 an argument), verified against the server — who it authenticates as, and that
-it can reach the profile's account — and only then stored as a non-expiring
-credential under a named profile:
+it can reach the profile's account — and only then stored under a named
+profile, with whatever expiry the server reports for it:
 
 ```bash
 op read "op://Vault/Item/credential" | basecamp auth login --with-token -P bot --account 999

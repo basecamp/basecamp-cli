@@ -236,6 +236,13 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
+			// The entry is written only after the login succeeds, so prove
+			// the config file can take it before a credential exists to
+			// orphan: a malformed file is refused here, not after OAuth.
+			if _, err := writableGlobalProfiles(); err != nil {
+				return err
+			}
+
 			// Snapshot in-memory config before mutation
 			prevActiveProfile := app.Config.ActiveProfile
 			prevBaseURL := app.Config.BaseURL
@@ -471,6 +478,18 @@ func globalProfilesMap(configData map[string]any, configPath string) (map[string
 		return nil, fmt.Errorf("config file %s has a \"profiles\" value that is not an object, refusing to rewrite it", configPath)
 	}
 	return profilesMap, nil
+}
+
+// writableGlobalProfiles reports whether the global config file can take a
+// profile entry — readable, parseable, with an object (or absent) profiles
+// value — without writing anything. Callers that obtain a credential before
+// registering its profile run this first.
+func writableGlobalProfiles() (map[string]any, error) {
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	return globalProfilesMap(configData, configPath)
 }
 
 // globalProfileEntry returns the named profile's entry in the global config

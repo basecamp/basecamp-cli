@@ -1149,3 +1149,26 @@ func TestProfileSetDefaultCreatesTheConfigDir(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"default_profile": "bot"`)
 }
+
+// TestProfileCreateRefusesAMalformedConfigBeforeLogin: registration happens
+// after OAuth, so a config file that cannot take the entry must be refused
+// before a credential exists to orphan.
+func TestProfileCreateRefusesAMalformedConfigBeforeLogin(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"profiles":[]}`), 0o600))
+
+	// Any network use would be a login attempt; the no-network transport
+	// fails instantly, and the assertion below is on the refusal wording.
+	app, _ := setupTestApp(t)
+	err := executeCommand(NewProfileCmd(), app, "create", "bot", "--device-code")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"profiles" value that is not an object`)
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, `{"profiles":[]}`, string(data))
+	_, loadErr := app.Auth.GetStore().Load("profile:bot")
+	assert.Error(t, loadErr, "no login may have run")
+}
