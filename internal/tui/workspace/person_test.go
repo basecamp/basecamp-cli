@@ -147,9 +147,9 @@ func TestThePersonCardDrawsAFace(t *testing.T) {
 	card.images = drawnImage{cols: cardFaceCols, rows: 8}
 	card.coming = true
 
-	cmd, took := card.Update(avatarsMsg{
-		asked:   []string{testPerson().avatar},
-		avatars: map[string][]byte{testPerson().avatar: testImageBytes(t, 200, 200)},
+	cmd, took := card.Update(cardFaceMsg{
+		avatar: testPerson().avatar,
+		data:   testImageBytes(t, 200, 200),
 	})
 	require.True(t, took)
 	require.NotNil(t, cmd, "the pixels were never sent")
@@ -165,7 +165,7 @@ func TestThePersonCardStopsWaitingOnAFailedRead(t *testing.T) {
 	_, card := openPersonCard(t, testPerson())
 	card.coming = true
 
-	card.Update(avatarsMsg{asked: []string{testPerson().avatar}})
+	card.Update(cardFaceMsg{avatar: testPerson().avatar})
 	assert.False(t, card.coming)
 	assert.NotContains(t, ansi.Strip(card.View()), "Loading")
 }

@@ -51,6 +51,22 @@ func TestTheEditFormOpensOverTheFolder(t *testing.T) {
 	assert.Equal(t, 2, m.nav.depth())
 }
 
+// A modal holds every key, but not every message: the screen it opened over may
+// still be waiting on a read, and swallowing the answer leaves it waiting for
+// good — nothing asks twice.
+func TestAModalPassesOnWhatIsNotItsOwn(t *testing.T) {
+	m, _ := openEdit(t, testFolderToEdit())
+	under, ok := m.nav.current().(*listScreen)
+	require.True(t, ok)
+	under.loading = true
+
+	m = load(t, m, directoryLoadedMsg{projects: []project{{id: 9, name: "Late Arrival"}}})
+
+	assert.False(t, under.loading, "the modal swallowed the read the screen was waiting on")
+	assert.Equal(t, "Late Arrival", under.projects[0].name)
+	require.NotNil(t, m.modal, "the modal closed on somebody else's message")
+}
+
 // A modal holds every key while it is up — the jump menu's included.
 func TestAModalKeepsEveryKey(t *testing.T) {
 	m, form := openEdit(t, testFolderToEdit())

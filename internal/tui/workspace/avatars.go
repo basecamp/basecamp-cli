@@ -63,9 +63,21 @@ var avatarClient = &http.Client{
 // avatarsMsg is the avatar data that arrived, by the address it came from, and
 // every address that was asked for — including the ones that answered nothing,
 // so the throbber standing in for them can stop.
+//
+// A screen's faces and a card's picture answer with different messages even
+// though the read is the same. A modal is handed a message before the screen
+// under it and keeps what it takes, so one message for both meant a card opened
+// while a screen's faces were in flight swallowed them — and they stayed marked
+// as coming, so the throbber turned forever and nothing asked again.
 type avatarsMsg struct {
 	asked   []string
 	avatars map[string][]byte
+}
+
+// cardFaceMsg is one person's picture, for the card that asked for it.
+type cardFaceMsg struct {
+	avatar string
+	data   []byte
 }
 
 // avatarReader reads a person's avatar.
@@ -165,12 +177,25 @@ func validAvatar(data []byte) error {
 // comment, and none of them is what the reader came for.
 func loadAvatars(ctx context.Context, app *appctx.App, budget *imageBudget, wanted []string) tea.Cmd {
 	return func() tea.Msg {
-		read := atMost(traced(app, avatarReader(app)), maxAvatarBytes)
-		arrived := budget.fetch(ctx, read, wanted)
-		app.Tracer.Log(observability.TraceTUI, "avatars read",
-			"wanted", len(wanted), "arrived", len(arrived))
+		arrived := readAvatars(ctx, app, budget, wanted)
 		return avatarsMsg{asked: wanted, avatars: arrived}
 	}
+}
+
+// loadCardFace reads the one picture a card is about.
+func loadCardFace(ctx context.Context, app *appctx.App, budget *imageBudget, avatar string) tea.Cmd {
+	return func() tea.Msg {
+		arrived := readAvatars(ctx, app, budget, []string{avatar})
+		return cardFaceMsg{avatar: avatar, data: arrived[avatar]}
+	}
+}
+
+func readAvatars(ctx context.Context, app *appctx.App, budget *imageBudget, wanted []string) map[string][]byte {
+	read := atMost(traced(app, avatarReader(app)), maxAvatarBytes)
+	arrived := budget.fetch(ctx, read, wanted)
+	app.Tracer.Log(observability.TraceTUI, "avatars read",
+		"wanted", len(wanted), "arrived", len(arrived))
+	return arrived
 }
 
 // traced says what happened to each avatar. A picture that does not appear is

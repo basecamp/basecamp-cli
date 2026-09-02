@@ -62,7 +62,7 @@ func (c *personCard) Init() tea.Cmd {
 	}
 	c.coming = true
 	return tea.Batch(
-		loadAvatars(c.ctx.Ctx(), c.ctx.app, c.budget, []string{c.who.avatar}),
+		loadCardFace(c.ctx.Ctx(), c.ctx.app, c.budget, c.who.avatar),
 		c.spin4(),
 	)
 }
@@ -84,13 +84,12 @@ func (c *personCard) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (c *personCard) Update(msg tea.Msg) (tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case avatarsMsg:
-		data := msg.avatars[c.who.avatar]
-		if len(data) == 0 {
+	case cardFaceMsg:
+		if len(msg.data) == 0 {
 			c.coming = false
 			return nil, true
 		}
-		rendered := c.images.Render(data, tui.NextImageID(), cardFaceCols)
+		rendered := c.images.Render(msg.data, tui.NextImageID(), cardFaceCols)
 		if rendered.Content == "" {
 			c.coming = false
 			return nil, true

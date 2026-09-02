@@ -113,9 +113,12 @@ func (f *folderEdit) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return func() tea.Msg { return folderGoneMsg{name: msg.name} }, true
 	}
 
+	// The field gets its cursor blink, and the message goes on to the screen
+	// underneath: this modal opens over a list that may still be waiting on a
+	// read, and claiming every message left that read with nowhere to land.
 	name, cmd := f.name.Update(msg)
 	f.name = name
-	return cmd, true
+	return cmd, false
 }
 
 // HandleKey answers whether the modal stays open. Esc closes it; everything else

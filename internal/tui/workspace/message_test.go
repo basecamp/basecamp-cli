@@ -529,6 +529,57 @@ func TestAFaceThatArrivedKeepsTurningUntilItIsPlaced(t *testing.T) {
 	assert.Empty(t, post.facesComing)
 }
 
+// A card open over the message does not eat the faces the message asked for.
+//
+// Both reads answered with the same message, and a modal is handed a message
+// before the screen under it — so pressing i before the avatars landed lost them
+// for the life of the screen: they stayed marked as coming, so the throbber kept
+// turning and readFaces would not ask again.
+func TestACardOverTheMessageDoesNotEatItsFaces(t *testing.T) {
+	m, post := openMessageScreen(t, 96, 40)
+	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
+	post.replies[0].author.avatar = source
+	post.facesComing = map[string]struct{}{source: {}}
+
+	m, _ = update(t, m, personCardMsg{who: person{
+		id: 5, name: "Rob Z.",
+		avatar: "https://bc3-production-assets-cdn.basecamp-static.com/1/people/b/avatar",
+	}})
+	require.NotNil(t, m.modal, "the card never opened")
+
+	_, cmd := update(t, m, avatarsMsg{
+		asked:   []string{source},
+		avatars: map[string][]byte{source: testImageBytes(t, 40, 20)},
+	})
+	require.NotNil(t, cmd, "the card swallowed the faces the message screen asked for")
+
+	// The picture is drawn in a command, so it is still coming until that runs.
+	assert.Contains(t, post.facesComing, source)
+	post.placeFaces(map[string]tui.RenderedImage{source: post.images.Render(nil, 1, avatarCols)})
+	assert.Empty(t, post.facesComing)
+	assert.NotEmpty(t, post.faces[source].Content)
+}
+
+// And the card still gets its own.
+func TestTheCardGetsItsOwnFace(t *testing.T) {
+	m, _ := openMessageScreen(t, 96, 40)
+	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/b/avatar"
+
+	m, _ = update(t, m, personCardMsg{who: person{id: 5, name: "Rob Z.", avatar: source}})
+	card, ok := m.modal.(*personCard)
+	require.True(t, ok)
+	card.images = drawnImage{cols: cardFaceCols, rows: avatarRows}
+	card.coming = true
+
+	_, took := card.Update(cardFaceMsg{avatar: source, data: testImageBytes(t, 40, 20)})
+	assert.True(t, took)
+
+	card.Update(cardFacePlacedMsg{rendered: card.images.Render(nil, 1, cardFaceCols)})
+	assert.False(t, card.coming)
+	assert.NotEmpty(t, card.face.Content)
+}
+
 // A face already on its way is not asked for again. The screen asks twice — for
 // the author when it opens and for everybody when the comments land — and two
 // reads over one budget lost pictures.

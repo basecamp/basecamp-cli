@@ -299,12 +299,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// A modal takes the answers to its own writes, and its cursor blink, before
-	// the screen underneath sees them.
+	// the screen underneath sees them. What it does not take goes on down, and its
+	// command comes along: a modal that passes a message on still wants its cursor
+	// to blink, and a screen still wants the answer to what it asked for before
+	// the modal opened over it.
 	if m.modal != nil {
-		if cmd, took := m.modal.Update(msg); took {
+		cmd, took := m.modal.Update(msg)
+		if took {
 			m.relayout()
 			return m, m.syncLoading(cmd)
 		}
+		under, _ := m.nav.current().Update(msg)
+		return m, m.syncLoading(tea.Batch(cmd, under))
 	}
 
 	cmd, _ := m.nav.current().Update(msg)
