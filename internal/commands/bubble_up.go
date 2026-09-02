@@ -33,8 +33,8 @@ document, card, and so on), addressed by its id or by pasting its Basecamp URL.
 			"agent_notes": "Account-wide and personal — no --in <project> needed.\n" +
 				"add/remove are idempotent. add takes --at to schedule; bc3 requires a\n" +
 				"value, so add sends \"now\" when --at is omitted. There is no status\n" +
-				"read (per-recording GET is an unrenderable API gap); the full list is\n" +
-				"basecamp notifications.",
+				"read (per-recording GET is an unrenderable API gap); the full\n" +
+				"current-and-scheduled list is basecamp notifications bubbleups.",
 		},
 	}
 
@@ -91,13 +91,17 @@ succeeds.
 				return convertSDKError(err)
 			}
 
+			// add is idempotent and bc3 answers with a bare 204: adding over
+			// an already bubbled-up recording is a no-op reported identically,
+			// so there is no readable post-state. Report the requested timing
+			// rather than assert a resulting state we can't confirm.
 			immediate := when == "now"
-			summary := fmt.Sprintf("Bubbled up recording %d", recordingID)
+			summary := fmt.Sprintf("Requested bubble-up for recording %d", recordingID)
 			if !immediate {
-				summary = fmt.Sprintf("Scheduled recording %d to bubble up %s", recordingID, when)
+				summary = fmt.Sprintf("Requested bubble-up for recording %d at %s", recordingID, when)
 			}
 
-			return app.OK(map[string]any{"id": recordingID, "bubbled_up": immediate, "at": when},
+			return app.OK(map[string]any{"id": recordingID, "at": when},
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{

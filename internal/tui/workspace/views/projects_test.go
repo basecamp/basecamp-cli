@@ -397,6 +397,16 @@ func TestProjectInfoToListItem_UnicodeDescription(t *testing.T) {
 	assert.Equal(t, item.Description, string([]rune(item.Description)))
 }
 
+// The list star marker reflects Starred, not Bookmarked: a project filed into a
+// stack is Bookmarked but unstarred, and the /star.json toggle acts on the star.
+func TestProjectInfoToListItem_MarkedReflectsStarred(t *testing.T) {
+	stackedNotStarred := projectInfoToListItem(data.ProjectInfo{ID: 1, Name: "Stacked", Bookmarked: true, Starred: false})
+	assert.False(t, stackedNotStarred.Marked, "a bookmarked-but-unstarred project is not marked")
+
+	starred := projectInfoToListItem(data.ProjectInfo{ID: 2, Name: "Starred", Bookmarked: true, Starred: true})
+	assert.True(t, starred.Marked, "a starred project is marked")
+}
+
 func TestToolNameToView(t *testing.T) {
 	tests := []struct {
 		name string

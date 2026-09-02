@@ -74,31 +74,35 @@ func bubbleUpData(t *testing.T, out *bytes.Buffer) map[string]any {
 	return map[string]any{"data": envelope.Data, "summary": envelope.Summary}
 }
 
-// A scheduled add reports bubbled_up:false (only in the scheduled set) and a
-// scheduling summary.
-func TestBubbleUpAddScheduledReportsNotYetBubbled(t *testing.T) {
+// A scheduled add reports the requested timing, not a resulting state: bc3
+// returns a bare 204 and add is idempotent, so the command must not claim the
+// bubble-up now sits in the scheduled set (it may have been a no-op over an
+// existing immediate bubble-up). It echoes the requested `at` and no
+// bubbled_up state assertion.
+func TestBubbleUpAddScheduledReportsRequestedTiming(t *testing.T) {
 	app, _, out := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
 
 	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "tomorrow"))
 
 	env := bubbleUpData(t, out)
 	data := env["data"].(map[string]any)
-	assert.Equal(t, false, data["bubbled_up"])
+	assert.NotContains(t, data, "bubbled_up", "add must not assert a resulting bubbled-up state")
 	assert.Equal(t, "tomorrow", data["at"])
-	assert.Equal(t, "Scheduled recording 42 to bubble up tomorrow", env["summary"])
+	assert.Equal(t, "Requested bubble-up for recording 42 at tomorrow", env["summary"])
 }
 
-// An explicit --at now is immediate, matching the omitted default: bubbled_up:true
-// and a "Bubbled up" summary, not a scheduling one.
-func TestBubbleUpAddExplicitNowReportsImmediate(t *testing.T) {
+// An immediate add (the omitted default, or an explicit --at now) reports the
+// request without a resulting-state claim.
+func TestBubbleUpAddImmediateReportsRequest(t *testing.T) {
 	app, _, out := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
 
 	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "now"))
 
 	env := bubbleUpData(t, out)
 	data := env["data"].(map[string]any)
-	assert.Equal(t, true, data["bubbled_up"])
-	assert.Equal(t, "Bubbled up recording 42", env["summary"])
+	assert.NotContains(t, data, "bubbled_up", "add must not assert a resulting bubbled-up state")
+	assert.Equal(t, "now", data["at"])
+	assert.Equal(t, "Requested bubble-up for recording 42", env["summary"])
 }
 
 // A calendar date reaches the wire verbatim.
