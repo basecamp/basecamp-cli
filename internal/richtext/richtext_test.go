@@ -3015,3 +3015,90 @@ func TestPlainToHTMLRoundTripsThroughHTMLToMarkdown(t *testing.T) {
 		}
 	}
 }
+
+// An embedded post — a tweet, a video — is an iframe on the web and nothing a
+// terminal can draw. What it is is a link, so that is what it becomes.
+func TestHTMLToMarkdownTurnsEmbedsIntoLinks(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wants   []string
+		refuses []string
+	}{
+		{
+			name: "an oEmbed blockquote links to the post, not to Basecamp's proxy",
+			input: `<p>BTW love this idea.</p><p><bc-attachment sgid="x" content-type="embed/x-rich" ` +
+				`content='&lt;blockquote class="twitter-tweet"&gt;&lt;p&gt;Give your users a receipt&lt;/p&gt;` +
+				`&lt;a href="https://x.com/dqnamo/status/123?ref_src=tw"&gt;August 11, 2026&lt;/a&gt;&lt;/blockquote&gt;'>` +
+				`<figure><iframe src="https://bc3-production-assets-cdn.basecamp-static.com/1/embeds/x"></iframe></figure>` +
+				`</bc-attachment></p>`,
+			wants: []string{
+				"BTW love this idea.",
+				"🔗 [",
+				"Give your users a receipt",
+				"](https://x.com/dqnamo/status/123?ref_src=tw)",
+			},
+			refuses: []string{"basecamp-static.com", "📎"},
+		},
+		{
+			name: "a shortener is a link to another link, so it is not the one shown",
+			input: `<bc-attachment content-type="embed/x-rich" content='&lt;p&gt;See ` +
+				`&lt;a href="https://t.co/abc"&gt;pic.twitter.com/abc&lt;/a&gt;&lt;/p&gt;` +
+				`&lt;a href="https://x.com/someone/status/9"&gt;the post&lt;/a&gt;'></bc-attachment>`,
+			wants:   []string{"](https://x.com/someone/status/9)"},
+			refuses: []string{"t.co"},
+		},
+		{
+			name: "an embed with a caption is called what the writer called it",
+			input: `<bc-attachment content-type="embed/video" caption="The demo" ` +
+				`content='&lt;a href="https://example.com/watch"&gt;watch&lt;/a&gt;'></bc-attachment>`,
+			wants: []string{"🔗 [The demo](https://example.com/watch)"},
+		},
+		{
+			name:    "an embed with nothing to link to still says what it is",
+			input:   `<bc-attachment content-type="embed/x-rich" content='&lt;p&gt;no links here&lt;/p&gt;'></bc-attachment>`,
+			wants:   []string{"🔗 embed"},
+			refuses: []string{"📎"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := HTMLToMarkdown(test.input)
+			for _, want := range test.wants {
+				if !strings.Contains(got, want) {
+					t.Errorf("HTMLToMarkdown() = %q, want it to contain %q", got, want)
+				}
+			}
+			for _, refuse := range test.refuses {
+				if strings.Contains(got, refuse) {
+					t.Errorf("HTMLToMarkdown() = %q, want it not to contain %q", got, refuse)
+				}
+			}
+		})
+	}
+}
+
+// A long embed reads as a sentence that stops rather than one that breaks
+// mid-word.
+func TestTruncateWords(t *testing.T) {
+	tests := []struct {
+		in   string
+		most int
+		want string
+	}{
+		{"short", 20, "short"},
+		// The limit lands on the space after "brown", so the word it fitted stays.
+		{"the quick brown fox jumps", 15, "the quick brown…"},
+		// It lands mid-word here, so it backs up to the last space.
+		{"the quick brown fox jumps", 18, "the quick brown…"},
+		// Nothing to back up to.
+		{"unbreakablesinglewordhere", 10, "unbreakabl…"},
+	}
+
+	for _, test := range tests {
+		if got := truncateWords(test.in, test.most); got != test.want {
+			t.Errorf("truncateWords(%q, %d) = %q, want %q", test.in, test.most, got, test.want)
+		}
+	}
+}

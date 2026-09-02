@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -71,11 +72,16 @@ var (
 	reMentionAttachment = regexp.MustCompile(`(?is)<bc-attachment[^>]*content-type="application/vnd\.basecamp\.mention"[^>]*>(.*?)</bc-attachment>`)
 	reMentionFigcaption = regexp.MustCompile(`(?is)<figcaption[^>]*>(.*?)</figcaption>`)
 	reMentionImgAlt     = regexp.MustCompile(`(?is)<img[^>]*alt="([^"]+)"[^>]*>`)
+	reAttachElement     = regexp.MustCompile(`(?is)<bc-attachment((?:\s[^>]*)?)>.*?</bc-attachment\s*>`)
 	reAttachment        = regexp.MustCompile(`(?i)<bc-attachment[^>]*filename="([^"]*)"[^>]*/?\s*>`)
 	reAttachNoFile      = regexp.MustCompile(`(?i)<bc-attachment[^>]*/?\s*>`)
 	reAttachClose       = regexp.MustCompile(`(?i)</bc-attachment>`)
-	reStripTags         = regexp.MustCompile(`<[^>]+>`)
-	reMultiNewline      = regexp.MustCompile(`\n{3,}`)
+	// Single quotes as well as double: an embed's own markup goes in a
+	// content='…' attribute, because the markup is full of double quotes.
+	reAttachAttr   = regexp.MustCompile(`(?is)\b([a-z-]+)=(?:"([^"]*)"|'([^']*)')`)
+	reAttachHref   = regexp.MustCompile(`(?is)href="([^"]*)"`)
+	reStripTags    = regexp.MustCompile(`<[^>]+>`)
+	reMultiNewline = regexp.MustCompile(`\n{3,}`)
 )
 
 // reMentionInput matches @Name or @First.Last in user input.
@@ -702,6 +708,10 @@ func HTMLToMarkdown(html string) string {
 	// @-mentions: extract display text, render as bold (must fire before general attachment regex)
 	html = reMentionAttachment.ReplaceAllStringFunc(html, mentionMarkdown)
 
+	// Basecamp attachments that wrap a <figure>: converted whole, from their own
+	// attributes, before the tag-stripping pass below can get at their insides.
+	html = reAttachElement.ReplaceAllStringFunc(html, attachmentMarkdown)
+
 	// Basecamp attachments: <bc-attachment ... filename="report.pdf"> → 📎 report.pdf
 	html = reAttachment.ReplaceAllString(html, "\n📎 $1\n")
 	// Closing bc-attachment tags (e.g. </bc-attachment>)
@@ -724,6 +734,131 @@ func HTMLToMarkdown(html string) string {
 	}
 
 	return strings.TrimSpace(html)
+}
+
+// attachmentMarkdown converts one whole <bc-attachment> element to Markdown,
+// reading its own attributes rather than what it wraps.
+//
+// The element carries everything worth saying — content-type, url, filename,
+// caption — and wraps a <figure> holding an <img> and a <figcaption> that
+// repeat it. Converting the element as a unit drops that duplication, and it
+// drops the whitespace with it: the editor pretty-prints the figure, and four
+// spaces of HTML indentation left behind by a tag-stripping pass is an indented
+// code block in Markdown, which is why an image used to print as its own
+// literal ![](…).
+//
+// An image becomes an image, so a terminal that draws pictures has something to
+// draw and one that doesn't shows the caption. Everything else is a paperclip
+// and a filename, which is all a terminal can offer for a PDF.
+func attachmentMarkdown(s string) string {
+	attrs := map[string]string{}
+	if match := reAttachElement.FindStringSubmatch(s); len(match) >= 2 {
+		for _, attr := range reAttachAttr.FindAllStringSubmatch(match[1], -1) {
+			value := attr[2]
+			if value == "" {
+				value = attr[3]
+			}
+			attrs[strings.ToLower(attr[1])] = unescapeHTML(value)
+		}
+	}
+
+	filename := strings.TrimSpace(attrs["filename"])
+	caption := strings.TrimSpace(attrs["caption"])
+
+	// An embedded post — a tweet, a video, a Figma frame — is an iframe on the
+	// web and nothing a terminal can draw. What it is is a link, so that is what
+	// it becomes.
+	if strings.HasPrefix(attrs["content-type"], "embed/") {
+		return embedMarkdown(attrs["content"], caption)
+	}
+
+	if source := strings.TrimSpace(attrs["url"]); source != "" && strings.HasPrefix(attrs["content-type"], "image/") {
+		// The alt text is the caption when there is one and the filename
+		// otherwise, so the line says something either way.
+		alt := caption
+		if alt == "" {
+			alt = filename
+		}
+		return "\n![" + escapeAltText(alt) + "](" + source + ")\n"
+	}
+
+	if filename == "" {
+		filename = "attachment"
+	}
+	if caption != "" && caption != filename {
+		return "\n📎 " + filename + " — " + caption + "\n"
+	}
+	return "\n📎 " + filename + "\n"
+}
+
+// embedMarkdown turns an embedded post into a link to it.
+//
+// The address comes out of the embed's own markup rather than off the element:
+// the element's iframe points at Basecamp's embed proxy, which is not somewhere
+// a reader wants to go. An oEmbed blockquote carries the post's text and ends
+// with a link to the post itself, so the last link that is not a shortener is
+// the permalink — a t.co is a link to another link.
+func embedMarkdown(content, caption string) string {
+	var address string
+	for _, href := range reAttachHref.FindAllStringSubmatch(content, -1) {
+		found := strings.TrimSpace(unescapeHTML(href[1]))
+		if !strings.HasPrefix(found, "http") || isLinkShortener(found) {
+			continue
+		}
+		address = found
+	}
+	if address == "" {
+		return "\n🔗 embed\n"
+	}
+
+	label := caption
+	if label == "" {
+		label = strings.TrimSpace(reWhitespaceRun.ReplaceAllString(
+			unescapeHTML(reStripTags.ReplaceAllString(unescapeHTML(content), " ")), " "))
+	}
+	if label == "" {
+		label = address
+	}
+	return "\n🔗 [" + escapeAltText(truncateWords(label, 120)) + "](" + address + ")\n"
+}
+
+// isLinkShortener reports whether an address only stands for another one, which
+// makes it the wrong thing to show a reader.
+func isLinkShortener(address string) bool {
+	parsed, err := url.Parse(address)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimPrefix(parsed.Host, "www.")) {
+	case "t.co", "bit.ly", "buff.ly", "ow.ly", "tinyurl.com", "goo.gl":
+		return true
+	}
+	return false
+}
+
+// truncateWords cuts a label at a word rather than mid-word, so a long embed
+// reads as a sentence that stops rather than one that breaks.
+func truncateWords(s string, most int) string {
+	if len(s) <= most {
+		return s
+	}
+
+	cut := s[:most]
+	// Already on a boundary, so the cut takes no word with it. Backing up here
+	// would throw away a word that fitted exactly.
+	if s[most] != ' ' {
+		if at := strings.LastIndex(cut, " "); at > most/2 {
+			cut = cut[:at]
+		}
+	}
+	return strings.TrimSpace(cut) + "…"
+}
+
+// escapeAltText keeps a caption from closing the image's own brackets.
+func escapeAltText(alt string) string {
+	alt = strings.ReplaceAll(alt, `\`, `\\`)
+	alt = strings.ReplaceAll(alt, "[", `\[`)
+	return strings.ReplaceAll(alt, "]", `\]`)
 }
 
 // mentionMarkdown converts one <bc-attachment> mention element to bold
