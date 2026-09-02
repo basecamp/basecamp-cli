@@ -686,6 +686,9 @@ func TestBareGroupWithUnknownArgSuppressesHelp(t *testing.T) {
 		{"messages typo", []string{"messages", "shwo"}, commands.NewMessagesCmd},
 		// --help=false disables help, so the stray positional still errors.
 		{"help disabled", []string{"cards", "12345", "--help=false"}, commands.NewCardsCmd},
+		// A scoped invocation still trips the unknown-arg guard; Execute()
+		// checks it ahead of the bare-flags case so the specific hint wins.
+		{"scoped positional", []string{"cards", "12345", "--in", "myproject"}, commands.NewCardsCmd},
 	}
 
 	for _, tt := range tests {
@@ -744,6 +747,15 @@ func TestUnknownSubcommandErrorClassifiesAndHints(t *testing.T) {
 			addCmd:   commands.NewAccountsCmd,
 			wantMsg:  `unknown command "123" for "basecamp accounts"`,
 			wantHint: "Run: basecamp accounts --help",
+		},
+		{
+			// chat's id-taking "line" command exposes "show" as an alias, so
+			// the hint resolves through the alias.
+			name:     "id-taking show alias still hints show",
+			args:     []string{"chat", "123"},
+			addCmd:   commands.NewChatCmd,
+			wantMsg:  `unknown command "123" for "basecamp chat"`,
+			wantHint: `Did you mean "basecamp chat show 123"?`,
 		},
 	}
 

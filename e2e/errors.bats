@@ -459,6 +459,30 @@ load test_helper
   assert_json_value '.error' 'unknown command "shwo" for "basecamp messages"'
 }
 
+@test "a scoped bare numeric id keeps the specific unknown-command error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # With a group-local flag present the unknown-arg guard still wins over the
+  # generic "subcommand required" bare-flags error.
+  run basecamp cards 12345 --in myproject
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "12345" for "basecamp cards"'
+  assert_json_value '.hint' 'Did you mean "basecamp cards show 12345"?'
+}
+
+@test "a numeric id resolves a show alias" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # chat's id-taking "line" command exposes "show" as an alias.
+  run basecamp chat 123
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint' 'Did you mean "basecamp chat show 123"?'
+}
+
 @test "singleton group does not steer a numeric id to show" {
   create_credentials
   create_global_config '{"account_id": 99999}'

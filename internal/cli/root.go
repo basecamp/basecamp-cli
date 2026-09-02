@@ -373,22 +373,24 @@ func Execute() {
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
 
-	// Bare group command with explicit flags (e.g. "cards --in X"): the help
-	// function suppressed output. Convert to a usage error.
+	// Bare group command with a positional that matches no subcommand
+	// (e.g. "cards 12345", or "cards 12345 --in X"): Cobra stops at the group
+	// and renders help with a zero exit — so an agent that meant "cards show
+	// 12345" reads success while nothing ran. The help function suppressed the
+	// output; convert it to a usage error that names the mistake and points at
+	// the canonical path. This is checked before the bare-flags case so a
+	// scoped invocation keeps the specific hint rather than the generic one.
+	if err == nil && executedCmd != cmd && isBareGroupWithUnknownArg(executedCmd) {
+		err = unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0])
+	}
+
+	// Bare group command with explicit flags but no positional (e.g. "cards
+	// --in X"): the help function suppressed output. Convert to a usage error.
 	if err == nil && executedCmd != cmd && isBareGroupWithFlags(executedCmd) {
 		err = output.ErrUsageHint(
 			"subcommand required",
 			"Usage: "+executedCmd.CommandPath()+" <command> [flags]",
 		)
-	}
-
-	// Bare group command with a positional that matches no subcommand
-	// (e.g. "cards 12345"): Cobra stops at the group and renders help with a
-	// zero exit — so an agent that meant "cards show 12345" reads success while
-	// nothing ran. The help function suppressed the output; convert it to a
-	// usage error that names the mistake and points at the canonical path.
-	if err == nil && executedCmd != cmd && isBareGroupWithUnknownArg(executedCmd) {
-		err = unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0])
 	}
 
 	if err != nil {
@@ -719,13 +721,14 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// showAcceptsID reports whether cmd has a show subcommand that takes an
-// identifier positional. A singleton "show" (accounts, config, hillcharts)
-// takes no id, so suggesting "<group> show <id>" there would send the caller to
-// a command that silently ignores the number.
+// showAcceptsID reports whether cmd has a show action that takes an identifier
+// positional. A singleton "show" (accounts, config, hillcharts) takes no id, so
+// suggesting "<group> show <id>" there would send the caller to a command that
+// silently ignores the number. The action is matched by name or alias, so a
+// command like chat's "line" that exposes "show" as an alias still counts.
 func showAcceptsID(cmd *cobra.Command) bool {
 	for _, sub := range cmd.Commands() {
-		if sub.Name() != "show" {
+		if !commandMatches(sub, "show") {
 			continue
 		}
 		for _, a := range ParseArgs(sub) {
@@ -734,6 +737,20 @@ func showAcceptsID(cmd *cobra.Command) bool {
 			}
 		}
 		return false
+	}
+	return false
+}
+
+// commandMatches reports whether name is cmd's primary name or one of its
+// aliases.
+func commandMatches(cmd *cobra.Command, name string) bool {
+	if cmd.Name() == name {
+		return true
+	}
+	for _, alias := range cmd.Aliases {
+		if alias == name {
+			return true
+		}
 	}
 	return false
 }
