@@ -684,6 +684,8 @@ func TestBareGroupWithUnknownArgSuppressesHelp(t *testing.T) {
 		{"todos numeric", []string{"todos", "999"}, commands.NewTodosCmd},
 		{"comments numeric", []string{"comments", "55"}, commands.NewCommentsCmd},
 		{"messages typo", []string{"messages", "shwo"}, commands.NewMessagesCmd},
+		// --help=false disables help, so the stray positional still errors.
+		{"help disabled", []string{"cards", "12345", "--help=false"}, commands.NewCardsCmd},
 	}
 
 	for _, tt := range tests {
@@ -734,6 +736,15 @@ func TestUnknownSubcommandErrorClassifiesAndHints(t *testing.T) {
 			wantMsg:  `unknown command "zzzzzz" for "basecamp messages"`,
 			wantHint: "Run: basecamp messages --help",
 		},
+		{
+			// accounts show reads the current account and takes no id, so a
+			// numeric positional must not be steered to "accounts show 123".
+			name:     "singleton show does not get a numeric id hint",
+			args:     []string{"accounts", "123"},
+			addCmd:   commands.NewAccountsCmd,
+			wantMsg:  `unknown command "123" for "basecamp accounts"`,
+			wantHint: "Run: basecamp accounts --help",
+		},
 	}
 
 	for _, tt := range tests {
@@ -747,7 +758,7 @@ func TestUnknownSubcommandErrorClassifiesAndHints(t *testing.T) {
 			executedCmd, err := cmd.ExecuteC()
 			require.NoError(t, err)
 
-			outErr := output.AsError(unknownSubcommandError(executedCmd))
+			outErr := output.AsError(unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0]))
 			assert.Equal(t, output.CodeUsage, outErr.Code)
 			assert.Equal(t, tt.wantMsg, outErr.Message)
 			assert.Equal(t, tt.wantHint, outErr.Hint)

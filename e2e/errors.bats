@@ -459,6 +459,29 @@ load test_helper
   assert_json_value '.error' 'unknown command "shwo" for "basecamp messages"'
 }
 
+@test "singleton group does not steer a numeric id to show" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # accounts show reads the current account and takes no id, so the hint must
+  # not point at "accounts show 123".
+  run basecamp accounts 123
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint' 'Run: basecamp accounts --help'
+}
+
+@test "help for a group with a stray id still renders help" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # The explicit help path renders help and exits zero; it must not be
+  # converted into an error or suppressed into silence.
+  run basecamp help cards 12345
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
 @test "messages --json shows structured JSON help" {
   create_credentials
   create_global_config '{"account_id": 99999}'

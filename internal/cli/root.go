@@ -384,11 +384,11 @@ func Execute() {
 
 	// Bare group command with a positional that matches no subcommand
 	// (e.g. "cards 12345"): Cobra stops at the group and renders help with a
-	// zero exit, so an agent that meant "cards show 12345" reads success while
-	// nothing ran. The help function suppressed output; convert to a usage
-	// error that names the mistake and points at the canonical path.
+	// zero exit — so an agent that meant "cards show 12345" reads success while
+	// nothing ran. The help function suppressed the output; convert it to a
+	// usage error that names the mistake and points at the canonical path.
 	if err == nil && executedCmd != cmd && isBareGroupWithUnknownArg(executedCmd) {
-		err = unknownSubcommandError(executedCmd)
+		err = unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0])
 	}
 
 	if err != nil {
@@ -686,14 +686,13 @@ func isConfigCmd(cmd *cobra.Command) bool {
 
 // unknownSubcommandError builds a usage error for a group command handed a
 // positional that matches no subcommand. A bare numeric positional almost
-// always means the caller wanted "<group> show <id>", so when the group has a
-// show subcommand the hint spells that path out; otherwise it offers cobra's
-// spelling suggestions, falling back to help.
-func unknownSubcommandError(cmd *cobra.Command) error {
-	arg := cmd.Flags().Args()[0]
+// always means the caller wanted "<group> show <id>", so when the group's show
+// subcommand actually accepts an id the hint spells that path out; otherwise it
+// offers cobra's spelling suggestions, falling back to help.
+func unknownSubcommandError(cmd *cobra.Command, arg string) error {
 	msg := fmt.Sprintf("unknown command %q for %q", arg, cmd.CommandPath())
 
-	if isAllDigits(arg) && hasSubcommandNamed(cmd, "show") {
+	if isAllDigits(arg) && showAcceptsID(cmd) {
 		return output.ErrUsageHint(msg, fmt.Sprintf("Did you mean %q?", cmd.CommandPath()+" show "+arg))
 	}
 	// Only the root sets SuggestionsMinimumDistance; a group left at zero would
@@ -720,13 +719,21 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// hasSubcommandNamed reports whether cmd has an immediate subcommand with the
-// given name.
-func hasSubcommandNamed(cmd *cobra.Command, name string) bool {
+// showAcceptsID reports whether cmd has a show subcommand that takes an
+// identifier positional. A singleton "show" (accounts, config, hillcharts)
+// takes no id, so suggesting "<group> show <id>" there would send the caller to
+// a command that silently ignores the number.
+func showAcceptsID(cmd *cobra.Command) bool {
 	for _, sub := range cmd.Commands() {
-		if sub.Name() == name {
-			return true
+		if sub.Name() != "show" {
+			continue
 		}
+		for _, a := range ParseArgs(sub) {
+			if a.Kind == "identifier" {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
