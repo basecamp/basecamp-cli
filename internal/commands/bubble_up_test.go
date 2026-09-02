@@ -101,13 +101,27 @@ func TestBubbleUpAddExplicitNowReportsImmediate(t *testing.T) {
 	assert.Equal(t, "Bubbled up recording 42", env["summary"])
 }
 
-// A malformed --at is a local usage error before any request is issued.
-func TestBubbleUpAddRejectsInvalidAt(t *testing.T) {
-	app, transport, _ := setupPersonalFeedApp(t)
+// A calendar date reaches the wire verbatim.
+func TestBubbleUpAddAcceptsACalendarDate(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
 
-	err := executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "tomorow")
-	requireBookmarksUsageError(t, err)
-	assert.Empty(t, transport.recorded(), "no request should be made for an invalid --at")
+	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "2026-09-10"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal([]byte(transport.last(t).Body), &body))
+	assert.Equal(t, "2026-09-10", body["at"])
+}
+
+// A malformed --at, and a timestamp bc3 would truncate to a date, are both local
+// usage errors before any request is issued.
+func TestBubbleUpAddRejectsInvalidAt(t *testing.T) {
+	for _, bad := range []string{"tomorow", "2026-09-10T09:00:00Z", "20260910"} {
+		app, transport, _ := setupPersonalFeedApp(t)
+
+		err := executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", bad)
+		requireBookmarksUsageError(t, err)
+		assert.Empty(t, transport.recorded(), "no request should be made for --at %q", bad)
+	}
 }
 
 // A non-positive id is rejected as a usage error, not sent to the API.

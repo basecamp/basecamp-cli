@@ -264,9 +264,6 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Notifications | `basecamp notifications --json` |
 | Mark notification read | `basecamp notifications read <id> --json` |
 | All bubble-ups (BC5) | `basecamp notifications bubbleups --json` |
-| Bubble a recording up | `basecamp bubble-up add <id-or-url> --json` |
-| Bubble up on a schedule | `basecamp bubble-up add <id-or-url> --at tomorrow --json` |
-| Pop a bubble-up | `basecamp bubble-up remove <id-or-url> --json` |
 | Gauges (account-wide) | `basecamp gauges list --json` |
 | Gauge needles | `basecamp gauges needles --in <project> --json` |
 | Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |

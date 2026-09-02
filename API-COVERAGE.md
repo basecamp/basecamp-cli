@@ -6,12 +6,12 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 184 |
+| ✅ Implemented | 50 | 186 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **54** | **196** |
+| **Total tracked** | **54** | **198** |
 
-**184 of 184 tracked in-scope endpoints.** The last gap — `GET
+**186 of 186 tracked in-scope endpoints.** The last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
 (`files versions`) was written earlier but held: the SDK's
 `UploadsService.ListVersions` decoded the response as `[]Upload` when the API

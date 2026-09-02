@@ -55,7 +55,8 @@ func newBubbleUpAddCmd() *cobra.Command {
 		Long: `Bubble a recording up so it resurfaces in your readings.
 
 By default it bubbles up now. Pass --at to schedule it instead: a keyword
-("today", "tomorrow", "weekend", "next_week") or an ISO8601 date.
+("today", "tomorrow", "weekend", "next_week") or a calendar date (YYYY-MM-DD).
+bc3 schedules at day granularity, so a date is honored to the day, not the hour.
 
 Idempotent: bubbling up something already bubbled up is a no-op that still
 succeeds.
@@ -114,7 +115,7 @@ succeeds.
 		},
 	}
 
-	cmd.Flags().StringVar(&at, "at", "", `When to bubble up: "now" (default), a keyword ("today", "tomorrow", "weekend", "next_week"), or an ISO8601 date`)
+	cmd.Flags().StringVar(&at, "at", "", `When to bubble up: "now" (default), a keyword ("today", "tomorrow", "weekend", "next_week"), or a calendar date (YYYY-MM-DD)`)
 
 	return cmd
 }
@@ -176,19 +177,22 @@ func bubbleUpRecordingID(arg string) (int64, error) {
 // validateBubbleUpAt rejects an --at value bc3 cannot parse before any account
 // resolution or network call, so a typo like "tomorow" is a local usage error
 // rather than a server-side Date.iso8601 raise. Valid values are the empty
-// default, "now", the schedule keywords, or an ISO8601 date.
+// default, "now", the schedule keywords, or a calendar date (YYYY-MM-DD).
+//
+// bc3 schedules bubble-ups at a date granularity — a keyword maps to a fixed
+// morning/afternoon hour and Date.iso8601 reduces any value to a calendar day —
+// so a timestamp with a time component would be silently truncated. We accept
+// only YYYY-MM-DD rather than echo an exact time the server never honors.
 func validateBubbleUpAt(at string) error {
 	switch at {
 	case "", "now", "today", "tomorrow", "weekend", "next_week":
 		return nil
 	}
-	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02T15:04:05"} {
-		if _, err := time.Parse(layout, at); err == nil {
-			return nil
-		}
+	if _, err := time.Parse("2006-01-02", at); err == nil {
+		return nil
 	}
 	return output.ErrUsageHint(
 		fmt.Sprintf("%q is not a valid --at value", at),
-		`Use "now", a keyword ("today", "tomorrow", "weekend", "next_week"), or an ISO8601 date`,
+		`Use "now", a keyword ("today", "tomorrow", "weekend", "next_week"), or a calendar date (YYYY-MM-DD)`,
 	)
 }
