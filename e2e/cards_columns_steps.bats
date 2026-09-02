@@ -196,16 +196,16 @@ load test_helper
 }
 
 
-# Column unknown action - Cobra shows help for unknown subcommands
+# Column unknown action - a positional matching no subcommand is a usage error
 
-@test "cards column unknown action shows help" {
+@test "cards column unknown action errors" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp cards column foobar
-  # Cobra doesn't error on unknown args, shows help
-  assert_success
-  assert_output_contains "COMMANDS"
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "foobar" for "basecamp cards column"'
 }
 
 
@@ -369,14 +369,14 @@ load test_helper
 }
 
 
-# Step unknown action - Cobra shows help for unknown subcommands
+# Step unknown action - a positional matching no subcommand is a usage error
 
-@test "cards step unknown action shows help" {
+@test "cards step unknown action errors" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp cards step foobar
-  # Cobra doesn't error on unknown args, shows help
-  assert_success
-  assert_output_contains "COMMANDS"
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "foobar" for "basecamp cards step"'
 }

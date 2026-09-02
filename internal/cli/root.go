@@ -696,6 +696,11 @@ func unknownSubcommandError(cmd *cobra.Command) error {
 	if isAllDigits(arg) && hasSubcommandNamed(cmd, "show") {
 		return output.ErrUsageHint(msg, fmt.Sprintf("Did you mean %q?", cmd.CommandPath()+" show "+arg))
 	}
+	// Only the root sets SuggestionsMinimumDistance; a group left at zero would
+	// match nothing but an exact prefix, so borrow the root's threshold.
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = cmd.Root().SuggestionsMinimumDistance
+	}
 	if suggestions := cmd.SuggestionsFor(arg); len(suggestions) > 0 {
 		return output.ErrUsageHint(msg, "Did you mean: "+strings.Join(suggestions, ", ")+"?")
 	}

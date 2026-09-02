@@ -721,10 +721,17 @@ func TestUnknownSubcommandErrorClassifiesAndHints(t *testing.T) {
 			wantHint: `Did you mean "basecamp cards show 12345"?`,
 		},
 		{
-			name:     "typo falls back to help",
+			name:     "typo suggests the nearest subcommand",
 			args:     []string{"messages", "shwo"},
 			addCmd:   commands.NewMessagesCmd,
 			wantMsg:  `unknown command "shwo" for "basecamp messages"`,
+			wantHint: "Did you mean: show?",
+		},
+		{
+			name:     "unrecognizable arg falls back to help",
+			args:     []string{"messages", "zzzzzz"},
+			addCmd:   commands.NewMessagesCmd,
+			wantMsg:  `unknown command "zzzzzz" for "basecamp messages"`,
 			wantHint: "Run: basecamp messages --help",
 		},
 	}
@@ -761,6 +768,26 @@ func TestSubcommandRoutesPastUnknownArgGuard(t *testing.T) {
 	assert.Equal(t, "show", target.Name())
 	assert.False(t, isBareGroupWithUnknownArg(target),
 		"a runnable leaf command is never treated as a bare group")
+}
+
+func TestBareGroupWithUnknownArgAndHelpShowsHelp(t *testing.T) {
+	// Explicit --help renders help and exits zero even with a stray positional,
+	// so the documented exception can't silently regress into a suppressed error.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCardsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cards", "12345", "--help"})
+
+	executedCmd, err := cmd.ExecuteC()
+	require.NoError(t, err)
+	assert.False(t, isBareGroupWithUnknownArg(executedCmd),
+		"explicit --help opts out of the unknown-arg guard")
+	out := buf.String()
+	assert.Contains(t, out, "COMMANDS")
+	assert.Contains(t, out, "USAGE")
 }
 
 func TestGroupCommandHelpOmitsArguments(t *testing.T) {
