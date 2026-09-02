@@ -47,6 +47,19 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "people update rejects bare invocation" {
+  run_smoke basecamp people update me --json
+  assert_failure
+  assert_json_value '.error' 'No update fields specified'
+  assert_json_value '.code' 'usage'
+}
+
+@test "people out-of-office shows status" {
+  run_smoke basecamp people out-of-office me --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "auth token shows current token" {
   run_smoke basecamp auth token --json
   assert_success

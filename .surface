@@ -290,8 +290,11 @@ ARG basecamp msgs update 00 <id|url>
 ARG basecamp notes set 00 [content]
 ARG basecamp notifications read 00 <id>...
 ARG basecamp people add 00 <person-id>...
+ARG basecamp people ooo 00 [me]
+ARG basecamp people out-of-office 00 [me]
 ARG basecamp people remove 00 <person-id>...
 ARG basecamp people show 00 <id|name>
+ARG basecamp people update 00 [me]
 ARG basecamp profile create 00 <name>
 ARG basecamp profile delete 00 <name>
 ARG basecamp profile set-default 00 <name>
@@ -921,9 +924,12 @@ CMD basecamp notifications read
 CMD basecamp people
 CMD basecamp people add
 CMD basecamp people list
+CMD basecamp people ooo
+CMD basecamp people out-of-office
 CMD basecamp people pingable
 CMD basecamp people remove
 CMD basecamp people show
+CMD basecamp people update
 CMD basecamp profile
 CMD basecamp profile create
 CMD basecamp profile delete
@@ -11751,6 +11757,54 @@ FLAG basecamp people list --stats type=bool
 FLAG basecamp people list --styled type=bool
 FLAG basecamp people list --todolist type=string
 FLAG basecamp people list --verbose type=count
+FLAG basecamp people ooo --account type=string
+FLAG basecamp people ooo --agent type=bool
+FLAG basecamp people ooo --cache-dir type=string
+FLAG basecamp people ooo --clear type=bool
+FLAG basecamp people ooo --count type=bool
+FLAG basecamp people ooo --end type=string
+FLAG basecamp people ooo --help type=bool
+FLAG basecamp people ooo --hints type=bool
+FLAG basecamp people ooo --ids-only type=bool
+FLAG basecamp people ooo --in type=string
+FLAG basecamp people ooo --jq type=string
+FLAG basecamp people ooo --json type=bool
+FLAG basecamp people ooo --markdown type=bool
+FLAG basecamp people ooo --md type=bool
+FLAG basecamp people ooo --no-hints type=bool
+FLAG basecamp people ooo --no-stats type=bool
+FLAG basecamp people ooo --profile type=string
+FLAG basecamp people ooo --project type=string
+FLAG basecamp people ooo --quiet type=bool
+FLAG basecamp people ooo --start type=string
+FLAG basecamp people ooo --stats type=bool
+FLAG basecamp people ooo --styled type=bool
+FLAG basecamp people ooo --todolist type=string
+FLAG basecamp people ooo --verbose type=count
+FLAG basecamp people out-of-office --account type=string
+FLAG basecamp people out-of-office --agent type=bool
+FLAG basecamp people out-of-office --cache-dir type=string
+FLAG basecamp people out-of-office --clear type=bool
+FLAG basecamp people out-of-office --count type=bool
+FLAG basecamp people out-of-office --end type=string
+FLAG basecamp people out-of-office --help type=bool
+FLAG basecamp people out-of-office --hints type=bool
+FLAG basecamp people out-of-office --ids-only type=bool
+FLAG basecamp people out-of-office --in type=string
+FLAG basecamp people out-of-office --jq type=string
+FLAG basecamp people out-of-office --json type=bool
+FLAG basecamp people out-of-office --markdown type=bool
+FLAG basecamp people out-of-office --md type=bool
+FLAG basecamp people out-of-office --no-hints type=bool
+FLAG basecamp people out-of-office --no-stats type=bool
+FLAG basecamp people out-of-office --profile type=string
+FLAG basecamp people out-of-office --project type=string
+FLAG basecamp people out-of-office --quiet type=bool
+FLAG basecamp people out-of-office --start type=string
+FLAG basecamp people out-of-office --stats type=bool
+FLAG basecamp people out-of-office --styled type=bool
+FLAG basecamp people out-of-office --todolist type=string
+FLAG basecamp people out-of-office --verbose type=count
 FLAG basecamp people pingable --account type=string
 FLAG basecamp people pingable --agent type=bool
 FLAG basecamp people pingable --cache-dir type=string
@@ -11814,6 +11868,33 @@ FLAG basecamp people show --stats type=bool
 FLAG basecamp people show --styled type=bool
 FLAG basecamp people show --todolist type=string
 FLAG basecamp people show --verbose type=count
+FLAG basecamp people update --account type=string
+FLAG basecamp people update --agent type=bool
+FLAG basecamp people update --bio type=string
+FLAG basecamp people update --cache-dir type=string
+FLAG basecamp people update --count type=bool
+FLAG basecamp people update --email type=string
+FLAG basecamp people update --help type=bool
+FLAG basecamp people update --hints type=bool
+FLAG basecamp people update --ids-only type=bool
+FLAG basecamp people update --in type=string
+FLAG basecamp people update --jq type=string
+FLAG basecamp people update --json type=bool
+FLAG basecamp people update --location type=string
+FLAG basecamp people update --markdown type=bool
+FLAG basecamp people update --md type=bool
+FLAG basecamp people update --name type=string
+FLAG basecamp people update --no-hints type=bool
+FLAG basecamp people update --no-stats type=bool
+FLAG basecamp people update --profile type=string
+FLAG basecamp people update --project type=string
+FLAG basecamp people update --quiet type=bool
+FLAG basecamp people update --stats type=bool
+FLAG basecamp people update --styled type=bool
+FLAG basecamp people update --time-zone type=string
+FLAG basecamp people update --title type=string
+FLAG basecamp people update --todolist type=string
+FLAG basecamp people update --verbose type=count
 FLAG basecamp profile --account type=string
 FLAG basecamp profile --agent type=bool
 FLAG basecamp profile --cache-dir type=string
@@ -18278,9 +18359,12 @@ SUB basecamp notifications read
 SUB basecamp people
 SUB basecamp people add
 SUB basecamp people list
+SUB basecamp people ooo
+SUB basecamp people out-of-office
 SUB basecamp people pingable
 SUB basecamp people remove
 SUB basecamp people show
+SUB basecamp people update
 SUB basecamp profile
 SUB basecamp profile create
 SUB basecamp profile delete

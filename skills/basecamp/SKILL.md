@@ -1218,9 +1218,20 @@ basecamp people list --json                          # All people in account
 basecamp people list --project <project> --json    # People on project
 basecamp me --json                                 # Current user
 basecamp people show <id> --json                   # Person details
+basecamp people show me --json                     # Your own profile
+basecamp people update me --bio "..." --title "..." --json   # Edit your own profile
+basecamp people out-of-office me --json            # Your out-of-office status
+basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18 --json  # Set out-of-office
+basecamp people out-of-office me --clear --json    # Clear out-of-office
 basecamp people add <id> --project <project>       # Add to project
 basecamp people remove <id> --project <project>    # Remove from project
 ```
+
+`people update me` edits your own profile (bio, title, name, email, location,
+time zone); pass a flag with an empty value to clear that field. `people
+out-of-office me` shows your away status, sets it with `--start`/`--end`
+(natural language or YYYY-MM-DD, end not before start), or clears it with
+`--clear`.
 
 ### Search
 
