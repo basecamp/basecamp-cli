@@ -20,7 +20,7 @@ func rootHelpFunc() func(*cobra.Command, []string) {
 		// Bare group with explicit flags (e.g. "cards --in X"): suppress
 		// help output so Execute() can emit a usage error with non-zero exit.
 		// Must run before machine-help branches to avoid mixed output.
-		if isBareGroupWithFlags(cmd) {
+		if isBareGroupWithFlags(cmd) || isBareGroupWithUnknownArg(cmd) {
 			return
 		}
 
@@ -65,6 +65,21 @@ func isBareGroupWithFlags(cmd *cobra.Command) bool {
 		return false
 	}
 	return hasExplicitLocalFlags(cmd)
+}
+
+// isBareGroupWithUnknownArg reports whether cmd is a non-runnable group command
+// that was handed a positional argument matching no subcommand. Cobra stops at
+// the group, so the leftover arg surfaces here; Execute() turns it into a usage
+// error instead of the silent help-with-zero-exit that masks the no-op.
+// Explicit --help always renders help regardless of the stray arg.
+func isBareGroupWithUnknownArg(cmd *cobra.Command) bool {
+	if cmd.Runnable() || !cmd.HasSubCommands() {
+		return false
+	}
+	if helpFlag := cmd.Flags().Lookup("help"); helpFlag != nil && helpFlag.Changed {
+		return false
+	}
+	return len(cmd.Flags().Args()) > 0
 }
 
 // curatedCategories defines the subset of categories and commands shown in root help.

@@ -382,6 +382,15 @@ func Execute() {
 		)
 	}
 
+	// Bare group command with a positional that matches no subcommand
+	// (e.g. "cards 12345"): Cobra stops at the group and renders help with a
+	// zero exit, so an agent that meant "cards show 12345" reads success while
+	// nothing ran. The help function suppressed output; convert to a usage
+	// error that names the mistake and points at the canonical path.
+	if err == nil && executedCmd != cmd && isBareGroupWithUnknownArg(executedCmd) {
+		err = unknownSubcommandError(executedCmd)
+	}
+
 	if err != nil {
 		// When a command receives zero args but requires some, show help instead of an error —
 		// but only for interactive human users. Machine consumers (--agent, --json, piped stdout)
@@ -669,6 +678,48 @@ func promptForProfile(cfg *config.Config) (string, error) {
 func isConfigCmd(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		if c.Name() == "config" {
+			return true
+		}
+	}
+	return false
+}
+
+// unknownSubcommandError builds a usage error for a group command handed a
+// positional that matches no subcommand. A bare numeric positional almost
+// always means the caller wanted "<group> show <id>", so when the group has a
+// show subcommand the hint spells that path out; otherwise it offers cobra's
+// spelling suggestions, falling back to help.
+func unknownSubcommandError(cmd *cobra.Command) error {
+	arg := cmd.Flags().Args()[0]
+	msg := fmt.Sprintf("unknown command %q for %q", arg, cmd.CommandPath())
+
+	if isAllDigits(arg) && hasSubcommandNamed(cmd, "show") {
+		return output.ErrUsageHint(msg, fmt.Sprintf("Did you mean %q?", cmd.CommandPath()+" show "+arg))
+	}
+	if suggestions := cmd.SuggestionsFor(arg); len(suggestions) > 0 {
+		return output.ErrUsageHint(msg, "Did you mean: "+strings.Join(suggestions, ", ")+"?")
+	}
+	return output.ErrUsageHint(msg, "Run: "+cmd.CommandPath()+" --help")
+}
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// hasSubcommandNamed reports whether cmd has an immediate subcommand with the
+// given name.
+func hasSubcommandNamed(cmd *cobra.Command, name string) bool {
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == name {
 			return true
 		}
 	}

@@ -436,6 +436,29 @@ load test_helper
   assert_output_contains "COMMANDS"
 }
 
+@test "cards with a bare numeric id errors instead of silent help" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # "cards 12345" matches no subcommand — a caller who meant "cards show
+  # 12345" must get a non-zero usage error, not help with a zero exit.
+  run basecamp cards 12345
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "12345" for "basecamp cards"'
+  assert_json_value '.hint' 'Did you mean "basecamp cards show 12345"?'
+}
+
+@test "group with an unknown subcommand errors non-zero" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp messages shwo
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "shwo" for "basecamp messages"'
+}
+
 @test "messages --json shows structured JSON help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
