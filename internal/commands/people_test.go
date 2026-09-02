@@ -956,6 +956,35 @@ func TestPeopleUpdateFirstWeekDay(t *testing.T) {
 	assert.Equal(t, "Monday", capture.putBody["first_week_day"])
 }
 
+// TestPeopleUpdateInvalidTimeFormat rejects an unknown time-format value.
+func TestPeopleUpdateInvalidTimeFormat(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--time-format", "military")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.False(t, capture.putSeen)
+}
+
+// TestPeopleUpdateTimeFormat sends a valid time-format through to the body.
+func TestPeopleUpdateTimeFormat(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--time-format", "twenty_four_hour")
+	require.NoError(t, err)
+	require.True(t, capture.putSeen)
+	assert.Equal(t, "twenty_four_hour", capture.putBody["time_format"])
+}
+
 // TestPeopleOutOfOfficeEnable posts resolved dates to the OOO endpoint.
 func TestPeopleOutOfOfficeEnable(t *testing.T) {
 	capture := &profileCapture{}
@@ -1026,6 +1055,77 @@ func TestPeopleOutOfOfficeRequiresBothDates(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeEmptyStartRejected verifies an explicit empty --start is
+// a malformed date, not a silently-dropped omission.
+func TestPeopleOutOfOfficeEmptyStartRejected(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "", "--end", "2026-09-18")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeClearWithEmptyStartConflict verifies that an explicitly
+// passed empty --start still conflicts with --clear.
+func TestPeopleOutOfOfficeClearWithEmptyStartConflict(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--clear", "--start", "")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "--clear cannot be combined")
+	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeImpossibleDate rejects a syntactically-shaped but
+// non-calendar date before any request.
+func TestPeopleOutOfOfficeImpossibleDate(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "2026-13-45", "--end", "2026-09-18")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeNaturalLanguageDates resolves relative dates before
+// sending them.
+func TestPeopleOutOfOfficeNaturalLanguageDates(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "today", "--end", "tomorrow")
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPost, capture.oooMethod)
+	payload, ok := capture.oooBody["out_of_office"].(map[string]any)
+	require.True(t, ok)
+	// Resolved to concrete YYYY-MM-DD dates, not the literal words.
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, payload["start_date"])
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}$`, payload["end_date"])
 }
 
 // TestPeopleOutOfOfficeNoArgs returns a usage error with no flags.

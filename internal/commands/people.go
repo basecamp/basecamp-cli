@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -325,15 +326,46 @@ Dates accept natural language ("next monday", "in 2 weeks") or YYYY-MM-DD.`,
 	return cmd
 }
 
+// resolveOOODate turns a natural-language or YYYY-MM-DD date into a calendar
+// date the API accepts, rejecting both unparseable input and impossible dates
+// (e.g. 2026-13-45) locally rather than sending them to the server.
+func resolveOOODate(label, input string) (string, error) {
+	parsed := dateparse.Parse(input)
+	if _, err := time.Parse("2006-01-02", parsed); err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("Invalid %s date %q (use natural language or YYYY-MM-DD)", label, input))
+	}
+	return parsed, nil
+}
+
 func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool) error {
 	app := appctx.FromContext(cmd.Context())
 
-	datesGiven := start != "" || end != ""
+	// Track flag presence, not emptiness, so an explicit --start "" is a
+	// malformed date rather than a silently-ignored omission.
+	startChanged := cmd.Flags().Changed("start")
+	endChanged := cmd.Flags().Changed("end")
+	datesGiven := startChanged || endChanged
+
 	if clearFlag && datesGiven {
 		return output.ErrUsage("--clear cannot be combined with --start or --end")
 	}
 	if !clearFlag && !datesGiven {
 		return noChanges(cmd)
+	}
+
+	// Settle all input validation before any account resolution or request.
+	var startDate, endDate string
+	if !clearFlag {
+		if !startChanged || !endChanged {
+			return output.ErrUsage("both --start and --end are required to set out-of-office")
+		}
+		var err error
+		if startDate, err = resolveOOODate("start", start); err != nil {
+			return err
+		}
+		if endDate, err = resolveOOODate("end", end); err != nil {
+			return err
+		}
 	}
 
 	if err := ensureAccount(cmd, app); err != nil {
@@ -352,18 +384,6 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 		return app.OK(map[string]any{"enabled": false},
 			output.WithSummary("Cleared your out-of-office"),
 		)
-	}
-
-	if start == "" || end == "" {
-		return output.ErrUsage("both --start and --end are required to set out-of-office")
-	}
-	startDate := dateparse.Parse(start)
-	endDate := dateparse.Parse(end)
-	if !dateparse.IsValid(startDate) {
-		return output.ErrUsage(fmt.Sprintf("Invalid start date %q (use natural language or YYYY-MM-DD)", start))
-	}
-	if !dateparse.IsValid(endDate) {
-		return output.ErrUsage(fmt.Sprintf("Invalid end date %q (use natural language or YYYY-MM-DD)", end))
 	}
 
 	ooo, err := app.Account().People().EnableOutOfOffice(cmd.Context(), me.ID, &basecamp.EnableOutOfOfficeRequest{
