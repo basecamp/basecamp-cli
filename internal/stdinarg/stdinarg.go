@@ -94,6 +94,16 @@ func IsPiped(r io.Reader) bool {
 	return fi.Mode()&os.ModeCharDevice == 0
 }
 
+// IsTerminal reports whether the reader is an interactive terminal. A
+// non-*os.File reader — the cmd.SetIn test seam — never is. Unlike IsPiped
+// this asks term.IsTerminal, so /dev/null (a character device that delivers
+// nothing) is not a terminal: a secret redirected from it should read as
+// empty, not be refused as typed.
+func IsTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	return ok && isTerminal(f)
+}
+
 // InteractiveStdio reports whether both stdout and stdin are terminals — the
 // floor for launching anything that draws to the terminal and reads
 // keystrokes. A TUI (picker, wizard) reads key events from stdin, so a pipe or

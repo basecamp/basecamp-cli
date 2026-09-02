@@ -269,43 +269,8 @@ Examples:
 				profileCfg.Scope = loginResult.Scope
 			}
 
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
-				return fmt.Errorf("failed to create config directory: %w", err)
-			}
-
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
-			}
-
-			// Get or create profiles map
-			profilesMap, _ := configData["profiles"].(map[string]any)
-			if profilesMap == nil {
-				profilesMap = make(map[string]any)
-			}
-
-			// Add profile with effective scope
-			profileEntry := map[string]any{
-				"base_url": profileCfg.BaseURL,
-			}
-			if profileCfg.AccountID != "" {
-				profileEntry["account_id"] = profileCfg.AccountID
-			}
-			if profileCfg.Scope != "" {
-				profileEntry["scope"] = profileCfg.Scope
-			}
-			profilesMap[name] = profileEntry
-			configData["profiles"] = profilesMap
-
-			// If this is the first profile, set it as default
-			isDefault := len(profilesMap) == 1
-			if isDefault {
-				configData["default_profile"] = name
-			}
-
-			// Write config atomically
-			if err := atomicWriteJSON(configPath, configData); err != nil {
+			isDefault, err := registerProfile(name, profileCfg)
+			if err != nil {
 				return err
 			}
 
@@ -378,27 +343,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not delete credentials for profile %q: %v\n", name, err)
 			}
 
-			// Update config file
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
-			}
-
-			if profilesMap, ok := configData["profiles"].(map[string]any); ok {
-				delete(profilesMap, name)
-				if len(profilesMap) == 0 {
-					delete(configData, "profiles")
-				}
-			}
-
-			// Clear default_profile if it was this profile
-			if dp, ok := configData["default_profile"].(string); ok && dp == name {
-				delete(configData, "default_profile")
-			}
-
-			// Write config back atomically
-			if err := atomicWriteJSON(configPath, configData); err != nil {
+			if err := unregisterProfile(name); err != nil {
 				return err
 			}
 
@@ -451,6 +396,69 @@ func newProfileSetDefaultCmd() *cobra.Command {
 			}, output.WithSummary(fmt.Sprintf("Default profile set to %q", name)))
 		},
 	}
+}
+
+// registerProfile adds a profile entry to the global config file. The first
+// profile registered becomes the default; isDefault reports whether this one
+// did. The in-memory config is the caller's to update.
+func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err error) {
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
+		return false, fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	configData := make(map[string]any)
+	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+		_ = json.Unmarshal(data, &configData)
+	}
+
+	profilesMap, _ := configData["profiles"].(map[string]any)
+	if profilesMap == nil {
+		profilesMap = make(map[string]any)
+	}
+
+	entry := map[string]any{
+		"base_url": p.BaseURL,
+	}
+	if p.AccountID != "" {
+		entry["account_id"] = p.AccountID
+	}
+	if p.Scope != "" {
+		entry["scope"] = p.Scope
+	}
+	profilesMap[name] = entry
+	configData["profiles"] = profilesMap
+
+	isDefault = len(profilesMap) == 1
+	if isDefault {
+		configData["default_profile"] = name
+	}
+
+	return isDefault, atomicWriteJSON(configPath, configData)
+}
+
+// unregisterProfile removes a profile entry from the global config file,
+// clearing default_profile when it named this profile. Credentials are the
+// caller's to remove.
+func unregisterProfile(name string) error {
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	configData := make(map[string]any)
+	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
+		_ = json.Unmarshal(data, &configData)
+	}
+
+	if profilesMap, ok := configData["profiles"].(map[string]any); ok {
+		delete(profilesMap, name)
+		if len(profilesMap) == 0 {
+			delete(configData, "profiles")
+		}
+	}
+
+	if dp, ok := configData["default_profile"].(string); ok && dp == name {
+		delete(configData, "default_profile")
+	}
+
+	return atomicWriteJSON(configPath, configData)
 }
 
 // validProfileName matches letters, numbers, hyphens, and underscores.

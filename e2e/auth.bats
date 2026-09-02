@@ -90,6 +90,35 @@ load test_helper
   assert_output_contains "default full"
 }
 
+@test "basecamp auth login --help shows --with-token, --expect-identity, and --login-hint" {
+  run basecamp auth login --help
+  assert_success
+  assert_output_contains "--with-token"
+  assert_output_contains "--expect-identity"
+  assert_output_contains "--login-hint"
+  assert_output_contains "op read"
+}
+
+@test "basecamp auth login --with-token requires a profile" {
+  run basecamp auth login --with-token </dev/null
+  assert_failure
+  assert_output_contains "named profile"
+  assert_output_contains "--profile"
+}
+
+@test "basecamp auth login --with-token needs --account to create the profile" {
+  run basecamp auth login --with-token -P bot </dev/null
+  assert_failure
+  assert_output_contains "does not exist"
+  assert_output_contains "--account"
+}
+
+@test "basecamp auth login --with-token rejects --device-code" {
+  run basecamp auth login --with-token --device-code </dev/null
+  assert_failure
+  assert_output_contains "with-token"
+}
+
 @test "basecamp auth login rejects --device-code --local" {
   run basecamp auth login --device-code --local
   assert_failure

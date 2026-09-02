@@ -1715,3 +1715,31 @@ func TestAuthorizationEndpoint_LaunchpadTokenOverridesStoredBC3(t *testing.T) {
 	assert.Equal(t, "https://launchpad.37signals.com/authorization.json", ep,
 		"non-bc_at_ env token must route to launchpad, not stored bc3")
 }
+
+// TestLoginLaunchpadIgnoresLoginHint: the authorization-code flow has no
+// login_hint; the option is acknowledged as ignored, not silently dropped.
+func TestLoginLaunchpadIgnoresLoginHint(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "")
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	var logs []string
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:      true,
+		LoginHint:   "bot@example.com",
+		Logger:      func(msg string) { logs = append(logs, msg) },
+		InputReader: strings.NewReader(""),
+	})
+	require.Error(t, err, "EOF on the paste prompt aborts the login")
+	assert.Contains(t, strings.Join(logs, "\n"), "--login-hint ignored")
+}

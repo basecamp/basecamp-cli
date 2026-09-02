@@ -194,6 +194,28 @@ basecamp auth login --scope full # Full read+write access (default; ignored by L
 basecamp auth token              # Print token for scripts
 ```
 
+`--expect-identity <id>` makes any login assert who it authenticated as: on a
+mismatch the new credential is discarded (a profile's previous credential is
+kept) and the command exits non-zero. `--login-hint <email>` suggests which
+account to sign in as on the device-flow approval page.
+
+### Personal access tokens
+
+A [personal access token](https://3.basecamp.com/my/access_tokens) can be
+imported instead of running OAuth — the shape for bots, CI, and any machine
+that should never sign in interactively. The token is read from stdin (never
+an argument), stored as a non-expiring credential under a named profile, and
+verified against the server before anything is kept:
+
+```bash
+op read "op://Vault/Item/credential" | basecamp auth login --with-token -P bot --account 999
+op read "op://Vault/Item/credential" | basecamp auth login --with-token -P bot --account 999 --expect-identity 12345 --json
+```
+
+`--account` is required when the profile does not exist yet. `--json` returns
+an envelope with the profile, account, identity and person, `oauth_type`,
+`scope`, and `expires_at: null`.
+
 ### Multiple Identities
 
 Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:
@@ -217,6 +239,12 @@ To use your own OAuth app (e.g., a custom Launchpad integration):
 | `BASECAMP_OAUTH_REDIRECT_URI` | Redirect URI (must be `http://` loopback with explicit port) |
 
 Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set together.
+
+`BASECAMP_OAUTH_ISSUER=https://3.basecamp.com` pins the OAuth authorization
+server and skips discovery, so `basecamp auth login` reaches a server that is
+serving piloted clients but not yet advertising itself (discovery still 404s).
+It is a temporary escape hatch for that dark pilot, not a configuration
+surface, and will be removed once the server advertises its metadata.
 
 ## AI Agent Integration
 

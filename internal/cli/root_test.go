@@ -408,3 +408,39 @@ func TestReportWireError(t *testing.T) {
 	reportWireError(&buf, output.ErrAPI(502, "bad\x1b[31mgateway\r\ninjected"))
 	assert.Equal(t, "Error: badgateway injected\n", buf.String())
 }
+
+// TestResolveProfileMayCreatePassesUnknownName: a command that registers the
+// named profile itself (auth login --with-token) receives the name; every
+// other command is still refused an unknown --profile / BASECAMP_PROFILE.
+func TestResolveProfileMayCreatePassesUnknownName(t *testing.T) {
+	t.Setenv("BASECAMP_PROFILE", "")
+	cfg := &config.Config{Profiles: map[string]*config.ProfileConfig{"human": {}}}
+
+	name, err := resolveProfile(cfg, appctx.GlobalFlags{Profile: "bot"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, "bot", name)
+
+	_, err = resolveProfile(cfg, appctx.GlobalFlags{Profile: "bot"}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown profile "bot"`)
+
+	name, err = resolveProfile(cfg, appctx.GlobalFlags{Profile: "human"}, false)
+	require.NoError(t, err)
+	assert.Equal(t, "human", name)
+
+	// With no profiles configured at all, the may-create name still passes.
+	empty := &config.Config{}
+	name, err = resolveProfile(empty, appctx.GlobalFlags{Profile: "bot"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, "bot", name)
+	_, err = resolveProfile(empty, appctx.GlobalFlags{Profile: "bot"}, false)
+	require.Error(t, err)
+
+	t.Setenv("BASECAMP_PROFILE", "bot")
+	name, err = resolveProfile(cfg, appctx.GlobalFlags{}, true)
+	require.NoError(t, err)
+	assert.Equal(t, "bot", name)
+	_, err = resolveProfile(cfg, appctx.GlobalFlags{}, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BASECAMP_PROFILE")
+}
