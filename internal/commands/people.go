@@ -160,13 +160,14 @@ func NewPeopleCmd() *cobra.Command {
 	return cmd
 }
 
-// requireMeTarget enforces the "me" sentinel that scopes a self-only person
-// action. The profile PUT and the out-of-office endpoints only ever act on the
-// authenticated user, so the target is always spelled "me" — matching
-// "basecamp people show me" — and any other value is rejected up front with a
-// hint rather than sent to the server. Requiring the word (instead of assuming
-// it) keeps "basecamp people update <id>" open for a future admin edit. The
-// message is command-neutral because both update and out-of-office share it.
+// requireMeTarget enforces the "me" sentinel that scopes these commands to the
+// authenticated user. This is a CLI restriction, not an endpoint one: the
+// profile PUT is inherently self-only (/my/profile.json), but the out-of-office
+// endpoints are person-scoped and a Pro Pack admin may manage others through
+// them — the CLI deliberately exposes only the self case for now. Any other
+// value is rejected up front rather than sent to the server, and requiring the
+// word (instead of assuming it) keeps "people update <id>" open for a future
+// admin edit. The message is command-neutral because both commands share it.
 func requireMeTarget(target string) error {
 	if strings.EqualFold(target, "me") {
 		return nil
