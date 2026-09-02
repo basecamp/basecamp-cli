@@ -107,11 +107,13 @@ type loginIdentityServer struct {
 	authorizationStatus int
 	// personName lets a test plant hostile content in the person record.
 	personName string
+	// expiresAt is what /authorization.json reports; empty omits the field.
+	expiresAt string
 }
 
 func startLoginIdentityServer(t *testing.T, wantToken string) *loginIdentityServer {
 	t.Helper()
-	s := &loginIdentityServer{identityID: 28142355, accounts: []int64{999}, personName: "Clawdito"}
+	s := &loginIdentityServer{identityID: 28142355, accounts: []int64{999}, personName: "Clawdito", expiresAt: "2036-01-01T00:00:00Z"}
 	mux := http.NewServeMux()
 	record := func(r *http.Request) bool {
 		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -145,9 +147,11 @@ func startLoginIdentityServer(t *testing.T, wantToken string) *loginIdentityServ
 			accounts = append(accounts, map[string]any{"id": id, "name": "Acme", "href": fmt.Sprintf("%s/%d", s.srv.URL, id), "product": "bc3"})
 		}
 		body := map[string]any{
-			"identity":   map[string]any{"id": s.identityID, "first_name": "Claw", "last_name": "Dito", "email_address": "identity@example.com"},
-			"accounts":   accounts,
-			"expires_at": "2036-01-01T00:00:00Z",
+			"identity": map[string]any{"id": s.identityID, "first_name": "Claw", "last_name": "Dito", "email_address": "identity@example.com"},
+			"accounts": accounts,
+		}
+		if s.expiresAt != "" {
+			body["expires_at"] = s.expiresAt
 		}
 		if s.scope != "" {
 			body["scope"] = s.scope
@@ -288,15 +292,14 @@ func TestAuthLoginWithTokenCreatesProfileAndVerifiesIdentity(t *testing.T) {
 	creds, err := app.Auth.GetStore().Load("profile:bot")
 	require.NoError(t, err)
 	assert.Equal(t, "bc_at_secret", creds.AccessToken)
-	assert.Zero(t, creds.ExpiresAt, "a personal access token is stored as non-expiring")
+	assert.Equal(t, time.Date(2036, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), creds.ExpiresAt, "the expiry the server reported is kept")
 	assert.Empty(t, creds.RefreshToken)
 	assert.Equal(t, "bc5", creds.OAuthType)
 	assert.Equal(t, "full", creds.Scope)
 	assert.Equal(t, "51177542", creds.UserID)
 	assert.Equal(t, "clawdito@example.com", creds.UserEmail)
 
-	// Non-expiring: AccessToken serves it without attempting a refresh
-	// (there is no refresh token or token endpoint to attempt one with).
+	// Far from expiry: AccessToken serves it without attempting a refresh.
 	tok, err := app.Auth.AccessToken(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "bc_at_secret", tok)
@@ -333,8 +336,7 @@ func TestAuthLoginWithTokenJSONEnvelope(t *testing.T) {
 	assert.Equal(t, "token", data["source"])
 	assert.Equal(t, "bc5", data["oauth_type"])
 	assert.Equal(t, "full", data["scope"])
-	assert.Contains(t, data, "expires_at")
-	assert.Nil(t, data["expires_at"])
+	assert.Equal(t, "2036-01-01T00:00:00Z", data["expires_at"])
 	assert.Equal(t, true, data["profile_created"])
 	assert.Equal(t, true, data["default"])
 	assert.Equal(t, float64(28142355), data["identity"].(map[string]any)["id"])
@@ -844,6 +846,7 @@ func TestAuthLoginWithTokenBindsAnUnboundExistingProfile(t *testing.T) {
 		Profiles:      map[string]*config.ProfileConfig{"bot": {ProjectID: "42"}},
 	}
 	app, _ := loginTestApp(t, srv, cfg)
+	app.Config.Sources["profiles"] = "global"
 	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(config.GlobalConfigDir(), "config.json"),
 		[]byte(`{"profiles":{"bot":{"base_url":"`+srv.srv.URL+`","project_id":"42"}}}`), 0o600))
@@ -923,4 +926,57 @@ func TestAuthLoginDeviceFlowWithoutExpectationKeepsBestEffortIdentity(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, "dev-tok", creds.AccessToken)
 	assert.Empty(t, creds.UserID, "no person was resolved, so none is recorded")
+}
+
+func TestAuthLoginWithTokenWithoutReportedExpiryIsNonExpiring(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	srv.expiresAt = ""
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+	app.Flags.JSON = true
+
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.NoError(t, err)
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	assert.Zero(t, creds.ExpiresAt)
+
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Contains(t, envelope.Data, "expires_at")
+	assert.Nil(t, envelope.Data["expires_at"])
+}
+
+func TestAuthLoginWithTokenRefusesToBindANonGlobalProfile(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	cfg := &config.Config{
+		ActiveProfile: "bot",
+		Profiles:      map[string]*config.ProfileConfig{"bot": {}},
+		Sources:       map[string]string{"profiles": "repo"},
+	}
+	app, _ := loginTestApp(t, srv, cfg)
+	withAccount(app, "999", "flag")
+
+	in := strings.NewReader("bc_at_secret")
+	_, err := runLogin(t, app, in, "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defined outside the global config")
+	assert.Contains(t, err.Error(), "repo config")
+	assert.Equal(t, 12, in.Len(), "refused before stdin is read")
+	assert.Empty(t, srv.seenBearers())
+}
+
+func TestAuthLoginRejectsPositionalArguments(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+
+	in := strings.NewReader("bc_at_secret")
+	_, err := runLogin(t, app, in, "--with-token", "bc_at_pasted")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown command")
+	assert.Equal(t, 12, in.Len())
+	assert.Empty(t, srv.seenBearers())
 }

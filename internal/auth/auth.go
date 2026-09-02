@@ -773,25 +773,30 @@ func validVerificationURL(raw string) string {
 
 // ImportToken stores an externally issued BC5 access token (a personal
 // access token) as the current credential, in one write, together with the
-// identity it was verified to authenticate as. The token has no refresh
-// token and no token endpoint, and ExpiresAt stays zero — the non-expiring
-// path AccessToken already takes, so refresh is never attempted; when the
-// server stops honoring it the next request fails as unauthenticated and
-// the token is imported again. Scope is what the token was verified or
-// declared to carry.
-func (m *Manager) ImportToken(token, scope, userID, userEmail string) error {
+// identity it was verified to authenticate as and the expiry the server
+// reported for it (zero when it reported none). The token has no refresh
+// token and no token endpoint: a zero expiry is the non-expiring path
+// AccessToken already takes, and a reported one makes AccessToken refuse
+// the token near expiry with "No refresh token available" rather than
+// letting requests start failing — either way the remedy is to import
+// again. Scope is what the token was verified or declared to carry.
+func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt time.Time) error {
 	if scope != scopeRead && scope != scopeFull {
 		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.store.Save(m.credentialKey(), &Credentials{
+	creds := &Credentials{
 		AccessToken: token,
 		OAuthType:   oauthTypeBC5,
 		Scope:       scope,
 		UserID:      userID,
 		UserEmail:   userEmail,
-	})
+	}
+	if !expiresAt.IsZero() {
+		creds.ExpiresAt = expiresAt.Unix()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store.Save(m.credentialKey(), creds)
 }
 
 // Logout removes stored credentials.

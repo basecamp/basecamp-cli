@@ -273,6 +273,9 @@ named profile, creating the profile when --account is given.
 --login-hint names the account to sign in as on the device-flow approval page.
 This build tells you the hint instead of sending it to the server.`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
+		// No positional arguments, so a token pasted after --with-token is
+		// refused rather than silently ignored while it sits in shell history.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -421,6 +424,11 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	case existing.AccountID == "" && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
 			"Pass --account <id> to bind it alongside the imported token.")
+	case existing.AccountID == "" && config.Source(app.Config.Sources["profiles"]) != config.SourceGlobal:
+		// Binding rewrites the global config file; a profile that arrived
+		// from a system, repo or local config would keep shadowing it.
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is defined outside the global config", name),
+			fmt.Sprintf("Add account_id to its entry in the %s config, then rerun the import.", app.Config.Sources["profiles"]))
 	case existing.AccountID == "":
 		bindAccount = true
 	case !accountIDsEqual(account, existing.AccountID):
@@ -467,8 +475,15 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		existing.AccountID = account
 	}
 
-	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email); err != nil {
+	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email, who.ExpiresAt); err != nil {
 		return fmt.Errorf("profile %q is registered but the token could not be stored (rerun the import): %w", name, err)
+	}
+
+	var expiresAt any
+	tokenLine := "personal access token (does not expire)"
+	if !who.ExpiresAt.IsZero() {
+		expiresAt = who.ExpiresAt.UTC().Format(time.RFC3339)
+		tokenLine = "expires " + who.ExpiresAt.Local().Format("2006-01-02")
 	}
 
 	data := map[string]any{
@@ -478,7 +493,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		"source":          "token",
 		"oauth_type":      "bc5",
 		"scope":           scope,
-		"expires_at":      nil,
+		"expires_at":      expiresAt,
 		"identity":        map[string]any{"id": who.IdentityID, "email": who.IdentityEmail},
 		"person":          map[string]any{"id": who.PersonID, "name": who.Name, "email": who.Email},
 		"profile_created": created != nil,
@@ -494,7 +509,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	w := cmd.OutOrStdout()
 	r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
 	fmt.Fprintln(w, r.Success.Render("Logged in as "+who.label()))
-	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: personal access token (does not expire)", name, account, scope)))
+	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: %s", name, account, scope, tokenLine)))
 	if created != nil {
 		line := fmt.Sprintf("Created profile %q for account %s", name, account)
 		if isDefault {
@@ -602,6 +617,9 @@ type loginIdentity struct {
 	Name          string
 	Email         string
 	Scope         string
+	// ExpiresAt is the expiry the authorization document reported for the
+	// credential; zero when it reported none.
+	ExpiresAt time.Time
 }
 
 // label renders the identity for a one-line terminal sink. Name and email
@@ -666,6 +684,9 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 		Email:         info.Identity.EmailAddress,
 		Name:          strings.TrimSpace(info.Identity.FirstName + " " + info.Identity.LastName),
 		Scope:         info.Scope,
+	}
+	if expiry, ok := info.Expiry(); ok {
+		who.ExpiresAt = expiry
 	}
 	if who.Scope != "" && who.Scope != "read" && who.Scope != "full" {
 		return output.ErrAuth(fmt.Sprintf("The server reports scope %q for this credential; only read or full can be stored", richtext.SanitizeSingleLine(who.Scope)))

@@ -1088,7 +1088,7 @@ func TestImportToken(t *testing.T) {
 	m := newDeviceTestManager(t, "https://3.basecampapi.com")
 	m.cfg.ActiveProfile = "bot"
 
-	require.NoError(t, m.ImportToken("bc_at_secret", "full", "51177542", "bot@example.com"))
+	require.NoError(t, m.ImportToken("bc_at_secret", "full", "51177542", "bot@example.com", time.Time{}))
 
 	creds, err := m.store.Load("profile:bot")
 	require.NoError(t, err)
@@ -1108,9 +1108,19 @@ func TestImportToken(t *testing.T) {
 	require.Error(t, err, "an explicit refresh has nothing to refresh with")
 	assert.Contains(t, err.Error(), "No refresh token")
 
-	err = m.ImportToken("bc_at_secret", "admin", "", "")
+	err = m.ImportToken("bc_at_secret", "admin", "", "", time.Time{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Invalid scope")
+
+	// A reported expiry is kept, and near it the token is refused rather
+	// than served: there is no refresh token to renew it with.
+	require.NoError(t, m.ImportToken("bc_at_short", "full", "", "", time.Now().Add(time.Minute)))
+	creds, err = m.store.Load("profile:bot")
+	require.NoError(t, err)
+	assert.Positive(t, creds.ExpiresAt)
+	_, err = m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "No refresh token")
 }
 
 // TestLoginDevice_VerifyRunsBeforeStore: a Verify hook sees the freshly

@@ -217,7 +217,9 @@ op read "op://Vault/Item/credential" | basecamp auth login --with-token -P bot -
 
 `--account` is required when the profile does not exist yet. `--json` returns
 an envelope with the profile, account, identity and person, `oauth_type`,
-`scope`, and `expires_at: null`.
+`scope`, and `expires_at` (the expiry the server reports for the token, or
+`null` when it reports none). A token has no refresh token, so near a reported
+expiry the CLI refuses it and asks for a fresh import.
 
 ### Multiple Identities
 
