@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -761,4 +762,285 @@ func TestPeopleRemoveNoProject(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Contains(t, e.Message, "--project (or --in) is required")
+}
+
+// profileCapture records what the mock server saw so tests can assert on the
+// exact request the command built.
+type profileCapture struct {
+	putSeen   bool
+	putBody   map[string]any
+	oooMethod string
+	oooPath   string
+	oooBody   map[string]any
+}
+
+// setupProfileMockServer routes the profile PUT/GET and out-of-office
+// POST/DELETE endpoints, recording each mutating request into capture.
+func setupProfileMockServer(t *testing.T, accountID string, capture *profileCapture) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		profilePath := fmt.Sprintf("/%s/my/profile.json", accountID)
+
+		switch {
+		case r.URL.Path == profilePath && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": 12345, "name": "Test User", "title": "Engineer", "bio": "current bio",
+			})
+		case r.URL.Path == profilePath && r.Method == http.MethodPut:
+			capture.putSeen = true
+			body, _ := io.ReadAll(r.Body)
+			capture.putBody = map[string]any{}
+			if err := json.Unmarshal(body, &capture.putBody); err != nil {
+				http.Error(w, fmt.Sprintf("bad body: %v", err), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+		case strings.HasSuffix(r.URL.Path, "/out_of_office.json") && r.Method == http.MethodPost:
+			capture.oooMethod = http.MethodPost
+			capture.oooPath = r.URL.Path
+			body, _ := io.ReadAll(r.Body)
+			capture.oooBody = map[string]any{}
+			_ = json.Unmarshal(body, &capture.oooBody)
+			json.NewEncoder(w).Encode(map[string]any{
+				"enabled": true, "start_date": "2026-09-14", "end_date": "2026-09-18",
+			})
+		case strings.HasSuffix(r.URL.Path, "/out_of_office.json") && r.Method == http.MethodDelete:
+			capture.oooMethod = http.MethodDelete
+			capture.oooPath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestPeopleUpdateSetsFields verifies that set flags land in the PUT body and
+// that the updated profile is read back and returned.
+func TestPeopleUpdateSetsFields(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--bio", "Building the CLI", "--title", "Staff Engineer")
+	require.NoError(t, err)
+
+	require.True(t, capture.putSeen, "expected a PUT to /my/profile.json")
+	assert.Equal(t, "Building the CLI", capture.putBody["bio"])
+	assert.Equal(t, "Staff Engineer", capture.putBody["title"])
+	_, hasName := capture.putBody["name"]
+	assert.False(t, hasName, "name should be omitted when its flag is not set")
+
+	var result struct {
+		Data struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.Equal(t, int64(12345), result.Data.ID)
+	assert.Equal(t, "Test User", result.Data.Name)
+}
+
+// TestPeopleUpdateClearsField verifies that an explicit empty value clears the
+// field: the key is present in the body with an empty string, not omitted.
+func TestPeopleUpdateClearsField(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--bio", "")
+	require.NoError(t, err)
+
+	require.True(t, capture.putSeen)
+	bio, ok := capture.putBody["bio"]
+	require.True(t, ok, "bio key must be present to clear it, got body: %v", capture.putBody)
+	assert.Equal(t, "", bio)
+}
+
+// TestPeopleUpdateOmitsUnsetFields verifies that unset flags never appear in
+// the request body.
+func TestPeopleUpdateOmitsUnsetFields(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--title", "PM")
+	require.NoError(t, err)
+
+	require.True(t, capture.putSeen)
+	assert.Equal(t, "PM", capture.putBody["title"])
+	assert.Len(t, capture.putBody, 1, "only the title key should be present, got: %v", capture.putBody)
+}
+
+// TestPeopleUpdateDefaultsToMe verifies the bare "me" target is optional.
+func TestPeopleUpdateDefaultsToMe(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "--bio", "no explicit target")
+	require.NoError(t, err)
+	assert.True(t, capture.putSeen)
+}
+
+// TestPeopleUpdateNoFields returns a usage error and never hits the server.
+func TestPeopleUpdateNoFields(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.False(t, capture.putSeen, "no request should be sent when nothing changes")
+}
+
+// TestPeopleUpdateRejectsOtherTarget refuses a non-"me" target before any call.
+func TestPeopleUpdateRejectsOtherTarget(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "1001", "--bio", "x")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "Only your own profile")
+	assert.False(t, capture.putSeen)
+}
+
+// TestPeopleUpdateInvalidFirstWeekDay rejects an unknown enum value.
+func TestPeopleUpdateInvalidFirstWeekDay(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--first-week-day", "Frday")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.False(t, capture.putSeen)
+}
+
+// TestPeopleUpdateFirstWeekDay sends a valid enum through to the body.
+func TestPeopleUpdateFirstWeekDay(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--first-week-day", "Monday")
+	require.NoError(t, err)
+	require.True(t, capture.putSeen)
+	assert.Equal(t, "Monday", capture.putBody["first_week_day"])
+}
+
+// TestPeopleOutOfOfficeEnable posts resolved dates to the OOO endpoint.
+func TestPeopleOutOfOfficeEnable(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "2026-09-14", "--end", "2026-09-18")
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPost, capture.oooMethod)
+	assert.Equal(t, "/99999/people/12345/out_of_office.json", capture.oooPath)
+	payload, ok := capture.oooBody["out_of_office"].(map[string]any)
+	require.True(t, ok, "expected out_of_office payload, got: %v", capture.oooBody)
+	assert.Equal(t, "2026-09-14", payload["start_date"])
+	assert.Equal(t, "2026-09-18", payload["end_date"])
+
+	var result struct {
+		Data struct {
+			Enabled bool `json:"enabled"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.True(t, result.Data.Enabled)
+}
+
+// TestPeopleOutOfOfficeClear deletes the OOO for the current user.
+func TestPeopleOutOfOfficeClear(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--clear")
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodDelete, capture.oooMethod)
+	assert.Equal(t, "/99999/people/12345/out_of_office.json", capture.oooPath)
+}
+
+// TestPeopleOutOfOfficeConflict rejects --clear with dates before any call.
+func TestPeopleOutOfOfficeConflict(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--clear", "--start", "2026-09-14")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, capture.oooMethod, "no OOO request should be sent on a conflicting invocation")
+}
+
+// TestPeopleOutOfOfficeRequiresBothDates rejects a half-specified range.
+func TestPeopleOutOfOfficeRequiresBothDates(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "2026-09-14")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeNoArgs returns a usage error with no flags.
+func TestPeopleOutOfOfficeNoArgs(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Empty(t, capture.oooMethod)
 }

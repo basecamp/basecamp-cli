@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/completion"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -149,11 +150,233 @@ func NewPeopleCmd() *cobra.Command {
 
 	cmd.AddCommand(newPeopleListCmd())
 	cmd.AddCommand(newPeopleShowCmd())
+	cmd.AddCommand(newPeopleUpdateCmd())
+	cmd.AddCommand(newPeopleOutOfOfficeCmd())
 	cmd.AddCommand(newPeoplePingableCmd())
 	cmd.AddCommand(newPeopleAddCmd())
 	cmd.AddCommand(newPeopleRemoveCmd())
 
 	return cmd
+}
+
+// requireMeTarget enforces the "me" sentinel that scopes a self-only person
+// action. The profile PUT and the out-of-office endpoints only ever act on the
+// authenticated user, so the target is always spelled "me" — matching
+// "basecamp people show me" — and any other value is rejected up front with a
+// hint rather than sent to the server. Requiring the word (instead of assuming
+// it) keeps "basecamp people update <id>" open for a future admin edit.
+func requireMeTarget(target string) error {
+	if strings.EqualFold(target, "me") {
+		return nil
+	}
+	return output.ErrUsageHint(
+		"Only your own profile can be edited",
+		"The target is always \"me\": basecamp people update me --bio \"...\"")
+}
+
+// firstWeekDays and timeFormats are the accepted enum values for the two
+// profile settings that are not free text. Validating them locally turns a
+// typo into a clear message instead of an opaque server rejection.
+var firstWeekDays = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+var timeFormats = []string{"twelve_hour", "twenty_four_hour"}
+
+func newPeopleUpdateCmd() *cobra.Command {
+	var name, email, title, bio, location, timeZone, firstWeekDay, timeFormat string
+
+	cmd := &cobra.Command{
+		Use:   "update [me] [flags]",
+		Short: "Update your profile",
+		Long: `Update your own Basecamp profile.
+
+Only your own profile can be edited, so the target is always "me" — the same
+sentinel accepted by "basecamp people show me".
+
+Each field is left unchanged unless you pass its flag. Pass a flag with an
+empty value to clear that field:
+
+  basecamp people update me --bio "Building the Basecamp CLI"
+  basecamp people update me --title "Staff Engineer" --location "Chicago, IL"
+  basecamp people update me --bio ""
+
+first-week-day is one of: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday,
+Saturday. time-format is twelve_hour or twenty_four_hour.`,
+		Example: `basecamp people update me --bio "Building the Basecamp CLI" --title "Staff Engineer"`,
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "me"
+			if len(args) > 0 {
+				target = args[0]
+			}
+			if err := requireMeTarget(target); err != nil {
+				return err
+			}
+			return runPeopleUpdate(cmd, name, email, title, bio, location, timeZone, firstWeekDay, timeFormat)
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Display name")
+	cmd.Flags().StringVar(&email, "email", "", "Email address")
+	cmd.Flags().StringVar(&title, "title", "", "Job title")
+	cmd.Flags().StringVar(&bio, "bio", "", "Short bio (tagline)")
+	cmd.Flags().StringVar(&location, "location", "", "Location")
+	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Rails time zone name (e.g. America/Chicago)")
+	cmd.Flags().StringVar(&firstWeekDay, "first-week-day", "", "First day of the week (Sunday..Saturday)")
+	cmd.Flags().StringVar(&timeFormat, "time-format", "", "Time format (twelve_hour or twenty_four_hour)")
+
+	return cmd
+}
+
+func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, timeZone, firstWeekDay, timeFormat string) error {
+	app := appctx.FromContext(cmd.Context())
+
+	req := &basecamp.UpdateMyProfileRequest{}
+	changed := false
+
+	setStr := func(flag, value string, dst **string) {
+		if cmd.Flags().Changed(flag) {
+			v := value
+			*dst = &v
+			changed = true
+		}
+	}
+	setStr("name", name, &req.Name)
+	setStr("email", email, &req.EmailAddress)
+	setStr("title", title, &req.Title)
+	setStr("bio", bio, &req.Bio)
+	setStr("location", location, &req.Location)
+	setStr("time-zone", timeZone, &req.TimeZoneName)
+	setStr("time-format", timeFormat, &req.TimeFormat)
+
+	if cmd.Flags().Changed("time-format") && !slices.Contains(timeFormats, timeFormat) {
+		return output.ErrUsage("Invalid time-format (use twelve_hour or twenty_four_hour)")
+	}
+	if cmd.Flags().Changed("first-week-day") {
+		if !slices.Contains(firstWeekDays, firstWeekDay) {
+			return output.ErrUsage("Invalid first-week-day (use Sunday, Monday, ... Saturday)")
+		}
+		fwd := basecamp.FirstWeekDay(firstWeekDay)
+		req.FirstWeekDay = &fwd
+		changed = true
+	}
+
+	if !changed {
+		return noChanges(cmd)
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	if err := app.Account().People().UpdateMyProfile(cmd.Context(), req); err != nil {
+		return convertSDKError(err)
+	}
+
+	// The PUT returns no body, so read the profile back to show the result.
+	person, err := app.Account().People().Me(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	breadcrumbs := []output.Breadcrumb{
+		{Action: "show", Cmd: "basecamp people show me", Description: "Show your profile"},
+	}
+	return app.OK(person,
+		output.WithSummary("Updated your profile"),
+		output.WithBreadcrumbs(breadcrumbs...),
+	)
+}
+
+func newPeopleOutOfOfficeCmd() *cobra.Command {
+	var start, end string
+	var clearFlag bool
+
+	cmd := &cobra.Command{
+		Use:     "out-of-office [me] [flags]",
+		Aliases: []string{"ooo"},
+		Short:   "Set or clear your out-of-office dates",
+		Long: `Set or clear your own out-of-office dates.
+
+Only your own out-of-office can be set here, so the target is always "me".
+
+  basecamp people out-of-office me --start "next monday" --end "next friday"
+  basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18
+  basecamp people out-of-office me --clear
+
+Dates accept natural language ("next monday", "in 2 weeks") or YYYY-MM-DD.`,
+		Example: `basecamp people out-of-office me --start "next monday" --end "next friday"`,
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "me"
+			if len(args) > 0 {
+				target = args[0]
+			}
+			if err := requireMeTarget(target); err != nil {
+				return err
+			}
+			return runPeopleOutOfOffice(cmd, start, end, clearFlag)
+		},
+	}
+
+	cmd.Flags().StringVar(&start, "start", "", "Out-of-office start date (natural language or YYYY-MM-DD)")
+	cmd.Flags().StringVar(&end, "end", "", "Out-of-office end date (natural language or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&clearFlag, "clear", false, "Clear out-of-office (mark yourself back)")
+
+	return cmd
+}
+
+func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool) error {
+	app := appctx.FromContext(cmd.Context())
+
+	datesGiven := start != "" || end != ""
+	if clearFlag && datesGiven {
+		return output.ErrUsage("--clear cannot be combined with --start or --end")
+	}
+	if !clearFlag && !datesGiven {
+		return noChanges(cmd)
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	me, err := app.Account().People().Me(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	if clearFlag {
+		if err := app.Account().People().DisableOutOfOffice(cmd.Context(), me.ID); err != nil {
+			return convertSDKError(err)
+		}
+		return app.OK(map[string]any{"enabled": false},
+			output.WithSummary("Cleared your out-of-office"),
+		)
+	}
+
+	if start == "" || end == "" {
+		return output.ErrUsage("both --start and --end are required to set out-of-office")
+	}
+	startDate := dateparse.Parse(start)
+	endDate := dateparse.Parse(end)
+	if !dateparse.IsValid(startDate) {
+		return output.ErrUsage(fmt.Sprintf("Invalid start date %q (use natural language or YYYY-MM-DD)", start))
+	}
+	if !dateparse.IsValid(endDate) {
+		return output.ErrUsage(fmt.Sprintf("Invalid end date %q (use natural language or YYYY-MM-DD)", end))
+	}
+
+	ooo, err := app.Account().People().EnableOutOfOffice(cmd.Context(), me.ID, &basecamp.EnableOutOfOfficeRequest{
+		StartDate: startDate,
+		EndDate:   endDate,
+	})
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(ooo,
+		output.WithSummary(fmt.Sprintf("Out of office %s to %s", startDate, endDate)),
+	)
 }
 
 func newPeopleListCmd() *cobra.Command {
