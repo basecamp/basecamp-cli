@@ -100,9 +100,13 @@ func newAuthStatusCmd() *cobra.Command {
 				effectiveScope = ""
 			}
 
+			source := "oauth"
+			if creds.Source != "" {
+				source = creds.Source
+			}
 			status := map[string]any{
 				"authenticated": true,
-				"source":        "oauth",
+				"source":        source,
 				"oauth_type":    creds.OAuthType,
 			}
 			if effectiveScope != "" {
@@ -410,6 +414,14 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	// another.
 	account := app.Config.AccountID
 	existing := app.Config.Profiles[name]
+	globalUnbound := false
+	if existing != nil && existing.AccountID == "" {
+		unbound, err := globalProfileIsUnbound(name)
+		if err != nil {
+			return err
+		}
+		globalUnbound = unbound
+	}
 	var created *config.ProfileConfig
 	bindAccount := false
 	switch {
@@ -424,7 +436,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	case existing.AccountID == "" && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
 			"Pass --account <id> to bind it alongside the imported token.")
-	case existing.AccountID == "" && !globalProfileIsUnbound(name):
+	case existing.AccountID == "" && !globalUnbound:
 		// Binding rewrites the global config file. The effective profile
 		// is accountless, so if the global entry is missing or already
 		// carries an account, the accountless one came from a system, repo
@@ -446,7 +458,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		return err
 	}
 
-	verifier := &loginVerifier{app: app, expectIdentity: expect, account: account, strict: true}
+	verifier := &loginVerifier{app: app, expectIdentity: expect, account: account, strict: true, noRefresh: true}
 	if err := verifier.verify(cmd.Context(), token, "bc5"); err != nil {
 		return err
 	}
@@ -661,6 +673,10 @@ type loginVerifier struct {
 	expectIdentity int64
 	account        string
 	strict         bool
+	// noRefresh marks a credential with nothing to refresh with (an
+	// imported token): one already inside the refresh window is refused,
+	// where an OAuth login's refresh token would simply renew it.
+	noRefresh bool
 
 	who *loginIdentity
 }
@@ -698,7 +714,7 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 	}
 	// An imported token has nothing to refresh with, so one already inside
 	// the refresh window could not serve a single command once stored.
-	if v.strict && !who.ExpiresAt.IsZero() && time.Until(who.ExpiresAt) <= auth.RefreshWindow {
+	if v.noRefresh && !who.ExpiresAt.IsZero() && time.Until(who.ExpiresAt) <= auth.RefreshWindow {
 		return output.ErrAuth(fmt.Sprintf("The credential expires at %s, within the %s the CLI keeps clear of expiry; nothing was stored — mint a fresh token", who.ExpiresAt.UTC().Format(time.RFC3339), auth.RefreshWindow))
 	}
 	if v.expectIdentity != 0 && who.IdentityID != v.expectIdentity {

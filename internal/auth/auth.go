@@ -55,6 +55,10 @@ const (
 	scopeFull = "full"
 )
 
+// CredentialSourceToken marks a credential imported from a personal access
+// token rather than obtained through an OAuth flow.
+const CredentialSourceToken = "token"
+
 // RefreshWindow is how long before its expiry a stored access token stops
 // being served as-is: AccessToken refreshes inside this window, and a
 // credential with nothing to refresh with (an imported token) is refused
@@ -797,6 +801,7 @@ func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt 
 		Scope:       scope,
 		UserID:      userID,
 		UserEmail:   userEmail,
+		Source:      CredentialSourceToken,
 	}
 	if !expiresAt.IsZero() {
 		creds.ExpiresAt = expiresAt.Unix()

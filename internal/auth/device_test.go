@@ -1092,7 +1092,7 @@ func TestImportToken(t *testing.T) {
 
 	creds, err := m.store.Load("profile:bot")
 	require.NoError(t, err)
-	assert.Equal(t, &Credentials{AccessToken: "bc_at_secret", OAuthType: "bc5", Scope: "full", UserID: "51177542", UserEmail: "bot@example.com"}, creds)
+	assert.Equal(t, &Credentials{AccessToken: "bc_at_secret", OAuthType: "bc5", Scope: "full", UserID: "51177542", UserEmail: "bot@example.com", Source: "token"}, creds)
 	assert.Zero(t, creds.ExpiresAt)
 
 	// Non-expiring: served as-is, with no refresh attempted (there is no

@@ -298,6 +298,7 @@ func TestAuthLoginWithTokenCreatesProfileAndVerifiesIdentity(t *testing.T) {
 	assert.Equal(t, "full", creds.Scope)
 	assert.Equal(t, "51177542", creds.UserID)
 	assert.Equal(t, "clawdito@example.com", creds.UserEmail)
+	assert.Equal(t, "token", creds.Source)
 
 	// Far from expiry: AccessToken serves it without attempting a refresh.
 	tok, err := app.Auth.AccessToken(context.Background())
@@ -1029,4 +1030,65 @@ func TestAuthLoginRejectsPositionalArguments(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown command")
 	assert.Equal(t, 12, in.Len())
 	assert.Empty(t, srv.seenBearers())
+}
+
+func TestAuthStatusReportsAnImportedToken(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.NoError(t, err)
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "token", envelope.Data["source"], "a machine consumer can tell an imported token from an OAuth login")
+	assert.Equal(t, "bc5", envelope.Data["oauth_type"])
+}
+
+func TestAuthLoginWithTokenRefusesToRewriteMalformedConfig(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte("{ not json"), 0o600))
+
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not valid JSON")
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "{ not json", string(data), "the operator's file is left exactly as it was")
+	_, loadErr := app.Auth.GetStore().Load("profile:bot")
+	assert.Error(t, loadErr, "the entry comes before the credential, so nothing is stored")
+}
+
+// TestAuthLoginDeviceFlowExpectIdentityKeepsAShortLivedAccessToken: the
+// near-expiry refusal is for imports, which cannot refresh. An asserted
+// OAuth login whose access token is about to expire has a refresh token
+// and is stored.
+func TestAuthLoginDeviceFlowExpectIdentityKeepsAShortLivedAccessToken(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	srv.expiresAt = time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339)
+	srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot", Profiles: map[string]*config.ProfileConfig{"bot": {AccountID: "999"}}})
+	withAccount(app, "999", "profile")
+	t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	out, err := runLogin(t, app, strings.NewReader(""), "--device-code", "--expect-identity", "28142355")
+	require.NoError(t, err, out)
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, "dev-ref", creds.RefreshToken)
+	assert.Empty(t, creds.Source)
 }

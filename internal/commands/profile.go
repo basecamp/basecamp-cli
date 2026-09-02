@@ -157,6 +157,9 @@ func newProfileShowCmd() *cobra.Command {
 			if err == nil && creds.AccessToken != "" {
 				result["authenticated"] = true
 				result["oauth_type"] = creds.OAuthType
+				if creds.Source != "" {
+					result["source"] = creds.Source
+				}
 				isLaunchpad = creds.OAuthType == "launchpad"
 
 				// Suppress credential scope for Launchpad (scopes not supported)
@@ -378,13 +381,10 @@ func newProfileSetDefaultCmd() *cobra.Command {
 				return output.ErrUsage(fmt.Sprintf("Profile %q not found", name))
 			}
 
-			// Update config file
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
+			configData, configPath, err := loadGlobalConfigFile()
+			if err != nil {
+				return err
 			}
-
 			configData["default_profile"] = name
 
 			if err := atomicWriteJSON(configPath, configData); err != nil {
@@ -403,14 +403,12 @@ func newProfileSetDefaultCmd() *cobra.Command {
 // profile registered becomes the default; isDefault reports whether this one
 // did. The in-memory config is the caller's to update.
 func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err error) {
-	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
 		return false, fmt.Errorf("failed to create config directory: %w", err)
 	}
-
-	configData := make(map[string]any)
-	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-		_ = json.Unmarshal(data, &configData)
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return false, err
 	}
 
 	profilesMap, _ := configData["profiles"].(map[string]any)
@@ -438,15 +436,24 @@ func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err 
 	return isDefault, atomicWriteJSON(configPath, configData)
 }
 
-// loadGlobalConfigFile returns the global config file's contents and path (an
-// empty map when the file is absent or unreadable).
-func loadGlobalConfigFile() (map[string]any, string) {
+// loadGlobalConfigFile returns the global config file's contents and path.
+// A missing file is an empty config; a file that cannot be read or parsed
+// is an error, since every caller is about to write the map back and would
+// otherwise replace whatever the operator had with a partial decode.
+func loadGlobalConfigFile() (map[string]any, string, error) {
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	configData := make(map[string]any)
-	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-		_ = json.Unmarshal(data, &configData)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: Path is from trusted config location
+	if os.IsNotExist(err) {
+		return configData, configPath, nil
 	}
-	return configData, configPath
+	if err != nil {
+		return nil, configPath, fmt.Errorf("failed to read config file %s: %w", configPath, err)
+	}
+	if err := json.Unmarshal(data, &configData); err != nil {
+		return nil, configPath, fmt.Errorf("config file %s is not valid JSON, refusing to rewrite it: %w", configPath, err)
+	}
+	return configData, configPath, nil
 }
 
 // globalProfileEntry returns the named profile's entry in the global config
@@ -462,16 +469,22 @@ func globalProfileEntry(configData map[string]any, name string) map[string]any {
 // Config layers merge per profile name, so the effective profile being
 // accountless says nothing about which file it came from; the global entry
 // itself is the evidence.
-func globalProfileIsUnbound(name string) bool {
-	configData, _ := loadGlobalConfigFile()
+func globalProfileIsUnbound(name string) (bool, error) {
+	configData, _, err := loadGlobalConfigFile()
+	if err != nil {
+		return false, err
+	}
 	entry := globalProfileEntry(configData, name)
-	return entry != nil && getStringOrNumber(entry, "account_id") == ""
+	return entry != nil && getStringOrNumber(entry, "account_id") == "", nil
 }
 
 // bindProfileAccount sets the account on an existing profile entry in the
 // global config file, leaving every other field of the entry as it is.
 func bindProfileAccount(name, account string) error {
-	configData, configPath := loadGlobalConfigFile()
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return err
+	}
 	entry := globalProfileEntry(configData, name)
 	if entry == nil {
 		return output.ErrUsage(fmt.Sprintf("Profile %q not found in %s", name, configPath))
@@ -497,10 +510,9 @@ func getStringOrNumber(m map[string]any, key string) string {
 // clearing default_profile when it named this profile. Credentials are the
 // caller's to remove.
 func unregisterProfile(name string) error {
-	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-	configData := make(map[string]any)
-	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-		_ = json.Unmarshal(data, &configData)
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return err
 	}
 
 	if profilesMap, ok := configData["profiles"].(map[string]any); ok {
