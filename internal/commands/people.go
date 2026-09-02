@@ -165,14 +165,15 @@ func NewPeopleCmd() *cobra.Command {
 // authenticated user, so the target is always spelled "me" — matching
 // "basecamp people show me" — and any other value is rejected up front with a
 // hint rather than sent to the server. Requiring the word (instead of assuming
-// it) keeps "basecamp people update <id>" open for a future admin edit.
+// it) keeps "basecamp people update <id>" open for a future admin edit. The
+// message is command-neutral because both update and out-of-office share it.
 func requireMeTarget(target string) error {
 	if strings.EqualFold(target, "me") {
 		return nil
 	}
 	return output.ErrUsageHint(
-		"Only your own profile can be edited",
-		"The target is always \"me\": basecamp people update me --bio \"...\"")
+		`Only "me" is a valid target here`,
+		`This action only affects your own account; pass "me" or omit the target.`)
 }
 
 // firstWeekDays and timeFormats are the accepted enum values for the two
@@ -273,19 +274,23 @@ func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, time
 		return convertSDKError(err)
 	}
 
-	// The PUT returns no body, so read the profile back to show the result.
-	person, err := app.Account().People().Me(cmd.Context())
-	if err != nil {
-		return convertSDKError(err)
+	respOpts := []output.ResponseOption{
+		output.WithSummary("Updated your profile"),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action: "show", Cmd: "basecamp people show me", Description: "Show your profile",
+		}),
 	}
 
-	breadcrumbs := []output.Breadcrumb{
-		{Action: "show", Cmd: "basecamp people show me", Description: "Show your profile"},
+	// The PUT returns no body, so read the profile back to show the result. A
+	// failed read-back must not misreport the completed update: keep the success
+	// and attach a diagnostic, mirroring the project-update path.
+	person, err := app.Account().People().Me(cmd.Context())
+	if err != nil {
+		respOpts = append(respOpts, output.WithDiagnostic(
+			fmt.Sprintf("Profile updated, but reading it back failed: %v", err)))
+		return app.OK(map[string]any{"updated": true}, respOpts...)
 	}
-	return app.OK(person,
-		output.WithSummary("Updated your profile"),
-		output.WithBreadcrumbs(breadcrumbs...),
-	)
+	return app.OK(person, respOpts...)
 }
 
 func newPeopleOutOfOfficeCmd() *cobra.Command {
@@ -300,12 +305,14 @@ func newPeopleOutOfOfficeCmd() *cobra.Command {
 
 Only your own out-of-office can be set here, so the target is always "me".
 
-  basecamp people out-of-office me --start "next monday" --end "next friday"
   basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18
+  basecamp people out-of-office me --start today --end "in 2 weeks"
   basecamp people out-of-office me --clear
 
-Dates accept natural language ("next monday", "in 2 weeks") or YYYY-MM-DD.`,
-		Example: `basecamp people out-of-office me --start "next monday" --end "next friday"`,
+Dates accept natural language ("today", "in 2 weeks") or YYYY-MM-DD, and the
+end must not precede the start. Relative weekday words each resolve
+independently from today, so prefer explicit dates for a precise range.`,
+		Example: `basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18`,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "me"
@@ -365,6 +372,10 @@ func runPeopleOutOfOffice(cmd *cobra.Command, start, end string, clearFlag bool)
 		}
 		if endDate, err = resolveOOODate("end", end); err != nil {
 			return err
+		}
+		// ISO YYYY-MM-DD sorts chronologically, so a lexical compare orders them.
+		if endDate < startDate {
+			return output.ErrUsage(fmt.Sprintf("out-of-office end %s precedes start %s", endDate, startDate))
 		}
 	}
 

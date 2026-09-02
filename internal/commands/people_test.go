@@ -923,7 +923,7 @@ func TestPeopleUpdateRejectsOtherTarget(t *testing.T) {
 	var e *output.Error
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeUsage, e.Code)
-	assert.Contains(t, e.Message, "Only your own profile")
+	assert.Contains(t, e.Message, `Only "me" is a valid target`)
 	assert.False(t, capture.putSeen)
 }
 
@@ -1107,6 +1107,54 @@ func TestPeopleOutOfOfficeImpossibleDate(t *testing.T) {
 	require.True(t, errors.As(err, &e))
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleOutOfOfficeInvertedRange rejects an end that precedes the start.
+func TestPeopleOutOfOfficeInvertedRange(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "out-of-office", "me", "--start", "2026-09-18", "--end", "2026-09-14")
+	require.Error(t, err)
+
+	var e *output.Error
+	require.True(t, errors.As(err, &e))
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "precedes start")
+	assert.Empty(t, capture.oooMethod)
+}
+
+// TestPeopleUpdateReadBackFailureStillSucceeds verifies a failed profile
+// read-back keeps the update reported as successful with a diagnostic.
+func TestPeopleUpdateReadBackFailureStillSucceeds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/99999/my/profile.json" && r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{}`))
+			return
+		}
+		// Any read-back GET fails with a non-retryable client error.
+		http.Error(w, "boom", http.StatusBadRequest)
+	}))
+	t.Cleanup(server.Close)
+	app, buf := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--bio", "x")
+	require.NoError(t, err, "output: %s", buf.String())
+
+	var result struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Updated bool `json:"updated"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.True(t, result.OK)
+	assert.True(t, result.Data.Updated)
 }
 
 // TestPeopleOutOfOfficeNaturalLanguageDates resolves relative dates before
