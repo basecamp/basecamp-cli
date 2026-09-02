@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -57,9 +58,64 @@ func TestBubbleUpAddAcceptsAURL(t *testing.T) {
 	app, transport, _ := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
 
 	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add",
-		"https://3.basecamp.com/1234567/buckets/89/todos/42"))
+		"https://3.basecamp.com/99999/buckets/89/todos/42"))
 
 	assert.Equal(t, bubbleUpRecordingPath(42), transport.last(t).Path)
+}
+
+// bubbleUpData reads the single-object success envelope the add/remove verbs emit.
+func bubbleUpData(t *testing.T, out *bytes.Buffer) map[string]any {
+	t.Helper()
+	var envelope struct {
+		Data    map[string]any `json:"data"`
+		Summary string         `json:"summary"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	return map[string]any{"data": envelope.Data, "summary": envelope.Summary}
+}
+
+// A scheduled add reports bubbled_up:false (only in the scheduled set) and a
+// scheduling summary.
+func TestBubbleUpAddScheduledReportsNotYetBubbled(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
+
+	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "tomorrow"))
+
+	env := bubbleUpData(t, out)
+	data := env["data"].(map[string]any)
+	assert.Equal(t, false, data["bubbled_up"])
+	assert.Equal(t, "tomorrow", data["at"])
+	assert.Equal(t, "Scheduled recording 42 to bubble up tomorrow", env["summary"])
+}
+
+// An explicit --at now is immediate, matching the omitted default: bubbled_up:true
+// and a "Bubbled up" summary, not a scheduling one.
+func TestBubbleUpAddExplicitNowReportsImmediate(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t, bubbleUpRoute(42, http.MethodPost))
+
+	require.NoError(t, executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "now"))
+
+	env := bubbleUpData(t, out)
+	data := env["data"].(map[string]any)
+	assert.Equal(t, true, data["bubbled_up"])
+	assert.Equal(t, "Bubbled up recording 42", env["summary"])
+}
+
+// A malformed --at is a local usage error before any request is issued.
+func TestBubbleUpAddRejectsInvalidAt(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t)
+
+	err := executeRecordingCommand(NewBubbleUpCmd(), app, "add", "42", "--at", "tomorow")
+	requireBookmarksUsageError(t, err)
+	assert.Empty(t, transport.recorded(), "no request should be made for an invalid --at")
+}
+
+// A non-positive id is rejected as a usage error, not sent to the API.
+func TestBubbleUpAddRejectsNonPositiveID(t *testing.T) {
+	app, _, _ := setupPersonalFeedApp(t)
+
+	err := executeRecordingCommand(NewBubbleUpCmd(), app, "add", "0")
+	requireBookmarksUsageError(t, err)
 }
 
 func TestBubbleUpRemoveDeletesTheBubbleUp(t *testing.T) {
@@ -75,6 +131,8 @@ func TestBubbleUpRemoveDeletesTheBubbleUp(t *testing.T) {
 func TestBubbleUpVerbsRejectANonID(t *testing.T) {
 	app, _, _ := setupPersonalFeedApp(t)
 
-	err := executeRecordingCommand(NewBubbleUpCmd(), app, "add", "not-an-id")
-	requireBookmarksUsageError(t, err)
+	for _, verb := range []string{"add", "remove"} {
+		err := executeRecordingCommand(NewBubbleUpCmd(), app, verb, "not-an-id")
+		requireBookmarksUsageError(t, err)
+	}
 }

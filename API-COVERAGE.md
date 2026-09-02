@@ -43,8 +43,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.15.0 (`internal/version/sdk-provenance.json` is
-authoritative). The command surface below largely dates to the v0.12.0 bump,
+**SDK version:** v0.15.1 (adds Bubble Up write support; pinned to the
+pre-release bubble-up SDK head until the v0.15.1 tag —
+`internal/version/sdk-provenance.json` is authoritative). The command surface below largely dates to the v0.12.0 bump,
 which added 20 exported Go methods over 13 new backend operations; the extra
 seven wrapped endpoints that already existed but were reachable only through
 the raw generated client, which the andon-cord rule forbids the CLI from
@@ -197,7 +198,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, thread, create, update. @mentions in content. `show` surfaces `reply_target` + paste-ready `mention` from its single Get (no new calls). `thread` composes Get + parent recording (via type endpoint) + List into a deterministic reply-ready context (no new endpoints) |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete. No account-wide listing — BC5 withdrew `/boosts.json` (basecamp/bc3#12464); temporary, returns via basecamp/bc3#12463 |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
-| bubble_ups | 1 | `notifications bubbleups` | ✅ | BC5 | - | Dedicated Bubble Ups list (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups` |
+| bubble_ups | 3 | `bubble-up`, `notifications bubbleups` | ✅ | BC5 | - | `bubble-up add`/`remove` create and delete a per-recording bubble-up (`POST`/`DELETE /recordings/{id}/bubble_up.json`); `add --at` schedules. Dedicated list is `notifications bubbleups` (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups`. Per-recording GET is an unrenderable API gap, so there is no `check`. |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |

@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -70,6 +71,9 @@ succeeds.
 			if err != nil {
 				return err
 			}
+			if err := validateBubbleUpAt(at); err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -86,12 +90,13 @@ succeeds.
 				return convertSDKError(err)
 			}
 
+			immediate := when == "now"
 			summary := fmt.Sprintf("Bubbled up recording %d", recordingID)
-			if at != "" {
-				summary = fmt.Sprintf("Scheduled recording %d to bubble up %s", recordingID, at)
+			if !immediate {
+				summary = fmt.Sprintf("Scheduled recording %d to bubble up %s", recordingID, when)
 			}
 
-			return app.OK(map[string]any{"id": recordingID, "bubbled_up": true, "at": when},
+			return app.OK(map[string]any{"id": recordingID, "bubbled_up": immediate, "at": when},
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
@@ -101,7 +106,7 @@ succeeds.
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp recordings show %d", recordingID),
+						Cmd:         fmt.Sprintf("basecamp show %d", recordingID),
 						Description: "View the recording",
 					},
 				),
@@ -159,11 +164,31 @@ run without checking first.
 // pasted URL is the natural way to name one.
 func bubbleUpRecordingID(arg string) (int64, error) {
 	id, err := strconv.ParseInt(extractID(arg), 10, 64)
-	if err != nil {
+	if err != nil || id <= 0 {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a recording id or Basecamp URL", arg),
 			"Pass a numeric recording id, or paste the recording's Basecamp URL",
 		)
 	}
 	return id, nil
+}
+
+// validateBubbleUpAt rejects an --at value bc3 cannot parse before any account
+// resolution or network call, so a typo like "tomorow" is a local usage error
+// rather than a server-side Date.iso8601 raise. Valid values are the empty
+// default, "now", the schedule keywords, or an ISO8601 date.
+func validateBubbleUpAt(at string) error {
+	switch at {
+	case "", "now", "today", "tomorrow", "weekend", "next_week":
+		return nil
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339, "2006-01-02T15:04:05"} {
+		if _, err := time.Parse(layout, at); err == nil {
+			return nil
+		}
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("%q is not a valid --at value", at),
+		`Use "now", a keyword ("today", "tomorrow", "weekend", "next_week"), or an ISO8601 date`,
+	)
 }
