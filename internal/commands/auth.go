@@ -424,11 +424,13 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	case existing.AccountID == "" && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
 			"Pass --account <id> to bind it alongside the imported token.")
-	case existing.AccountID == "" && config.Source(app.Config.Sources["profiles"]) != config.SourceGlobal:
-		// Binding rewrites the global config file; a profile that arrived
-		// from a system, repo or local config would keep shadowing it.
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is defined outside the global config", name),
-			fmt.Sprintf("Add account_id to its entry in the %s config, then rerun the import.", app.Config.Sources["profiles"]))
+	case existing.AccountID == "" && !globalProfileIsUnbound(name):
+		// Binding rewrites the global config file. The effective profile
+		// is accountless, so if the global entry is missing or already
+		// carries an account, the accountless one came from a system, repo
+		// or local config and would keep shadowing whatever is written.
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is not the global config's entry", name),
+			"Add account_id to the config file that defines it, then rerun the import.")
 	case existing.AccountID == "":
 		bindAccount = true
 	case !accountIDsEqual(account, existing.AccountID):
@@ -693,6 +695,11 @@ func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType strin
 	}
 	if v.strict && who.IdentityID <= 0 {
 		return output.ErrAuth("The authorization endpoint did not report an identity for the new credential; nothing was stored")
+	}
+	// An imported token has nothing to refresh with, so one already inside
+	// the refresh window could not serve a single command once stored.
+	if v.strict && !who.ExpiresAt.IsZero() && time.Until(who.ExpiresAt) <= auth.RefreshWindow {
+		return output.ErrAuth(fmt.Sprintf("The credential expires at %s, within the %s the CLI keeps clear of expiry; nothing was stored — mint a fresh token", who.ExpiresAt.UTC().Format(time.RFC3339), auth.RefreshWindow))
 	}
 	if v.expectIdentity != 0 && who.IdentityID != v.expectIdentity {
 		return output.ErrAuth(fmt.Sprintf("Authenticated as %s, not identity %d; nothing was stored", who.label(), v.expectIdentity))

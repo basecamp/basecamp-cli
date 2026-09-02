@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -437,22 +438,59 @@ func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err 
 	return isDefault, atomicWriteJSON(configPath, configData)
 }
 
-// bindProfileAccount sets the account on an existing profile entry in the
-// global config file, leaving every other field of the entry as it is.
-func bindProfileAccount(name, account string) error {
+// loadGlobalConfigFile returns the global config file's contents and path (an
+// empty map when the file is absent or unreadable).
+func loadGlobalConfigFile() (map[string]any, string) {
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	configData := make(map[string]any)
 	if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
 		_ = json.Unmarshal(data, &configData)
 	}
+	return configData, configPath
+}
 
+// globalProfileEntry returns the named profile's entry in the global config
+// file, or nil when the file has none.
+func globalProfileEntry(configData map[string]any, name string) map[string]any {
 	profilesMap, _ := configData["profiles"].(map[string]any)
 	entry, _ := profilesMap[name].(map[string]any)
+	return entry
+}
+
+// globalProfileIsUnbound reports whether the global config file defines the
+// profile without an account — the one shape bindProfileAccount can act on.
+// Config layers merge per profile name, so the effective profile being
+// accountless says nothing about which file it came from; the global entry
+// itself is the evidence.
+func globalProfileIsUnbound(name string) bool {
+	configData, _ := loadGlobalConfigFile()
+	entry := globalProfileEntry(configData, name)
+	return entry != nil && getStringOrNumber(entry, "account_id") == ""
+}
+
+// bindProfileAccount sets the account on an existing profile entry in the
+// global config file, leaving every other field of the entry as it is.
+func bindProfileAccount(name, account string) error {
+	configData, configPath := loadGlobalConfigFile()
+	entry := globalProfileEntry(configData, name)
 	if entry == nil {
 		return output.ErrUsage(fmt.Sprintf("Profile %q not found in %s", name, configPath))
 	}
 	entry["account_id"] = account
 	return atomicWriteJSON(configPath, configData)
+}
+
+// getStringOrNumber reads a config value that may be stored as a string or
+// a JSON number, as config.loadFromFile accepts for IDs.
+func getStringOrNumber(m map[string]any, key string) string {
+	switch v := m[key].(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
 }
 
 // unregisterProfile removes a profile entry from the global config file,

@@ -55,6 +55,13 @@ const (
 	scopeFull = "full"
 )
 
+// RefreshWindow is how long before its expiry a stored access token stops
+// being served as-is: AccessToken refreshes inside this window, and a
+// credential with nothing to refresh with (an imported token) is refused
+// there instead. Exported so an import can decline a token that would be
+// unusable from its first command.
+const RefreshWindow = 5 * time.Minute
+
 // Default OAuth callback address and redirect URI.
 const (
 	defaultCallbackAddr = "127.0.0.1:8976"
@@ -137,7 +144,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	// Check if token is expired (with 5 minute buffer).
 	// ExpiresAt==0 means non-expiring token (e.g., from BASECAMP_TOKEN env var),
 	// so only refresh if ExpiresAt > 0 and is within the expiry window.
-	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds()) {
 		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
 			return "", err
 		}
@@ -168,8 +175,8 @@ func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
 		return "", output.ErrAuth(fmt.Sprintf("No stored credentials for %s: %v", credKey, err))
 	}
 
-	// Check if token is expired (with 5 minute buffer)
-	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+	// Check if token is expired (with the refresh-window buffer)
+	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds()) {
 		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
 			// Preserve the original error type (API, network, etc.)
 			return "", err

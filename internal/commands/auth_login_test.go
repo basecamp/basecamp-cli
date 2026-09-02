@@ -949,23 +949,73 @@ func TestAuthLoginWithTokenWithoutReportedExpiryIsNonExpiring(t *testing.T) {
 	assert.Nil(t, envelope.Data["expires_at"])
 }
 
-func TestAuthLoginWithTokenRefusesToBindANonGlobalProfile(t *testing.T) {
-	srv := startLoginIdentityServer(t, "bc_at_secret")
-	cfg := &config.Config{
-		ActiveProfile: "bot",
-		Profiles:      map[string]*config.ProfileConfig{"bot": {}},
-		Sources:       map[string]string{"profiles": "repo"},
+// TestAuthLoginWithTokenBindsOnlyTheGlobalConfigsOwnEntry: config layers
+// merge per profile name, so cfg.Sources["profiles"] is aggregate and says
+// nothing about where this profile came from. The global file's entry is
+// the evidence: bind when it exists and is unbound, refuse otherwise —
+// before stdin is read.
+func TestAuthLoginWithTokenBindsOnlyTheGlobalConfigsOwnEntry(t *testing.T) {
+	cases := map[string]struct {
+		global  string
+		sources string
+		wantErr string
+	}{
+		"global file has no such profile": {
+			global:  `{"profiles":{"other":{"base_url":"https://3.basecampapi.com"}}}`,
+			sources: "repo",
+			wantErr: "not the global config's entry",
+		},
+		"global entry is already bound (shadowed by an accountless layer)": {
+			global:  `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"111"}}}`,
+			sources: "local",
+			wantErr: "not the global config's entry",
+		},
+		"global entry is unbound even though another layer contributed profiles": {
+			global:  `{"profiles":{"bot":{"base_url":"BASE","project_id":"42"}}}`,
+			sources: "repo",
+		},
 	}
-	app, _ := loginTestApp(t, srv, cfg)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := startLoginIdentityServer(t, "bc_at_secret")
+			cfg := &config.Config{
+				ActiveProfile: "bot",
+				Profiles:      map[string]*config.ProfileConfig{"bot": {}},
+				Sources:       map[string]string{"profiles": tc.sources},
+			}
+			app, _ := loginTestApp(t, srv, cfg)
+			withAccount(app, "999", "flag")
+			require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(config.GlobalConfigDir(), "config.json"),
+				[]byte(strings.ReplaceAll(tc.global, "BASE", srv.srv.URL)), 0o600))
+
+			in := strings.NewReader("bc_at_secret")
+			out, err := runLogin(t, app, in, "--with-token")
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				assert.Equal(t, 12, in.Len(), "refused before stdin is read")
+				assert.Empty(t, srv.seenBearers())
+				return
+			}
+			require.NoError(t, err, out)
+			bot := readGlobalConfig(t)["profiles"].(map[string]any)["bot"].(map[string]any)
+			assert.Equal(t, "999", bot["account_id"])
+			assert.Equal(t, "42", bot["project_id"])
+		})
+	}
+}
+
+func TestAuthLoginWithTokenRefusesATokenInsideTheRefreshWindow(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	srv.expiresAt = time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339)
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
 	withAccount(app, "999", "flag")
 
-	in := strings.NewReader("bc_at_secret")
-	_, err := runLogin(t, app, in, "--with-token")
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "defined outside the global config")
-	assert.Contains(t, err.Error(), "repo config")
-	assert.Equal(t, 12, in.Len(), "refused before stdin is read")
-	assert.Empty(t, srv.seenBearers())
+	assert.Contains(t, err.Error(), "within the 5m0s the CLI keeps clear of expiry")
+	assertNothingStored(t, app, "bot")
 }
 
 func TestAuthLoginRejectsPositionalArguments(t *testing.T) {
