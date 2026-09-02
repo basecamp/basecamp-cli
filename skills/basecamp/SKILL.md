@@ -4,7 +4,7 @@ description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
   subscriptions, lineup, chat, pings, gauges, assignments, notifications, bookmarks,
-  drafts, notes, calendars, and accounts.
+  bubble-up, drafts, notes, calendars, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -20,6 +20,7 @@ triggers:
   - basecamp file
   - basecamp document
   - basecamp bookmarks
+  - basecamp bubble-up
   - basecamp drafts
   - basecamp notes
   - basecamp calendars
@@ -215,6 +216,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | My bookmarks | `basecamp bookmarks list --json` |
 | Bookmark something | `basecamp bookmarks add <id-or-url> --json` |
 | Is it bookmarked? | `basecamp bookmarks check <id-or-url> --json` (always exits 0) |
+| Bubble a recording up | `basecamp bubble-up add <id-or-url> --json` |
+| Schedule a bubble-up | `basecamp bubble-up add <id-or-url> --at tomorrow --json` |
+| Pop a bubble-up | `basecamp bubble-up remove <id-or-url> --json` |
 | My unpublished drafts | `basecamp drafts list --json` |
 | Read my personal note | `basecamp notes show --json` |
 | Replace my personal note | `basecamp notes set "<content>" --json` |
@@ -1084,7 +1088,7 @@ success while changing nothing. If two steps on one card are prioritized, the
 listing shows the card once with a single `priority_recording_id` and the
 siblings are not separately addressable.
 
-### Personal (bookmarks, drafts, notes)
+### Personal (bookmarks, bubble-up, drafts, notes)
 
 Private to you, spanning every project — no `--in <project>`.
 
@@ -1093,10 +1097,20 @@ basecamp bookmarks list --json
 basecamp bookmarks add <id-or-url> --json
 basecamp bookmarks remove <id-or-url> --json
 basecamp bookmarks check <id-or-url> --json
+basecamp bubble-up add <id-or-url> --json
+basecamp bubble-up add <id-or-url> --at tomorrow --json
+basecamp bubble-up remove <id-or-url> --json
 basecamp drafts list --json
 basecamp notes show --json
 basecamp notes set "<content>" --json
 ```
+
+`bubble-up add`/`remove` resurface a recording in your readings (the BC5
+successor to "save"), addressed by id or pasted URL. `add` bubbles up now by
+default; `--at` schedules it — a keyword (`today`, `tomorrow`, `weekend`,
+`next_week`) or a calendar date (`YYYY-MM-DD`). Both verbs are idempotent. There is no
+per-recording status read (that GET is an unrenderable API gap); the full list
+is `basecamp notifications bubbleups`.
 
 `bookmarks add` and `remove` are idempotent — re-adding returns the existing
 bookmark, removing an absent one still succeeds. `check` reports

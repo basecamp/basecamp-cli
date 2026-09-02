@@ -215,6 +215,7 @@ type ProjectInfo struct {
 	Description string
 	Purpose     string
 	Bookmarked  bool
+	Starred     bool
 	AccountID   string
 	AccountName string
 	Dock        []DockToolInfo

@@ -80,6 +80,7 @@ func CommandCategories() []CommandCategory {
 			Name: "Personal",
 			Commands: []CommandInfo{
 				{Name: "bookmarks", Category: "personal", Description: "Manage your personal bookmarks", Actions: []string{"list", "add", "remove", "check"}},
+				{Name: "bubble-up", Category: "personal", Description: "Bubble a recording up in your readings", Actions: []string{"add", "remove"}},
 				{Name: "drafts", Category: "personal", Description: "List your unpublished drafts", Actions: []string{"list"}},
 				{Name: "notes", Category: "personal", Description: "Read and write your personal note", Actions: []string{"show", "set"}},
 			},

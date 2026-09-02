@@ -216,7 +216,7 @@ func (v *Projects) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 			// Revert optimistic update
 			p := v.findProject(msg.ProjectID)
 			if p != nil {
-				p.Bookmarked = !msg.Bookmarked
+				p.Starred = !msg.Bookmarked
 				v.syncProjectList()
 			}
 			return v, workspace.ReportError(msg.Err, "toggling bookmark")
@@ -509,7 +509,7 @@ func projectInfoToListItem(p data.ProjectInfo) widget.ListItem {
 		ID:          fmt.Sprintf("%d", p.ID),
 		Title:       p.Name,
 		Description: desc,
-		Marked:      p.Bookmarked,
+		Marked:      p.Starred,
 	}
 }
 
@@ -734,12 +734,14 @@ func (v *Projects) toggleBookmark() tea.Cmd {
 		return nil
 	}
 
-	newBookmarked := !p.Bookmarked
+	// The toggle drives /projects/{id}/star.json, so it tracks Starred — a
+	// project filed into a stack is Bookmarked but not necessarily Starred.
+	newStarred := !p.Starred
 	// Optimistic: flip in local data, re-sort
-	p.Bookmarked = newBookmarked
+	p.Starred = newStarred
 	v.syncProjectList()
 
-	return v.setBookmark(projectID, newBookmarked)
+	return v.setBookmark(projectID, newStarred)
 }
 
 func (v *Projects) setBookmark(projectID int64, bookmarked bool) tea.Cmd {
