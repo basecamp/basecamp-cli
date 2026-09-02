@@ -1088,11 +1088,11 @@ func TestImportToken(t *testing.T) {
 	m := newDeviceTestManager(t, "https://3.basecampapi.com")
 	m.cfg.ActiveProfile = "bot"
 
-	require.NoError(t, m.ImportToken("bc_at_secret", "full"))
+	require.NoError(t, m.ImportToken("bc_at_secret", "full", "51177542", "bot@example.com"))
 
 	creds, err := m.store.Load("profile:bot")
 	require.NoError(t, err)
-	assert.Equal(t, &Credentials{AccessToken: "bc_at_secret", OAuthType: "bc5", Scope: "full"}, creds)
+	assert.Equal(t, &Credentials{AccessToken: "bc_at_secret", OAuthType: "bc5", Scope: "full", UserID: "51177542", UserEmail: "bot@example.com"}, creds)
 	assert.Zero(t, creds.ExpiresAt)
 
 	// Non-expiring: served as-is, with no refresh attempted (there is no
@@ -1108,7 +1108,81 @@ func TestImportToken(t *testing.T) {
 	require.Error(t, err, "an explicit refresh has nothing to refresh with")
 	assert.Contains(t, err.Error(), "No refresh token")
 
-	err = m.ImportToken("bc_at_secret", "admin")
+	err = m.ImportToken("bc_at_secret", "admin", "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Invalid scope")
+}
+
+// TestLoginDevice_VerifyRunsBeforeStore: a Verify hook sees the freshly
+// issued token before anything is written, and its error aborts the login
+// with nothing stored.
+func TestLoginDevice_VerifyRunsBeforeStore(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+	credKey := config.NormalizeBaseURL(resource.URL)
+
+	var seenToken, seenType string
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        func(string) {},
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify: func(_ context.Context, token, oauthType string) error {
+			seenToken, seenType = token, oauthType
+			_, loadErr := m.store.Load(credKey)
+			assert.Error(t, loadErr, "the store must still be empty while verifying")
+			return output.ErrAuth("not you")
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not you")
+	assert.Equal(t, "dev-tok", seenToken)
+	assert.Equal(t, "bc5", seenType)
+	_, loadErr := m.store.Load(credKey)
+	assert.Error(t, loadErr, "a rejected token is never stored")
+
+	result, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        func(string) {},
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify:        func(context.Context, string, string) error { return nil },
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "bc5", result.OAuthType)
+	creds, err := m.store.Load(credKey)
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok", creds.AccessToken)
+}
+
+func TestLoginDevice_LoginHintIsSanitizedForTheTerminal(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		LoginHint:     "bot@example.com\x1b]8;;https://evil.example\x07\r\nEvil",
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+	logs := cl.joined()
+	assert.Contains(t, logs, "Sign in as bot@example.com Evil")
+	assert.NotContains(t, logs, "\x1b")
+	assert.NotContains(t, logs, "evil.example")
+}
+
+func TestDiscoverOAuth_PinnedIssuerIsSanitizedForTheTerminal(t *testing.T) {
+	as := startDeviceAS(t)
+	resource, _ := countingServer(t)
+	m := newDeviceTestManager(t, resource.URL)
+	// A C1 control in the path survives url.Parse and the endpoint checks;
+	// the log line must not carry it to the terminal.
+	t.Setenv("BASECAMP_OAUTH_ISSUER", as.srv.URL+"/\u0085x")
+
+	cl := &collectLogger{}
+	_, _ = m.Login(context.Background(), LoginOptions{Remote: true, Logger: cl.log, deviceOptions: []oauth.DeviceOption{instantSleep()}})
+	assert.Contains(t, cl.joined(), "pinned by BASECAMP_OAUTH_ISSUER")
+	assert.NotContains(t, cl.joined(), "\u0085")
 }

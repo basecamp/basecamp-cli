@@ -47,6 +47,11 @@ type App struct {
 
 	// Flags holds the global flag values
 	Flags GlobalFlags
+
+	// SDKOptions are the client options SDK was built with, so a second
+	// client — one verifying a credential that is not stored yet — rides
+	// the same transport, hooks, and user agent.
+	SDKOptions []basecamp.ClientOption
 }
 
 // GlobalFlags holds values for global CLI flags.
@@ -126,11 +131,12 @@ func NewApp(cfg *config.Config) *App {
 		CacheDir:     cfg.CacheDir,
 		CacheEnabled: cfg.CacheEnabled,
 	}
-	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr},
+	sdkOptions := []basecamp.ClientOption{
 		basecamp.WithHooks(hooks),
 		basecamp.WithTransport(transport),
-		basecamp.WithUserAgent(version.UserAgent()+" "+basecamp.DefaultUserAgent),
-	)
+		basecamp.WithUserAgent(version.UserAgent() + " " + basecamp.DefaultUserAgent),
+	}
+	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr}, sdkOptions...)
 
 	// Create name resolver using SDK client and account ID
 	nameResolver := names.NewResolver(sdkClient, authMgr, cfg.AccountID)
@@ -147,17 +153,26 @@ func NewApp(cfg *config.Config) *App {
 	}
 
 	return &App{
-		Config:    cfg,
-		Auth:      authMgr,
-		SDK:       sdkClient,
-		Names:     nameResolver,
-		Collector: collector,
-		Hooks:     cliHooks,
+		Config:     cfg,
+		Auth:       authMgr,
+		SDK:        sdkClient,
+		SDKOptions: sdkOptions,
+		Names:      nameResolver,
+		Collector:  collector,
+		Hooks:      cliHooks,
 		Output: output.New(output.Options{
 			Format: format,
 			Writer: os.Stdout,
 		}),
 	}
+}
+
+// SDKClientFor returns a client configured like SDK but authenticating with
+// the given provider instead of the stored credential — the way to exercise
+// a token before deciding whether to keep it.
+func (a *App) SDKClientFor(provider basecamp.TokenProvider) *basecamp.Client {
+	cfg := a.SDK.Config()
+	return basecamp.NewClient(&cfg, provider, a.SDKOptions...)
 }
 
 // ApplyFlags applies global flag values to the app configuration.

@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
@@ -265,8 +266,12 @@ Import a personal access token from stdin (never pass it as an argument):
   op read "op://<vault>/<item>/credential" | basecamp auth login --with-token -P bot --account 999
   ... | basecamp auth login --with-token -P bot --account 999 --expect-identity 12345 --json
 
---with-token stores the token under the named profile, creating the profile
-when --account is given, then verifies who it authenticates as.`,
+--with-token verifies the token against the server — who it authenticates as,
+and that it can reach the profile's account — before storing it under the
+named profile, creating the profile when --account is given.
+
+--login-hint names the account to sign in as on the device-flow approval page.
+This build tells you the hint instead of sending it to the server.`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -274,8 +279,13 @@ when --account is given, then verifies who it authenticates as.`,
 				return fmt.Errorf("app not initialized")
 			}
 
+			expect, err := parseExpectIdentity(expectIdentity)
+			if err != nil {
+				return err
+			}
+
 			if withToken {
-				return runLoginWithToken(cmd, app, scope, expectIdentity)
+				return runLoginWithToken(cmd, app, scope, expect)
 			}
 
 			if app.Flags.JQFilter != "" {
@@ -287,8 +297,8 @@ when --account is given, then verifies who it authenticates as.`,
 						"Check credentials with `basecamp auth status`, or import a token headlessly: "+
 						"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
 			}
-			if err := requireIdentityCheckable(expectIdentity); err != nil {
-				return err
+			if expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
+				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
 			}
 			if name := app.Config.ActiveProfile; name != "" {
 				if _, ok := app.Config.Profiles[name]; !ok {
@@ -310,8 +320,10 @@ when --account is given, then verifies who it authenticates as.`,
 				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
 			}
 
-			restore := credentialRestorer(app)
-
+			// With an expectation the login is assertive: the token is
+			// checked before it is stored, and a mismatch stores nothing.
+			// Without one the identity line stays informational.
+			verifier := &loginVerifier{app: app, expectIdentity: expect, account: app.Config.AccountID, strict: expect != 0}
 			result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
@@ -319,6 +331,7 @@ when --account is given, then verifies who it authenticates as.`,
 				Local:     local,
 				LoginHint: loginHint,
 				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
+				Verify:    verifier.verify,
 			})
 			if err != nil {
 				return err
@@ -331,15 +344,8 @@ when --account is given, then verifies who it authenticates as.`,
 				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Access: %s", result.Scope)))
 			}
 
-			// Without an expectation the identity line is informational, as
-			// it always was; with one, a credential that cannot be verified
-			// is not kept.
-			who, err := verifyLoginIdentity(cmd.Context(), app, expectIdentity, expectIdentity != "")
-			if err != nil {
-				restore(cmd.ErrOrStderr())
-				return err
-			}
-			if who != nil {
+			if who := verifier.who; who != nil {
+				_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
 				fmt.Fprintln(w, r.Data.Render("Logged in as: "+who.label()))
 			}
 
@@ -355,8 +361,8 @@ when --account is given, then verifies who it authenticates as.`,
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
 	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin instead of running OAuth (requires --profile)")
-	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise discard the credentials")
-	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as (device flow only; ignored by Launchpad)")
+	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
+	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as (device flow only; announced, not yet sent; ignored by Launchpad)")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 	for _, flag := range []string{"device-code", "remote", "local", "no-browser", "login-hint"} {
@@ -367,16 +373,19 @@ when --account is given, then verifies who it authenticates as.`,
 }
 
 // runLoginWithToken imports a personal access token from stdin as the
-// active profile's credential. The profile is registered only after the
-// token has proven who it authenticates as, and a token that fails that
-// check leaves whatever credential the profile had before.
-func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope, expectIdentity string) error {
-	if err := requireIdentityCheckable(expectIdentity); err != nil {
-		return err
+// active profile's credential. Everything that can be checked without the
+// token is checked before stdin is read; the token is then verified through
+// a client of its own — identity, and access to the profile's account —
+// and only a token that passes is stored and its profile registered.
+func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect int64) error {
+	if scope == "" {
+		scope = "full"
+	}
+	if scope != "read" && scope != "full" {
+		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
 	if os.Getenv("BASECAMP_TOKEN") != "" {
-		return output.ErrUsageHint("BASECAMP_TOKEN is set",
-			"Every request, including the identity check, would use it instead of the imported token. Unset it and retry.")
+		return errEnvTokenShadows("BASECAMP_TOKEN is set")
 	}
 
 	name := app.Config.ActiveProfile
@@ -387,21 +396,25 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope, expectIdentit
 	if !isValidProfileName(name) {
 		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
 	}
-	if scope == "" {
-		scope = "full"
-	}
 
+	// The effective account is what every later command will address, so
+	// it is what the token must be able to reach: the profile's binding,
+	// overridden by --account / BASECAMP_ACCOUNT_ID exactly as at runtime.
+	account := app.Config.AccountID
 	existing := app.Config.Profiles[name]
 	var created *config.ProfileConfig
 	switch {
-	case existing == nil && app.Flags.Account == "":
+	case existing == nil && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
 			"Pass --account <id> to create it alongside the imported token.")
 	case existing == nil:
-		created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: app.Flags.Account}
-	case app.Flags.Account != "" && existing.AccountID != "" && existing.AccountID != app.Flags.Account:
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, app.Flags.Account),
-			"Import into a different profile, or pass the account the profile is bound to.")
+		created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
+	case existing.AccountID != "" && account != existing.AccountID:
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, account),
+			"Import into a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
+	}
+	if err := requireNumericAccount(account); err != nil {
+		return err
 	}
 
 	token, err := readTokenFromStdin(cmd)
@@ -409,31 +422,25 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope, expectIdentit
 		return err
 	}
 
-	restore := credentialRestorer(app)
-	if err := app.Auth.ImportToken(token, scope); err != nil {
+	verifier := &loginVerifier{app: app, expectIdentity: expect, account: account, strict: true}
+	if err := verifier.verify(cmd.Context(), token, "bc5"); err != nil {
 		return err
 	}
-
-	who, err := verifyLoginIdentity(cmd.Context(), app, expectIdentity, true)
-	if err != nil {
-		restore(cmd.ErrOrStderr())
-		return err
-	}
+	who := verifier.who
 	// The server's word on the token's scope beats the caller's declaration.
-	if who.Scope != "" && who.Scope != scope {
+	if who.Scope != "" {
 		scope = who.Scope
-		if err := setStoredScope(app, scope); err != nil {
-			restore(cmd.ErrOrStderr())
-			return err
-		}
 	}
 
-	isDefault := false
+	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email); err != nil {
+		return err
+	}
+
+	isDefault := app.Config.DefaultProfile == name
 	if created != nil {
 		created.Scope = scope
 		if isDefault, err = registerProfile(name, created); err != nil {
-			restore(cmd.ErrOrStderr())
-			return err
+			return fmt.Errorf("the token was stored for profile %q but the profile entry could not be written (rerun the import): %w", name, err)
 		}
 		if app.Config.Profiles == nil {
 			app.Config.Profiles = make(map[string]*config.ProfileConfig)
@@ -441,26 +448,17 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope, expectIdentit
 		app.Config.Profiles[name] = created
 	}
 
-	accountID := app.Flags.Account
-	if existing != nil && existing.AccountID != "" {
-		accountID = existing.AccountID
-	}
-
 	data := map[string]any{
 		"profile":         name,
+		"account_id":      account,
 		"base_url":        app.Config.BaseURL,
 		"source":          "token",
 		"oauth_type":      "bc5",
 		"scope":           scope,
 		"expires_at":      nil,
+		"identity":        map[string]any{"id": who.IdentityID, "email": who.IdentityEmail},
 		"person":          map[string]any{"id": who.PersonID, "name": who.Name, "email": who.Email},
 		"profile_created": created != nil,
-	}
-	if accountID != "" {
-		data["account_id"] = accountID
-	}
-	if who.IdentityID != 0 {
-		data["identity"] = map[string]any{"id": who.IdentityID, "email": who.Email}
 	}
 	if isDefault {
 		data["default"] = true
@@ -473,13 +471,37 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope, expectIdentit
 	w := cmd.OutOrStdout()
 	r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
 	fmt.Fprintln(w, r.Success.Render("Logged in as "+who.label()))
-	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Access: %s · Token: personal access token (does not expire)", name, scope)))
+	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: personal access token (does not expire)", name, account, scope)))
 	if created != nil {
-		line := fmt.Sprintf("Created profile %q for account %s", name, created.AccountID)
+		line := fmt.Sprintf("Created profile %q for account %s", name, account)
 		if isDefault {
 			line += " (default)"
 		}
 		fmt.Fprintln(w, r.Muted.Render(line))
+	}
+	return nil
+}
+
+// accountGivenExplicitly reports whether the effective account came from
+// this invocation (--account or BASECAMP_ACCOUNT_ID) rather than a config
+// file: a new bot profile must not inherit whatever account the operator's
+// own configuration happens to name.
+func accountGivenExplicitly(app *appctx.App) bool {
+	src := config.Source(app.Config.Sources["account_id"])
+	return app.Config.AccountID != "" && (src == config.SourceFlag || src == config.SourceEnv)
+}
+
+// requireNumericAccount mirrors App.RequireAccount for an account the login
+// is about to bind a profile to: anything but ASCII digits would leave a
+// profile every account-scoped command rejects.
+func requireNumericAccount(account string) error {
+	if account == "" {
+		return output.ErrUsage("Account ID required. Set via --account flag or BASECAMP_ACCOUNT_ID env.")
+	}
+	for _, c := range account {
+		if c < '0' || c > '9' {
+			return output.ErrUsage(fmt.Sprintf("Invalid account ID %q: must contain only digits", account))
+		}
 	}
 	return nil
 }
@@ -514,19 +536,6 @@ func readTokenFromStdin(cmd *cobra.Command) (string, error) {
 	return token, nil
 }
 
-// setStoredScope rewrites the scope on the active credential, keeping
-// everything else the login recorded on it.
-func setStoredScope(app *appctx.App, scope string) error {
-	store := app.Auth.GetStore()
-	key := app.Auth.CredentialKey()
-	creds, err := store.Load(key)
-	if err != nil {
-		return err
-	}
-	creds.Scope = scope
-	return store.Save(key, creds)
-}
-
 // machineOutputFlagSet reports whether an explicit output flag asked for a
 // machine format. The config-driven formats are deliberately excluded: a
 // configured format=json must not lock a person out of an interactive login.
@@ -534,63 +543,45 @@ func machineOutputFlagSet(app *appctx.App) bool {
 	return app.Flags.Agent || app.Flags.JSON || app.Flags.Quiet || app.Flags.IDsOnly || app.Flags.Count
 }
 
-// requireIdentityCheckable rejects an --expect-identity that could not be
-// honored: a malformed ID, or a BASECAMP_TOKEN that every request — the
-// identity check included — would use instead of the credential being
-// verified.
-func requireIdentityCheckable(expectIdentity string) error {
-	if expectIdentity == "" {
-		return nil
+// parseExpectIdentity parses --expect-identity: 0 when absent, the identity
+// ID otherwise. Identity IDs are positive, so 0 is free to mean "none".
+func parseExpectIdentity(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
 	}
-	if _, err := strconv.ParseInt(expectIdentity, 10, 64); err != nil {
-		return output.ErrUsage(fmt.Sprintf("Invalid --expect-identity %q: expected a numeric identity ID", expectIdentity))
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, output.ErrUsage(fmt.Sprintf("Invalid --expect-identity %q: expected a numeric identity ID", raw))
 	}
-	if os.Getenv("BASECAMP_TOKEN") != "" {
-		return output.ErrUsageHint("--expect-identity cannot be checked while BASECAMP_TOKEN is set",
-			"The identity check would run as the environment token, not the new credential. Unset it and retry.")
-	}
-	return nil
+	return id, nil
 }
 
-// credentialRestorer snapshots the active credential and returns a function
-// that puts it back — or removes what a login stored when there was none —
-// so a login that fails verification leaves the profile as it found it.
-func credentialRestorer(app *appctx.App) func(warn io.Writer) {
-	store := app.Auth.GetStore()
-	key := app.Auth.CredentialKey()
-	prev, err := store.Load(key)
-	if err != nil {
-		prev = nil
-	}
-	return func(warn io.Writer) {
-		var restoreErr error
-		if prev != nil {
-			restoreErr = store.Save(key, prev)
-		} else {
-			restoreErr = store.Delete(key)
-		}
-		if restoreErr != nil {
-			fmt.Fprintf(warn, "Warning: could not restore credentials for %s: %v\n", key, restoreErr)
-		}
-	}
+// errEnvTokenShadows names the reason BASECAMP_TOKEN blocks a verified
+// login: every request, the verification included, would carry the
+// environment token instead of the credential being checked.
+func errEnvTokenShadows(msg string) error {
+	return output.ErrUsageHint(msg,
+		"Every request, including the identity check, would use the environment token instead of the new credential. Unset it and retry.")
 }
 
-// loginIdentity is who a freshly stored credential authenticates as: the
-// account-scoped person (from /my/profile.json) and the account-independent
-// identity (from the authorization endpoint), which is what --expect-identity
-// compares against.
+// loginIdentity is who a credential authenticates as: the account-independent
+// identity from the authorization endpoint — what --expect-identity compares
+// against — and the person within the verified account.
 type loginIdentity struct {
-	PersonID   int64
-	Name       string
-	Email      string
-	IdentityID int64
-	Scope      string
+	IdentityID    int64
+	IdentityEmail string
+	PersonID      int64
+	Name          string
+	Email         string
+	Scope         string
 }
 
+// label renders the identity for a one-line terminal sink. Name and email
+// are server-supplied, so they are reduced to single lines first.
 func (l *loginIdentity) label() string {
-	label := l.Name
-	if l.Email != "" {
-		label += " <" + l.Email + ">"
+	label := richtext.SanitizeSingleLine(l.Name)
+	if email := richtext.SanitizeSingleLine(l.Email); email != "" {
+		label += " <" + email + ">"
 	}
 	parts := []string{}
 	if l.IdentityID != 0 {
@@ -602,57 +593,102 @@ func (l *loginIdentity) label() string {
 	if len(parts) > 0 {
 		label += " (" + strings.Join(parts, ", ") + ")"
 	}
-	return label
+	return strings.TrimSpace(label)
 }
 
-// verifyLoginIdentity resolves who the active credential authenticates as
-// and records it on the credential. With strict set, a lookup failure is the
-// caller's error to act on; otherwise it is reported as no identity (nil,
-// nil), as the post-login line has always been best-effort. A non-empty
-// expectIdentity must match the identity ID, and is checked strictly.
-func verifyLoginIdentity(ctx context.Context, app *appctx.App, expectIdentity string, strict bool) (*loginIdentity, error) {
-	resp, err := app.SDK.Get(ctx, "/my/profile.json")
+// loginVerifier proves a credential before it is stored. verify runs as
+// LoginOptions.Verify (and directly for token imports) with a client bound
+// to the candidate token, so nothing it learns comes from a stored
+// credential or from BASECAMP_TOKEN.
+//
+// Strict mode is the assertive login: the authorization endpoint must
+// answer, the effective account (when there is one) must be among the
+// accounts the token can reach, and the identity must match any
+// expectation. Non-strict mode keeps the informational "Logged in as" line
+// best-effort: a lookup failure leaves who nil and the login proceeds.
+type loginVerifier struct {
+	app            *appctx.App
+	expectIdentity int64
+	account        string
+	strict         bool
+
+	who *loginIdentity
+}
+
+func (v *loginVerifier) verify(ctx context.Context, accessToken, oauthType string) error {
+	client := v.app.SDKClientFor(&basecamp.StaticTokenProvider{Token: accessToken})
+
+	endpoint, err := v.app.Auth.AuthorizationEndpointFor(oauthType)
 	if err != nil {
-		if !strict {
-			return nil, nil
+		return err
+	}
+	info, err := client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	if err != nil {
+		if !v.strict {
+			return nil
 		}
-		return nil, convertSDKError(err)
-	}
-	var person struct {
-		ID    int64  `json:"id"`
-		Name  string `json:"name"`
-		Email string `json:"email_address"`
-	}
-	if err := resp.UnmarshalData(&person); err != nil {
-		if !strict {
-			return nil, nil
-		}
-		return nil, output.ErrAPI(0, fmt.Sprintf("unexpected /my/profile.json response: %v", err))
-	}
-	who := &loginIdentity{PersonID: person.ID, Name: person.Name, Email: person.Email}
-
-	endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
-	if err == nil {
-		var info *basecamp.AuthorizationInfo
-		info, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
-		if err == nil {
-			who.IdentityID = info.Identity.ID
-			who.Scope = info.Scope
-			if who.Email == "" {
-				who.Email = info.Identity.EmailAddress
-			}
-		}
-	}
-	if err != nil && expectIdentity != "" {
-		return nil, output.ErrAuth(fmt.Sprintf("Could not verify the identity of the new credential: %v", err))
+		return output.ErrAuth(fmt.Sprintf("Could not verify the new credential: %v", err))
 	}
 
-	if expectIdentity != "" && strconv.FormatInt(who.IdentityID, 10) != expectIdentity {
-		return nil, output.ErrAuth(fmt.Sprintf("Authenticated as %s, not identity %s; the credential was not kept", who.label(), expectIdentity))
+	who := &loginIdentity{
+		IdentityID:    info.Identity.ID,
+		IdentityEmail: info.Identity.EmailAddress,
+		Email:         info.Identity.EmailAddress,
+		Name:          strings.TrimSpace(info.Identity.FirstName + " " + info.Identity.LastName),
+		Scope:         info.Scope,
+	}
+	if who.Scope != "" && who.Scope != "read" && who.Scope != "full" {
+		return output.ErrAuth(fmt.Sprintf("The server reports scope %q for this credential; only read or full can be stored", richtext.SanitizeSingleLine(who.Scope)))
+	}
+	if v.expectIdentity != 0 && who.IdentityID != v.expectIdentity {
+		return output.ErrAuth(fmt.Sprintf("Authenticated as %s, not identity %d; nothing was stored", who.label(), v.expectIdentity))
 	}
 
-	_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), who.Email)
-	return who, nil
+	// The person record is account-scoped (/{account}/my/profile.json), so
+	// it doubles as the proof the token reaches the account it is about to
+	// be used for. The authorization document is checked first: a missing
+	// account there is a clearer answer than a 404 from the person lookup.
+	if v.account != "" {
+		if !authorizesAccount(info, v.account) {
+			return output.ErrAuth(fmt.Sprintf("%s cannot access account %s (authorized: %s); nothing was stored", who.label(), v.account, authorizedAccountIDs(info)))
+		}
+		person, err := client.ForAccount(v.account).People().Me(ctx)
+		if err != nil {
+			return output.ErrAuth(fmt.Sprintf("Could not verify %s on account %s: %v", who.label(), v.account, err))
+		}
+		who.PersonID = person.ID
+		who.Name = person.Name
+		if person.EmailAddress != "" {
+			who.Email = person.EmailAddress
+		}
+	}
+
+	v.who = who
+	return nil
+}
+
+// authorizesAccount reports whether the authorization document names the
+// account as reachable (and not expired) by the credential.
+func authorizesAccount(info *basecamp.AuthorizationInfo, account string) bool {
+	for _, acct := range info.Accounts {
+		if strconv.FormatInt(acct.ID, 10) == account && !acct.Expired {
+			return true
+		}
+	}
+	return false
+}
+
+func authorizedAccountIDs(info *basecamp.AuthorizationInfo) string {
+	ids := make([]string, 0, len(info.Accounts))
+	for _, acct := range info.Accounts {
+		if !acct.Expired {
+			ids = append(ids, strconv.FormatInt(acct.ID, 10))
+		}
+	}
+	if len(ids) == 0 {
+		return "none"
+	}
+	return strings.Join(ids, ", ")
 }
 
 // buildLogoutCmd constructs a logout command with the given Use name.

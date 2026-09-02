@@ -100,17 +100,17 @@ load test_helper
 }
 
 @test "basecamp auth login --with-token requires a profile" {
-  run basecamp auth login --with-token </dev/null
+  run env -u BASECAMP_PROFILE basecamp auth login --with-token </dev/null
   assert_failure
-  assert_output_contains "named profile"
-  assert_output_contains "--profile"
+  assert_json_value '.error' '--with-token stores the token under a named profile'
+  assert_json_value '.code' 'usage'
 }
 
 @test "basecamp auth login --with-token needs --account to create the profile" {
   run basecamp auth login --with-token -P bot </dev/null
   assert_failure
-  assert_output_contains "does not exist"
-  assert_output_contains "--account"
+  assert_json_value '.error' 'Profile "bot" does not exist'
+  assert_json_value '.code' 'usage'
 }
 
 @test "basecamp auth login --with-token rejects --device-code" {

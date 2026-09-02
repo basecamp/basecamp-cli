@@ -194,18 +194,21 @@ basecamp auth login --scope full # Full read+write access (default; ignored by L
 basecamp auth token              # Print token for scripts
 ```
 
-`--expect-identity <id>` makes any login assert who it authenticated as: on a
-mismatch the new credential is discarded (a profile's previous credential is
-kept) and the command exits non-zero. `--login-hint <email>` suggests which
-account to sign in as on the device-flow approval page.
+`--expect-identity <id>` makes any login assert who it authenticated as: the
+new credential is checked before it is stored, and on a mismatch nothing is
+written (a profile's previous credential is untouched) and the command exits
+non-zero. `--login-hint <email>` names the account to sign in as on the
+device-flow approval page; this build tells you the hint rather than sending
+it to the server, so the approval page is not preselected.
 
 ### Personal access tokens
 
 A [personal access token](https://3.basecamp.com/my/access_tokens) can be
 imported instead of running OAuth — the shape for bots, CI, and any machine
 that should never sign in interactively. The token is read from stdin (never
-an argument), stored as a non-expiring credential under a named profile, and
-verified against the server before anything is kept:
+an argument), verified against the server — who it authenticates as, and that
+it can reach the profile's account — and only then stored as a non-expiring
+credential under a named profile:
 
 ```bash
 op read "op://Vault/Item/credential" | basecamp auth login --with-token -P bot --account 999

@@ -346,9 +346,17 @@ type LoginOptions struct {
 	Local bool
 
 	// LoginHint names the account (email address) the user should sign in
-	// as; it steers the sign-in page and never authenticates on its own.
-	// Device flow only — Launchpad's authorization-code flow ignores it.
+	// as. It is meant to steer the device-flow sign-in page and never
+	// authenticates on its own; this build announces it to the user rather
+	// than sending it (see announceLoginHint), and Launchpad's
+	// authorization-code flow ignores it.
 	LoginHint string
+
+	// Verify, when set, is called with the freshly issued access token and
+	// its provider type ("bc5" or "launchpad") before anything is stored. A
+	// non-nil error aborts the login and nothing is written: the credential
+	// is proven first and persisted second.
+	Verify func(ctx context.Context, accessToken, oauthType string) error
 
 	// InputReader is the source for pasted callback URLs in remote mode.
 	// If nil, os.Stdin is used.
@@ -580,6 +588,11 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
 	creds.Scope = ""
 
+	if opts.Verify != nil {
+		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeLaunchpad); err != nil {
+			return nil, err
+		}
+	}
 	if err := m.store.Save(credKey, creds); err != nil {
 		return nil, err
 	}
@@ -718,6 +731,11 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
+	if opts.Verify != nil {
+		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeBC5); err != nil {
+			return nil, err
+		}
+	}
 	if err := m.store.Save(credKey, creds); err != nil {
 		return nil, err
 	}
@@ -726,15 +744,17 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 }
 
 // announceLoginHint tells the user which account LoginOptions.LoginHint
-// named. The hint belongs on the wire as the RFC 8628 login_hint form
-// parameter, but the pinned basecamp-sdk has no option for it yet
-// (basecamp/basecamp-sdk#841 adds WithDeviceLoginHint); once that bump
-// lands this becomes an oauth.WithDeviceLoginHint entry in devOpts.
+// named. The hint belongs on the wire as Basecamp's login_hint extension to
+// the device authorization request, but the pinned basecamp-sdk has no
+// option for it yet (basecamp/basecamp-sdk#841 adds WithDeviceLoginHint);
+// once that bump lands this becomes an oauth.WithDeviceLoginHint entry in
+// devOpts. The hint is flag input headed for a terminal, so it is reduced
+// to one line first.
 func announceLoginHint(opts *LoginOptions) {
 	if opts.LoginHint == "" {
 		return
 	}
-	opts.log("Sign in as " + opts.LoginHint + " when the browser asks (this build cannot pass --login-hint to the server yet).")
+	opts.log("Sign in as " + richtext.SanitizeSingleLine(opts.LoginHint) + " when the browser asks (this build cannot pass --login-hint to the server yet).")
 }
 
 // validVerificationURL validates a server-supplied verification URI with the
@@ -752,13 +772,14 @@ func validVerificationURL(raw string) string {
 }
 
 // ImportToken stores an externally issued BC5 access token (a personal
-// access token) as the current credential. The token has no refresh token
-// and no token endpoint, and ExpiresAt stays zero — the non-expiring path
-// AccessToken already takes, so refresh is never attempted; when the server
-// stops honoring it the next request fails as unauthenticated and the token
-// is imported again. Scope is the caller's declaration of what the token was
-// minted with.
-func (m *Manager) ImportToken(token, scope string) error {
+// access token) as the current credential, in one write, together with the
+// identity it was verified to authenticate as. The token has no refresh
+// token and no token endpoint, and ExpiresAt stays zero — the non-expiring
+// path AccessToken already takes, so refresh is never attempted; when the
+// server stops honoring it the next request fails as unauthenticated and
+// the token is imported again. Scope is what the token was verified or
+// declared to carry.
+func (m *Manager) ImportToken(token, scope, userID, userEmail string) error {
 	if scope != scopeRead && scope != scopeFull {
 		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
@@ -768,6 +789,8 @@ func (m *Manager) ImportToken(token, scope string) error {
 		AccessToken: token,
 		OAuthType:   oauthTypeBC5,
 		Scope:       scope,
+		UserID:      userID,
+		UserEmail:   userEmail,
 	})
 }
 
@@ -867,7 +890,7 @@ func pinnedIssuerDiscovery(issuer string, log func(string)) (*discovery, error) 
 		DeviceAuthorizationEndpoint: &deviceEndpoint,
 		GrantTypesSupported:         []string{oauth.DeviceCodeGrantType, "refresh_token"},
 	}
-	log(fmt.Sprintf("Authenticating via %s (device flow, pinned by %s)", issuer, oauthIssuerEnv))
+	log(fmt.Sprintf("Authenticating via %s (device flow, pinned by %s)", richtext.SanitizeSingleLine(issuer), oauthIssuerEnv))
 	return &discovery{config: cfg, oauthType: oauthTypeBC5, issuer: issuer}, nil
 }
 
@@ -1207,7 +1230,12 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 		return strings.TrimSuffix(lpURL, "/") + "/authorization.json", nil
 	}
 
-	oauthType := m.GetOAuthType()
+	return m.AuthorizationEndpointFor(m.GetOAuthType())
+}
+
+// AuthorizationEndpointFor returns the authorization info endpoint for a
+// credential of the given OAuth type, whether or not it is stored yet.
+func (m *Manager) AuthorizationEndpointFor(oauthType string) (string, error) {
 	switch oauthType {
 	case "bc3", oauthTypeBC5:
 		// resourceOrigin, not NormalizeBaseURL: the latter only trims a

@@ -1743,3 +1743,71 @@ func TestLoginLaunchpadIgnoresLoginHint(t *testing.T) {
 	require.Error(t, err, "EOF on the paste prompt aborts the login")
 	assert.Contains(t, strings.Join(logs, "\n"), "--login-hint ignored")
 }
+
+// TestLoginLaunchpadVerifyRunsBeforeStore: the authorization-code flow
+// honors the same pre-store hook as the device flow.
+func TestLoginLaunchpadVerifyRunsBeforeStore(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/authorization/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"remote-tok","token_type":"bearer","refresh_token":"remote-refresh"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "")
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+	credKey := config.NormalizeBaseURL(srv.URL)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	var seenToken, seenType string
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+			Verify: func(_ context.Context, token, oauthType string) error {
+				seenToken, seenType = token, oauthType
+				return output.ErrAuth("not you")
+			},
+		})
+		errCh <- err
+	}()
+
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL to be logged")
+	}
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	_, err = fmt.Fprintf(pw, "http://127.0.0.1:8976/callback?code=test-code&state=%s\n", u.Query().Get("state"))
+	require.NoError(t, err)
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not you")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+	assert.Equal(t, "remote-tok", seenToken)
+	assert.Equal(t, "launchpad", seenType)
+	_, loadErr := m.store.Load(credKey)
+	assert.Error(t, loadErr, "a rejected token is never stored")
+}

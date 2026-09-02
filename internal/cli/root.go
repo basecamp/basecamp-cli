@@ -147,8 +147,10 @@ func NewRootCmd() *cobra.Command {
 					CacheDir: flags.CacheDir,
 				})
 			}
-			// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
-			if profileName != "" && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
+			// Profile-scoped cache (only if cache dir was not explicitly set
+			// via flag or env). A not-yet-registered name is unvalidated
+			// input, so it does not become a path component.
+			if profileKnown && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 				cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 			}
 

@@ -444,3 +444,31 @@ func TestResolveProfileMayCreatePassesUnknownName(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "BASECAMP_PROFILE")
 }
+
+// TestUnknownProfileNameIsNotACachePath: a may-create command can name a
+// profile that does not exist yet; that unvalidated name must not become a
+// cache directory component before the command has vetted it.
+func TestUnknownProfileNameIsNotACachePath(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_PROFILE", "")
+	t.Setenv("BASECAMP_CACHE_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	var cacheDir string
+	root := NewRootCmd()
+	root.AddCommand(&cobra.Command{
+		Use:         "probe",
+		Annotations: map[string]string{commands.AnnotationProfileMayCreate: "true"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cacheDir = appctx.FromContext(cmd.Context()).Config.CacheDir
+			return nil
+		},
+	})
+	root.SetArgs([]string{"probe", "--profile", "../../outside"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	require.NoError(t, root.Execute())
+	assert.NotContains(t, cacheDir, "outside")
+}
