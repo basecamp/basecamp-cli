@@ -1134,3 +1134,18 @@ func TestProfileCreateWithNilProfilesMap(t *testing.T) {
 	require.True(t, ok, "expected profiles map in config")
 	assert.Contains(t, profiles, "new-profile", "new profile should be created")
 }
+
+// TestProfileSetDefaultCreatesTheConfigDir: the global config directory may
+// not exist yet when the profiles came from another config layer.
+func TestProfileSetDefaultCreatesTheConfigDir(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "fresh"))
+
+	app, _ := setupTestApp(t)
+	app.Config.Profiles = map[string]*config.ProfileConfig{"bot": {BaseURL: "https://3.basecampapi.com"}}
+
+	require.NoError(t, executeCommand(NewProfileCmd(), app, "set-default", "bot"))
+	data, err := os.ReadFile(filepath.Join(config.GlobalConfigDir(), "config.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"default_profile": "bot"`)
+}

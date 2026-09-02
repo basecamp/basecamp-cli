@@ -899,8 +899,8 @@ const oauthIssuerEnv = "BASECAMP_OAUTH_ISSUER"
 func pinnedIssuerDiscovery(issuer string, log func(string)) (*discovery, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	u, err := url.Parse(issuer)
-	if err != nil || !isSecureEndpointURL(u) || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return nil, output.ErrAuth("invalid " + oauthIssuerEnv + ": must be an absolute https URL (or http on loopback) with a hostname and no userinfo, query, or fragment")
+	if err != nil || u.Opaque != "" || !isSecureEndpointURL(u) || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, output.ErrAuth("invalid " + oauthIssuerEnv + ": must be an origin — an absolute https URL (or http on loopback) with a hostname and no path, userinfo, query, or fragment")
 	}
 	deviceEndpoint := issuer + "/oauth/device_authorizations"
 	cfg := &oauth.Config{

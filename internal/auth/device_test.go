@@ -1046,6 +1046,8 @@ func TestDiscoverOAuth_PinnedIssuerIsCheckedLikeAnEndpoint(t *testing.T) {
 		"file scheme":             "file:///etc/passwd",
 		"query string":            "https://as.example/?token=hunter2",
 		"fragment":                "https://as.example/#frag",
+		"path":                    "https://as.example/some/path",
+		"opaque":                  "https:as.example",
 	} {
 		t.Run(name, func(t *testing.T) {
 			resource, discoveryHits := countingServer(t)
@@ -1184,15 +1186,18 @@ func TestLoginDevice_LoginHintIsSanitizedForTheTerminal(t *testing.T) {
 }
 
 func TestDiscoverOAuth_PinnedIssuerIsSanitizedForTheTerminal(t *testing.T) {
-	as := startDeviceAS(t)
 	resource, _ := countingServer(t)
 	m := newDeviceTestManager(t, resource.URL)
-	// A C1 control in the path survives url.Parse and the endpoint checks;
-	// the log line must not carry it to the terminal.
-	t.Setenv("BASECAMP_OAUTH_ISSUER", as.srv.URL+"/\u0085x")
+	// Only an origin is accepted now, so a control character can only ride
+	// in the host — where url.Parse or the endpoint check refuses it. Either
+	// way the terminal never sees it: refused values are not echoed, and an
+	// accepted one is announced through the sanitizer.
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "http://127.0.0.1\u0085:3001")
 
 	cl := &collectLogger{}
-	_, _ = m.Login(context.Background(), LoginOptions{Remote: true, Logger: cl.log, deviceOptions: []oauth.DeviceOption{instantSleep()}})
-	assert.Contains(t, cl.joined(), "pinned by BASECAMP_OAUTH_ISSUER")
+	_, err := m.Login(context.Background(), LoginOptions{Remote: true, Logger: cl.log, deviceOptions: []oauth.DeviceOption{instantSleep()}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BASECAMP_OAUTH_ISSUER")
+	assert.NotContains(t, err.Error(), "\u0085")
 	assert.NotContains(t, cl.joined(), "\u0085")
 }

@@ -403,17 +403,13 @@ func newProfileSetDefaultCmd() *cobra.Command {
 // profile registered becomes the default; isDefault reports whether this one
 // did. The in-memory config is the caller's to update.
 func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err error) {
-	if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
-		return false, fmt.Errorf("failed to create config directory: %w", err)
-	}
 	configData, configPath, err := loadGlobalConfigFile()
 	if err != nil {
 		return false, err
 	}
-
-	profilesMap, _ := configData["profiles"].(map[string]any)
-	if profilesMap == nil {
-		profilesMap = make(map[string]any)
+	profilesMap, err := globalProfilesMap(configData, configPath)
+	if err != nil {
+		return false, err
 	}
 
 	entry := map[string]any{
@@ -426,7 +422,6 @@ func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err 
 		entry["scope"] = p.Scope
 	}
 	profilesMap[name] = entry
-	configData["profiles"] = profilesMap
 
 	isDefault = len(profilesMap) == 1
 	if isDefault {
@@ -436,11 +431,15 @@ func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err 
 	return isDefault, atomicWriteJSON(configPath, configData)
 }
 
-// loadGlobalConfigFile returns the global config file's contents and path.
-// A missing file is an empty config; a file that cannot be read or parsed
-// is an error, since every caller is about to write the map back and would
-// otherwise replace whatever the operator had with a partial decode.
+// loadGlobalConfigFile returns the global config file's contents and path,
+// with the config directory in place for the write every caller is about
+// to make. A missing file is an empty config; a file that cannot be read or
+// parsed is an error, since writing the map back would otherwise replace
+// whatever the operator had with a partial decode.
 func loadGlobalConfigFile() (map[string]any, string, error) {
+	if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
+		return nil, "", fmt.Errorf("failed to create config directory: %w", err)
+	}
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	configData := make(map[string]any)
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: Path is from trusted config location
@@ -456,8 +455,27 @@ func loadGlobalConfigFile() (map[string]any, string, error) {
 	return configData, configPath, nil
 }
 
+// globalProfilesMap returns the config's "profiles" object, creating it in
+// the map when absent. A present value of any other shape is refused for
+// the same reason a parse failure is: the caller is about to write the map
+// back, and replacing an unexpected value would destroy operator config.
+func globalProfilesMap(configData map[string]any, configPath string) (map[string]any, error) {
+	raw, present := configData["profiles"]
+	if !present {
+		profilesMap := make(map[string]any)
+		configData["profiles"] = profilesMap
+		return profilesMap, nil
+	}
+	profilesMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("config file %s has a \"profiles\" value that is not an object, refusing to rewrite it", configPath)
+	}
+	return profilesMap, nil
+}
+
 // globalProfileEntry returns the named profile's entry in the global config
-// file, or nil when the file has none.
+// file, or nil when the file has none (or its profiles value is not an
+// object — which the writers refuse separately).
 func globalProfileEntry(configData map[string]any, name string) map[string]any {
 	profilesMap, _ := configData["profiles"].(map[string]any)
 	entry, _ := profilesMap[name].(map[string]any)
@@ -483,6 +501,9 @@ func globalProfileIsUnbound(name string) (bool, error) {
 func bindProfileAccount(name, account string) error {
 	configData, configPath, err := loadGlobalConfigFile()
 	if err != nil {
+		return err
+	}
+	if _, err := globalProfilesMap(configData, configPath); err != nil {
 		return err
 	}
 	entry := globalProfileEntry(configData, name)
@@ -514,12 +535,13 @@ func unregisterProfile(name string) error {
 	if err != nil {
 		return err
 	}
-
-	if profilesMap, ok := configData["profiles"].(map[string]any); ok {
-		delete(profilesMap, name)
-		if len(profilesMap) == 0 {
-			delete(configData, "profiles")
-		}
+	profilesMap, err := globalProfilesMap(configData, configPath)
+	if err != nil {
+		return err
+	}
+	delete(profilesMap, name)
+	if len(profilesMap) == 0 {
+		delete(configData, "profiles")
 	}
 
 	if dp, ok := configData["default_profile"].(string); ok && dp == name {

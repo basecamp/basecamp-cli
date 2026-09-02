@@ -1092,3 +1092,21 @@ func TestAuthLoginDeviceFlowExpectIdentityKeepsAShortLivedAccessToken(t *testing
 	assert.Equal(t, "dev-ref", creds.RefreshToken)
 	assert.Empty(t, creds.Source)
 }
+
+func TestAuthLoginWithTokenRefusesToRewriteANonObjectProfilesValue(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"profiles":[],"format":"json"}`), 0o600))
+
+	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"profiles" value that is not an object`)
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, `{"profiles":[],"format":"json"}`, string(data))
+	_, loadErr := app.Auth.GetStore().Load("profile:bot")
+	assert.Error(t, loadErr)
+}

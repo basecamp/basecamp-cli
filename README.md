@@ -203,7 +203,7 @@ it to the server, so the approval page is not preselected.
 
 ### Personal access tokens
 
-A [personal access token](https://3.basecamp.com/my/access_tokens) can be
+A [personal access token](https://app.basecamp.com/my/access_tokens) can be
 imported instead of running OAuth — the shape for bots, CI, and any machine
 that should never sign in interactively. The token is read from stdin (never
 an argument), verified against the server — who it authenticates as, and that
@@ -245,7 +245,7 @@ To use your own OAuth app (e.g., a custom Launchpad integration):
 
 Both `BASECAMP_OAUTH_CLIENT_ID` and `BASECAMP_OAUTH_CLIENT_SECRET` must be set together.
 
-`BASECAMP_OAUTH_ISSUER=https://3.basecamp.com` pins the OAuth authorization
+`BASECAMP_OAUTH_ISSUER=https://app.basecamp.com` pins the OAuth authorization
 server and skips discovery, so `basecamp auth login` reaches a server that is
 serving piloted clients but not yet advertising itself (discovery still 404s).
 It is a temporary escape hatch for that dark pilot, not a configuration
