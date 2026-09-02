@@ -20,7 +20,7 @@ func rootHelpFunc() func(*cobra.Command, []string) {
 		// Bare group with explicit flags (e.g. "cards --in X"): suppress
 		// help output so Execute() can emit a usage error with non-zero exit.
 		// Must run before machine-help branches to avoid mixed output.
-		if isBareGroupWithFlags(cmd) {
+		if isBareGroupWithFlags(cmd) || isBareGroupWithUnknownArg(cmd) {
 			return
 		}
 
@@ -54,17 +54,39 @@ func hasExplicitLocalFlags(cmd *cobra.Command) bool {
 	return found
 }
 
-// isBareGroupWithFlags reports whether cmd is a non-runnable group command
-// that was invoked bare (no subcommand) with explicitly-set local flags.
-// Explicit --help always renders help regardless of other flags.
+// isBareGroup reports whether cmd is a non-runnable command carrying
+// subcommands — a group whose bare invocation shows help.
+func isBareGroup(cmd *cobra.Command) bool {
+	return !cmd.Runnable() && cmd.HasSubCommands()
+}
+
+// helpRequested reports whether --help resolved to true for cmd. Reading the
+// parsed value rather than the changed flag means an explicit --help=false
+// still counts as "help not requested".
+func helpRequested(cmd *cobra.Command) bool {
+	v, _ := cmd.Flags().GetBool("help")
+	return v
+}
+
+// isBareGroupWithFlags reports whether cmd is a bare group invoked with
+// explicitly-set local flags but no subcommand. Explicit --help always renders
+// help regardless of other flags.
 func isBareGroupWithFlags(cmd *cobra.Command) bool {
-	if cmd.Runnable() || !cmd.HasSubCommands() {
-		return false
-	}
-	if helpFlag := cmd.Flags().Lookup("help"); helpFlag != nil && helpFlag.Changed {
+	if !isBareGroup(cmd) || helpRequested(cmd) {
 		return false
 	}
 	return hasExplicitLocalFlags(cmd)
+}
+
+// isBareGroupWithUnknownArg reports whether cmd is a bare group handed a
+// positional argument matching no subcommand. Without conversion the group
+// renders help with a zero exit, masking the no-op; Execute() turns it into a
+// usage error. Explicit --help still renders help.
+func isBareGroupWithUnknownArg(cmd *cobra.Command) bool {
+	if !isBareGroup(cmd) || helpRequested(cmd) {
+		return false
+	}
+	return len(cmd.Flags().Args()) > 0
 }
 
 // curatedCategories defines the subset of categories and commands shown in root help.

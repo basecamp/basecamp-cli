@@ -373,8 +373,19 @@ func Execute() {
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
 
-	// Bare group command with explicit flags (e.g. "cards --in X"): the help
-	// function suppressed output. Convert to a usage error.
+	// Bare group command with a positional that matches no subcommand
+	// (e.g. "cards 12345", or "cards 12345 --in X"): Cobra stops at the group
+	// and renders help with a zero exit — so an agent that meant "cards show
+	// 12345" reads success while nothing ran. The help function suppressed the
+	// output; convert it to a usage error that names the mistake and points at
+	// the canonical path. This is checked before the bare-flags case so a
+	// scoped invocation keeps the specific hint rather than the generic one.
+	if err == nil && executedCmd != cmd && isBareGroupWithUnknownArg(executedCmd) {
+		err = unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0])
+	}
+
+	// Bare group command with explicit flags but no positional (e.g. "cards
+	// --in X"): the help function suppressed output. Convert to a usage error.
 	if err == nil && executedCmd != cmd && isBareGroupWithFlags(executedCmd) {
 		err = output.ErrUsageHint(
 			"subcommand required",
@@ -669,6 +680,75 @@ func promptForProfile(cfg *config.Config) (string, error) {
 func isConfigCmd(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		if c.Name() == "config" {
+			return true
+		}
+	}
+	return false
+}
+
+// unknownSubcommandError builds a usage error for a group command handed a
+// positional that matches no subcommand. A bare numeric positional almost
+// always means the caller wanted "<group> show <id>", so when the group's show
+// subcommand actually accepts an id the hint spells that path out; otherwise it
+// offers cobra's spelling suggestions, falling back to help.
+func unknownSubcommandError(cmd *cobra.Command, arg string) error {
+	msg := fmt.Sprintf("unknown command %q for %q", arg, cmd.CommandPath())
+
+	if isAllDigits(arg) && showAcceptsID(cmd) {
+		return output.ErrUsageHint(msg, fmt.Sprintf("Did you mean %q?", cmd.CommandPath()+" show "+arg))
+	}
+	// Only the root sets SuggestionsMinimumDistance; a group left at zero would
+	// match nothing but an exact prefix, so borrow the root's threshold.
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = cmd.Root().SuggestionsMinimumDistance
+	}
+	if suggestions := cmd.SuggestionsFor(arg); len(suggestions) > 0 {
+		return output.ErrUsageHint(msg, "Did you mean: "+strings.Join(suggestions, ", ")+"?")
+	}
+	return output.ErrUsageHint(msg, "Run: "+cmd.CommandPath()+" --help")
+}
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// showAcceptsID reports whether cmd has a show action that takes an identifier
+// positional. A singleton "show" (accounts, config, hillcharts) takes no id, so
+// suggesting "<group> show <id>" there would send the caller to a command that
+// silently ignores the number. The action is matched by name or alias, so a
+// command like chat's "line" that exposes "show" as an alias still counts.
+func showAcceptsID(cmd *cobra.Command) bool {
+	for _, sub := range cmd.Commands() {
+		if !commandMatches(sub, "show") {
+			continue
+		}
+		for _, a := range ParseArgs(sub) {
+			if a.Kind == "identifier" {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// commandMatches reports whether name is cmd's primary name or one of its
+// aliases.
+func commandMatches(cmd *cobra.Command, name string) bool {
+	if cmd.Name() == name {
+		return true
+	}
+	for _, alias := range cmd.Aliases {
+		if alias == name {
 			return true
 		}
 	}

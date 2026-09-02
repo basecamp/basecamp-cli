@@ -436,6 +436,76 @@ load test_helper
   assert_output_contains "COMMANDS"
 }
 
+@test "cards with a bare numeric id errors instead of silent help" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # "cards 12345" matches no subcommand — a caller who meant "cards show
+  # 12345" must get a non-zero usage error, not help with a zero exit.
+  run basecamp cards 12345
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "12345" for "basecamp cards"'
+  assert_json_value '.hint' 'Did you mean "basecamp cards show 12345"?'
+}
+
+@test "group with an unknown subcommand errors non-zero" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp messages shwo
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "shwo" for "basecamp messages"'
+}
+
+@test "a scoped bare numeric id keeps the specific unknown-command error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # With a group-local flag present the unknown-arg guard still wins over the
+  # generic "subcommand required" bare-flags error.
+  run basecamp cards 12345 --in myproject
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "12345" for "basecamp cards"'
+  assert_json_value '.hint' 'Did you mean "basecamp cards show 12345"?'
+}
+
+@test "a numeric id resolves a show alias" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # chat's id-taking "line" command exposes "show" as an alias.
+  run basecamp chat 123
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint' 'Did you mean "basecamp chat show 123"?'
+}
+
+@test "singleton group does not steer a numeric id to show" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # accounts show reads the current account and takes no id, so the hint must
+  # not point at "accounts show 123".
+  run basecamp accounts 123
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.hint' 'Run: basecamp accounts --help'
+}
+
+@test "help for a group with a stray id still renders help" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  # The explicit help path renders help and exits zero; it must not be
+  # converted into an error or suppressed into silence.
+  run basecamp help cards 12345
+  assert_success
+  assert_output_contains "COMMANDS"
+}
+
 @test "messages --json shows structured JSON help" {
   create_credentials
   create_global_config '{"account_id": 99999}'
