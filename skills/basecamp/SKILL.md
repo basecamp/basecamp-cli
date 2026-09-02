@@ -1108,7 +1108,7 @@ basecamp notes set "<content>" --json
 `bubble-up add`/`remove` resurface a recording in your readings (the BC5
 successor to "save"), addressed by id or pasted URL. `add` bubbles up now by
 default; `--at` schedules it — a keyword (`today`, `tomorrow`, `weekend`,
-`next_week`) or an ISO8601 date. Both verbs are idempotent. There is no
+`next_week`) or a calendar date (`YYYY-MM-DD`). Both verbs are idempotent. There is no
 per-recording status read (that GET is an unrenderable API gap); the full list
 is `basecamp notifications bubbleups`.
 

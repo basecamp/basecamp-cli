@@ -219,7 +219,7 @@ func (v *Projects) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 				p.Starred = !msg.Bookmarked
 				v.syncProjectList()
 			}
-			return v, workspace.ReportError(msg.Err, "toggling star")
+			return v, workspace.ReportError(msg.Err, "toggling bookmark")
 		}
 		// On success, invalidate pool so other views (Home bookmarks) get updated data
 		v.pool.Invalidate()
