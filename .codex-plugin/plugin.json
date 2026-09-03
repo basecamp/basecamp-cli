@@ -1,6 +1,6 @@
 {
   "name": "basecamp",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Use Basecamp from Codex to find work, create todos, and keep projects up to date.",
   "author": {
     "name": "37signals",
