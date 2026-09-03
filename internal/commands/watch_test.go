@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -309,41 +308,12 @@ func TestALongTitleIsCutRatherThanWrapped(t *testing.T) {
 	assert.Equal(t, "R\u00e9\u2026", truncateLine("R\u00e9staurant", 3), "a cut fell inside a rune")
 }
 
-// --- Appearing ---
+// --- Heartbeats ---
 
-// Basecamp drops a connection from its appearances store after 30 seconds, and
-// an offline user is not broadcast to, so a heartbeat at or past that leaves the
-// watch subscribed to a stream nothing is sent on.
-func TestTheHeartbeatOutpacesTheServersTTL(t *testing.T) {
-	assert.Less(t, appearInterval, 30*time.Second)
-}
-
-// Basecamp beats no ping of its own, so the client's own ping is the only frame
-// that arrives on an idle connection. actioncable-go calls a connection stale
-// after six seconds without one and redials a perfectly live socket, which is
-// what a watch looks like when it reconnects every six seconds forever.
-func TestThePingOutpacesTheStaleWindow(t *testing.T) {
-	const staleAfter = 6 * time.Second // actioncable-go's default
-
-	assert.LessOrEqual(t, pingInterval, staleAfter/2)
-}
-
-// A watch that never got its subscriptions says nothing rather than falling over
-// on every tick.
-func TestHeartbeatsWithoutASubscriptionAreQuiet(t *testing.T) {
-	complaints := &strings.Builder{}
-	watch := &readingsWatch{errOut: complaints}
-
-	watch.appear(context.Background())
-	watch.ping(context.Background())
-
-	assert.Empty(t, complaints.String())
-}
-
-// A refused appearance is fatal, not a warning: it means nothing will ever be
-// sent to this watch.
-func TestARefusedAppearanceSaysWhatItCosts(t *testing.T) {
-	err := appearanceError(fmt.Errorf("%w: AppearanceChannel", actioncable.ErrRejected))
+// A refused heartbeat is fatal, not a warning: an offline connection is sent
+// nothing at all.
+func TestARefusedHeartbeatSaysWhatItCosts(t *testing.T) {
+	err := heartbeatError(fmt.Errorf("%w: AppearanceChannel", actioncable.ErrRejected))
 
 	assert.Equal(t, output.CodeForbidden, output.AsError(err).Code)
 	assert.Contains(t, err.Error(), "never be sent any notifications")

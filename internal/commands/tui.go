@@ -81,7 +81,7 @@ func NewTUICmd() *cobra.Command {
 			tui.CalibrateWidths(os.Stdin, os.Stdout)
 			tui.DetectImageSupport(os.Stdin, os.Stdout)
 
-			model, shutdown := workspace.New(app)
+			model, shutdown := workspace.New(app, workspace.WithReadingsWatcher(liveReadings(app)))
 			defer shutdown()
 
 			_, err := tea.NewProgram(model).Run()

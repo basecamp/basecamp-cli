@@ -34,26 +34,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
-// unreadsChannel is the channel the web sidebar subscribes to. Basecamp writes
-// a reading per recording, so one thing happening rings it several times.
-const unreadsChannel = "UnreadsChannel"
-
-// Offline users don't get broadcasts, and appearing is the only thing that makes
-// a connection online — for 30 seconds at a time, so the watch says it again on
-// appearInterval, the same heartbeat the web keeps.
-const (
-	appearanceChannel = "AppearanceChannel"
-	appearInterval    = 15 * time.Second
-)
-
-// Basecamp beats no ping of its own — MonitoringChannel answers ours instead —
-// so a client that never pings sees no frame for six seconds and redials on a
-// live connection. pingInterval is half that window, which is what the web uses.
-const (
-	monitoringChannel = "MonitoringChannel"
-	pingInterval      = 3 * time.Second
-)
-
 // A failed read of the notifications is retried on its own, doubling the wait
 // each time so a server that stays down isn't hammered. asyncScriptLimit caps
 // how many --run-async commands run at once, so a busy morning can't fork a
@@ -254,7 +234,7 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	subscription, err := client.Subscribe(ctx, actioncable.Identifier{Channel: unreadsChannel},
+	subscription, err := client.Subscribe(ctx, actioncable.Identifier{Channel: cable.UnreadsChannel},
 		actioncable.OnConnected(func(reconnected bool) {
 			if reconnected {
 				watch.noteConnection(true)
@@ -269,17 +249,11 @@ func (c *watchCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrAPI(0, fmt.Sprintf("could not subscribe to your notifications: %v", err))
 	}
 
-	appearance, err := client.Subscribe(ctx, actioncable.Identifier{Channel: appearanceChannel})
+	beats, err := cable.Beat(ctx, client)
 	if err != nil {
-		return appearanceError(err)
+		return heartbeatError(err)
 	}
-	watch.appearance = appearance
-
-	monitoring, err := client.Subscribe(ctx, actioncable.Identifier{Channel: monitoringChannel})
-	if err != nil {
-		return output.ErrAPI(0, fmt.Sprintf("could not join the channel that keeps the connection alive: %v", err))
-	}
-	watch.monitoring = monitoring
+	watch.beats = beats
 
 	if err := watch.listen(ctx, subscription); err != nil {
 		return err
@@ -322,22 +296,10 @@ func (c *watchCommand) watchedTypes() (map[string]bool, error) {
 }
 
 func (c *watchCommand) dial(ctx context.Context, app *appctx.App, watch *readingsWatch) (*actioncable.Client, error) {
-	appURL := c.appURL(ctx, app, watch)
-	if appURL == "" {
-		return nil, output.ErrUsageHint(
-			"Could not work out which Action Cable server to connect to",
-			"Set "+cable.CableURLEnv+" to your cable endpoint, for example wss://chat.app.basecamp.com/"+app.Config.AccountID)
-	}
-
-	cableURL, err := cable.URL(appURL, app.Config.AccountID)
+	cableURL, options, err := cableEndpoint(ctx, app, watch.anyAppURL)
 	if err != nil {
 		return nil, err
 	}
-
-	// The cable server's own name is not on config.action_cable's origin
-	// allowlist — the web app's is — so say which Basecamp this connection
-	// belongs to rather than letting the client assume the endpoint's host.
-	options := append(tracedCable(app), actioncable.WithOrigin(cable.AppURLHost(appURL)))
 
 	client, err := cable.Dial(ctx, cableURL, app.Auth, options...)
 	if err != nil {
@@ -345,6 +307,30 @@ func (c *watchCommand) dial(ctx context.Context, app *appctx.App, watch *reading
 	}
 
 	return client, nil
+}
+
+// cableEndpoint is where this account's cable server is and how to dial it.
+// hintedAppURL is an app_url already in hand — a notification's, say — which
+// saves asking the authorization document for one.
+func cableEndpoint(ctx context.Context, app *appctx.App, hintedAppURL string) (string, []actioncable.Option, error) {
+	appURL := accountAppURL(ctx, app, hintedAppURL)
+	if appURL == "" {
+		return "", nil, output.ErrUsageHint(
+			"Could not work out which Action Cable server to connect to",
+			"Set "+cable.CableURLEnv+" to your cable endpoint, for example wss://chat.app.basecamp.com/"+app.Config.AccountID)
+	}
+
+	cableURL, err := cable.URL(appURL, app.Config.AccountID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// The cable server's own name is not on config.action_cable's origin
+	// allowlist — the web app's is — so say which Basecamp this connection
+	// belongs to rather than letting the client assume the endpoint's host.
+	options := append(tracedCable(app), actioncable.WithOrigin(cable.AppURLHost(appURL)))
+
+	return cableURL, options, nil
 }
 
 // tracedCable sends the cable client's own account of itself — why a connection
@@ -360,7 +346,7 @@ func tracedCable(app *appctx.App) []actioncable.Option {
 	}))}
 }
 
-// appURL is where this account's web app lives. Basecamp serves the cable from a
+// accountAppURL is where this account's web app lives. Basecamp serves the cable from a
 // host of its own, which nothing in the API reports, so the web host is taken
 // from an app_url the notifications already carry and turned into the cable host
 // the same way the web client does it.
@@ -368,7 +354,7 @@ func tracedCable(app *appctx.App) []actioncable.Option {
 // A localhost base URL is a development server, which serves its own cable, and
 // BASECAMP_CABLE_URL settles it for anything else — a staging deployment whose
 // cable host is not chat.<host>, say.
-func (c *watchCommand) appURL(ctx context.Context, app *appctx.App, watch *readingsWatch) string {
+func accountAppURL(ctx context.Context, app *appctx.App, hinted string) string {
 	if os.Getenv(cable.CableURLEnv) != "" {
 		// URL hands the override straight back, so nothing has to be resolved
 		// to reach it — and a development server is reachable this way too.
@@ -377,7 +363,7 @@ func (c *watchCommand) appURL(ctx context.Context, app *appctx.App, watch *readi
 	if host := cable.AppURLHost(app.Config.BaseURL); host != "" && isLocalBaseURL(app.Config.BaseURL) {
 		return host
 	}
-	if host := cable.AppURLHost(watch.anyAppURL); host != "" {
+	if host := cable.AppURLHost(hinted); host != "" {
 		return host
 	}
 
@@ -419,16 +405,14 @@ func isLocalBaseURL(baseURL string) bool {
 	return hostutil.IsLocalhost(parsed.Host)
 }
 
-// appearanceError says what a refused appearance costs, which is everything:
-// Basecamp broadcasts to a user it considers online, and nothing else makes one
-// online. A read-only token is refused until AppearanceChannel declares appear
-// and away read-only.
-func appearanceError(err error) error {
+// heartbeatError says what a refused heartbeat costs, which is everything: an
+// offline connection is sent nothing, and a stale one is dropped.
+func heartbeatError(err error) error {
 	if errors.Is(err, actioncable.ErrRejected) {
-		return output.ErrForbidden("Basecamp turned down this token's appearance, so it would never be sent any notifications")
+		return output.ErrForbidden("Basecamp turned down this token's heartbeat, so it would never be sent any notifications")
 	}
 
-	return output.ErrAPI(0, fmt.Sprintf("could not tell Basecamp the watch is here: %v", err))
+	return output.ErrAPI(0, fmt.Sprintf("could not keep the connection to Basecamp alive: %v", err))
 }
 
 // watchDialError tells the two ways a dial fails apart: the server turned the
@@ -479,8 +463,7 @@ type watchEvent struct {
 // found, and what to do with a change once it arrives.
 type readingsWatch struct {
 	app            *appctx.App
-	appearance     *actioncable.Subscription
-	monitoring     *actioncable.Subscription
+	beats          *cable.Heartbeats
 	types          map[string]bool
 	asyncScript    string
 	syncScript     string
@@ -519,14 +502,9 @@ func (w *readingsWatch) readBaseline(ctx context.Context) error {
 }
 
 func (w *readingsWatch) listen(ctx context.Context, subscription *actioncable.Subscription) error {
-	appearing := time.NewTicker(appearInterval)
-	defer appearing.Stop()
-
-	pinging := time.NewTicker(pingInterval)
-	defer pinging.Stop()
-
-	w.appear(ctx)
-	w.ping(ctx)
+	go w.beats.Run(ctx, func(err error) {
+		fmt.Fprintf(w.errOut, "warning: could not keep the connection to Basecamp alive: %v\n", err)
+	})
 	w.announce(watchReady)
 
 	for !w.finished() {
@@ -534,10 +512,6 @@ func (w *readingsWatch) listen(ctx context.Context, subscription *actioncable.Su
 		case <-ctx.Done():
 			// An interrupt or a --timeout is how a watch is meant to end.
 			return nil
-		case <-appearing.C:
-			w.appear(ctx)
-		case <-pinging.C:
-			w.ping(ctx)
 		case <-w.connection:
 			if err := w.followConnection(ctx); err != nil {
 				return err
@@ -578,33 +552,6 @@ func (w *readingsWatch) closedError(ctx context.Context) error {
 	}
 }
 
-// appear says the watch is here, which is what makes Basecamp broadcast to it
-// at all. It appears on nothing: appearing on a recording tells the server the
-// reader is looking at it, which excludes them from its unread updates — the
-// opposite of what a watch wants.
-func (w *readingsWatch) appear(ctx context.Context) {
-	if w.appearance == nil {
-		return
-	}
-
-	if err := w.appearance.Perform(ctx, "appear", map[string]any{"appearing_on": []string{}}); err != nil {
-		fmt.Fprintf(w.errOut, "warning: could not tell Basecamp the watch is here: %v\n", err)
-	}
-}
-
-// ping asks for the pong that keeps the connection from looking dead. The pong
-// is delivered to a subscription nobody reads, which is fine — arriving at all
-// is the whole point of it.
-func (w *readingsWatch) ping(ctx context.Context) {
-	if w.monitoring == nil {
-		return
-	}
-
-	if err := w.monitoring.Perform(ctx, "ping", nil); err != nil {
-		fmt.Fprintf(w.errOut, "warning: could not ping Basecamp: %v\n", err)
-	}
-}
-
 // ring is the doorbell. Basecamp writes a reading per recording, so one thing
 // happening rings it several times, and the payload is a set of signed ids
 // rather than anything a client can read. So the ring only says "something
@@ -642,7 +589,7 @@ func (w *readingsWatch) followConnection(ctx context.Context) error {
 		if connected {
 			// A reconnect is a new connection token on the server's side, so the
 			// last appearance died with the old one.
-			w.appear(ctx)
+			w.beats.Appear(ctx, nil)
 			if err := w.reread(ctx); err != nil {
 				return err
 			}
