@@ -202,6 +202,7 @@ when --confirm-adding-people is explicitly provided.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -209,6 +210,11 @@ when --confirm-adding-people is explicitly provided.`,
 			resolvedProjectID, err := resolveProjectID(cmd, app, project)
 			if err != nil {
 				return err
+			}
+			if todoset != "" {
+				if err := validateTemplateCopyTodoset(cmd, app, todoset, resolvedProjectID); err != nil {
+					return err
+				}
 			}
 			resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todoset)
 			if err != nil {
@@ -225,7 +231,14 @@ when --confirm-adding-people is explicitly provided.`,
 				AddingPeopleConfirmed: confirmAddingPeople,
 			})
 			if err != nil {
-				return templateCopyError(err, templateID, resolvedProjectID, todoset)
+				return templateCopyError(
+					err,
+					templateID,
+					resolvedProjectID,
+					resolvedTodosetID,
+					app.Config.ActiveProfile,
+					replyAccountArg(persistentAccount, app.Config.AccountID),
+				)
 			}
 
 			return app.OK(templateCopy,
@@ -249,7 +262,33 @@ when --confirm-adding-people is explicitly provided.`,
 	return cmd
 }
 
-func templateCopyError(err error, templateID int64, projectID, todosetID string) error {
+func validateTemplateCopyTodoset(cmd *cobra.Command, app *appctx.App, todosetID, projectID string) error {
+	if err := validateTodosetOwnership(cmd, app, todosetID, projectID); err != nil {
+		return err
+	}
+
+	enabled, all, err := getDockTools(cmd.Context(), app, projectID, "todoset")
+	if err != nil {
+		return err
+	}
+	todosetNum, err := strconv.ParseInt(todosetID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid todoset ID")
+	}
+	for _, tool := range enabled {
+		if tool.ID == todosetNum {
+			return nil
+		}
+	}
+	for _, tool := range all {
+		if tool.ID == todosetNum {
+			return output.ErrUsage(fmt.Sprintf("--todoset %s is disabled for project %s", todosetID, projectID))
+		}
+	}
+	return output.ErrUsage(fmt.Sprintf("--todoset %s is not a To-dos tool in project %s", todosetID, projectID))
+}
+
+func templateCopyError(err error, templateID int64, projectID, todosetID, profile, accountArg string) error {
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	if !errors.As(err, &confirmationErr) {
 		return convertSDKError(err)
@@ -260,10 +299,11 @@ func templateCopyError(err error, templateID int64, projectID, todosetID string)
 		people = append(people, fmt.Sprintf("%s (#%d)", person.Name, person.ID))
 	}
 
-	rerun := fmt.Sprintf("basecamp templates copy %d --in %s", templateID, projectID)
-	if todosetID != "" {
-		rerun += " --todoset " + todosetID
+	rerun := fmt.Sprintf("basecamp templates copy %d --in %s --todoset %s", templateID, projectID, todosetID)
+	if profile != "" {
+		rerun += " --profile " + profile
 	}
+	rerun += accountArg
 	rerun += " --confirm-adding-people"
 
 	converted := output.AsError(err)

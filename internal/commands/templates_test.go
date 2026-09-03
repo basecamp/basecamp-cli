@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -30,6 +32,15 @@ func templateCopyProjectRoute() stubRoute {
 		path:   "/99999/projects/123.json",
 		status: http.StatusOK,
 		body:   `{"id":123,"name":"Test Project","dock":[{"name":"todoset","id":9,"title":"To-dos","enabled":true}]}`,
+	}
+}
+
+func templateCopyTodosetRoute(bucketID int64) stubRoute {
+	return stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/todosets/9",
+		status: http.StatusOK,
+		body:   fmt.Sprintf(`{"id":9,"bucket":{"id":%d,"name":"Project"}}`, bucketID),
 	}
 }
 
@@ -124,6 +135,7 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
+		templateCopyTodosetRoute(123),
 		templateCopyProjectRoute(),
 		stubRoute{
 			method: http.MethodPost,
@@ -134,13 +146,53 @@ func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
 	)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--confirm-adding-people")
+		"copy", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
 	require.NoError(t, err)
 
+	requests := transport.recorded()
+	require.Len(t, requests, 4)
+	assert.Equal(t, "/99999/projects.json", requests[0].Path)
+	assert.Equal(t, "/99999/todosets/9", requests[1].Path)
+	assert.Equal(t, "/99999/projects/123.json", requests[2].Path)
 	assert.JSONEq(t,
 		`{"template_recording_id":3,"destination_parent_id":9,"adding_people_confirmed":true}`,
-		transport.last(t).Body,
+		requests[3].Body,
 	)
+}
+
+func TestTemplatesCopyRejectsTodosetFromAnotherProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, projectsRoute(), templateCopyTodosetRoute(456))
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app,
+		"copy", "3", "--project", "123", "--todoset", "9")
+	require.Error(t, err)
+
+	var outputErr *output.Error
+	require.True(t, errors.As(err, &outputErr))
+	assert.Contains(t, outputErr.Message, "--todoset 9 belongs to project 456, not 123")
+	require.Len(t, transport.recorded(), 2, "copy request must not be sent")
+}
+
+func TestTemplatesCopyRejectsDisabledTodoset(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		templateCopyTodosetRoute(123),
+		stubRoute{
+			method: http.MethodGet,
+			path:   "/99999/projects/123.json",
+			status: http.StatusOK,
+			body:   `{"id":123,"name":"Test Project","dock":[{"name":"todoset","id":9,"title":"To-dos","enabled":false}]}`,
+		},
+	)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app,
+		"copy", "3", "--project", "123", "--todoset", "9")
+	require.Error(t, err)
+
+	var outputErr *output.Error
+	require.True(t, errors.As(err, &outputErr))
+	assert.Contains(t, outputErr.Message, "--todoset 9 is disabled for project 123")
+	require.Len(t, transport.recorded(), 3, "copy request must not be sent")
 }
 
 func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
@@ -155,6 +207,9 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 		},
 	)
 
+	app.Config.ActiveProfile = "work"
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "123")
 	require.Error(t, err)
 
@@ -163,7 +218,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	assert.Equal(t, output.CodeValidation, outputErr.Code)
 	assert.Contains(t, outputErr.Message, "Victor (#4)")
 	assert.Contains(t, outputErr.Message, "Georgia (#7)")
-	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --confirm-adding-people")
+	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --todoset 9 --profile work --account 99999 --confirm-adding-people")
 
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	assert.True(t, errors.As(err, &confirmationErr), "typed SDK error should remain available")
