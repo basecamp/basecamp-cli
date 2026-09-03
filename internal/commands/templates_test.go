@@ -72,6 +72,8 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 		body:   templateLibraryJSON,
 	})
 	buf := captureTemplateOutput(app)
+	app.Config.ActiveProfile = "work profile"
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
 	require.NoError(t, err)
@@ -82,7 +84,7 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "1 active to-do list templates", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy <template-id> --in <project>", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates copy <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {

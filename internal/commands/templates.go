@@ -144,10 +144,15 @@ func newTemplatesLibraryCmd() *cobra.Command {
 		Long:  "List the account's active to-do list templates.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
+			persistentAccount := hasPersistentAccount(app.Config)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
 
 			library, err := app.Account().Templates().GetLibrary(cmd.Context())
 			if err != nil {
@@ -169,7 +174,7 @@ func newTemplatesLibraryCmd() *cobra.Command {
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "copy",
-						Cmd:         "basecamp templates copy <template-id> --in <project>",
+						Cmd:         "basecamp templates copy <template-id> --in <project>" + contextArgs,
 						Description: "Copy a template into a project",
 					},
 				),
