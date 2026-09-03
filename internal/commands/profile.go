@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -156,6 +157,9 @@ func newProfileShowCmd() *cobra.Command {
 			if err == nil && creds.AccessToken != "" {
 				result["authenticated"] = true
 				result["oauth_type"] = creds.OAuthType
+				if creds.Source != "" {
+					result["source"] = creds.Source
+				}
 				isLaunchpad = creds.OAuthType == "launchpad"
 
 				// Suppress credential scope for Launchpad (scopes not supported)
@@ -232,6 +236,13 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
+			// The entry is written only after the login succeeds, so prove
+			// the config file can take it before a credential exists to
+			// orphan: a malformed file is refused here, not after OAuth.
+			if _, err := writableGlobalProfiles(); err != nil {
+				return err
+			}
+
 			// Snapshot in-memory config before mutation
 			prevActiveProfile := app.Config.ActiveProfile
 			prevBaseURL := app.Config.BaseURL
@@ -269,43 +280,8 @@ Examples:
 				profileCfg.Scope = loginResult.Scope
 			}
 
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
-				return fmt.Errorf("failed to create config directory: %w", err)
-			}
-
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
-			}
-
-			// Get or create profiles map
-			profilesMap, _ := configData["profiles"].(map[string]any)
-			if profilesMap == nil {
-				profilesMap = make(map[string]any)
-			}
-
-			// Add profile with effective scope
-			profileEntry := map[string]any{
-				"base_url": profileCfg.BaseURL,
-			}
-			if profileCfg.AccountID != "" {
-				profileEntry["account_id"] = profileCfg.AccountID
-			}
-			if profileCfg.Scope != "" {
-				profileEntry["scope"] = profileCfg.Scope
-			}
-			profilesMap[name] = profileEntry
-			configData["profiles"] = profilesMap
-
-			// If this is the first profile, set it as default
-			isDefault := len(profilesMap) == 1
-			if isDefault {
-				configData["default_profile"] = name
-			}
-
-			// Write config atomically
-			if err := atomicWriteJSON(configPath, configData); err != nil {
+			isDefault, err := registerProfile(name, profileCfg)
+			if err != nil {
 				return err
 			}
 
@@ -378,27 +354,7 @@ func newProfileDeleteCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not delete credentials for profile %q: %v\n", name, err)
 			}
 
-			// Update config file
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
-			}
-
-			if profilesMap, ok := configData["profiles"].(map[string]any); ok {
-				delete(profilesMap, name)
-				if len(profilesMap) == 0 {
-					delete(configData, "profiles")
-				}
-			}
-
-			// Clear default_profile if it was this profile
-			if dp, ok := configData["default_profile"].(string); ok && dp == name {
-				delete(configData, "default_profile")
-			}
-
-			// Write config back atomically
-			if err := atomicWriteJSON(configPath, configData); err != nil {
+			if err := unregisterProfile(name); err != nil {
 				return err
 			}
 
@@ -432,13 +388,10 @@ func newProfileSetDefaultCmd() *cobra.Command {
 				return output.ErrUsage(fmt.Sprintf("Profile %q not found", name))
 			}
 
-			// Update config file
-			configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
-			configData := make(map[string]any)
-			if data, err := os.ReadFile(configPath); err == nil { //nolint:gosec // G304: Path is from trusted config location
-				_ = json.Unmarshal(data, &configData)
+			configData, configPath, err := loadGlobalConfigFile()
+			if err != nil {
+				return err
 			}
-
 			configData["default_profile"] = name
 
 			if err := atomicWriteJSON(configPath, configData); err != nil {
@@ -451,6 +404,170 @@ func newProfileSetDefaultCmd() *cobra.Command {
 			}, output.WithSummary(fmt.Sprintf("Default profile set to %q", name)))
 		},
 	}
+}
+
+// registerProfile adds a profile entry to the global config file. The first
+// profile registered becomes the default; isDefault reports whether this one
+// did. The in-memory config is the caller's to update.
+func registerProfile(name string, p *config.ProfileConfig) (isDefault bool, err error) {
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return false, err
+	}
+	profilesMap, err := globalProfilesMap(configData, configPath)
+	if err != nil {
+		return false, err
+	}
+
+	entry := map[string]any{
+		"base_url": p.BaseURL,
+	}
+	if p.AccountID != "" {
+		entry["account_id"] = p.AccountID
+	}
+	if p.Scope != "" {
+		entry["scope"] = p.Scope
+	}
+	profilesMap[name] = entry
+
+	isDefault = len(profilesMap) == 1
+	if isDefault {
+		configData["default_profile"] = name
+	}
+
+	return isDefault, atomicWriteJSON(configPath, configData)
+}
+
+// loadGlobalConfigFile returns the global config file's contents and path,
+// with the config directory in place for the write every caller is about
+// to make. A missing file is an empty config; a file that cannot be read or
+// parsed is an error, since writing the map back would otherwise replace
+// whatever the operator had with a partial decode.
+func loadGlobalConfigFile() (map[string]any, string, error) {
+	if err := os.MkdirAll(config.GlobalConfigDir(), 0700); err != nil {
+		return nil, "", fmt.Errorf("failed to create config directory: %w", err)
+	}
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	configData := make(map[string]any)
+	data, err := os.ReadFile(configPath) //nolint:gosec // G304: Path is from trusted config location
+	if os.IsNotExist(err) {
+		return configData, configPath, nil
+	}
+	if err != nil {
+		return nil, configPath, fmt.Errorf("failed to read config file %s: %w", configPath, err)
+	}
+	if err := json.Unmarshal(data, &configData); err != nil {
+		return nil, configPath, fmt.Errorf("config file %s is not valid JSON, refusing to rewrite it: %w", configPath, err)
+	}
+	return configData, configPath, nil
+}
+
+// globalProfilesMap returns the config's "profiles" object, creating it in
+// the map when absent. A present value of any other shape is refused for
+// the same reason a parse failure is: the caller is about to write the map
+// back, and replacing an unexpected value would destroy operator config.
+func globalProfilesMap(configData map[string]any, configPath string) (map[string]any, error) {
+	raw, present := configData["profiles"]
+	if !present {
+		profilesMap := make(map[string]any)
+		configData["profiles"] = profilesMap
+		return profilesMap, nil
+	}
+	profilesMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("config file %s has a \"profiles\" value that is not an object, refusing to rewrite it", configPath)
+	}
+	return profilesMap, nil
+}
+
+// writableGlobalProfiles reports whether the global config file can take a
+// profile entry — readable, parseable, with an object (or absent) profiles
+// value — without writing anything. Callers that obtain a credential before
+// registering its profile run this first.
+func writableGlobalProfiles() (map[string]any, error) {
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	return globalProfilesMap(configData, configPath)
+}
+
+// globalProfileEntry returns the named profile's entry in the global config
+// file, or nil when the file has none (or its profiles value is not an
+// object — which the writers refuse separately).
+func globalProfileEntry(configData map[string]any, name string) map[string]any {
+	profilesMap, _ := configData["profiles"].(map[string]any)
+	entry, _ := profilesMap[name].(map[string]any)
+	return entry
+}
+
+// globalProfileIsUnbound reports whether the global config file defines the
+// profile without an account — the one shape bindProfileAccount can act on.
+// Config layers merge per profile name, so the effective profile being
+// accountless says nothing about which file it came from; the global entry
+// itself is the evidence.
+func globalProfileIsUnbound(name string) (bool, error) {
+	configData, _, err := loadGlobalConfigFile()
+	if err != nil {
+		return false, err
+	}
+	entry := globalProfileEntry(configData, name)
+	return entry != nil && getStringOrNumber(entry, "account_id") == "", nil
+}
+
+// bindProfileAccount sets the account on an existing profile entry in the
+// global config file, leaving every other field of the entry as it is.
+func bindProfileAccount(name, account string) error {
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return err
+	}
+	if _, err := globalProfilesMap(configData, configPath); err != nil {
+		return err
+	}
+	entry := globalProfileEntry(configData, name)
+	if entry == nil {
+		return output.ErrUsage(fmt.Sprintf("Profile %q not found in %s", name, configPath))
+	}
+	entry["account_id"] = account
+	return atomicWriteJSON(configPath, configData)
+}
+
+// getStringOrNumber reads a config value that may be stored as a string or
+// a JSON number, as config.loadFromFile accepts for IDs.
+func getStringOrNumber(m map[string]any, key string) string {
+	switch v := m[key].(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
+}
+
+// unregisterProfile removes a profile entry from the global config file,
+// clearing default_profile when it named this profile. Credentials are the
+// caller's to remove.
+func unregisterProfile(name string) error {
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return err
+	}
+	profilesMap, err := globalProfilesMap(configData, configPath)
+	if err != nil {
+		return err
+	}
+	delete(profilesMap, name)
+	if len(profilesMap) == 0 {
+		delete(configData, "profiles")
+	}
+
+	if dp, ok := configData["default_profile"].(string); ok && dp == name {
+		delete(configData, "default_profile")
+	}
+
+	return atomicWriteJSON(configPath, configData)
 }
 
 // validProfileName matches letters, numbers, hyphens, and underscores.

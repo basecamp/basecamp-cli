@@ -161,3 +161,25 @@ func TestPredicatesDisagreeOnTheStreamTheyAskAbout(t *testing.T) {
 	assert.False(t, InteractiveStdio(), "a piped stdout is no place for a picker")
 	assert.True(t, InteractivePrompt(), "but a form draws to stderr, which is still a terminal")
 }
+
+// TestIsTerminal: only a real terminal counts. A buffer (the cmd.SetIn
+// seam), a pipe, and /dev/null — a character device that delivers nothing —
+// are all "not a terminal", so a secret redirected from any of them is read
+// rather than refused as typed.
+func TestIsTerminal(t *testing.T) {
+	assert.False(t, IsTerminal(strings.NewReader("token")))
+
+	devnull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	defer devnull.Close()
+	assert.False(t, IsTerminal(devnull))
+
+	pipeR, pipeW, err := os.Pipe()
+	require.NoError(t, err)
+	defer pipeR.Close()
+	defer pipeW.Close()
+	assert.False(t, IsTerminal(pipeR))
+
+	pty := openPTY(t)
+	assert.True(t, IsTerminal(pty))
+}

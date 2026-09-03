@@ -112,7 +112,8 @@ func NewRootCmd() *cobra.Command {
 			}
 
 			// Resolve profile
-			profileName, err := resolveProfile(cfg, flags)
+			mayCreate := cmd.Annotations[commands.AnnotationProfileMayCreate] != ""
+			profileName, err := resolveProfile(cfg, flags, mayCreate)
 			if err != nil {
 				if bareRoot {
 					initBareRootApp(cfg)
@@ -120,7 +121,14 @@ func NewRootCmd() *cobra.Command {
 				}
 				return err
 			}
-			if profileName != "" {
+			_, profileKnown := cfg.Profiles[profileName]
+			if profileName != "" && !profileKnown {
+				// A may-create command named a profile that does not exist
+				// yet: it becomes the active credential key with the
+				// top-level configuration, and the command registers it.
+				cfg.ActiveProfile = profileName
+			}
+			if profileKnown {
 				if err := cfg.ApplyProfile(profileName); err != nil {
 					return err
 				}
@@ -138,10 +146,12 @@ func NewRootCmd() *cobra.Command {
 					Todolist: flags.Todolist,
 					CacheDir: flags.CacheDir,
 				})
-				// Profile-scoped cache (only if cache dir was not explicitly set via flag or env)
-				if flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
-					cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
-				}
+			}
+			// Profile-scoped cache (only if cache dir was not explicitly set
+			// via flag or env). A not-yet-registered name is unvalidated
+			// input, so it does not become a path component.
+			if profileKnown && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
+				cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 			}
 
 			// Enforce HTTPS for non-localhost base_url.
@@ -557,27 +567,31 @@ func jqRenderErrorDiagnostic(err error) string {
 // 4. Single profile → auto-use
 // 5. Multiple profiles → interactive picker (if TTY)
 // 6. No profiles → empty string (use top-level config values)
-func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags) (string, error) {
+//
+// An explicitly named profile (1, 2) must exist unless mayCreate: a command
+// annotated AnnotationProfileMayCreate registers the profile itself, so the
+// name passes through for it to act on.
+func resolveProfile(cfg *config.Config, flags appctx.GlobalFlags, mayCreate bool) (string, error) {
 	// 1. --profile flag
 	if flags.Profile != "" {
+		if _, ok := cfg.Profiles[flags.Profile]; ok || mayCreate {
+			return flags.Profile, nil
+		}
 		if len(cfg.Profiles) == 0 {
 			return "", fmt.Errorf("profile %q specified via --profile but no profiles are configured; create one with: basecamp profile create", flags.Profile)
 		}
-		if _, ok := cfg.Profiles[flags.Profile]; !ok {
-			return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
-		}
-		return flags.Profile, nil
+		return "", fmt.Errorf("unknown profile %q (available: %s)", flags.Profile, profileNames(cfg))
 	}
 
 	// 2. BASECAMP_PROFILE env var
 	if profile := os.Getenv("BASECAMP_PROFILE"); profile != "" {
+		if _, ok := cfg.Profiles[profile]; ok || mayCreate {
+			return profile, nil
+		}
 		if len(cfg.Profiles) == 0 {
 			return "", fmt.Errorf("profile %q specified via BASECAMP_PROFILE but no profiles are configured; create one with: basecamp profile create", profile)
 		}
-		if _, ok := cfg.Profiles[profile]; !ok {
-			return "", fmt.Errorf("unknown profile %q from BASECAMP_PROFILE (available: %s)", profile, profileNames(cfg))
-		}
-		return profile, nil
+		return "", fmt.Errorf("unknown profile %q from BASECAMP_PROFILE (available: %s)", profile, profileNames(cfg))
 	}
 
 	// No profiles configured - use top-level config

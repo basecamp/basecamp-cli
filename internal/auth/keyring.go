@@ -22,6 +22,11 @@ type Credentials struct {
 	UserID        string `json:"user_id,omitempty"`
 	UserEmail     string `json:"user_email,omitempty"`
 
+	// Source records how the credential was obtained when that is not the
+	// OAuth flow: "token" for an imported personal access token, which has
+	// no refresh material. Empty means an OAuth login.
+	Source string `json:"source,omitempty"`
+
 	// Resource is the RFC 8707 resource indicator the tokens are bound to
 	// (BC5: urn:bc:account:<id>). BC5 device logins as the trusted
 	// basecamp-cli client mint MULTI-ACCOUNT refresh tokens, and the refresh

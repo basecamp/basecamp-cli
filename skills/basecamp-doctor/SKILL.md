@@ -20,7 +20,11 @@ Interpret every check by status:
 
 Report failures and warnings with their `hint` fields. Also inspect the top-level `breadcrumbs` array and preserve its structured `cmd` next steps, because a breadcrumb can provide a more specific action than a check hint. Use these common remediations when relevant:
 
-- Basecamp authentication: `basecamp auth login`
+- Basecamp authentication: `basecamp auth login`. Guard a replacement login
+  with `--expect-identity <id>` so a browser signed in as someone else cannot
+  become the profile. A bot or CI profile that must never sign in interactively
+  imports a personal access token instead:
+  `op read "op://<vault>/<item>/credential" | basecamp auth login --with-token -P <profile> --account <id> --expect-identity <id>`
 - Agent plugin installation or version: `basecamp setup agents` (honors `BASECAMP_SETUP_AGENT`)
 - Codex plugin specifically: `basecamp setup codex`
 - Claude Code plugin specifically: `basecamp setup claude`

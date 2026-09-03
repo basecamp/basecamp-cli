@@ -48,7 +48,7 @@ func startDeviceAS(t *testing.T) *deviceAS {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, as.metadata())
 	})
-	mux.HandleFunc("/oauth/device", func(w http.ResponseWriter, r *http.Request) {
+	deviceHandler := func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		as.mu.Lock()
 		as.deviceForms = append(as.deviceForms, r.PostForm)
@@ -57,8 +57,8 @@ func startDeviceAS(t *testing.T) *deviceAS {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
-	})
-	mux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+	}
+	tokenHandler := func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		as.mu.Lock()
 		call := len(as.tokenForms)
@@ -68,7 +68,13 @@ func startDeviceAS(t *testing.T) *deviceAS {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
-	})
+	}
+	mux.HandleFunc("/oauth/device", deviceHandler)
+	mux.HandleFunc("/oauth/token", tokenHandler)
+	// The paths Basecamp mounts, which a pinned BASECAMP_OAUTH_ISSUER derives
+	// without reading metadata.
+	mux.HandleFunc("/oauth/device_authorizations", deviceHandler)
+	mux.HandleFunc("/oauth/tokens", tokenHandler)
 
 	as.srv = httptest.NewServer(mux)
 	t.Cleanup(as.srv.Close)
@@ -144,6 +150,9 @@ func newDeviceTestManager(t *testing.T, baseURL string) *Manager {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	// A pinned issuer in the developer's environment would bypass the
+	// discovery every test here exercises.
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "")
 	cfg := &config.Config{BaseURL: baseURL}
 	m := NewManager(cfg, http.DefaultClient)
 	m.store = newTestStore(t, tmpDir)
@@ -986,4 +995,209 @@ func TestEnvTokenOverridesStoredAccountBinding(t *testing.T) {
 
 		assert.Empty(t, m.AccountID(), "the env token's account is not the stored one")
 	})
+}
+
+// TestDiscoverOAuth_PinnedIssuerSkipsDiscovery: BASECAMP_OAUTH_ISSUER names
+// the authorization server outright. No discovery request is made — the
+// resource here 404s everything and counts — and the device flow runs
+// against the endpoints Basecamp mounts under the issuer.
+func TestDiscoverOAuth_PinnedIssuerSkipsDiscovery(t *testing.T) {
+	as := startDeviceAS(t)
+	resource, discoveryHits := countingServer(t)
+	m := newDeviceTestManager(t, resource.URL)
+	t.Setenv("BASECAMP_OAUTH_ISSUER", as.srv.URL+"/")
+
+	cl := &collectLogger{}
+	result, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, &LoginResult{OAuthType: "bc5", Scope: "read"}, result)
+
+	assert.Zero(t, *discoveryHits, "a pinned issuer must not consult resource metadata")
+	require.Len(t, as.deviceCalls(), 1)
+	assert.Equal(t, "basecamp-cli", as.deviceCalls()[0].Get("client_id"))
+	assert.NotEmpty(t, as.tokenCalls())
+
+	logs := cl.joined()
+	assert.Contains(t, logs, "pinned by BASECAMP_OAUTH_ISSUER")
+	assert.Contains(t, logs, "Authenticating via "+as.srv.URL+" (device flow")
+
+	// The trailing slash is trimmed: the stored token endpoint is the exact
+	// mount, which refresh will POST to later.
+	creds, err := m.store.Load(config.NormalizeBaseURL(resource.URL))
+	require.NoError(t, err)
+	assert.Equal(t, as.srv.URL+"/oauth/tokens", creds.TokenEndpoint)
+	assert.Equal(t, "bc5", creds.OAuthType)
+}
+
+// TestDiscoverOAuth_PinnedIssuerIsCheckedLikeAnEndpoint: the override is
+// operator environment, but it names where credentials get POSTed, so it
+// passes the same checks a discovery document would — and never falls back
+// to Launchpad.
+func TestDiscoverOAuth_PinnedIssuerIsCheckedLikeAnEndpoint(t *testing.T) {
+	for name, issuer := range map[string]string{
+		"plain http off loopback": "http://as.example",
+		"userinfo":                "https://user@as.example",
+		"no host":                 "https://",
+		"bad port":                "https://as.example:70000",
+		"file scheme":             "file:///etc/passwd",
+		"query string":            "https://as.example/?token=hunter2",
+		"fragment":                "https://as.example/#frag",
+		"path":                    "https://as.example/some/path",
+		"opaque":                  "https:as.example",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource, discoveryHits := countingServer(t)
+			m := newDeviceTestManager(t, resource.URL)
+			t.Setenv("BASECAMP_OAUTH_ISSUER", issuer)
+
+			_, err := m.Login(context.Background(), LoginOptions{Remote: true, Logger: func(string) {}})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "BASECAMP_OAUTH_ISSUER")
+			assert.NotContains(t, err.Error(), "as.example", "the rejected value is never echoed")
+			assert.NotContains(t, err.Error(), "hunter2")
+			var outErr *output.Error
+			require.ErrorAs(t, err, &outErr)
+			assert.Equal(t, output.CodeAuth, outErr.Code)
+			assert.Zero(t, *discoveryHits, "a rejected override must not fall back to discovery or Launchpad")
+		})
+	}
+}
+
+// TestLoginDevice_LoginHintAnnounced: until the SDK bump that carries
+// login_hint on the wire, the hint is told to the user rather than sent.
+func TestLoginDevice_LoginHintAnnounced(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		LoginHint:     "bot@example.com",
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, cl.joined(), "Sign in as bot@example.com")
+	require.Len(t, as.deviceCalls(), 1)
+}
+
+func TestImportToken(t *testing.T) {
+	m := newDeviceTestManager(t, "https://3.basecampapi.com")
+	m.cfg.ActiveProfile = "bot"
+
+	require.NoError(t, m.ImportToken("bc_at_secret", "full", "51177542", "bot@example.com", time.Time{}))
+
+	creds, err := m.store.Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, &Credentials{AccessToken: "bc_at_secret", OAuthType: "bc5", Scope: "full", UserID: "51177542", UserEmail: "bot@example.com", Source: "token"}, creds)
+	assert.Zero(t, creds.ExpiresAt)
+
+	// Non-expiring: served as-is, with no refresh attempted (there is no
+	// refresh token or endpoint to attempt one with, and no HTTP client that
+	// could reach one).
+	tok, err := m.AccessToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "bc_at_secret", tok)
+	assert.True(t, m.IsAuthenticated())
+	assert.Equal(t, "bc5", m.GetOAuthType())
+
+	err = m.Refresh(context.Background())
+	require.Error(t, err, "an explicit refresh has nothing to refresh with")
+	assert.Contains(t, err.Error(), "No refresh token")
+
+	err = m.ImportToken("bc_at_secret", "admin", "", "", time.Time{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid scope")
+
+	// A reported expiry is kept, and near it the token is refused rather
+	// than served: there is no refresh token to renew it with.
+	require.NoError(t, m.ImportToken("bc_at_short", "full", "", "", time.Now().Add(time.Minute)))
+	creds, err = m.store.Load("profile:bot")
+	require.NoError(t, err)
+	assert.Positive(t, creds.ExpiresAt)
+	_, err = m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "No refresh token")
+}
+
+// TestLoginDevice_VerifyRunsBeforeStore: a Verify hook sees the freshly
+// issued token before anything is written, and its error aborts the login
+// with nothing stored.
+func TestLoginDevice_VerifyRunsBeforeStore(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+	credKey := config.NormalizeBaseURL(resource.URL)
+
+	var seenToken, seenType string
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        func(string) {},
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify: func(_ context.Context, token, oauthType string) error {
+			seenToken, seenType = token, oauthType
+			_, loadErr := m.store.Load(credKey)
+			assert.Error(t, loadErr, "the store must still be empty while verifying")
+			return output.ErrAuth("not you")
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not you")
+	assert.Equal(t, "dev-tok", seenToken)
+	assert.Equal(t, "bc5", seenType)
+	_, loadErr := m.store.Load(credKey)
+	assert.Error(t, loadErr, "a rejected token is never stored")
+
+	result, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        func(string) {},
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify:        func(context.Context, string, string) error { return nil },
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "bc5", result.OAuthType)
+	creds, err := m.store.Load(credKey)
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok", creds.AccessToken)
+}
+
+func TestLoginDevice_LoginHintIsSanitizedForTheTerminal(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		LoginHint:     "bot@example.com\x1b]8;;https://evil.example\x07\r\nEvil",
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+	logs := cl.joined()
+	assert.Contains(t, logs, "Sign in as bot@example.com Evil")
+	assert.NotContains(t, logs, "\x1b")
+	assert.NotContains(t, logs, "evil.example")
+}
+
+func TestDiscoverOAuth_PinnedIssuerIsSanitizedForTheTerminal(t *testing.T) {
+	resource, _ := countingServer(t)
+	m := newDeviceTestManager(t, resource.URL)
+	// Only an origin is accepted now, so a control character can only ride
+	// in the host — where url.Parse or the endpoint check refuses it. Either
+	// way the terminal never sees it: refused values are not echoed, and an
+	// accepted one is announced through the sanitizer.
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "http://127.0.0.1\u0085:3001")
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{Remote: true, Logger: cl.log, deviceOptions: []oauth.DeviceOption{instantSleep()}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BASECAMP_OAUTH_ISSUER")
+	assert.NotContains(t, err.Error(), "\u0085")
+	assert.NotContains(t, cl.joined(), "\u0085")
 }

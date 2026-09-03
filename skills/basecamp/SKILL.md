@@ -1352,6 +1352,8 @@ basecamp auth login                               # Re-authenticate
 basecamp auth login --scope full                  # Full access (the default; ignored by Launchpad)
 basecamp auth login --scope read                  # Read-only access (ignored by Launchpad)
 basecamp auth login --device-code                 # Headless authentication with manual browser instructions
+basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
+basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
 ```
 
 **Network errors / localhost URLs:**
