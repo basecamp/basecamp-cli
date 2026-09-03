@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-08-31",
+    "version": "2026-09-02",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -21761,6 +21761,304 @@
         }
       }
     },
+    "/{accountId}/template_library.json": {
+      "get": {
+        "description": "Get the account's to-do list template library",
+        "operationId": "GetTemplateLibrary",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetTemplateLibrary 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTemplateLibraryResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Automation"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/template_library/copies.json": {
+      "post": {
+        "description": "Start copying a to-do list template into a project",
+        "operationId": "CreateTemplateLibraryCopy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateLibraryCopyRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreateTemplateLibraryCopy 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTemplateLibraryCopyResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "PeopleConfirmationRequiredError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleConfirmationRequiredErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Automation"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/template_library/copies/{copyId}": {
+      "get": {
+        "description": "Get the current status of a to-do list template copy",
+        "operationId": "GetTemplateLibraryCopy",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "copyId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetTemplateLibraryCopy 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTemplateLibraryCopyResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Automation"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/templates.json": {
       "get": {
         "description": "List all templates visible to the current user\n\n**Pagination**: Uses Link header (RFC5988). Follow the `next` rel URL\nto fetch additional pages. X-Total-Count header provides total count.",
@@ -29203,6 +29501,30 @@
       "CreateScheduleEntryResponseContent": {
         "$ref": "#/components/schemas/ScheduleEntry"
       },
+      "CreateTemplateLibraryCopyRequestContent": {
+        "type": "object",
+        "properties": {
+          "template_recording_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destination_parent_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "adding_people_confirmed": {
+            "type": "boolean",
+            "description": "Confirm granting destination-project access to people referenced by the template."
+          }
+        },
+        "required": [
+          "destination_parent_id",
+          "template_recording_id"
+        ]
+      },
+      "CreateTemplateLibraryCopyResponseContent": {
+        "$ref": "#/components/schemas/TemplateLibraryCopy"
+      },
       "CreateTemplateRequestContent": {
         "type": "object",
         "properties": {
@@ -31088,6 +31410,12 @@
       "GetSubscriptionResponseContent": {
         "$ref": "#/components/schemas/Subscription"
       },
+      "GetTemplateLibraryCopyResponseContent": {
+        "$ref": "#/components/schemas/TemplateLibraryCopy"
+      },
+      "GetTemplateLibraryResponseContent": {
+        "$ref": "#/components/schemas/TemplateLibrary"
+      },
       "GetTemplateResponseContent": {
         "$ref": "#/components/schemas/Template"
       },
@@ -32393,6 +32721,25 @@
             "type": "boolean"
           }
         }
+      },
+      "PeopleConfirmationRequiredErrorResponseContent": {
+        "type": "object",
+        "description": "The copy requires confirmation before granting destination-project access\nto people referenced by the template.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TemplateLibraryConfirmationPerson"
+            }
+          }
+        },
+        "required": [
+          "error",
+          "people"
+        ]
       },
       "Person": {
         "type": "object",
@@ -34436,6 +34783,92 @@
           "id",
           "name",
           "updated_at"
+        ]
+      },
+      "TemplateLibrary": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "$ref": "#/components/schemas/RecordingBucket"
+          },
+          "todoset": {
+            "$ref": "#/components/schemas/RecordingParent"
+          },
+          "todolists": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Todolist"
+            }
+          }
+        },
+        "required": [
+          "bucket",
+          "todolists",
+          "todoset"
+        ]
+      },
+      "TemplateLibraryConfirmationPerson": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "format": "password",
+            "x-basecamp-sensitive": {
+              "category": "pii",
+              "redact": true
+            }
+          },
+          "avatar_url": {
+            "type": "string",
+            "format": "password",
+            "x-basecamp-sensitive": {
+              "category": "pii",
+              "redact": true
+            }
+          }
+        },
+        "required": [
+          "avatar_url",
+          "id",
+          "name"
+        ]
+      },
+      "TemplateLibraryCopy": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "pending|processing|completed|failed"
+          },
+          "source_recording_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "destination_parent_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "url": {
+            "type": "string"
+          },
+          "destination_todolist": {
+            "$ref": "#/components/schemas/Todolist"
+          }
+        },
+        "required": [
+          "destination_parent_id",
+          "id",
+          "source_recording_id",
+          "status",
+          "url"
         ]
       },
       "TimelineAttachment": {

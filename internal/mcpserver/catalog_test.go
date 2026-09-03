@@ -61,7 +61,7 @@ func TestCatalogExcludesBinaryUploads(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 253, total, "served operation count")
+	assert.Equal(t, 256, total, "served operation count")
 }
 
 // TestCatalogIsAccountScoped pins the rescope: the CLI's account-scoped SDK
@@ -145,6 +145,6 @@ func TestCatalogModelProvenance(t *testing.T) {
 	require.NoError(t, err)
 	match := regexp.MustCompile(`github\.com/basecamp/basecamp-sdk/go (v\S+)`).FindSubmatch(gomod)
 	require.NotNil(t, match, "basecamp-sdk dependency not found in go.mod")
-	assert.Equal(t, "go/"+string(match[1]), provenance.Ref,
+	assert.Equal(t, string(match[1]), strings.TrimPrefix(provenance.Ref, "go/"),
 		"vendored model must match the basecamp-sdk version go.mod pins — run scripts/sync-mcp-model.sh against that checkout")
 }

@@ -21,6 +21,13 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "templates library returns to-do list templates" {
+  run_smoke basecamp templates library --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Template library not available in this account"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "people show returns person detail" {
   run_smoke basecamp people show me --json
   assert_success

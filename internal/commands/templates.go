@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -13,16 +15,16 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-// NewTemplatesCmd creates the templates command for managing project templates.
+// NewTemplatesCmd creates the templates command for managing project and to-do list templates.
 func NewTemplatesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "templates",
-		Short: "Manage project templates",
-		Long: `Manage project templates.
+		Short: "Manage project and to-do list templates",
+		Long: `Manage project templates and the account's to-do list template library.
 
-Templates allow you to create new projects with predefined structure,
-tools, and content.`,
-		Annotations: map[string]string{"agent_notes": "Construction from template is asynchronous — poll construction until status=completed to get the new project ID"},
+Project templates create projects with predefined structure, tools, and content.
+Library templates copy a reusable to-do list into an existing project.`,
+		Annotations: map[string]string{"agent_notes": "Project construction and to-do list template copies are asynchronous. Poll construction or copy-status until status=completed. Copy grants referenced people project access only with --confirm-adding-people."},
 	}
 
 	cmd.AddCommand(
@@ -33,6 +35,9 @@ tools, and content.`,
 		newTemplatesDeleteCmd(),
 		newTemplatesConstructCmd(),
 		newTemplatesConstructionCmd(),
+		newTemplatesLibraryCmd(),
+		newTemplatesCopyCmd(),
+		newTemplatesCopyStatusCmd(),
 	)
 
 	return cmd
@@ -130,6 +135,213 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 			},
 		),
 	)
+}
+
+func newTemplatesLibraryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "library",
+		Short: "List to-do list templates",
+		Long:  "List the account's active to-do list templates.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			library, err := app.Account().Templates().GetLibrary(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			display := make([]struct {
+				ID    int64  `json:"id"`
+				Title string `json:"title"`
+			}, len(library.Todolists))
+			for i, todolist := range library.Todolists {
+				display[i].ID = todolist.ID
+				display[i].Title = todolist.Title
+			}
+
+			return app.OK(library,
+				output.WithDisplayData(display),
+				output.WithSummary(fmt.Sprintf("%d active to-do list templates", len(library.Todolists))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "copy",
+						Cmd:         "basecamp templates copy <template-id> --in <project>",
+						Description: "Copy a template into a project",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newTemplatesCopyCmd() *cobra.Command {
+	var project string
+	var todoset string
+	var confirmAddingPeople bool
+
+	cmd := &cobra.Command{
+		Use:   "copy <template_id>",
+		Short: "Copy a to-do list template into a project",
+		Long: `Start copying a to-do list template into a project's To-dos tool.
+
+The copy runs asynchronously. Use 'templates copy-status' with the returned
+copy ID to check its progress. Referenced people receive project access only
+when --confirm-adding-people is explicitly provided.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			templateID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid template ID")
+			}
+			if err := requireNumericID(todoset, "todoset ID"); err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			resolvedProjectID, err := resolveProjectID(cmd, app, project)
+			if err != nil {
+				return err
+			}
+			resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todoset)
+			if err != nil {
+				return err
+			}
+			destinationParentID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid todoset ID")
+			}
+
+			templateCopy, err := app.Account().Templates().CreateLibraryCopy(cmd.Context(), &basecamp.CreateTemplateLibraryCopyRequest{
+				TemplateRecordingID:   templateID,
+				DestinationParentID:   destinationParentID,
+				AddingPeopleConfirmed: confirmAddingPeople,
+			})
+			if err != nil {
+				return templateCopyError(err, templateID, resolvedProjectID, todoset)
+			}
+
+			return app.OK(templateCopy,
+				output.WithSummary(fmt.Sprintf("Started template copy #%d (%s)", templateCopy.ID, templateCopy.Status)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "status",
+						Cmd:         fmt.Sprintf("basecamp templates copy-status %d", templateCopy.ID),
+						Description: "Check copy status",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVarP(&project, "project", "p", "", "Project ID or name")
+	cmd.Flags().StringVar(&project, "in", "", "Project ID or name (alias for --project)")
+	cmd.Flags().StringVar(&todoset, "todoset", "", "To-dos tool ID (auto-detected from project)")
+	cmd.Flags().BoolVar(&confirmAddingPeople, "confirm-adding-people", false, "Grant referenced people access to the destination project")
+
+	return cmd
+}
+
+func templateCopyError(err error, templateID int64, projectID, todosetID string) error {
+	var confirmationErr *basecamp.PeopleConfirmationRequiredError
+	if !errors.As(err, &confirmationErr) {
+		return convertSDKError(err)
+	}
+
+	people := make([]string, 0, len(confirmationErr.People))
+	for _, person := range confirmationErr.People {
+		people = append(people, fmt.Sprintf("%s (#%d)", person.Name, person.ID))
+	}
+
+	rerun := fmt.Sprintf("basecamp templates copy %d --in %s", templateID, projectID)
+	if todosetID != "" {
+		rerun += " --todoset " + todosetID
+	}
+	rerun += " --confirm-adding-people"
+
+	converted := output.AsError(err)
+	return &output.Error{
+		Code:       converted.Code,
+		Message:    fmt.Sprintf("Adding referenced people requires confirmation: %s", strings.Join(people, ", ")),
+		Hint:       "Review the people above, then rerun with explicit confirmation: " + rerun,
+		HTTPStatus: converted.HTTPStatus,
+		Retryable:  converted.Retryable,
+		Cause:      err,
+	}
+}
+
+func newTemplatesCopyStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "copy-status <copy_id>",
+		Short: "Check a to-do list template copy",
+		Long:  "Check whether a to-do list template copy is pending, processing, completed, or failed.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			copyID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid copy ID")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			templateCopy, err := app.Account().Templates().GetLibraryCopy(cmd.Context(), copyID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			summary, breadcrumbs := templateCopyStatusOutput(templateCopy)
+			return app.OK(templateCopy,
+				output.WithSummary(summary),
+				output.WithBreadcrumbs(breadcrumbs...),
+			)
+		},
+	}
+}
+
+func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy) (string, []output.Breadcrumb) {
+	switch templateCopy.Status {
+	case "completed":
+		if templateCopy.DestinationTodolist != nil {
+			list := templateCopy.DestinationTodolist
+			breadcrumbs := []output.Breadcrumb{
+				{
+					Action:      "show",
+					Cmd:         fmt.Sprintf("basecamp todolists show %d --in %d", list.ID, list.Bucket.ID),
+					Description: "View copied to-do list",
+				},
+			}
+			return fmt.Sprintf("Template copy complete: %s (to-do list #%d)", list.Name, list.ID), breadcrumbs
+		}
+		return fmt.Sprintf("Template copy #%d completed", templateCopy.ID), nil
+	case "failed":
+		return fmt.Sprintf("Template copy #%d failed", templateCopy.ID), []output.Breadcrumb{
+			{
+				Action:      "library",
+				Cmd:         "basecamp templates library",
+				Description: "List available templates",
+			},
+		}
+	case "pending", "processing":
+		return fmt.Sprintf("Template copy #%d is %s", templateCopy.ID, templateCopy.Status), []output.Breadcrumb{
+			{
+				Action:      "poll",
+				Cmd:         fmt.Sprintf("basecamp templates copy-status %d", templateCopy.ID),
+				Description: "Check again",
+			},
+		}
+	default:
+		return fmt.Sprintf("Template copy #%d status: %s", templateCopy.ID, templateCopy.Status), nil
+	}
 }
 
 func newTemplatesShowCmd() *cobra.Command {

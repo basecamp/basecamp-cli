@@ -89,7 +89,7 @@ func CommandCategories() []CommandCategory {
 			Name: "Organization",
 			Commands: []CommandInfo{
 				{Name: "people", Category: "organization", Description: "Manage people and access", Actions: []string{"list", "show", "update", "out-of-office", "pingable", "add", "remove"}},
-				{Name: "templates", Category: "organization", Description: "Manage project templates", Actions: []string{"list", "show", "create", "update", "delete", "construct"}},
+				{Name: "templates", Category: "organization", Description: "Manage project and to-do list templates", Actions: []string{"list", "show", "create", "update", "delete", "construct", "construction", "library", "copy", "copy-status"}},
 				{Name: "webhooks", Category: "organization", Description: "Manage webhooks", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "lineup", Category: "organization", Description: "Manage lineup markers", Actions: []string{"list", "create", "update", "delete"}},
 			},

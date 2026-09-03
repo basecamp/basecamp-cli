@@ -81,7 +81,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
+Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
 
 ## Agent Invariants
 
@@ -962,16 +962,26 @@ basecamp recordings visibility <id> --hidden      # Hide from clients
 ### Templates
 
 ```bash
-basecamp templates --json                         # List templates
-basecamp templates show <id> --json               # Template details
-basecamp templates create "Template Name"         # Create empty template
+basecamp templates list --json                    # List project templates
+basecamp templates show <id> --json               # Project template details
+basecamp templates create "Template Name"         # Create empty project template
 basecamp templates update <id> --name "New Name"
-basecamp templates delete <id>                    # Trash template
+basecamp templates delete <id>                    # Trash project template
 basecamp templates construct <id> --name "New Project"  # Create project (async)
-basecamp templates construction <template_id> <construction_id>  # Check status
+basecamp templates construction <template_id> <construction_id>  # Check project status
+
+basecamp templates library --json                 # List active to-do list templates
+basecamp templates copy <template_id> --in <project>  # Start copying into To-dos
+basecamp templates copy-status <copy_id>          # Check copy status
 ```
 
-**Construct returns construction_id - poll until status="completed" to get project.**
+**Asynchronous results:** `construct` returns a construction ID; poll `construction`
+until `status="completed"` to get the project. `copy` returns a copy ID; poll
+`copy-status` through `pending` and `processing` until it is `completed` or `failed`.
+
+A copy can report the people who need access to the destination project. Show those
+people to the user and rerun with `--confirm-adding-people` only after the user
+explicitly approves granting that access. Never add this flag automatically.
 
 ### Webhooks
 

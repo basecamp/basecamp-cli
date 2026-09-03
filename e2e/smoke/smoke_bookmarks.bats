@@ -49,3 +49,11 @@ setup_file() {
 @test "bookmarks remove is out of scope" {
   mark_out_of_scope "Mutating - exercised by the live add/check/remove round-trip"
 }
+
+@test "bubble-up add is out of scope" {
+  mark_out_of_scope "Mutates the current user's personal readings"
+}
+
+@test "bubble-up remove is out of scope" {
+  mark_out_of_scope "Mutates the current user's personal readings"
+}

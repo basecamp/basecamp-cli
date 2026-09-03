@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 186 |
+| ✅ Implemented | 50 | 189 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **54** | **198** |
+| **Total tracked** | **54** | **201** |
 
-**186 of 186 tracked in-scope endpoints.** The last gap — `GET
+**189 of 189 tracked in-scope endpoints.** SDK v0.16.0 adds the three to-do
+list template-library operations, available through `templates library`,
+`templates copy`, and `templates copy-status`. The previous last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
 (`files versions`) was written earlier but held: the SDK's
 `UploadsService.ListVersions` decoded the response as `[]Upload` when the API
@@ -43,16 +45,15 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.15.1 (adds Bubble Up write support; pinned to the
-pre-release bubble-up SDK head until the v0.15.1 tag —
-`internal/version/sdk-provenance.json` is authoritative). The command surface below largely dates to the v0.12.0 bump,
-which added 20 exported Go methods over 13 new backend operations; the extra
-seven wrapped endpoints that already existed but were reachable only through
-the raw generated client, which the andon-cord rule forbids the CLI from
-calling. v0.13.0–v0.15.0 corrected shapes and routes (pointerized optional
-fields, page-selection semantics, field-keyed 422 payloads) rather than opening
-new sections; their additions here are `files replace` and the un-held
-`files versions`, both from v0.14.0's upload work (basecamp/basecamp-sdk#683).
+**SDK version:** v0.16.0 (adds the to-do list template library and asynchronous
+copy operations; `internal/version/sdk-provenance.json` is authoritative). The
+command surface below largely dates to the v0.12.0 bump, which added 20 exported
+Go methods over 13 new backend operations; the extra seven wrapped endpoints
+that already existed but were reachable only through the raw generated client,
+which the andon-cord rule forbids the CLI from calling. v0.13.0–v0.15.0
+corrected shapes and routes (pointerized optional fields, page-selection
+semantics, field-keyed 422 payloads) and added `files replace`, `files versions`,
+and Bubble Up writes. v0.16.0 adds the three template-library operations.
 
 Those methods land as four new command groups (`bookmarks`, `drafts`, `notes`,
 `calendars`) and three extensions (`assignments` gains the Up Next verbs,
@@ -228,7 +229,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 7 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction |
+| templates | 10 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction, library, copy, copy-status |
 | **Time Tracking** |
 | timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Subscriptions** |
