@@ -1,0 +1,49 @@
+{
+  "lists": [
+    {
+      "id": 10254012232,
+      "type": "Kanban::Triage",
+      "title": "Triage",
+      "color": null,
+      "cards_count": 7,
+      "position": null,
+      "on_hold": null
+    },
+    {
+      "id": 10254012234,
+      "type": "Kanban::NotNowColumn",
+      "title": "Not now",
+      "color": null,
+      "cards_count": 0,
+      "position": null,
+      "on_hold": null
+    },
+    {
+      "id": 10254012236,
+      "type": "Kanban::Column",
+      "title": "Figuring it out",
+      "color": "purple",
+      "cards_count": 0,
+      "position": 1,
+      "on_hold": null
+    },
+    {
+      "id": 10254012238,
+      "type": "Kanban::Column",
+      "title": "In progress",
+      "color": "orange",
+      "cards_count": 2,
+      "position": 2,
+      "on_hold": null
+    },
+    {
+      "id": 10254012240,
+      "type": "Kanban::DoneColumn",
+      "title": "Done",
+      "color": null,
+      "cards_count": 7,
+      "position": null,
+      "on_hold": null
+    }
+  ]
+}

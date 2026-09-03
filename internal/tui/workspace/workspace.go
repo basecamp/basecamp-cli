@@ -40,6 +40,13 @@ type model struct {
 	// every key while it is up.
 	modal modal
 
+	// target is where a URL asked the workspace to open, and pending the tool
+	// inside it that is waiting on the project's dock to be read. Both are empty
+	// once the walk in is done.
+	target      *Target
+	pending     openToolMsg
+	pendingCard *card
+
 	// styles is a pointer every view holds, so a theme switch reaches all of
 	// them by rewriting what it points at rather than by walking the stack.
 	styles *tui.Styles
@@ -105,6 +112,13 @@ func (m model) Init() tea.Cmd {
 			loadAccounts(m.ctx.Ctx(), m.ctx.app),
 			loadReadings(m.ctx.Ctx(), m.ctx.app, time.Now()))
 	}
+	// A URL says where to open. Resolving it is a read of its own, so home is
+	// drawn first and the walk in lands over it — which is also what puts the
+	// project in the trail.
+	if m.target != nil {
+		cmds = append(cmds, resolveTarget(m.ctx.Ctx(), m.ctx.app, *m.target))
+	}
+
 	return tea.Batch(append(cmds, startWatchCmd(m.ctx.Ctx(), m.watch, m.watchAttempt))...)
 }
 
@@ -184,6 +198,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.appendReads(msg.page, msg.reads)
 		m.relayout()
 		return m, nil
+
+	case targetResolvedMsg:
+		return m, m.openTarget(msg)
+
+	case projectLoadedMsg:
+		// This is the project screen's own read, so it goes on down. The model
+		// only looks at it: a URL that named a tool inside the project is
+		// waiting on the dock to say what the tool is called.
+		cmd, _ := m.nav.current().Update(msg)
+		return m, m.syncLoading(tea.Batch(cmd, m.openPending(msg)))
 
 	case projectsLoadedMsg:
 		if msg.err != nil {
@@ -284,6 +308,70 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openMessageMsg:
 		return m, m.openMessage(msg.message)
+
+	case openCardMsg:
+		return m, m.openCard(msg)
+
+	case addCardMsg:
+		return m, m.openModal(newCardForm(m.ctx, msg))
+
+	case addColumnMsg:
+		return m, m.openModal(newColumnForm(m.ctx, msg))
+
+	case editColumnMsg:
+		return m, m.openModal(newColumnEdit(m.ctx, msg))
+
+	case columnWatchMsg:
+		if board := m.board(); board != nil {
+			return m, board.watchChanged(msg)
+		}
+		return m, nil
+
+	// Every write from a form over the board lands here when it landed, and
+	// falls through to the form when it did not: the form is what has room to
+	// say what went wrong, and the board is what has to show what changed.
+	case cardAddedMsg:
+		if msg.err == nil {
+			m.closeModal()
+			if board := m.board(); board != nil {
+				return m, board.cardAdded(msg)
+			}
+			return m, nil
+		}
+
+	case columnAddedMsg:
+		if msg.err == nil {
+			m.closeModal()
+			// A new column is a new list on the table, and where it landed among
+			// the others is the table's to say.
+			return m, tea.Batch(notify("Added "+msg.title), m.nav.current().Init())
+		}
+
+	case columnSavedMsg:
+		if msg.err == nil {
+			m.closeModal()
+			if board := m.board(); board != nil {
+				return m, board.columnSaved(msg)
+			}
+			return m, nil
+		}
+
+	case columnGoneMsg:
+		if msg.err == nil {
+			m.closeModal()
+			if board := m.board(); board != nil {
+				return m, board.columnGone(msg)
+			}
+			return m, nil
+		}
+
+	case columnOnHoldMsg:
+		if msg.err == nil {
+			m.closeModal()
+			// The parked list is part of the table's own read, so the board asks
+			// again rather than being patched from here.
+			return m, tea.Batch(notify("Changed 'On hold'"), m.nav.current().Init())
+		}
 
 	case openProjectActivityMsg:
 		return m, m.openProjectActivity(msg.project)
@@ -466,6 +554,8 @@ func (m *model) openTool(chosen tool, inside project) tea.Cmd {
 		return m.push(newChat(m.ctx, chosen))
 	case messageBoardKind:
 		return m.push(newMessageBoard(m.ctx, chosen, inside))
+	case cardTableKind:
+		return m.push(newCardTable(m.ctx, chosen, inside))
 	}
 	return m.push(newBlank(m.ctx, chosen.name))
 }
@@ -475,6 +565,22 @@ func (m *model) openTool(chosen tool, inside project) tea.Cmd {
 func (m *model) openMessage(post message) tea.Cmd {
 	m.sidebar.leave()
 	return m.push(newMessage(m.ctx, post))
+}
+
+// openCard goes to one card on a table, which hangs off the table the same way
+// a post hangs off its board: Home › CLIs › Card Table › Add clients via CLI.
+func (m *model) openCard(msg openCardMsg) tea.Cmd {
+	m.sidebar.leave()
+	return m.push(newCardScreen(m.ctx, msg.card))
+}
+
+// board is the card table on screen, if that is what is on screen.
+//
+// The forms that write to a board are modals over it rather than part of it, so
+// their answers come back through the model and have to find their way home.
+func (m *model) board() *cardTableScreen {
+	open, _ := m.nav.current().(*cardTableScreen)
+	return open
 }
 
 // openProjectActivity goes to the project's whole feed, which hangs off the

@@ -158,7 +158,7 @@ func ruleWithSlots(width int, rule lipgloss.Style, center, right string) (string
 // from the theme — and drops out entirely when the theme has no colors at all.
 func brandStyle(styles *tui.Styles) lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
-	if _, colorless := styles.Theme().Primary.(lipgloss.NoColor); colorless {
+	if styles.Theme().Colorless() {
 		return style
 	}
 	return style.Foreground(tui.BrandColor)

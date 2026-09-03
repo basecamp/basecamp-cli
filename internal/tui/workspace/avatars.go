@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -191,7 +190,7 @@ func loadCardFace(ctx context.Context, app *appctx.App, budget *imageBudget, ava
 }
 
 func readAvatars(ctx context.Context, app *appctx.App, budget *imageBudget, wanted []string) map[string][]byte {
-	read := atMost(traced(app, avatarReader(app)), maxAvatarBytes)
+	read := cached(pictureStore(app), atMost(traced(app, avatarReader(app)), maxAvatarBytes))
 	arrived := budget.fetch(ctx, read, wanted)
 	app.Tracer.Log(observability.TraceTUI, "avatars read",
 		"wanted", len(wanted), "arrived", len(arrived))
@@ -204,7 +203,7 @@ func readAvatars(ctx context.Context, app *appctx.App, budget *imageBudget, want
 func traced(app *appctx.App, read imageReader) imageReader {
 	return func(ctx context.Context, source string, maxBytes int64) ([]byte, error) {
 		data, err := read(ctx, source, maxBytes)
-		app.Tracer.Log(observability.TraceTUI, "avatar fetched",
+		app.Tracer.Log(observability.TraceTUI, "picture fetched",
 			"source", source, "bytes", len(data), "err", fmt.Sprint(err))
 		return data, err
 	}
@@ -219,164 +218,27 @@ func atMost(read imageReader, ceiling int64) imageReader {
 	}
 }
 
-// avatarCells is how much room a person's picture takes.
+// The two sizes a person's picture is drawn at.
 //
-// Four columns rather than two for a square: a cell is about twice as tall as it
-// is wide, so a square picture spanning two columns comes out one row high. Four
-// columns and two rows is the square the web draws.
+// A cell is about twice as tall as it is wide, so four columns and two rows is
+// the square the web draws beside a name — two columns would come out one row
+// high. Which is exactly what a reaction wants: two columns and the one row a
+// pill has room for is the same square, small.
 const (
 	avatarCols = 4
 	avatarRows = 2
+
+	chipCols = 2
 )
 
-// readFaces asks for the pictures of everyone on screen who has one and whose
-// picture is not drawn yet.
-func (m *messageScreen) readFaces() tea.Cmd {
-	if m.images == nil || m.images.Protocol() == tui.ImageProtocolText {
-		return nil
-	}
-
-	wanted := make([]string, 0, len(m.replies)+1)
-	for _, source := range append([]string{m.post.author.avatar}, repliers(m.replies)...) {
-		if source == "" || m.faces[source].Content != "" || slices.Contains(wanted, source) {
-			continue
-		}
-		// Already on its way. This runs twice — once for the author when the
-		// screen opens and once for everybody when the comments land — and
-		// without this the author was asked for again while the first read was
-		// still in flight, which put two reads over one budget at once.
-		if _, coming := m.facesComing[source]; coming {
-			continue
-		}
-		wanted = append(wanted, source)
-	}
-	if len(wanted) == 0 {
-		return nil
-	}
-
-	// What is on its way is what the throbber stands in for, so the rows can say
-	// a face is coming rather than leaving a hole where one will be.
-	if m.facesComing == nil {
-		m.facesComing = map[string]struct{}{}
-	}
-	for _, source := range wanted {
-		m.facesComing[source] = struct{}{}
-	}
-	return tea.Batch(loadAvatars(m.ctx.Ctx(), m.ctx.app, m.faceBudget, wanted), m.spinImages())
-}
-
-func repliers(replies []reply) []string {
-	sources := make([]string, 0, len(replies))
-	for _, answer := range replies {
-		sources = append(sources, answer.author.avatar)
-	}
-	return sources
-}
-
-// drawFaces sends the pixels for the pictures that arrived and then asks for
-// their cells, the same two steps and the same reason as drawImages.
-func (m *messageScreen) drawFaces(arrived map[string][]byte) tea.Cmd {
-	drawn := m.renderFaces(arrived)
-	if len(drawn) == 0 {
-		return nil
-	}
-
-	// Each face's pixels, then that same face's cells, then the next one.
-	//
-	// Not every payload and then every placement. A picture's cells name an image
-	// the terminal must already hold, so putting them all up after the last write
-	// leaves whichever face was written last with its cells on screen a frame
-	// early — and since these arrive as a map, which face that was changed every
-	// run. That is the whack-a-mole: one face missing, a different one each time.
-	// Pairing each write with its own placement means no face's cells can
-	// out-run its own pixels.
-	sends := make([]tea.Cmd, 0, len(drawn)*2)
-	for source, rendered := range drawn {
-		sends = append(sends, tea.Raw(rendered.Raw), placeFaces(map[string]tui.RenderedImage{source: rendered}))
-	}
-	return tea.Sequence(sends...)
-}
-
-// renderFaces turns the data that arrived into the cells that will stand for
-// each picture, and the payload the terminal needs before they mean anything.
-func (m *messageScreen) renderFaces(arrived map[string][]byte) map[string]tui.RenderedImage {
-	drawn := make(map[string]tui.RenderedImage, len(arrived))
-	for source, data := range arrived {
-		rendered := m.images.Render(data, tui.NextImageID(), avatarCols)
-		if rendered.Content == "" {
-			continue
-		}
-		drawn[source] = rendered
-	}
-	return drawn
-}
-
-func placeFaces(drawn map[string]tui.RenderedImage) tea.Cmd {
-	return func() tea.Msg { return facesPlacedMsg{drawn: drawn} }
-}
-
-// facesPlacedMsg carries pictures whose pixels the terminal already holds.
+// facesPlacedMsg carries pictures whose pixels the terminal already holds, so
+// the cells pointing at them can go on screen.
 type facesPlacedMsg struct {
-	drawn map[string]tui.RenderedImage
+	drawn map[faceAt]tui.RenderedImage
 }
 
-func (m *messageScreen) placeFaces(drawn map[string]tui.RenderedImage) {
-	if m.faces == nil {
-		m.faces = map[string]tui.RenderedImage{}
-	}
-	for source, rendered := range drawn {
-		m.faces[source] = rendered
-		delete(m.facesComing, source)
-	}
-}
-
-// facesArrived stops the throbber for the pictures that are not coming after
-// all — a read that failed leaves nothing to wait for, and one that turns
-// forever is worse than no picture.
-//
-// What decides is whether the read answered, not whether the picture is on
-// screen yet. Placement happens in a command that has not run when this does, so
-// asking m.faces here said every face had failed and took the throbber away from
-// all of them.
-func (m *messageScreen) facesArrived(asked []string, arrived map[string][]byte) {
-	for _, source := range asked {
-		if len(arrived[source]) == 0 {
-			delete(m.facesComing, source)
-		}
-	}
-}
-
-// face is what stands in the picture's column: the cells once the terminal holds
-// the picture, a throbber while it is on its way, and nothing at all for a
-// person who has no picture — a row without one is laid out without the space
-// for one rather than with a hole in it.
-func (m *messageScreen) face(source string) []string {
-	if rendered := m.faces[source]; rendered.Content != "" {
-		return strings.Split(rendered.Content, "\n")
-	}
-	if _, coming := m.facesComing[source]; coming {
-		return m.faceComing()
-	}
-	return nil
-}
-
-// faceComing is the throbber in the middle of the square the picture will fill,
-// so the name beside it does not shift left and then right again when it lands.
-func (m *messageScreen) faceComing() []string {
-	frame := m.ctx.Styles().Muted.Render(spinnerFrames[m.spin%len(spinnerFrames)])
-	blank := strings.Repeat(" ", avatarCols)
-
-	rows := make([]string, 0, avatarRows)
-	for row := range avatarRows {
-		if row == avatarRows/2 {
-			// Centered in the square: one cell of throbber, the rest padding.
-			rows = append(rows, strings.Repeat(" ", (avatarCols-1)/2)+frame+
-				strings.Repeat(" ", avatarCols-1-(avatarCols-1)/2))
-			continue
-		}
-		rows = append(rows, blank)
-	}
-	return rows
+func placeFaces(drawn map[faceAt]tui.RenderedImage) tea.Cmd {
+	return func() tea.Msg { return facesPlacedMsg{drawn: drawn} }
 }
 
 // besideFace puts a person's picture to the left of what they wrote or are

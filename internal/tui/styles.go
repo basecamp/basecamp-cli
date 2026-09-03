@@ -22,6 +22,15 @@ type Theme struct {
 	RoomColors []color.Color
 }
 
+// Colorless is whether the theme paints anything at all. NO_COLOR resolves to a
+// palette of lipgloss.NoColor, which renders as plain text — and which reads as
+// opaque black to anything that asks it for channels, so a color derived from
+// one has to be skipped rather than computed.
+func (t Theme) Colorless() bool {
+	_, colorless := t.Primary.(lipgloss.NoColor)
+	return colorless
+}
+
 // DefaultTheme returns the default basecamp theme resolved for the given background.
 func DefaultTheme(dark bool) Theme {
 	ld := lipgloss.LightDark(dark)

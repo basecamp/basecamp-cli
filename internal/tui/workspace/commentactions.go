@@ -12,7 +12,7 @@ import (
 
 // commentActionsMsg asks the model to open the actions over one comment.
 type commentActionsMsg struct {
-	comment reply
+	comment comment
 	mine    bool
 }
 
@@ -48,7 +48,7 @@ const (
 // presses deep makes it the rarest.
 type commentActions struct {
 	ctx     *Context
-	comment reply
+	comment comment
 	mine    bool
 
 	mode   commentMode
@@ -65,7 +65,7 @@ type commentActions struct {
 
 func newCommentActions(ctx *Context, msg commentActionsMsg) *commentActions {
 	body := newComposer("")
-	body.SetValue(msg.comment.body)
+	body.SetValue(msg.comment.words.text())
 
 	return &commentActions{ctx: ctx, comment: msg.comment, mine: msg.mine, body: body}
 }

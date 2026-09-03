@@ -11,6 +11,12 @@ import (
 	"math"
 	"strings"
 	"sync/atomic"
+
+	// WebP is what every screenshot tool writes now — CleanShot, Shottr, macOS
+	// itself — so it is most of what turns up in a Basecamp body. The standard
+	// library has no decoder for it, and a picture that will not decode falls
+	// back to its own filename and a link.
+	_ "golang.org/x/image/webp"
 )
 
 // Diacritics for encoding row/column indices in Kitty unicode placeholders.
@@ -179,7 +185,9 @@ func pngEncoded(data []byte) []byte {
 func imageDimensions(data []byte, maxCols int) (cols, rows int) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || cfg.Width == 0 || cfg.Height == 0 {
-		// Fallback for unknown formats (e.g. WebP)
+		// A format none of the registered decoders knows. There is no aspect
+		// ratio to work from, so this is a guess at a shape — wide enough to see
+		// and short enough not to take the screen.
 		if maxCols > 40 {
 			return 40, 10
 		}

@@ -10,6 +10,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
+// The key that asks who somebody is — the author of whatever the reader is
+// standing on.
+const personCardKey = "i"
+
 // personCardMsg asks the model to open a card about somebody.
 type personCardMsg struct{ who person }
 

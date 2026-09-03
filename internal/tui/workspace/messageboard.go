@@ -508,25 +508,3 @@ func toMessage(post basecamp.Message) message {
 	}
 	return out
 }
-
-// imageSources maps a picture's address in the body to the address it can be read
-// from.
-//
-// The body's Markdown points at the preview host, which is where the browser
-// reads a picture from and is not somewhere this will: accountImageReader reads
-// from the account's API host and nowhere else. The same attachment appears in
-// content_attachments with a download_url that is on that host, so the body says
-// one address and the read uses the other.
-func imageSources(attachments []basecamp.RichTextAttachment) map[string]string {
-	sources := make(map[string]string, len(attachments))
-	for _, file := range attachments {
-		if !strings.HasPrefix(strings.ToLower(file.ContentType), "image/") || file.DownloadURL == "" {
-			continue
-		}
-		if file.PreviewURL != "" {
-			sources[file.PreviewURL] = file.DownloadURL
-		}
-		sources[file.DownloadURL] = file.DownloadURL
-	}
-	return sources
-}

@@ -1,0 +1,240 @@
+[
+  {
+    "column": 10254012232,
+    "cards": [
+      {
+        "id": 10257703318,
+        "title": "[SDK][CLI] Automate the pipeline: bc3 API merge -> SDK adoption -> CLI absorption",
+        "description": "<p>See the card in Basecamp for the attachments.</p>",
+        "comments_count": 0,
+        "created_at": "2026-08-31T22:32:26.243Z",
+        "position": 1,
+        "creator": {
+          "name": "Clawdito"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254833847,
+        "title": "[SDK][TUI] Set a folder's color, and move a project out of one",
+        "description": "<p dir=\"auto\">FoldersService can List, Get, Create, Update and Delete. Update takes a name and nothing else — UpdateFolderJSONRequestBody{Name: name}. Two things the web does to a folder have no operation at all.</p><p dir=\"auto\"><br></p><p dir=\"auto\">SETTING THE COLOR</p><p dir=\"auto\"><br></p><p dir=\"auto\">The SDK reads it — Folder.Color and FolderWithProjects.Color are right there — and cannot w",
+        "comments_count": 0,
+        "created_at": "2026-08-31T12:44:51.399Z",
+        "position": 2,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254690203,
+        "title": "[SDK] Pass the activity date and filters through",
+        "description": "<p dir=\"auto\">reports/progress.json takes three parameters the SDK never sends. GetProgressReportParams has exactly one field: Page.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">date is the blocking one. The endpoint serves ONE DAY per request and defaults to today — Timeline::Filter sets from_date = Date.current and to_date = from_date, then scopes on created_at within that window. So the TUI's Lates",
+        "comments_count": 0,
+        "created_at": "2026-08-31T12:02:02.686Z",
+        "position": 3,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254639863,
+        "title": "[SDK] Invite people to an account",
+        "description": "<p dir=\"auto\">There's no endpoint for it.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">PeopleService lists people, reads one, updates my own profile and preferences, and changes who has access to a project that already exists. Adding a new person to the account is Adminland only.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">The CLI's home screen has <code>i</code> for invite. All it can do is open a brows",
+        "comments_count": 0,
+        "created_at": "2026-08-31T11:43:20.673Z",
+        "position": 4,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254639803,
+        "title": "[SDK] Make pagination consistent across services",
+        "description": "<p dir=\"auto\">Two services, same parameter name, opposite meanings for the same value.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">Projects.List with ProjectListOptions{Page: 0} auto-paginates the entire Link rel=\"next\" chain. MyNotifications.Get with page: 0 fetches page 1 and stops.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">Both are documented, so neither is a bug on its own. Together they're a trap",
+        "comments_count": 0,
+        "created_at": "2026-08-31T11:43:19.37Z",
+        "position": 5,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254639751,
+        "title": "[SDK] Expose the account's web URL",
+        "description": "<p dir=\"auto\">authorization.json only tells you the API host:</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">\"href\": \"<a target=\"_blank\" rel=\"noreferrer\" class=\"autolinked\" data-behavior=\"truncate\" href=\"https://3.basecampapi.com/2914079\">https://3.basecampapi.com/2914079</a>\"</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">Nothing in it says where the account lives on the web. Anything the CLI hands off to a ",
+        "comments_count": 0,
+        "created_at": "2026-08-31T11:43:17.811Z",
+        "position": 6,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254638233,
+        "title": "[SDK] Expose a folder's position",
+        "description": "<p dir=\"auto\">The CLI's home screen can't put folders in the order you dragged them into.</p><p dir=\"auto\"><br></p><p dir=\"auto\">The web's grid orders folders and starred projects together by bucket_pins.position — Project::Collection::Home#pinned_roots_by_position.</p><p dir=\"auto\"><br></p><p dir=\"auto\">stacks.json orders by that same column but doesn't send it. The whole payload is: bucket_ids, ",
+        "comments_count": 0,
+        "created_at": "2026-08-31T11:42:37.664Z",
+        "position": 7,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      }
+    ]
+  },
+  {
+    "column": 10254012238,
+    "cards": [
+      {
+        "id": 10262674819,
+        "title": "Add clients via CLI",
+        "description": "<p>See the card in Basecamp for the attachments.</p>",
+        "comments_count": 9,
+        "created_at": "2026-09-01T23:02:07.444Z",
+        "position": 1,
+        "creator": {
+          "name": "Rob Zolkos"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10256947017,
+        "title": "[SDK][CLI] Spotlights",
+        "description": "<p dir=\"auto\">Add support for Spotlights in SDK/CLI</p>",
+        "comments_count": 1,
+        "created_at": "2026-08-31T19:32:14.966Z",
+        "position": 2,
+        "creator": {
+          "name": "Rob Zolkos"
+        },
+        "assignees": [
+          {
+            "name": "Rob Zolkos"
+          }
+        ],
+        "steps": [
+          {
+            "title": "SDK",
+            "completed": true,
+            "assignees": []
+          },
+          {
+            "title": "CLI",
+            "completed": false,
+            "assignees": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "column": 10254012240,
+    "cards": [
+      {
+        "id": 10264451804,
+        "title": "[SDK] Wrap bubbling up a recording",
+        "description": "<p dir=\"auto\">The API exposes bubbling up — <code>bubble_up_url</code> is on a recording's payload whenever <code>recording.bubbleupable?</code> (see <code>app/views/api/recordings/_recording.json.jbuilder</code>, the <code>bubbleupable</code> local) — but the Go SDK has no service wrapping it. There is no <code>BubbleUps</code> anywhere in <code>pkg/basecamp</code>.</p>\n<p dir=\"auto\"><br></p>\n<p ",
+        "comments_count": 8,
+        "created_at": "2026-09-02T12:57:39.136Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10264452281,
+        "title": "[API] Serve a recording's backlinks so references can be listed",
+        "description": "<p dir=\"auto\">The web shows a \"N references to this message\" tab beside Comments, listing everything that links to the recording. It is backlinks: <code>app/views/recordings/backlinks/index.html.erb</code>, routed at <code>config/routes.rb:239</code> as <code>resources :backlinks, only: :index</code> inside the recordings scope.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">That route is HTML only. The",
+        "comments_count": 4,
+        "created_at": "2026-09-02T12:57:46.395Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10264999579,
+        "title": "[SDK] UpdateMessageRequest can't clear a message's category",
+        "description": "<p dir=\"auto\"><code>UpdateMessageRequest.CategoryID</code> is an <code>int64</code> with <code>omitempty</code>, and <code>messages.go</code> guards the wire write with <code>if req.CategoryID != 0</code>. So a zero id never reaches the server.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">The server's <code>MessagesController#find_category</code> reads a <strong>missing</strong> <code>category_id</cod",
+        "comments_count": 8,
+        "created_at": "2026-09-02T14:44:57.877Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254022746,
+        "title": "[SDK] Expose recent projects",
+        "description": "",
+        "comments_count": 15,
+        "created_at": "2026-08-31T07:34:12.044Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254639694,
+        "title": "[SDK] Expose whether a project is starred",
+        "description": "<p dir=\"auto\">A project's payload carries star_url but no starred boolean — while bookmarked sits right there next to bookmark_url.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">The web's home grid is two groups: starred projects interleaved with folders in one drag-ordered row, then the unstarred rest. Without a starred flag on the project, the CLI can't tell the groups apart.</p>\n<p dir=\"auto\"><br></",
+        "comments_count": 9,
+        "created_at": "2026-08-31T11:43:16.274Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10258017090,
+        "title": "[API] bc3 <-> bc-api docs drift: mirror carries content bc3 lacks; full sync would delete it",
+        "description": "<p>See the card in Basecamp for the attachments.</p>",
+        "comments_count": 5,
+        "created_at": "2026-09-01T01:03:23.018Z",
+        "position": 0,
+        "creator": {
+          "name": "Clawdito"
+        },
+        "assignees": [],
+        "steps": []
+      },
+      {
+        "id": 10254772286,
+        "title": "[SDK] ProjectStatusActive always fails",
+        "description": "<p dir=\"auto\">basecamp.ProjectStatusActive is exported, documented, and 400s every time you use it.</p>\n<p dir=\"auto\"><br></p>\n<p dir=\"auto\">ProjectsController#status_param_for_api runs the parameter through presence_in(%w[ archived trashed ]) and answers head :bad_request for anything else that is present. \"active\" is present, so it is rejected. Active is the default and the way to ask for it is ",
+        "comments_count": 12,
+        "created_at": "2026-08-31T12:27:51.02Z",
+        "position": 0,
+        "creator": {
+          "name": "Stanko Krtalic Rusendic"
+        },
+        "assignees": [],
+        "steps": []
+      }
+    ]
+  }
+]

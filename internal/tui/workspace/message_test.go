@@ -15,10 +15,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui"
 )
 
-func testReplies() []reply {
-	return []reply{
-		{author: person{name: "Rob Z."}, body: "Sounds good.", at: testNow.Add(-2 * time.Minute)},
-		{author: person{name: "Jorge L."}, body: "I'll cut the tag.", at: testNow.Add(-time.Minute)},
+func testReplies() []comment {
+	return []comment{
+		{author: person{name: "Rob Z."}, words: wrote("Sounds good."), at: testNow.Add(-2 * time.Minute)},
+		{author: person{name: "Jorge L."}, words: wrote("I'll cut the tag."), at: testNow.Add(-time.Minute)},
 	}
 }
 
@@ -30,7 +30,7 @@ func openMessageScreen(t *testing.T, width, height int) (model, *messageScreen) 
 	post.now = func() time.Time { return testNow }
 	m.push(post)
 
-	post.Update(messageRepliesMsg{replies: testReplies()})
+	post.Update(commentsMsg{recording: post.post.id, comments: testReplies()})
 	m.relayout()
 	return m, post
 }
@@ -78,15 +78,15 @@ func TestMessageShowsItsReplies(t *testing.T) {
 }
 
 // A post nobody has answered is not worth a read, so the screen never asks for
-// the replies — only for who the reader is, which is what says the post is theirs
-// to edit and which the replies would otherwise have carried.
+// the comments — only for who the reader is, which is what says the post is theirs
+// to edit and which the comments would otherwise have carried.
 func TestMessageWithNoRepliesAsksForNone(t *testing.T) {
 	m := resize(t, newTestModel(t), 96, 26)
 	post := newMessage(m.ctx, message{id: 1, subject: "Quiet", comments: 0})
 	m.push(post)
 
 	post.Init()
-	assert.False(t, post.reading, "a post with no replies read them anyway")
+	assert.False(t, post.answers.reading, "a post with no comments read them anyway")
 	m.relayout()
 
 	assert.Contains(t, ansi.Strip(post.View()), "No comments yet.")
@@ -99,25 +99,25 @@ func TestMessageCountsTheRepliesItGot(t *testing.T) {
 	post := newMessage(m.ctx, message{id: 1, subject: "Shipping", comments: 9})
 	post.now = func() time.Time { return testNow }
 	m.push(post)
-	post.Update(messageRepliesMsg{replies: testReplies()})
+	post.Update(commentsMsg{recording: post.post.id, comments: testReplies()})
 	m.relayout()
 
 	assert.Contains(t, ansi.Strip(post.View()), "Sounds good.")
 }
 
-// The post is already on screen when the replies fail, so the failure costs the
-// replies and nothing else.
+// The post is already on screen when the comments fail, so the failure costs the
+// comments and nothing else.
 func TestMessageKeepsThePostWhenTheRepliesFail(t *testing.T) {
 	m := resize(t, newTestModel(t), 96, 30)
 	post := newMessage(m.ctx, testMessages()[0])
 	post.now = func() time.Time { return testNow }
 	m.push(post)
-	post.Update(messageRepliesMsg{err: errors.New("nope")})
+	post.Update(commentsMsg{recording: post.post.id, err: errors.New("nope")})
 	m.relayout()
 
 	rendered := ansi.Strip(post.View())
 	assert.Contains(t, rendered, "Shipping Friday")
-	assert.Contains(t, rendered, "Could not load the replies")
+	assert.Contains(t, rendered, "Could not load the comments")
 }
 
 // --- Scrolling ---
@@ -146,7 +146,7 @@ func TestMessageScrolls(t *testing.T) {
 
 func TestToReplyFlattensAComment(t *testing.T) {
 	at := testNow.Add(-time.Hour)
-	answer := toReply(basecamp.Comment{
+	answer := toComment(basecamp.Comment{
 		ID:        7,
 		Content:   "<div>Looks <em>right</em></div>",
 		CreatedAt: at,
@@ -155,7 +155,7 @@ func TestToReplyFlattensAComment(t *testing.T) {
 	}, 5)
 
 	assert.Equal(t, int64(7), answer.id)
-	assert.Equal(t, "Looks *right*", answer.body)
+	assert.Equal(t, "Looks *right*", answer.words.text())
 	assert.Equal(t, "Rob Z.", answer.author.name)
 	assert.Equal(t, "Ops", answer.author.title)
 	assert.Equal(t, "https://app.basecamp.com/1/buckets/2/comments/7", answer.url)
@@ -166,12 +166,12 @@ func TestToReplyFlattensAComment(t *testing.T) {
 // Somebody else's comment is not the reader's to edit or trash, which is what
 // this flag decides.
 func TestToReplyMarksOnlyTheReadersOwn(t *testing.T) {
-	answer := toReply(basecamp.Comment{Creator: &basecamp.Person{ID: 9, Name: "Jorge L."}}, 5)
+	answer := toComment(basecamp.Comment{Creator: &basecamp.Person{ID: 9, Name: "Jorge L."}}, 5)
 	assert.False(t, answer.mine)
 
 	// Not knowing who the reader is marks nothing as theirs, rather than
 	// everything.
-	assert.False(t, toReply(basecamp.Comment{Creator: &basecamp.Person{ID: 5}}, 0).mine)
+	assert.False(t, toComment(basecamp.Comment{Creator: &basecamp.Person{ID: 5}}, 0).mine)
 }
 
 // --- Layout ---
@@ -205,20 +205,20 @@ func TestMessageHasTwoTabs(t *testing.T) {
 // j and k walk the comments, and off the top of them back to the message itself.
 func TestMessageWalksItsComments(t *testing.T) {
 	m, post := openMessageScreen(t, 110, 40)
-	assert.Equal(t, -1, post.cursor, "a comment was selected before the reader asked")
+	assert.Equal(t, -1, post.answers.cursor, "a comment was selected before the reader asked")
 
 	m, _ = press(t, m, "j")
-	assert.Equal(t, 0, post.cursor)
+	assert.Equal(t, 0, post.answers.cursor)
 	assert.Contains(t, ansi.Strip(post.View()), selectedMarker)
 
 	m, _ = press(t, m, "j")
 	m, _ = press(t, m, "j")
-	assert.Equal(t, len(testReplies())-1, post.cursor, "the cursor ran past the last comment")
+	assert.Equal(t, len(testReplies())-1, post.answers.cursor, "the cursor ran past the last comment")
 
 	for range 4 {
 		m, _ = press(t, m, "k")
 	}
-	assert.Equal(t, -1, post.cursor)
+	assert.Equal(t, -1, post.answers.cursor)
 	assert.NotContains(t, ansi.Strip(post.View()), selectedMarker)
 }
 
@@ -300,7 +300,7 @@ func TestEIsOffWhenTheReaderIsUnknown(t *testing.T) {
 // whoever left them.
 func TestMessageShowsBoostsUnderAComment(t *testing.T) {
 	m, post := openMessageScreen(t, 110, 40)
-	post.replies[0].id = 7
+	post.answers.comments[0].id = 7
 	post.Update(boostsMsg{comment: 7, boosts: []boost{
 		{id: 1, content: "Sounds good!", by: person{name: "Jason Fried"}},
 		{id: 2, content: "🚀", by: person{name: "Rob Zolkos"}},
@@ -317,23 +317,23 @@ func TestMessageShowsBoostsUnderAComment(t *testing.T) {
 // that say they have any, since the API lists them one recording at a time.
 func TestBoostsAreReadForEveryCommentThatHasThem(t *testing.T) {
 	_, post := openMessageScreen(t, 110, 40)
-	post.replies[0].id, post.replies[0].boosted = 7, 2
-	post.replies[1].id, post.replies[1].boosted = 8, 0
+	post.answers.comments[0].id, post.answers.comments[0].boosted = 7, 2
+	post.answers.comments[1].id, post.answers.comments[1].boosted = 8, 0
 
-	assert.NotNil(t, post.readBoosts(), "the boosts were never asked for")
+	assert.NotNil(t, post.answers.readBoosts(), "the boosts were never asked for")
 
 	post.Update(boostsMsg{comment: 7, boosts: []boost{{id: 1, content: "🎉"}}})
-	assert.Nil(t, post.readBoosts(), "a comment's boosts were asked for twice")
+	assert.Nil(t, post.answers.readBoosts(), "a comment's boosts were asked for twice")
 }
 
 // A comment nobody reacted to is not worth a request.
 func TestACommentWithNoBoostsIsNotAsked(t *testing.T) {
 	_, post := openMessageScreen(t, 110, 40)
-	for index := range post.replies {
-		post.replies[index].boosted = 0
+	for index := range post.answers.comments {
+		post.answers.comments[index].boosted = 0
 	}
 
-	assert.Nil(t, post.readBoosts())
+	assert.Nil(t, post.answers.readBoosts())
 }
 
 // A tab is a shape standing in front of a line, not an underlined word: the open
@@ -355,11 +355,11 @@ func TestTheTabsAreDrawnAsTabs(t *testing.T) {
 // the face beside it.
 func TestBoostsLineUpWithTheBody(t *testing.T) {
 	m, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
-	post.replies[0].id = 7
-	post.replies[0].author.avatar = "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
-	post.placeFaces(map[string]tui.RenderedImage{
-		post.replies[0].author.avatar: post.images.Render(nil, 1, avatarCols),
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.answers.comments[0].id = 7
+	post.answers.comments[0].author.avatar = "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
+	post.shown.placeFaces(map[faceAt]tui.RenderedImage{
+		{source: post.answers.comments[0].author.avatar, cols: chipCols}: post.shown.renderer.Render(nil, 1, chipCols),
 	})
 	post.Update(boostsMsg{comment: 7, boosts: []boost{{id: 1, content: "Sounds good!", by: person{name: "Andy Smith"}}}})
 	m.relayout()
@@ -403,14 +403,15 @@ func TestTheTabsSayHowToSwitchThem(t *testing.T) {
 // first picture and dropped the rest.
 func TestEachFaceIsItsOwnWrite(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 
-	drawn := post.renderFaces(map[string][]byte{
+	drawn := post.shown.renderFaces(map[string][]byte{
 		"https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar": testImageBytes(t, 40, 20),
 		"https://bc3-production-assets-cdn.basecamp-static.com/1/people/b/avatar": testImageBytes(t, 40, 20),
 	})
 
-	assert.Len(t, drawn, 2, "a face was not drawn")
+	// Two people, and each face drawn at both the sizes a screen shows one at.
+	assert.Len(t, drawn, 4, "a face was not drawn at every size")
 	for _, rendered := range drawn {
 		assert.NotEmpty(t, rendered.Raw, "a face has no pixels to send")
 		assert.NotEmpty(t, rendered.Content, "a face has no cells to stand in for it")
@@ -422,27 +423,27 @@ func TestEachFaceIsItsOwnWrite(t *testing.T) {
 // then every placement, which left whichever was written last a frame early.
 func TestEachFaceIsPlacedAfterItsOwnPixels(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 	first := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
 	second := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/b/avatar"
 
-	require.NotNil(t, post.drawFaces(map[string][]byte{
+	require.NotNil(t, post.shown.drawFaces(map[string][]byte{
 		first:  testImageBytes(t, 40, 20),
 		second: testImageBytes(t, 40, 20),
 	}))
 
 	// Each placement carries one face, so a face can only go on screen behind its
 	// own write.
-	post.placeFaces(map[string]tui.RenderedImage{first: post.images.Render(nil, 1, avatarCols)})
-	assert.NotEmpty(t, post.face(first))
-	assert.Empty(t, post.face(second), "the second face went up on the first one's write")
+	post.shown.placeFaces(map[faceAt]tui.RenderedImage{{source: first, cols: avatarCols}: post.shown.renderer.Render(nil, 1, avatarCols)})
+	assert.NotEmpty(t, post.shown.face(first))
+	assert.Empty(t, post.shown.face(second), "the second face went up on the first one's write")
 }
 
 // The reactions get a box so they read as reactions rather than as more of the
 // comment, and it stays inside the column.
 func TestBoostsAreBoxed(t *testing.T) {
 	m, post := openMessageScreen(t, 96, 40)
-	post.replies[0].id = 7
+	post.answers.comments[0].id = 7
 	post.Update(boostsMsg{comment: 7, boosts: []boost{
 		{id: 1, content: "Love it!", by: person{name: "Stanko K"}},
 		{id: 2, content: "That's great", by: person{name: "Bob B"}},
@@ -465,7 +466,7 @@ func TestBoostsAreBoxed(t *testing.T) {
 func TestABoxOfBoostsStaysInTheColumn(t *testing.T) {
 	for _, width := range []int{30, 40, 60} {
 		m, post := openMessageScreen(t, width, 40)
-		post.replies[0].id = 7
+		post.answers.comments[0].id = 7
 		post.Update(boostsMsg{comment: 7, boosts: []boost{
 			{id: 1, content: "Love it!", by: person{name: "Stanko K"}},
 			{id: 2, content: "That's great", by: person{name: "Bob B"}},
@@ -483,12 +484,12 @@ func TestABoxOfBoostsStaysInTheColumn(t *testing.T) {
 // beside it does not shift left and then right again when it lands.
 func TestAFaceOnItsWayTurns(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
-	post.replies[0].author.avatar = source
-	post.facesComing = map[string]struct{}{source: {}}
+	post.answers.comments[0].author.avatar = source
+	post.shown.facesComing = map[string]struct{}{source: {}}
 
-	standing := post.face(source)
+	standing := post.shown.face(source)
 	require.Len(t, standing, avatarRows, "the throbber did not fill the picture's square")
 	assert.Contains(t, ansi.Strip(strings.Join(standing, "")), spinnerFrames[0])
 	for _, row := range standing {
@@ -496,9 +497,9 @@ func TestAFaceOnItsWayTurns(t *testing.T) {
 	}
 
 	// It stops once the picture is there.
-	post.placeFaces(map[string]tui.RenderedImage{source: post.images.Render(nil, 1, avatarCols)})
-	assert.NotContains(t, ansi.Strip(strings.Join(post.face(source), "")), spinnerFrames[0])
-	assert.Empty(t, post.facesComing)
+	post.shown.placeFaces(map[faceAt]tui.RenderedImage{{source: source, cols: avatarCols}: post.shown.renderer.Render(nil, 1, avatarCols)})
+	assert.NotContains(t, ansi.Strip(strings.Join(post.shown.face(source), "")), spinnerFrames[0])
+	assert.Empty(t, post.shown.facesComing)
 }
 
 // A read that answered nothing stops the throbber too: one that turns forever is
@@ -506,11 +507,11 @@ func TestAFaceOnItsWayTurns(t *testing.T) {
 func TestAFaceThatNeverArrivedStopsTurning(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
 	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
-	post.facesComing = map[string]struct{}{source: {}}
+	post.shown.facesComing = map[string]struct{}{source: {}}
 
-	post.facesArrived([]string{source}, nil)
-	assert.Empty(t, post.facesComing)
-	assert.Nil(t, post.face(source), "a picture that never arrived still took the space")
+	post.shown.facesArrived([]string{source}, nil)
+	assert.Empty(t, post.shown.facesComing)
+	assert.Nil(t, post.shown.face(source), "a picture that never arrived still took the space")
 }
 
 // A picture that did arrive keeps its throbber until the cells are on screen:
@@ -518,15 +519,15 @@ func TestAFaceThatNeverArrivedStopsTurning(t *testing.T) {
 // deciding from what is drawn took the throbber from every face at once.
 func TestAFaceThatArrivedKeepsTurningUntilItIsPlaced(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
-	post.facesComing = map[string]struct{}{source: {}}
+	post.shown.facesComing = map[string]struct{}{source: {}}
 
-	post.facesArrived([]string{source}, map[string][]byte{source: testImageBytes(t, 40, 20)})
-	assert.Contains(t, post.facesComing, source, "the throbber stopped before the picture was drawn")
+	post.shown.facesArrived([]string{source}, map[string][]byte{source: testImageBytes(t, 40, 20)})
+	assert.Contains(t, post.shown.facesComing, source, "the throbber stopped before the picture was drawn")
 
-	post.placeFaces(map[string]tui.RenderedImage{source: post.images.Render(nil, 1, avatarCols)})
-	assert.Empty(t, post.facesComing)
+	post.shown.placeFaces(map[faceAt]tui.RenderedImage{{source: source, cols: avatarCols}: post.shown.renderer.Render(nil, 1, avatarCols)})
+	assert.Empty(t, post.shown.facesComing)
 }
 
 // A card open over the message does not eat the faces the message asked for.
@@ -537,10 +538,10 @@ func TestAFaceThatArrivedKeepsTurningUntilItIsPlaced(t *testing.T) {
 // turning and readFaces would not ask again.
 func TestACardOverTheMessageDoesNotEatItsFaces(t *testing.T) {
 	m, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 	source := "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
-	post.replies[0].author.avatar = source
-	post.facesComing = map[string]struct{}{source: {}}
+	post.answers.comments[0].author.avatar = source
+	post.shown.facesComing = map[string]struct{}{source: {}}
 
 	m, _ = update(t, m, personCardMsg{who: person{
 		id: 5, name: "Rob Z.",
@@ -555,10 +556,10 @@ func TestACardOverTheMessageDoesNotEatItsFaces(t *testing.T) {
 	require.NotNil(t, cmd, "the card swallowed the faces the message screen asked for")
 
 	// The picture is drawn in a command, so it is still coming until that runs.
-	assert.Contains(t, post.facesComing, source)
-	post.placeFaces(map[string]tui.RenderedImage{source: post.images.Render(nil, 1, avatarCols)})
-	assert.Empty(t, post.facesComing)
-	assert.NotEmpty(t, post.faces[source].Content)
+	assert.Contains(t, post.shown.facesComing, source)
+	post.shown.placeFaces(map[faceAt]tui.RenderedImage{{source: source, cols: avatarCols}: post.shown.renderer.Render(nil, 1, avatarCols)})
+	assert.Empty(t, post.shown.facesComing)
+	assert.NotEmpty(t, post.shown.faces[faceAt{source: source, cols: avatarCols}].Content)
 }
 
 // And the card still gets its own.
@@ -585,20 +586,20 @@ func TestTheCardGetsItsOwnFace(t *testing.T) {
 // reads over one budget lost pictures.
 func TestAFaceOnItsWayIsNotAskedForAgain(t *testing.T) {
 	_, post := openMessageScreen(t, 96, 40)
-	post.images = drawnImage{cols: avatarCols, rows: avatarRows}
+	post.shown.renderer = drawnImage{cols: avatarCols, rows: avatarRows}
 	post.post.author.avatar = "https://bc3-production-assets-cdn.basecamp-static.com/1/people/a/avatar"
 
-	require.NotNil(t, post.readFaces(), "the author's picture was never asked for")
-	assert.Contains(t, post.facesComing, post.post.author.avatar)
+	require.NotNil(t, post.shown.readFaces(append([]string{post.post.author.avatar}, post.answers.people()...)), "the author's picture was never asked for")
+	assert.Contains(t, post.shown.facesComing, post.post.author.avatar)
 
-	assert.Nil(t, post.readFaces(), "the same picture was asked for twice")
+	assert.Nil(t, post.shown.readFaces(append([]string{post.post.author.avatar}, post.answers.people()...)), "the same picture was asked for twice")
 }
 
 // The pills run along the row and onto the next when the column runs out, rather
 // than off the edge.
 func TestBoostPillsWrapOntoTheNextRow(t *testing.T) {
 	m, post := openMessageScreen(t, 70, 40)
-	post.replies[0].id = 7
+	post.answers.comments[0].id = 7
 	post.Update(boostsMsg{comment: 7, boosts: []boost{
 		{id: 1, content: "Love it!", by: person{name: "Stanko K"}},
 		{id: 2, content: "That's great", by: person{name: "Bob B"}},
@@ -617,7 +618,7 @@ func TestBoostPillsWrapOntoTheNextRow(t *testing.T) {
 // comment is one key rather than two.
 func TestBOpensTheBoosts(t *testing.T) {
 	m, post := openMessageScreen(t, 110, 40)
-	post.replies[0].id = 7
+	post.answers.comments[0].id = 7
 	post.Update(boostsMsg{comment: 7, boosts: []boost{{id: 1, content: "🎉", by: person{name: "Andy Smith"}}}})
 	m, _ = press(t, m, "j")
 
@@ -640,7 +641,7 @@ func TestBDoesNothingWithNothingSelected(t *testing.T) {
 // i says who wrote what the reader is standing on.
 func TestIOpensACardAboutTheCommentAuthor(t *testing.T) {
 	m, post := openMessageScreen(t, 110, 40)
-	post.replies[0].author = person{name: "Jason Fried", title: "Co-owner"}
+	post.answers.comments[0].author = person{name: "Jason Fried", title: "Co-owner"}
 	m, _ = press(t, m, "j")
 
 	_, cmd := press(t, m, "i")
@@ -668,4 +669,10 @@ func TestIDoesNothingWithNobodyToShow(t *testing.T) {
 	m.push(post)
 
 	assert.Nil(t, post.openCard())
+}
+
+// wrote is a comment's words as a test writes them: plain Markdown, no
+// pictures.
+func wrote(markdown string) body {
+	return newBodyFromMarkdown(markdown, nil)
 }

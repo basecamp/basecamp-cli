@@ -58,17 +58,17 @@ func toBoost(left basecamp.Boost, me int64) boost {
 	return out
 }
 
-// boostRows draws the reactions under a comment: each one behind the initials of
-// whoever left it.
+// boostRows draws the reactions under a comment: each one behind the face of
+// whoever left it, or their initials on a terminal that draws no pictures.
 //
-// Initials rather than a face. A face is four columns at its smallest here — a
-// cell is twice as tall as it is wide, so anything narrower is a letterbox — and
-// four columns per reaction turns a row of them into a wall. Two letters say who
-// in the room the web gives a 20-pixel circle.
+// Two columns and one row for the face, which is the same square the web puts a
+// 20-pixel circle in — a cell is twice as tall as it is wide, so two columns
+// across is one row down. It drops into the room a pill already had for two
+// letters, so a row of reactions is the same size either way.
 //
 // One line, wrapped by the caller's width, so they read as a row of small things
 // rather than a list.
-func boostRows(styles *tui.Styles, boosts []boost, width int) []string {
+func boostRows(styles *tui.Styles, shown *pictures, boosts []boost, width int) []string {
 	if len(boosts) == 0 {
 		return nil
 	}
@@ -95,7 +95,13 @@ func boostRows(styles *tui.Styles, boosts []boost, width int) []string {
 		if left.mine {
 			style = mine
 		}
-		pill := box.Render(style.Render(left.by.initials() + " " + left.content))
+		// The face is already styled by the terminal, so it goes beside the
+		// reaction rather than through the pill's own color.
+		who := style.Render(left.by.initials())
+		if face := shown.chip(left.by.avatar); face != "" {
+			who = face
+		}
+		pill := box.Render(who + style.Render(" "+left.content))
 		wide := lipgloss.Width(pill)
 
 		if len(line) > 0 && spent+1+wide > width {

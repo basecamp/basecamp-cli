@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func testComment(mine bool) reply {
-	return reply{
-		id: 7, author: person{name: "Jason Fried", title: "Co-owner"}, body: "Nice summary.",
+func testComment(mine bool) comment {
+	return comment{
+		id: 7, author: person{name: "Jason Fried", title: "Co-owner"}, words: wrote("Nice summary."),
 		url: "https://app.basecamp.com/1/buckets/2/comments/7", mine: mine,
 	}
 }

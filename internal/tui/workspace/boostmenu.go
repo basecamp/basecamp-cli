@@ -9,7 +9,7 @@ import (
 
 // boostMenuMsg asks the model to open the boosts over one comment.
 type boostMenuMsg struct {
-	comment reply
+	comment comment
 	boosts  []boost
 }
 
@@ -22,7 +22,7 @@ type boostMenuMsg struct {
 // there to be read.
 type boostMenu struct {
 	ctx     *Context
-	comment reply
+	comment comment
 	boosts  []boost
 
 	// adding is the field a new reaction is typed into, and typing says the

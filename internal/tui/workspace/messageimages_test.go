@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +40,7 @@ func placePictures(t *testing.T, m model, post *messageScreen, sources ...string
 
 	drawn := map[string]tui.RenderedImage{}
 	for _, source := range sources {
-		drawn[source] = post.images.Render(testImageBytes(t, 40, 20), 1, post.width)
+		drawn[source] = post.shown.renderer.Render(testImageBytes(t, 40, 20), 1, post.width)
 	}
 	updated, _ := m.Update(placeMessageImages(drawn)())
 	return updated.(model)
@@ -52,7 +54,7 @@ func openPicturePost(t *testing.T, cols, rows, width int) (model, *messageScreen
 	m := resize(t, newTestModel(t), width, 40)
 	post := newMessage(m.ctx, testPicturePost())
 	post.now = func() time.Time { return testNow }
-	post.images = drawnImage{cols: cols, rows: rows}
+	post.shown.renderer = drawnImage{cols: cols, rows: rows}
 	m.push(post)
 	m.relayout()
 	return m, post
@@ -119,22 +121,22 @@ func TestImageSourcesMapPreviewsToDownloads(t *testing.T) {
 func TestPicturesAreReadOneAtATime(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
 
-	require.NotNil(t, post.readImages(), "no read was started")
-	assert.Equal(t, []string{testDownloadURL}, post.queue)
+	require.NotNil(t, post.shown.read(post.words), "no read was started")
+	assert.Equal(t, []string{testDownloadURL}, post.shown.queue)
 
 	// The one in flight is still counted as coming, so its row says so.
-	assert.True(t, post.coming(post.parts[1]))
+	assert.True(t, post.shown.coming(post.words, post.words.parts[1]))
 }
 
 // A terminal that cannot draw pictures is never asked to read one.
 func TestATerminalThatDrawsNoneReadsNone(t *testing.T) {
 	m := resize(t, newTestModel(t), 96, 30)
 	post := newMessage(m.ctx, testPicturePost())
-	post.images = noImages{}
+	post.shown.renderer = noImages{}
 	m.push(post)
 
-	assert.Nil(t, post.readImages())
-	assert.Empty(t, post.queue)
+	assert.Nil(t, post.shown.read(post.words))
+	assert.Empty(t, post.shown.queue)
 }
 
 // --- The wait before drawing ---
@@ -143,17 +145,17 @@ func TestATerminalThatDrawsNoneReadsNone(t *testing.T) {
 // screenshots redraws once rather than once per picture.
 func TestArrivalsAreDrawnTogether(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
+	post.shown.read(post.words)
 
-	cmd := post.imageArrived(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
+	cmd := post.shown.arrivedOne(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
 	require.NotNil(t, cmd)
-	assert.True(t, post.waiting, "no wait was armed")
-	assert.Empty(t, post.picture(post.parts[1]), "the picture was drawn before the wait was up")
+	assert.True(t, post.shown.waiting, "no wait was armed")
+	assert.Empty(t, post.shown.picture(post.words, post.words.parts[1], post.width), "the picture was drawn before the wait was up")
 
 	// A second arrival inside the wait arms no second wait.
-	post.arrived["other"] = testImageBytes(t, 4, 4)
-	post.imageArrived(messageImageMsg{source: "other"})
-	assert.True(t, post.waiting)
+	post.shown.arrived["other"] = testImageBytes(t, 4, 4)
+	post.shown.arrivedOne(messageImageMsg{source: "other"})
+	assert.True(t, post.shown.waiting)
 }
 
 // The wait ending sends the pixels and only then puts the cells on screen: cells
@@ -161,17 +163,17 @@ func TestArrivalsAreDrawnTogether(t *testing.T) {
 // have yet.
 func TestTheWaitEndingDrawsWhatArrived(t *testing.T) {
 	m, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
-	post.imageArrived(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
+	post.shown.read(post.words)
+	post.shown.arrivedOne(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
 
-	cmd := post.drawImages()
+	cmd := post.shown.draw(post.words)
 	require.NotNil(t, cmd, "the pixels were never sent to the terminal")
-	assert.False(t, post.waiting)
-	assert.Empty(t, post.arrived, "the same picture would be drawn again")
-	assert.Empty(t, post.picture(post.parts[1]), "the cells went on screen in the same frame as the pixels")
+	assert.False(t, post.shown.waiting)
+	assert.Empty(t, post.shown.arrived, "the same picture would be drawn again")
+	assert.Empty(t, post.shown.picture(post.words, post.words.parts[1], post.width), "the cells went on screen in the same frame as the pixels")
 
 	_ = placePictures(t, m, post, testDownloadURL)
-	assert.NotEmpty(t, post.picture(post.parts[1]), "the cells never arrived")
+	assert.NotEmpty(t, post.shown.picture(post.words, post.words.parts[1], post.width), "the cells never arrived")
 	assert.Contains(t, ansi.Strip(post.View()), "▒")
 }
 
@@ -179,7 +181,7 @@ func TestTheWaitEndingDrawsWhatArrived(t *testing.T) {
 func TestTheWaitEndingWithNothingDrawsNothing(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
 
-	assert.Nil(t, post.drawImages())
+	assert.Nil(t, post.shown.draw(post.words))
 }
 
 // --- What stands where a picture will go ---
@@ -188,7 +190,7 @@ func TestTheWaitEndingWithNothingDrawsNothing(t *testing.T) {
 // picture on its way from a gap.
 func TestAPictureOnItsWaySaysSo(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
+	post.shown.read(post.words)
 
 	rendered := ansi.Strip(post.View())
 	assert.Contains(t, rendered, "Loading Adminland banner…")
@@ -200,11 +202,11 @@ func TestAPictureOnItsWaySaysSo(t *testing.T) {
 // hang.
 func TestTheThrobberTurnsWhilePicturesAreRead(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
-	require.True(t, post.spinning, "no throbber was armed")
+	post.shown.read(post.words)
+	require.True(t, post.shown.spinning, "no throbber was armed")
 
 	assert.Contains(t, ansi.Strip(post.View()), spinnerFrames[0])
-	require.NotNil(t, post.advanceImageSpinner(), "the throbber stopped while a picture was still coming")
+	require.NotNil(t, mustTake(post.shown.update(imageSpinMsg{}, post.words)), "the throbber stopped while a picture was still coming")
 	assert.Contains(t, ansi.Strip(post.View()), spinnerFrames[1])
 }
 
@@ -212,12 +214,12 @@ func TestTheThrobberTurnsWhilePicturesAreRead(t *testing.T) {
 // nothing.
 func TestTheThrobberStopsWhenNothingIsComing(t *testing.T) {
 	_, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
-	post.imageArrived(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
-	post.drawImages()
+	post.shown.read(post.words)
+	post.shown.arrivedOne(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
+	post.shown.draw(post.words)
 
-	assert.Nil(t, post.advanceImageSpinner())
-	assert.False(t, post.spinning)
+	assert.Nil(t, mustTake(post.shown.update(imageSpinMsg{}, post.words)))
+	assert.False(t, post.shown.spinning)
 }
 
 // A picture with no caption still says something.
@@ -227,9 +229,9 @@ func TestAPictureWithNoCaptionStillSaysItIsComing(t *testing.T) {
 		id: 1, subject: "Shot", body: "![](" + testPreviewURL + ")",
 		images: map[string]string{testPreviewURL: testDownloadURL},
 	})
-	post.images = drawnImage{cols: 4, rows: 2}
+	post.shown.renderer = drawnImage{cols: 4, rows: 2}
 	m.push(post)
-	post.readImages()
+	post.shown.read(post.words)
 	m.relayout()
 
 	assert.Contains(t, ansi.Strip(post.View()), "Loading image…")
@@ -239,8 +241,8 @@ func TestAPictureWithNoCaptionStillSaysItIsComing(t *testing.T) {
 // pictures were drawn at all.
 func TestAPictureThatNeverArrivedFallsBackToItsAddress(t *testing.T) {
 	m, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
-	post.imageArrived(messageImageMsg{source: testDownloadURL})
+	post.shown.read(post.words)
+	post.shown.arrivedOne(messageImageMsg{source: testDownloadURL})
 	m.relayout()
 
 	rendered := ansi.Strip(post.View())
@@ -251,9 +253,9 @@ func TestAPictureThatNeverArrivedFallsBackToItsAddress(t *testing.T) {
 // The caption goes under the picture, where the web puts it.
 func TestACaptionSitsUnderThePicture(t *testing.T) {
 	m, post := openPicturePost(t, 4, 2, 96)
-	post.readImages()
-	post.imageArrived(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
-	post.drawImages()
+	post.shown.read(post.words)
+	post.shown.arrivedOne(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 40, 20)})
+	post.shown.draw(post.words)
 	_ = placePictures(t, m, post, testDownloadURL)
 
 	lines := strings.Split(ansi.Strip(post.View()), "\n")
@@ -273,12 +275,21 @@ func TestACaptionSitsUnderThePicture(t *testing.T) {
 // part of one: the cells are what the terminal matches the image against.
 func TestAPictureInAMessageTooWideForTheColumnIsLeftOut(t *testing.T) {
 	m, post := openPicturePost(t, 80, 4, 96)
-	post.readImages()
-	post.imageArrived(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 800, 40)})
-	post.drawImages()
+	post.shown.read(post.words)
+	post.shown.arrivedOne(messageImageMsg{source: testDownloadURL, data: testImageBytes(t, 800, 40)})
+	post.shown.draw(post.words)
 	_ = placePictures(t, m, post, testDownloadURL)
-	require.NotEmpty(t, post.picture(post.parts[1]))
+	require.NotEmpty(t, post.shown.picture(post.words, post.words.parts[1], post.width))
 
 	post.Resize(20, 40)
-	assert.Empty(t, post.picture(post.parts[1]))
+	assert.Empty(t, post.shown.picture(post.words, post.words.parts[1], post.width))
+}
+
+// mustTake unwraps what a component answered, for a test driving one message
+// straight into it rather than through the screen that holds it.
+func mustTake(cmd tea.Cmd, took bool) tea.Cmd {
+	if !took {
+		panic("the component did not take the message")
+	}
+	return cmd
 }

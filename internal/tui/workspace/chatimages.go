@@ -235,9 +235,14 @@ func loadMessageImage(ctx context.Context, app *appctx.App, budget *imageBudget,
 		if err := app.RequireAccount(); err != nil {
 			return messageImageMsg{source: source}
 		}
+		// Traced, the way the avatar reads are. A picture that does not turn up
+		// leaves a filename and a link on screen and says nothing about why —
+		// too big, wrong host, a format with no decoder — and the trace is the
+		// only place that answer can be written down.
+		read := cached(pictureStore(app), traced(app, accountImageReader(app)))
 		return messageImageMsg{
 			source: source,
-			data:   budget.fetch(ctx, accountImageReader(app), []string{source})[source],
+			data:   budget.fetch(ctx, read, []string{source})[source],
 		}
 	}
 }
@@ -318,8 +323,13 @@ func validImage(data []byte, contentType string) error {
 		}
 	}
 
+	// WebP belongs here as much as the other three: it is what every screenshot
+	// tool writes now, so it is most of what Basecamp bodies actually carry. The
+	// decoder for it is registered alongside the standard library's — see the
+	// imports in internal/tui/kitty.go — and this list is what decides whether
+	// one is ever offered to it.
 	switch http.DetectContentType(data) {
-	case "image/gif", "image/jpeg", "image/png":
+	case "image/gif", "image/jpeg", "image/png", "image/webp":
 	default:
 		return fmt.Errorf("response content is not an image a terminal can draw")
 	}

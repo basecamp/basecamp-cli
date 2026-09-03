@@ -26,9 +26,9 @@ func NewTUICmd() *cobra.Command {
 		Use:   "tui [url]",
 		Short: "Launch the Basecamp workspace [dev]",
 		Long: "Launch a persistent, full-screen terminal workspace for Basecamp.\n\n" +
-			"A Basecamp URL is accepted but not yet routed: the workspace is being\n" +
-			"rebuilt and has only its home screen. This feature is under active\n" +
-			"development and may change between releases.",
+			"Pass a Basecamp URL to open a project, or one of the tools on its dock,\n" +
+			"instead of the home screen. This feature is under active development and\n" +
+			"may change between releases.",
 		Annotations: map[string]string{"dev_only": "true"},
 		Args:        cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -41,6 +41,18 @@ func NewTUICmd() *cobra.Command {
 					`experimental feature "tui" is not enabled; run: basecamp config set experimental.tui true --global`)
 			}
 			printDevNotice(app.Config.CacheDir)
+
+			// A URL names the account it belongs to, and that is the account the
+			// workspace should open — not whatever the config was left on.
+			if len(args) > 0 {
+				target, err := parseTUITarget(args[0])
+				if err != nil {
+					return err
+				}
+				if target.AccountID != "" {
+					app.Config.AccountID = target.AccountID
+				}
+			}
 			return settleAccount(app)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,7 +93,15 @@ func NewTUICmd() *cobra.Command {
 			tui.CalibrateWidths(os.Stdin, os.Stdout)
 			tui.DetectImageSupport(os.Stdin, os.Stdout)
 
-			model, shutdown := workspace.New(app, workspace.WithReadingsWatcher(liveReadings(app)))
+			options := []workspace.Option{workspace.WithReadingsWatcher(liveReadings(app))}
+			if len(args) > 0 {
+				// PreRunE already read it and refused an argument that is not a
+				// Basecamp URL, so this cannot fail.
+				target, _ := parseTUITarget(args[0])
+				options = append(options, workspace.WithTarget(target))
+			}
+
+			model, shutdown := workspace.New(app, options...)
 			defer shutdown()
 
 			_, err := tea.NewProgram(model).Run()
