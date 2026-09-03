@@ -27,6 +27,69 @@ func TestDetectCodexDirectory(t *testing.T) {
 	assert.True(t, DetectCodex())
 }
 
+func TestCodexHomeAliases(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []struct {
+		configured string
+		want       string
+	}{
+		{"", filepath.Join(home, ".codex")},
+		{"~", home},
+		{"~/", home},
+		{"~\\", home},
+		{"~/custom", filepath.Join(home, "custom")},
+	}
+	for _, test := range tests {
+		t.Run(strconv.Quote(test.configured), func(t *testing.T) {
+			t.Setenv("CODEX_HOME", test.configured)
+			got, err := CodexHome()
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Clean(test.want), got)
+		})
+	}
+}
+
+func TestCodexHomePreservesWhitespaceInOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	configured := "  codex home  "
+	t.Setenv("CODEX_HOME", configured)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	got, err := CodexHome()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(cwd, configured), got)
+}
+
+func TestCodexHomeResolvesRelativeOverrideFromWorkingDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "project-local-codex")
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	got, err := CodexHome()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(cwd, "project-local-codex"), got)
+}
+
+func TestCodexHomeDoesNotRequireHomeForSelfContainedOverride(t *testing.T) {
+	t.Setenv("HOME", "")
+	absolute := filepath.Join(t.TempDir(), "codex")
+	t.Setenv("CODEX_HOME", absolute)
+	got, err := CodexHome()
+	require.NoError(t, err)
+	assert.Equal(t, absolute, got)
+
+	t.Setenv("CODEX_HOME", "project-local-codex")
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	got, err = CodexHome()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(cwd, "project-local-codex"), got)
+}
+
 func TestDetectCodexBinary(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -34,6 +97,18 @@ func TestDetectCodexBinary(t *testing.T) {
 
 	assert.True(t, DetectCodex())
 	assert.Equal(t, "/usr/local/bin/codex", FindCodexBinary())
+}
+
+func TestDetectCodexCustomHomeWithoutBinary(t *testing.T) {
+	home := t.TempDir()
+	customHome := filepath.Join(t.TempDir(), "custom-codex")
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", customHome)
+	stubCodexLookPath(t, "", exec.ErrNotFound)
+
+	assert.False(t, DetectCodex())
+	require.NoError(t, os.MkdirAll(customHome, 0o755))
+	assert.True(t, DetectCodex())
 }
 
 func TestCheckCodexPluginMissingBinary(t *testing.T) {

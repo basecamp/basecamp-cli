@@ -74,14 +74,26 @@ func init() {
 
 // DetectCodex returns true when Codex has a home directory or executable.
 func DetectCodex() bool {
-	home, err := os.UserHomeDir()
+	codexHome, err := CodexHome()
 	if err == nil {
-		info, statErr := os.Stat(filepath.Join(filepath.Clean(home), ".codex"))
+		info, statErr := os.Stat(codexHome)
 		if statErr == nil && info.IsDir() {
 			return true
 		}
 	}
 	return FindCodexBinary() != ""
+}
+
+// CodexHome resolves CODEX_HOME, including shell-style home aliases.
+func CodexHome() (string, error) {
+	return resolveAgentConfigDir("CODEX_HOME", ".codex", resolveRelativeConfigPath)
+}
+
+// CodexPluginInstalledContext reports whether Basecamp is currently installed.
+// Callers can use it to distinguish a successful no-op removal from a real removal.
+func CodexPluginInstalledContext(ctx context.Context) (bool, error) {
+	state, found, err := queryCodexPlugin(ctx)
+	return found && state.Installed, err
 }
 
 // FindCodexBinary returns the Codex executable path, or an empty string.

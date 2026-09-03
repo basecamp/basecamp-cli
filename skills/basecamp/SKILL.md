@@ -1337,11 +1337,15 @@ basecamp doctor --json                            # Check CLI health, auth, conn
 ```bash
 basecamp setup agents                             # Install skill + connect detected agent(s)
 basecamp setup agents --json                      # Structured result envelope
+basecamp setup agents --remove                    # Remove CLI-managed agent integrations only
 ```
 `setup agents` installs the baseline skill and connects coding agents without
 prompting. Selection is driven by `BASECAMP_SETUP_AGENT` (`claude`, `codex`,
 `all`, or `none`); unset auto-detects — one detected agent is connected, several
 leave the skill only and surface the per-agent `basecamp setup <id>` commands.
+`--remove` removes Basecamp-managed skills and Claude/Codex plugins without
+removing authentication, configuration, or Basecamp data. Unmanaged skill
+directories and additional user files are preserved.
 
 **Rate limiting (429):** The CLI handles backoff automatically. If you see 429 errors, reduce request frequency.
 

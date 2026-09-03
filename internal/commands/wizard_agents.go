@@ -144,6 +144,9 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 // runClaudeSetup performs the Claude Code-specific setup steps
 // (marketplace add + plugin install + skill symlink).
 func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
+	if _, err := harness.ClaudeConfigDir(); err != nil {
+		return fmt.Errorf("resolving Claude configuration: %w", err)
+	}
 	w := cmd.OutOrStdout()
 
 	// Clean up stale plugin entries from old marketplaces before checking status.
@@ -385,6 +388,9 @@ func claudeStaleIssues() []agentIssue {
 
 // runClaudeSetupNonInteractive attempts plugin install without prompts (for --json/--agent mode).
 func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
+	if _, err := harness.ClaudeConfigDir(); err != nil {
+		return fmt.Errorf("resolving Claude configuration: %w", err)
+	}
 	var errs []string
 
 	// Clean up stale plugin entries from old marketplaces before checking status.
@@ -685,10 +691,13 @@ const agentSetupEnv = "BASECAMP_SETUP_AGENT"
 // selector (or auto-detection), and emits a structured envelope. It never
 // prompts, so it is safe for the piped installer and coding-agent shells.
 func newSetupAgentsCmd() *cobra.Command {
-	return &cobra.Command{
+	var remove bool
+	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "Install the Basecamp skill and connect detected coding agents",
 		Long: "Install the baseline Basecamp agent skill and attempt to connect coding agents.\n\n" +
+			"Use --remove to uninstall Basecamp-managed coding-agent integrations without\n" +
+			"removing authentication, configuration, or Basecamp data.\n\n" +
 			"Selection is controlled by " + agentSetupEnv + ": claude, codex, all, or none. When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
 			"guessed — the per-agent `basecamp setup <id>` commands are surfaced instead.",
@@ -700,9 +709,14 @@ func newSetupAgentsCmd() *cobra.Command {
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
+			if remove {
+				return runRemoveAgentSetup(cmd, app)
+			}
 			return runNonInteractiveAgentSetup(cmd, app)
 		},
 	}
+	cmd.Flags().BoolVar(&remove, "remove", false, "Remove Basecamp-managed coding-agent integrations")
+	return cmd
 }
 
 // agentSetupRecord is the per-agent outcome captured while running handlers.

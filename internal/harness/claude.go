@@ -25,14 +25,19 @@ func init() {
 
 func claudeChecks() []*StatusCheck {
 	checks := []*StatusCheck{CheckClaudePlugin()}
-	// Only check the skill link if ~/.claude exists (i.e. Claude is dir-detected)
-	home, err := os.UserHomeDir()
-	if err == nil {
-		if info, statErr := os.Stat(filepath.Join(home, ".claude")); statErr == nil && info.IsDir() {
+	// Only check the skill link if Claude's configured home exists.
+	if configDir, err := ClaudeConfigDir(); err == nil {
+		if info, statErr := os.Stat(configDir); statErr == nil && info.IsDir() {
 			checks = append(checks, CheckClaudeSkillLink())
 		}
 	}
 	return checks
+}
+
+// ClaudeConfigDir resolves Claude Code's configured home. A relative override
+// is rejected because its meaning would otherwise depend on the caller's cwd.
+func ClaudeConfigDir() (string, error) {
+	return resolveAgentConfigDir("CLAUDE_CONFIG_DIR", ".claude", rejectRelativeConfigPath)
 }
 
 // ClaudeMarketplaceSource is the marketplace repository for the Basecamp plugin.
@@ -49,12 +54,10 @@ const ClaudeMarketplaceName = "37signals"
 const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
 
 // DetectClaude returns true if Claude Code is installed.
-// Checks ~/.claude/ directory first, then falls back to binary on PATH.
+// Checks Claude's configured home first, then falls back to binary on PATH.
 func DetectClaude() bool {
-	home, err := os.UserHomeDir()
-	if err == nil {
-		home = filepath.Clean(home)
-		info, statErr := os.Stat(filepath.Join(home, ".claude"))
+	if configDir, err := ClaudeConfigDir(); err == nil {
+		info, statErr := os.Stat(configDir)
 		if statErr == nil && info.IsDir() {
 			return true
 		}
@@ -89,16 +92,16 @@ func FindClaudeBinary() string {
 
 // CheckClaudePlugin checks whether the basecamp plugin is installed in Claude Code.
 func CheckClaudePlugin() *StatusCheck {
-	home, err := os.UserHomeDir()
+	configDir, err := ClaudeConfigDir()
 	if err != nil {
 		return &StatusCheck{
 			Name:    "Claude Code Plugin",
 			Status:  "warn",
-			Message: "Cannot determine home directory",
+			Message: "Cannot determine Claude home: " + err.Error(),
 		}
 	}
 
-	pluginsPath := filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")
+	pluginsPath := filepath.Join(configDir, "plugins", "installed_plugins.json")
 	data, err := os.ReadFile(pluginsPath) //nolint:gosec // G304: trusted path
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -136,18 +139,18 @@ func CheckClaudePlugin() *StatusCheck {
 	}
 }
 
-// CheckClaudeSkillLink checks whether ~/.claude/skills/basecamp contains a valid SKILL.md.
+// CheckClaudeSkillLink checks Claude's configured home for a valid Basecamp SKILL.md.
 func CheckClaudeSkillLink() *StatusCheck {
-	home, err := os.UserHomeDir()
+	configDir, err := ClaudeConfigDir()
 	if err != nil {
 		return &StatusCheck{
 			Name:    "Claude Code Skill",
 			Status:  "warn",
-			Message: "Cannot determine home directory",
+			Message: "Cannot determine Claude home: " + err.Error(),
 		}
 	}
 
-	skillPath := filepath.Join(filepath.Clean(home), ".claude", "skills", "basecamp", "SKILL.md")
+	skillPath := filepath.Join(configDir, "skills", "basecamp", "SKILL.md")
 	if _, err := os.Stat(skillPath); err != nil {
 		if os.IsNotExist(err) {
 			return &StatusCheck{
@@ -213,14 +216,14 @@ func CheckClaudePluginVersion() *StatusCheck {
 	}
 }
 
-// InstalledPluginVersion reads the installed plugin version from
-// ~/.claude/plugins/installed_plugins.json. Returns "" if unreadable.
+// InstalledPluginVersion reads the installed plugin version from Claude's
+// configured home. Returns "" if unreadable.
 func InstalledPluginVersion() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	configDir, err := ClaudeConfigDir()
+	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
+	data, err := os.ReadFile(filepath.Join(configDir, "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
 	if err != nil {
 		return ""
 	}
@@ -371,11 +374,11 @@ type StalePlugin struct {
 // StalePluginKeys returns stale plugin entries from installed_plugins.json
 // that belong to old/dead marketplaces.
 func StalePluginKeys() []StalePlugin {
-	home, err := os.UserHomeDir()
+	configDir, err := ClaudeConfigDir()
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
+	data, err := os.ReadFile(filepath.Join(configDir, "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
 	if err != nil {
 		return nil
 	}

@@ -12993,6 +12993,7 @@ FLAG basecamp setup agents --no-stats type=bool
 FLAG basecamp setup agents --profile type=string
 FLAG basecamp setup agents --project type=string
 FLAG basecamp setup agents --quiet type=bool
+FLAG basecamp setup agents --remove type=bool
 FLAG basecamp setup agents --stats type=bool
 FLAG basecamp setup agents --styled type=bool
 FLAG basecamp setup agents --todolist type=string

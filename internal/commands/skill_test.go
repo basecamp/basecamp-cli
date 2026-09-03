@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestSkillInstallIdempotent(t *testing.T) {
 	}
 }
 
-func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
+func TestSkillInstallPreservesNonEmptyUnmanagedClaudeDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	// ~/.claude dir exists so DetectClaude() triggers symlink path
@@ -95,9 +96,7 @@ func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pre-create a non-empty directory where the symlink would go.
-	// os.Remove can't remove non-empty dirs, so symlink creation will fail,
-	// triggering the copy fallback.
+	// Pre-create a non-empty, unmarked directory where the symlink would go.
 	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
 	if err := os.MkdirAll(symlinkPath, 0o755); err != nil {
 		t.Fatal(err)
@@ -112,25 +111,105 @@ func TestSkillInstallFallbackOnNonEmptyDir(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	err := cmd.RunE(cmd, nil)
-	if err != nil {
-		t.Fatalf("RunE() error = %v (fallback should have handled it)", err)
-	}
+	require.Error(t, err)
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	data, readErr := os.ReadFile(filepath.Join(symlinkPath, "blocker.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "x", string(data))
+	_, statErr := os.Stat(filepath.Join(symlinkPath, "SKILL.md"))
+	assert.True(t, os.IsNotExist(statErr), "unmanaged directory must not be claimed or overwritten")
+}
 
-	// Verify SKILL.md was copied (not symlinked)
-	copied, err := os.ReadFile(filepath.Join(symlinkPath, "SKILL.md"))
-	if err != nil {
-		t.Fatal("SKILL.md not found in fallback copy location")
-	}
-	embedded, _ := skills.FS.ReadFile("basecamp/SKILL.md")
-	if string(copied) != string(embedded) {
-		t.Error("fallback copy content does not match embedded")
-	}
+func TestClaimSkillDirRejectsPopulatedUnmarkedPredefinedDestination(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine"), 0o644))
 
-	// Output should mention fallback (via stdout since no app context)
-	output := buf.String()
-	if output == "" {
-		t.Error("expected fallback output, got empty")
-	}
+	err := claimSkillDir(dir)
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	_, statErr := os.Stat(filepath.Join(dir, ownershipMarkerFile))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestClaimSkillDirRejectsEmptyUnmarkedPredefinedDestination(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
+	err := claimSkillDir(dir)
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+}
+
+func TestClaimSkillDirAcceptsMarkerlessManagedPayload(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), embedded, 0o644))
+
+	require.NoError(t, claimSkillDir(dir))
+}
+
+func TestClaimPredefinedSkillDirAcceptsManagedCanonicalLinkOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	canonical := filepath.Join(home, ".agents", "skills", "basecamp")
+
+	managedLink := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.Symlink(canonical, managedLink))
+	require.NoError(t, claimPredefinedSkillDir(managedLink))
+
+	unrelated := t.TempDir()
+	unrelatedLink := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.Symlink(unrelated, unrelatedLink))
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, claimPredefinedSkillDir(unrelatedLink), &unmanaged)
+}
+
+func TestWizardSkillLocationsUsesClaudeConfigDir(t *testing.T) {
+	custom := filepath.Join(t.TempDir(), "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", custom)
+
+	locations, err := wizardSkillLocations()
+	require.NoError(t, err)
+	index := slices.IndexFunc(locations, func(location skillLocation) bool {
+		return location.Name == "Claude Code (Global)"
+	})
+	require.NotEqual(t, -1, index)
+	assert.Equal(t, filepath.Join(custom, "skills", "basecamp", skillFilename), locations[index].Path)
+}
+
+func TestLinkSkillToClaudeRefreshesManagedCopyWithUserFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	dir := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ownershipMarkerFile), []byte("managed"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep"), 0o644))
+
+	_, notice, err := linkSkillToClaude()
+	require.NoError(t, err)
+	assert.Contains(t, notice, "copied files instead")
+	embedded, readErr := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, readErr)
+	got, readErr := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, readErr)
+	assert.Equal(t, embedded, got)
+	notes, readErr := os.ReadFile(filepath.Join(dir, "notes.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep", string(notes))
 }
 
 func TestSkillInstallOutputKeys(t *testing.T) {
@@ -182,11 +261,19 @@ func TestCopySkillFiles(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "dest")
 
-	// Create test files in source (flat — no subdirs)
-	if err := os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("skill content"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, skillFilename), []byte("skill content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, ownershipMarkerFile), []byte("managed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "extra.txt"), []byte("extra"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "extra.txt"), []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +281,7 @@ func TestCopySkillFiles(t *testing.T) {
 		t.Fatalf("copySkillFiles() error = %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
+	got, err := os.ReadFile(filepath.Join(dst, skillFilename))
 	if err != nil {
 		t.Fatalf("reading SKILL.md: %v", err)
 	}
@@ -205,25 +292,48 @@ func TestCopySkillFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading extra.txt: %v", err)
 	}
-	if string(got) != "extra" {
-		t.Errorf("extra.txt = %q, want %q", got, "extra")
+	if string(got) != "keep" {
+		t.Errorf("extra.txt = %q, want preserved user content", got)
 	}
 }
 
-func TestCopySkillFilesRejectsSubdirs(t *testing.T) {
+func TestWriteWizardSkillRejectsSymlinkAtPredefinedDestination(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "target")
+	require.NoError(t, os.WriteFile(target, []byte("keep"), 0o644))
+	link := filepath.Join(t.TempDir(), skillFilename)
+	require.NoError(t, os.Symlink(target, link))
+
+	err := writeWizardSkill(link, []byte("replacement"), true)
+	require.Error(t, err)
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep", string(got))
+}
+
+func TestCopySkillFilesRejectsNonRegularManagedDestination(t *testing.T) {
 	src := t.TempDir()
 	dst := filepath.Join(t.TempDir(), "dest")
 
-	os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("content"), 0o644)
-	os.MkdirAll(filepath.Join(src, "subdir"), 0o755)
+	require.NoError(t, os.WriteFile(filepath.Join(src, skillFilename), []byte("content"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, ownershipMarkerFile), []byte("managed"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dst, skillFilename), 0o755))
 
 	err := copySkillFiles(src, dst)
-	if err == nil {
-		t.Fatal("expected error for subdirectory in source")
-	}
-	if !strings.Contains(err.Error(), "subdirectory") {
-		t.Errorf("error = %q, want subdirectory rejection message", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "was not written by basecamp-cli")
+}
+
+func TestCopySkillFilesAcceptsLegacyVersionOwnershipWithoutMarker(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "dest")
+	require.NoError(t, os.WriteFile(filepath.Join(src, skillFilename), []byte("content"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(src, installedVersionFile), []byte("0.9.1"), 0o644))
+
+	require.NoError(t, copySkillFiles(src, dst))
+	assert.FileExists(t, filepath.Join(dst, skillFilename))
+	assert.FileExists(t, filepath.Join(dst, installedVersionFile))
+	_, err := os.Stat(filepath.Join(dst, ownershipMarkerFile))
+	assert.True(t, os.IsNotExist(err))
 }
 
 // Pin the literals rather than deriving them, so a test can't mirror a typo the
@@ -272,11 +382,13 @@ func TestRefreshAllInstalledSkills_LegacyOpenCodePath(t *testing.T) {
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(baseline, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	// Singular — what the wizard wrote before #624.
 	legacy := filepath.Join(home, ".config", "opencode", "skill", "basecamp")
 	require.NoError(t, os.MkdirAll(legacy, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	require.True(t, refreshAllInstalledSkills())
 
@@ -541,6 +653,406 @@ func TestRefreshSkillsIfVersionChanged_NoSentinelUpdateOnFailure(t *testing.T) {
 	assert.Equal(t, "2.0.0", string(sentinel), "sentinel should remain unchanged on failure")
 }
 
+func TestRefreshSkillsIfVersionChangedRetriesInvalidClaudeConfig(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative/invalid")
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	sentinelDir := filepath.Join(configDir, "basecamp")
+	require.NoError(t, os.MkdirAll(sentinelDir, 0o755))
+	sentinel := filepath.Join(sentinelDir, ".last-run-version")
+	require.NoError(t, os.WriteFile(sentinel, []byte("2.0.0"), 0o644))
+
+	assert.False(t, RefreshSkillsIfVersionChanged())
+	got, err := os.ReadFile(sentinel)
+	require.NoError(t, err)
+	assert.Equal(t, "2.0.0", string(got))
+}
+
+func TestRefreshSkillsIfVersionChangedAdvancesSentinelForUnmanagedBaseline(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), []byte("user"), 0o644))
+
+	assert.False(t, RefreshSkillsIfVersionChanged())
+	sentinel := filepath.Join(configDir, "basecamp", ".last-run-version")
+	got, err := os.ReadFile(sentinel)
+	require.NoError(t, err)
+	assert.Equal(t, "3.0.0", string(got))
+	data, err := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, "user", string(data))
+}
+
+func TestRefreshSkillsIfVersionChangedRetriesManagedLocationFailureWithoutManagedBaseline(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, skillFilename), []byte("user"), 0o644))
+
+	claudeDir := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, skillFilename), embedded, 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(claudeDir, ownershipMarkerFile), 0o755))
+
+	assert.False(t, RefreshSkillsIfVersionChanged())
+	_, err = os.Stat(filepath.Join(configDir, "basecamp", ".last-run-version"))
+	assert.True(t, os.IsNotExist(err), "a failed managed location must keep the sentinel stale")
+}
+
+func TestRefreshSkillsIfVersionChangedRetriesFailedClaudeLinkRepair(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	installExecutableStub(t, "claude")
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+
+	link := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	require.NoError(t, os.Symlink(claudeSkillLinkTarget, link))
+	opencode := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(opencode, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(opencode, skillFilename), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(opencode, ownershipMarkerFile), []byte("managed"), 0o644))
+
+	assert.False(t, RefreshSkillsIfVersionChanged(), "a partial refresh must not report success")
+	_, err := os.Stat(filepath.Join(configDir, "basecamp", ".last-run-version"))
+	assert.True(t, os.IsNotExist(err), "a failed managed link repair must keep the sentinel stale")
+}
+
+func TestRefreshSkillsIfVersionChangedAcceptsManagedClaudeLink(t *testing.T) {
+	home := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	origVersion := version.Version
+	version.Version = "3.0.0"
+	defer func() { version.Version = origVersion }()
+
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	_, _, err = linkSkillToClaude()
+	require.NoError(t, err)
+
+	assert.True(t, RefreshSkillsIfVersionChanged())
+	sentinel := filepath.Join(configDir, "basecamp", ".last-run-version")
+	got, err := os.ReadFile(sentinel)
+	require.NoError(t, err)
+	assert.Equal(t, "3.0.0", string(got))
+}
+
+func TestRefreshAllInstalledSkillsRejectsSymlinkedSkillDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	target := filepath.Join(t.TempDir(), "target")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, skillFilename), []byte("outside"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(target, ownershipMarkerFile), []byte("managed"), 0o644))
+	link := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	require.NoError(t, os.Symlink(target, link))
+
+	assert.False(t, refreshAllInstalledSkills())
+	got, err := os.ReadFile(filepath.Join(target, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, "outside", string(got))
+	linkInfo, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, linkInfo.Mode()&os.ModeSymlink)
+	linkTarget, err := os.Readlink(link)
+	require.NoError(t, err)
+	assert.Equal(t, target, linkTarget)
+}
+
+func TestRefreshAllInstalledSkillsRejectsSymlinkedSkillAncestor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	externalConfig := t.TempDir()
+	target := filepath.Join(externalConfig, "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, skillFilename), []byte("outside"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(target, ownershipMarkerFile), []byte("managed"), 0o644))
+	require.NoError(t, os.Symlink(externalConfig, filepath.Join(home, ".config")))
+
+	assert.False(t, refreshAllInstalledSkills())
+	got, err := os.ReadFile(filepath.Join(target, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, "outside", string(got))
+}
+
+func TestLinkSkillToClaudeUsesResolvedConfigDirectoryForRelativeTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	realConfig := filepath.Join(t.TempDir(), "claude")
+	require.NoError(t, os.MkdirAll(realConfig, 0o755))
+	configAlias := filepath.Join(home, "claude-alias")
+	require.NoError(t, os.Symlink(realConfig, configAlias))
+	t.Setenv("CLAUDE_CONFIG_DIR", configAlias)
+
+	link, _, err := linkSkillToClaude()
+	require.NoError(t, err)
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+	got, err := os.ReadFile(filepath.Join(link, skillFilename))
+	require.NoError(t, err)
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	assert.Equal(t, embedded, got)
+}
+
+func TestLinkSkillToClaudeAcceptsLegacyTargetWhenAgentsDirectoryIsSymlinked(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	realAgents := filepath.Join(t.TempDir(), "agents")
+	baseline := filepath.Join(realAgents, "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(baseline, 0o755))
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, skillFilename), embedded, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, ownershipMarkerFile), []byte("managed"), 0o644))
+	require.NoError(t, os.Symlink(realAgents, filepath.Join(home, ".agents")))
+
+	link := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o755))
+	require.NoError(t, os.Symlink(claudeSkillLinkTarget, link))
+
+	got, _, err := linkSkillToClaude()
+	require.NoError(t, err)
+	assert.Equal(t, link, got)
+	data, err := os.ReadFile(filepath.Join(link, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, embedded, data)
+}
+
+func TestInstallSkillFilesRejectsSymlinkedParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	external := t.TempDir()
+	require.NoError(t, os.Symlink(external, filepath.Join(home, ".agents")))
+
+	_, err := installSkillFiles()
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	_, statErr := os.Lstat(filepath.Join(external, "skills", "basecamp", skillFilename))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestClaimPredefinedSkillDirRejectsProjectRelativeSymlinkedParent(t *testing.T) {
+	project := t.TempDir()
+	t.Chdir(project)
+	external := t.TempDir()
+	require.NoError(t, os.Symlink(external, filepath.Join(project, ".opencode")))
+
+	_, err := claimPredefinedSkillDirForWrite(filepath.Join(".opencode", "skills", "basecamp"))
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	_, statErr := os.Lstat(filepath.Join(external, "skills", "basecamp"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestLinkSkillToClaudeRejectsSymlinkedSkillsParent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+	external := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude"), 0o755))
+	require.NoError(t, os.Symlink(external, filepath.Join(home, ".claude", "skills")))
+
+	_, _, err = linkSkillToClaude()
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	_, statErr := os.Lstat(filepath.Join(external, "basecamp"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestLinkSkillToClaudeRejectsSymlinkedBaselineDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(target, skillFilename), []byte("skill"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(target, ownershipMarkerFile), []byte("managed"), 0o644))
+	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Dir(baseline), 0o755))
+	require.NoError(t, os.Symlink(target, baseline))
+
+	_, _, err := linkSkillToClaude()
+	var unmanaged *unmanagedSkillDirError
+	require.ErrorAs(t, err, &unmanaged)
+	_, statErr := os.Lstat(filepath.Join(home, ".claude", "skills", "basecamp"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestRefreshManagedSkillCountsNonRegularSkillAsFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	dir := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, skillFilename), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ownershipMarkerFile), []byte("managed"), 0o644))
+
+	outcome := refreshInstalledSkills()
+	assert.Equal(t, 0, outcome.updated)
+	assert.Equal(t, 1, outcome.failed)
+}
+
+func TestRefreshManagedSkillRepairsMissingSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	dir := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ownershipMarkerFile), []byte("managed"), 0o644))
+
+	outcome := refreshInstalledSkills()
+	assert.Equal(t, 1, outcome.updated)
+	assert.Equal(t, 0, outcome.failed)
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, embedded, got)
+}
+
+func TestRefreshManagedSkillCountsMalformedMarkerWithMissingSkillAsFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	dir := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ownershipMarkerFile), 0o755))
+
+	outcome := refreshInstalledSkills()
+	assert.Equal(t, 0, outcome.updated)
+	assert.Equal(t, 1, outcome.failed)
+}
+
+func TestRefreshAllInstalledSkillsClaimsVerifiedMarkerlessWizardPayload(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+
+	dir := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), embedded, 0o644))
+
+	assert.True(t, refreshAllInstalledSkills())
+	assert.True(t, regularFile(filepath.Join(dir, ownershipMarkerFile)))
+}
+
+func TestRefreshAllInstalledSkillsDoesNotClaimMarkerlessDirectoryWithUserFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	dir := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), embedded, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine"), 0o644))
+
+	assert.False(t, refreshAllInstalledSkills())
+	_, statErr := os.Lstat(filepath.Join(dir, ownershipMarkerFile))
+	assert.True(t, os.IsNotExist(statErr))
+	data, err := os.ReadFile(filepath.Join(dir, "notes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "mine", string(data))
+}
+
+func TestRefreshAllInstalledSkillsUsesConfiguredClaudeCopy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	custom := filepath.Join(home, "custom-claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", custom)
+
+	dir := filepath.Join(custom, "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ownershipMarkerFile), []byte("managed"), 0o644))
+
+	assert.True(t, refreshAllInstalledSkills())
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, embedded, got)
+}
+
+func TestRefreshAllInstalledSkillsSkipsRelativeCodexHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", home)
+	project := t.TempDir()
+	t.Chdir(project)
+	t.Setenv("CODEX_HOME", ".codex")
+
+	index := slices.IndexFunc(skillLocations, func(location skillLocation) bool {
+		return location.Name == "Codex (Global)"
+	})
+	require.NotEqual(t, -1, index)
+	original := skillLocations[index].Path
+	skillLocations[index].Path = codexGlobalSkillPath()
+	t.Cleanup(func() { skillLocations[index].Path = original })
+
+	dir := filepath.Join(project, ".codex", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), []byte("project-owned"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ownershipMarkerFile), []byte("managed"), 0o644))
+
+	assert.False(t, refreshAllInstalledSkills())
+	data, err := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, "project-owned", string(data))
+}
+
 func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -557,14 +1069,17 @@ func TestRefreshAllInstalledSkills_MultipleLocations(t *testing.T) {
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(baseline, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	claudeSkill := filepath.Join(home, ".claude", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(claudeSkill, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(claudeSkill, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeSkill, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	opencode := filepath.Join(home, ".config", "opencode", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(opencode, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(opencode, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(opencode, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	refreshed := refreshAllInstalledSkills()
 	assert.True(t, refreshed)
@@ -597,6 +1112,7 @@ func TestRefreshAllInstalledSkills_SkipsAbsentLocations(t *testing.T) {
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(baseline, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	refreshed := refreshAllInstalledSkills()
 	assert.True(t, refreshed)
@@ -631,6 +1147,7 @@ func TestRefreshAllInstalledSkills_SkipsProjectRelativePaths(t *testing.T) {
 	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
 	require.NoError(t, os.MkdirAll(baseline, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseline, installedVersionFile), []byte("4.0.0"), 0o644))
 
 	refreshAllInstalledSkills()
 
@@ -640,31 +1157,47 @@ func TestRefreshAllInstalledSkills_SkipsProjectRelativePaths(t *testing.T) {
 	assert.Equal(t, "project", string(got), "project-relative skill should not be refreshed")
 }
 
-func TestRepairClaudeSkillLink_BrokenSymlink(t *testing.T) {
+func TestRefreshAllInstalledSkillsPreservesUnmanagedSkill(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".agents", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	skillPath := filepath.Join(dir, skillFilename)
+	require.NoError(t, os.WriteFile(skillPath, []byte("user-authored"), 0o644))
+
+	assert.False(t, refreshAllInstalledSkills())
+	data, err := os.ReadFile(skillPath)
+	require.NoError(t, err)
+	assert.Equal(t, "user-authored", string(data))
+	_, err = os.Stat(filepath.Join(dir, ownershipMarkerFile))
+	assert.True(t, os.IsNotExist(err), "refresh must not claim an unmanaged directory")
+}
+
+func TestRepairClaudeSkillLink_PreservesUnmanagedBrokenSymlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	// Ensure ~/.claude/skills exists so the symlink can be placed there
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755))
 
-	// Create baseline skill
-	baseline := filepath.Join(home, ".agents", "skills", "basecamp")
-	require.NoError(t, os.MkdirAll(baseline, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(baseline, "SKILL.md"), []byte("skill"), 0o644))
+	_, err := installSkillFiles()
+	require.NoError(t, err)
 
 	// Create a broken symlink
 	symlinkPath := filepath.Join(home, ".claude", "skills", "basecamp")
 	require.NoError(t, os.Symlink("/nonexistent/target", symlinkPath))
 
 	// Verify it's broken
-	_, err := os.Stat(symlinkPath)
+	_, err = os.Stat(symlinkPath)
 	require.True(t, os.IsNotExist(err), "symlink should be broken")
 
-	repairClaudeSkillLink()
+	require.NoError(t, repairClaudeSkillLink())
 
-	// Symlink should now be healthy
-	_, err = os.Stat(filepath.Join(symlinkPath, "SKILL.md"))
-	assert.NoError(t, err, "skill should be reachable through repaired symlink")
+	// An arbitrary target is user state, even when broken.
+	target, readErr := os.Readlink(symlinkPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "/nonexistent/target", target)
 }
 
 func TestRepairClaudeSkillLink_HealthySymlink(t *testing.T) {
@@ -683,7 +1216,7 @@ func TestRepairClaudeSkillLink_HealthySymlink(t *testing.T) {
 	// Read the symlink target before repair
 	targetBefore, _ := os.Readlink(filepath.Join(symlinkDir, "basecamp"))
 
-	repairClaudeSkillLink()
+	require.NoError(t, repairClaudeSkillLink())
 
 	// Target should be unchanged (no unnecessary repair)
 	targetAfter, _ := os.Readlink(filepath.Join(symlinkDir, "basecamp"))
