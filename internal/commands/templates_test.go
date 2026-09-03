@@ -114,6 +114,8 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 		},
 	)
 	buf := captureTemplateOutput(app)
+	app.Config.ActiveProfile = "work profile"
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "Test Project")
 	require.NoError(t, err)
@@ -129,7 +131,7 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "Started template copy #5 (pending)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy-status 5", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates copy-status 5 --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
@@ -207,7 +209,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 		},
 	)
 
-	app.Config.ActiveProfile = "work"
+	app.Config.ActiveProfile = "work profile; echo unsafe"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "123")
@@ -218,7 +220,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	assert.Equal(t, output.CodeValidation, outputErr.Code)
 	assert.Contains(t, outputErr.Message, "Victor (#4)")
 	assert.Contains(t, outputErr.Message, "Georgia (#7)")
-	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --todoset 9 --profile work --account 99999 --confirm-adding-people")
+	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --todoset 9 --profile 'work profile; echo unsafe' --account 99999 --confirm-adding-people")
 
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	assert.True(t, errors.As(err, &confirmationErr), "typed SDK error should remain available")
@@ -251,6 +253,8 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 				body:   test.body,
 			})
 			buf := captureTemplateOutput(app)
+			app.Config.ActiveProfile = "work profile"
+			app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 			err := executeRecordingCommand(NewTemplatesCmd(), app, "copy-status", "5")
 			require.NoError(t, err)
@@ -261,7 +265,7 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 			envelope := decodeTemplateEnvelope(t, buf)
 			assert.Equal(t, test.summary, envelope.Summary)
 			require.Len(t, envelope.Breadcrumbs, 1)
-			assert.Equal(t, test.breadcrumb, envelope.Breadcrumbs[0].Cmd)
+			assert.Equal(t, test.breadcrumb+" --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 		})
 	}
 }

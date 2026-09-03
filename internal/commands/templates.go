@@ -206,6 +206,11 @@ when --confirm-adding-people is explicitly provided.`,
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
 
 			resolvedProjectID, err := resolveProjectID(cmd, app, project)
 			if err != nil {
@@ -231,14 +236,7 @@ when --confirm-adding-people is explicitly provided.`,
 				AddingPeopleConfirmed: confirmAddingPeople,
 			})
 			if err != nil {
-				return templateCopyError(
-					err,
-					templateID,
-					resolvedProjectID,
-					resolvedTodosetID,
-					app.Config.ActiveProfile,
-					replyAccountArg(persistentAccount, app.Config.AccountID),
-				)
+				return templateCopyError(err, templateID, resolvedProjectID, resolvedTodosetID, contextArgs)
 			}
 
 			return app.OK(templateCopy,
@@ -246,7 +244,7 @@ when --confirm-adding-people is explicitly provided.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "status",
-						Cmd:         fmt.Sprintf("basecamp templates copy-status %d", templateCopy.ID),
+						Cmd:         fmt.Sprintf("basecamp templates copy-status %d%s", templateCopy.ID, contextArgs),
 						Description: "Check copy status",
 					},
 				),
@@ -288,7 +286,15 @@ func validateTemplateCopyTodoset(cmd *cobra.Command, app *appctx.App, todosetID,
 	return output.ErrUsage(fmt.Sprintf("--todoset %s is not a To-dos tool in project %s", todosetID, projectID))
 }
 
-func templateCopyError(err error, templateID int64, projectID, todosetID, profile, accountArg string) error {
+func templateCommandContextArgs(profile string, persistentAccount bool, accountID string) string {
+	args := ""
+	if profile != "" {
+		args += " --profile " + shellQuote(profile)
+	}
+	return args + replyAccountArg(persistentAccount, accountID)
+}
+
+func templateCopyError(err error, templateID int64, projectID, todosetID, contextArgs string) error {
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	if !errors.As(err, &confirmationErr) {
 		return convertSDKError(err)
@@ -299,12 +305,7 @@ func templateCopyError(err error, templateID int64, projectID, todosetID, profil
 		people = append(people, fmt.Sprintf("%s (#%d)", person.Name, person.ID))
 	}
 
-	rerun := fmt.Sprintf("basecamp templates copy %d --in %s --todoset %s", templateID, projectID, todosetID)
-	if profile != "" {
-		rerun += " --profile " + profile
-	}
-	rerun += accountArg
-	rerun += " --confirm-adding-people"
+	rerun := fmt.Sprintf("basecamp templates copy %d --in %s --todoset %s%s --confirm-adding-people", templateID, projectID, todosetID, contextArgs)
 
 	converted := output.AsError(err)
 	return &output.Error{
@@ -330,16 +331,22 @@ func newTemplatesCopyStatusCmd() *cobra.Command {
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
 
 			templateCopy, err := app.Account().Templates().GetLibraryCopy(cmd.Context(), copyID)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			summary, breadcrumbs := templateCopyStatusOutput(templateCopy)
+			summary, breadcrumbs := templateCopyStatusOutput(templateCopy, contextArgs)
 			return app.OK(templateCopy,
 				output.WithSummary(summary),
 				output.WithBreadcrumbs(breadcrumbs...),
@@ -348,7 +355,7 @@ func newTemplatesCopyStatusCmd() *cobra.Command {
 	}
 }
 
-func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy) (string, []output.Breadcrumb) {
+func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy, contextArgs string) (string, []output.Breadcrumb) {
 	switch templateCopy.Status {
 	case "completed":
 		if templateCopy.DestinationTodolist != nil {
@@ -356,7 +363,7 @@ func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy) (strin
 			breadcrumbs := []output.Breadcrumb{
 				{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("basecamp todolists show %d --in %d", list.ID, list.Bucket.ID),
+					Cmd:         fmt.Sprintf("basecamp todolists show %d --in %d%s", list.ID, list.Bucket.ID, contextArgs),
 					Description: "View copied to-do list",
 				},
 			}
@@ -367,7 +374,7 @@ func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy) (strin
 		return fmt.Sprintf("Template copy #%d failed", templateCopy.ID), []output.Breadcrumb{
 			{
 				Action:      "library",
-				Cmd:         "basecamp templates library",
+				Cmd:         "basecamp templates library" + contextArgs,
 				Description: "List available templates",
 			},
 		}
@@ -375,7 +382,7 @@ func templateCopyStatusOutput(templateCopy *basecamp.TemplateLibraryCopy) (strin
 		return fmt.Sprintf("Template copy #%d is %s", templateCopy.ID, templateCopy.Status), []output.Breadcrumb{
 			{
 				Action:      "poll",
-				Cmd:         fmt.Sprintf("basecamp templates copy-status %d", templateCopy.ID),
+				Cmd:         fmt.Sprintf("basecamp templates copy-status %d%s", templateCopy.ID, contextArgs),
 				Description: "Check again",
 			},
 		}
