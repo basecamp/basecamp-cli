@@ -305,6 +305,17 @@
         ]
       }
     },
+    "CreateTemplateLibraryCopy": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "CreateTimesheetEntry": {
       "retry": {
         "max": 3,
@@ -1629,6 +1640,30 @@
       }
     },
     "GetTemplate": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTemplateLibrary": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetTemplateLibraryCopy": {
       "readonly": true,
       "retry": {
         "max": 3,
@@ -3299,6 +3334,10 @@
     ],
     "PersonCompany": [
       "$.name"
+    ],
+    "TemplateLibraryConfirmationPerson": [
+      "$.name",
+      "$.avatar_url"
     ],
     "UpcomingSchedulePerson": [
       "$.name",

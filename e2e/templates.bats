@@ -131,6 +131,33 @@ load test_helper
 }
 
 
+# Template library copy errors
+
+@test "templates copy without template id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates copy
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates copy-status without copy id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates copy-status
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates copy --confirm-adding-people is accepted" {
+  run basecamp templates copy --help
+  assert_success
+  assert_output_contains "--confirm-adding-people"
+}
+
+
 # Flag parsing
 
 @test "templates list --status without value shows error" {
@@ -163,6 +190,8 @@ load test_helper
   assert_output_contains "basecamp templates"
   assert_output_contains "construct"
   assert_output_contains "construction"
+  assert_output_contains "library"
+  assert_output_contains "copy-status"
 }
 
 

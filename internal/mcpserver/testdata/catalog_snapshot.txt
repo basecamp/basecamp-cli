@@ -226,6 +226,7 @@ ACTIONS (RO = read-only):
 - create_project_from_template: Create a project from a template (asynchronous)
 - create_question: Create a new question in a questionnaire
 - create_template: Create a new template
+- create_template_library_copy: Start copying a to-do list template into a project
 - create_tool: Create a tool in a project dock
 - create_webhook: Create a new webhook for a project
 - delete_lineup_marker: Delete a lineup marker
@@ -242,6 +243,8 @@ ACTIONS (RO = read-only):
 - get_questionnaire (RO): Get a questionnaire (automatic check-ins container) by id
 - get_search_metadata (RO): Get search metadata (available filter options)
 - get_template (RO): Get a single template by id
+- get_template_library (RO): Get the account's to-do list template library
+- get_template_library_copy (RO): Get the current status of a to-do list template copy
 - get_tool (RO): Get a dock tool by id
 - get_webhook (RO): Get a single webhook by id
 - list_answers (RO, paginated): List all answers for a question
