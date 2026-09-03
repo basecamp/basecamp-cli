@@ -357,10 +357,10 @@ type LoginOptions struct {
 	Local bool
 
 	// LoginHint names the account (email address) the user should sign in
-	// as. It is meant to steer the device-flow sign-in page and never
-	// authenticates on its own; this build announces it to the user rather
-	// than sending it (see announceLoginHint), and Launchpad's
-	// authorization-code flow ignores it.
+	// as. The device flow sends it as Basecamp's login_hint extension to the
+	// device authorization request, where it steers the sign-in page and
+	// never authenticates on its own; Launchpad's authorization-code flow
+	// ignores it.
 	LoginHint string
 
 	// Verify, when set, is called with the freshly issued access token and
@@ -648,13 +648,15 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 	if err != nil {
 		return nil, err
 	}
-	devOpts := make([]oauth.DeviceOption, 0, 2+len(opts.deviceOptions))
+	devOpts := make([]oauth.DeviceOption, 0, 3+len(opts.deviceOptions))
 	devOpts = append(devOpts,
 		oauth.WithDeviceHTTPClient(deviceClient),
 		oauth.WithDeviceScope(requestedScope),
 	)
+	if opts.LoginHint != "" {
+		devOpts = append(devOpts, oauth.WithDeviceLoginHint(opts.LoginHint))
+	}
 	devOpts = append(devOpts, opts.deviceOptions...)
-	announceLoginHint(opts)
 
 	// The SDK display hook can't return an error, and the SDK proceeds into
 	// polling regardless. On malformed display data the callback records
@@ -752,20 +754,6 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 	}
 
 	return &LoginResult{OAuthType: oauthTypeBC5, Scope: effectiveScope}, nil
-}
-
-// announceLoginHint tells the user which account LoginOptions.LoginHint
-// named. The hint belongs on the wire as Basecamp's login_hint extension to
-// the device authorization request, but the pinned basecamp-sdk has no
-// option for it yet (basecamp/basecamp-sdk#841 adds WithDeviceLoginHint);
-// once that bump lands this becomes an oauth.WithDeviceLoginHint entry in
-// devOpts. The hint is flag input headed for a terminal, so it is reduced
-// to one line first.
-func announceLoginHint(opts *LoginOptions) {
-	if opts.LoginHint == "" {
-		return
-	}
-	opts.log("Sign in as " + richtext.SanitizeSingleLine(opts.LoginHint) + " when the browser asks (this build cannot pass --login-hint to the server yet).")
 }
 
 // validVerificationURL validates a server-supplied verification URI with the

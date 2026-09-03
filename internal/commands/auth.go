@@ -274,8 +274,8 @@ Import a personal access token from stdin (never pass it as an argument):
 and that it can reach the profile's account — before storing it under the
 named profile, creating the profile when --account is given.
 
---login-hint names the account to sign in as on the device-flow approval page.
-This build tells you the hint instead of sending it to the server.`,
+--login-hint names the account to sign in as on the device-flow approval page
+(ignored by Launchpad).`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		// No positional arguments, so a token pasted after --with-token is
 		// refused rather than silently ignored while it sits in shell history.
@@ -371,7 +371,7 @@ This build tells you the hint instead of sending it to the server.`,
 	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin instead of running OAuth (requires --profile)")
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
-	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as (device flow only; announced, not yet sent; ignored by Launchpad)")
+	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as on the device-flow approval page (ignored by Launchpad)")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 	for _, flag := range []string{"device-code", "remote", "local", "no-browser", "login-hint"} {

@@ -1067,23 +1067,37 @@ func TestDiscoverOAuth_PinnedIssuerIsCheckedLikeAnEndpoint(t *testing.T) {
 	}
 }
 
-// TestLoginDevice_LoginHintAnnounced: until the SDK bump that carries
-// login_hint on the wire, the hint is told to the user rather than sent.
-func TestLoginDevice_LoginHintAnnounced(t *testing.T) {
+// TestLoginDevice_LoginHintIsSent: the hint rides the device authorization
+// request as login_hint, and is omitted when not given.
+func TestLoginDevice_LoginHintIsSent(t *testing.T) {
 	as := startDeviceAS(t)
 	resource := startResourceServer(t, as.srv.URL)
 	m := newDeviceTestManager(t, resource.URL)
 
-	cl := &collectLogger{}
 	_, err := m.Login(context.Background(), LoginOptions{
 		Remote:        true,
 		LoginHint:     "bot@example.com",
-		Logger:        cl.log,
+		Logger:        func(string) {},
 		deviceOptions: []oauth.DeviceOption{instantSleep()},
 	})
 	require.NoError(t, err)
-	assert.Contains(t, cl.joined(), "Sign in as bot@example.com")
-	require.Len(t, as.deviceCalls(), 1)
+	calls := as.deviceCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "bot@example.com", calls[0].Get("login_hint"))
+
+	as2 := startDeviceAS(t)
+	resource2 := startResourceServer(t, as2.srv.URL)
+	m2 := newDeviceTestManager(t, resource2.URL)
+	_, err = m2.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        func(string) {},
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+	})
+	require.NoError(t, err)
+	calls = as2.deviceCalls()
+	require.Len(t, calls, 1)
+	_, present := calls[0]["login_hint"]
+	assert.False(t, present, "no hint, no parameter")
 }
 
 func TestImportToken(t *testing.T) {
@@ -1164,25 +1178,6 @@ func TestLoginDevice_VerifyRunsBeforeStore(t *testing.T) {
 	creds, err := m.store.Load(credKey)
 	require.NoError(t, err)
 	assert.Equal(t, "dev-tok", creds.AccessToken)
-}
-
-func TestLoginDevice_LoginHintIsSanitizedForTheTerminal(t *testing.T) {
-	as := startDeviceAS(t)
-	resource := startResourceServer(t, as.srv.URL)
-	m := newDeviceTestManager(t, resource.URL)
-
-	cl := &collectLogger{}
-	_, err := m.Login(context.Background(), LoginOptions{
-		Remote:        true,
-		LoginHint:     "bot@example.com\x1b]8;;https://evil.example\x07\r\nEvil",
-		Logger:        cl.log,
-		deviceOptions: []oauth.DeviceOption{instantSleep()},
-	})
-	require.NoError(t, err)
-	logs := cl.joined()
-	assert.Contains(t, logs, "Sign in as bot@example.com Evil")
-	assert.NotContains(t, logs, "\x1b")
-	assert.NotContains(t, logs, "evil.example")
 }
 
 func TestDiscoverOAuth_PinnedIssuerIsSanitizedForTheTerminal(t *testing.T) {

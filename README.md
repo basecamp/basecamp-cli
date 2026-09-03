@@ -198,8 +198,8 @@ basecamp auth token              # Print token for scripts
 new credential is checked before it is stored, and on a mismatch nothing is
 written (a profile's previous credential is untouched) and the command exits
 non-zero. `--login-hint <email>` names the account to sign in as on the
-device-flow approval page; this build tells you the hint rather than sending
-it to the server, so the approval page is not preselected.
+device-flow approval page (sent as `login_hint`; it steers the sign-in page and
+never authenticates on its own; ignored by Launchpad).
 
 ### Personal access tokens
 
