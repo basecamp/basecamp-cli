@@ -7,12 +7,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// ReadingsWatcher opens the stream that says the sidebar's notifications changed.
-// Basecamp pushes those over ActionCable to the channel the web sidebar at
-// /<account>/my/sidebar/inbox subscribes to, and this is the seam a client for
-// it plugs into.
+// ReadingsWatcher opens the stream that says the sidebar's notifications
+// changed. Basecamp pushes those over Action Cable to UnreadsChannel, which the
+// web sidebar subscribes to and an authenticated OAuth client may now join too.
+// This is the seam a client for it plugs into; internal/cable dials it, and
+// `basecamp watch` follows it from the command line.
 //
-// Nothing serves that stream yet. Until something does, the workspace runs with
+// Nothing wires one in here yet. Until something does, the workspace runs with
 // no watcher and the sidebar is the snapshot it was read as — which is why every
 // command here answers with nil rather than erroring on a missing watcher.
 //

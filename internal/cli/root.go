@@ -353,6 +353,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewNotesCmd())
 	cmd.AddCommand(commands.NewCalendarsCmd())
 	cmd.AddCommand(commands.NewNotificationsCmd())
+	cmd.AddCommand(commands.NewWatchCmd())
 	cmd.AddCommand(commands.NewTUICmd())
 	cmd.AddCommand(commands.NewImageProbeCmd())
 	cmd.AddCommand(commands.NewBonfireCmd())

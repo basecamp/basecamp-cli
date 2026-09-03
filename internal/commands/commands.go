@@ -104,6 +104,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "thread", "update", "trash", "archive", "restore"}},
 				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
 				{Name: "notifications", Category: "communication", Description: "View and manage notifications", Actions: []string{"list", "read", "bubbleups"}},
+				{Name: "watch", Category: "communication", Description: "Follow your notifications as they arrive"},
 			},
 		},
 		{

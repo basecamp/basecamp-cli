@@ -87,6 +87,8 @@ github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
+github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655 h1:zz0WUSEmjURj0T+soXuTtgX291nYouqa+UoyYY3Xxk8=
+github.com/basecamp/actioncable-go v0.0.0-20260824145920-822e6cf08655/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
 github.com/basecamp/basecamp-sdk/go v0.15.0 h1:Yxp3WM7rZ7PDcXrOTc4dI9EFOqwHojpqVJ/zbdXnoVg=
 github.com/basecamp/basecamp-sdk/go v0.15.0/go.mod h1:00mgcmi89PlnHnLJNwcJjwryo4W5bYJtA2FoqVgHP54=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d h1:jAzDrCCzDpIwhbFT1xVVs0z2xpXoDEkomHfKB2bUUp8=

@@ -57,6 +57,10 @@ load smoke_helper
   mark_out_of_scope "Terminal UI — interactive"
 }
 
+@test "watch is out of scope" {
+  mark_out_of_scope "Long-running Action Cable watch — covered by Go tests in internal/commands and internal/cable"
+}
+
 @test "bonfire is out of scope" {
   mark_out_of_scope "Experimental — split-pane TUI"
 }

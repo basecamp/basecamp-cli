@@ -134,7 +134,7 @@ Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule,
      or `--edit` where offered.
    - Trailing newlines are trimmed from stdin content, so `printf 'x\n' | ... -`
      posts `x` (this keeps `boost create -` inside its 16-rune limit).
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the seven list commands covered in item 7.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp watch` for notifications as they arrive, `basecamp gauges list` for account-wide gauges, and the seven list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
    Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected) or `--all` for everything. `--page N` fetches exactly one page, but only on the paginated listings.
    The two overdue variants — `basecamp todos list --all-projects --overdue` and `basecamp cards list --all-projects --overdue` — come from unpaginated endpoints. They accept `--limit` and `--all` but **reject `--page`**, so do not generate `--page` against them.
@@ -194,7 +194,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp watch`, `basecamp gauges list`.
 >
 > Seven list commands also list account-wide: `basecamp todos list --all-projects --json`, and likewise `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`.
 
@@ -260,6 +260,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Notifications | `basecamp notifications --json` |
 | Mark notification read | `basecamp notifications read <id> --json` |
 | All bubble-ups (BC5) | `basecamp notifications bubbleups --json` |
+| Wait for the next notification | `basecamp watch --exit-on-first --timeout 8h --json` |
+| Wait to be mentioned | `basecamp watch --types mention --exit-on-first --timeout 8h --json` |
 | Gauges (account-wide) | `basecamp gauges list --json` |
 | Gauge needles | `basecamp gauges needles --in <project> --json` |
 | Create needle | `basecamp gauges create --position 75 --color green --in <project> --json` |

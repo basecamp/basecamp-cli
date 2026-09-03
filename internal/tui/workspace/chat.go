@@ -73,12 +73,12 @@ type chatSaidMsg struct {
 // chatScreen is a project's chat: the transcript, oldest at the top, and a
 // composer under it.
 //
-// It does not update itself. Basecamp pushes new lines over ActionCable to a
-// channel our OAuth client is not yet trusted to join, so there is nothing to
-// listen to; `r` re-reads. When that trust arrives the stream is a doorbell —
-// ring, re-read the newest page — which is the same shape as ReadingsWatcher in
-// live.go. The HTML it carries is beside the point: what a client needs from it
-// is the news that something changed.
+// It does not update itself yet; `r` re-reads. Basecamp pushes new lines over
+// Action Cable to ChatChannel, which an authenticated OAuth client may now
+// join — see internal/cable, and `basecamp watch`, which follows the sidebar's
+// notifications the same way. The stream is a doorbell: ring, re-read the newest
+// page. The HTML it carries is beside the point — what a client needs from it is
+// the news that something changed.
 type chatScreen struct {
 	ctx  *Context
 	tool tool

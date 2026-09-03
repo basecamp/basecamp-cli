@@ -1161,6 +1161,7 @@ CMD basecamp vaults vaults create
 CMD basecamp vaults vaults list
 CMD basecamp vaults versions
 CMD basecamp version
+CMD basecamp watch
 CMD basecamp webhook
 CMD basecamp webhook create
 CMD basecamp webhook delete
@@ -17502,6 +17503,32 @@ FLAG basecamp version --stats type=bool
 FLAG basecamp version --styled type=bool
 FLAG basecamp version --todolist type=string
 FLAG basecamp version --verbose type=count
+FLAG basecamp watch --account type=string
+FLAG basecamp watch --agent type=bool
+FLAG basecamp watch --cache-dir type=string
+FLAG basecamp watch --count type=bool
+FLAG basecamp watch --exit-on-first type=bool
+FLAG basecamp watch --help type=bool
+FLAG basecamp watch --hints type=bool
+FLAG basecamp watch --ids-only type=bool
+FLAG basecamp watch --in type=string
+FLAG basecamp watch --jq type=string
+FLAG basecamp watch --json type=bool
+FLAG basecamp watch --markdown type=bool
+FLAG basecamp watch --md type=bool
+FLAG basecamp watch --no-hints type=bool
+FLAG basecamp watch --no-stats type=bool
+FLAG basecamp watch --profile type=string
+FLAG basecamp watch --project type=string
+FLAG basecamp watch --quiet type=bool
+FLAG basecamp watch --run-async type=string
+FLAG basecamp watch --run-sync type=string
+FLAG basecamp watch --stats type=bool
+FLAG basecamp watch --styled type=bool
+FLAG basecamp watch --timeout type=duration
+FLAG basecamp watch --todolist type=string
+FLAG basecamp watch --types type=stringSlice
+FLAG basecamp watch --verbose type=count
 FLAG basecamp webhook --account type=string
 FLAG basecamp webhook --agent type=bool
 FLAG basecamp webhook --cache-dir type=string
@@ -18449,6 +18476,7 @@ SUB basecamp vaults vaults create
 SUB basecamp vaults vaults list
 SUB basecamp vaults versions
 SUB basecamp version
+SUB basecamp watch
 SUB basecamp webhook
 SUB basecamp webhook create
 SUB basecamp webhook delete
