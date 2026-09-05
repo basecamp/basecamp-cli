@@ -156,9 +156,8 @@ func TestRunCodexSetupInteractiveExplainsNextSteps(t *testing.T) {
 
 	assert.Contains(t, output.String(), "Registering 37signals marketplace")
 	assert.Contains(t, output.String(), "Installing basecamp plugin")
-	// Codex lists untrusted hooks but does not run them until trusted, and
-	// an untrusted SessionStart is skipped — so the trust step must come
-	// before the new-thread step.
+	// Codex lists untrusted hooks but does not run them until trusted, so
+	// complete hook setup before starting the thread that loads the skills.
 	trustAt := strings.Index(output.String(), "trust the plugin hooks with /hooks")
 	newThreadAt := strings.Index(output.String(), "start a new Codex thread")
 	require.GreaterOrEqual(t, trustAt, 0)

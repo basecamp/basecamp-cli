@@ -232,7 +232,7 @@ CLI needs upgrading.
 
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
-**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks.
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in commit-reference hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks. The plugin does not inject Basecamp context at session start; Codex selects the skill when a request is relevant or explicitly references Basecamp.
 
 Manual Codex installation uses the same marketplace:
 
