@@ -455,7 +455,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	// Registering or binding rewrites the global config file; prove it can
 	// be before the token is consumed and sent anywhere.
 	if created != nil || bindAccount {
-		if err := writableGlobalProfiles(); err != nil {
+		if err := globalConfigTakesProfiles(); err != nil {
 			return err
 		}
 	}
@@ -501,7 +501,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	}
 
 	var expiresAt any
-	tokenLine := "personal access token (does not expire)"
+	tokenLine := "personal access token (no expiry reported)"
 	if !who.ExpiresAt.IsZero() {
 		expiresAt = who.ExpiresAt.UTC().Format(time.RFC3339)
 		tokenLine = "expires " + who.ExpiresAt.Local().Format("2006-01-02")
