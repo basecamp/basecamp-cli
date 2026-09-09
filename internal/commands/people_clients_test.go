@@ -393,7 +393,7 @@ func TestPeopleClientsDisableNamesRemainingClients(t *testing.T) {
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, output.CodeForbidden, outErr.Code)
 	assert.Contains(t, outErr.Message, "2 client(s) still have access")
-	assert.Contains(t, outErr.Hint, "basecamp people clients remove 3002, 3001 --in 123")
+	assert.Contains(t, outErr.Hint, "basecamp people clients remove 3002 3001 --in 123")
 }
 
 // With no client on the roster the 403 is not evidence that clients remain,
@@ -411,4 +411,17 @@ func TestPeopleClientsDisableWithoutClientsIsAPlainDenial(t *testing.T) {
 	assert.Equal(t, output.CodeForbidden, outErr.Code)
 	assert.NotContains(t, outErr.Message, "still have access")
 	assert.Contains(t, outErr.Hint, "permission")
+}
+
+// A stray positional must not be discarded: with a default project configured,
+// "disable 123" would otherwise act on the configured project.
+func TestPeopleClientsProjectOnlyVerbsRejectPositionals(t *testing.T) {
+	for _, verb := range []string{"list", "enable", "disable"} {
+		app, transport, _ := setupPersonalFeedApp(t, projectsRoute())
+		app.Config.ProjectID = "123"
+
+		err := executeRecordingCommand(NewPeopleCmd(), app, "clients", verb, "456")
+		require.Error(t, err, verb)
+		assert.Empty(t, transport.recorded(), "%s must not reach the API", verb)
+	}
 }

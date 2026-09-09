@@ -945,6 +945,7 @@ person's "client" flag.
 
   basecamp people clients list --in <project>`,
 		Example: `basecamp people clients list --in <project>`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectID, err := requireProject(cmd, projectID)
 			if err != nil {
@@ -1232,7 +1233,7 @@ func runPeopleClientsAccess(cmd *cobra.Command, projectID string, people []strin
 	}
 	if missed := unaffectedPersonIDs(ids, affected); len(missed) != 0 {
 		respOpts = append(respOpts, output.WithDiagnostic(
-			fmt.Sprintf("Not %s (%s): %s", strings.ToLower(verb), missedWhy, joinInt64s(missed))))
+			fmt.Sprintf("Not %s (%s): %s", strings.ToLower(verb), missedWhy, joinInt64s(missed, ", "))))
 	}
 
 	return app.OK(result, respOpts...)
@@ -1263,12 +1264,14 @@ func unaffectedPersonIDs(requested []int64, affected []basecamp.Person) []int64 
 	return missed
 }
 
-func joinInt64s(ids []int64) string {
+// joinInt64s renders ids separated by sep: ", " for prose, " " for a command
+// line the caller is meant to paste.
+func joinInt64s(ids []int64, sep string) string {
 	parts := make([]string, len(ids))
 	for i, id := range ids {
 		parts[i] = strconv.FormatInt(id, 10)
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, sep)
 }
 
 func newPeopleClientsInviteCmd() *cobra.Command {
@@ -1430,6 +1433,7 @@ is a standard project.
 
   basecamp people clients enable --in <project>`,
 		Example: `basecamp people clients enable --in <project>`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectID, err := requireProject(cmd, projectID)
 			if err != nil {
@@ -1457,6 +1461,7 @@ Refused (403) while any client still has access; remove them first with
 
   basecamp people clients disable --in <project>`,
 		Example: `basecamp people clients disable --in <project>`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectID, err := requireProject(cmd, projectID)
 			if err != nil {
@@ -1537,7 +1542,7 @@ func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64,
 			return &output.Error{
 				Code:       output.CodeForbidden,
 				Message:    fmt.Sprintf("Clients cannot be disabled on project #%s while %d client(s) still have access", projectRef, len(ids)),
-				Hint:       fmt.Sprintf("Remove them first: basecamp people clients remove %s --in %s", joinInt64s(ids), projectRef),
+				Hint:       fmt.Sprintf("Remove them first: basecamp people clients remove %s --in %s", joinInt64s(ids, " "), projectRef),
 				HTTPStatus: sdkErr.HTTPStatus,
 				Cause:      sdkErr,
 			}
