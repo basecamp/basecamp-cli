@@ -249,7 +249,7 @@ Examples:
 			// The entry is written only after the login succeeds, so prove
 			// the config file can take it before a credential exists to
 			// orphan: a malformed file is refused here, not after OAuth.
-			if _, err := writableGlobalProfiles(); err != nil {
+			if err := writableGlobalProfiles(); err != nil {
 				return err
 			}
 
@@ -361,7 +361,7 @@ func newProfileDeleteCmd() *cobra.Command {
 
 			// The credential delete is irreversible, so prove the config
 			// file can take the entry's removal before it goes.
-			if _, err := writableGlobalProfiles(); err != nil {
+			if err := writableGlobalProfiles(); err != nil {
 				return err
 			}
 
@@ -505,14 +505,15 @@ func globalProfilesMap(configData map[string]any, configPath string) (map[string
 
 // writableGlobalProfiles reports whether the global config file can take a
 // profile entry — readable, parseable, with an object (or absent) profiles
-// value — without writing anything. Callers that obtain a credential before
-// registering its profile run this first.
-func writableGlobalProfiles() (map[string]any, error) {
+// value — without writing anything. Callers about to do something they
+// cannot take back before the entry is written run this first.
+func writableGlobalProfiles() error {
 	configData, configPath, err := loadGlobalConfigFile()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return globalProfilesMap(configData, configPath)
+	_, err = globalProfilesMap(configData, configPath)
+	return err
 }
 
 // globalProfileEntry returns the named profile's entry in the global config

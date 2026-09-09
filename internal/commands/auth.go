@@ -455,7 +455,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	// Registering or binding rewrites the global config file; prove it can
 	// be before the token is consumed and sent anywhere.
 	if created != nil || bindAccount {
-		if _, err := writableGlobalProfiles(); err != nil {
+		if err := writableGlobalProfiles(); err != nil {
 			return err
 		}
 	}
