@@ -96,6 +96,7 @@ Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages,
    - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
+
    Raw HTML is also accepted and passes through unchanged, but it is all-or-nothing per field: any HTML tag outside a code span or fence skips Markdown conversion for the whole field, including inline image upload, which only works from Markdown `![alt](/local/path)` syntax. Titles (a todo's content argument, card and message titles) are plain text and never converted.
 
    **Table boundary:** GFM tables round-trip: they render in message/comment
