@@ -13635,6 +13635,214 @@
         }
       }
     },
+    "/{accountId}/projects/{projectId}/client_enablement.json": {
+      "delete": {
+        "description": "Disable clients on a project\n\n403 while the project still has any client users \u2014 revoke them first with\nUpdateProjectClientAccess. Naturally idempotent: disabling a project with\nclients already off re-answers `{\"clients_enabled\": false}`.",
+        "operationId": "DisableProjectClients",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DisableProjectClients 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisableProjectClientsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "People"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "post": {
+        "description": "Enable clients on a project so client users can be added to it\n\nA deliberate step separate from adding clients: it turns on the project's\nclient-facing surface and applies the default client visibility (the\ntimeline and most docked tools become client-visible; the card table,\nCampfire, and Doors stay private). UpdateProjectClientAccess never enables\nclients implicitly \u2014 enable first, then add. 403 unless the project can have\nclients (the account supports clients and the project is a standard\nproject). Naturally idempotent: enabling an enabled project re-answers\n`{\"clients_enabled\": true}`.",
+        "operationId": "EnableProjectClients",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "EnableProjectClients 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnableProjectClientsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "People"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/projects/{projectId}/gauge.json": {
       "put": {
         "description": "Enable or disable the gauge for a project. Only project admins can toggle gauges.",
@@ -14062,6 +14270,207 @@
           "backoff": "exponential",
           "retryOn": [
             429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/projects/{projectId}/people/client_users.json": {
+      "put": {
+        "description": "Update project client access (grant/revoke/create client users)\n\nThe client-side counterpart to UpdateProjectAccess: `grant` adds existing\nclient users by id, `revoke` removes client users, and `create` invites\nbrand-new clients by email (`name` optional, defaulting to the address).\nOnly client users are eligible \u2014 a `grant` id belonging to a team member is\nrejected (omitted from `granted`) rather than cross-graded, and `revoke` never removes a team\nmember. The response mirrors UpdateProjectAccess: `granted` and `revoked`\npeople, each with `client: true`.\n\nRequires clients to be enabled on the project (EnableProjectClients);\notherwise 403. Invitations are all-or-nothing: an invalid `create` row\n(including one with no email address) answers 422 with the rejected\naddresses and nobody is invited; new addresses that would exceed the\naccount's user limit answer 429 and nobody is invited. Addresses already on\nthe account take no seat and a repeated address counts once.\n\nThe seat-limit 429 is a verdict, not throttling: it carries no Retry-After\nand re-asking cannot change the answer, so this operation declares\n`retryOn: [503]` and a 429 surfaces on the first attempt (status-mapped to\n`rate_limit`, since the wire status is the only signal). Every other\noperation retries on 429.",
+        "operationId": "UpdateProjectClientAccess",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectClientAccessRequestContent"
+              },
+              "examples": {
+                "UpdateProjectClientAccess_example1": {
+                  "summary": "Grant access to existing clients",
+                  "description": "Use grant array with client person IDs; team-member IDs are omitted from granted",
+                  "value": {
+                    "grant": [
+                      111
+                    ]
+                  }
+                },
+                "UpdateProjectClientAccess_example2": {
+                  "summary": "Invite new clients by email",
+                  "description": "Use create array; name is optional and defaults to the address",
+                  "value": {
+                    "create": [
+                      {
+                        "email_address": "annie@example.com",
+                        "company_name": "Springfield Elementary"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true,
+            "examples": {
+              "UpdateProjectClientAccess_example1": {
+                "summary": "Grant access to existing clients",
+                "description": "Use grant array with client person IDs; team-member IDs are omitted from granted",
+                "value": "999"
+              },
+              "UpdateProjectClientAccess_example2": {
+                "summary": "Invite new clients by email",
+                "description": "Use create array; name is optional and defaults to the address",
+                "value": "999"
+              }
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true,
+            "examples": {
+              "UpdateProjectClientAccess_example1": {
+                "summary": "Grant access to existing clients",
+                "description": "Use grant array with client person IDs; team-member IDs are omitted from granted",
+                "value": 12345678
+              },
+              "UpdateProjectClientAccess_example2": {
+                "summary": "Invite new clients by email",
+                "description": "Use create array; name is optional and defaults to the address",
+                "value": 12345678
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UpdateProjectClientAccess 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProjectClientAccessResponseContent"
+                },
+                "examples": {
+                  "UpdateProjectClientAccess_example1": {
+                    "summary": "Grant access to existing clients",
+                    "description": "Use grant array with client person IDs; team-member IDs are omitted from granted",
+                    "value": {
+                      "granted": [
+                        {
+                          "id": 111,
+                          "name": "Annie Bryan",
+                          "client": true
+                        }
+                      ],
+                      "revoked": []
+                    }
+                  },
+                  "UpdateProjectClientAccess_example2": {
+                    "summary": "Invite new clients by email",
+                    "description": "Use create array; name is optional and defaults to the address",
+                    "value": {
+                      "granted": [
+                        {
+                          "id": 444,
+                          "name": "annie@example.com",
+                          "email_address": "annie@example.com",
+                          "client": true
+                        }
+                      ],
+                      "revoked": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ClientInvitationValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientInvitationValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "People"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
             503
           ]
         }
@@ -28630,6 +29039,47 @@
           "visible_to_clients"
         ]
       },
+      "ClientInvitationError": {
+        "type": "object",
+        "description": "One rejected `create` row: the address as submitted and the validation\nmessages for it. Always emitted; `null` when the row carried no address (the\nrow is still rejected, with a \"can't be blank\" message). `@required` models\nthe presence and the nullability is layered on in the OpenAPI\n(smithy-build.json jsonAdd -> type: [\"string\",\"null\"]), the Wormhole.color\ntreatment.",
+        "properties": {
+          "email_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "x-go-type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "email_address",
+          "messages"
+        ]
+      },
+      "ClientInvitationErrors": {
+        "type": "object",
+        "description": "The per-row 422 body: {\"errors\": [{\"email_address\": ..., \"messages\": [...]}]}.",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientInvitationError"
+            }
+          }
+        },
+        "required": [
+          "errors"
+        ]
+      },
+      "ClientInvitationValidationErrorResponseContent": {
+        "$ref": "#/components/schemas/ClientInvitationErrors"
+      },
       "ClientReply": {
         "type": "object",
         "properties": {
@@ -29096,6 +29546,31 @@
       },
       "CreateChatbotResponseContent": {
         "$ref": "#/components/schemas/Chatbot"
+      },
+      "CreateClientRequest": {
+        "type": "object",
+        "description": "A new client to invite. Unlike CreatePersonRequest, only the address is\nrequired: bc3 defaults `name` to the email address when omitted.",
+        "properties": {
+          "email_address": {
+            "type": "string",
+            "format": "password"
+          },
+          "name": {
+            "type": "string",
+            "format": "password"
+          },
+          "title": {
+            "type": "string",
+            "format": "password"
+          },
+          "company_name": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "required": [
+          "email_address"
+        ]
       },
       "CreateCloudFileRequestContent": {
         "type": "object",
@@ -29841,6 +30316,9 @@
       "DisableCardColumnOnHoldResponseContent": {
         "$ref": "#/components/schemas/CardColumn"
       },
+      "DisableProjectClientsResponseContent": {
+        "$ref": "#/components/schemas/ProjectClientEnablement"
+      },
       "DockItem": {
         "type": "object",
         "properties": {
@@ -30134,6 +30612,9 @@
       },
       "EnableOutOfOfficeResponseContent": {
         "$ref": "#/components/schemas/OutOfOffice"
+      },
+      "EnableProjectClientsResponseContent": {
+        "$ref": "#/components/schemas/ProjectClientEnablement"
       },
       "Event": {
         "type": "object",
@@ -33077,6 +33558,18 @@
             "x-go-type-skip-optional-pointer": true
           }
         }
+      },
+      "ProjectClientEnablement": {
+        "type": "object",
+        "description": "The project's client-enablement state after a toggle.",
+        "properties": {
+          "clients_enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "clients_enabled"
+        ]
       },
       "ProjectConstruction": {
         "type": "object",
@@ -36460,6 +36953,37 @@
         }
       },
       "UpdateProjectAccessResponseContent": {
+        "$ref": "#/components/schemas/ProjectAccessResult"
+      },
+      "UpdateProjectClientAccessRequestContent": {
+        "type": "object",
+        "properties": {
+          "grant": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Existing client people IDs to add to the project."
+          },
+          "revoke": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Client people IDs to remove from the project."
+          },
+          "create": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateClientRequest"
+            },
+            "description": "New clients to invite by email."
+          }
+        }
+      },
+      "UpdateProjectClientAccessResponseContent": {
         "$ref": "#/components/schemas/ProjectAccessResult"
       },
       "UpdateProjectRequestContent": {

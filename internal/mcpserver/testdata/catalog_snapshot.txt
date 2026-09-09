@@ -197,7 +197,9 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 
 ACTIONS (RO = read-only):
 - disable_out_of_office: Disable out of office for a person
+- disable_project_clients: Disable clients on a project
 - enable_out_of_office: Enable or replace out of office for a person
+- enable_project_clients: Enable clients on a project so client users can be added to it
 - get_my_preferences (RO): Get the current user's preferences
 - get_my_profile (RO): Get the current authenticated user's profile
 - get_out_of_office (RO): Get the out of office status for a person
@@ -211,6 +213,7 @@ ACTIONS (RO = read-only):
 - update_my_preferences: Update the current user's preferences
 - update_my_profile: Update the current authenticated user's profile (returns 204 No Content)
 - update_project_access: Update project access (grant/revoke/create people)
+- update_project_client_access: Update project client access (grant/revoke/create client users)
 - update_subscription: Update subscriptions by adding or removing specific users
 
 == basecamp_automation
