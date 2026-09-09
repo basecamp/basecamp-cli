@@ -528,6 +528,12 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 	resolve := func(bool) {} // no-op default for remote mode
 
 	if opts.Remote {
+		if config.NonInteractiveEnv() {
+			return nil, output.ErrUsageHint("Cannot prompt for the callback URL under BASECAMP_NONINTERACTIVE",
+				"This server signs in through the browser flow, which in remote mode waits for the redirect URL to be pasted here. "+
+					"Unset BASECAMP_NONINTERACTIVE to paste it, or import a token headlessly: "+
+					"`... | basecamp auth login --with-token -P <profile> --account <id>`.")
+		}
 		// Remote/headless mode: prompt user to paste callback URL
 		opts.log("\nRemote Authentication")
 		opts.log("")

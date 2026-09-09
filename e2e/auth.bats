@@ -119,6 +119,14 @@ load test_helper
   assert_output_contains "with-token"
 }
 
+@test "basecamp auth login refuses to run under BASECAMP_NONINTERACTIVE" {
+  run env BASECAMP_NONINTERACTIVE=1 basecamp auth login
+  assert_failure
+  assert_output_contains "BASECAMP_NONINTERACTIVE"
+  assert_output_contains "--device-code"
+  assert_output_contains "--with-token"
+}
+
 @test "basecamp auth login rejects --device-code --local" {
   run basecamp auth login --device-code --local
   assert_failure

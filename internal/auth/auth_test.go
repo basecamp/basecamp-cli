@@ -869,6 +869,53 @@ func TestLoginRemoteAndLocalMutuallyExclusive(t *testing.T) {
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
+// TestLoginRemoteModeRefusesNonInteractiveEnv: the pasted-callback prompt is
+// the one place a login reads the terminal. Under BASECAMP_NONINTERACTIVE it
+// becomes an actionable error, before the instructions it would otherwise
+// print and without reading a byte of stdin.
+func TestLoginRemoteModeRefusesNonInteractiveEnv(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	defer pw.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "BASECAMP_NONINTERACTIVE")
+		assert.Contains(t, err.Error(), "--with-token")
+	case <-time.After(5 * time.Second):
+		t.Fatal("remote login waited on stdin under BASECAMP_NONINTERACTIVE")
+	}
+	for _, line := range sl.snapshot() {
+		assert.NotContains(t, line, "Paste the callback URL")
+	}
+}
+
 func TestLoginRemoteMode(t *testing.T) {
 	// No protected-resource metadata (404) => Launchpad fallback, pointed
 	// at this server via BASECAMP_LAUNCHPAD_URL.

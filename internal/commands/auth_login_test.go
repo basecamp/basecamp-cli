@@ -743,6 +743,47 @@ func TestAuthLoginRefusesMachineOutputForInteractiveFlows(t *testing.T) {
 	}
 }
 
+// TestAuthLoginRefusesNonInteractiveEnvWithoutDeviceCode covers the env half
+// of the gate. BASECAMP_NONINTERACTIVE says nobody is at this terminal, so the
+// flows that wait on one — a browser callback, a pasted URL — refuse before
+// any network call. --device-code is the stated exception: it prints a code
+// to approve from any device and asks nothing of the terminal.
+func TestAuthLoginRefusesNonInteractiveEnvWithoutDeviceCode(t *testing.T) {
+	for name, args := range map[string][]string{
+		"default":    nil,
+		"remote":     {"--remote"},
+		"local":      {"--local"},
+		"no-browser": {"--no-browser"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+			srv := startLoginIdentityServer(t, "bc_at_secret")
+			app, _ := loginTestApp(t, srv, &config.Config{})
+			_, err := runLogin(t, app, strings.NewReader(""), args...)
+			require.Error(t, err)
+			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			assert.Contains(t, err.Error(), "BASECAMP_NONINTERACTIVE")
+			assert.Contains(t, err.Error(), "--device-code")
+			assert.Contains(t, err.Error(), "--with-token")
+			assert.Empty(t, srv.seenBearers())
+		})
+	}
+}
+
+func TestAuthLoginDeviceCodeRunsUnderNonInteractiveEnv(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot", Profiles: map[string]*config.ProfileConfig{"bot": {AccountID: "999"}}})
+	withAccount(app, "999", "profile")
+	t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	out, err := runLogin(t, app, strings.NewReader(""), "--device-code")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "and enter the code: ABCD-EFGH")
+	assert.Contains(t, out, "Authentication successful")
+}
+
 func TestAuthLoginUnknownProfileNeedsCreateOrToken(t *testing.T) {
 	srv := startLoginIdentityServer(t, "bc_at_secret")
 	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "ghost"})
