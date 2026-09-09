@@ -887,7 +887,10 @@ const oauthIssuerEnv = "BASECAMP_OAUTH_ISSUER"
 func pinnedIssuerDiscovery(issuer string, log func(string)) (*discovery, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	u, err := url.Parse(issuer)
-	if err != nil || u.Opaque != "" || !isSecureEndpointURL(u) || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+	// The delimiters are checked on the raw value: url.Parse reports an
+	// empty query or fragment ("https://as.example#") as absent, while the
+	// endpoints derived by concatenation below would carry it.
+	if err != nil || u.Opaque != "" || !isSecureEndpointURL(u) || u.Path != "" || strings.ContainsAny(issuer, "?#") {
 		return nil, output.ErrAuth("invalid " + oauthIssuerEnv + ": must be an origin — an absolute https URL (or http on loopback) with a hostname and no path, userinfo, query, or fragment")
 	}
 	deviceEndpoint := issuer + "/oauth/device_authorizations"

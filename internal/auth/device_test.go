@@ -1046,6 +1046,8 @@ func TestDiscoverOAuth_PinnedIssuerIsCheckedLikeAnEndpoint(t *testing.T) {
 		"file scheme":             "file:///etc/passwd",
 		"query string":            "https://as.example/?token=hunter2",
 		"fragment":                "https://as.example/#frag",
+		"empty fragment":          "https://as.example#",
+		"empty query":             "https://as.example?",
 		"path":                    "https://as.example/some/path",
 		"opaque":                  "https:as.example",
 	} {
