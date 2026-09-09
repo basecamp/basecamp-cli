@@ -399,7 +399,7 @@ func (o *LoginOptions) defaults() {
 	if !o.Remote && !o.Local && hostutil.IsRemoteSession() {
 		o.Remote = true
 	}
-	if o.Remote {
+	if o.Remote || config.NonInteractiveEnv() {
 		o.NoBrowser = true
 	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {

@@ -265,6 +265,9 @@ Examples:
 			app.Config.ActiveProfile = name
 			app.Config.BaseURL = profileCfg.BaseURL
 
+			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
+				return err
+			}
 			if deviceCode {
 				remote = true
 			}

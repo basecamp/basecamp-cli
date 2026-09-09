@@ -869,6 +869,21 @@ func TestLoginRemoteAndLocalMutuallyExclusive(t *testing.T) {
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
+// TestLoginDefaultsNeverOpenABrowserUnderNonInteractiveEnv: whatever flow a
+// caller reaches under the variable, no browser is launched for it — the
+// device flow prints its code instead, which is the shape the variable's
+// callers can relay.
+func TestLoginDefaultsNeverOpenABrowserUnderNonInteractiveEnv(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	opts := LoginOptions{Local: true}
+	opts.defaults()
+	assert.True(t, opts.NoBrowser)
+	assert.Nil(t, opts.BrowserLauncher)
+}
+
 // TestLoginLaunchpadRefusesNonInteractiveEnv: both Launchpad shapes wait on a
 // person — a browser at the loopback callback, or a pasted redirect URL —
 // and every login entry point reaches them through loginLaunchpad. Under

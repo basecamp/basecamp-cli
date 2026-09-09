@@ -304,12 +304,8 @@ named profile, creating the profile when --account is given.
 						"Check credentials with `basecamp auth status`, or import a token headlessly: "+
 						"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
 			}
-			if config.NonInteractiveEnv() && !deviceCode {
-				return output.ErrUsageHint("Interactive login cannot run under BASECAMP_NONINTERACTIVE",
-					"Browser and pasted-callback logins wait on a person at this terminal. "+
-						"Import a token headlessly: `... | basecamp auth login --with-token -P <profile> --account <id>`; "+
-						"pass --device-code where the server offers the device flow (Launchpad does not) to approve the printed code from any device; "+
-						"or check credentials with `basecamp auth status`.")
+			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
+				return err
 			}
 			if expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
 				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
@@ -627,6 +623,23 @@ func readTokenFromStdin(cmd *cobra.Command) (string, error) {
 		return "", output.ErrUsage("Token on stdin must be a single line with no whitespace or control characters (one trailing line ending is allowed)")
 	}
 	return token, nil
+}
+
+// refuseNonInteractiveLogin is the environment half of the login gate.
+// BASECAMP_NONINTERACTIVE says nobody is at this terminal, and every OAuth
+// flow but one waits on a person: a browser at the loopback callback, a
+// pasted redirect URL, or an approval page the browser was opened to.
+// --device-code is that one: it prints a code to approve from any device
+// and asks nothing of the terminal, so it is the caller's stated intent.
+func refuseNonInteractiveLogin(deviceCode bool) error {
+	if !config.NonInteractiveEnv() || deviceCode {
+		return nil
+	}
+	return output.ErrUsageHint("Interactive login cannot run under BASECAMP_NONINTERACTIVE",
+		"Browser and pasted-callback logins wait on a person at this terminal. "+
+			"Import a token headlessly: `... | basecamp auth login --with-token -P <profile> --account <id>`; "+
+			"pass --device-code where the server offers the device flow (Launchpad does not) to approve the printed code from any device; "+
+			"or check credentials with `basecamp auth status`.")
 }
 
 // machineOutputFlagSet reports whether an explicit output flag asked for a
