@@ -155,20 +155,18 @@ func TestClientsForbiddenErrorPassesOtherErrorsThrough(t *testing.T) {
 }
 
 func TestClientSeatLimitErrorRemapsBare429(t *testing.T) {
-	invitees := []clientInvitee{{EmailAddress: "a@example.com"}, {EmailAddress: "b@example.com"}}
-
-	err := clientSeatLimitError(basecamp.ErrRateLimit(0), invitees)
+	err := clientSeatLimitError(basecamp.ErrRateLimit(0))
 
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, output.CodeLimitExceeded, outErr.Code)
 	assert.False(t, outErr.Retryable)
 	assert.Equal(t, output.ExitLimit, output.ExitCodeFor(outErr.Code))
-	assert.Contains(t, outErr.Message, "2 new client(s)")
+	assert.Contains(t, outErr.Message, "Not enough seats")
 }
 
 func TestClientSeatLimitErrorKeepsRealThrottling(t *testing.T) {
-	err := clientSeatLimitError(basecamp.ErrRateLimit(30), nil)
+	err := clientSeatLimitError(basecamp.ErrRateLimit(30))
 
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr))
@@ -394,5 +392,23 @@ func TestPeopleClientsDisableNamesRemainingClients(t *testing.T) {
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr))
 	assert.Equal(t, output.CodeForbidden, outErr.Code)
+	assert.Contains(t, outErr.Message, "2 client(s) still have access")
 	assert.Contains(t, outErr.Hint, "basecamp people clients remove 3002, 3001 --in 123")
+}
+
+// With no client on the roster the 403 is not evidence that clients remain,
+// so the message must not claim it.
+func TestPeopleClientsDisableWithoutClientsIsAPlainDenial(t *testing.T) {
+	roster := stubRoute{method: http.MethodGet, path: clientsProjectPeoplePath, status: http.StatusOK,
+		body: `[{"id":1001,"name":"Zed Team","employee":true}]`, pages: []string{`[{"id":1001,"name":"Zed Team","employee":true}]`}}
+	app, _, _ := setupPersonalFeedApp(t, projectsRoute(), roster,
+		stubRoute{method: http.MethodDelete, path: clientEnablementPath, status: http.StatusForbidden, body: ``})
+
+	err := executeRecordingCommand(NewPeopleCmd(), app, "clients", "disable", "--in", "123")
+
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr))
+	assert.Equal(t, output.CodeForbidden, outErr.Code)
+	assert.NotContains(t, outErr.Message, "still have access")
+	assert.Contains(t, outErr.Hint, "permission")
 }

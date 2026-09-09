@@ -262,6 +262,35 @@ func TestGatingHooksOnOperationStartAndRequestMethods(t *testing.T) {
 	hooks.OnRetry(ctx, basecamp.RequestInfo{}, 1, nil)
 }
 
+// A headerless 429 blocks later operations for a minute, except when the
+// operation's declared retry set excludes 429: that 429 is the server's answer
+// (the client seat limit), not throttling, and must not gate unrelated work.
+func TestGatingHooksHeaderless429BlocksUnlessTheOperationTreatsItAsAVerdict(t *testing.T) {
+	block := func(operation string) time.Duration {
+		hooks := NewGatingHooksFromConfig(NewStore(t.TempDir()), DefaultConfig())
+		ctx := hooks.OnOperationStart(context.Background(), basecamp.OperationInfo{Service: "People", Operation: operation})
+		hooks.OnRequestEnd(ctx, basecamp.RequestInfo{Method: "PUT"}, basecamp.RequestResult{StatusCode: 429})
+		remaining, err := hooks.rateLimiter.RetryAfterRemaining()
+		require.NoError(t, err)
+		return remaining
+	}
+
+	assert.Greater(t, block("UpdateProjectAccess"), 50*time.Second, "throttling 429 keeps the default block")
+	assert.Greater(t, block(""), 50*time.Second, "an unnamed operation keeps the default block")
+	assert.Zero(t, block("UpdateProjectClientAccess"), "a seat-limit verdict sets no block")
+}
+
+// A 429 that names a Retry-After is honored regardless of the operation.
+func TestGatingHooksRetryAfterHeaderIsHonoredOnAVerdictOperation(t *testing.T) {
+	hooks := NewGatingHooksFromConfig(NewStore(t.TempDir()), DefaultConfig())
+	ctx := hooks.OnOperationStart(context.Background(), basecamp.OperationInfo{Service: "People", Operation: "UpdateProjectClientAccess"})
+	hooks.OnRequestEnd(ctx, basecamp.RequestInfo{Method: "PUT"}, basecamp.RequestResult{StatusCode: 429, RetryAfter: 7})
+
+	remaining, err := hooks.rateLimiter.RetryAfterRemaining()
+	require.NoError(t, err)
+	assert.Greater(t, remaining, 5*time.Second)
+}
+
 func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	// This integration test verifies stale cleanup works even when the rate
 	// limiter updates State.UpdatedAt before the circuit breaker runs.

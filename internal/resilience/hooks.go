@@ -2,9 +2,11 @@ package resilience
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/basecamp/basecamp-sdk/go/pkg/generated"
 )
 
 // Verify GatingHooks implements basecamp.GatingHooks at compile time.
@@ -12,6 +14,10 @@ var _ basecamp.GatingHooks = (*GatingHooks)(nil)
 
 // releaseKey is the context key for the bulkhead release function.
 type releaseKey struct{}
+
+// operationKey carries the operation name from OnOperationStart to the
+// request hooks, which only see method and URL.
+type operationKey struct{}
 
 // GatingHooks implements basecamp.GatingHooks to provide resilience patterns
 // for SDK operations. It gates requests through circuit breaker, rate limiter,
@@ -90,10 +96,11 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 	return ctx, nil
 }
 
-// OnOperationStart is called when a semantic SDK operation begins.
+// OnOperationStart is called when a semantic SDK operation begins. Gating
+// already happened in OnOperationGate; this only names the operation for the
+// request hooks, which otherwise see method and URL alone.
 func (h *GatingHooks) OnOperationStart(ctx context.Context, op basecamp.OperationInfo) context.Context {
-	// No additional setup needed; gating already happened in OnOperationGate
-	return ctx
+	return context.WithValue(ctx, operationKey{}, op.Operation)
 }
 
 // OnOperationEnd is called when a semantic SDK operation completes.
@@ -136,11 +143,27 @@ func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInf
 	// Honor Retry-After header from rate-limited or overloaded responses
 	if result.RetryAfter > 0 {
 		_ = h.rateLimiter.SetRetryAfterDuration(time.Duration(result.RetryAfter) * time.Second) //nolint:contextcheck // lock acquisition is context-independent by design
-	} else if result.StatusCode == 429 {
+	} else if result.StatusCode == 429 && !isVerdict429(ctx) {
 		// Default to 60 seconds if no Retry-After specified (SDK parity for 429 only)
 		// Note: 503 requires explicit Retry-After header per SDK behavior
 		_ = h.rateLimiter.SetRetryAfterDuration(60 * time.Second) //nolint:contextcheck // lock acquisition is context-independent by design
 	}
+}
+
+// isVerdict429 reports whether a headerless 429 on the operation in ctx is an
+// answer rather than throttling. The SDK's behavior model declares which
+// statuses each operation retries on, and an operation whose set excludes 429
+// (UpdateProjectClientAccess: its 429 is the account seat-limit verdict) is
+// one the server answers 429 deterministically. Blocking every later command
+// for a minute on such an answer would gate unrelated work on a fact about
+// one request's input. Operations the model does not name keep the default.
+func isVerdict429(ctx context.Context) bool {
+	operation, _ := ctx.Value(operationKey{}).(string)
+	if operation == "" {
+		return false
+	}
+	retryOn, ok := generated.GetOperationRetryOn(operation)
+	return ok && !slices.Contains(retryOn, 429)
 }
 
 // OnRetry is called before a retry attempt.

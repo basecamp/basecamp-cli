@@ -1097,15 +1097,17 @@ func clientsForbiddenError(ctx context.Context, app *appctx.App, bucketID int64,
 // throttling: no Retry-After accompanies it and waiting cannot change it, so it
 // is reported as the account-limit code (the one a 507 carries elsewhere) and
 // not as a retryable rate limit. A 429 that does name a Retry-After is real
-// throttling and converts as usual.
-func clientSeatLimitError(err error, invitees []clientInvitee) error {
+// throttling and converts as usual. No count is stated: addresses already on
+// the account take no seat and a repeated address counts once, and only the
+// server knows which rows those are.
+func clientSeatLimitError(err error) error {
 	var sdkErr *basecamp.Error
 	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeRateLimit || sdkErr.RetryAfter > 0 {
 		return convertSDKError(err)
 	}
 	return &output.Error{
 		Code:       output.CodeLimitExceeded,
-		Message:    fmt.Sprintf("Not enough seats on the account to invite %d new client(s)", len(invitees)),
+		Message:    "Not enough seats on the account for the new clients in this batch",
 		Hint:       "The account's user limit would be exceeded; nobody was invited. Free up seats or raise the limit, then retry",
 		HTTPStatus: sdkErr.HTTPStatus,
 		Retryable:  false,
@@ -1369,7 +1371,7 @@ func clientInviteError(ctx context.Context, app *appctx.App, bucketID int64, pro
 		case basecamp.CodeForbidden:
 			return clientsForbiddenError(ctx, app, bucketID, projectRef, err)
 		case basecamp.CodeRateLimit:
-			return clientSeatLimitError(err, invitees)
+			return clientSeatLimitError(err)
 		case basecamp.CodeValidation:
 			return clientInviteValidationError(sdkErr, invitees)
 		}
@@ -1507,8 +1509,9 @@ func runPeopleClientsEnablement(cmd *cobra.Command, projectID string, enable boo
 
 // clientEnablementError explains the two 403s the enablement endpoint answers.
 // Enabling is refused when the project cannot have clients at all; disabling
-// is refused while any client keeps access, and the roster is read back once
-// to name them.
+// is refused while any client keeps access, so the roster is read back once
+// and the remaining clients are named only when it shows some — the same 403
+// also answers a caller who may not manage the project's people.
 func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64, projectRef string, enable bool, err error) error {
 	var sdkErr *basecamp.Error
 	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
@@ -1523,7 +1526,6 @@ func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64,
 			Cause:      sdkErr,
 		}
 	}
-	hint := "Remove every client first: basecamp people clients list --in " + projectRef
 	if roster, listErr := app.Account().People().ListProjectPeople(ctx, bucketID, &basecamp.PeopleListOptions{}); listErr == nil {
 		var ids []int64
 		for _, p := range roster.People {
@@ -1532,13 +1534,19 @@ func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64,
 			}
 		}
 		if len(ids) != 0 {
-			hint = fmt.Sprintf("Remove every client first: basecamp people clients remove %s --in %s", joinInt64s(ids), projectRef)
+			return &output.Error{
+				Code:       output.CodeForbidden,
+				Message:    fmt.Sprintf("Clients cannot be disabled on project #%s while %d client(s) still have access", projectRef, len(ids)),
+				Hint:       fmt.Sprintf("Remove them first: basecamp people clients remove %s --in %s", joinInt64s(ids), projectRef),
+				HTTPStatus: sdkErr.HTTPStatus,
+				Cause:      sdkErr,
+			}
 		}
 	}
 	return &output.Error{
 		Code:       output.CodeForbidden,
-		Message:    fmt.Sprintf("Clients cannot be disabled on project #%s while any client still has access", projectRef),
-		Hint:       hint,
+		Message:    fmt.Sprintf("Clients cannot be disabled on project #%s", projectRef),
+		Hint:       "Disabling is refused while any client still has access, and requires permission to manage the project's people: basecamp people clients list --in " + projectRef,
 		HTTPStatus: sdkErr.HTTPStatus,
 		Cause:      sdkErr,
 	}
