@@ -347,6 +347,12 @@ func newProfileDeleteCmd() *cobra.Command {
 				return output.ErrUsage(fmt.Sprintf("Profile %q not found", name))
 			}
 
+			// The credential delete is irreversible, so prove the config
+			// file can take the entry's removal before it goes.
+			if _, err := writableGlobalProfiles(); err != nil {
+				return err
+			}
+
 			// Remove credentials
 			credKey := "profile:" + name
 			store := app.Auth.GetStore()
@@ -458,6 +464,11 @@ func loadGlobalConfigFile() (map[string]any, string, error) {
 	}
 	if err := json.Unmarshal(data, &configData); err != nil {
 		return nil, configPath, fmt.Errorf("config file %s is not valid JSON, refusing to rewrite it: %w", configPath, err)
+	}
+	// A top-level null decodes into a nil map that every writer would
+	// then assign into; it is refused like any other non-object value.
+	if configData == nil {
+		return nil, configPath, fmt.Errorf("config file %s is not a JSON object, refusing to rewrite it", configPath)
 	}
 	return configData, configPath, nil
 }

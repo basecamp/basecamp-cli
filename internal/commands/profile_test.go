@@ -1172,3 +1172,49 @@ func TestProfileCreateRefusesAMalformedConfigBeforeLogin(t *testing.T) {
 	_, loadErr := app.Auth.GetStore().Load("profile:bot")
 	assert.Error(t, loadErr, "no login may have run")
 }
+
+// TestProfileDeleteRefusesAMalformedConfigBeforeRemovingTheCredential: the
+// credential delete cannot be undone, so a config file that cannot take
+// the entry's removal is refused first and the credential stays.
+func TestProfileDeleteRefusesAMalformedConfigBeforeRemovingTheCredential(t *testing.T) {
+	cfg := &config.Config{
+		BaseURL:  "https://3.basecampapi.com",
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+		Profiles: map[string]*config.ProfileConfig{"bot": {BaseURL: "https://3.basecampapi.com"}},
+	}
+	app, _ := setupProfileTestApp(t, cfg)
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{AccessToken: "keep"}))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte("{ not json"), 0o600))
+
+	err := executeProfileCommand(newProfileDeleteCmd(), app, "bot")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not valid JSON")
+	creds, loadErr := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, loadErr, "the credential outlives a refused config write")
+	assert.Equal(t, "keep", creds.AccessToken)
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "{ not json", string(data))
+}
+
+// TestProfileSetDefaultRefusesANullConfig: a top-level null decodes into a
+// nil map; assigning into it would panic where the writers promise a
+// refusal.
+func TestProfileSetDefaultRefusesANullConfig(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte("null"), 0o600))
+
+	app, _ := setupTestApp(t)
+	app.Config.Profiles = map[string]*config.ProfileConfig{"bot": {BaseURL: "https://3.basecampapi.com"}}
+	err := executeCommand(NewProfileCmd(), app, "set-default", "bot")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a JSON object")
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "null", string(data))
+}

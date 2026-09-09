@@ -1062,14 +1062,37 @@ func TestAuthLoginWithTokenRefusesToRewriteMalformedConfig(t *testing.T) {
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	require.NoError(t, os.WriteFile(configPath, []byte("{ not json"), 0o600))
 
-	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	in := strings.NewReader("bc_at_secret")
+	_, err := runLogin(t, app, in, "--with-token")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not valid JSON")
+	assert.Equal(t, 12, in.Len(), "a config file that cannot take the entry is refused before the token is read")
+	assert.Empty(t, srv.seenBearers())
 	data, readErr := os.ReadFile(configPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, "{ not json", string(data), "the operator's file is left exactly as it was")
 	_, loadErr := app.Auth.GetStore().Load("profile:bot")
 	assert.Error(t, loadErr, "the entry comes before the credential, so nothing is stored")
+}
+
+func TestAuthLoginWithTokenRefusesANullConfig(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_secret")
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	withAccount(app, "999", "flag")
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte("null\n"), 0o600))
+
+	in := strings.NewReader("bc_at_secret")
+	_, err := runLogin(t, app, in, "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a JSON object")
+	assert.Equal(t, 12, in.Len())
+	assert.Empty(t, srv.seenBearers())
+	data, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "null\n", string(data))
+	assertNothingStored(t, app, "bot")
 }
 
 // TestAuthLoginDeviceFlowExpectIdentityKeepsAShortLivedAccessToken: the
@@ -1103,9 +1126,12 @@ func TestAuthLoginWithTokenRefusesToRewriteANonObjectProfilesValue(t *testing.T)
 	configPath := filepath.Join(config.GlobalConfigDir(), "config.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"profiles":[],"format":"json"}`), 0o600))
 
-	_, err := runLogin(t, app, strings.NewReader("bc_at_secret"), "--with-token")
+	in := strings.NewReader("bc_at_secret")
+	_, err := runLogin(t, app, in, "--with-token")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"profiles" value that is not an object`)
+	assert.Equal(t, 12, in.Len())
+	assert.Empty(t, srv.seenBearers())
 	data, readErr := os.ReadFile(configPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, `{"profiles":[],"format":"json"}`, string(data))
