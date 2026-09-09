@@ -798,6 +798,46 @@ func TestAuthLoginDeviceFlowExpectIdentityStoresNothingOnMismatch(t *testing.T) 
 	assert.Equal(t, "51177542", creds.UserID)
 }
 
+// TestAuthLoginRefusesOverridesThatDisagreeWithTheProfileBinding: an OAuth
+// login stores under the profile key whatever the override verified, so
+// an --account / BASECAMP_ACCOUNT_ID / BASECAMP_BASE_URL that disagrees
+// with the binding is refused before any request, asserted or not.
+func TestAuthLoginRefusesOverridesThatDisagreeWithTheProfileBinding(t *testing.T) {
+	for _, source := range []string{"flag", "env"} {
+		t.Run("account from "+source, func(t *testing.T) {
+			srv := startLoginIdentityServer(t, "dev-tok")
+			srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+			app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot", Profiles: map[string]*config.ProfileConfig{"bot": {AccountID: "111"}}})
+			withAccount(app, "222", source)
+			t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+
+			for _, args := range [][]string{{"--device-code"}, {"--device-code", "--expect-identity", "28142355"}} {
+				_, err := runLogin(t, app, strings.NewReader(""), args...)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), `Profile "bot" is bound to account 111, not 222`)
+			}
+			assert.Empty(t, srv.seenPaths(), "refused before the device flow starts")
+			_, loadErr := app.Auth.GetStore().Load("profile:bot")
+			assert.Error(t, loadErr)
+		})
+	}
+
+	t.Run("base URL", func(t *testing.T) {
+		srv := startLoginIdentityServer(t, "dev-tok")
+		srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+		// loginTestApp points the effective base URL at the server, as a
+		// BASECAMP_BASE_URL override would.
+		app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot", Profiles: map[string]*config.ProfileConfig{"bot": {BaseURL: "https://staging.example/", AccountID: "999"}}})
+		withAccount(app, "999", "profile")
+		t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+
+		_, err := runLogin(t, app, strings.NewReader(""), "--device-code", "--expect-identity", "28142355")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `Profile "bot" is bound to https://staging.example/, not `+srv.srv.URL)
+		assert.Empty(t, srv.seenPaths())
+	})
+}
+
 // deviceGrantThen wraps a handler with a BC5 device grant that issues
 // dev-tok immediately, at the paths a pinned issuer derives.
 func deviceGrantThen(t *testing.T, next http.Handler) http.Handler {

@@ -308,9 +308,13 @@ named profile, creating the profile when --account is given.
 				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
 			}
 			if name := app.Config.ActiveProfile; name != "" {
-				if _, ok := app.Config.Profiles[name]; !ok {
+				existing, ok := app.Config.Profiles[name]
+				if !ok {
 					return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
 						fmt.Sprintf("Create it with `basecamp profile create %s`, or import a token: `... | basecamp auth login --with-token -P %s --account <id>`.", name, name))
+				}
+				if err := requireProfileBinding(app, name, existing); err != nil {
+					return err
 				}
 			}
 
@@ -408,12 +412,14 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 
 	// The effective account and base URL are what every later command will
 	// address under this profile, so they are what the token must be
-	// verified for — and they must be the profile's own. A --account /
-	// BASECAMP_ACCOUNT_ID / BASECAMP_BASE_URL override that disagrees with
-	// the binding would verify the token for one place and store it for
-	// another.
+	// verified for — and they must be the profile's own.
 	account := app.Config.AccountID
 	existing := app.Config.Profiles[name]
+	if existing != nil {
+		if err := requireProfileBinding(app, name, existing); err != nil {
+			return err
+		}
+	}
 	globalUnbound := false
 	if existing != nil && existing.AccountID == "" {
 		unbound, err := globalProfileIsUnbound(name)
@@ -430,9 +436,6 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 			"Pass --account <id> to create it alongside the imported token.")
 	case existing == nil:
 		created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
-	case existing.BaseURL != "" && config.NormalizeBaseURL(existing.BaseURL) != config.NormalizeBaseURL(app.Config.BaseURL):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to %s, not %s", name, existing.BaseURL, app.Config.BaseURL),
-			"Import into a different profile, or drop the BASECAMP_BASE_URL override.")
 	case existing.AccountID == "" && !accountGivenExplicitly(app):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
 			"Pass --account <id> to bind it alongside the imported token.")
@@ -445,9 +448,6 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 			"Add account_id to the config file that defines it, then rerun the import.")
 	case existing.AccountID == "":
 		bindAccount = true
-	case !accountIDsEqual(account, existing.AccountID):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, account),
-			"Import into a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
 	}
 	if err := requireNumericAccount(account); err != nil {
 		return err
@@ -537,6 +537,24 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 			line += " (default)"
 		}
 		fmt.Fprintln(w, r.Muted.Render(line))
+	}
+	return nil
+}
+
+// requireProfileBinding refuses a login whose effective server or account
+// is not the named profile's own. A --account / BASECAMP_ACCOUNT_ID /
+// BASECAMP_BASE_URL override is what the credential would be verified
+// for, while the profile key it is stored under keeps its binding: once
+// the override is gone, the profile would serve a credential proven for
+// somewhere else.
+func requireProfileBinding(app *appctx.App, name string, existing *config.ProfileConfig) error {
+	switch {
+	case existing.BaseURL != "" && config.NormalizeBaseURL(existing.BaseURL) != config.NormalizeBaseURL(app.Config.BaseURL):
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to %s, not %s", name, existing.BaseURL, app.Config.BaseURL),
+			"Use a different profile, or drop the BASECAMP_BASE_URL override.")
+	case existing.AccountID != "" && app.Config.AccountID != "" && !accountIDsEqual(app.Config.AccountID, existing.AccountID):
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, app.Config.AccountID),
+			"Use a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
 	}
 	return nil
 }
