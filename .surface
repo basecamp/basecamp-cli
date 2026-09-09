@@ -11933,6 +11933,7 @@ FLAG basecamp profile create --base-url type=string
 FLAG basecamp profile create --cache-dir type=string
 FLAG basecamp profile create --count type=bool
 FLAG basecamp profile create --device-code type=bool
+FLAG basecamp profile create --expect-identity type=string
 FLAG basecamp profile create --help type=bool
 FLAG basecamp profile create --hints type=bool
 FLAG basecamp profile create --ids-only type=bool

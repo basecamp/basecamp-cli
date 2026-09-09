@@ -197,7 +197,8 @@ basecamp auth token              # Print token for scripts
 `--expect-identity <id>` makes any login assert who it authenticated as: the
 new credential is checked before it is stored, and on a mismatch nothing is
 written (a profile's previous credential is untouched) and the command exits
-non-zero. `--login-hint <email>` names the account to sign in as on the
+non-zero. `basecamp profile create <name> --expect-identity <id>` does the same
+for a profile that does not exist yet. `--login-hint <email>` names the account to sign in as on the
 device-flow approval page (sent as `login_hint`; it steers the sign-in page and
 never authenticates on its own; ignored by Launchpad).
 

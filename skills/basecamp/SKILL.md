@@ -1354,6 +1354,7 @@ basecamp auth login --scope read                  # Read-only access (ignored by
 basecamp auth login --device-code                 # Headless authentication with manual browser instructions
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
+basecamp profile create <name> --account <id> --expect-identity <id>  # Same assertion for a new profile
 ```
 
 **Network errors / localhost URLs:**

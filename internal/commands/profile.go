@@ -192,6 +192,7 @@ func newProfileCreateCmd() *cobra.Command {
 	var remote bool
 	var local bool
 	var deviceCode bool
+	var expectIdentity string
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -201,7 +202,8 @@ func newProfileCreateCmd() *cobra.Command {
 Examples:
   basecamp profile create personal
   basecamp profile create staging --base-url https://staging.example.com
-  basecamp profile create triage-bot --scope full`,
+  basecamp profile create triage-bot --scope full
+  basecamp profile create bot --account 999 --expect-identity 12345   # Create nothing unless the login is this identity`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -221,6 +223,14 @@ Examples:
 				if _, exists := app.Config.Profiles[name]; exists {
 					return output.ErrUsage(fmt.Sprintf("Profile %q already exists", name))
 				}
+			}
+
+			expect, err := parseExpectIdentity(expectIdentity)
+			if err != nil {
+				return err
+			}
+			if expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
+				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
 			}
 
 			// Defaults
@@ -259,13 +269,18 @@ Examples:
 				remote = true
 			}
 
-			// Start OAuth login flow — must succeed before we persist anything
+			// Start OAuth login flow — must succeed before we persist anything.
+			// With an expectation the credential is checked before it is
+			// stored and a mismatch stores nothing; without one the
+			// identity lookup stays informational.
+			verifier := &loginVerifier{app: app, expectIdentity: expect, account: accountID, strict: expect != 0}
 			loginResult, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
 				Remote:    remote,
 				Local:     local,
 				Logger:    func(msg string) { fmt.Println(msg) },
+				Verify:    verifier.verify,
 			})
 			if err != nil {
 				// Restore in-memory state
@@ -285,19 +300,6 @@ Examples:
 				return err
 			}
 
-			// Try to fetch and store user profile
-			resp, profileErr := app.SDK.Get(cmd.Context(), "/my/profile.json")
-			if profileErr == nil {
-				var profile struct {
-					ID    int    `json:"id"`
-					Name  string `json:"name"`
-					Email string `json:"email_address"`
-				}
-				if err := resp.UnmarshalData(&profile); err == nil {
-					_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email)
-				}
-			}
-
 			result := map[string]any{
 				"name":     name,
 				"base_url": baseURL,
@@ -307,6 +309,15 @@ Examples:
 			}
 			if isDefault {
 				result["default"] = true
+			}
+			if who := verifier.who; who != nil {
+				if who.PersonID != 0 {
+					_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
+				}
+				result["identity"] = map[string]any{"id": who.IdentityID, "email": who.IdentityEmail}
+				if who.PersonID != 0 {
+					result["person"] = map[string]any{"id": who.PersonID, "name": who.Name, "email": who.Email}
+				}
 			}
 			return app.OK(result, output.WithSummary(fmt.Sprintf("Created profile %q", name)))
 		},
@@ -319,6 +330,7 @@ Examples:
 	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
 	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
 	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
+	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise create nothing")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 

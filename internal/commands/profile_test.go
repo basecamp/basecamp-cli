@@ -211,7 +211,7 @@ func TestProfileCreateRejectsInvalidNames(t *testing.T) {
 func TestProfileCreateHasExpectedFlags(t *testing.T) {
 	cmd := newProfileCreateCmd()
 
-	flags := []string{"base-url", "scope", "account", "no-browser", "remote", "local", "device-code"}
+	flags := []string{"base-url", "scope", "account", "no-browser", "remote", "local", "device-code", "expect-identity"}
 	for _, flag := range flags {
 		f := cmd.Flags().Lookup(flag)
 		assert.NotNil(t, f, "expected flag %q to exist on create command", flag)
@@ -1217,4 +1217,50 @@ func TestProfileSetDefaultRefusesANullConfig(t *testing.T) {
 	data, readErr := os.ReadFile(configPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, "null", string(data))
+}
+
+// TestProfileCreateExpectIdentityCreatesNothingOnMismatch: profile create
+// is the OAuth login for a profile that does not exist yet, so it takes the
+// same assertion as auth login. A mismatch leaves no credential and no
+// profile entry; a match registers the profile with the verified person.
+func TestProfileCreateExpectIdentityCreatesNothingOnMismatch(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+	app, buf := loginTestApp(t, srv, &config.Config{})
+	t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	create := func(expect string) error {
+		return executeProfileCommand(NewProfileCmd(), app, "create", "bot", "--base-url", srv.srv.URL, "--account", "999", "--device-code", "--expect-identity", expect)
+	}
+
+	err := create("1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not identity 1")
+	assertNothingStored(t, app, "bot")
+
+	require.NoError(t, create("28142355"))
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok", creds.AccessToken)
+	assert.Equal(t, "51177542", creds.UserID, "the person comes from the account-scoped lookup")
+	assert.Contains(t, readGlobalConfig(t)["profiles"], "bot")
+	assert.Contains(t, srv.seenPaths(), "/999/my/profile.json")
+
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Equal(t, float64(28142355), envelope.Data["identity"].(map[string]any)["id"])
+	assert.Equal(t, float64(51177542), envelope.Data["person"].(map[string]any)["id"])
+}
+
+func TestProfileCreateExpectIdentityRefusesEnvToken(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "env-tok")
+	app, _ := setupProfileTestApp(t, nil)
+	err := executeProfileCommand(NewProfileCmd(), app, "create", "bot", "--expect-identity", "1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BASECAMP_TOKEN")
+	assertNothingStored(t, app, "bot")
 }

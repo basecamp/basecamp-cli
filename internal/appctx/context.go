@@ -172,6 +172,9 @@ func NewApp(cfg *config.Config) *App {
 // a token before deciding whether to keep it.
 func (a *App) SDKClientFor(provider basecamp.TokenProvider) *basecamp.Client {
 	cfg := a.SDK.Config()
+	// The effective base URL, not the one SDK was built with: a profile
+	// being created sets its own in memory before its login runs.
+	cfg.BaseURL = a.Config.BaseURL
 	return basecamp.NewClient(&cfg, provider, a.SDKOptions...)
 }
 
