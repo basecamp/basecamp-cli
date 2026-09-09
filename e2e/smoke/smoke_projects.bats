@@ -31,6 +31,18 @@ setup_file() {
   echo "$output" | jq -r '.data[0].id' > "$BATS_FILE_TMPDIR/project_id"
 }
 
+@test "people clients list returns the project's clients" {
+  local proj_file="$BATS_FILE_TMPDIR/project_id"
+  [[ -f "$proj_file" ]] || mark_unverifiable "projects list did not produce a project ID"
+  local proj_id
+  proj_id=$(<"$proj_file")
+
+  run_smoke basecamp people clients list --in "$proj_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data | type' 'array'
+}
+
 @test "projects show returns project detail" {
   local proj_file="$BATS_FILE_TMPDIR/project_id"
   [[ -f "$proj_file" ]] || mark_unverifiable "projects list did not produce a project ID"

@@ -6,12 +6,15 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 189 |
+| ✅ Implemented | 50 | 192 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **54** | **201** |
+| **Total tracked** | **54** | **204** |
 
-**189 of 189 tracked in-scope endpoints.** SDK v0.16.0 adds the three to-do
+**192 of 192 tracked in-scope endpoints.** The client-admission endpoints
+basecamp/bc3#13098 added — `PUT /projects/:id/people/client_users.json` and
+`POST`/`DELETE /projects/:id/client_enablement.json` — land as `people clients`.
+SDK v0.16.0 adds the three to-do
 list template-library operations, available through `templates library`,
 `templates copy`, and `templates copy-status`. The previous last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
@@ -211,7 +214,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | drafts | 1 | `drafts` | ✅ | BC5 | - | list unpublished drafts across projects (server caps at 250). Bounded like the account-wide listings; publishing happens through the command for the draft's type |
 | my_notes | 2 | `notes` | ✅ | BC5 | - | show, set. A singleton per person, so no id and no listing. Pre-first-write the record does not exist yet and renders as empty rather than 404. `set` writes Markdown as HTML; attachments are out of scope |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, update (edit your own profile via `PUT /my/profile.json`), out-of-office show/set/clear (`GetOutOfOffice`/`EnableOutOfOffice`/`DisableOutOfOffice`), pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
+| people | 15 | `people`, `me` | ✅ | BC4 | - | list, show, update (edit your own profile via `PUT /my/profile.json`), out-of-office show/set/clear (`GetOutOfOffice`/`EnableOutOfOffice`/`DisableOutOfOffice`), pingable, add, remove (BC5: `tagline` alias of `bio` on person output). `people clients` covers the client side: `add`/`remove`/`invite` through `PUT /projects/:id/people/client_users.json` (basecamp/bc3#13098), `enable`/`disable` through `POST`/`DELETE /projects/:id/client_enablement.json`; `list` is the project roster filtered to `client: true` |
 | **Search & Recordings** |
 | my_assignments | 6 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter), prioritize, deprioritize, reorder. `list` surfaces `priority_recording_id`, which is the only way to address a prioritized card-table step — it appears in no URL |
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |

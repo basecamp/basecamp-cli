@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/mail"
 	"slices"
 	"sort"
 	"strconv"
@@ -146,7 +149,7 @@ func NewPeopleCmd() *cobra.Command {
 		Use:         "people [action]",
 		Short:       "Manage people",
 		Long:        "List, show, and manage people in your Basecamp account.",
-		Annotations: map[string]string{"agent_notes": "--assignee me resolves to the current user's ID automatically\nPerson IDs are needed for --participants, --people, assign --to\nbasecamp people pingable lists people who can be @mentioned"},
+		Annotations: map[string]string{"agent_notes": "--assignee me resolves to the current user's ID automatically\nPerson IDs are needed for --participants, --people, assign --to\nbasecamp people pingable lists people who can be @mentioned\nadd/remove manage team members only; clients go through basecamp people clients"},
 	}
 
 	cmd.AddCommand(newPeopleListCmd())
@@ -156,6 +159,7 @@ func NewPeopleCmd() *cobra.Command {
 	cmd.AddCommand(newPeoplePingableCmd())
 	cmd.AddCommand(newPeopleAddCmd())
 	cmd.AddCommand(newPeopleRemoveCmd())
+	cmd.AddCommand(newPeopleClientsCmd())
 
 	return cmd
 }
@@ -525,6 +529,7 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 		Title        string `json:"title"`
 		Employee     bool   `json:"employee"`
 		Admin        bool   `json:"admin"`
+		Client       bool   `json:"client"`
 	}
 	items := make([]personListItem, len(people))
 	for i, p := range people {
@@ -535,6 +540,7 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 			Title:        p.Title,
 			Employee:     p.Employee,
 			Admin:        p.Admin,
+			Client:       p.Client,
 		}
 	}
 
@@ -811,4 +817,729 @@ func runPeopleRemove(cmd *cobra.Command, personIDs []string, projectID string) e
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
+}
+
+// newPeopleClientsCmd groups the client-side counterpart of people add/remove.
+//
+// Basecamp keeps clients and team members apart on the wire: the team endpoint
+// (PUT /projects/:id/people/users.json) silently drops a client's id, and the
+// client endpoint (PUT /projects/:id/people/client_users.json) rejects a team
+// member's, so neither can cross-grade someone into the other kind of access.
+// The CLI mirrors that split with a separate group rather than a --client flag.
+func newPeopleClientsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "clients",
+		Short: "Manage clients on a project",
+		Long: `List, add, remove, and invite clients on a project, and turn client
+access on or off.
+
+Clients are external collaborators who see only what the project shares with
+them. A project must have clients enabled before any can be added, and
+enabling is a deliberate, separate step: it applies the project's default
+client visibility (the timeline and most tools become visible; the card table,
+Campfire, and Doors stay private), so adding a client never enables the
+project implicitly.
+
+  basecamp people clients enable --in <project>
+  basecamp people clients invite "Annie Bryan <annie@example.com>" --in <project>
+  basecamp people clients add 1049715915 --in <project>
+  basecamp people clients list --in <project>
+  basecamp people clients remove 1049715915 --in <project>
+  basecamp people clients disable --in <project>
+
+Only client users go through here. Team members use "basecamp people add"
+and "basecamp people remove".`,
+		Annotations: map[string]string{
+			"agent_notes": "Enable clients on the project before adding or inviting any; the API answers 403 otherwise.\n" +
+				"add takes existing client users (id, email, or name); invite creates new clients by email.\n" +
+				"Invitations are all-or-nothing: one bad address or a seat shortfall invites nobody.\n" +
+				"disable refuses while any client still has access; remove them first.",
+		},
+	}
+
+	cmd.AddCommand(
+		newPeopleClientsListCmd(),
+		newPeopleClientsAddCmd(),
+		newPeopleClientsRemoveCmd(),
+		newPeopleClientsInviteCmd(),
+		newPeopleClientsEnableCmd(),
+		newPeopleClientsDisableCmd(),
+	)
+
+	return cmd
+}
+
+// addProjectFlags registers the --project/--in pair every clients verb takes
+// and returns the value they share. The two spellings are one flag: --in is
+// the repo-wide alias for --project and both bind to the same variable.
+func addProjectFlags(cmd *cobra.Command, projectID *string, usage string) {
+	cmd.Flags().StringVarP(projectID, "project", "p", "", usage)
+	cmd.Flags().StringVar(projectID, "in", "", usage+" (alias for --project)")
+
+	completer := completion.NewCompleter(nil)
+	_ = cmd.RegisterFlagCompletionFunc("project", completer.ProjectNameCompletion())
+	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
+}
+
+// requireProject settles the project from the flag, then the global --project,
+// then the configured default (.basecamp/config.json), as a usage error when
+// none names one.
+func requireProject(cmd *cobra.Command, projectID string) (string, error) {
+	app := appctx.FromContext(cmd.Context())
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		return "", output.ErrUsage("--project (or --in) is required")
+	}
+	return projectID, nil
+}
+
+// resolveProjectBucket resolves a project name, id, or URL to its bucket id,
+// returning both the numeric id and its string form for messages.
+func resolveProjectBucket(cmd *cobra.Command, app *appctx.App, projectID string) (int64, string, error) {
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return 0, "", err
+	}
+	bucketID, err := strconv.ParseInt(resolvedProjectID, 10, 64)
+	if err != nil {
+		return 0, "", output.ErrUsage("Invalid project ID")
+	}
+	return bucketID, resolvedProjectID, nil
+}
+
+// resolvePeopleArgs resolves each positional id, email, or name to a person
+// id, in the order given. Positionals are already split, so unlike the
+// comma-separated resolvePersonIDs a name containing a comma stays whole.
+func resolvePeopleArgs(cmd *cobra.Command, app *appctx.App, people []string) ([]int64, error) {
+	ids := make([]int64, 0, len(people))
+	for _, person := range people {
+		resolvedID, _, err := app.Names.ResolvePerson(cmd.Context(), person)
+		if err != nil {
+			return nil, err
+		}
+		id, err := strconv.ParseInt(resolvedID, 10, 64)
+		if err != nil {
+			return nil, output.ErrUsage("Invalid person ID")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func newPeopleClientsListCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List clients on a project",
+		Long: `List the clients who have access to a project.
+
+This is the project's people list narrowed to client users. Team members are
+listed by "basecamp people list --in <project>", which also reports each
+person's "client" flag.
+
+  basecamp people clients list --in <project>`,
+		Example: `basecamp people clients list --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsList(cmd, projectID)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to list clients on (required)")
+
+	return cmd
+}
+
+func runPeopleClientsList(cmd *cobra.Command, projectID string) error {
+	app := appctx.FromContext(cmd.Context())
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	bucketID, resolvedProjectID, err := resolveProjectBucket(cmd, app, projectID)
+	if err != nil {
+		return err
+	}
+
+	// The project roster is small and unpaginated in practice; fetch it whole
+	// so the client filter sees everyone rather than a first page.
+	result, err := app.Account().People().ListProjectPeople(cmd.Context(), bucketID, &basecamp.PeopleListOptions{})
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	type clientListItem struct {
+		ID           int64  `json:"id"`
+		Name         string `json:"name"`
+		EmailAddress string `json:"email_address"`
+		Title        string `json:"title"`
+		Company      string `json:"company,omitempty"`
+	}
+	items := make([]clientListItem, 0)
+	for _, p := range result.People {
+		if !p.Client {
+			continue
+		}
+		item := clientListItem{ID: p.ID, Name: p.Name, EmailAddress: p.EmailAddress, Title: p.Title}
+		if p.Company != nil {
+			item.Company = p.Company.Name
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+
+	return app.OK(items,
+		output.WithSummary(fmt.Sprintf("%d client(s) on project #%s", len(items), resolvedProjectID)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{Action: "add", Cmd: fmt.Sprintf("basecamp people clients add <id> --in %s", resolvedProjectID), Description: "Add an existing client"},
+			output.Breadcrumb{Action: "invite", Cmd: fmt.Sprintf("basecamp people clients invite <email> --in %s", resolvedProjectID), Description: "Invite a new client"},
+		),
+	)
+}
+
+// clientInvitee is one row of a client invitation.
+type clientInvitee struct {
+	Name         string
+	EmailAddress string
+}
+
+// parseClientInvitees reads each token as a bare email address or as
+// "Name <email>", the RFC 5322 mailbox form net/mail accepts, so a quoted
+// display name and a bare address both work without a second flag. A missing
+// name is left empty and the server defaults it to the address.
+func parseClientInvitees(tokens []string) ([]clientInvitee, error) {
+	invitees := make([]clientInvitee, 0, len(tokens))
+	for _, token := range tokens {
+		addr, err := mail.ParseAddress(strings.TrimSpace(token))
+		if err != nil {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf(`%q is not an email address or "Name <email>"`, token),
+				`Name each client by email address, or as "Full Name <email>" to set the name`)
+		}
+		invitees = append(invitees, clientInvitee{Name: addr.Name, EmailAddress: addr.Address})
+	}
+	return invitees, nil
+}
+
+// resolveClientInviteeTokens turns the invite positionals into invitee tokens:
+// exactly ["-"] reads one invitee per line from piped stdin, anything else is
+// taken as given. A "-" mixed with other tokens is a usage error, the same
+// rule the join-all content commands apply.
+func resolveClientInviteeTokens(cmd *cobra.Command, args []string) ([]string, error) {
+	dashes := 0
+	for _, a := range args {
+		if a == "-" {
+			dashes++
+		}
+	}
+	if dashes == 0 {
+		return args, nil
+	}
+	if len(args) != 1 {
+		return nil, output.ErrUsageHint(
+			`"-" cannot be combined with other invitees`,
+			`Pass "-" alone to read one invitee per line from stdin, or list the invitees as arguments`)
+	}
+	content, err := readStdinContent(cmd, "<invitee>")
+	if err != nil {
+		return nil, err
+	}
+	var tokens []string
+	for _, line := range strings.Split(content, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			tokens = append(tokens, line)
+		}
+	}
+	return tokens, nil
+}
+
+// clientsForbiddenError explains a 403 from the client endpoints. The server
+// answers the same empty 403 for "clients are not enabled here" and "you may
+// not manage people here", so on that status the project is read back once to
+// tell them apart and name the fix. Any other error converts as usual.
+func clientsForbiddenError(ctx context.Context, app *appctx.App, bucketID int64, projectRef string, err error) error {
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
+		return convertSDKError(err)
+	}
+	if project, getErr := app.Account().Projects().Get(ctx, bucketID); getErr == nil && !project.ClientsEnabled {
+		return &output.Error{
+			Code:       output.CodeForbidden,
+			Message:    fmt.Sprintf("Clients are not enabled on project #%s", projectRef),
+			Hint:       fmt.Sprintf("Enable them first: basecamp people clients enable --in %s", projectRef),
+			HTTPStatus: sdkErr.HTTPStatus,
+			Cause:      sdkErr,
+		}
+	}
+	return &output.Error{
+		Code:       output.CodeForbidden,
+		Message:    "Access denied: managing clients on this project requires permission to manage its people",
+		Hint:       sdkErr.Hint,
+		HTTPStatus: sdkErr.HTTPStatus,
+		Cause:      sdkErr,
+	}
+}
+
+// clientSeatLimitError re-reads the 429 the client endpoint answers when the
+// new addresses would exceed the account's user limit. That is a verdict, not
+// throttling: no Retry-After accompanies it and waiting cannot change it, so it
+// is reported as the account-limit code (the one a 507 carries elsewhere) and
+// not as a retryable rate limit. A 429 that does name a Retry-After is real
+// throttling and converts as usual.
+func clientSeatLimitError(err error, invitees []clientInvitee) error {
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeRateLimit || sdkErr.RetryAfter > 0 {
+		return convertSDKError(err)
+	}
+	return &output.Error{
+		Code:       output.CodeLimitExceeded,
+		Message:    fmt.Sprintf("Not enough seats on the account to invite %d new client(s)", len(invitees)),
+		Hint:       "The account's user limit would be exceeded; nobody was invited. Free up seats or raise the limit, then retry",
+		HTTPStatus: sdkErr.HTTPStatus,
+		Retryable:  false,
+		Cause:      sdkErr,
+	}
+}
+
+func newPeopleClientsAddCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
+		Use:   "add <id|email|name>...",
+		Short: "Add existing clients to a project",
+		Long: `Grant existing client users access to a project.
+
+Name each client by id, email address, or name. Only client users are
+granted: the server drops a team member's id rather than cross-grading them
+into client access, and any id it did not grant is reported in the notice.
+To invite someone who is not on the account yet, use "basecamp people
+clients invite".
+
+  basecamp people clients add 1049715915 --in <project>
+  basecamp people clients add annie@example.com "Bob Client" --in <project>`,
+		Example: `basecamp people clients add 1049715915 --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|email|name>...")
+			}
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsAccess(cmd, projectID, args, clientAccessGrant)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to add clients to (required)")
+
+	return cmd
+}
+
+func newPeopleClientsRemoveCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
+		Use:   "remove <id|email|name>...",
+		Short: "Remove clients from a project",
+		Long: `Revoke clients' access to a project.
+
+Name each client by id, email address, or name. Only client users are
+revoked; any id the server did not revoke is reported in the notice.
+
+  basecamp people clients remove 1049715915 --in <project>`,
+		Example: `basecamp people clients remove 1049715915 --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|email|name>...")
+			}
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsAccess(cmd, projectID, args, clientAccessRevoke)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to remove clients from (required)")
+
+	return cmd
+}
+
+// clientAccessChange selects which side of the client access triad a verb
+// drives; add and remove differ only in which list carries the ids.
+type clientAccessChange int
+
+const (
+	clientAccessGrant clientAccessChange = iota
+	clientAccessRevoke
+)
+
+func runPeopleClientsAccess(cmd *cobra.Command, projectID string, people []string, change clientAccessChange) error {
+	app := appctx.FromContext(cmd.Context())
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	bucketID, resolvedProjectID, err := resolveProjectBucket(cmd, app, projectID)
+	if err != nil {
+		return err
+	}
+
+	ids, err := resolvePeopleArgs(cmd, app, people)
+	if err != nil {
+		return err
+	}
+
+	req := &basecamp.UpdateProjectClientAccessRequest{}
+	if change == clientAccessGrant {
+		req.Grant = ids
+	} else {
+		req.Revoke = ids
+	}
+
+	result, err := app.Account().People().UpdateProjectClientAccess(cmd.Context(), bucketID, req)
+	if err != nil {
+		return clientsForbiddenError(cmd.Context(), app, bucketID, resolvedProjectID, err)
+	}
+
+	affected := result.Granted
+	verb, missedWhy := "Added", "already on the project, or not a client user"
+	if change == clientAccessRevoke {
+		affected = result.Revoked
+		verb, missedWhy = "Removed", "not on the project, or not a client user"
+	}
+
+	respOpts := []output.ResponseOption{
+		output.WithSummary(fmt.Sprintf("%s %d client(s) %s project #%s", verb, len(affected), accessPreposition(change), resolvedProjectID)),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action: "list", Cmd: fmt.Sprintf("basecamp people clients list --in %s", resolvedProjectID), Description: "List the project's clients",
+		}),
+	}
+	if missed := unaffectedPersonIDs(ids, affected); len(missed) != 0 {
+		respOpts = append(respOpts, output.WithDiagnostic(
+			fmt.Sprintf("Not %s (%s): %s", strings.ToLower(verb), missedWhy, joinInt64s(missed))))
+	}
+
+	return app.OK(result, respOpts...)
+}
+
+func accessPreposition(change clientAccessChange) string {
+	if change == clientAccessRevoke {
+		return "from"
+	}
+	return "to"
+}
+
+// unaffectedPersonIDs lists the requested ids absent from the server's
+// granted/revoked echo, in request order and without repeats: the endpoint
+// silently drops an ineligible id, and the caller needs to know which.
+func unaffectedPersonIDs(requested []int64, affected []basecamp.Person) []int64 {
+	seen := make(map[int64]bool, len(affected))
+	for _, p := range affected {
+		seen[p.ID] = true
+	}
+	var missed []int64
+	for _, id := range requested {
+		if !seen[id] {
+			seen[id] = true
+			missed = append(missed, id)
+		}
+	}
+	return missed
+}
+
+func joinInt64s(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func newPeopleClientsInviteCmd() *cobra.Command {
+	var projectID, company, title string
+
+	cmd := &cobra.Command{
+		Use:   "invite <invitee>...",
+		Short: "Invite new clients to a project by email",
+		Long: `Invite people who are not on the account yet as clients on a project.
+
+Each invitee is an email address, or "Name <email>" to set the display name
+(it defaults to the address). Pass "-" alone to read one invitee per line
+from stdin. --company applies to every invitee in the invocation; --title
+names one person's role, so it takes exactly one invitee.
+
+Invitations are all-or-nothing: an invalid address fails the whole batch
+with each bad row named (exit 9, validation), and a batch that would exceed
+the account's user limit fails with nobody invited (exit 10, limit_exceeded).
+Addresses already on the account do not consume a seat. Clients must be
+enabled on the project first; see "basecamp people clients enable".
+
+  basecamp people clients invite annie@example.com --in <project>
+  basecamp people clients invite "Annie Bryan <annie@example.com>" --in <project> --company "Springfield Elementary" --title Owner
+  printf 'annie@example.com\nBob Client <bob@example.com>\n' | basecamp people clients invite - --in <project>`,
+		Example: `basecamp people clients invite "Annie Bryan <annie@example.com>" --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<invitee>...")
+			}
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsInvite(cmd, projectID, args, company, title)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to invite clients to (required)")
+	cmd.Flags().StringVar(&company, "company", "", "Company name for every invitee")
+	cmd.Flags().StringVar(&title, "title", "", "Job title (a single invitee only)")
+	allowDash(cmd, "arg:0")
+
+	return cmd
+}
+
+func runPeopleClientsInvite(cmd *cobra.Command, projectID string, args []string, company, title string) error {
+	app := appctx.FromContext(cmd.Context())
+
+	tokens, err := resolveClientInviteeTokens(cmd, args)
+	if err != nil {
+		return err
+	}
+	invitees, err := parseClientInvitees(tokens)
+	if err != nil {
+		return err
+	}
+	if title != "" && len(invitees) != 1 {
+		return output.ErrUsage("--title names one person's role; invite them on their own to set it")
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	bucketID, resolvedProjectID, err := resolveProjectBucket(cmd, app, projectID)
+	if err != nil {
+		return err
+	}
+
+	req := &basecamp.UpdateProjectClientAccessRequest{Create: make([]basecamp.CreateClientRequest, 0, len(invitees))}
+	for _, invitee := range invitees {
+		req.Create = append(req.Create, basecamp.CreateClientRequest{
+			EmailAddress: invitee.EmailAddress,
+			Name:         invitee.Name,
+			Title:        title,
+			CompanyName:  company,
+		})
+	}
+
+	result, err := app.Account().People().UpdateProjectClientAccess(cmd.Context(), bucketID, req)
+	if err != nil {
+		return clientInviteError(cmd.Context(), app, bucketID, resolvedProjectID, err, invitees)
+	}
+
+	return app.OK(result,
+		output.WithSummary(fmt.Sprintf("Invited %d client(s) to project #%s", len(result.Granted), resolvedProjectID)),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action: "list", Cmd: fmt.Sprintf("basecamp people clients list --in %s", resolvedProjectID), Description: "List the project's clients",
+		}),
+	)
+}
+
+// clientInviteError maps the invite endpoint's three refusals: a 403 for
+// clients being off (or no permission), a 429 for the seat limit, and a 422
+// naming each rejected row.
+func clientInviteError(ctx context.Context, app *appctx.App, bucketID int64, projectRef string, err error, invitees []clientInvitee) error {
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
+		switch sdkErr.Code {
+		case basecamp.CodeForbidden:
+			return clientsForbiddenError(ctx, app, bucketID, projectRef, err)
+		case basecamp.CodeRateLimit:
+			return clientSeatLimitError(err, invitees)
+		case basecamp.CodeValidation:
+			return clientInviteValidationError(sdkErr, invitees)
+		}
+	}
+	return convertSDKError(err)
+}
+
+// clientInviteValidationError renders the all-or-nothing 422. The wire body is
+// row-keyed — {"errors": [{"email_address", "messages"}]}. When the SDK exposes
+// it as FieldErrors keyed by address, the hint names each rejected row; when it
+// carries only the status, the hint names the addresses submitted so the caller
+// still knows which batch was refused.
+func clientInviteValidationError(sdkErr *basecamp.Error, invitees []clientInvitee) error {
+	hint := "Nobody was invited. Check each address, then retry the whole batch"
+	if len(sdkErr.FieldErrors) != 0 {
+		addresses := make([]string, 0, len(sdkErr.FieldErrors))
+		for address := range sdkErr.FieldErrors {
+			addresses = append(addresses, address)
+		}
+		sort.Strings(addresses)
+		rows := make([]string, 0, len(addresses))
+		for _, address := range addresses {
+			rows = append(rows, fmt.Sprintf("%s: %s", address, strings.Join(sdkErr.FieldErrors[address], "; ")))
+		}
+		hint = "Nobody was invited. Rejected:\n" + strings.Join(rows, "\n")
+	} else if len(invitees) != 0 {
+		addresses := make([]string, len(invitees))
+		for i, invitee := range invitees {
+			addresses[i] = invitee.EmailAddress
+		}
+		hint = "Nobody was invited. Basecamp rejected at least one of: " + strings.Join(addresses, ", ")
+	}
+	return &output.Error{
+		Code:       output.CodeValidation,
+		Message:    "Invitation rejected: at least one client row is invalid",
+		Hint:       hint,
+		HTTPStatus: sdkErr.HTTPStatus,
+		Cause:      sdkErr,
+	}
+}
+
+func newPeopleClientsEnableCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
+		Use:   "enable",
+		Short: "Turn on client access for a project",
+		Long: `Enable clients on a project so they can be added to it.
+
+This is a deliberate, separate step from adding clients: it applies the
+project's default client visibility, so the timeline and most docked tools
+become visible to clients (the card table, Campfire, and Doors stay private)
+and later content inherits that default. Adjust visibility per tool and per
+item from there. Refused (403) unless the account supports clients and this
+is a standard project.
+
+  basecamp people clients enable --in <project>`,
+		Example: `basecamp people clients enable --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsEnablement(cmd, projectID, true)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to enable clients on (required)")
+
+	return cmd
+}
+
+func newPeopleClientsDisableCmd() *cobra.Command {
+	var projectID string
+
+	cmd := &cobra.Command{
+		Use:   "disable",
+		Short: "Turn off client access for a project",
+		Long: `Disable clients on a project.
+
+Refused (403) while any client still has access; remove them first with
+"basecamp people clients remove".
+
+  basecamp people clients disable --in <project>`,
+		Example: `basecamp people clients disable --in <project>`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectID, err := requireProject(cmd, projectID)
+			if err != nil {
+				return err
+			}
+			return runPeopleClientsEnablement(cmd, projectID, false)
+		},
+	}
+
+	addProjectFlags(cmd, &projectID, "Project to disable clients on (required)")
+
+	return cmd
+}
+
+func runPeopleClientsEnablement(cmd *cobra.Command, projectID string, enable bool) error {
+	app := appctx.FromContext(cmd.Context())
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	bucketID, resolvedProjectID, err := resolveProjectBucket(cmd, app, projectID)
+	if err != nil {
+		return err
+	}
+
+	var result *basecamp.ProjectClientEnablement
+	if enable {
+		result, err = app.Account().People().EnableProjectClients(cmd.Context(), bucketID)
+	} else {
+		result, err = app.Account().People().DisableProjectClients(cmd.Context(), bucketID)
+	}
+	if err != nil {
+		return clientEnablementError(cmd.Context(), app, bucketID, resolvedProjectID, enable, err)
+	}
+
+	if enable {
+		return app.OK(result,
+			output.WithSummary(fmt.Sprintf("Enabled clients on project #%s", resolvedProjectID)),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{Action: "invite", Cmd: fmt.Sprintf("basecamp people clients invite <email> --in %s", resolvedProjectID), Description: "Invite a new client"},
+				output.Breadcrumb{Action: "add", Cmd: fmt.Sprintf("basecamp people clients add <id> --in %s", resolvedProjectID), Description: "Add an existing client"},
+			),
+		)
+	}
+	return app.OK(result,
+		output.WithSummary(fmt.Sprintf("Disabled clients on project #%s", resolvedProjectID)),
+	)
+}
+
+// clientEnablementError explains the two 403s the enablement endpoint answers.
+// Enabling is refused when the project cannot have clients at all; disabling
+// is refused while any client keeps access, and the roster is read back once
+// to name them.
+func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64, projectRef string, enable bool, err error) error {
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
+		return convertSDKError(err)
+	}
+	if enable {
+		return &output.Error{
+			Code:       output.CodeForbidden,
+			Message:    fmt.Sprintf("Clients cannot be enabled on project #%s", projectRef),
+			Hint:       "The account may not support clients, this may not be a standard project, or you may lack permission to manage its people",
+			HTTPStatus: sdkErr.HTTPStatus,
+			Cause:      sdkErr,
+		}
+	}
+	hint := "Remove every client first: basecamp people clients list --in " + projectRef
+	if roster, listErr := app.Account().People().ListProjectPeople(ctx, bucketID, &basecamp.PeopleListOptions{}); listErr == nil {
+		var ids []int64
+		for _, p := range roster.People {
+			if p.Client {
+				ids = append(ids, p.ID)
+			}
+		}
+		if len(ids) != 0 {
+			hint = fmt.Sprintf("Remove every client first: basecamp people clients remove %s --in %s", joinInt64s(ids), projectRef)
+		}
+	}
+	return &output.Error{
+		Code:       output.CodeForbidden,
+		Message:    fmt.Sprintf("Clients cannot be disabled on project #%s while any client still has access", projectRef),
+		Hint:       hint,
+		HTTPStatus: sdkErr.HTTPStatus,
+		Cause:      sdkErr,
+	}
 }

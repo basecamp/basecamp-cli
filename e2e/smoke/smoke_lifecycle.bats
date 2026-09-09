@@ -137,6 +137,26 @@ load smoke_helper
   mark_out_of_scope "Modifies project membership"
 }
 
+@test "people clients add is out of scope" {
+  mark_out_of_scope "Modifies project membership"
+}
+
+@test "people clients remove is out of scope" {
+  mark_out_of_scope "Modifies project membership"
+}
+
+@test "people clients invite is out of scope" {
+  mark_out_of_scope "Invites a new client by email — consumes an account seat"
+}
+
+@test "people clients enable is out of scope" {
+  mark_out_of_scope "Reconfigures project-wide client visibility"
+}
+
+@test "people clients disable is out of scope" {
+  mark_out_of_scope "Reconfigures project-wide client visibility"
+}
+
 @test "todos sweep is out of scope" {
   mark_out_of_scope "Bulk completion — destructive, no undo"
 }

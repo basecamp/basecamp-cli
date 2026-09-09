@@ -1240,8 +1240,8 @@ basecamp people update me --bio "..." --title "..." --json   # Edit your own pro
 basecamp people out-of-office me --json            # Your out-of-office status
 basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18 --json  # Set out-of-office
 basecamp people out-of-office me --clear --json    # Clear out-of-office
-basecamp people add <id> --project <project>       # Add to project
-basecamp people remove <id> --project <project>    # Remove from project
+basecamp people add <id> --project <project>       # Add a team member to a project
+basecamp people remove <id> --project <project>    # Remove a team member from a project
 ```
 
 `people update me` edits your own profile (bio, title, name, email, location,
@@ -1249,6 +1249,31 @@ time zone); pass a flag with an empty value to clear that field. `people
 out-of-office me` shows your away status, sets it with `--start`/`--end`
 (natural language or YYYY-MM-DD, end not before start), or clears it with
 `--clear`.
+
+`people list` reports each person's `client` flag. `people add`/`remove` manage
+team members only — a client's id passed to them is dropped server-side, never
+cross-graded — so clients have their own verbs:
+
+```bash
+basecamp people clients enable --in <project>                 # Turn client access on (do this first)
+basecamp people clients list --in <project>                   # Clients on the project
+basecamp people clients add <id|email|name> --in <project>    # Grant an existing client user
+basecamp people clients invite annie@example.com --in <project>                 # Invite a new client by email
+basecamp people clients invite "Annie Bryan <annie@example.com>" --in <project> # ... with a name
+basecamp people clients invite - --in <project>               # One invitee per line on stdin
+basecamp people clients remove <id|email|name> --in <project> # Revoke a client's access
+basecamp people clients disable --in <project>                # Turn client access off (after removing every client)
+```
+
+Enabling clients is a deliberate, separate step: it applies the project's
+default client visibility (timeline and most tools shared; card table,
+Campfire, and Doors private), so `add`/`invite` never enable implicitly and
+answer `forbidden` with an `enable` hint while clients are off. `invite` takes
+`--company` (applies to every invitee) and `--title` (one invitee only), and is
+all-or-nothing: an invalid address exits `validation` (9) naming each rejected
+row, and a seat shortfall exits `limit_exceeded` (10) — in both cases nobody
+was invited. `add`/`remove` report the ids the server did not grant or revoke
+(already on the project, or not a client user) in the notice.
 
 ### Search
 

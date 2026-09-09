@@ -290,6 +290,9 @@ ARG basecamp msgs update 00 <id|url>
 ARG basecamp notes set 00 [content]
 ARG basecamp notifications read 00 <id>...
 ARG basecamp people add 00 <person-id>...
+ARG basecamp people clients add 00 <id|email|name>...
+ARG basecamp people clients invite 00 <invitee>...
+ARG basecamp people clients remove 00 <id|email|name>...
 ARG basecamp people ooo 00 [me]
 ARG basecamp people out-of-office 00 [me]
 ARG basecamp people remove 00 <person-id>...
@@ -925,6 +928,13 @@ CMD basecamp notifications list
 CMD basecamp notifications read
 CMD basecamp people
 CMD basecamp people add
+CMD basecamp people clients
+CMD basecamp people clients add
+CMD basecamp people clients disable
+CMD basecamp people clients enable
+CMD basecamp people clients invite
+CMD basecamp people clients list
+CMD basecamp people clients remove
 CMD basecamp people list
 CMD basecamp people ooo
 CMD basecamp people out-of-office
@@ -11742,6 +11752,155 @@ FLAG basecamp people add --stats type=bool
 FLAG basecamp people add --styled type=bool
 FLAG basecamp people add --todolist type=string
 FLAG basecamp people add --verbose type=count
+FLAG basecamp people clients --account type=string
+FLAG basecamp people clients --agent type=bool
+FLAG basecamp people clients --cache-dir type=string
+FLAG basecamp people clients --count type=bool
+FLAG basecamp people clients --help type=bool
+FLAG basecamp people clients --hints type=bool
+FLAG basecamp people clients --ids-only type=bool
+FLAG basecamp people clients --in type=string
+FLAG basecamp people clients --jq type=string
+FLAG basecamp people clients --json type=bool
+FLAG basecamp people clients --markdown type=bool
+FLAG basecamp people clients --md type=bool
+FLAG basecamp people clients --no-hints type=bool
+FLAG basecamp people clients --no-stats type=bool
+FLAG basecamp people clients --profile type=string
+FLAG basecamp people clients --project type=string
+FLAG basecamp people clients --quiet type=bool
+FLAG basecamp people clients --stats type=bool
+FLAG basecamp people clients --styled type=bool
+FLAG basecamp people clients --todolist type=string
+FLAG basecamp people clients --verbose type=count
+FLAG basecamp people clients add --account type=string
+FLAG basecamp people clients add --agent type=bool
+FLAG basecamp people clients add --cache-dir type=string
+FLAG basecamp people clients add --count type=bool
+FLAG basecamp people clients add --help type=bool
+FLAG basecamp people clients add --hints type=bool
+FLAG basecamp people clients add --ids-only type=bool
+FLAG basecamp people clients add --in type=string
+FLAG basecamp people clients add --jq type=string
+FLAG basecamp people clients add --json type=bool
+FLAG basecamp people clients add --markdown type=bool
+FLAG basecamp people clients add --md type=bool
+FLAG basecamp people clients add --no-hints type=bool
+FLAG basecamp people clients add --no-stats type=bool
+FLAG basecamp people clients add --profile type=string
+FLAG basecamp people clients add --project type=string
+FLAG basecamp people clients add --quiet type=bool
+FLAG basecamp people clients add --stats type=bool
+FLAG basecamp people clients add --styled type=bool
+FLAG basecamp people clients add --todolist type=string
+FLAG basecamp people clients add --verbose type=count
+FLAG basecamp people clients disable --account type=string
+FLAG basecamp people clients disable --agent type=bool
+FLAG basecamp people clients disable --cache-dir type=string
+FLAG basecamp people clients disable --count type=bool
+FLAG basecamp people clients disable --help type=bool
+FLAG basecamp people clients disable --hints type=bool
+FLAG basecamp people clients disable --ids-only type=bool
+FLAG basecamp people clients disable --in type=string
+FLAG basecamp people clients disable --jq type=string
+FLAG basecamp people clients disable --json type=bool
+FLAG basecamp people clients disable --markdown type=bool
+FLAG basecamp people clients disable --md type=bool
+FLAG basecamp people clients disable --no-hints type=bool
+FLAG basecamp people clients disable --no-stats type=bool
+FLAG basecamp people clients disable --profile type=string
+FLAG basecamp people clients disable --project type=string
+FLAG basecamp people clients disable --quiet type=bool
+FLAG basecamp people clients disable --stats type=bool
+FLAG basecamp people clients disable --styled type=bool
+FLAG basecamp people clients disable --todolist type=string
+FLAG basecamp people clients disable --verbose type=count
+FLAG basecamp people clients enable --account type=string
+FLAG basecamp people clients enable --agent type=bool
+FLAG basecamp people clients enable --cache-dir type=string
+FLAG basecamp people clients enable --count type=bool
+FLAG basecamp people clients enable --help type=bool
+FLAG basecamp people clients enable --hints type=bool
+FLAG basecamp people clients enable --ids-only type=bool
+FLAG basecamp people clients enable --in type=string
+FLAG basecamp people clients enable --jq type=string
+FLAG basecamp people clients enable --json type=bool
+FLAG basecamp people clients enable --markdown type=bool
+FLAG basecamp people clients enable --md type=bool
+FLAG basecamp people clients enable --no-hints type=bool
+FLAG basecamp people clients enable --no-stats type=bool
+FLAG basecamp people clients enable --profile type=string
+FLAG basecamp people clients enable --project type=string
+FLAG basecamp people clients enable --quiet type=bool
+FLAG basecamp people clients enable --stats type=bool
+FLAG basecamp people clients enable --styled type=bool
+FLAG basecamp people clients enable --todolist type=string
+FLAG basecamp people clients enable --verbose type=count
+FLAG basecamp people clients invite --account type=string
+FLAG basecamp people clients invite --agent type=bool
+FLAG basecamp people clients invite --cache-dir type=string
+FLAG basecamp people clients invite --company type=string
+FLAG basecamp people clients invite --count type=bool
+FLAG basecamp people clients invite --help type=bool
+FLAG basecamp people clients invite --hints type=bool
+FLAG basecamp people clients invite --ids-only type=bool
+FLAG basecamp people clients invite --in type=string
+FLAG basecamp people clients invite --jq type=string
+FLAG basecamp people clients invite --json type=bool
+FLAG basecamp people clients invite --markdown type=bool
+FLAG basecamp people clients invite --md type=bool
+FLAG basecamp people clients invite --no-hints type=bool
+FLAG basecamp people clients invite --no-stats type=bool
+FLAG basecamp people clients invite --profile type=string
+FLAG basecamp people clients invite --project type=string
+FLAG basecamp people clients invite --quiet type=bool
+FLAG basecamp people clients invite --stats type=bool
+FLAG basecamp people clients invite --styled type=bool
+FLAG basecamp people clients invite --title type=string
+FLAG basecamp people clients invite --todolist type=string
+FLAG basecamp people clients invite --verbose type=count
+FLAG basecamp people clients list --account type=string
+FLAG basecamp people clients list --agent type=bool
+FLAG basecamp people clients list --cache-dir type=string
+FLAG basecamp people clients list --count type=bool
+FLAG basecamp people clients list --help type=bool
+FLAG basecamp people clients list --hints type=bool
+FLAG basecamp people clients list --ids-only type=bool
+FLAG basecamp people clients list --in type=string
+FLAG basecamp people clients list --jq type=string
+FLAG basecamp people clients list --json type=bool
+FLAG basecamp people clients list --markdown type=bool
+FLAG basecamp people clients list --md type=bool
+FLAG basecamp people clients list --no-hints type=bool
+FLAG basecamp people clients list --no-stats type=bool
+FLAG basecamp people clients list --profile type=string
+FLAG basecamp people clients list --project type=string
+FLAG basecamp people clients list --quiet type=bool
+FLAG basecamp people clients list --stats type=bool
+FLAG basecamp people clients list --styled type=bool
+FLAG basecamp people clients list --todolist type=string
+FLAG basecamp people clients list --verbose type=count
+FLAG basecamp people clients remove --account type=string
+FLAG basecamp people clients remove --agent type=bool
+FLAG basecamp people clients remove --cache-dir type=string
+FLAG basecamp people clients remove --count type=bool
+FLAG basecamp people clients remove --help type=bool
+FLAG basecamp people clients remove --hints type=bool
+FLAG basecamp people clients remove --ids-only type=bool
+FLAG basecamp people clients remove --in type=string
+FLAG basecamp people clients remove --jq type=string
+FLAG basecamp people clients remove --json type=bool
+FLAG basecamp people clients remove --markdown type=bool
+FLAG basecamp people clients remove --md type=bool
+FLAG basecamp people clients remove --no-hints type=bool
+FLAG basecamp people clients remove --no-stats type=bool
+FLAG basecamp people clients remove --profile type=string
+FLAG basecamp people clients remove --project type=string
+FLAG basecamp people clients remove --quiet type=bool
+FLAG basecamp people clients remove --stats type=bool
+FLAG basecamp people clients remove --styled type=bool
+FLAG basecamp people clients remove --todolist type=string
+FLAG basecamp people clients remove --verbose type=count
 FLAG basecamp people list --account type=string
 FLAG basecamp people list --agent type=bool
 FLAG basecamp people list --all type=bool
@@ -18435,6 +18594,13 @@ SUB basecamp notifications list
 SUB basecamp notifications read
 SUB basecamp people
 SUB basecamp people add
+SUB basecamp people clients
+SUB basecamp people clients add
+SUB basecamp people clients disable
+SUB basecamp people clients enable
+SUB basecamp people clients invite
+SUB basecamp people clients list
+SUB basecamp people clients remove
 SUB basecamp people list
 SUB basecamp people ooo
 SUB basecamp people out-of-office
