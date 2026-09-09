@@ -612,6 +612,8 @@ func TestAuthLoginWithTokenRejectsBadStdin(t *testing.T) {
 		"two lines":             {"bc_at_one\nbc_at_two\n", "single line"},
 		"inner space":           {"bc_at one", "single line"},
 		"control char":          {"bc_at\x1bone", "single line"},
+		"bare CR":               {"bc_at_secret\r", "single line"},
+		"LF then CR":            {"bc_at_secret\n\r", "single line"},
 		"oversized":             {strings.Repeat("x", maxTokenBytes+1), "longer than"},
 	} {
 		t.Run(name, func(t *testing.T) {

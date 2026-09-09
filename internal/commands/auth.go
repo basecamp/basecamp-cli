@@ -581,8 +581,12 @@ func readTokenFromStdin(cmd *cobra.Command) (string, error) {
 	// CRLF file on Windows); that one is stripped and nothing else is —
 	// any other whitespace is not a token, and quietly trimming it would
 	// hide a malformed secret rather than the secret store's exact value.
-	token := strings.TrimSuffix(string(data), "\n")
-	token = strings.TrimSuffix(token, "\r")
+	token := string(data)
+	if strings.HasSuffix(token, "\r\n") {
+		token = strings.TrimSuffix(token, "\r\n")
+	} else {
+		token = strings.TrimSuffix(token, "\n")
+	}
 	if token == "" {
 		return "", output.ErrUsageHint("No token on stdin",
 			"Pipe it in from a secret store: `op read \"op://<vault>/<item>/credential\" | basecamp auth login --with-token -P <profile> --account <id>`.")
