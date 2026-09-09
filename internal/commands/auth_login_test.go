@@ -763,8 +763,8 @@ func TestAuthLoginRefusesNonInteractiveEnvWithoutDeviceCode(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
 			assert.Contains(t, err.Error(), "BASECAMP_NONINTERACTIVE")
-			assert.Contains(t, err.Error(), "--device-code")
 			assert.Contains(t, err.Error(), "--with-token")
+			assert.Contains(t, err.Error(), "--device-code where the server offers the device flow")
 			assert.Empty(t, srv.seenBearers())
 		})
 	}

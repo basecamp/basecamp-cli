@@ -287,6 +287,45 @@ func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
 		"--device-code must select the remote paste-callback flow")
 }
 
+// TestProfileCreateRefusesNonInteractiveEnvOnLaunchpad: profile create
+// reaches Manager.Login without the login command's gate, so the auth-layer
+// refusal is what stops it opening a browser and waiting on the loopback
+// callback under BASECAMP_NONINTERACTIVE.
+func TestProfileCreateRefusesNonInteractiveEnvOnLaunchpad(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+
+	cfg := &config.Config{BaseURL: srv.URL, CacheDir: t.TempDir(), Sources: make(map[string]string)}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	authMgr.SetStore(auth.NewStore(tmpDir))
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	root := &cobra.Command{Use: "basecamp"}
+	root.AddCommand(NewProfileCmd())
+	root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", srv.URL, "--local", "--no-browser"})
+	root.SetContext(appctx.WithApp(ctx, app))
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+	assert.Contains(t, err.Error(), "BASECAMP_NONINTERACTIVE")
+	assert.Contains(t, err.Error(), "--with-token")
+	assert.Empty(t, cfg.Profiles, "a refused login registers no profile")
+}
+
 func TestProfileCreateRejectsDuplicateName(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL:  "https://3.basecampapi.com",

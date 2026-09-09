@@ -1385,7 +1385,7 @@ basecamp auth login                               # Re-authenticate
 basecamp auth login --scope full                  # Full access (the default; ignored by Launchpad)
 basecamp auth login --scope read                  # Read-only access (ignored by Launchpad)
 basecamp auth login --device-code                 # Headless authentication with manual browser instructions
-BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE; browser and pasted-callback flows refuse
+BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE, and only where the server offers the device flow (Launchpad does not); browser and pasted-callback flows refuse — prefer --with-token
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
 basecamp profile create <name> --account <id> --expect-identity <id>  # Same assertion for a new profile

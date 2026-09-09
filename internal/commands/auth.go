@@ -307,8 +307,9 @@ named profile, creating the profile when --account is given.
 			if config.NonInteractiveEnv() && !deviceCode {
 				return output.ErrUsageHint("Interactive login cannot run under BASECAMP_NONINTERACTIVE",
 					"Browser and pasted-callback logins wait on a person at this terminal. "+
-						"Pass --device-code to approve the printed code from any device, import a token headlessly: "+
-						"`... | basecamp auth login --with-token -P <profile> --account <id>`, or check credentials with `basecamp auth status`.")
+						"Import a token headlessly: `... | basecamp auth login --with-token -P <profile> --account <id>`; "+
+						"pass --device-code where the server offers the device flow (Launchpad does not) to approve the printed code from any device; "+
+						"or check credentials with `basecamp auth status`.")
 			}
 			if expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
 				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")

@@ -487,6 +487,17 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 // browser (or printed) auth URL, then a loopback callback or pasted
 // callback URL in remote mode.
 func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *oauth.Config, opts *LoginOptions) (*LoginResult, error) {
+	// Both Launchpad shapes wait on a person: the loopback callback on a
+	// browser someone signs into, the remote one on a pasted redirect URL.
+	// Every login entry point converges here, so this is where the
+	// environment's word that nobody is at the terminal is final.
+	if config.NonInteractiveEnv() {
+		return nil, output.ErrUsageHint("Interactive login cannot run under BASECAMP_NONINTERACTIVE",
+			"This authorization server signs in through the browser — a loopback callback, or a pasted redirect URL in remote mode — and does not offer the device flow. "+
+				"Unset BASECAMP_NONINTERACTIVE to sign in, or import a token headlessly: "+
+				"`... | basecamp auth login --with-token -P <profile> --account <id>`.")
+	}
+
 	// Resolve redirect URI and listener address
 	redirectURI, listenAddr, err := resolveOAuthCallback(opts)
 	if err != nil {
@@ -528,12 +539,6 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 	resolve := func(bool) {} // no-op default for remote mode
 
 	if opts.Remote {
-		if config.NonInteractiveEnv() {
-			return nil, output.ErrUsageHint("Cannot prompt for the callback URL under BASECAMP_NONINTERACTIVE",
-				"This server signs in through the browser flow, which in remote mode waits for the redirect URL to be pasted here. "+
-					"Unset BASECAMP_NONINTERACTIVE to paste it, or import a token headlessly: "+
-					"`... | basecamp auth login --with-token -P <profile> --account <id>`.")
-		}
 		// Remote/headless mode: prompt user to paste callback URL
 		opts.log("\nRemote Authentication")
 		opts.log("")
