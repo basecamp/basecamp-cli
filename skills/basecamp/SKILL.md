@@ -91,12 +91,12 @@ Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages,
 2. **Parse URLs first** with `basecamp url parse "<url>"` to extract IDs
 3. **Comments are flat** - reply to parent recording, not to comments
 4. **Check context** via `.basecamp/config.json` before assuming project
-5. **Content fields accept Markdown and @mentions** — message body and comment content accept Markdown syntax; the CLI converts to HTML automatically. Use Markdown formatting (lists, bold, links, code blocks, tables) for rich content. Four mention syntaxes are available (prefer deterministic for agents):
+5. **Content fields accept Markdown and @mentions** — every rich-text field is converted from Markdown to HTML by the CLI: message and document bodies, comment content, todo, card, schedule-entry and upload descriptions, chat lines, check-in answers and notes. Use Markdown formatting (lists, bold, links, code blocks, tables) for rich content. Four mention syntaxes are available (prefer deterministic for agents):
    - **`[@Name](mention:SGID)`** — zero API calls, embeds SGID directly (preferred for agents)
    - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
    - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
-   For todos, documents, and cards, content is sent as-is — use plain text or HTML directly.
+   Raw HTML is also accepted and passes through unchanged, but it is all-or-nothing per field: any HTML tag outside a code span or fence skips Markdown conversion for the whole field, including inline image upload, which only works from Markdown `![alt](/local/path)` syntax. Titles (a todo's content argument, card and message titles) are plain text and never converted.
 
    **Table boundary:** GFM tables round-trip: they render in message/comment
    bodies, display converts them back to pipe tables, and the TUI in-place
