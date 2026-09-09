@@ -112,7 +112,7 @@ func (r *Resolver) ProjectWithPersist(ctx context.Context) (*ResolvedValue, erro
 // projectToPickerItem converts a Basecamp project to a picker item.
 func projectToPickerItem(proj basecamp.Project) tui.PickerItem {
 	title := proj.Name
-	if proj.Bookmarked {
+	if proj.Starred {
 		title = "★ " + title
 	}
 

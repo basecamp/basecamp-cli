@@ -97,6 +97,14 @@ load smoke_helper
   mark_out_of_scope "Depends on templates construct (OOS)"
 }
 
+@test "templates copy is out of scope" {
+  mark_out_of_scope "Copies a to-do list into a project and may grant project access"
+}
+
+@test "templates copy-status is out of scope" {
+  mark_out_of_scope "Depends on templates copy (OOS)"
+}
+
 @test "templates create is out of scope" {
   mark_out_of_scope "Account-wide template mutation"
 }

@@ -21,6 +21,13 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "templates library returns to-do list templates" {
+  run_smoke basecamp templates library --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Template library not available in this account"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "people show returns person detail" {
   run_smoke basecamp people show me --json
   assert_success
@@ -43,6 +50,19 @@ setup_file() {
 
 @test "people pingable returns pingable people" {
   run_smoke basecamp people pingable --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "people update rejects bare invocation" {
+  run_smoke basecamp people update me --json
+  assert_failure
+  assert_json_value '.error' 'No update fields specified'
+  assert_json_value '.code' 'usage'
+}
+
+@test "people out-of-office shows status" {
+  run_smoke basecamp people out-of-office me --json
   assert_success
   assert_json_value '.ok' 'true'
 }

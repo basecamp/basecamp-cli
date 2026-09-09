@@ -4,7 +4,7 @@ description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
   subscriptions, lineup, chat, pings, gauges, assignments, notifications, bookmarks,
-  drafts, notes, calendars, and accounts.
+  bubble-up, drafts, notes, calendars, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -20,6 +20,7 @@ triggers:
   - basecamp file
   - basecamp document
   - basecamp bookmarks
+  - basecamp bubble-up
   - basecamp drafts
   - basecamp notes
   - basecamp calendars
@@ -80,7 +81,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 155 endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
+Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
 
 ## Agent Invariants
 
@@ -215,6 +216,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | My bookmarks | `basecamp bookmarks list --json` |
 | Bookmark something | `basecamp bookmarks add <id-or-url> --json` |
 | Is it bookmarked? | `basecamp bookmarks check <id-or-url> --json` (always exits 0) |
+| Bubble a recording up | `basecamp bubble-up add <id-or-url> --json` |
+| Schedule a bubble-up | `basecamp bubble-up add <id-or-url> --at tomorrow --json` |
+| Pop a bubble-up | `basecamp bubble-up remove <id-or-url> --json` |
 | My unpublished drafts | `basecamp drafts list --json` |
 | Read my personal note | `basecamp notes show --json` |
 | Replace my personal note | `basecamp notes set "<content>" --json` |
@@ -958,16 +962,26 @@ basecamp recordings visibility <id> --hidden      # Hide from clients
 ### Templates
 
 ```bash
-basecamp templates --json                         # List templates
-basecamp templates show <id> --json               # Template details
-basecamp templates create "Template Name"         # Create empty template
+basecamp templates list --json                    # List project templates
+basecamp templates show <id> --json               # Project template details
+basecamp templates create "Template Name"         # Create empty project template
 basecamp templates update <id> --name "New Name"
-basecamp templates delete <id>                    # Trash template
+basecamp templates delete <id>                    # Trash project template
 basecamp templates construct <id> --name "New Project"  # Create project (async)
-basecamp templates construction <template_id> <construction_id>  # Check status
+basecamp templates construction <template_id> <construction_id>  # Check project status
+
+basecamp templates library --json                 # List active to-do list templates
+basecamp templates copy <template_id> --in <project>  # Start copying into To-dos
+basecamp templates copy-status <copy_id>          # Check copy status
 ```
 
-**Construct returns construction_id - poll until status="completed" to get project.**
+**Asynchronous results:** `construct` returns a construction ID; poll `construction`
+until `status="completed"` to get the project. `copy` returns a copy ID; poll
+`copy-status` through `pending` and `processing` until it is `completed` or `failed`.
+
+A copy can report the people who need access to the destination project. Show those
+people to the user and rerun with `--confirm-adding-people` only after the user
+explicitly approves granting that access. Never add this flag automatically.
 
 ### Webhooks
 
@@ -1084,7 +1098,7 @@ success while changing nothing. If two steps on one card are prioritized, the
 listing shows the card once with a single `priority_recording_id` and the
 siblings are not separately addressable.
 
-### Personal (bookmarks, drafts, notes)
+### Personal (bookmarks, bubble-up, drafts, notes)
 
 Private to you, spanning every project — no `--in <project>`.
 
@@ -1093,10 +1107,20 @@ basecamp bookmarks list --json
 basecamp bookmarks add <id-or-url> --json
 basecamp bookmarks remove <id-or-url> --json
 basecamp bookmarks check <id-or-url> --json
+basecamp bubble-up add <id-or-url> --json
+basecamp bubble-up add <id-or-url> --at tomorrow --json
+basecamp bubble-up remove <id-or-url> --json
 basecamp drafts list --json
 basecamp notes show --json
 basecamp notes set "<content>" --json
 ```
+
+`bubble-up add`/`remove` resurface a recording in your readings (the BC5
+successor to "save"), addressed by id or pasted URL. `add` bubbles up now by
+default; `--at` schedules it — a keyword (`today`, `tomorrow`, `weekend`,
+`next_week`) or a calendar date (`YYYY-MM-DD`). Both verbs are idempotent. There is no
+per-recording status read (that GET is an unrenderable API gap); the full list
+is `basecamp notifications bubbleups`.
 
 `bookmarks add` and `remove` are idempotent — re-adding returns the existing
 bookmark, removing an absent one still succeeds. `check` reports
@@ -1204,9 +1228,20 @@ basecamp people list --json                          # All people in account
 basecamp people list --project <project> --json    # People on project
 basecamp me --json                                 # Current user
 basecamp people show <id> --json                   # Person details
+basecamp people show me --json                     # Your own profile
+basecamp people update me --bio "..." --title "..." --json   # Edit your own profile
+basecamp people out-of-office me --json            # Your out-of-office status
+basecamp people out-of-office me --start 2026-09-14 --end 2026-09-18 --json  # Set out-of-office
+basecamp people out-of-office me --clear --json    # Clear out-of-office
 basecamp people add <id> --project <project>       # Add to project
 basecamp people remove <id> --project <project>    # Remove from project
 ```
+
+`people update me` edits your own profile (bio, title, name, email, location,
+time zone); pass a flag with an empty value to clear that field. `people
+out-of-office me` shows your away status, sets it with `--start`/`--end`
+(natural language or YYYY-MM-DD, end not before start), or clears it with
+`--clear`.
 
 ### Search
 

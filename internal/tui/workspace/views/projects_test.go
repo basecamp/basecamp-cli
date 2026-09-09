@@ -1,17 +1,81 @@
 package views
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
+
+// starToggleTransport records the account-scoped requests the star toggle issues
+// and answers each with a bare 204, matching bc3's /star.json contract.
+type starToggleTransport struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (s *starToggleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.mu.Lock()
+	s.requests = append(s.requests, req.Method+" "+req.URL.Path)
+	s.mu.Unlock()
+	return &http.Response{
+		StatusCode: http.StatusNoContent,
+		Body:       io.NopCloser(bytes.NewReader(nil)),
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+type starTestToken struct{}
+
+func (starTestToken) AccessToken(context.Context) (string, error) { return "test-token", nil }
+
+// Toggling a project filed into a stack (Bookmarked, not Starred) stars it: it
+// flips Starred (not Bookmarked), POSTs /star.json (never DELETE), and rolls the
+// star back on error. This guards the star-vs-bookmark field identity through
+// the actual toggle path, not just the marker.
+func TestProjects_ToggleStarsStackedProject(t *testing.T) {
+	transport := &starToggleTransport{}
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, starTestToken{},
+		basecamp.WithTransport(transport), basecamp.WithMaxRetries(1))
+	sess := workspace.NewTestSessionWithClient(sdk, workspace.Scope{AccountID: "99999"})
+
+	v := testProjectsView([]data.ProjectInfo{
+		{ID: 42, Name: "Stacked", AccountID: "99999", Bookmarked: true, Starred: false},
+	})
+	v.session = sess
+
+	cmd := v.toggleBookmark()
+	require.NotNil(t, cmd)
+
+	p := v.findProject(42)
+	require.NotNil(t, p)
+	assert.True(t, p.Starred, "toggling a stacked-but-unstarred project stars it")
+	assert.True(t, p.Bookmarked, "the pinned/bookmark state is untouched")
+
+	msg := cmd()
+	bm, ok := msg.(workspace.ProjectBookmarkedMsg)
+	require.True(t, ok, "toggle dispatch returns a ProjectBookmarkedMsg")
+	require.NoError(t, bm.Err)
+	assert.Equal(t, []string{"POST /99999/projects/42/star.json"}, transport.requests,
+		"starring POSTs to /star.json (a regression to Bookmarked would DELETE an already-unstarred project)")
+
+	v.Update(workspace.ProjectBookmarkedMsg{ProjectID: 42, Bookmarked: true, Err: assert.AnError})
+	assert.False(t, v.findProject(42).Starred, "a failed toggle rolls the star back")
+}
 
 // testProjectsView builds a Projects view with pre-populated data for unit
 // testing focus management and key routing. Session is nil — tests that
@@ -395,6 +459,16 @@ func TestProjectInfoToListItem_UnicodeDescription(t *testing.T) {
 	assert.NotEmpty(t, item.Description)
 	// Verify result is valid UTF-8 by round-tripping through runes
 	assert.Equal(t, item.Description, string([]rune(item.Description)))
+}
+
+// The list star marker reflects Starred, not Bookmarked: a project filed into a
+// stack is Bookmarked but unstarred, and the /star.json toggle acts on the star.
+func TestProjectInfoToListItem_MarkedReflectsStarred(t *testing.T) {
+	stackedNotStarred := projectInfoToListItem(data.ProjectInfo{ID: 1, Name: "Stacked", Bookmarked: true, Starred: false})
+	assert.False(t, stackedNotStarred.Marked, "a bookmarked-but-unstarred project is not marked")
+
+	starred := projectInfoToListItem(data.ProjectInfo{ID: 2, Name: "Starred", Bookmarked: true, Starred: true})
+	assert.True(t, starred.Marked, "a starred project is marked")
 }
 
 func TestToolNameToView(t *testing.T) {

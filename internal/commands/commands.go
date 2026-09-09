@@ -80,6 +80,7 @@ func CommandCategories() []CommandCategory {
 			Name: "Personal",
 			Commands: []CommandInfo{
 				{Name: "bookmarks", Category: "personal", Description: "Manage your personal bookmarks", Actions: []string{"list", "add", "remove", "check"}},
+				{Name: "bubble-up", Category: "personal", Description: "Bubble a recording up in your readings", Actions: []string{"add", "remove"}},
 				{Name: "drafts", Category: "personal", Description: "List your unpublished drafts", Actions: []string{"list"}},
 				{Name: "notes", Category: "personal", Description: "Read and write your personal note", Actions: []string{"show", "set"}},
 			},
@@ -87,8 +88,8 @@ func CommandCategories() []CommandCategory {
 		{
 			Name: "Organization",
 			Commands: []CommandInfo{
-				{Name: "people", Category: "organization", Description: "Manage people and access", Actions: []string{"list", "show", "pingable", "add", "remove"}},
-				{Name: "templates", Category: "organization", Description: "Manage project templates", Actions: []string{"list", "show", "create", "update", "delete", "construct"}},
+				{Name: "people", Category: "organization", Description: "Manage people and access", Actions: []string{"list", "show", "update", "out-of-office", "pingable", "add", "remove"}},
+				{Name: "templates", Category: "organization", Description: "Manage project and to-do list templates", Actions: []string{"list", "show", "create", "update", "delete", "construct", "construction", "library", "copy", "copy-status"}},
 				{Name: "webhooks", Category: "organization", Description: "Manage webhooks", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "lineup", Category: "organization", Description: "Manage lineup markers", Actions: []string{"list", "create", "update", "delete"}},
 			},

@@ -224,6 +224,19 @@ func NewTestSessionWithScope(scope Scope) *Session {
 	return s
 }
 
+// NewTestSessionWithClient returns a test Session whose AccountClient is backed
+// by the given SDK client — typically wired to a stub transport — under the
+// given scope, so tests can exercise view actions that issue account-scoped
+// HTTP requests (e.g. toggling a project's star).
+func NewTestSessionWithClient(sdk *basecamp.Client, scope Scope) *Session {
+	s := NewTestSession()
+	s.app = &appctx.App{SDK: sdk}
+	s.multiStore = data.NewMultiStore(sdk)
+	s.hub = data.NewHub(s.multiStore, scope.AccountID)
+	s.scope = scope
+	return s
+}
+
 // NewTestSessionWithRecents is like NewTestSession but includes a recents store.
 func NewTestSessionWithRecents(r *recents.Store) *Session {
 	s := NewTestSession()

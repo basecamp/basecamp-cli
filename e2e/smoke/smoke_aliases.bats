@@ -272,3 +272,7 @@ load smoke_helper
 @test "projects trash is out of scope" {
   mark_out_of_scope "Soft-trashes a project — destructive mutation"
 }
+
+@test "people ooo is out of scope" {
+  mark_out_of_scope "Alias for out-of-office — tested via canonical form"
+}

@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 184 |
+| ✅ Implemented | 50 | 189 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **54** | **196** |
+| **Total tracked** | **54** | **201** |
 
-**184 of 184 tracked in-scope endpoints.** The last gap — `GET
+**189 of 189 tracked in-scope endpoints.** SDK v0.16.0 adds the three to-do
+list template-library operations, available through `templates library`,
+`templates copy`, and `templates copy-status`. The previous last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
 (`files versions`) was written earlier but held: the SDK's
 `UploadsService.ListVersions` decoded the response as `[]Upload` when the API
@@ -43,15 +45,15 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
-**SDK version:** v0.15.0 (`internal/version/sdk-provenance.json` is
-authoritative). The command surface below largely dates to the v0.12.0 bump,
-which added 20 exported Go methods over 13 new backend operations; the extra
-seven wrapped endpoints that already existed but were reachable only through
-the raw generated client, which the andon-cord rule forbids the CLI from
-calling. v0.13.0–v0.15.0 corrected shapes and routes (pointerized optional
-fields, page-selection semantics, field-keyed 422 payloads) rather than opening
-new sections; their additions here are `files replace` and the un-held
-`files versions`, both from v0.14.0's upload work (basecamp/basecamp-sdk#683).
+**SDK version:** v0.16.0 (adds the to-do list template library and asynchronous
+copy operations; `internal/version/sdk-provenance.json` is authoritative). The
+command surface below largely dates to the v0.12.0 bump, which added 20 exported
+Go methods over 13 new backend operations; the extra seven wrapped endpoints
+that already existed but were reachable only through the raw generated client,
+which the andon-cord rule forbids the CLI from calling. v0.13.0–v0.15.0
+corrected shapes and routes (pointerized optional fields, page-selection
+semantics, field-keyed 422 payloads) and added `files replace`, `files versions`,
+and Bubble Up writes. v0.16.0 adds the three template-library operations.
 
 Those methods land as four new command groups (`bookmarks`, `drafts`, `notes`,
 `calendars`) and three extensions (`assignments` gains the Up Next verbs,
@@ -197,7 +199,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, thread, create, update. @mentions in content. `show` surfaces `reply_target` + paste-ready `mention` from its single Get (no new calls). `thread` composes Get + parent recording (via type endpoint) + List into a deterministic reply-ready context (no new endpoints) |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete. No account-wide listing — BC5 withdrew `/boosts.json` (basecamp/bc3#12464); temporary, returns via basecamp/bc3#12463 |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
-| bubble_ups | 1 | `notifications bubbleups` | ✅ | BC5 | - | Dedicated Bubble Ups list (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups` |
+| bubble_ups | 3 | `bubble-up`, `notifications bubbleups` | ✅ | BC5 | - | `bubble-up add`/`remove` create and delete a per-recording bubble-up (`POST`/`DELETE /recordings/{id}/bubble_up.json`); `add --at` schedules. Dedicated list is `notifications bubbleups` (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups`. Per-recording GET is an unrenderable API gap, so there is no `check`. |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
@@ -209,7 +211,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | drafts | 1 | `drafts` | ✅ | BC5 | - | list unpublished drafts across projects (server caps at 250). Bounded like the account-wide listings; publishing happens through the command for the draft's type |
 | my_notes | 2 | `notes` | ✅ | BC5 | - | show, set. A singleton per person, so no id and no listing. Pre-first-write the record does not exist yet and renders as empty rather than 404. `set` writes Markdown as HTML; attachments are out of scope |
 | **People** |
-| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
+| people | 12 | `people`, `me` | ✅ | BC4 | - | list, show, update (edit your own profile via `PUT /my/profile.json`), out-of-office show/set/clear (`GetOutOfOffice`/`EnableOutOfOffice`/`DisableOutOfOffice`), pingable, add, remove (BC5: `tagline` alias of `bio` on person output) |
 | **Search & Recordings** |
 | my_assignments | 6 | `assignments` | ✅ | BC4 | - | list (priorities/non-priorities), completed, due (with scope filter), prioritize, deprioritize, reorder. `list` surfaces `priority_recording_id`, which is the only way to address a prioritized card-table step — it appears in no URL |
 | search | 2 | `search` | ✅ | BC4 | - | Full-text search + metadata. Filters: `--project`/`--in`, `--type`, `--creator`, `--since` (BC5-only), `--file-type`, `--exclude-chat`. Metadata lists recording/file search types |
@@ -227,7 +229,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 7 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction |
+| templates | 10 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction, library, copy, copy-status |
 | **Time Tracking** |
 | timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Subscriptions** |

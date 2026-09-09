@@ -91,7 +91,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 	{
 		Key:   "account",
-		Tags:  []string{"Account", "Gauges", "MyAssignments", "MyNotes", "MyNotifications", "Bookmarks", "Drafts"},
-		Blurb: "Account info and your personal surface: gauges and needles, my assignments and priorities, notifications and bubble-ups, bookmarks, personal note, and drafts.",
+		Tags:  []string{"Account", "Gauges", "MyAssignments", "MyNotes", "MyNotifications", "Bookmarks", "BubbleUps", "Drafts"},
+		Blurb: "Account info and your personal surface: gauges and needles, my assignments and priorities, notifications and bubble-ups, bookmarks, bubbling recordings up, personal note, and drafts.",
 	},
 }

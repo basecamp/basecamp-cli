@@ -174,15 +174,17 @@ load test_helper
 }
 
 
-# Unknown action - Cobra treats unknown args as command arguments, not subcommands
+# Unknown action - a positional matching no subcommand is a usage error,
+# not silent help with a zero exit.
 
-@test "chat unknown action shows help" {
+@test "chat unknown action errors" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
   run basecamp chat foobar
-  # Parent command with no RunE — cobra shows help for unknown subcommands
-  assert_success
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'unknown command "foobar" for "basecamp chat"'
 }
 
 

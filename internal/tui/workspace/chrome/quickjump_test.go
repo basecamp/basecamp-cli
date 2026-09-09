@@ -49,6 +49,31 @@ func testQuickJumpSource() QuickJumpSource {
 	}
 }
 
+// The "bookmark" category renders as "Starred", so it must be populated from
+// Starred, not Bookmarked: a project filed into a stack is bookmarked but
+// unstarred and must not appear there.
+func TestQuickJump_StarredCategoryUsesStarred(t *testing.T) {
+	styles := tui.NewStyles()
+	qj := NewQuickJump(styles)
+	qj.SetSize(80, 24)
+
+	src := testQuickJumpSource()
+	src.Projects = []data.ProjectInfo{
+		{ID: 300, Name: "Starred Project", AccountID: "acct1", Bookmarked: true, Starred: true},
+		{ID: 301, Name: "Stacked Only", AccountID: "acct1", Bookmarked: true, Starred: false},
+	}
+	qj.Focus(src)
+
+	inStarred := map[string]bool{}
+	for _, item := range qj.items {
+		if item.Category == "bookmark" {
+			inStarred[item.Title] = true
+		}
+	}
+	assert.True(t, inStarred["Starred Project"], "a starred project belongs in the Starred category")
+	assert.False(t, inStarred["Stacked Only"], "a bookmarked-but-unstarred project must not appear as Starred")
+}
+
 func TestQuickJump_ToolItems_Appear(t *testing.T) {
 	styles := tui.NewStyles()
 	qj := NewQuickJump(styles)

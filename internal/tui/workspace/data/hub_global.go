@@ -779,6 +779,7 @@ func projectsToInfos(projects []basecamp.Project, acct AccountInfo) []ProjectInf
 			Description: p.Description,
 			Purpose:     p.Purpose,
 			Bookmarked:  p.Bookmarked,
+			Starred:     p.Starred,
 			AccountID:   acct.ID,
 			AccountName: acct.Name,
 			Dock:        dock,

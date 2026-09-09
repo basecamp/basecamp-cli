@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/commands"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // isolateHelpTest sets env vars for hermetic help tests: disables keyring
@@ -662,6 +663,151 @@ func TestBareGroupWithFlagsAndHelpShowsHelp(t *testing.T) {
 	err := cmd.Execute()
 
 	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "COMMANDS")
+	assert.Contains(t, out, "USAGE")
+}
+
+func TestBareGroupWithUnknownArgSuppressesHelp(t *testing.T) {
+	// A group handed a positional that matches no subcommand (e.g. "cards
+	// 12345") must not print help with a zero exit — that reads as success to
+	// an agent while nothing ran. Help is suppressed so Execute() can emit a
+	// usage error; Cobra itself still returns nil for the non-runnable group.
+	isolateHelpTest(t)
+
+	tests := []struct {
+		name   string
+		args   []string
+		addCmd func() *cobra.Command
+	}{
+		{"cards numeric", []string{"cards", "12345"}, commands.NewCardsCmd},
+		{"todos numeric", []string{"todos", "999"}, commands.NewTodosCmd},
+		{"comments numeric", []string{"comments", "55"}, commands.NewCommentsCmd},
+		{"messages typo", []string{"messages", "shwo"}, commands.NewMessagesCmd},
+		// --help=false disables help, so the stray positional still errors.
+		{"help disabled", []string{"cards", "12345", "--help=false"}, commands.NewCardsCmd},
+		// A scoped invocation still trips the unknown-arg guard; Execute()
+		// checks it ahead of the bare-flags case so the specific hint wins.
+		{"scoped positional", []string{"cards", "12345", "--in", "myproject"}, commands.NewCardsCmd},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(tt.addCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs(tt.args)
+
+			executedCmd, err := cmd.ExecuteC()
+			require.NoError(t, err, "Cobra returns nil for non-runnable commands")
+			assert.Empty(t, buf.String(), "help text should be suppressed")
+			assert.True(t, isBareGroupWithUnknownArg(executedCmd),
+				"Execute() should detect this and convert to a usage error")
+		})
+	}
+}
+
+func TestUnknownSubcommandErrorClassifiesAndHints(t *testing.T) {
+	isolateHelpTest(t)
+
+	tests := []struct {
+		name     string
+		args     []string
+		addCmd   func() *cobra.Command
+		wantMsg  string
+		wantHint string
+	}{
+		{
+			name:     "numeric id hints show",
+			args:     []string{"cards", "12345"},
+			addCmd:   commands.NewCardsCmd,
+			wantMsg:  `unknown command "12345" for "basecamp cards"`,
+			wantHint: `Did you mean "basecamp cards show 12345"?`,
+		},
+		{
+			name:     "typo suggests the nearest subcommand",
+			args:     []string{"messages", "shwo"},
+			addCmd:   commands.NewMessagesCmd,
+			wantMsg:  `unknown command "shwo" for "basecamp messages"`,
+			wantHint: "Did you mean: show?",
+		},
+		{
+			name:     "unrecognizable arg falls back to help",
+			args:     []string{"messages", "zzzzzz"},
+			addCmd:   commands.NewMessagesCmd,
+			wantMsg:  `unknown command "zzzzzz" for "basecamp messages"`,
+			wantHint: "Run: basecamp messages --help",
+		},
+		{
+			// accounts show reads the current account and takes no id, so a
+			// numeric positional must not be steered to "accounts show 123".
+			name:     "singleton show does not get a numeric id hint",
+			args:     []string{"accounts", "123"},
+			addCmd:   commands.NewAccountsCmd,
+			wantMsg:  `unknown command "123" for "basecamp accounts"`,
+			wantHint: "Run: basecamp accounts --help",
+		},
+		{
+			// chat's id-taking "line" command exposes "show" as an alias, so
+			// the hint resolves through the alias.
+			name:     "id-taking show alias still hints show",
+			args:     []string{"chat", "123"},
+			addCmd:   commands.NewChatCmd,
+			wantMsg:  `unknown command "123" for "basecamp chat"`,
+			wantHint: `Did you mean "basecamp chat show 123"?`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(tt.addCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs(tt.args)
+
+			executedCmd, err := cmd.ExecuteC()
+			require.NoError(t, err)
+
+			outErr := output.AsError(unknownSubcommandError(executedCmd, executedCmd.Flags().Args()[0]))
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Equal(t, tt.wantMsg, outErr.Message)
+			assert.Equal(t, tt.wantHint, outErr.Hint)
+		})
+	}
+}
+
+func TestSubcommandRoutesPastUnknownArgGuard(t *testing.T) {
+	// A real subcommand (e.g. "cards show 123") resolves to the leaf command,
+	// which is runnable — so the group guard never fires for it.
+	isolateHelpTest(t)
+
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCardsCmd())
+
+	target, _, err := cmd.Find([]string{"cards", "show", "123"})
+	require.NoError(t, err)
+	assert.Equal(t, "show", target.Name())
+	assert.False(t, isBareGroupWithUnknownArg(target),
+		"a runnable leaf command is never treated as a bare group")
+}
+
+func TestBareGroupWithUnknownArgAndHelpShowsHelp(t *testing.T) {
+	// Explicit --help renders help and exits zero even with a stray positional,
+	// so the documented exception can't silently regress into a suppressed error.
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewCardsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"cards", "12345", "--help"})
+
+	executedCmd, err := cmd.ExecuteC()
+	require.NoError(t, err)
+	assert.False(t, isBareGroupWithUnknownArg(executedCmd),
+		"explicit --help opts out of the unknown-arg guard")
 	out := buf.String()
 	assert.Contains(t, out, "COMMANDS")
 	assert.Contains(t, out, "USAGE")

@@ -195,6 +195,7 @@ func (v *Dock) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 			Description: msg.Project.Description,
 			Purpose:     msg.Project.Purpose,
 			Bookmarked:  msg.Project.Bookmarked,
+			Starred:     msg.Project.Starred,
 			Dock:        dock,
 		}
 		v.syncTools()

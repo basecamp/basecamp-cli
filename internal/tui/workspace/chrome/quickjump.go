@@ -195,10 +195,10 @@ func (q *QuickJump) populateItems(src QuickJumpSource) {
 		})
 	}
 
-	// 3. Bookmarked projects
+	// 3. Starred projects (this category renders as "Starred")
 	for _, p := range src.Projects {
 		id := fmt.Sprintf("%d", p.ID)
-		if seen[id] || !p.Bookmarked {
+		if seen[id] || !p.Starred {
 			continue
 		}
 		seen[id] = true
