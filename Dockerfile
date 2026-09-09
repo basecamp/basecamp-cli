@@ -1,13 +1,9 @@
 # Development Dockerfile for basecamp
 #
-# NOTE: This Dockerfile requires vendored dependencies or BuildKit secrets
-# for the private basecamp-sdk. For local builds, either:
-#   1. Run `go mod vendor` first, then build with: docker build .
-#   2. Use GoReleaser for release builds (handles auth automatically)
-#
-# For CI/release builds, use Dockerfile.goreleaser instead.
+# Local builds only: `docker build .` (vendor first with `go mod vendor` when
+# offline). Release binaries come from GoReleaser, not this image.
 
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS builder
 
 RUN apk add --no-cache git ca-certificates
 
@@ -20,7 +16,7 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 
-# Build with vendored deps if available, otherwise try to download (may fail without auth for private SDK)
+# Build with vendored deps if available, otherwise download
 RUN if [ -d vendor ]; then \
         CGO_ENABLED=0 GOOS=linux go build -mod=vendor \
             -trimpath \
@@ -35,7 +31,7 @@ RUN if [ -d vendor ]; then \
     fi
 
 # Runtime stage using distroless for minimal attack surface
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=builder /basecamp /basecamp
 

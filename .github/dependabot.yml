@@ -41,3 +41,21 @@ updates:
       default-days: 10
     commit-message:
       prefix: "ci"
+
+  # Container base images (digest pins in Dockerfile)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 10
+    groups:
+      docker:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 10
+    commit-message:
+      prefix: "build"
