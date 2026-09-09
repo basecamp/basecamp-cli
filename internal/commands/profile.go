@@ -249,7 +249,7 @@ Examples:
 			// The entry is written only after the login succeeds, so prove
 			// the config file can take it before a credential exists to
 			// orphan: a malformed file is refused here, not after OAuth.
-			if err := writableGlobalProfiles(); err != nil {
+			if err := globalConfigTakesProfiles(); err != nil {
 				return err
 			}
 
@@ -361,7 +361,7 @@ func newProfileDeleteCmd() *cobra.Command {
 
 			// The credential delete is irreversible, so prove the config
 			// file can take the entry's removal before it goes.
-			if err := writableGlobalProfiles(); err != nil {
+			if err := globalConfigTakesProfiles(); err != nil {
 				return err
 			}
 
@@ -503,11 +503,13 @@ func globalProfilesMap(configData map[string]any, configPath string) (map[string
 	return profilesMap, nil
 }
 
-// writableGlobalProfiles reports whether the global config file can take a
-// profile entry — readable, parseable, with an object (or absent) profiles
-// value — without writing anything. Callers about to do something they
-// cannot take back before the entry is written run this first.
-func writableGlobalProfiles() error {
+// globalConfigTakesProfiles reports whether the global config file's shape
+// can take a profile entry — readable, parseable, with an object (or
+// absent) profiles value — without writing anything. It is the clobber
+// refusal run early: a file the writers would refuse to rewrite is refused
+// before a step that cannot be taken back. It does not probe permissions;
+// an unwritable directory fails at the write with the OS error.
+func globalConfigTakesProfiles() error {
 	configData, configPath, err := loadGlobalConfigFile()
 	if err != nil {
 		return err
