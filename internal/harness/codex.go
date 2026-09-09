@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,8 +26,8 @@ const (
 
 	// codexQueryTimeout bounds how long the Codex probe may run.
 	codexQueryTimeout = 5 * time.Second
-	// codexWaitDelay is the grace period after the kill before Wait gives up on
-	// output pipes a surviving grandchild still holds open.
+	// codexWaitDelay is the grace period after the group kill before the
+	// probe gives up on a pipe some escaped descendant still holds open.
 	codexWaitDelay = time.Second
 )
 
@@ -34,17 +35,62 @@ var (
 	codexLookPath   = exec.LookPath
 	runCodexCommand = func(ctx context.Context, path string, args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path comes from exec.LookPath
-		// Bound Wait, not just the process. Canceling the context kills the
-		// child, but it does not close output pipes a *grandchild* inherited,
-		// and Wait blocks on those copies until they do — so the 5s timeout in
-		// queryCodexPlugin buys nothing on its own. `codex` is routinely a
-		// wrapper that shells out (an npm exec launcher, a mise shim), and one
-		// of those left `basecamp doctor` hanging for ten minutes rather than
-		// five seconds. WaitDelay is what makes the deadline real.
+		startInOwnProcessGroup(cmd)
+		cmd.Cancel = func() error { return killProcessGroup(cmd) }
 		cmd.WaitDelay = codexWaitDelay
-		return cmd.Output()
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, err
+		}
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+
+		// `codex` is routinely a wrapper (an npm exec launcher, a mise shim)
+		// that exits at once and leaves a descendant holding the inherited
+		// stdout. That descendant is why the output is read here rather
+		// than through Output: the exec package stops watching the context
+		// once the direct child exits, so cmd.Cancel never fires for a
+		// deadline that expires after that, and the group has to be killed
+		// before Wait reaps its leader — the group ID is the leader's PID,
+		// free for reuse from the reap onward.
+		read := make(chan codexRead, 1)
+		go func() {
+			data, err := io.ReadAll(stdout)
+			read <- codexRead{data: data, err: err}
+		}()
+
+		var out codexRead
+		select {
+		case out = <-read:
+		case <-ctx.Done():
+			_ = killProcessGroup(cmd)
+			select {
+			case out = <-read:
+			case <-time.After(codexWaitDelay):
+				// A descendant that left the group (setsid) is out of reach
+				// and still holds the pipe; closing our end ends the read.
+				_ = stdout.Close()
+				out = <-read
+			}
+		}
+		waitErr := cmd.Wait()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		return out.data, out.err
 	}
 )
+
+// codexRead is what the stdout reader hands back: everything the probe
+// wrote, and the error that ended the read.
+type codexRead struct {
+	data []byte
+	err  error
+}
 
 var (
 	errCodexBinaryMissing = errors.New("codex executable not found")
