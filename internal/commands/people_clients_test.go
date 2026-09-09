@@ -86,6 +86,37 @@ func TestParseClientInviteesRejectsNonAddresses(t *testing.T) {
 	}
 }
 
+// Every malformed token is named at once, so a batch is fixed in one pass.
+func TestParseClientInviteesNamesEveryMalformedToken(t *testing.T) {
+	_, err := parseClientInvitees([]string{"ok@example.com", "Annie Bryan", "annie@"})
+
+	outErr := requireBookmarksUsageError(t, err)
+	assert.Contains(t, outErr.Message, `"Annie Bryan", "annie@"`)
+	assert.NotContains(t, outErr.Message, "ok@example.com")
+}
+
+// people list carries each person's client flag, the only way a caller can
+// tell which ids belong on people clients add rather than people add.
+func TestPeopleListReportsTheClientFlag(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t, accountPeopleRoute())
+
+	require.NoError(t, executeRecordingCommand(NewPeopleCmd(), app, "list"))
+
+	var envelope struct {
+		Data []struct {
+			ID     int64 `json:"id"`
+			Client bool  `json:"client"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), "output: %s", out.String())
+	clientByID := map[int64]bool{}
+	for _, p := range envelope.Data {
+		clientByID[p.ID] = p.Client
+	}
+	assert.True(t, clientByID[3001])
+	assert.False(t, clientByID[1001])
+}
+
 func TestResolveClientInviteeTokensReadsStdinLines(t *testing.T) {
 	cmd := &cobra.Command{Use: "invite"}
 	cmd.SetIn(strings.NewReader("annie@example.com\r\n\n  Annie Bryan <annie@example.com>  \n"))

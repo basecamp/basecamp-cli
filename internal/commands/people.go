@@ -1019,17 +1019,23 @@ type clientInvitee struct {
 // parseClientInvitees reads each token as a bare email address or as
 // "Name <email>", the RFC 5322 mailbox form net/mail accepts, so a quoted
 // display name and a bare address both work without a second flag. A missing
-// name is left empty and the server defaults it to the address.
+// name is left empty and the server defaults it to the address. Every
+// malformed token is named in one usage error, before any request.
 func parseClientInvitees(tokens []string) ([]clientInvitee, error) {
 	invitees := make([]clientInvitee, 0, len(tokens))
+	var malformed []string
 	for _, token := range tokens {
 		addr, err := mail.ParseAddress(strings.TrimSpace(token))
 		if err != nil {
-			return nil, output.ErrUsageHint(
-				fmt.Sprintf(`%q is not an email address or "Name <email>"`, token),
-				`Name each client by email address, or as "Full Name <email>" to set the name`)
+			malformed = append(malformed, fmt.Sprintf("%q", token))
+			continue
 		}
 		invitees = append(invitees, clientInvitee{Name: addr.Name, EmailAddress: addr.Address})
+	}
+	if len(malformed) != 0 {
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf(`Not an email address or "Name <email>": %s`, strings.Join(malformed, ", ")),
+			`Name each client by email address, or as "Full Name <email>" to set the name; nothing was sent`)
 	}
 	return invitees, nil
 }
@@ -1287,9 +1293,11 @@ Each invitee is an email address, or "Name <email>" to set the display name
 from stdin. --company applies to every invitee in the invocation; --title
 names one person's role, so it takes exactly one invitee.
 
-Invitations are all-or-nothing: an invalid address fails the whole batch
-with each bad row named (exit 9, validation), and a batch that would exceed
-the account's user limit fails with nobody invited (exit 10, limit_exceeded).
+A token that is not an address is refused here, before any request, as a
+usage error naming each one (exit 2). Invitations the server accepts are
+all-or-nothing: an address Basecamp rejects fails the whole batch with each
+rejected row named (exit 9, validation), and a batch that would exceed the
+account's user limit fails with nobody invited (exit 10, limit_exceeded).
 Addresses already on the account do not consume a seat. Clients must be
 enabled on the project first; see "basecamp people clients enable".
 

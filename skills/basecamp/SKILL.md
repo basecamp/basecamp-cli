@@ -1270,9 +1270,10 @@ default client visibility (timeline and most tools shared; card table,
 Campfire, and Doors private), so `add`/`invite` never enable implicitly and
 answer `forbidden` with an `enable` hint while clients are off. `invite` takes
 `--company` (applies to every invitee) and `--title` (one invitee only), and is
-all-or-nothing: an invalid address exits `validation` (9) naming each rejected
-row, and a seat shortfall exits `limit_exceeded` (10) — in both cases nobody
-was invited. `add`/`remove` report the ids the server did not grant or revoke
+all-or-nothing: a token that is not an address is refused locally as `usage`
+(2) naming each one, an address the server rejects exits `validation` (9)
+naming each rejected row, and a seat shortfall exits `limit_exceeded` (10) — in
+every case nobody was invited. `add`/`remove` report the ids the server did not grant or revoke
 (already on the project, or not a client user) in the notice.
 
 ### Search
