@@ -36,7 +36,6 @@ var (
 	runCodexCommand = func(ctx context.Context, path string, args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // path comes from exec.LookPath
 		startInOwnProcessGroup(cmd)
-		cmd.Cancel = func() error { return killProcessGroup(cmd) }
 		cmd.WaitDelay = codexWaitDelay
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
@@ -51,9 +50,12 @@ var (
 		// stdout. That descendant is why the output is read here rather
 		// than through Output: the exec package stops watching the context
 		// once the direct child exits, so cmd.Cancel never fires for a
-		// deadline that expires after that, and the group has to be killed
-		// before Wait reaps its leader — the group ID is the leader's PID,
-		// free for reuse from the reap onward.
+		// deadline that expires after that. The group kill below is the
+		// only one, and it runs strictly before Wait on this goroutine: the
+		// group ID is the leader's PID, reserved only until the leader is
+		// reaped, so a kill issued from cmd.Cancel could race the reap and
+		// land on a recycled ID. Once Wait begins, a leader still running
+		// is killed alone by the exec package's own cancel.
 		read := make(chan codexRead, 1)
 		go func() {
 			data, err := io.ReadAll(stdout)
