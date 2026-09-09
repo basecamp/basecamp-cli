@@ -135,12 +135,13 @@ Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages,
      or `--edit` where offered.
    - Trailing newlines are trimmed from stdin content, so `printf 'x\n' | ... -`
      posts `x` (this keeps `boost create -` inside its 16-rune limit).
-   - Universal `-` support (and the stray-`-` guard) shipped in **v0.10.0**. Older
-     CLIs read stdin only for `comments create` — everywhere else the dash is
-     **accepted silently as literal content**, so `messages create "Title" -`
-     posts a body of `-`, which Markdown renders as an empty bullet list. When the
-     CLI version is unknown, check `basecamp --version` first, or pass the content
-     portably as `"$(cat file.md)"` and verify the posted `content` when it matters.
+  - Universal `-` support (and the stray-`-` guard) shipped in **v0.10.0**. Older
+    CLIs do not support it consistently: `comments create/update` read stdin,
+    while unsupported inputs may treat `-` as literal content or fail. For
+    example, `messages create "Title" -` posts a body of `-`, which Markdown
+    renders as an empty bullet list. When the CLI version is unknown, check
+    `basecamp --version` first, or pass the content portably as
+    `"$(cat file.md)"` and verify the posted `content` when it matters.
 6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the seven list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
    Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected) or `--all` for everything. `--page N` fetches exactly one page, but only on the paginated listings.
