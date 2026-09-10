@@ -60,6 +60,26 @@ func killIfAlive(pid int) {
 	}
 }
 
+// terminated reports whether pid is gone, or is a zombie: killed, but not yet
+// collected. Where this suite runs, whoever adopts the orphan reaps it at
+// once, and kill(pid, 0) answers ESRCH. Under a PID 1 that does not reap —
+// a container running go test as PID 1 — the group kill still worked, and
+// the state field of /proc/<pid>/stat is the only place that says so; it
+// follows the parenthesized comm, which may itself hold spaces or parens,
+// so the last ')' ends it. Outside Linux there is no /proc, and no init that
+// leaves orphans uncollected.
+func terminated(pid int) bool {
+	if syscall.Kill(pid, 0) == syscall.ESRCH {
+		return true
+	}
+	stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")) //nolint:gosec // G304: /proc/<pid>/stat for a pid this test spawned
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(stat)[strings.LastIndexByte(string(stat), ')')+1:])
+	return len(fields) > 0 && fields[0] == "Z"
+}
+
 // TestRunCodexCommandOutlivingGrandchild pins two things ten minutes of a
 // hung `basecamp doctor` proved were not being enforced: the deadline, and
 // that nothing survives it.
@@ -87,10 +107,8 @@ func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
 	assert.Less(t, time.Since(start), 30*time.Second,
 		"runCodexCommand blocked on a pipe held open by a surviving grandchild")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Eventually(t, func() bool {
-		return syscall.Kill(pid, 0) == syscall.ESRCH
-	}, 5*time.Second, 50*time.Millisecond,
-		"grandchild %d outlived the deadline: the process group was not killed (or, under a PID 1 that does not reap orphans, it is an uncollected zombie)", pid)
+	assert.Eventually(t, func() bool { return terminated(pid) }, 5*time.Second, 50*time.Millisecond,
+		"grandchild %d outlived the deadline: the process group was not killed", pid)
 }
 
 // TestRunCodexCommandEscapedDescendant covers the descendant a group kill
