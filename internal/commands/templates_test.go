@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -226,6 +227,90 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	assert.True(t, errors.As(err, &confirmationErr), "typed SDK error should remain available")
+}
+
+func TestTemplatesConstructSendsStartDateUnderProjectEnvelope(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/templates/2085958507/project_constructions.json",
+			status: http.StatusCreated,
+			body:   `{"id":598194962,"status":"pending","url":"https://example.test/constructions/598194962.json"}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app,
+		"construct", "2085958507", "--name", "Marketing Campaign",
+		"--description", "For Client: Xyz Corp Conference", "--start-date", "2026-09-01")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	require.Len(t, requests, 1)
+	assert.Equal(t, http.MethodPost, requests[0].Method)
+	assert.JSONEq(t,
+		`{"project":{"name":"Marketing Campaign","description":"For Client: Xyz Corp Conference","start_date":"2026-09-01"}}`,
+		requests[0].Body,
+	)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Started project construction #598194962 (pending)", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates construction 2085958507 598194962", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesConstructOmitsStartDateWhenUnset(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/templates/2085958507/project_constructions.json",
+			status: http.StatusCreated,
+			body:   `{"id":598194962,"status":"pending","url":"https://example.test/constructions/598194962.json"}`,
+		},
+	)
+	captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	require.Len(t, requests, 1)
+	assert.JSONEq(t, `{"project":{"name":"Marketing Campaign"}}`, requests[0].Body)
+}
+
+func TestTemplatesConstructParsesNaturalStartDate(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/templates/2085958507/project_constructions.json",
+			status: http.StatusCreated,
+			body:   `{"id":598194962,"status":"pending","url":"https://example.test/constructions/598194962.json"}`,
+		},
+	)
+	captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	require.Len(t, requests, 1)
+	var body struct {
+		Project struct {
+			StartDate string `json:"start_date"`
+		} `json:"project"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(requests[0].Body), &body))
+	assert.Equal(t, time.Now().AddDate(0, 0, 1).Format("2006-01-02"), body.Project.StartDate)
+}
+
+func TestTemplatesConstructRejectsMalformedStartDateBeforeAnyRequest(t *testing.T) {
+	app, transport := setupRecordingTestApp(t)
+	captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "someday")
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Message, "Invalid start date")
+	assert.Empty(t, transport.recorded())
 }
 
 func TestTemplatesCopyStatusStates(t *testing.T) {

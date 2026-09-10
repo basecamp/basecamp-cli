@@ -975,6 +975,7 @@ basecamp templates create "Template Name"         # Create empty project templat
 basecamp templates update <id> --name "New Name"
 basecamp templates delete <id>                    # Trash project template
 basecamp templates construct <id> --name "New Project"  # Create project (async)
+basecamp templates construct <id> --name "New Project" --start-date 2026-09-01  # Anchor template dates to that week
 basecamp templates construction <template_id> <construction_id>  # Check project status
 
 basecamp templates library --json                 # List active to-do list templates
@@ -983,7 +984,10 @@ basecamp templates copy-status <copy_id>          # Check copy status
 ```
 
 **Asynchronous results:** `construct` returns a construction ID; poll `construction`
-until `status="completed"` to get the project. `copy` returns a copy ID; poll
+until `status="completed"` to get the project. A template's dates are relative to its
+first week, and template weeks start on Sunday: `--start-date` (YYYY-MM-DD or natural,
+e.g. `next monday`) anchors them to the Sunday on or before that date; without it they
+anchor to the week of construction. `copy` returns a copy ID; poll
 `copy-status` through `pending` and `processing` until it is `completed` or `failed`.
 
 A copy can report the people who need access to the destination project. Show those

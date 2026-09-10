@@ -13442,6 +13442,7 @@ FLAG basecamp templates construct --no-stats type=bool
 FLAG basecamp templates construct --profile type=string
 FLAG basecamp templates construct --project type=string
 FLAG basecamp templates construct --quiet type=bool
+FLAG basecamp templates construct --start-date type=string
 FLAG basecamp templates construct --stats type=bool
 FLAG basecamp templates construct --styled type=bool
 FLAG basecamp templates construct --todolist type=string

@@ -33601,6 +33601,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "Date the new project starts on. Template dates are relative to the start\nof the template's first week, and template weeks start on a Sunday, so\nthe project's dates are anchored to the Sunday on or before this date.\nOmitted, they are anchored to the week in which the construction is\nprocessed."
           }
         },
         "required": [

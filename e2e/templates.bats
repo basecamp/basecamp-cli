@@ -109,6 +109,15 @@ load test_helper
   assert_output_contains "name required"
 }
 
+@test "templates construct with malformed start date shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates construct 123 --name "Project" --start-date someday
+  assert_failure
+  assert_output_contains "Invalid start date"
+}
+
 
 # Construction status errors
 

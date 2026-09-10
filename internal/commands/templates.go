@@ -12,6 +12,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -24,7 +25,7 @@ func NewTemplatesCmd() *cobra.Command {
 
 Project templates create projects with predefined structure, tools, and content.
 Library templates copy a reusable to-do list into an existing project.`,
-		Annotations: map[string]string{"agent_notes": "Project construction and to-do list template copies are asynchronous. Poll construction or copy-status until status=completed. Copy grants referenced people project access only with --confirm-adding-people."},
+		Annotations: map[string]string{"agent_notes": "Project construction and to-do list template copies are asynchronous. Poll construction or copy-status until status=completed. construct --start-date anchors the template's relative dates to the Sunday of that week; without it they anchor to the week of construction. Copy grants referenced people project access only with --confirm-adding-people."},
 	}
 
 	cmd.AddCommand(
@@ -629,6 +630,7 @@ func newTemplatesDeleteCmd() *cobra.Command {
 func newTemplatesConstructCmd() *cobra.Command {
 	var projectName string
 	var projectDesc string
+	var startDate string
 
 	cmd := &cobra.Command{
 		Use:   "construct <template_id>",
@@ -636,7 +638,11 @@ func newTemplatesConstructCmd() *cobra.Command {
 		Long: `Create a new project from a template.
 
 This is an asynchronous operation. The command returns a construction ID
-which can be polled via 'templates construction' until the status is "completed".`,
+which can be polled via 'templates construction' until the status is "completed".
+
+A template's dates are relative to the start of its first week, and template
+weeks start on a Sunday. --start-date anchors them to the Sunday on or before
+the given date; without it they anchor to the week the project is constructed.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if projectName == "" {
@@ -646,6 +652,14 @@ which can be polled via 'templates construction' until the status is "completed"
 			templateID, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
+			}
+
+			var parsedStart string
+			if strings.TrimSpace(startDate) != "" {
+				parsedStart = dateparse.Parse(startDate)
+				if _, err := time.Parse("2006-01-02", parsedStart); err != nil {
+					return output.ErrUsage(fmt.Sprintf("Invalid start date: %q", startDate))
+				}
 			}
 
 			// Syntactic checks first, then "-", then account and network.
@@ -660,7 +674,8 @@ which can be polled via 'templates construction' until the status is "completed"
 				return err
 			}
 
-			construction, err := app.Account().Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc)
+			construction, err := app.Account().Templates().CreateProject(cmd.Context(), templateID, projectName, projectDesc,
+				&basecamp.CreateProjectOptions{StartDate: parsedStart})
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -681,6 +696,7 @@ which can be polled via 'templates construction' until the status is "completed"
 	cmd.Flags().StringVar(&projectName, "name", "", "Project name (required)")
 	cmd.Flags().StringVar(&projectDesc, "description", "", "Project description; use - to read from stdin")
 	cmd.Flags().StringVar(&projectDesc, "desc", "", "Project description (alias)")
+	cmd.Flags().StringVar(&startDate, "start-date", "", "Project start date (YYYY-MM-DD or natural, e.g. \"next monday\"); template dates anchor to the Sunday of that week")
 	_ = cmd.MarkFlagRequired("name")
 
 	allowDash(cmd, "flag:description", "flag:desc")
