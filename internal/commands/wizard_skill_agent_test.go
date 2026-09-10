@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -117,7 +118,13 @@ func TestSetupSkillAgentDetectedByOverrideOrBinary(t *testing.T) {
 			emptyHome(t)
 			t.Setenv(agent.HomeEnv, "")
 			bin := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(bin, agent.Binary), []byte("#!/bin/sh\n"), 0o755)) //nolint:gosec // G306: test stub must be executable
+			// Named for the platform, as the harness stubs are: grok.exe on
+			// Windows, where LookPath resolves the bare name through PATHEXT.
+			stub := filepath.Join(bin, agent.Binary)
+			if runtime.GOOS == "windows" {
+				stub += ".exe"
+			}
+			require.NoError(t, os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755)) //nolint:gosec // G306: test stub must be executable
 			t.Setenv("PATH", bin)
 
 			envelope := runSetupSkillAgentJSON(t, agent)
