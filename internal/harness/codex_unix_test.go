@@ -19,8 +19,8 @@ import (
 
 // codexWrapper runs script through sh as the probe's command, with a
 // deadline well short of the sleep the script backgrounds, and returns the
-// error and the pid the script recorded.
-func codexWrapper(t *testing.T, script string, deadline time.Duration) (error, int) {
+// pid the script recorded and the error.
+func codexWrapper(t *testing.T, script string, deadline time.Duration) (int, error) {
 	t.Helper()
 	sh, err := exec.LookPath("sh")
 	if err != nil {
@@ -47,7 +47,7 @@ func codexWrapper(t *testing.T, script string, deadline time.Duration) (error, i
 	require.NoError(t, readErr, "wrapper did not record the descendant's pid")
 	pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
 	require.NoError(t, convErr)
-	return err, pid
+	return pid, err
 }
 
 // killIfAlive reaps a descendant the probe was expected to leave behind, or
@@ -75,7 +75,7 @@ func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
 	// The grandchild has to outlive the deadline by a wide margin, or the test
 	// passes on the sleep ending rather than on the kill working.
 	start := time.Now()
-	err, pid := codexWrapper(t, "sleep 120 & echo $! > PIDFILE; exit 0", 500*time.Millisecond)
+	pid, err := codexWrapper(t, "sleep 120 & echo $! > PIDFILE; exit 0", 500*time.Millisecond)
 	// Only a failing run has a grandchild left to reap; a passing one has
 	// already seen it gone, and a pid seen gone is nobody's to signal.
 	t.Cleanup(func() {
@@ -90,7 +90,7 @@ func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return syscall.Kill(pid, 0) == syscall.ESRCH
 	}, 5*time.Second, 50*time.Millisecond,
-		"grandchild %d outlived the deadline: the process group was not killed", pid)
+		"grandchild %d outlived the deadline: the process group was not killed (or, under a PID 1 that does not reap orphans, it is an uncollected zombie)", pid)
 }
 
 // TestRunCodexCommandEscapedDescendant covers the descendant a group kill
@@ -104,7 +104,7 @@ func TestRunCodexCommandEscapedDescendant(t *testing.T) {
 	}
 
 	start := time.Now()
-	err, pid := codexWrapper(t, "setsid sleep 120 & echo $! > PIDFILE; exit 0", 500*time.Millisecond)
+	pid, err := codexWrapper(t, "setsid sleep 120 & echo $! > PIDFILE; exit 0", 500*time.Millisecond)
 	t.Cleanup(func() { killIfAlive(pid) })
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
