@@ -78,11 +78,18 @@ func runSetupAgentsStyled(t *testing.T) string {
 }
 
 // emptyHome points HOME and PATH at empty temp dirs so no agent is detected.
+// emptyHome isolates a test from the developer's machine: an empty home
+// (HOME, and USERPROFILE for os.UserHomeDir on Windows), an empty PATH, and
+// no shared-skill agent home override such as GROK_HOME.
 func emptyHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", filepath.Join(home, "empty-bin"))
+	for _, agent := range harness.SkillAgents() {
+		t.Setenv(agent.HomeEnv, "")
+	}
 	return home
 }
 
@@ -145,6 +152,27 @@ func TestSetupAgentsBaselineSkillFailure(t *testing.T) {
 	assert.False(t, env.Data.SkillInstalled)
 	require.NotEmpty(t, env.Data.Errors)
 	assert.Contains(t, env.Data.Errors[0], "skill:")
+}
+
+// A shared-skill agent detected by its home directory never needed a binary
+// to connect, so when the shared skill is what failed, the missing-binary
+// remediation would name the wrong cause; the skill error already names it.
+func TestSetupAgentsSkillAgentSkillFailureIsNotABinaryProblem(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent harness.SkillAgent) {
+		home := emptyHome(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(home, agent.HomeDir), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(home, ".agents"), []byte("blocker"), 0o644))
+		t.Setenv("BASECAMP_SETUP_AGENT", agent.ID)
+
+		env := runSetupAgentsJSON(t)
+
+		assert.False(t, env.Data.SkillInstalled)
+		assert.Contains(t, env.Data.Errors[0], "skill:")
+		for _, warning := range env.Data.Warnings {
+			assert.NotContains(t, warning, "binary not found", "the binary did not block %s", agent.Name)
+		}
+		assert.NotContains(t, env.Data.ManualCommands, "basecamp setup "+agent.ID)
+	})
 }
 
 func TestSetupAgentsSingleDetectedCodex(t *testing.T) {

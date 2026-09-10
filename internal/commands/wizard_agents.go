@@ -788,6 +788,7 @@ func newSetupAgentsCmd() *cobra.Command {
 type agentSetupRecord struct {
 	id, name        string
 	detectedBefore  bool
+	skillOnly       bool // a shared-skill agent: its setup never runs the binary
 	detectedAfter   bool
 	pluginInstalled bool
 	binaryAbsent    bool
@@ -879,7 +880,7 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 			for _, m := range r.manualCommands {
 				manualUnion.add(m)
 			}
-			if r.binaryAbsent && !r.pluginInstalled {
+			if r.binaryBlocked() {
 				manualUnion.add("basecamp setup " + r.id)
 			}
 		}
@@ -887,12 +888,9 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 
 	// warnings: synthesized missing-binary remediation, sorted-agent order.
 	// The Claude handler treats a missing binary as no-op success while Codex
-	// returns an error, so synthesizing here keeps remediation symmetric. Only
-	// when the absence actually prevented the connection — a shared-skill
-	// agent is routinely detected by its home directory alone, and its
-	// skill-only setup succeeds without a binary.
+	// returns an error, so synthesizing here keeps remediation symmetric.
 	for _, r := range records {
-		if r.binaryAbsent && !r.pluginInstalled {
+		if r.binaryBlocked() {
 			warnings = append(warnings, fmt.Sprintf("%s: %s binary not found; install %s, then run: basecamp setup %s", r.id, r.name, r.name, r.id))
 		}
 	}
@@ -947,6 +945,7 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 		name:           agent.Name,
 		detectedBefore: agent.Detect != nil && agent.Detect(),
 		binaryAbsent:   !agentBinaryPresent(agent),
+		skillOnly:      isSkillAgent(agent.ID),
 	}
 
 	if handler, ok := agentSetupHandlers[agent.ID]; ok && handler.RunNonInteractive != nil {
@@ -966,6 +965,26 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 	// on the machine — the handler's refusal is what says it is not.
 	rec.pluginInstalled = len(rec.errors) == 0 && agentChecksPass(agent)
 	return rec
+}
+
+// binaryBlocked reports whether the binary's absence is what kept the agent
+// from connecting, which is when the missing-binary remediation applies. A
+// plugin agent needs its binary to install the plugin, so absent and not
+// connected is that. A shared-skill agent is routinely detected by its home
+// directory alone and its skill-only setup never runs the binary: detected
+// but not connected means the shared skill failed, which is already in its
+// errors, and only an agent absent altogether is missing its binary.
+func (r agentSetupRecord) binaryBlocked() bool {
+	return r.binaryAbsent && !r.pluginInstalled && (!r.skillOnly || !r.detectedBefore)
+}
+
+func isSkillAgent(id string) bool {
+	for _, agent := range harness.SkillAgents() {
+		if agent.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // agentBinaryPresent reports whether the agent's executable is on disk. An
