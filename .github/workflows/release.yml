@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   security:
     name: Security scan
-    uses: ./.github/workflows/security.yml
+    uses: $/.github/workflows/security.yml
     permissions:
       contents: read
       security-events: write
@@ -31,7 +31,7 @@ jobs:
   # actions/checkout inside the reusable workflow has no repository access.
   headless-probe:
     name: Headless keyring probe
-    uses: ./.github/workflows/headless-probe-composition.yml
+    uses: $/.github/workflows/headless-probe-composition.yml
     permissions:
       contents: read
 
