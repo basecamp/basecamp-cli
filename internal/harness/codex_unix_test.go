@@ -27,7 +27,9 @@ func codexWrapper(t *testing.T, script string, deadline time.Duration) (int, err
 		t.Skip("sh not available")
 	}
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
-	script = strings.ReplaceAll(script, "PIDFILE", pidFile)
+	// TempDir follows TMPDIR, which may hold a space or a shell metacharacter,
+	// so the path goes into the script single-quoted.
+	script = strings.ReplaceAll(script, "PIDFILE", "'"+strings.ReplaceAll(pidFile, "'", `'\''`)+"'")
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
