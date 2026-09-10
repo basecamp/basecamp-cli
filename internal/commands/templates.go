@@ -655,7 +655,7 @@ the given date; without it they anchor to the week the project is constructed.`,
 			}
 
 			var parsedStart string
-			if strings.TrimSpace(startDate) != "" {
+			if cmd.Flags().Changed("start-date") {
 				parsedStart = dateparse.Parse(startDate)
 				if _, err := time.Parse("2006-01-02", parsedStart); err != nil {
 					return output.ErrUsage(fmt.Sprintf("Invalid start date: %q", startDate))

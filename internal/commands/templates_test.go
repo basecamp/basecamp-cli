@@ -289,7 +289,9 @@ func TestTemplatesConstructParsesNaturalStartDate(t *testing.T) {
 	)
 	captureTemplateOutput(app)
 
+	before := time.Now()
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
+	after := time.Now()
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -300,7 +302,18 @@ func TestTemplatesConstructParsesNaturalStartDate(t *testing.T) {
 		} `json:"project"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(requests[0].Body), &body))
-	assert.Equal(t, time.Now().AddDate(0, 0, 1).Format("2006-01-02"), body.Project.StartDate)
+	tomorrow := func(now time.Time) string { return now.AddDate(0, 0, 1).Format("2006-01-02") }
+	assert.Contains(t, []string{tomorrow(before), tomorrow(after)}, body.Project.StartDate)
+}
+
+func TestTemplatesConstructRejectsBlankStartDate(t *testing.T) {
+	app, transport := setupRecordingTestApp(t)
+	captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "")
+	outErr := requireUsageErr(t, err)
+	assert.Contains(t, outErr.Message, "Invalid start date")
+	assert.Empty(t, transport.recorded())
 }
 
 func TestTemplatesConstructRejectsMalformedStartDateBeforeAnyRequest(t *testing.T) {
