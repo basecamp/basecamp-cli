@@ -12,4 +12,4 @@ shellcheck = "0.11.0"
 powershell = "7.6.5"
 # Keep in sync with the zizmor-action `version:` input in
 # .github/workflows/test.yml so local bin/ci runs the same release CI does.
-zizmor = "1.29.0"
+zizmor = "1.30.0"

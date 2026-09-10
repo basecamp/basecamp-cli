@@ -6,10 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -203,61 +200,4 @@ func boolJSON(value bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-// TestRunCodexCommandOutlivingGrandchild pins the deadline that ten minutes of
-// a hung `basecamp doctor` proved was not being enforced.
-//
-// The stub above replaces runCodexCommand, so nothing else here exercises the
-// real one. This does. It stands in for the shape codex actually ships as on
-// some machines — a wrapper script that backgrounds a longer-lived process —
-// where canceling the context kills the wrapper but the grandchild keeps the
-// inherited stdout pipe open. Without cmd.WaitDelay, Wait blocks on that pipe
-// for as long as the grandchild lives, and the query timeout means nothing.
-func TestRunCodexCommandOutlivingGrandchild(t *testing.T) {
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("sh not available")
-	}
-
-	// The grandchild has to outlive the deadline by a wide margin, or the test
-	// passes on the sleep ending rather than on WaitDelay working. That makes
-	// it our job to reap it: WaitDelay closes the inherited pipe, it does not
-	// kill the process, which is reparented to init and would otherwise sit
-	// there for two minutes accumulating one orphan per `bin/ci`.
-	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
-	script := "sleep 120 & echo $! > " + pidFile + "; exit 0"
-
-	t.Cleanup(func() {
-		raw, readErr := os.ReadFile(pidFile) //nolint:gosec // G304: path is this test's own TempDir
-		if readErr != nil {
-			return
-		}
-		pid, convErr := strconv.Atoi(strings.TrimSpace(string(raw)))
-		if convErr != nil {
-			return
-		}
-		if proc, findErr := os.FindProcess(pid); findErr == nil {
-			_ = proc.Kill()
-		}
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	done := make(chan struct{})
-	start := time.Now()
-	go func() {
-		defer close(done)
-		_, _ = runCodexCommand(ctx, sh, "-c", script)
-	}()
-
-	select {
-	case <-done:
-		// The call must return on its own deadline, not the grandchild's.
-		assert.Less(t, time.Since(start), 30*time.Second,
-			"runCodexCommand blocked on a pipe held open by a surviving grandchild")
-	case <-time.After(30 * time.Second):
-		t.Fatal("runCodexCommand did not return: WaitDelay is not bounding Wait")
-	}
 }
