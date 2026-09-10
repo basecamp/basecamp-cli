@@ -1377,7 +1377,7 @@ basecamp setup agents                             # Install skill + connect dete
 basecamp setup agents --json                      # Structured result envelope
 ```
 `setup agents` installs the baseline skill and connects coding agents without
-prompting. Selection is driven by `BASECAMP_SETUP_AGENT` (`claude`, `codex`,
+prompting. Selection is driven by `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `grok`,
 `all`, or `none`); unset auto-detects — one detected agent is connected, several
 leave the skill only and surface the per-agent `basecamp setup <id>` commands.
 

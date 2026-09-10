@@ -18,7 +18,7 @@
 #                        and connect coding agents)
 #   BASECAMP_SETUP_AGENT
 #                       Which coding agent(s) `setup agents` connects:
-#                       claude | codex | all | none. Unset = auto-detect (connect
+#                       claude | codex | grok | all | none. Unset = auto-detect (connect
 #                       a single detected agent; if several, install the skill
 #                       only and surface the per-agent commands).
 #                       Piped install sets it for the interpreter, not the fetch:
@@ -577,13 +577,13 @@ binary_supports_setup_agents() {
 }
 
 # binary_supports_setup_agent reports whether the binary exposes a per-agent
-# `setup <id>` subcommand for the given agent id (claude or codex).
+# `setup <id>` subcommand for the given agent id (claude, codex or grok).
 binary_supports_setup_agent() {
   "$1" setup --help 2>/dev/null | grep -qE "^[[:space:]]+$2[[:space:]]"
 }
 
 # post_install_setup installs the baseline skill and connects coding agents
-# without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# without prompting. It honors BASECAMP_SETUP_AGENT (claude|codex|grok|all|none;
 # unset = auto-detect). Never runs the interactive wizard.
 #
 # Cross-version: newer binaries get the intent-neutral `setup agents`. Older
@@ -607,7 +607,7 @@ post_install_setup() {
   fi
 
   case "${BASECAMP_SETUP_AGENT:-}" in
-    claude|codex)
+    claude|codex|grok)
       # Capability-check first: an old `setup` parent accepts an unadvertised
       # agent id as a stray positional arg and launches the INTERACTIVE wizard,
       # violating the non-interactive contract. Degrade to the shared skill.
@@ -621,7 +621,7 @@ post_install_setup() {
       # Explicit "every agent": dispatch each per-agent setup the binary knows,
       # falling back to the shared skill if it supports none of them.
       local ran_agent=0 agent
-      for agent in claude codex; do
+      for agent in claude codex grok; do
         if binary_supports_setup_agent "$bin" "$agent"; then
           BASECAMP_NO_KEYRING=1 "$bin" setup "$agent" || true
           ran_agent=1

@@ -31,8 +31,8 @@ func AgentSkillPath() string {
 }
 
 // BaselineSkillInstalled reports whether the shared skill is on disk. It is
-// the one health predicate for the shared skill: setup and doctor answer
-// from it, and so does any agent whose integration is the skill alone.
+// the one health predicate for the shared skill: setup, doctor and the
+// shared-skill agents' checks all answer from it.
 func BaselineSkillInstalled() bool {
 	return statAgentSkill() == nil
 }

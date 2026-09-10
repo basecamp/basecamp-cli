@@ -1208,7 +1208,7 @@ func TestSetupSubcommandsSurviveTheGate(t *testing.T) {
 	for _, agent := range agents {
 		subs = append(subs, agent.ID)
 	}
-	require.Equal(t, []string{"agents", "claude", "codex"}, subs)
+	require.Equal(t, []string{"agents", "claude", "codex", "grok"}, subs)
 	for _, sub := range subs {
 		t.Run(sub, func(t *testing.T) {
 			t.Setenv("BASECAMP_NO_KEYRING", "1")

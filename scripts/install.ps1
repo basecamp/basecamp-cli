@@ -14,7 +14,7 @@ try {
 #   BASECAMP_NONINTERACTIVE
 #                         Set to 1 or true to use non-interactive setup
 #   BASECAMP_SETUP_AGENT  Which coding agent(s) `setup agents` connects:
-#                         claude | codex | all | none. Unset = auto-detect.
+#                         claude | codex | grok | all | none. Unset = auto-detect.
 #                         Piped install sets it for the interpreter, not the fetch:
 #                           $env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex
 $Repo = 'basecamp/basecamp-cli'
@@ -321,7 +321,7 @@ function Invoke-FirstTimeSetup([string]$Binary) {
 }
 
 # Invoke-PostInstallSetup installs the baseline skill and connects coding agents
-# without prompting, honoring BASECAMP_SETUP_AGENT (claude|codex|all|none;
+# without prompting, honoring BASECAMP_SETUP_AGENT (claude|codex|grok|all|none;
 # unset = auto-detect). It is strictly best-effort: agent setup must never fail
 # an otherwise-successful install, so every native call is wrapped so a nonzero
 # exit (amplified by $ErrorActionPreference='Stop' +
@@ -349,7 +349,7 @@ function Invoke-PostInstallSetup([string]$Binary) {
     }
 
     $selector = $env:BASECAMP_SETUP_AGENT
-    if ($selector -in @('claude', 'codex')) {
+    if ($selector -in @('claude', 'codex', 'grok')) {
       # Capability-check first: an old `setup` parent accepts an unadvertised agent
       # id as a stray arg and launches the INTERACTIVE wizard. Degrade to the skill.
       if ($help -match "(?m)^\s+$selector\s") {
@@ -359,7 +359,7 @@ function Invoke-PostInstallSetup([string]$Binary) {
       }
     } elseif ($selector -eq 'all') {
       $ranAgent = $false
-      foreach ($agent in @('claude', 'codex')) {
+      foreach ($agent in @('claude', 'codex', 'grok')) {
         if ($help -match "(?m)^\s+$agent\s") {
           # Mark attempted (not succeeded) -- matches install.sh's `ran_agent=1`,
           # which is set regardless of the setup call's exit status.

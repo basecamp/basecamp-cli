@@ -199,6 +199,7 @@ EOF
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"setup claude"* ]]
   [[ "$output" != *"setup codex"* ]]  # codex unadvertised → never invoked
+  [[ "$output" != *"setup grok"* ]]   # grok likewise
 }
 
 # Explicit `codex` on an old binary that lacks `setup codex` must NOT run the
@@ -210,6 +211,25 @@ EOF
   [[ "$status" -eq 0 ]]
   [[ "$output" == *"skill install"* ]]
   [[ "$output" != *"setup codex"* ]]
+}
+
+# Grok is the same explicit-selector shape as codex: an old binary that does
+# not advertise `setup grok` degrades to the shared skill.
+@test "old binary + BASECAMP_SETUP_AGENT=grok degrades to 'skill install', never 'setup grok'" {
+  write_stub old
+  run_post_install_setup "export BASECAMP_SETUP_AGENT=grok"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"skill install"* ]]
+  [[ "$output" != *"setup grok"* ]]
+}
+
+# A new binary owns the selector: the installer hands every value, grok
+# included, to `setup agents` rather than dispatching per agent itself.
+@test "new binary + BASECAMP_SETUP_AGENT=grok dispatches to 'setup agents'" {
+  run_post_install_setup "export BASECAMP_SETUP_AGENT=grok"
+  [[ "$status" -eq 0 ]]
+  [[ "$output" == *"setup agents"* ]]
+  [[ "$output" != *"setup grok"* ]]
 }
 
 @test "install.sh has no residual 'setup claude' dispatch" {
@@ -235,7 +255,7 @@ EOF
   grep -q 'setup agents' "$INSTALL_PS1"
   grep -q 'skill install' "$INSTALL_PS1"
   grep -q 'catch {' "$INSTALL_PS1"
-  # Explicit claude|codex selectors must be capability-checked before dispatch,
+  # Explicit claude|codex|grok selectors must be capability-checked before dispatch,
   # so an old binary never gets an unadvertised subcommand as a stray arg.
   grep -qF 'match "(?m)^\s+$selector\s"' "$INSTALL_PS1"
   # The keyring escape hatch belt (see the BASECAMP_NO_KEYRING tests below).

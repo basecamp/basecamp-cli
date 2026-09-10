@@ -33,10 +33,25 @@ basecamp-cli/
 │   └── version/      # Version info
 ├── e2e/              # BATS integration tests
 ├── skills/           # Agent skills
-├── hooks/            # Agent lifecycle hooks (both agents)
+├── hooks/            # Agent lifecycle hooks (both plugin agents)
 ├── .claude-plugin/   # Claude Code integration
 └── .codex-plugin/    # Codex plugin manifest
 ```
+
+## Coding-agent integrations
+
+Coding-agent integration lives in `internal/harness` (agent registry, detection, plugin and
+skill health checks) and `internal/commands/wizard_agents.go` (`basecamp setup
+claude|codex|grok|agents`). Claude Code and Codex each get a native plugin from the
+`basecamp/claude-plugins` marketplace and have registrations of their own (`claude.go`,
+`codex.go`). Grok Build has no plugin: it reads the shared `~/.agents/skills/basecamp` skill
+directly, so it is a row of `harness.SkillAgent` (name, id, home env var, home directory,
+binary) in `skill_agent.go`, and everything in `internal/commands` that touches a shared-skill
+agent — the setup handler, the `BASECAMP_SETUP_AGENT` values, doctor's remediation — loops over
+`harness.SkillAgents()` rather than naming it. A new shared-skill agent is a new row; the skill
+picker's `(Global)` row, the prose lists in the installers and the docs are the places to update
+by hand. `setup <id>` never fabricates an agent's home directory: a skill-only agent that is not
+detected is reported missing, not created.
 
 ## Basecamp API Reference
 

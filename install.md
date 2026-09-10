@@ -32,7 +32,7 @@ irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install
 
 > **Note:** The install scripts run `basecamp setup` whenever they can attach it to a usable interactive terminal, including the standard `curl | bash` command. When no usable controlling terminal is available, output is redirected, or `BASECAMP_NONINTERACTIVE=1`/`true` is set, they skip authentication and run `basecamp setup agents`. That command installs the baseline agent skill and **attempts to connect** a single detected coding agent (best effort). If several agents are detected, or none is, only the baseline skill is installed and the per-agent commands are surfaced. Explicitly skipping first-time setup with `BASECAMP_SKIP_SETUP=1` still runs `setup agents`. If optional first-time setup is cancelled or does not finish, the installed CLI remains ready and the installer prints the command to resume setup.
 >
-> Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `all`, or `none`). Set it for the interpreter, not the fetch:
+> Choose which agent to connect with `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `grok`, `all`, or `none`). Set it for the interpreter, not the fetch:
 > - Bash: `curl -fsSL https://basecamp.com/install-cli | BASECAMP_SETUP_AGENT=codex bash`
 > - PowerShell: `$env:BASECAMP_SETUP_AGENT='codex'; irm https://raw.githubusercontent.com/basecamp/basecamp-cli/main/scripts/install.ps1 | iex`
 >
@@ -131,7 +131,7 @@ EXECUTE NOW: Start with Step 1. Mark TODO items complete as you go. Stop when `b
 
 **Do not execute this section unless explicitly requested.** The core installation is complete when DONE WHEN passes.
 
-Interactive setup in Step 1 connects every detected agent. Without a controlling terminal, the installer still installs the baseline skill and attempts to connect one detected agent. Run the commands here to force a specific agent, repair a connection, or connect agents that were not available during installation. Both agent plugins require the `basecamp` CLI installed above — the plugin invokes it for every Basecamp operation.
+Interactive setup in Step 1 connects every detected agent. Without a controlling terminal, the installer still installs the baseline skill and attempts to connect one detected agent. Run the commands here to force a specific agent, repair a connection, or connect agents that were not available during installation. Every integration requires the `basecamp` CLI installed above — the plugins and the skill invoke it for every Basecamp operation.
 
 ### Claude Code
 
@@ -163,7 +163,15 @@ codex plugin add basecamp@37signals
 
 To pick up a newer plugin version later, refresh with `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
 
-Verify either agent integration with structured diagnostics:
+### Grok Build
+
+```bash
+basecamp setup grok
+```
+
+This installs the shared Basecamp skill and confirms it is healthy. There is no Grok plugin: Grok reads user skills from `~/.grok/skills/` and from the cross-agent `~/.agents/skills/`, so the shared skill at `~/.agents/skills/basecamp/SKILL.md` is the whole integration. Setup requires Grok to be present — `$GROK_HOME` (default `~/.grok`) or a `grok` binary on `PATH`, in `~/.local/bin`, or in `$GROK_HOME/bin` — and never creates the Grok home itself. Start a new Grok session afterwards to load the skill.
+
+Verify any agent integration with structured diagnostics:
 
 ```bash
 basecamp doctor --json

@@ -2,10 +2,10 @@
 
 `basecamp` is the official command-line interface for Basecamp. Manage projects, todos, messages, and more from your terminal or through AI agents.
 
-- Works standalone or with any AI agent (Claude, Codex, Copilot, Gemini)
+- Works standalone or with any AI agent (Claude, Codex, Grok, Copilot, Gemini)
 - JSON output with breadcrumbs for easy navigation
 - OAuth authentication with automatic token refresh
-- Includes agent skills plus native Claude Code and Codex plugins
+- Includes agent skills plus native Claude Code and Codex plugins; Grok Build reads the shared skill directly
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ The first interactive `basecamp` run applies the recommended setup automatically
 
 - Account granted by OAuth, otherwise the existing configured account or first available account, saved globally
 - No global default project; directory-specific and environment project settings continue to apply
-- Every detected Claude Code or Codex integration
+- Every detected Claude Code, Codex or Grok integration
 
 Run the same setup directly with `basecamp setup`. To choose the account, default project, config scope, and agent integrations, run:
 
@@ -278,6 +278,8 @@ codex plugin add basecamp@37signals
 To pick up a newer plugin version later, refresh the marketplace with
 `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
 
+**Grok Build:** `basecamp setup grok` — installs the shared skill and confirms it is healthy. There is no Grok plugin: Grok reads user skills from `~/.grok/skills/` and from the cross-agent `~/.agents/skills/`, so the shared `~/.agents/skills/basecamp` skill is the whole integration. Grok is detected by `$GROK_HOME` (default `~/.grok`) or a `grok` binary on `PATH`, in `~/.local/bin`, or in `$GROK_HOME/bin` where its installers put it. Start a new Grok session after setup to load the skill.
+
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
 **Agent discovery:** Every command supports `--help --agent` for structured JSON output (flags, gotchas, subcommands). Use `basecamp commands --json` for the full catalog.
@@ -335,7 +337,7 @@ client-registration flow) is obsolete and safe to delete.
 ```bash
 basecamp doctor              # Check CLI health and diagnose issues
 basecamp doctor --verbose    # Verbose output with details
-basecamp doctor --json       # Structured checks, including Claude and Codex
+basecamp doctor --json       # Structured checks, including Claude, Codex and Grok
 ```
 
 ### Windows: Smart App Control and SmartScreen

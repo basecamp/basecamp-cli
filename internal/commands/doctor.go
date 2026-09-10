@@ -1136,6 +1136,14 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 				Cmd:         "basecamp setup codex",
 				Description: "Install or update the Codex plugin",
 			})
+		default:
+			if agent, ok := skillAgentForCheck(c.Name); ok {
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "setup_" + agent.ID,
+					Cmd:         "basecamp setup " + agent.ID,
+					Description: "Install the shared Basecamp skill for " + agent.Name,
+				})
+			}
 		}
 	}
 
@@ -1150,6 +1158,17 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 	}
 
 	return unique
+}
+
+// skillAgentForCheck returns the shared-skill agent whose check is named, so
+// its remediation reads the harness table rather than a case per agent.
+func skillAgentForCheck(name string) (harness.SkillAgent, bool) {
+	for _, agent := range harness.SkillAgents() {
+		if name == agent.Name+" Skill" {
+			return agent, true
+		}
+	}
+	return harness.SkillAgent{}, false
 }
 
 // pluralize returns singular or plural form based on count.

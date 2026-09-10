@@ -28,6 +28,7 @@ Report failures and warnings with their `hint` fields. Also inspect the top-leve
 - Agent plugin installation or version: `basecamp setup agents` (honors `BASECAMP_SETUP_AGENT`)
 - Codex plugin specifically: `basecamp setup codex`
 - Claude Code plugin specifically: `basecamp setup claude`
+- Grok skill specifically: `basecamp setup grok` (skill-only; Grok reads the shared `~/.agents/skills/basecamp` skill)
 
 Every remediation above runs without a terminal. Bare `basecamp setup` is the
 human first-time flow and is **not** one of them: it opens browser OAuth and

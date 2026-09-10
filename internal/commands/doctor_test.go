@@ -834,6 +834,21 @@ func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {
 	assert.Equal(t, "basecamp setup codex", breadcrumbs[0].Cmd)
 }
 
+// A shared-skill agent's failing skill check remediates with its own
+// `setup <id>`, read from the harness table rather than a case per agent.
+func TestBuildDoctorBreadcrumbs_SkillAgents(t *testing.T) {
+	for _, agent := range harness.SkillAgents() {
+		t.Run(agent.ID, func(t *testing.T) {
+			breadcrumbs := buildDoctorBreadcrumbs([]Check{{Name: agent.Name + " Skill", Status: "fail"}})
+
+			require.Len(t, breadcrumbs, 1)
+			assert.Equal(t, "setup_"+agent.ID, breadcrumbs[0].Action)
+			assert.Equal(t, "basecamp setup "+agent.ID, breadcrumbs[0].Cmd)
+		})
+	}
+	assert.Empty(t, buildDoctorBreadcrumbs([]Check{{Name: "Grok Skill", Status: "pass"}}), "a passing check needs no remediation")
+}
+
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

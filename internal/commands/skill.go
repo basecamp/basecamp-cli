@@ -35,6 +35,7 @@ var skillLocations = []skillLocation{
 	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skills/basecamp/SKILL.md"},
 	{Name: "OpenCode (Project)", Path: ".opencode/skills/basecamp/SKILL.md"},
 	{Name: "Codex (Global)", Path: agentHomeSkillPath("CODEX_HOME", "~/.codex")},
+	{Name: "Grok (Global)", Path: agentHomeSkillPath("GROK_HOME", "~/.grok")},
 }
 
 // legacySkillLocations are paths an agent still reads but that we no longer
@@ -315,9 +316,9 @@ func expandSkillPath(path string) string {
 }
 
 // agentHomeSkillPath is the skill's path under an agent's own home: $homeEnv
-// when set, else defaultHome (tilde form, expanded at install time). Any
-// agent that reads its home's skills directory and relocates that home with
-// an environment variable is a picker row that differs only in these two.
+// when set, else defaultHome (tilde form, expanded at install time). Codex and
+// Grok both read their home's skills directory and both relocate it with an
+// environment variable, so their picker rows differ only in these two values.
 func agentHomeSkillPath(homeEnv, defaultHome string) string {
 	agentHome := strings.TrimSpace(os.Getenv(homeEnv))
 	if agentHome == "" {

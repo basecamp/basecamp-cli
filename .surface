@@ -991,6 +991,7 @@ CMD basecamp setup
 CMD basecamp setup agents
 CMD basecamp setup claude
 CMD basecamp setup codex
+CMD basecamp setup grok
 CMD basecamp show
 CMD basecamp skill
 CMD basecamp skill install
@@ -13205,6 +13206,27 @@ FLAG basecamp setup codex --stats type=bool
 FLAG basecamp setup codex --styled type=bool
 FLAG basecamp setup codex --todolist type=string
 FLAG basecamp setup codex --verbose type=count
+FLAG basecamp setup grok --account type=string
+FLAG basecamp setup grok --agent type=bool
+FLAG basecamp setup grok --cache-dir type=string
+FLAG basecamp setup grok --count type=bool
+FLAG basecamp setup grok --help type=bool
+FLAG basecamp setup grok --hints type=bool
+FLAG basecamp setup grok --ids-only type=bool
+FLAG basecamp setup grok --in type=string
+FLAG basecamp setup grok --jq type=string
+FLAG basecamp setup grok --json type=bool
+FLAG basecamp setup grok --markdown type=bool
+FLAG basecamp setup grok --md type=bool
+FLAG basecamp setup grok --no-hints type=bool
+FLAG basecamp setup grok --no-stats type=bool
+FLAG basecamp setup grok --profile type=string
+FLAG basecamp setup grok --project type=string
+FLAG basecamp setup grok --quiet type=bool
+FLAG basecamp setup grok --stats type=bool
+FLAG basecamp setup grok --styled type=bool
+FLAG basecamp setup grok --todolist type=string
+FLAG basecamp setup grok --verbose type=count
 FLAG basecamp show --account type=string
 FLAG basecamp show --agent type=bool
 FLAG basecamp show --all-comments type=bool
@@ -18658,6 +18680,7 @@ SUB basecamp setup
 SUB basecamp setup agents
 SUB basecamp setup claude
 SUB basecamp setup codex
+SUB basecamp setup grok
 SUB basecamp show
 SUB basecamp skill
 SUB basecamp skill install

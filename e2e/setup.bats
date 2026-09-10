@@ -188,7 +188,7 @@ run_in_pty() {
 # non-interactive paths and have to keep working — a persistent hook would have
 # taken all of them out, which is the easiest thing to get wrong here.
 
-# hide_agent_binaries drops the developer's real claude/codex from PATH. Without
+# hide_agent_binaries drops the developer's real claude/codex/grok from PATH. Without
 # it these tests shell out to whichever agent CLI happens to be installed, and
 # those have prompts of their own — a hang in somebody else's tool, unrelated to
 # the gate under test. What we are asserting is that the parent's gate does not
@@ -224,6 +224,16 @@ hide_agent_binaries() {
   hide_agent_binaries
 
   run_guarded "basecamp setup codex --json < /dev/null"
+  assert_not_timed_out
+  assert_success
+}
+
+@test "setup grok still runs without a terminal" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+  hide_agent_binaries
+
+  run_guarded "basecamp setup grok --json < /dev/null"
   assert_not_timed_out
   assert_success
 }
