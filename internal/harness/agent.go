@@ -12,6 +12,11 @@ type AgentInfo struct {
 	Detect func() bool           // returns true if the agent is installed
 	Checks func() []*StatusCheck // cheap health checks gating setup wizard behavior
 
+	// FindBinary returns the agent's executable path, or "" when it is not on
+	// disk. Setup reads it to decide whether a "binary not found" remediation
+	// applies; nil means the agent has no executable to look for.
+	FindBinary func() string
+
 	// Diagnostics returns the full doctor check suite, including checks that
 	// are too slow or noisy for the wizard (e.g. version comparisons).
 	// When nil, doctor falls back to Checks.

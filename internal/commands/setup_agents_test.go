@@ -307,3 +307,36 @@ func TestSetupAgentsInvalidSelector(t *testing.T) {
 	require.NotEmpty(t, env.Data.Warnings)
 	assert.Contains(t, env.Data.Warnings[0], "frobnicate")
 }
+
+// The unknown-value warning names every accepted selector, read from the
+// registry, so a new agent shows up in the message without anyone editing it.
+func TestSetupAgentsInvalidSelectorListsEveryAgent(t *testing.T) {
+	emptyHome(t)
+	t.Setenv("BASECAMP_SETUP_AGENT", "frobnicate")
+
+	env := runSetupAgentsJSON(t)
+
+	require.NotEmpty(t, env.Data.Warnings)
+	assert.Contains(t, env.Data.Warnings[0], "expected claude, codex, all, or none")
+	assert.Equal(t, "claude, codex, all, or none", agentSelectorProse())
+}
+
+// A missing binary is remediation only when it kept the agent from
+// connecting: Claude's plugin is read from installed_plugins.json, so a
+// machine with the plugin already installed and no `claude` on PATH is
+// connected, and `setup agents` says so without a "binary not found" warning.
+func TestSetupAgentsNoBinaryWarningWhenAlreadyConnected(t *testing.T) {
+	home := emptyHome(t)
+	t.Setenv("BASECAMP_SETUP_AGENT", "claude")
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"version":"1.0.0","scope":"user"}]}}`), 0o644))
+
+	env := runSetupAgentsJSON(t)
+
+	require.Len(t, env.Data.Agents, 1)
+	assert.True(t, env.Data.Agents[0].PluginInstalled)
+	assert.Empty(t, env.Data.Warnings)
+	assert.Empty(t, env.Data.ManualCommands)
+	assert.Equal(t, "Installed baseline skill; connected Claude Code", env.Summary)
+}

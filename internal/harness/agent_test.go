@@ -88,15 +88,17 @@ func TestClaudeAgentInfoWiring(t *testing.T) {
 	defer resetRegistry()
 
 	RegisterAgent(AgentInfo{
-		Name:   "Claude Code",
-		ID:     "claude",
-		Detect: DetectClaude,
-		Checks: func() []*StatusCheck { return []*StatusCheck{CheckClaudePlugin()} },
+		Name:       "Claude Code",
+		ID:         "claude",
+		Detect:     DetectClaude,
+		FindBinary: FindClaudeBinary,
+		Checks:     func() []*StatusCheck { return []*StatusCheck{CheckClaudePlugin()} },
 	})
 
 	found := FindAgent("claude")
 	require.NotNil(t, found)
 	assert.Equal(t, "Claude Code", found.Name)
 	assert.NotNil(t, found.Detect)
+	assert.NotNil(t, found.FindBinary)
 	assert.NotNil(t, found.Checks)
 }

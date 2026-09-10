@@ -227,8 +227,8 @@ func TestCopySkillFilesRejectsSubdirs(t *testing.T) {
 }
 
 // Pin the literals rather than deriving them, so a test can't mirror a typo the
-// code has. Codex's entry is computed by codexGlobalSkillPath and covered
-// separately.
+// code has. Codex's entry is computed by agentHomeSkillPath and covered by
+// TestAgentHomeSkillPath.
 //
 // These are install targets, not the full set of paths an agent reads. opencode
 // takes an optional plural throughout — its own table reads
@@ -251,6 +251,31 @@ func TestSkillLocationsMatchAgentSearchPaths(t *testing.T) {
 	for name, path := range want {
 		assert.Equal(t, path, got[name], "install target for %s", name)
 	}
+}
+
+// Codex reads skills from its own home, which it relocates with CODEX_HOME;
+// the picker row follows it.
+func TestAgentHomeSkillPath(t *testing.T) {
+	for _, tc := range []struct{ name, env, home string }{
+		{"Codex (Global)", "CODEX_HOME", "~/.codex"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.env, "")
+			assert.Equal(t, tc.home+"/skills/basecamp/SKILL.md", agentHomeSkillPath(tc.env, tc.home))
+
+			override := t.TempDir()
+			t.Setenv(tc.env, " "+override+" ")
+			assert.Equal(t, filepath.Join(override, "skills", "basecamp", "SKILL.md"), agentHomeSkillPath(tc.env, tc.home))
+		})
+	}
+
+	// The row the picker offers is at the default home.
+	t.Setenv("CODEX_HOME", "")
+	got := map[string]string{}
+	for _, loc := range skillLocations {
+		got[loc.Name] = loc.Path
+	}
+	assert.Equal(t, "~/.codex/skills/basecamp/SKILL.md", got["Codex (Global)"])
 }
 
 // A wizard install written before #624 sits at opencode's singular path.

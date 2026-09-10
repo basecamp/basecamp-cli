@@ -17,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -158,8 +159,8 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 	// for the wizard by name here, so say so; isFirstRun asks the same question
 	// and answers it differently — see wizardCanRun.
 	//
-	// The gate belongs to this RunE alone: `setup claude`, `setup codex` and
-	// `setup agents` are the supported non-interactive paths and must keep
+	// The gate belongs to this RunE alone: `setup agents` and every per-agent
+	// `setup <id>` are the supported non-interactive paths and must keep
 	// working, which a persistent hook here would have broken.
 	if !setupCanRun(app) {
 		return output.ErrUsageHint("basecamp setup needs an interactive terminal", wizardEscapeHint())
@@ -246,7 +247,7 @@ func runWizard(cmd *cobra.Command, app *appctx.App) error {
 // rather than restating that a terminal is missing. Modeled on stdinEscapeHint:
 // point at the real alternatives.
 func wizardEscapeHint() string {
-	return "Agent setup runs without a terminal: basecamp setup agents (or basecamp setup claude / basecamp setup codex). " +
+	return "Agent setup runs without a terminal: basecamp setup agents (or " + strings.Join(agentChoiceCommands(harness.AllAgents()), " / ") + "). " +
 		"Set defaults directly with basecamp config set account_id <id> (or basecamp accounts use <id>) and basecamp config set project_id <id>. " +
 		"Check authentication with basecamp auth status."
 }

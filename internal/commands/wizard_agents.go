@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -286,7 +285,7 @@ func wizardAgents(cmd *cobra.Command, styles *tui.Styles) (agentSetupOutcome, er
 	preChecks := snapshotAgentChecks(agents)
 	if detectedAgentsReady(preChecks) {
 		for _, agent := range agents {
-			fmt.Fprintln(w, styles.RenderStatus(true, agent.Name+" plugin installed"))
+			fmt.Fprintln(w, styles.RenderStatus(true, agent.Name+" connected"))
 		}
 		fmt.Fprintln(w)
 		return agentSetupOutcome{Detected: len(agents), Checks: preChecks}, nil
@@ -574,8 +573,8 @@ func newSetupAgentCmds() []*cobra.Command {
 		h := handler // capture
 		cmds = append(cmds, &cobra.Command{
 			Use:   agent.ID,
-			Short: fmt.Sprintf("Install the Basecamp plugin for %s", agent.Name),
-			Long:  fmt.Sprintf("Set up the %s integration so %s can access Basecamp.", agent.Name, agent.Name),
+			Short: fmt.Sprintf("Connect %s to Basecamp", agent.Name),
+			Long:  fmt.Sprintf("Install the Basecamp agent skill and set up the %s integration so %s can access Basecamp.", agent.Name, agent.Name),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				app := appctx.FromContext(cmd.Context())
 				if app == nil {
@@ -632,11 +631,11 @@ func newSetupAgentCmds() []*cobra.Command {
 					}
 				}
 
-				summary := agent.Name + " plugin installed"
+				summary := agent.Name + " connected"
 				if !detected {
 					summary = agent.Name + " not detected"
 				} else if !installed {
-					summary = agent.Name + " plugin not installed"
+					summary = agent.Name + " not connected"
 				}
 
 				result := map[string]any{
@@ -648,7 +647,7 @@ func newSetupAgentCmds() []*cobra.Command {
 					// If setup had errors, don't claim installed even if checks pass
 					if installed {
 						result["plugin_installed"] = false
-						summary = agent.Name + " plugin not installed"
+						summary = agent.Name + " not connected"
 					}
 				}
 				if len(manualCommands) > 0 {
@@ -677,8 +676,25 @@ func newSetupAgentCmds() []*cobra.Command {
 }
 
 // agentSetupEnv selects which coding agents `setup agents` targets.
-// Values: claude | codex | all | none. Empty (unset) means auto-detect.
+// Values: an agent id (claude | codex) | all | none. Empty (unset) means
+// auto-detect.
 const agentSetupEnv = "BASECAMP_SETUP_AGENT"
+
+// agentSelectorValues lists what agentSetupEnv accepts, for help and
+// diagnostics: every registered agent id, then all and none.
+func agentSelectorValues() []string {
+	var values []string
+	for _, agent := range harness.AllAgents() {
+		values = append(values, agent.ID)
+	}
+	return append(values, "all", "none")
+}
+
+// agentSelectorProse renders agentSelectorValues as "claude, codex, all, or none".
+func agentSelectorProse() string {
+	values := agentSelectorValues()
+	return strings.Join(values[:len(values)-1], ", ") + ", or " + values[len(values)-1]
+}
 
 // newSetupAgentsCmd builds `setup agents`. It always runs non-interactively:
 // it installs the baseline skill, connects agents per the BASECAMP_SETUP_AGENT
@@ -689,7 +705,7 @@ func newSetupAgentsCmd() *cobra.Command {
 		Use:   "agents",
 		Short: "Install the Basecamp skill and connect detected coding agents",
 		Long: "Install the baseline Basecamp agent skill and attempt to connect coding agents.\n\n" +
-			"Selection is controlled by " + agentSetupEnv + ": claude, codex, all, or none. When\n" +
+			"Selection is controlled by " + agentSetupEnv + ": " + agentSelectorProse() + ". When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
 			"guessed — the per-agent `basecamp setup <id>` commands are surfaced instead.",
 		// Selection is env-driven; positional args are always a mistake (typo,
@@ -756,13 +772,13 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 		targets = harness.AllAgents()
 	case "none":
 		// baseline skill only
-	case "claude", "codex":
+	default:
 		if a := harness.FindAgent(selector); a != nil {
 			targets = []harness.AgentInfo{*a}
+		} else {
+			selector = "invalid"
+			warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected %s)", agentSetupEnv, selectorRaw, agentSelectorProse()))
 		}
-	default:
-		selector = "invalid"
-		warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected claude, codex, all, or none)", agentSetupEnv, selectorRaw))
 	}
 
 	// Run handlers in id order so aggregation is deterministic.
@@ -789,7 +805,7 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 		}
 	}
 
-	// manual_commands: ambiguous → both `setup <id>`; else union of each
+	// manual_commands: ambiguous → every `setup <id>`; else union of each
 	// handler's own ordered sequence plus a synthesized hint for absent
 	// binaries. Stable first-seen dedup preserves each handler's order.
 	manualUnion := newOrderedStringSet()
@@ -802,7 +818,7 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 			for _, m := range r.manualCommands {
 				manualUnion.add(m)
 			}
-			if r.binaryAbsent {
+			if r.binaryAbsent && !r.pluginInstalled {
 				manualUnion.add("basecamp setup " + r.id)
 			}
 		}
@@ -810,9 +826,11 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command, app *appctx.App) error {
 
 	// warnings: synthesized missing-binary remediation, sorted-agent order.
 	// The Claude handler treats a missing binary as no-op success while Codex
-	// returns an error, so synthesizing here keeps remediation symmetric.
+	// returns an error, so synthesizing here keeps remediation symmetric. Only
+	// when the absence actually prevented the connection — an agent whose
+	// integration is already healthy has nothing for the binary to fix.
 	for _, r := range records {
-		if r.binaryAbsent {
+		if r.binaryAbsent && !r.pluginInstalled {
 			warnings = append(warnings, fmt.Sprintf("%s: %s binary not found; install %s, then run: basecamp setup %s", r.id, r.name, r.name, r.id))
 		}
 	}
@@ -866,7 +884,7 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 		id:             agent.ID,
 		name:           agent.Name,
 		detectedBefore: agent.Detect != nil && agent.Detect(),
-		binaryAbsent:   !agentBinaryPresent(agent.ID),
+		binaryAbsent:   !agentBinaryPresent(agent),
 	}
 
 	if handler, ok := agentSetupHandlers[agent.ID]; ok && handler.RunNonInteractive != nil {
@@ -880,21 +898,18 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 	}
 
 	rec.detectedAfter = agent.Detect != nil && agent.Detect()
-	rec.pluginInstalled = agentChecksPass(agent)
+	// Connected means the handler succeeded AND health checks pass, the same
+	// verdict `setup <id>` reaches: a check that passes despite a setup error
+	// is a conflict to report, not a connection.
+	rec.pluginInstalled = len(rec.errors) == 0 && agentChecksPass(agent)
 	return rec
 }
 
-// agentBinaryPresent reports whether the agent's executable is on disk.
-// Unknown agents are assumed present so no bogus remediation is synthesized.
-func agentBinaryPresent(id string) bool {
-	switch id {
-	case "claude":
-		return harness.FindClaudeBinary() != ""
-	case "codex":
-		return harness.FindCodexBinary() != ""
-	default:
-		return true
-	}
+// agentBinaryPresent reports whether the agent's executable is on disk. An
+// agent with no executable to look for is assumed present so no bogus
+// remediation is synthesized.
+func agentBinaryPresent(agent harness.AgentInfo) bool {
+	return agent.FindBinary == nil || agent.FindBinary() != ""
 }
 
 // agentChecksPass reports whether every health check for the agent passes.
@@ -993,14 +1008,11 @@ func orEmptyStrings(ss []string) []string {
 	return ss
 }
 
-// baselineSkillInstalled returns true if ~/.agents/skills/basecamp/SKILL.md exists.
+// baselineSkillInstalled returns true if ~/.agents/skills/basecamp/SKILL.md
+// exists. The predicate lives in harness so an agent's health check can be
+// the same one.
 func baselineSkillInstalled() bool {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(filepath.Join(home, ".agents", "skills", "basecamp", "SKILL.md"))
-	return err == nil
+	return harness.BaselineSkillInstalled()
 }
 
 // joinNames joins names with commas and "and".

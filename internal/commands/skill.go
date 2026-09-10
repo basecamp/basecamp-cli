@@ -34,7 +34,7 @@ var skillLocations = []skillLocation{
 	{Name: "Claude Code (Project)", Path: ".claude/skills/basecamp/SKILL.md"},
 	{Name: "OpenCode (Global)", Path: "~/.config/opencode/skills/basecamp/SKILL.md"},
 	{Name: "OpenCode (Project)", Path: ".opencode/skills/basecamp/SKILL.md"},
-	{Name: "Codex (Global)", Path: codexGlobalSkillPath()},
+	{Name: "Codex (Global)", Path: agentHomeSkillPath("CODEX_HOME", "~/.codex")},
 }
 
 // legacySkillLocations are paths an agent still reads but that we no longer
@@ -314,12 +314,16 @@ func expandSkillPath(path string) string {
 	return path
 }
 
-func codexGlobalSkillPath() string {
-	codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if codexHome == "" {
-		return "~/.codex/skills/basecamp/SKILL.md"
+// agentHomeSkillPath is the skill's path under an agent's own home: $homeEnv
+// when set, else defaultHome (tilde form, expanded at install time). Any
+// agent that reads its home's skills directory and relocates that home with
+// an environment variable is a picker row that differs only in these two.
+func agentHomeSkillPath(homeEnv, defaultHome string) string {
+	agentHome := strings.TrimSpace(os.Getenv(homeEnv))
+	if agentHome == "" {
+		return defaultHome + "/skills/basecamp/" + skillFilename
 	}
-	return filepath.Join(codexHome, "skills", "basecamp", skillFilename)
+	return filepath.Join(agentHome, "skills", "basecamp", skillFilename)
 }
 
 // linkSkillToClaude creates a symlink at ~/.claude/skills/basecamp pointing to

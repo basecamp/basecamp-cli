@@ -666,9 +666,9 @@ func TestSetupClaudeSummaryStates(t *testing.T) {
 	} else {
 		installed, _ := envelope.Data["plugin_installed"].(bool)
 		if installed {
-			assert.Equal(t, "Claude Code plugin installed", envelope.Summary)
+			assert.Equal(t, "Claude Code connected", envelope.Summary)
 		} else {
-			assert.Equal(t, "Claude Code plugin not installed", envelope.Summary)
+			assert.Equal(t, "Claude Code not connected", envelope.Summary)
 		}
 	}
 }
@@ -1198,11 +1198,18 @@ func TestSetupRefusesMachineOutputOnATerminal(t *testing.T) {
 }
 
 // TestSetupSubcommandsSurviveTheGate is the other half of the gate: it belongs
-// to the parent's RunE only. `setup agents`, `setup claude` and `setup codex`
-// are the supported non-interactive paths and must keep working off a terminal
-// — a persistent hook here would have broken all three.
+// to the parent's RunE only. `setup agents` and every `setup <id>` are the
+// supported non-interactive paths and must keep working off a terminal — a
+// persistent hook here would have broken all of them.
 func TestSetupSubcommandsSurviveTheGate(t *testing.T) {
-	for _, sub := range []string{"agents", "claude", "codex"} {
+	agents := harness.AllAgents()
+	subs := make([]string, 0, 1+len(agents))
+	subs = append(subs, "agents")
+	for _, agent := range agents {
+		subs = append(subs, agent.ID)
+	}
+	require.Equal(t, []string{"agents", "claude", "codex"}, subs)
+	for _, sub := range subs {
 		t.Run(sub, func(t *testing.T) {
 			t.Setenv("BASECAMP_NO_KEYRING", "1")
 			t.Setenv("HOME", t.TempDir())

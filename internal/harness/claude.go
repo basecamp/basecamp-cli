@@ -13,10 +13,11 @@ import (
 
 func init() {
 	RegisterAgent(AgentInfo{
-		Name:   "Claude Code",
-		ID:     "claude",
-		Detect: DetectClaude,
-		Checks: claudeChecks,
+		Name:       "Claude Code",
+		ID:         "claude",
+		Detect:     DetectClaude,
+		FindBinary: FindClaudeBinary,
+		Checks:     claudeChecks,
 		Diagnostics: func(_ context.Context) []*StatusCheck {
 			return append(claudeChecks(), CheckClaudePluginVersion())
 		},
