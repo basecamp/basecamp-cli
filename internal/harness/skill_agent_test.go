@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,16 @@ func isolatedHome(t *testing.T, agent SkillAgent) string {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv(agent.HomeEnv, "")
 	return home
+}
+
+// stubBinaryPath is where a stub of the agent's executable goes in dir: the
+// bare name on Unix, name.exe on Windows, where exec.LookPath resolves the
+// bare name through PATHEXT and the official binary is grok.exe.
+func stubBinaryPath(dir string, agent SkillAgent) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(dir, agent.Binary+".exe")
+	}
+	return filepath.Join(dir, agent.Binary)
 }
 
 func writeStubBinary(t *testing.T, path string) {
@@ -82,7 +93,7 @@ func TestSkillAgentDetectByBinaryOnPath(t *testing.T) {
 	forEachSkillAgent(t, func(t *testing.T, agent SkillAgent) {
 		isolatedHome(t, agent)
 		bin := t.TempDir()
-		stub := filepath.Join(bin, agent.Binary)
+		stub := stubBinaryPath(bin, agent)
 		writeStubBinary(t, stub)
 		t.Setenv("PATH", bin)
 
@@ -109,12 +120,39 @@ func TestSkillAgentFindBinaryOffPath(t *testing.T) {
 				home := isolatedHome(t, agent)
 				require.Empty(t, agent.FindBinary(), "before any install")
 
-				stub := filepath.Join(binDir(t, home), agent.Binary)
+				stub := stubBinaryPath(binDir(t, home), agent)
 				writeStubBinary(t, stub)
 				assert.Equal(t, stub, agent.FindBinary())
 				assert.True(t, agent.Detect())
 			})
 		}
+	})
+}
+
+// A fallback candidate is held to the PATH lookup's standard: something that
+// merely has the binary's name is not the binary, and must not make Detect
+// report the agent present.
+func TestSkillAgentFindBinaryOffPathRequiresExecutable(t *testing.T) {
+	forEachSkillAgent(t, func(t *testing.T, agent SkillAgent) {
+		t.Run("directory", func(t *testing.T) {
+			home := isolatedHome(t, agent)
+			require.NoError(t, os.MkdirAll(filepath.Join(home, ".local", "bin", agent.Binary), 0o755))
+
+			assert.Empty(t, agent.FindBinary())
+			assert.False(t, agent.Detect())
+		})
+		t.Run("non-executable file", func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("Windows has no execute bit; the extension decides")
+			}
+			home := isolatedHome(t, agent)
+			stub := filepath.Join(home, ".local", "bin", agent.Binary)
+			require.NoError(t, os.MkdirAll(filepath.Dir(stub), 0o755))
+			require.NoError(t, os.WriteFile(stub, []byte("not a program"), 0o644))
+
+			assert.Empty(t, agent.FindBinary())
+			assert.False(t, agent.Detect(), "~/.local/bin/%s without an execute bit", agent.Binary)
+		})
 	})
 }
 

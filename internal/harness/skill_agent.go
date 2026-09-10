@@ -69,7 +69,11 @@ func (a SkillAgent) Detect() bool {
 // looks on PATH first, then where an installer puts the binary when the
 // shell has not picked up the PATH change yet: ~/.local/bin, and the agent's
 // own home's bin (Grok Build's installers write ~/.grok/bin/grok, or
-// $GROK_HOME/bin/grok for the npm package).
+// $GROK_HOME/bin/grok for the npm package). Each fallback goes through
+// exec.LookPath too, so it is held to the PATH lookup's standard — an
+// executable regular file on Unix, a PATHEXT extension such as .exe on
+// Windows — and a stale directory or non-executable file of that name is
+// not reported as the binary.
 func (a SkillAgent) FindBinary() string {
 	if path, err := exec.LookPath(a.Binary); err == nil {
 		return path
@@ -82,8 +86,8 @@ func (a SkillAgent) FindBinary() string {
 		candidates = append(candidates, filepath.Join(agentHome, "bin", a.Binary))
 	}
 	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
 		}
 	}
 	return ""
