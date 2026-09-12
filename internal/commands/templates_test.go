@@ -85,7 +85,7 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "1 active to-do list templates", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates todolists duplicate <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {
@@ -105,10 +105,9 @@ func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {
 	assert.Contains(t, buf.String(), "3")
 }
 
-func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
+func TestTemplatesCopyNamesTheProjectAndLetsBasecampPickTheContainer(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
-		templateCopyProjectRoute(),
 		stubRoute{
 			method: http.MethodPost,
 			path:   "/99999/template_library/copies.json",
@@ -124,17 +123,16 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 	require.NoError(t, err)
 
 	requests := transport.recorded()
-	require.Len(t, requests, 3)
+	require.Len(t, requests, 2, "no container lookup: Basecamp resolves it from the project")
 	assert.Equal(t, "/99999/projects.json", requests[0].Path)
-	assert.Equal(t, "/99999/projects/123.json", requests[1].Path)
-	assert.Equal(t, http.MethodPost, requests[2].Method)
-	assert.Equal(t, "/99999/template_library/copies.json", requests[2].Path)
-	assert.JSONEq(t, `{"template_recording_id":3,"destination_parent_id":9}`, requests[2].Body)
+	assert.Equal(t, http.MethodPost, requests[1].Method)
+	assert.Equal(t, "/99999/template_library/copies.json", requests[1].Path)
+	assert.JSONEq(t, `{"template_recording_id":3,"destination_project_id":123}`, requests[1].Body)
 
 	envelope := decodeTemplateEnvelope(t, buf)
-	assert.Equal(t, "Started template copy #5 (pending)", envelope.Summary)
+	assert.Equal(t, "Started template duplication #5 (pending)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy-status 5 --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates todolists duplication 5 --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
@@ -223,7 +221,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	assert.Equal(t, output.CodeValidation, outputErr.Code)
 	assert.Contains(t, outputErr.Message, "Victor (#4)")
 	assert.Contains(t, outputErr.Message, "Georgia (#7)")
-	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --todoset 9 --profile 'work profile; echo unsafe' --account 99999 --confirm-adding-people")
+	assert.Contains(t, outputErr.Hint, "basecamp templates todolists duplicate 3 --in 123 --profile 'work profile; echo unsafe' --account 99999 --confirm-adding-people")
 
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	assert.True(t, errors.As(err, &confirmationErr), "typed SDK error should remain available")
@@ -256,7 +254,7 @@ func TestTemplatesConstructSendsStartDateUnderProjectEnvelope(t *testing.T) {
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "Started project construction #598194962 (pending)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates construction 2085958507 598194962", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates projects construction 2085958507 598194962", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesConstructOmitsStartDateWhenUnset(t *testing.T) {
@@ -338,10 +336,10 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 		summary    string
 		breadcrumb string
 	}{
-		{name: "pending", body: templateCopyPendingJSON, summary: "Template copy #5 is pending", breadcrumb: "basecamp templates copy-status 5"},
-		{name: "processing", body: `{"id":5,"status":"processing","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template copy #5 is processing", breadcrumb: "basecamp templates copy-status 5"},
-		{name: "completed", body: completed, summary: "Template copy complete: Project kickoff (to-do list #10)", breadcrumb: "basecamp todolists show 10 --in 123"},
-		{name: "failed", body: `{"id":5,"status":"failed","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template copy #5 failed", breadcrumb: "basecamp templates library"},
+		{name: "pending", body: templateCopyPendingJSON, summary: "Template duplication #5 is pending", breadcrumb: "basecamp templates todolists duplication 5"},
+		{name: "processing", body: `{"id":5,"status":"processing","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template duplication #5 is processing", breadcrumb: "basecamp templates todolists duplication 5"},
+		{name: "completed", body: completed, summary: "Template duplication complete: Project kickoff (to-do list #10)", breadcrumb: "basecamp todolists show 10 --in 123"},
+		{name: "failed", body: `{"id":5,"status":"failed","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template duplication #5 failed", breadcrumb: "basecamp templates todolists list"},
 	}
 
 	for _, test := range tests {
