@@ -183,7 +183,7 @@ basecamp todos --agent --help
 
 Walk the tree: start at `basecamp --agent --help` for top-level commands, then drill into any subcommand. Commands carry domain-specific agent hints (e.g., "`--assignee` filters the account-wide listing only; within a project, fetch all and filter client-side").
 
-Note: persistent global flags from the Agent Invariants (e.g. `--jq`, `--agent`, `--styled`, `--verbose`) are listed only at the root (`basecamp --agent --help`) and won't show up in a subcommand's `inherited_flags`. They still apply on every subcommand.
+**Note:** a subcommand's `inherited_flags` is deliberately short — the CLI curates it down to `--account`, `--json`, `--md`, `--project`, `--quiet` (and drops `--project` where the command takes `<id|url>`). Every other global flag (`--jq`, `--agent`, `--styled`, `--verbose`, `--profile`, ...) is listed only at the root (`basecamp --agent --help`) but still applies on every subcommand (a command that cannot honor one refuses it with an explicit error — `version` rejects `--jq`); its absence from a subcommand's help does not mean it is unsupported.
 
 ### Pagination
 
