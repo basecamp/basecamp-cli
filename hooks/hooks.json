@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook session-start || true",
+            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise -C \"${HOME:-/}\" which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook session-start || true",
             "timeout": 5,
             "statusMessage": "Checking Basecamp status"
           }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook pre-commit-snapshot || true",
+            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise -C \"${HOME:-/}\" which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook pre-commit-snapshot || true",
             "timeout": 10
           }
         ]
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook post-commit || true",
+            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise -C \"${HOME:-/}\" which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook post-commit || true",
             "timeout": 12
           }
         ]
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook post-commit || true",
+            "command": "command -v basecamp >/dev/null 2>&1 || { d=\"$(mise -C \"${HOME:-/}\" which basecamp 2>/dev/null)\" && PATH=\"${d%/*}:$PATH\"; }; command -v basecamp >/dev/null 2>&1 && exec basecamp agent-hook post-commit || true",
             "timeout": 12
           }
         ]
