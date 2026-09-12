@@ -969,30 +969,68 @@ basecamp recordings visibility <id> --hidden      # Hide from clients
 
 ### Templates
 
-```bash
-basecamp templates list --json                    # List project templates
-basecamp templates show <id> --json               # Project template details
-basecamp templates create "Template Name"         # Create empty project template
-basecamp templates update <id> --name "New Name"
-basecamp templates delete <id>                    # Trash project template
-basecamp templates construct <id> --name "New Project"  # Create project (async)
-basecamp templates construct <id> --name "New Project" --start-date 2026-09-01  # Anchor template dates to that week
-basecamp templates construction <template_id> <construction_id>  # Check project status
+Templates are grouped by the kind of template each verb operates on.
 
-basecamp templates library --json                 # List active to-do list templates
-basecamp templates copy <template_id> --in <project>  # Start copying into To-dos
-basecamp templates copy-status <copy_id>          # Check copy status
+```bash
+basecamp templates projects list --json           # List project templates
+basecamp templates projects show <id> --json      # Project template details
+basecamp templates projects create "Template Name"  # Create empty project template
+basecamp templates projects update <id> --name "New Name"
+basecamp templates projects delete <id>           # Trash project template
+basecamp templates projects construct <id> --name "New Project"  # Create project (async)
+basecamp templates projects construct <id> --name "New Project" --start-date 2026-09-01  # Anchor template dates to that week
+basecamp templates projects construction <template_id> <construction_id>  # Check project status
+
+basecamp templates todolists list --json          # List active to-do list templates
+basecamp templates todolists create "List Name"   # Create empty to-do list template
+basecamp templates todolists duplicate <template_id> --in <project>  # Duplicate into To-dos (async)
+basecamp templates todolists duplication <id>     # Check duplication status
+
+basecamp templates card-tables list --json        # List active card table templates
+basecamp templates card-tables create "Board Name"  # Create empty card table template
+basecamp templates card-tables duplicate <template_id> --in <project>  # Duplicate into project (async)
+basecamp templates card-tables duplication <id>   # Check duplication status
 ```
+
+Save existing work into the library from the source group, mirroring the
+product, where "Save as a template..." is an action on the item itself:
+
+```bash
+basecamp todolists templatify <id> --in <project>      # Save a list (async)
+basecamp todolists templatification <id> <tid> --in <project> # Check save status
+basecamp card-tables templatify <id> --in <project> --move-cards-to-triage
+basecamp card-tables templatification <id> <tid> --in <project>
+```
+
+A templatification is the record of a save in progress, named to match
+`construction` and `duplication`. Every attribute of a save defaults server-side, so `templatify <id>` with
+no flags is a complete request and the template takes the source's title.
+`--move-cards-to-triage` gathers the cards into Triage instead of leaving them
+where they sit, and is card tables only.
+
+`duplicate` names the destination project and Basecamp picks the container from
+the template's kind: a to-do list lands in the project's To-dos tool, a card
+table on its dock. `--todoset` overrides that for a to-do list when a project
+has more than one; `card-tables duplicate` has no container flag because a
+project has exactly one dock. To-do list
+templates land in the project's To-dos tool, which `--todoset` can pin.
+
+**Older spellings still work.** The flat commands that shipped before the grouping
+(`templates list`, `templates show`, `templates create`, `templates update`,
+`templates delete`, `templates construct`, `templates construction`,
+`templates library`, `templates copy`, `templates copy-status`) remain as aliases.
+`copy` and `copy-status` also work inside `templates todolists`. Prefer the grouped,
+canonical spellings above when writing new commands.
 
 **Asynchronous results:** `construct` returns a construction ID; poll `construction`
 until `status="completed"` to get the project. A template's dates are relative to its
 first week, and template weeks start on Sunday: `--start-date` (YYYY-MM-DD or natural,
 e.g. `next monday`) anchors them to the Sunday on or before that date; without it they
-anchor to the week of construction. `copy` returns a copy ID; poll
-`copy-status` through `pending` and `processing` until it is `completed` or `failed`.
+anchor to the week of construction. `duplicate` returns a duplication ID; poll
+`duplication` through `pending` and `processing` until it is `completed` or `failed`.
 
-A copy can report the people who need access to the destination project. Show those
-people to the user and rerun with `--confirm-adding-people` only after the user
+A duplication can report the people who need access to the destination project. Show
+those people to the user and rerun with `--confirm-adding-people` only after the user
 explicitly approves granting that access. Never add this flag automatically.
 
 ### Webhooks

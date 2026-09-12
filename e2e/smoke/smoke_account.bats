@@ -28,6 +28,19 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "templates projects list returns templates" {
+  run_smoke basecamp templates projects list --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "templates todolists list returns to-do list templates" {
+  run_smoke basecamp templates todolists list --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Template library not available in this account"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
 @test "people show returns person detail" {
   run_smoke basecamp people show me --json
   assert_success
@@ -101,4 +114,24 @@ setup_file() {
 
 @test "account is out of scope" {
   mark_out_of_scope "Alias for accounts — tested via canonical form"
+}
+
+@test "templates projects show returns template detail" {
+  local out
+  out=$(basecamp templates projects list --json 2>/dev/null) || mark_unverifiable "Cannot list templates"
+  local tmpl_id
+  tmpl_id=$(echo "$out" | jq -r '.data[0].id // empty')
+  [[ -n "$tmpl_id" ]] || mark_unverifiable "No templates found"
+
+  run_smoke basecamp templates projects show "$tmpl_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.id'
+}
+
+@test "templates card-tables list returns card table templates" {
+  run_smoke basecamp templates card-tables list --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Card table template library not available in this account"
+  assert_success
+  assert_json_value '.ok' 'true'
 }

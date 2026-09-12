@@ -117,6 +117,82 @@ load smoke_helper
   mark_out_of_scope "Account-wide template mutation"
 }
 
+@test "templates projects construct is out of scope" {
+  mark_out_of_scope "Creates project from template — account-wide mutation"
+}
+
+@test "templates projects construction is out of scope" {
+  mark_out_of_scope "Depends on templates projects construct (OOS)"
+}
+
+@test "templates projects create is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "templates projects update is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "templates projects delete is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "templates todolists duplicate is out of scope" {
+  mark_out_of_scope "Duplicates a to-do list into a project and may grant project access"
+}
+
+@test "templates todolists duplication is out of scope" {
+  mark_out_of_scope "Depends on templates todolists duplicate (OOS)"
+}
+
+@test "templates todolists copy is out of scope" {
+  mark_out_of_scope "Alias of templates todolists duplicate (OOS)"
+}
+
+@test "templates todolists copy-status is out of scope" {
+  mark_out_of_scope "Alias of templates todolists duplication (OOS)"
+}
+
+@test "templates card-tables create is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "templates card-tables duplicate is out of scope" {
+  mark_out_of_scope "Duplicates a board into a project and may grant project access"
+}
+
+@test "templates card-tables duplication is out of scope" {
+  mark_out_of_scope "Depends on templates card-tables duplicate (OOS)"
+}
+
+@test "templates card-tables copy is out of scope" {
+  mark_out_of_scope "Alias of templates card-tables duplicate (OOS)"
+}
+
+@test "templates card-tables copy-status is out of scope" {
+  mark_out_of_scope "Alias of templates card-tables duplication (OOS)"
+}
+
+@test "templates todolists create is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "todolists templatify is out of scope" {
+  mark_out_of_scope "Writes a new template into the account library"
+}
+
+@test "todolists templatification is out of scope" {
+  mark_out_of_scope "Depends on todolists templatify (OOS)"
+}
+
+@test "card-tables templatify is out of scope" {
+  mark_out_of_scope "Writes a new template into the account library"
+}
+
+@test "card-tables templatification is out of scope" {
+  mark_out_of_scope "Depends on card-tables templatify (OOS)"
+}
+
 @test "messagetypes create is out of scope" {
   mark_out_of_scope "Account-wide message type mutation"
 }
