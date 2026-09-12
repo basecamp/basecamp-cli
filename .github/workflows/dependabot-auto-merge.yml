@@ -1,16 +1,75 @@
 name: Dependabot Auto-Merge
 
-on: pull_request
+# Approves and enables auto-merge for Dependabot's patch and minor bumps, after
+# refreshing the flake's vendorHash when the bump moved go.sum.
+#
+# A Go bump changes go.sum and leaves nix/package.nix's vendorHash stale, so
+# "Nix flake builds" fails with a fixed-output hash mismatch. It is not a
+# required check here, so #697 auto-merged red and main's flake was broken
+# until #701 refreshed the hash by hand. The refresh job runs the SHA-pinned
+# reusable workflow on the PR before auto-merge is enabled: it builds the
+# flake at the PR's merge commit, takes the corrected hash from Nix's
+# go-modules fixed-output mismatch, and commits exactly that one line of
+# nix/package.nix back to the PR with a one-hour cli-release-bot token scoped
+# to this repository, so the PR's own "Nix flake builds" check re-runs on the
+# new head and verifies it. The auto-merge job `needs:` it — the ordering is
+# structural, not a race against the required checks — so `gh pr merge --auto`
+# runs only once the hash is current or the push has landed, and not at all
+# when the refresh failed; that PR waits for a human. The App push is a
+# write-access actor's, so auto-merge stays enabled for the new head.
+#
+# The reusable workflow decides "Go bump" from the PR's changed files
+# (go.mod, go.sum and nix/package.nix, nothing else) and is a no-op for any
+# other Dependabot PR, which is why this workflow needs no path filter and
+# why an actions bump can never receive the push. Go bumps only: the
+# pull_request jobs that re-run under the App bot's actor are main's own, and
+# none of them references a secret a Go bump can reach — keep it that way.
+# The full actor analysis is in the reusable workflow's header.
+#
+# Needs the cli-release-bot App installed here with contents: write, and its
+# private key stored as a repository *Dependabot* secret named
+# RELEASE_APP_PRIVATE_KEY (Dependabot-triggered runs see only Dependabot
+# secrets) and, for the workflow_dispatch path, as a repository Actions secret
+# of the same name. release.yml's copies live in the `release` environment
+# and are not reachable from here, by design.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Dependabot pull request number whose vendorHash to refresh
+        required: true
+        type: string
 
 permissions: {}
 
 jobs:
+  refresh-nix-vendor-hash:
+    name: Refresh the Nix vendorHash
+    if: github.event_name == 'workflow_dispatch' || (github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]') # zizmor: ignore[bot-conditions] -- dual check: actor validates the current trigger (and stops the App bot's own push from looping back), user.login validates PR origin; on:pull_request, not pull_request_target, so GitHub sets the actor from who pushed
+    uses: basecamp/.github/.github/workflows/dependabot-sync-nix-vendor-hash.yml@49eaa2156461cee5ac15c5236d3ff3f5fe900d3f
+    with:
+      pr: ${{ inputs.pr }}
+      # cli-release-bot's client id — the `release` environment's
+      # RELEASE_CLIENT_ID, which is a public identifier (every release run
+      # prints it) and, being environment-scoped, is not readable here.
+      app-client-id: Iv23liAbERu6z8d7t5A8
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    secrets:
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   auto-merge:
+    name: Auto-merge
     runs-on: ubuntu-latest
+    needs: refresh-nix-vendor-hash
     permissions:
       contents: write
       pull-requests: write
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' # zizmor: ignore[bot-conditions] -- dual check is intentional: actor validates current trigger, user.login validates PR origin; on:pull_request (not pull_request_target) so actor is set by GitHub based on who pushed
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' # zizmor: ignore[bot-conditions] -- dual check is intentional: actor validates current trigger, user.login validates PR origin; on:pull_request (not pull_request_target) so actor is set by GitHub based on who pushed
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
