@@ -173,6 +173,10 @@ load smoke_helper
   mark_out_of_scope "Alias of templates card-tables duplication (OOS)"
 }
 
+@test "templates todolists create is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
 @test "messagetypes create is out of scope" {
   mark_out_of_scope "Account-wide message type mutation"
 }

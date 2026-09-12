@@ -339,3 +339,12 @@ load test_helper
   assert_failure
   assert_output_contains "ID required"
 }
+
+@test "templates todolists create without name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists create
+  assert_failure
+  assert_json_value '.error' '<name> required'
+}

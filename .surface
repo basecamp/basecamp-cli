@@ -358,6 +358,7 @@ ARG basecamp templates projects update 00 <id>
 ARG basecamp templates show 00 <id>
 ARG basecamp templates todolists copy 00 <template_id>
 ARG basecamp templates todolists copy-status 00 <duplication_id>
+ARG basecamp templates todolists create 00 <name>
 ARG basecamp templates todolists duplicate 00 <template_id>
 ARG basecamp templates todolists duplication 00 <duplication_id>
 ARG basecamp templates update 00 <id>
@@ -1045,6 +1046,7 @@ CMD basecamp templates show
 CMD basecamp templates todolists
 CMD basecamp templates todolists copy
 CMD basecamp templates todolists copy-status
+CMD basecamp templates todolists create
 CMD basecamp templates todolists duplicate
 CMD basecamp templates todolists duplication
 CMD basecamp templates todolists list
@@ -14074,6 +14076,30 @@ FLAG basecamp templates todolists copy-status --stats type=bool
 FLAG basecamp templates todolists copy-status --styled type=bool
 FLAG basecamp templates todolists copy-status --todolist type=string
 FLAG basecamp templates todolists copy-status --verbose type=count
+FLAG basecamp templates todolists create --account type=string
+FLAG basecamp templates todolists create --agent type=bool
+FLAG basecamp templates todolists create --cache-dir type=string
+FLAG basecamp templates todolists create --count type=bool
+FLAG basecamp templates todolists create --desc type=string
+FLAG basecamp templates todolists create --description type=string
+FLAG basecamp templates todolists create --help type=bool
+FLAG basecamp templates todolists create --hints type=bool
+FLAG basecamp templates todolists create --ids-only type=bool
+FLAG basecamp templates todolists create --in type=string
+FLAG basecamp templates todolists create --jq type=string
+FLAG basecamp templates todolists create --json type=bool
+FLAG basecamp templates todolists create --markdown type=bool
+FLAG basecamp templates todolists create --md type=bool
+FLAG basecamp templates todolists create --name type=string
+FLAG basecamp templates todolists create --no-hints type=bool
+FLAG basecamp templates todolists create --no-stats type=bool
+FLAG basecamp templates todolists create --profile type=string
+FLAG basecamp templates todolists create --project type=string
+FLAG basecamp templates todolists create --quiet type=bool
+FLAG basecamp templates todolists create --stats type=bool
+FLAG basecamp templates todolists create --styled type=bool
+FLAG basecamp templates todolists create --todolist type=string
+FLAG basecamp templates todolists create --verbose type=count
 FLAG basecamp templates todolists duplicate --account type=string
 FLAG basecamp templates todolists duplicate --agent type=bool
 FLAG basecamp templates todolists duplicate --cache-dir type=string
@@ -19214,6 +19240,7 @@ SUB basecamp templates show
 SUB basecamp templates todolists
 SUB basecamp templates todolists copy
 SUB basecamp templates todolists copy-status
+SUB basecamp templates todolists create
 SUB basecamp templates todolists duplicate
 SUB basecamp templates todolists duplication
 SUB basecamp templates todolists list
