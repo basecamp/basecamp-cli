@@ -348,3 +348,19 @@ load test_helper
   assert_failure
   assert_json_value '.error' '<name> required'
 }
+
+@test "todolists templatify without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp todolists templatify
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "todolists templatify has no --move-cards-to-triage flag" {
+  run basecamp todolists templatify --help
+  assert_success
+  assert_output_contains "--copy-comments"
+  assert_output_not_contains "--move-cards-to-triage"
+}

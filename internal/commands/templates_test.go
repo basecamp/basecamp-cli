@@ -437,3 +437,46 @@ func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
 	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
 	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
 }
+
+func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTodolistsCmd(), app, "templatify", "55", "--in", "123")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{}`, post.Body, "every attribute defaults server-side, so no flags means no body")
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Started saving to-do list #55 as a template (pending)", envelope.Summary)
+}
+
+func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodGet,
+			path:   "/99999/buckets/123/recordings/55/templatifications/9",
+			status: http.StatusOK,
+			body:   `{"id":9,"status":"completed","source_recording_id":55,"url":"https://example.test/t/9.json","destination_todolist":{"id":70,"name":"Client onboarding","title":"Client onboarding","bucket":{"id":1,"name":"Templates","type":"TemplateLibrary"}}}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTodolistsCmd(), app, "templatification", "55", "9", "--in", "123")
+	require.NoError(t, err)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Saved as template: Client onboarding (to-do list template #70)", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates todolists list", envelope.Breadcrumbs[0].Cmd)
+}
