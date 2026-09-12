@@ -422,22 +422,6 @@ func TestTemplatesCardTablesDuplicateHasNoTodosetFlag(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("in"))
 }
 
-func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
-	app, transport := setupRecordingTestApp(t, stubRoute{
-		method: http.MethodPost,
-		path:   "/99999/template_library/todolists.json",
-		status: http.StatusCreated,
-		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
-	})
-	buf := captureTemplateOutput(app)
-
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
-	require.NoError(t, err)
-
-	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
-	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
-}
-
 func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
@@ -460,6 +444,16 @@ func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
 	assert.Equal(t, "Started saving to-do list #55 as a template (pending)", envelope.Summary)
 }
 
+func TestTemplatifyOffersTriageOnlyForCardTables(t *testing.T) {
+	todolist, _, err := NewTodolistsCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.Nil(t, todolist.Flags().Lookup("move-cards-to-triage"), "bc3 never reads it for a to-do list")
+
+	cardTable, _, err := NewCardTablesCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.NotNil(t, cardTable.Flags().Lookup("move-cards-to-triage"))
+}
+
 func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
 	app, _ := setupRecordingTestApp(t,
 		projectsRoute(),
@@ -479,4 +473,20 @@ func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
 	assert.Equal(t, "Saved as template: Client onboarding (to-do list template #70)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
 	assert.Equal(t, "basecamp templates todolists list", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/template_library/todolists.json",
+		status: http.StatusCreated,
+		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
+	})
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
+	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
 }

@@ -1122,6 +1122,28 @@ func todolistTemplatificationKind() templatificationKind {
 	}
 }
 
+func cardTableTemplatificationKind() templatificationKind {
+	return templatificationKind{
+		noun:         "card table",
+		group:        "card-tables",
+		offersTriage: true,
+		describeCompletedResult: func(save *basecamp.Templatification, contextArgs string) (string, []output.Breadcrumb, bool) {
+			table := save.DestinationCardTable
+			if table == nil {
+				return "", nil, false
+			}
+			return fmt.Sprintf("Saved as template: %s (card table template #%d)", table.Title, table.ID),
+				[]output.Breadcrumb{
+					{
+						Action:      "list",
+						Cmd:         "basecamp templates card-tables list" + contextArgs,
+						Description: "List card table templates",
+					},
+				}, true
+		},
+	}
+}
+
 func newTemplatifyCmd(kind templatificationKind, project *string) *cobra.Command {
 	var name string
 	var copyComments bool

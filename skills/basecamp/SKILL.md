@@ -998,11 +998,16 @@ product, where "Save as a template..." is an action on the item itself:
 ```bash
 basecamp todolists templatify <id> --in <project>      # Save a list (async)
 basecamp todolists templatification <id> <tid> --in <project> # Check save status
+basecamp card-tables templatify <id> --in <project> --move-cards-to-triage
+basecamp card-tables templatification <id> <tid> --in <project>
 ```
 
 A templatification is the record of a save in progress, named to match
 `construction` and `duplication`. Every attribute of a save defaults server-side, so `templatify <id>` with
 no flags is a complete request and the template takes the source's title.
+`--move-cards-to-triage` gathers the cards into Triage instead of leaving them
+where they sit, and is card tables only.
+
 `duplicate` names the destination project and Basecamp picks the container from
 the template's kind: a to-do list lands in the project's To-dos tool, a card
 table on its dock. `--todoset` overrides that for a to-do list when a project

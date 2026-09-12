@@ -45,6 +45,9 @@ ARG basecamp campfire show 00 <id|url>
 ARG basecamp campfire update 00 <id|url>
 ARG basecamp campfire update 01 [content]
 ARG basecamp campfire upload 00 <file>
+ARG basecamp card-tables templatification 00 <id>
+ARG basecamp card-tables templatification 01 <templatification_id>
+ARG basecamp card-tables templatify 00 <id>
 ARG basecamp cards archive 00 <id|url>
 ARG basecamp cards column color 00 <id|url>
 ARG basecamp cards column create 00 <title>
@@ -584,6 +587,9 @@ CMD basecamp campfire post
 CMD basecamp campfire show
 CMD basecamp campfire update
 CMD basecamp campfire upload
+CMD basecamp card-tables
+CMD basecamp card-tables templatification
+CMD basecamp card-tables templatify
 CMD basecamp cards
 CMD basecamp cards archive
 CMD basecamp cards column
@@ -2902,6 +2908,73 @@ FLAG basecamp campfire upload --stats type=bool
 FLAG basecamp campfire upload --styled type=bool
 FLAG basecamp campfire upload --todolist type=string
 FLAG basecamp campfire upload --verbose type=count
+FLAG basecamp card-tables --account type=string
+FLAG basecamp card-tables --agent type=bool
+FLAG basecamp card-tables --cache-dir type=string
+FLAG basecamp card-tables --count type=bool
+FLAG basecamp card-tables --help type=bool
+FLAG basecamp card-tables --hints type=bool
+FLAG basecamp card-tables --ids-only type=bool
+FLAG basecamp card-tables --in type=string
+FLAG basecamp card-tables --jq type=string
+FLAG basecamp card-tables --json type=bool
+FLAG basecamp card-tables --markdown type=bool
+FLAG basecamp card-tables --md type=bool
+FLAG basecamp card-tables --no-hints type=bool
+FLAG basecamp card-tables --no-stats type=bool
+FLAG basecamp card-tables --profile type=string
+FLAG basecamp card-tables --project type=string
+FLAG basecamp card-tables --quiet type=bool
+FLAG basecamp card-tables --stats type=bool
+FLAG basecamp card-tables --styled type=bool
+FLAG basecamp card-tables --todolist type=string
+FLAG basecamp card-tables --verbose type=count
+FLAG basecamp card-tables templatification --account type=string
+FLAG basecamp card-tables templatification --agent type=bool
+FLAG basecamp card-tables templatification --cache-dir type=string
+FLAG basecamp card-tables templatification --count type=bool
+FLAG basecamp card-tables templatification --help type=bool
+FLAG basecamp card-tables templatification --hints type=bool
+FLAG basecamp card-tables templatification --ids-only type=bool
+FLAG basecamp card-tables templatification --in type=string
+FLAG basecamp card-tables templatification --jq type=string
+FLAG basecamp card-tables templatification --json type=bool
+FLAG basecamp card-tables templatification --markdown type=bool
+FLAG basecamp card-tables templatification --md type=bool
+FLAG basecamp card-tables templatification --no-hints type=bool
+FLAG basecamp card-tables templatification --no-stats type=bool
+FLAG basecamp card-tables templatification --profile type=string
+FLAG basecamp card-tables templatification --project type=string
+FLAG basecamp card-tables templatification --quiet type=bool
+FLAG basecamp card-tables templatification --stats type=bool
+FLAG basecamp card-tables templatification --styled type=bool
+FLAG basecamp card-tables templatification --todolist type=string
+FLAG basecamp card-tables templatification --verbose type=count
+FLAG basecamp card-tables templatify --account type=string
+FLAG basecamp card-tables templatify --agent type=bool
+FLAG basecamp card-tables templatify --cache-dir type=string
+FLAG basecamp card-tables templatify --copy-assignments type=bool
+FLAG basecamp card-tables templatify --copy-comments type=bool
+FLAG basecamp card-tables templatify --count type=bool
+FLAG basecamp card-tables templatify --help type=bool
+FLAG basecamp card-tables templatify --hints type=bool
+FLAG basecamp card-tables templatify --ids-only type=bool
+FLAG basecamp card-tables templatify --in type=string
+FLAG basecamp card-tables templatify --jq type=string
+FLAG basecamp card-tables templatify --json type=bool
+FLAG basecamp card-tables templatify --markdown type=bool
+FLAG basecamp card-tables templatify --md type=bool
+FLAG basecamp card-tables templatify --move-cards-to-triage type=bool
+FLAG basecamp card-tables templatify --name type=string
+FLAG basecamp card-tables templatify --no-hints type=bool
+FLAG basecamp card-tables templatify --no-stats type=bool
+FLAG basecamp card-tables templatify --profile type=string
+FLAG basecamp card-tables templatify --project type=string
+FLAG basecamp card-tables templatify --quiet type=bool
+FLAG basecamp card-tables templatify --stats type=bool
+FLAG basecamp card-tables templatify --styled type=bool
+FLAG basecamp card-tables templatify --todolist type=string
+FLAG basecamp card-tables templatify --verbose type=count
 FLAG basecamp cards --account type=string
 FLAG basecamp cards --agent type=bool
 FLAG basecamp cards --cache-dir type=string
@@ -18872,6 +18945,9 @@ SUB basecamp campfire post
 SUB basecamp campfire show
 SUB basecamp campfire update
 SUB basecamp campfire upload
+SUB basecamp card-tables
+SUB basecamp card-tables templatification
+SUB basecamp card-tables templatify
 SUB basecamp cards
 SUB basecamp cards archive
 SUB basecamp cards column
