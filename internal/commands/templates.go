@@ -267,7 +267,7 @@ func newTemplatesLibraryListCmd(use string) *cobra.Command {
 				app.Config.AccountID,
 			)
 
-			library, err := app.Account().Templates().GetLibrary(cmd.Context())
+			library, err := app.Account().Templates().GetLibraryTodolists(cmd.Context())
 			if err != nil {
 				return convertSDKError(err)
 			}

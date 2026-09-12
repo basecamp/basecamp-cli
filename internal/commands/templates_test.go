@@ -65,10 +65,10 @@ func decodeTemplateEnvelope(t *testing.T, buf *bytes.Buffer) struct {
 	return envelope
 }
 
-func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
+func TestTemplatesLibraryUsesCanonicalTodolistsEndpoint(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
-		path:   "/99999/template_library.json",
+		path:   "/99999/template_library/todolists.json",
 		status: http.StatusOK,
 		body:   templateLibraryJSON,
 	})
@@ -81,7 +81,7 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 
 	request := transport.last(t)
 	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/99999/template_library.json", request.Path)
+	assert.Equal(t, "/99999/template_library/todolists.json", request.Path)
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "1 active to-do list templates", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
@@ -91,7 +91,7 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {
 	app, _ := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
-		path:   "/99999/template_library.json",
+		path:   "/99999/template_library/todolists.json",
 		status: http.StatusOK,
 		body:   templateLibraryJSON,
 	})
