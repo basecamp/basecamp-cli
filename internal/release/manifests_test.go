@@ -140,6 +140,7 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &config))
 	require.NotEmpty(t, config.Hooks)
+	assert.NotContains(t, config.Hooks, "SessionStart", "plugins must not inject Basecamp context into every agent session")
 
 	for event, matchers := range config.Hooks {
 		require.NotEmpty(t, matchers, event)
