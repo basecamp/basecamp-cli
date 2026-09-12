@@ -79,6 +79,7 @@ existing project's To-dos tool.`,
 
 	cmd.AddCommand(
 		newTemplatesLibraryListCmd("list"),
+		newTemplatesTodolistsCreateCmd(),
 		newTemplatesDuplicateCmd(kind, "duplicate <template_id>", "copy"),
 		newTemplatesDuplicationCmd(kind, "duplication <duplication_id>", "copy-status"),
 	)
@@ -171,6 +172,69 @@ func newTemplatesCardTablesListCmd() *cobra.Command {
 			)
 		},
 	}
+}
+
+func newTemplatesTodolistsCreateCmd() *cobra.Command {
+	var name string
+	var description string
+
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create an empty to-do list template",
+		Long:  "Create an empty to-do list template in the account's library.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && name == "" {
+				name = args[0]
+			}
+			if name == "" {
+				return missingArg(cmd, "<name>")
+			}
+
+			description, err := resolveContentValue(cmd, description, -1, "--description")
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
+
+			todolist, err := app.Account().Templates().CreateLibraryTodolist(cmd.Context(), &basecamp.CreateTemplateLibraryTodolistRequest{
+				Name:        name,
+				Description: description,
+			})
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(todolist,
+				output.WithSummary(fmt.Sprintf("Created to-do list template #%d: %s", todolist.ID, todolist.Name)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "duplicate",
+						Cmd:         fmt.Sprintf("basecamp templates todolists duplicate %d --in <project>%s", todolist.ID, contextArgs),
+						Description: "Duplicate the template into a project",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Template name")
+	cmd.Flags().StringVar(&description, "description", "", "Template description; use - to read from stdin")
+	cmd.Flags().StringVar(&description, "desc", "", "Template description (alias)")
+
+	allowDash(cmd, "flag:description", "flag:desc")
+
+	return cmd
 }
 
 func newTemplatesCardTablesCreateCmd() *cobra.Command {

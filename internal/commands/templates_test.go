@@ -421,3 +421,19 @@ func TestTemplatesCardTablesDuplicateHasNoTodosetFlag(t *testing.T) {
 	assert.Nil(t, cmd.Flags().Lookup("todoset"), "a project has one dock, so there is nothing to pin")
 	assert.NotNil(t, cmd.Flags().Lookup("in"))
 }
+
+func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/template_library/todolists.json",
+		status: http.StatusCreated,
+		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
+	})
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
+	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
+}
