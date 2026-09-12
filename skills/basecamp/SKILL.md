@@ -982,6 +982,7 @@ basecamp templates projects construct <id> --name "New Project" --start-date 202
 basecamp templates projects construction <template_id> <construction_id>  # Check project status
 
 basecamp templates todolists list --json          # List active to-do list templates
+basecamp templates todolists create "List Name"   # Create empty to-do list template
 basecamp templates todolists duplicate <template_id> --in <project>  # Duplicate into To-dos (async)
 basecamp templates todolists duplication <id>     # Check duplication status
 
@@ -991,6 +992,17 @@ basecamp templates card-tables duplicate <template_id> --in <project>  # Duplica
 basecamp templates card-tables duplication <id>   # Check duplication status
 ```
 
+Save existing work into the library from the source group, mirroring the
+product, where "Save as a template..." is an action on the item itself:
+
+```bash
+basecamp todolists templatify <id> --in <project>      # Save a list (async)
+basecamp todolists templatification <id> <tid> --in <project> # Check save status
+```
+
+A templatification is the record of a save in progress, named to match
+`construction` and `duplication`. Every attribute of a save defaults server-side, so `templatify <id>` with
+no flags is a complete request and the template takes the source's title.
 `duplicate` names the destination project and Basecamp picks the container from
 the template's kind: a to-do list lands in the project's To-dos tool, a card
 table on its dock. `--todoset` overrides that for a to-do list when a project

@@ -177,6 +177,14 @@ load smoke_helper
   mark_out_of_scope "Account-wide template mutation"
 }
 
+@test "todolists templatify is out of scope" {
+  mark_out_of_scope "Writes a new template into the account library"
+}
+
+@test "todolists templatification is out of scope" {
+  mark_out_of_scope "Depends on todolists templatify (OOS)"
+}
+
 @test "messagetypes create is out of scope" {
   mark_out_of_scope "Account-wide message type mutation"
 }

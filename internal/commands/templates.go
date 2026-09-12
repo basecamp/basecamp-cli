@@ -1089,3 +1089,188 @@ the response includes the newly created project.`,
 		},
 	}
 }
+
+// What differs by kind when saving work as a template: what a finished save
+// points at, and whether the board-only triage flag is offered. bc3 accepts
+// move_cards_to_triage on any recording but never reads it for a to-do list,
+// so only the card table command registers it.
+type templatificationKind struct {
+	noun                    string
+	group                   string
+	offersTriage            bool
+	describeCompletedResult func(save *basecamp.Templatification, contextArgs string) (string, []output.Breadcrumb, bool)
+}
+
+func todolistTemplatificationKind() templatificationKind {
+	return templatificationKind{
+		noun:  "to-do list",
+		group: "todolists",
+		describeCompletedResult: func(save *basecamp.Templatification, contextArgs string) (string, []output.Breadcrumb, bool) {
+			list := save.DestinationTodolist
+			if list == nil {
+				return "", nil, false
+			}
+			return fmt.Sprintf("Saved as template: %s (to-do list template #%d)", list.Name, list.ID),
+				[]output.Breadcrumb{
+					{
+						Action:      "list",
+						Cmd:         "basecamp templates todolists list" + contextArgs,
+						Description: "List to-do list templates",
+					},
+				}, true
+		},
+	}
+}
+
+func newTemplatifyCmd(kind templatificationKind, project *string) *cobra.Command {
+	var name string
+	var copyComments bool
+	var copyAssignments bool
+	var moveCardsToTriage bool
+
+	cmd := &cobra.Command{
+		Use:   "templatify <id>",
+		Short: "Save a " + kind.noun + " as a reusable template",
+		Long: fmt.Sprintf(`Save an existing %s into the account's template library.
+
+The save runs asynchronously. Use '%s templatification' with the returned ID
+to check its progress. Without --name the template takes the source's title.`, kind.noun, kind.group),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			recordingID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid " + kind.noun + " ID")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
+
+			bucketID, err := resolveBucketID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			save, err := app.Account().Templates().CreateTemplatification(cmd.Context(), bucketID, recordingID,
+				&basecamp.CreateTemplatificationRequest{
+					TemplateName:      name,
+					CopyComments:      copyComments,
+					CopyAssignments:   copyAssignments,
+					MoveCardsToTriage: moveCardsToTriage,
+				})
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(save,
+				output.WithSummary(fmt.Sprintf("Started saving %s #%d as a template (%s)", kind.noun, recordingID, save.Status)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "status",
+						Cmd:         fmt.Sprintf("basecamp %s templatification %d %d --in %d%s", kind.group, recordingID, save.ID, bucketID, contextArgs),
+						Description: "Check templatification status",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Template name (defaults to the source's title)")
+	cmd.Flags().BoolVar(&copyComments, "copy-comments", false, "Carry the comments across")
+	cmd.Flags().BoolVar(&copyAssignments, "copy-assignments", false, "Carry assignees and the people involved across")
+	if kind.offersTriage {
+		cmd.Flags().BoolVar(&moveCardsToTriage, "move-cards-to-triage", false, "Gather the cards into Triage instead of leaving them where they sit")
+	}
+
+	return cmd
+}
+
+func newTemplatificationCmd(kind templatificationKind, project *string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "templatification <id> <templatification_id>",
+		Short: "Check a " + kind.noun + " templatification",
+		Long: "Check a templatification: the record of saving a " + kind.noun + " as a\n" +
+			"template. Reports pending, processing, completed, or failed.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			recordingID, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid " + kind.noun + " ID")
+			}
+			templatificationID, err := strconv.ParseInt(args[1], 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid templatification ID")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
+
+			bucketID, err := resolveBucketID(cmd, app, *project)
+			if err != nil {
+				return err
+			}
+
+			save, err := app.Account().Templates().GetTemplatification(cmd.Context(), bucketID, recordingID, templatificationID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			summary, breadcrumbs := templatificationStatusOutput(save, kind, recordingID, bucketID, contextArgs)
+			return app.OK(save,
+				output.WithSummary(summary),
+				output.WithBreadcrumbs(breadcrumbs...),
+			)
+		},
+	}
+}
+
+func templatificationStatusOutput(save *basecamp.Templatification, kind templatificationKind, recordingID, bucketID int64, contextArgs string) (string, []output.Breadcrumb) {
+	switch save.Status {
+	case "completed":
+		if summary, breadcrumbs, ok := kind.describeCompletedResult(save, contextArgs); ok {
+			return summary, breadcrumbs
+		}
+		return fmt.Sprintf("Templatification #%d completed", save.ID), nil
+	case "failed":
+		return fmt.Sprintf("Templatification #%d failed", save.ID), nil
+	case "pending", "processing":
+		return fmt.Sprintf("Templatification #%d is %s", save.ID, save.Status), []output.Breadcrumb{
+			{
+				Action:      "poll",
+				Cmd:         fmt.Sprintf("basecamp %s templatification %d %d --in %d%s", kind.group, recordingID, save.ID, bucketID, contextArgs),
+				Description: "Check again",
+			},
+		}
+	default:
+		return fmt.Sprintf("Templatification #%d status: %s", save.ID, save.Status), nil
+	}
+}
+
+func resolveBucketID(cmd *cobra.Command, app *appctx.App, project string) (int64, error) {
+	resolved, err := resolveProjectID(cmd, app, project)
+	if err != nil {
+		return 0, err
+	}
+
+	bucketID, err := strconv.ParseInt(resolved, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid project ID")
+	}
+
+	return bucketID, nil
+}

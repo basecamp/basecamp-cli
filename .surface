@@ -388,6 +388,9 @@ ARG basecamp todolist position 00 <id|url>...
 ARG basecamp todolist reorder 00 <id|url>...
 ARG basecamp todolist restore 00 <id|url>
 ARG basecamp todolist show 00 <id|url>
+ARG basecamp todolist templatification 00 <id>
+ARG basecamp todolist templatification 01 <templatification_id>
+ARG basecamp todolist templatify 00 <id>
 ARG basecamp todolist trash 00 <id|url>
 ARG basecamp todolist update 00 <id|url>
 ARG basecamp todolistgroup create 00 <name>
@@ -413,6 +416,9 @@ ARG basecamp todolists position 00 <id|url>...
 ARG basecamp todolists reorder 00 <id|url>...
 ARG basecamp todolists restore 00 <id|url>
 ARG basecamp todolists show 00 <id|url>
+ARG basecamp todolists templatification 00 <id>
+ARG basecamp todolists templatification 01 <templatification_id>
+ARG basecamp todolists templatify 00 <id>
 ARG basecamp todolists trash 00 <id|url>
 ARG basecamp todolists update 00 <id|url>
 ARG basecamp todos archive 00 <id|url>
@@ -1082,6 +1088,8 @@ CMD basecamp todolist position
 CMD basecamp todolist reorder
 CMD basecamp todolist restore
 CMD basecamp todolist show
+CMD basecamp todolist templatification
+CMD basecamp todolist templatify
 CMD basecamp todolist trash
 CMD basecamp todolist update
 CMD basecamp todolistgroup
@@ -1109,6 +1117,8 @@ CMD basecamp todolists position
 CMD basecamp todolists reorder
 CMD basecamp todolists restore
 CMD basecamp todolists show
+CMD basecamp todolists templatification
+CMD basecamp todolists templatify
 CMD basecamp todolists trash
 CMD basecamp todolists update
 CMD basecamp todos
@@ -14912,6 +14922,51 @@ FLAG basecamp todolist show --stats type=bool
 FLAG basecamp todolist show --styled type=bool
 FLAG basecamp todolist show --todolist type=string
 FLAG basecamp todolist show --verbose type=count
+FLAG basecamp todolist templatification --account type=string
+FLAG basecamp todolist templatification --agent type=bool
+FLAG basecamp todolist templatification --cache-dir type=string
+FLAG basecamp todolist templatification --count type=bool
+FLAG basecamp todolist templatification --help type=bool
+FLAG basecamp todolist templatification --hints type=bool
+FLAG basecamp todolist templatification --ids-only type=bool
+FLAG basecamp todolist templatification --in type=string
+FLAG basecamp todolist templatification --jq type=string
+FLAG basecamp todolist templatification --json type=bool
+FLAG basecamp todolist templatification --markdown type=bool
+FLAG basecamp todolist templatification --md type=bool
+FLAG basecamp todolist templatification --no-hints type=bool
+FLAG basecamp todolist templatification --no-stats type=bool
+FLAG basecamp todolist templatification --profile type=string
+FLAG basecamp todolist templatification --project type=string
+FLAG basecamp todolist templatification --quiet type=bool
+FLAG basecamp todolist templatification --stats type=bool
+FLAG basecamp todolist templatification --styled type=bool
+FLAG basecamp todolist templatification --todolist type=string
+FLAG basecamp todolist templatification --verbose type=count
+FLAG basecamp todolist templatify --account type=string
+FLAG basecamp todolist templatify --agent type=bool
+FLAG basecamp todolist templatify --cache-dir type=string
+FLAG basecamp todolist templatify --copy-assignments type=bool
+FLAG basecamp todolist templatify --copy-comments type=bool
+FLAG basecamp todolist templatify --count type=bool
+FLAG basecamp todolist templatify --help type=bool
+FLAG basecamp todolist templatify --hints type=bool
+FLAG basecamp todolist templatify --ids-only type=bool
+FLAG basecamp todolist templatify --in type=string
+FLAG basecamp todolist templatify --jq type=string
+FLAG basecamp todolist templatify --json type=bool
+FLAG basecamp todolist templatify --markdown type=bool
+FLAG basecamp todolist templatify --md type=bool
+FLAG basecamp todolist templatify --name type=string
+FLAG basecamp todolist templatify --no-hints type=bool
+FLAG basecamp todolist templatify --no-stats type=bool
+FLAG basecamp todolist templatify --profile type=string
+FLAG basecamp todolist templatify --project type=string
+FLAG basecamp todolist templatify --quiet type=bool
+FLAG basecamp todolist templatify --stats type=bool
+FLAG basecamp todolist templatify --styled type=bool
+FLAG basecamp todolist templatify --todolist type=string
+FLAG basecamp todolist templatify --verbose type=count
 FLAG basecamp todolist trash --account type=string
 FLAG basecamp todolist trash --agent type=bool
 FLAG basecamp todolist trash --cache-dir type=string
@@ -15524,6 +15579,51 @@ FLAG basecamp todolists show --stats type=bool
 FLAG basecamp todolists show --styled type=bool
 FLAG basecamp todolists show --todolist type=string
 FLAG basecamp todolists show --verbose type=count
+FLAG basecamp todolists templatification --account type=string
+FLAG basecamp todolists templatification --agent type=bool
+FLAG basecamp todolists templatification --cache-dir type=string
+FLAG basecamp todolists templatification --count type=bool
+FLAG basecamp todolists templatification --help type=bool
+FLAG basecamp todolists templatification --hints type=bool
+FLAG basecamp todolists templatification --ids-only type=bool
+FLAG basecamp todolists templatification --in type=string
+FLAG basecamp todolists templatification --jq type=string
+FLAG basecamp todolists templatification --json type=bool
+FLAG basecamp todolists templatification --markdown type=bool
+FLAG basecamp todolists templatification --md type=bool
+FLAG basecamp todolists templatification --no-hints type=bool
+FLAG basecamp todolists templatification --no-stats type=bool
+FLAG basecamp todolists templatification --profile type=string
+FLAG basecamp todolists templatification --project type=string
+FLAG basecamp todolists templatification --quiet type=bool
+FLAG basecamp todolists templatification --stats type=bool
+FLAG basecamp todolists templatification --styled type=bool
+FLAG basecamp todolists templatification --todolist type=string
+FLAG basecamp todolists templatification --verbose type=count
+FLAG basecamp todolists templatify --account type=string
+FLAG basecamp todolists templatify --agent type=bool
+FLAG basecamp todolists templatify --cache-dir type=string
+FLAG basecamp todolists templatify --copy-assignments type=bool
+FLAG basecamp todolists templatify --copy-comments type=bool
+FLAG basecamp todolists templatify --count type=bool
+FLAG basecamp todolists templatify --help type=bool
+FLAG basecamp todolists templatify --hints type=bool
+FLAG basecamp todolists templatify --ids-only type=bool
+FLAG basecamp todolists templatify --in type=string
+FLAG basecamp todolists templatify --jq type=string
+FLAG basecamp todolists templatify --json type=bool
+FLAG basecamp todolists templatify --markdown type=bool
+FLAG basecamp todolists templatify --md type=bool
+FLAG basecamp todolists templatify --name type=string
+FLAG basecamp todolists templatify --no-hints type=bool
+FLAG basecamp todolists templatify --no-stats type=bool
+FLAG basecamp todolists templatify --profile type=string
+FLAG basecamp todolists templatify --project type=string
+FLAG basecamp todolists templatify --quiet type=bool
+FLAG basecamp todolists templatify --stats type=bool
+FLAG basecamp todolists templatify --styled type=bool
+FLAG basecamp todolists templatify --todolist type=string
+FLAG basecamp todolists templatify --verbose type=count
 FLAG basecamp todolists trash --account type=string
 FLAG basecamp todolists trash --agent type=bool
 FLAG basecamp todolists trash --cache-dir type=string
@@ -19276,6 +19376,8 @@ SUB basecamp todolist position
 SUB basecamp todolist reorder
 SUB basecamp todolist restore
 SUB basecamp todolist show
+SUB basecamp todolist templatification
+SUB basecamp todolist templatify
 SUB basecamp todolist trash
 SUB basecamp todolist update
 SUB basecamp todolistgroup
@@ -19303,6 +19405,8 @@ SUB basecamp todolists position
 SUB basecamp todolists reorder
 SUB basecamp todolists restore
 SUB basecamp todolists show
+SUB basecamp todolists templatification
+SUB basecamp todolists templatify
 SUB basecamp todolists trash
 SUB basecamp todolists update
 SUB basecamp todos
