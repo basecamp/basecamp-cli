@@ -128,3 +128,10 @@ setup_file() {
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
 }
+
+@test "templates card-tables list returns card table templates" {
+  run_smoke basecamp templates card-tables list --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Card table template library not available in this account"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
