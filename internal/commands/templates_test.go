@@ -65,7 +65,7 @@ func decodeTemplateEnvelope(t *testing.T, buf *bytes.Buffer) struct {
 	return envelope
 }
 
-func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
+func TestTemplatesLibraryUsesCanonicalTodolistsEndpoint(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
 		path:   "/99999/template_library/todolists.json",
