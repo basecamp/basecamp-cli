@@ -422,22 +422,6 @@ func TestTemplatesCardTablesDuplicateHasNoTodosetFlag(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("in"))
 }
 
-func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
-	app, transport := setupRecordingTestApp(t, stubRoute{
-		method: http.MethodPost,
-		path:   "/99999/template_library/todolists.json",
-		status: http.StatusCreated,
-		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
-	})
-	buf := captureTemplateOutput(app)
-
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
-	require.NoError(t, err)
-
-	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
-	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
-}
-
 func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
@@ -460,6 +444,16 @@ func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
 	assert.Equal(t, "Started saving to-do list #55 as a template (pending)", envelope.Summary)
 }
 
+func TestTemplatifyOffersTriageOnlyForCardTables(t *testing.T) {
+	todolist, _, err := NewTodolistsCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.Nil(t, todolist.Flags().Lookup("move-cards-to-triage"), "bc3 never reads it for a to-do list")
+
+	cardTable, _, err := NewCardTablesCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.NotNil(t, cardTable.Flags().Lookup("move-cards-to-triage"))
+}
+
 func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
 	app, _ := setupRecordingTestApp(t,
 		projectsRoute(),
@@ -479,4 +473,79 @@ func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
 	assert.Equal(t, "Saved as template: Client onboarding (to-do list template #70)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
 	assert.Equal(t, "basecamp templates todolists list", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/template_library/todolists.json",
+		status: http.StatusCreated,
+		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
+	})
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
+	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
+}
+
+func TestCardTablesTemplatifySendsMoveCardsToTriage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app,
+		"templatify", "55", "--in", "123", "--move-cards-to-triage")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{"move_cards_to_triage":true}`, post.Body)
+}
+
+func TestCardTablesTemplatifyOmitsFlagsLeftUnset(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app, "templatify", "55", "--in", "123")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{}`, post.Body, "an unset flag stays off the wire so the server default applies")
+}
+
+func TestCardTablesTemplatificationReportsTheBoardItMade(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodGet,
+			path:   "/99999/buckets/123/recordings/55/templatifications/9",
+			status: http.StatusOK,
+			body:   `{"id":9,"status":"completed","source_recording_id":55,"url":"https://example.test/t/9.json","destination_card_table":{"id":70,"title":"Launch board","type":"Kanban::Board"}}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app, "templatification", "55", "9", "--in", "123")
+	require.NoError(t, err)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Saved as template: Launch board (card table template #70)", envelope.Summary,
+		"a nil destination would fall through to the generic completion line")
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables list", envelope.Breadcrumbs[0].Cmd)
 }

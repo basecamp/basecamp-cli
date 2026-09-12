@@ -340,15 +340,6 @@ load test_helper
   assert_output_contains "ID required"
 }
 
-@test "templates todolists create without name shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp templates todolists create
-  assert_failure
-  assert_json_value '.error' '<name> required'
-}
-
 @test "todolists templatify without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
@@ -363,4 +354,34 @@ load test_helper
   assert_success
   assert_output_contains "--copy-comments"
   assert_output_not_contains "--move-cards-to-triage"
+}
+
+@test "card-tables without subcommand shows help" {
+  run basecamp card-tables
+  assert_success
+  assert_output_contains "templatify"
+  assert_output_contains "templatification"
+}
+
+@test "card-tables templatify offers --move-cards-to-triage" {
+  run basecamp card-tables templatify --help
+  assert_success
+  assert_output_contains "--move-cards-to-triage"
+}
+
+@test "card-tables templatification requires two ids" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp card-tables templatification 123
+  assert_failure
+}
+
+@test "templates todolists create without name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists create
+  assert_failure
+  assert_json_value '.error' '<name> required'
 }
