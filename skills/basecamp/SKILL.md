@@ -984,7 +984,19 @@ basecamp templates projects construction <template_id> <construction_id>  # Chec
 basecamp templates todolists list --json          # List active to-do list templates
 basecamp templates todolists duplicate <template_id> --in <project>  # Duplicate into To-dos (async)
 basecamp templates todolists duplication <id>     # Check duplication status
+
+basecamp templates card-tables list --json        # List active card table templates
+basecamp templates card-tables create "Board Name"  # Create empty card table template
+basecamp templates card-tables duplicate <template_id> --in <project>  # Duplicate into project (async)
+basecamp templates card-tables duplication <id>   # Check duplication status
 ```
+
+`duplicate` names the destination project and Basecamp picks the container from
+the template's kind: a to-do list lands in the project's To-dos tool, a card
+table on its dock. `--todoset` overrides that for a to-do list when a project
+has more than one; `card-tables duplicate` has no container flag because a
+project has exactly one dock. To-do list
+templates land in the project's To-dos tool, which `--todoset` can pin.
 
 **Older spellings still work.** The flat commands that shipped before the grouping
 (`templates list`, `templates show`, `templates create`, `templates update`,

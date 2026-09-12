@@ -153,6 +153,26 @@ load smoke_helper
   mark_out_of_scope "Alias of templates todolists duplication (OOS)"
 }
 
+@test "templates card-tables create is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
+@test "templates card-tables duplicate is out of scope" {
+  mark_out_of_scope "Duplicates a board into a project and may grant project access"
+}
+
+@test "templates card-tables duplication is out of scope" {
+  mark_out_of_scope "Depends on templates card-tables duplicate (OOS)"
+}
+
+@test "templates card-tables copy is out of scope" {
+  mark_out_of_scope "Alias of templates card-tables duplicate (OOS)"
+}
+
+@test "templates card-tables copy-status is out of scope" {
+  mark_out_of_scope "Alias of templates card-tables duplication (OOS)"
+}
+
 @test "messagetypes create is out of scope" {
   mark_out_of_scope "Account-wide message type mutation"
 }

@@ -336,6 +336,11 @@ ARG basecamp subscriptions remove 01 [person_ids]
 ARG basecamp subscriptions show 00 <id|url>
 ARG basecamp subscriptions subscribe 00 <id|url>
 ARG basecamp subscriptions unsubscribe 00 <id|url>
+ARG basecamp templates card-tables copy 00 <template_id>
+ARG basecamp templates card-tables copy-status 00 <duplication_id>
+ARG basecamp templates card-tables create 00 <name>
+ARG basecamp templates card-tables duplicate 00 <template_id>
+ARG basecamp templates card-tables duplication 00 <duplication_id>
 ARG basecamp templates construct 00 <template_id>
 ARG basecamp templates construction 00 <template_id>
 ARG basecamp templates construction 01 <construction_id>
@@ -1013,6 +1018,13 @@ CMD basecamp subscriptions show
 CMD basecamp subscriptions subscribe
 CMD basecamp subscriptions unsubscribe
 CMD basecamp templates
+CMD basecamp templates card-tables
+CMD basecamp templates card-tables copy
+CMD basecamp templates card-tables copy-status
+CMD basecamp templates card-tables create
+CMD basecamp templates card-tables duplicate
+CMD basecamp templates card-tables duplication
+CMD basecamp templates card-tables list
 CMD basecamp templates construct
 CMD basecamp templates construction
 CMD basecamp templates copy
@@ -13469,6 +13481,156 @@ FLAG basecamp templates --stats type=bool
 FLAG basecamp templates --styled type=bool
 FLAG basecamp templates --todolist type=string
 FLAG basecamp templates --verbose type=count
+FLAG basecamp templates card-tables --account type=string
+FLAG basecamp templates card-tables --agent type=bool
+FLAG basecamp templates card-tables --cache-dir type=string
+FLAG basecamp templates card-tables --count type=bool
+FLAG basecamp templates card-tables --help type=bool
+FLAG basecamp templates card-tables --hints type=bool
+FLAG basecamp templates card-tables --ids-only type=bool
+FLAG basecamp templates card-tables --in type=string
+FLAG basecamp templates card-tables --jq type=string
+FLAG basecamp templates card-tables --json type=bool
+FLAG basecamp templates card-tables --markdown type=bool
+FLAG basecamp templates card-tables --md type=bool
+FLAG basecamp templates card-tables --no-hints type=bool
+FLAG basecamp templates card-tables --no-stats type=bool
+FLAG basecamp templates card-tables --profile type=string
+FLAG basecamp templates card-tables --project type=string
+FLAG basecamp templates card-tables --quiet type=bool
+FLAG basecamp templates card-tables --stats type=bool
+FLAG basecamp templates card-tables --styled type=bool
+FLAG basecamp templates card-tables --todolist type=string
+FLAG basecamp templates card-tables --verbose type=count
+FLAG basecamp templates card-tables copy --account type=string
+FLAG basecamp templates card-tables copy --agent type=bool
+FLAG basecamp templates card-tables copy --cache-dir type=string
+FLAG basecamp templates card-tables copy --confirm-adding-people type=bool
+FLAG basecamp templates card-tables copy --count type=bool
+FLAG basecamp templates card-tables copy --help type=bool
+FLAG basecamp templates card-tables copy --hints type=bool
+FLAG basecamp templates card-tables copy --ids-only type=bool
+FLAG basecamp templates card-tables copy --in type=string
+FLAG basecamp templates card-tables copy --jq type=string
+FLAG basecamp templates card-tables copy --json type=bool
+FLAG basecamp templates card-tables copy --markdown type=bool
+FLAG basecamp templates card-tables copy --md type=bool
+FLAG basecamp templates card-tables copy --no-hints type=bool
+FLAG basecamp templates card-tables copy --no-stats type=bool
+FLAG basecamp templates card-tables copy --profile type=string
+FLAG basecamp templates card-tables copy --project type=string
+FLAG basecamp templates card-tables copy --quiet type=bool
+FLAG basecamp templates card-tables copy --stats type=bool
+FLAG basecamp templates card-tables copy --styled type=bool
+FLAG basecamp templates card-tables copy --todolist type=string
+FLAG basecamp templates card-tables copy --verbose type=count
+FLAG basecamp templates card-tables copy-status --account type=string
+FLAG basecamp templates card-tables copy-status --agent type=bool
+FLAG basecamp templates card-tables copy-status --cache-dir type=string
+FLAG basecamp templates card-tables copy-status --count type=bool
+FLAG basecamp templates card-tables copy-status --help type=bool
+FLAG basecamp templates card-tables copy-status --hints type=bool
+FLAG basecamp templates card-tables copy-status --ids-only type=bool
+FLAG basecamp templates card-tables copy-status --in type=string
+FLAG basecamp templates card-tables copy-status --jq type=string
+FLAG basecamp templates card-tables copy-status --json type=bool
+FLAG basecamp templates card-tables copy-status --markdown type=bool
+FLAG basecamp templates card-tables copy-status --md type=bool
+FLAG basecamp templates card-tables copy-status --no-hints type=bool
+FLAG basecamp templates card-tables copy-status --no-stats type=bool
+FLAG basecamp templates card-tables copy-status --profile type=string
+FLAG basecamp templates card-tables copy-status --project type=string
+FLAG basecamp templates card-tables copy-status --quiet type=bool
+FLAG basecamp templates card-tables copy-status --stats type=bool
+FLAG basecamp templates card-tables copy-status --styled type=bool
+FLAG basecamp templates card-tables copy-status --todolist type=string
+FLAG basecamp templates card-tables copy-status --verbose type=count
+FLAG basecamp templates card-tables create --account type=string
+FLAG basecamp templates card-tables create --agent type=bool
+FLAG basecamp templates card-tables create --cache-dir type=string
+FLAG basecamp templates card-tables create --count type=bool
+FLAG basecamp templates card-tables create --help type=bool
+FLAG basecamp templates card-tables create --hints type=bool
+FLAG basecamp templates card-tables create --ids-only type=bool
+FLAG basecamp templates card-tables create --in type=string
+FLAG basecamp templates card-tables create --jq type=string
+FLAG basecamp templates card-tables create --json type=bool
+FLAG basecamp templates card-tables create --markdown type=bool
+FLAG basecamp templates card-tables create --md type=bool
+FLAG basecamp templates card-tables create --name type=string
+FLAG basecamp templates card-tables create --no-hints type=bool
+FLAG basecamp templates card-tables create --no-stats type=bool
+FLAG basecamp templates card-tables create --profile type=string
+FLAG basecamp templates card-tables create --project type=string
+FLAG basecamp templates card-tables create --quiet type=bool
+FLAG basecamp templates card-tables create --stats type=bool
+FLAG basecamp templates card-tables create --styled type=bool
+FLAG basecamp templates card-tables create --todolist type=string
+FLAG basecamp templates card-tables create --verbose type=count
+FLAG basecamp templates card-tables duplicate --account type=string
+FLAG basecamp templates card-tables duplicate --agent type=bool
+FLAG basecamp templates card-tables duplicate --cache-dir type=string
+FLAG basecamp templates card-tables duplicate --confirm-adding-people type=bool
+FLAG basecamp templates card-tables duplicate --count type=bool
+FLAG basecamp templates card-tables duplicate --help type=bool
+FLAG basecamp templates card-tables duplicate --hints type=bool
+FLAG basecamp templates card-tables duplicate --ids-only type=bool
+FLAG basecamp templates card-tables duplicate --in type=string
+FLAG basecamp templates card-tables duplicate --jq type=string
+FLAG basecamp templates card-tables duplicate --json type=bool
+FLAG basecamp templates card-tables duplicate --markdown type=bool
+FLAG basecamp templates card-tables duplicate --md type=bool
+FLAG basecamp templates card-tables duplicate --no-hints type=bool
+FLAG basecamp templates card-tables duplicate --no-stats type=bool
+FLAG basecamp templates card-tables duplicate --profile type=string
+FLAG basecamp templates card-tables duplicate --project type=string
+FLAG basecamp templates card-tables duplicate --quiet type=bool
+FLAG basecamp templates card-tables duplicate --stats type=bool
+FLAG basecamp templates card-tables duplicate --styled type=bool
+FLAG basecamp templates card-tables duplicate --todolist type=string
+FLAG basecamp templates card-tables duplicate --verbose type=count
+FLAG basecamp templates card-tables duplication --account type=string
+FLAG basecamp templates card-tables duplication --agent type=bool
+FLAG basecamp templates card-tables duplication --cache-dir type=string
+FLAG basecamp templates card-tables duplication --count type=bool
+FLAG basecamp templates card-tables duplication --help type=bool
+FLAG basecamp templates card-tables duplication --hints type=bool
+FLAG basecamp templates card-tables duplication --ids-only type=bool
+FLAG basecamp templates card-tables duplication --in type=string
+FLAG basecamp templates card-tables duplication --jq type=string
+FLAG basecamp templates card-tables duplication --json type=bool
+FLAG basecamp templates card-tables duplication --markdown type=bool
+FLAG basecamp templates card-tables duplication --md type=bool
+FLAG basecamp templates card-tables duplication --no-hints type=bool
+FLAG basecamp templates card-tables duplication --no-stats type=bool
+FLAG basecamp templates card-tables duplication --profile type=string
+FLAG basecamp templates card-tables duplication --project type=string
+FLAG basecamp templates card-tables duplication --quiet type=bool
+FLAG basecamp templates card-tables duplication --stats type=bool
+FLAG basecamp templates card-tables duplication --styled type=bool
+FLAG basecamp templates card-tables duplication --todolist type=string
+FLAG basecamp templates card-tables duplication --verbose type=count
+FLAG basecamp templates card-tables list --account type=string
+FLAG basecamp templates card-tables list --agent type=bool
+FLAG basecamp templates card-tables list --cache-dir type=string
+FLAG basecamp templates card-tables list --count type=bool
+FLAG basecamp templates card-tables list --help type=bool
+FLAG basecamp templates card-tables list --hints type=bool
+FLAG basecamp templates card-tables list --ids-only type=bool
+FLAG basecamp templates card-tables list --in type=string
+FLAG basecamp templates card-tables list --jq type=string
+FLAG basecamp templates card-tables list --json type=bool
+FLAG basecamp templates card-tables list --markdown type=bool
+FLAG basecamp templates card-tables list --md type=bool
+FLAG basecamp templates card-tables list --no-hints type=bool
+FLAG basecamp templates card-tables list --no-stats type=bool
+FLAG basecamp templates card-tables list --profile type=string
+FLAG basecamp templates card-tables list --project type=string
+FLAG basecamp templates card-tables list --quiet type=bool
+FLAG basecamp templates card-tables list --stats type=bool
+FLAG basecamp templates card-tables list --styled type=bool
+FLAG basecamp templates card-tables list --todolist type=string
+FLAG basecamp templates card-tables list --verbose type=count
 FLAG basecamp templates construct --account type=string
 FLAG basecamp templates construct --agent type=bool
 FLAG basecamp templates construct --cache-dir type=string
@@ -19025,6 +19187,13 @@ SUB basecamp subscriptions show
 SUB basecamp subscriptions subscribe
 SUB basecamp subscriptions unsubscribe
 SUB basecamp templates
+SUB basecamp templates card-tables
+SUB basecamp templates card-tables copy
+SUB basecamp templates card-tables copy-status
+SUB basecamp templates card-tables create
+SUB basecamp templates card-tables duplicate
+SUB basecamp templates card-tables duplication
+SUB basecamp templates card-tables list
 SUB basecamp templates construct
 SUB basecamp templates construction
 SUB basecamp templates copy
