@@ -367,3 +367,57 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 		})
 	}
 }
+
+func TestTemplatesCardTablesListUsesCardTablesEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/template_library/card_tables.json",
+		status: http.StatusOK,
+		body:   `{"bucket":{"id":1,"name":"Templates","type":"TemplateLibrary"},"kanban_boardset":{"id":8,"title":"Boards","type":"Kanban::Boardset","url":"https://example.test/boardset.json","app_url":"https://example.test/boardset"},"card_tables":[{"id":12,"title":"Launch board","type":"Kanban::Board"}]}`,
+	})
+	buf := captureTemplateOutput(app)
+	app.Config.ActiveProfile = "work profile"
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "list")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/template_library/card_tables.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "1 active card table templates", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables duplicate <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesCardTablesDuplicateNamesTheProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/template_library/copies.json",
+			status: http.StatusCreated,
+			body:   templateCopyPendingJSON,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "duplicate", "3", "--in", "Test Project")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	post := requests[len(requests)-1]
+	assert.Equal(t, "/99999/template_library/copies.json", post.Path)
+	assert.JSONEq(t, `{"template_recording_id":3,"destination_project_id":123}`, post.Body)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Started template duplication #5 (pending)", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables duplication 5", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesCardTablesDuplicateHasNoTodosetFlag(t *testing.T) {
+	cmd, _, err := NewTemplatesCmd().Find([]string{"card-tables", "duplicate"})
+	require.NoError(t, err)
+	assert.Nil(t, cmd.Flags().Lookup("todoset"), "a project has one dock, so there is nothing to pin")
+	assert.NotNil(t, cmd.Flags().Lookup("in"))
+}

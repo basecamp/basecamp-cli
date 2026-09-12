@@ -298,3 +298,44 @@ load test_helper
   assert_failure
   assert_output_contains "ID required"
 }
+
+@test "templates card-tables without subcommand shows help" {
+  run basecamp templates card-tables
+  assert_success
+  assert_output_contains "duplicate"
+  assert_output_contains "duplication"
+}
+
+@test "templates card-tables create without name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables create
+  assert_failure
+  assert_json_value '.error' '<name> required'
+}
+
+@test "templates card-tables duplicate without template id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables duplicate
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates card-tables duplicate has no --todoset flag" {
+  run basecamp templates card-tables duplicate --help
+  assert_success
+  assert_output_contains "--in"
+  assert_output_not_contains "--todoset"
+}
+
+@test "templates card-tables duplication without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables duplication
+  assert_failure
+  assert_output_contains "ID required"
+}

@@ -20,20 +20,22 @@ import (
 func NewTemplatesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "templates",
-		Short: "Manage project and to-do list templates",
+		Short: "Manage project, to-do list, and card table templates",
 		Long: `Manage the account's template library, grouped by kind of template.
 
   projects    Project templates: construct a whole project from a blueprint.
   todolists   To-do list templates: duplicate a reusable list into a project.
+  card-tables Card table templates: duplicate a reusable board into a project.
 
 The pre-grouping spellings (templates list, templates library, templates copy,
 and the rest) still work and resolve to the same commands.`,
-		Annotations: map[string]string{"agent_notes": "Project construction and to-do list template duplication are asynchronous. Poll templates projects construction or templates todolists duplication until status=completed. construct --start-date anchors the template's relative dates to the Sunday of that week; without it they anchor to the week of construction. Duplicating grants referenced people project access only with --confirm-adding-people."},
+		Annotations: map[string]string{"agent_notes": "Project construction and to-do list or card table template duplication are asynchronous. Poll templates projects construction or templates <kind> duplication until status=completed. construct --start-date anchors the template's relative dates to the Sunday of that week; without it they anchor to the week of construction. Duplicating grants referenced people project access only with --confirm-adding-people."},
 	}
 
 	cmd.AddCommand(
 		newTemplatesProjectsCmd(),
 		newTemplatesTodolistsCmd(),
+		newTemplatesCardTablesCmd(),
 	)
 	cmd.AddCommand(templatesBackCompatCmds()...)
 
@@ -103,6 +105,124 @@ func templatesBackCompatCmds() []*cobra.Command {
 	}
 }
 
+func newTemplatesCardTablesCmd() *cobra.Command {
+	kind := cardTableTemplateKind()
+
+	cmd := &cobra.Command{
+		Use:   "card-tables",
+		Short: "Manage card table templates",
+		Long: `Manage the account's card table template library.
+
+A card table template is a reusable board with its columns. Duplicating one
+adds it to an existing project.`,
+	}
+
+	cmd.AddCommand(
+		newTemplatesCardTablesListCmd(),
+		newTemplatesCardTablesCreateCmd(),
+		newTemplatesDuplicateCmd(kind, "duplicate <template_id>", "copy"),
+		newTemplatesDuplicationCmd(kind, "duplication <duplication_id>", "copy-status"),
+	)
+
+	return cmd
+}
+
+func newTemplatesCardTablesListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List card table templates",
+		Long:  "List the account's active card table templates.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
+
+			library, err := app.Account().Templates().GetLibraryCardTables(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			display := make([]struct {
+				ID    int64  `json:"id"`
+				Title string `json:"title"`
+			}, len(library.CardTables))
+			for i, cardTable := range library.CardTables {
+				display[i].ID = cardTable.ID
+				display[i].Title = cardTable.Title
+			}
+
+			return app.OK(library,
+				output.WithDisplayData(display),
+				output.WithSummary(fmt.Sprintf("%d active card table templates", len(library.CardTables))),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "duplicate",
+						Cmd:         "basecamp templates card-tables duplicate <template-id> --in <project>" + contextArgs,
+						Description: "Duplicate a template into a project",
+					},
+				),
+			)
+		},
+	}
+}
+
+func newTemplatesCardTablesCreateCmd() *cobra.Command {
+	var name string
+
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create an empty card table template",
+		Long:  "Create an empty card table template in the account's library.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && name == "" {
+				name = args[0]
+			}
+			if name == "" {
+				return missingArg(cmd, "<name>")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			contextArgs := templateCommandContextArgs(
+				app.Config.ActiveProfile,
+				persistentAccount,
+				app.Config.AccountID,
+			)
+
+			cardTable, err := app.Account().Templates().CreateLibraryCardTable(cmd.Context(), name)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return app.OK(cardTable,
+				output.WithSummary(fmt.Sprintf("Created card table template #%d: %s", cardTable.ID, cardTable.Title)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "duplicate",
+						Cmd:         fmt.Sprintf("basecamp templates card-tables duplicate %d --in <project>%s", cardTable.ID, contextArgs),
+						Description: "Duplicate the template into a project",
+					},
+				),
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&name, "name", "", "Template name")
+
+	return cmd
+}
+
 // What differs by kind when duplicating: how a pinned container is checked, and
 // what the finished copy points at. Basecamp resolves the container itself from
 // the destination project, so the unpinned path is the same for every kind.
@@ -124,6 +244,31 @@ func todolistTemplateKind() templateCopyKind {
 		resolveContainer:        resolveTemplateCopyTodoset,
 		describeCompletedResult: describeTodolistDuplication,
 	}
+}
+
+func cardTableTemplateKind() templateCopyKind {
+	return templateCopyKind{
+		noun:                    "card table",
+		group:                   "card-tables",
+		describeCompletedResult: describeCardTableDuplication,
+	}
+}
+
+func describeCardTableDuplication(templateCopy *basecamp.TemplateLibraryCopy, contextArgs string) (string, []output.Breadcrumb, bool) {
+	table := templateCopy.DestinationCardTable
+	if table == nil {
+		return "", nil, false
+	}
+
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "cards",
+			Cmd:         fmt.Sprintf("basecamp cards list --card-table %d%s", table.ID, contextArgs),
+			Description: "List cards on the duplicated board",
+		},
+	}
+
+	return fmt.Sprintf("Template duplication complete: %s (card table #%d)", table.Title, table.ID), breadcrumbs, true
 }
 
 func describeTodolistDuplication(templateCopy *basecamp.TemplateLibraryCopy, contextArgs string) (string, []output.Breadcrumb, bool) {
@@ -316,8 +461,10 @@ only when --confirm-adding-people is explicitly provided.`, kind.noun, kind.grou
 			if err != nil {
 				return output.ErrUsage("Invalid template ID")
 			}
-			if err := requireNumericID(container, kind.containerFlag+" ID"); err != nil {
-				return err
+			if kind.containerFlag != "" {
+				if err := requireNumericID(container, kind.containerFlag+" ID"); err != nil {
+					return err
+				}
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -373,7 +520,9 @@ only when --confirm-adding-people is explicitly provided.`, kind.noun, kind.grou
 
 	cmd.Flags().StringVarP(&project, "project", "p", "", "Destination project ID or name")
 	cmd.Flags().StringVar(&project, "in", "", "Destination project ID or name (alias for --project)")
-	cmd.Flags().StringVar(&container, kind.containerFlag, "", kind.containerUsage)
+	if kind.containerFlag != "" {
+		cmd.Flags().StringVar(&container, kind.containerFlag, "", kind.containerUsage)
+	}
 	cmd.Flags().BoolVar(&confirmAddingPeople, "confirm-adding-people", false, "Grant referenced people access to the destination project")
 
 	return cmd
