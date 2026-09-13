@@ -1374,9 +1374,11 @@ func (m *Manager) SetUserEmail(email string) error {
 }
 
 // SetUserIdentity stores the user ID and email for the current credential
-// key. As with SetUserEmail, an empty value leaves the stored field alone.
+// key. As with SetUserEmail, an empty value leaves the stored field alone,
+// and a BASECAMP_TOKEN session writes nothing: what it learned names the
+// environment token's user, not whoever the stored credential belongs to.
 func (m *Manager) SetUserIdentity(userID, email string) error {
-	if userID == "" && email == "" {
+	if os.Getenv("BASECAMP_TOKEN") != "" || (userID == "" && email == "") {
 		return nil
 	}
 

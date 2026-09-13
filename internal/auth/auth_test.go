@@ -1911,3 +1911,21 @@ func TestSetUserIdentity_EmptyValuesAreOmissions(t *testing.T) {
 	require.NoError(t, m.SetUserEmail("new@example.com"))
 	assert.Equal(t, "new@example.com", m.GetUserEmail())
 }
+
+// TestSetUserIdentity_EnvTokenWritesNothing: under BASECAMP_TOKEN the
+// identity belongs to the environment token, so the stored credential is
+// left alone — the same rule SetUserEmail applies.
+func TestSetUserIdentity_EnvTokenWritesNothing(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+	m := &Manager{cfg: config.Default(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "tok", OAuthType: "bc5", UserID: "1", UserEmail: "kept@example.com",
+	}))
+
+	require.NoError(t, m.SetUserIdentity("2", "other@example.com"))
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "1", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail)
+}
