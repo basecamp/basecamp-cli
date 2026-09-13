@@ -1358,7 +1358,9 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 	// BASECAMP_TOKEN wins — match AccessToken() precedence (auth.go line 75).
 	if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
 		if strings.HasPrefix(envToken, bc3TokenPrefix) {
-			return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
+			// The same origin-level document a stored BC5 credential asks
+			// for: a pathful base URL must not turn it into /api/v1/...
+			return m.AuthorizationEndpointFor(oauthTypeBC5)
 		}
 		lpURL, err := m.launchpadURL()
 		if err != nil {

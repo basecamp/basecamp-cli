@@ -2025,6 +2025,7 @@ FLAG basecamp auth refresh --verbose type=count
 FLAG basecamp auth status --account type=string
 FLAG basecamp auth status --agent type=bool
 FLAG basecamp auth status --cache-dir type=string
+FLAG basecamp auth status --check type=bool
 FLAG basecamp auth status --count type=bool
 FLAG basecamp auth status --help type=bool
 FLAG basecamp auth status --hints type=bool
