@@ -94,12 +94,12 @@ func runMe(cmd *cobra.Command, args []string) error {
 	if (name == "" || email == "") && app.RequireAccount() == nil && authorizesAccount(authInfo, currentAccountID) {
 		if p, err := app.Account().People().Me(cmd.Context()); err == nil {
 			person = &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress}
-			// The person record fills gaps; a field the authorization document
-			// already named is kept when the record omits it.
-			if p.Name != "" {
+			// The person record fills gaps only; a field the authorization
+			// document already named is kept as its own.
+			if name == "" {
 				name = p.Name
 			}
-			if p.EmailAddress != "" {
+			if email == "" {
 				email = p.EmailAddress
 			}
 		}

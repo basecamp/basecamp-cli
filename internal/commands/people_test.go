@@ -1292,10 +1292,10 @@ func TestMeUnderEnvTokenLeavesStoredIdentityAlone(t *testing.T) {
 	assert.Equal(t, "kept@example.com", creds.UserEmail)
 }
 
-// TestMeKeepsTheIdentityEmailWhenThePersonHasNone: the person record fills
-// gaps in the authorization document; a field the document already named
-// is not replaced by the record's omission.
-func TestMeKeepsTheIdentityEmailWhenThePersonHasNone(t *testing.T) {
+// TestMeKeepsTheIdentityEmailOverThePersons: the person record fills gaps
+// in the authorization document only; a field the document already named
+// is kept even when the record carries a different value.
+func TestMeKeepsTheIdentityEmailOverThePersons(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -1305,7 +1305,7 @@ func TestMeKeepsTheIdentityEmailWhenThePersonHasNone(t *testing.T) {
 				"accounts": []map[string]any{{"id": 555, "name": "Token Corp", "product": "bc3"}},
 			})
 		case "/555/my/profile.json":
-			json.NewEncoder(w).Encode(map[string]any{"id": 51177542, "name": "Ada Lovelace"})
+			json.NewEncoder(w).Encode(map[string]any{"id": 51177542, "name": "Ada Lovelace", "email_address": "person@example.com"})
 		default:
 			http.NotFound(w, r)
 		}
