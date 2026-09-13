@@ -11,6 +11,47 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
+func TestClaudeConfigDirUsesAbsoluteOverrideWithoutHome(t *testing.T) {
+	configured := filepath.Join(t.TempDir(), "claude-config")
+	t.Setenv("HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", configured)
+
+	got, err := ClaudeConfigDir()
+	require.NoError(t, err)
+	assert.Equal(t, configured, got)
+}
+
+func TestClaudeConfigDirPreservesWhitespaceInOverride(t *testing.T) {
+	configured := filepath.Join(t.TempDir(), "claude config ")
+	t.Setenv("CLAUDE_CONFIG_DIR", configured)
+
+	got, err := ClaudeConfigDir()
+	require.NoError(t, err)
+	assert.Equal(t, configured, got)
+}
+
+func TestClaudeConfigDirRejectsRelativeHome(t *testing.T) {
+	t.Setenv("HOME", "relative-home")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	_, err := ClaudeConfigDir()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "home directory: path must be absolute")
+}
+
+func TestClaudeChecksReportConfigError(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "relative")
+
+	plugin := CheckClaudePlugin()
+	assert.Equal(t, "warn", plugin.Status)
+	assert.Contains(t, plugin.Message, "CLAUDE_CONFIG_DIR must be an absolute path")
+	assert.Contains(t, plugin.Message, `~/ or ~\`)
+
+	skill := CheckClaudeSkillLink()
+	assert.Equal(t, "warn", skill.Status)
+	assert.Contains(t, skill.Message, "CLAUDE_CONFIG_DIR must be an absolute path")
+}
+
 func TestPluginInstalled_ArrayFormat(t *testing.T) {
 	data := []byte(`[{"name": "basecamp", "version": "1.0.0"}]`)
 	assert.True(t, pluginInstalled(data))

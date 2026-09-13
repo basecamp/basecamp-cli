@@ -282,6 +282,19 @@ To pick up a newer plugin version later, refresh the marketplace with
 
 **Other agents:** Point your agent at [`skills/basecamp/SKILL.md`](skills/basecamp/SKILL.md) for Basecamp workflow coverage.
 
+To remove the Basecamp-managed shared skill and coding-agent plugins without
+removing Basecamp authentication, configuration, or data, run:
+
+```bash
+basecamp setup agents --remove
+```
+
+The command leaves user-authored skill directories and additional files alone.
+It also keeps the `37signals` marketplace registration in Claude, which may serve
+other plugins; remove it yourself with `claude plugin marketplace remove 37signals`.
+The command uses the `codex` binary to inspect and remove the Codex plugin, so
+that binary must still be installed.
+
 **Agent discovery:** Every command supports `--help --agent` for structured JSON output (flags, gotchas, subcommands). Use `basecamp commands --json` for the full catalog.
 
 See [install.md](install.md) for step-by-step setup instructions.
