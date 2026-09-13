@@ -375,6 +375,7 @@ func TestAuthStatusNonRefreshableTokenInsideTheRefreshWindow(t *testing.T) {
 
 	report, err := authStatusReport(app)
 	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(report.details[1], "Token: expired ("), report.details[1])
 	assert.Contains(t, report.details[1], "inside the 5m the CLI keeps clear of expiry")
 }
 
@@ -397,4 +398,25 @@ func TestAuthStatusHumanOutputSanitizesValues(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	assert.NotContains(t, out.String(), "\x1b")
 	assert.Equal(t, 3, strings.Count(out.String(), "\n"), "no injected line breaks")
+}
+
+// TestAuthStatusMarkdownStaysLiteral: --md output goes through the envelope's
+// Markdown renderer, never the terminal prose path.
+func TestAuthStatusMarkdownStaysLiteral(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	cfg := statusTestConfig(t)
+	cfg.ActiveProfile = "bot"
+	app, _ := setupProfileTestApp(t, cfg)
+	md := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatMarkdown, Writer: md})
+
+	cmd := newAuthStatusCmd()
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	require.NoError(t, cmd.Execute())
+	assert.Empty(t, out.String(), "nothing is written to the terminal path")
+	assert.Contains(t, md.String(), "Not logged in to https://3.basecampapi.com")
+	assert.Contains(t, md.String(), "Run: basecamp auth login -P bot")
+	assert.NotContains(t, md.String(), "\x1b")
 }

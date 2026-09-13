@@ -118,7 +118,7 @@ This opens browser OAuth. Grant access when prompted.
 **Verify:**
 ```bash
 basecamp auth status
-# Expected: Logged in to https://3.basecampapi.com as you@example.com (user <id>)
+# Expected: a line starting "Logged in to https://3.basecampapi.com" (your email and user id follow when known)
 ```
 
 ---
