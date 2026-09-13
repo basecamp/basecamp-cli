@@ -40,6 +40,15 @@ func (cb *CircuitBreaker) now() time.Time {
 	return cb.nowFn()
 }
 
+// Tripped reports whether the circuit is open with its timeout still running:
+// the one state Allow rejects without writing anything. Read here so a gate
+// can fail fast before queueing for a token it would only be refused with.
+func (cb *CircuitBreaker) Tripped() bool {
+	state, err := cb.store.Load()
+	return err == nil && state.CircuitBreaker.IsOpen() &&
+		cb.now().Sub(state.CircuitBreaker.OpenedAt) < cb.config.OpenTimeout
+}
+
 // Allow checks if a request should be allowed.
 // Returns true if the request can proceed, false if it should be rejected.
 // In half-open state, atomically reserves an attempt slot to prevent thundering herd.
