@@ -1355,8 +1355,12 @@ func (m *Manager) GetUserEmail() string {
 // whoever the stored credentials belong to; writing it there would
 // mislabel them. Skipping the store also keeps a token session off the
 // keyring probe and the fallback warning it can raise.
+//
+// An empty email is an omission, not a value: an in-house (bc3) token's
+// authorization document carries only the identity id, and a caller
+// relaying that must not blank what a login stored.
 func (m *Manager) SetUserEmail(email string) error {
-	if os.Getenv("BASECAMP_TOKEN") != "" {
+	if os.Getenv("BASECAMP_TOKEN") != "" || email == "" {
 		return nil
 	}
 
@@ -1369,15 +1373,24 @@ func (m *Manager) SetUserEmail(email string) error {
 	return m.store.Save(credKey, creds)
 }
 
-// SetUserIdentity stores the user ID and email for the current credential key.
+// SetUserIdentity stores the user ID and email for the current credential
+// key. As with SetUserEmail, an empty value leaves the stored field alone.
 func (m *Manager) SetUserIdentity(userID, email string) error {
+	if userID == "" && email == "" {
+		return nil
+	}
+
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
 		return err
 	}
-	creds.UserID = userID
-	creds.UserEmail = email
+	if userID != "" {
+		creds.UserID = userID
+	}
+	if email != "" {
+		creds.UserEmail = email
+	}
 	return m.store.Save(credKey, creds)
 }
 

@@ -25,6 +25,18 @@ import (
 type MeOutput struct {
 	Identity basecamp.Identity `json:"identity"`
 	Accounts []AccountInfo     `json:"accounts"`
+	// Person is the account-scoped person record, looked up when the
+	// authorization document names no one (an in-house bc3 token reports
+	// only the identity id) and an account is configured to ask.
+	Person *MePerson `json:"person,omitempty"`
+}
+
+// MePerson is the person the credential resolves to within the configured
+// account.
+type MePerson struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // AccountInfo represents an account in the me command output
@@ -67,12 +79,33 @@ func runMe(cmd *cobra.Command, args []string) error {
 		return convertSDKError(err)
 	}
 
-	// Store user email for display purposes (non-fatal if fails).
-	_ = app.Auth.SetUserEmail(authInfo.Identity.EmailAddress)
+	currentAccountID := app.Config.AccountID
+
+	// Who the credential belongs to, for the summary and the stored label.
+	// The authorization document is the first word; an in-house (bc3)
+	// token's document carries only the identity id, and then the configured
+	// account's person record — the same lookup a login verifies against —
+	// fills in the name and email. That lookup is best-effort: a person the
+	// account cannot resolve leaves the identity as reported.
+	name := strings.TrimSpace(authInfo.Identity.FirstName + " " + authInfo.Identity.LastName)
+	email := authInfo.Identity.EmailAddress
+	var person *MePerson
+	if (name == "" || email == "") && app.RequireAccount() == nil && authorizesAccount(authInfo, currentAccountID) {
+		if p, err := app.Account().People().Me(cmd.Context()); err == nil {
+			person = &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress}
+			name, email = p.Name, p.EmailAddress
+		}
+	}
+	// Stored for display purposes (non-fatal if it fails). Empty values are
+	// omissions and leave what a login stored in place.
+	if person != nil {
+		_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), person.Email)
+	} else {
+		_ = app.Auth.SetUserEmail(email)
+	}
 
 	// Build account output (already filtered to bc3 by SDK)
 	var accounts []AccountInfo
-	currentAccountID := app.Config.AccountID
 	for _, acct := range authInfo.Accounts {
 		info := AccountInfo{
 			ID:      acct.ID,
@@ -90,14 +123,10 @@ func runMe(cmd *cobra.Command, args []string) error {
 	result := MeOutput{
 		Identity: authInfo.Identity,
 		Accounts: accounts,
+		Person:   person,
 	}
 
-	// Build summary
-	name := authInfo.Identity.FirstName
-	if authInfo.Identity.LastName != "" {
-		name += " " + authInfo.Identity.LastName
-	}
-	summary := fmt.Sprintf("%s <%s>", name, authInfo.Identity.EmailAddress)
+	summary := meLabel(authInfo.Identity.ID, name, email)
 	if len(accounts) > 0 {
 		summary += fmt.Sprintf(" - %d Basecamp account(s)", len(accounts))
 	}
@@ -128,6 +157,21 @@ func runMe(cmd *cobra.Command, args []string) error {
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
+}
+
+// meLabel names the authenticated user for the summary line: "Name <email>"
+// with whichever parts are known, or the bare identity id when neither is.
+func meLabel(identityID int64, name, email string) string {
+	switch {
+	case name != "" && email != "":
+		return name + " <" + email + ">"
+	case name != "":
+		return name
+	case email != "":
+		return email
+	default:
+		return fmt.Sprintf("identity %d", identityID)
+	}
 }
 
 // updateAccountsCache updates the completion cache with account data.
