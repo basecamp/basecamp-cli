@@ -246,6 +246,8 @@ func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	// No protected-resource metadata (404) → Launchpad fallback, pointed at
 	// this server. The token endpoint is never reached.
@@ -1277,6 +1279,8 @@ func TestProfileCreateExpectIdentityCreatesNothingOnMismatch(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 	create := func(expect string) error {
 		return executeProfileCommand(NewProfileCmd(), app, "create", "bot", "--base-url", srv.srv.URL, "--account", "999", "--device-code", "--expect-identity", expect)
 	}

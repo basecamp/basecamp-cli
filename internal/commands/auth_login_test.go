@@ -40,6 +40,8 @@ func TestAuthLoginDeviceCodeForcesRemoteMode(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	// No protected-resource metadata (404) → Launchpad fallback, pointed at
 	// this server. The token endpoint is never reached.
@@ -780,7 +782,8 @@ func TestAuthLoginDeviceCodeRunsUnderNonInteractiveEnv(t *testing.T) {
 
 	out, err := runLogin(t, app, strings.NewReader(""), "--device-code")
 	require.NoError(t, err, out)
-	assert.Contains(t, out, "and enter the code: ABCD-EFGH")
+	assert.Contains(t, out, "  2. Enter this one-time code when asked (expires in 10 minutes)\n     ABCD-EFGH")
+	assert.NotContains(t, out, "browser", "--device-code asked for the link alone; no launch, no commentary")
 	assert.Contains(t, out, "Authentication successful")
 }
 
@@ -820,6 +823,8 @@ func TestAuthLoginDeviceFlowExpectIdentityStoresNothingOnMismatch(t *testing.T) 
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	out, err := runLogin(t, app, strings.NewReader(""), "--device-code", "--expect-identity", "1")
 	require.Error(t, err)
@@ -1001,6 +1006,8 @@ func TestAuthLoginDeviceFlowWithoutExpectationKeepsBestEffortIdentity(t *testing
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	out, err := runLogin(t, app, strings.NewReader(""), "--device-code")
 	require.NoError(t, err, out)
@@ -1190,6 +1197,8 @@ func TestAuthLoginDeviceFlowExpectIdentityKeepsAShortLivedAccessToken(t *testing
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	out, err := runLogin(t, app, strings.NewReader(""), "--device-code", "--expect-identity", "28142355")
 	require.NoError(t, err, out)
@@ -1218,4 +1227,58 @@ func TestAuthLoginWithTokenRefusesToRewriteANonObjectProfilesValue(t *testing.T)
 	assert.Equal(t, `{"profiles":[],"format":"json"}`, string(data))
 	_, loadErr := app.Auth.GetStore().Load("profile:bot")
 	assert.Error(t, loadErr)
+}
+
+// TestAuthLoginCtrlCCancelsCleanly: an interrupt while the device flow is
+// waiting for approval ends the login with the interrupted code (exit 130,
+// rendered by nothing but the command's own line) and stores nothing.
+func TestAuthLoginCtrlCCancelsCleanly(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	pending := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			fmt.Fprintf(w, `{"device_code":"dc","user_code":"ABCD-EFGH","verification_uri":%q,"expires_in":600,"interval":1}`, "http://"+r.Host+"/verify")
+		case "/oauth/tokens":
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"authorization_pending"}`)
+		default:
+			srv.srv.Config.Handler.ServeHTTP(w, r)
+		}
+	})
+	srv.srv.Config.Handler = pending
+	app, _ := loginTestApp(t, srv, &config.Config{})
+	t.Setenv("BASECAMP_OAUTH_ISSUER", srv.srv.URL)
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
+
+	// The parent context stands in for the signal: loginContext derives
+	// from it, so canceling it is what Ctrl-C does to the flow.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(300*time.Millisecond, cancel)
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"login", "--no-browser"})
+	cmd.SetContext(appctx.WithApp(ctx, app))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Equal(t, output.CodeInterrupted, outErr.Code)
+	assert.Equal(t, output.ExitInterrupted, output.ExitCodeFor(outErr.Code))
+
+	assert.Contains(t, out.String(), "ABCD-EFGH", "the code was shown before the cancel")
+	assert.Contains(t, out.String(), "Login canceled. Nothing was stored.")
+	assert.NotContains(t, out.String(), "Authentication successful")
+	assert.False(t, app.Auth.IsAuthenticated(), "a canceled login stores nothing")
 }

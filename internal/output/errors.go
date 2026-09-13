@@ -72,6 +72,12 @@ func ErrAuth(msg string) *Error {
 	}
 }
 
+// ErrInterrupted reports a command stopped by the person at the terminal.
+// msg is for machine consumers; the command prints its own human line.
+func ErrInterrupted(msg string) *Error {
+	return &Error{Code: CodeInterrupted, Message: msg}
+}
+
 func ErrForbiddenScope() *Error {
 	return &Error{
 		Code:       CodeForbidden,

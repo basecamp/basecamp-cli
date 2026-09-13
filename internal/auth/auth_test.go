@@ -878,6 +878,8 @@ func TestLoginDefaultsNeverOpenABrowserUnderNonInteractiveEnv(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 	opts := LoginOptions{Local: true}
 	opts.defaults()
 	assert.True(t, opts.NoBrowser)

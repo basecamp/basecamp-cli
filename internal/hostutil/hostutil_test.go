@@ -203,3 +203,54 @@ func TestIsTrustedBasecampHost(t *testing.T) {
 		})
 	}
 }
+
+// pinInteractiveHost clears every signal HeadlessReason reads so a test
+// observes the interactive answer regardless of the machine it runs on (CI
+// exports CI=true and Linux runners have no display).
+func pinInteractiveHost(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "CI"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("WAYLAND_DISPLAY", "")
+}
+
+func TestHeadlessReason(t *testing.T) {
+	pinInteractiveHost(t)
+	assert.Empty(t, HeadlessReason(), "a display and no SSH or CI is interactive")
+
+	t.Run("ssh", func(t *testing.T) {
+		pinInteractiveHost(t)
+		t.Setenv("SSH_TTY", "/dev/pts/0")
+		assert.Equal(t, "SSH session", HeadlessReason())
+	})
+	t.Run("ci", func(t *testing.T) {
+		for _, v := range []string{"true", "1", "YES"} {
+			pinInteractiveHost(t)
+			t.Setenv("CI", v)
+			assert.Equal(t, "CI environment", HeadlessReason(), "CI=%s", v)
+		}
+		pinInteractiveHost(t)
+		t.Setenv("CI", "false")
+		assert.Empty(t, HeadlessReason(), "CI=false is not a CI runner")
+	})
+	t.Run("ssh outranks ci", func(t *testing.T) {
+		pinInteractiveHost(t)
+		t.Setenv("CI", "true")
+		t.Setenv("SSH_CLIENT", "10.0.0.1 12345 22")
+		assert.Equal(t, "SSH session", HeadlessReason())
+	})
+	t.Run("no display", func(t *testing.T) {
+		pinInteractiveHost(t)
+		t.Setenv("DISPLAY", "")
+		want := ""
+		if unixWithoutDisplay() {
+			want = "no display"
+		}
+		assert.Equal(t, want, HeadlessReason())
+
+		t.Setenv("WAYLAND_DISPLAY", "wayland-0")
+		assert.Empty(t, HeadlessReason(), "a Wayland display is a display")
+	})
+}

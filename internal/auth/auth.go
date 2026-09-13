@@ -389,6 +389,18 @@ type LoginOptions struct {
 	// If nil, messages are suppressed for headless/SDK use.
 	Logger func(msg string)
 
+	// Progress, when it is a terminal, carries the live wait line drawn
+	// while the device flow polls for approval (spinner and expiry
+	// countdown, redrawn in place). Any other writer, or nil, gets a static
+	// "Waiting for approval" line through Logger instead.
+	Progress io.Writer
+
+	// headlessReason is why defaults() turned the browser launch off on its
+	// own ("SSH session", "no display"), so the flow can say so instead of
+	// silently printing a link. Empty when the caller asked (NoBrowser) or
+	// a launch is going to be tried.
+	headlessReason string
+
 	// deviceOptions are appended last to the SDK device-flow options.
 	// Test seam: lets tests inject WithDeviceSleep/WithDeviceClock.
 	deviceOptions []oauth.DeviceOption
@@ -396,14 +408,45 @@ type LoginOptions struct {
 
 // defaults fills in default values for LoginOptions.
 func (o *LoginOptions) defaults() {
-	if !o.Remote && !o.Local && hostutil.IsRemoteSession() {
+	autoRemote := !o.Remote && !o.Local && hostutil.IsRemoteSession()
+	if autoRemote {
 		o.Remote = true
 	}
-	if o.Remote || config.NonInteractiveEnv() {
+	// The launch is turned off when nobody could see the browser, and the
+	// reason is kept for the transcript when the CLI decided that on its
+	// own: the environment says no one is at this terminal, or the host has
+	// nowhere to open one. A caller who asked (--no-browser, --remote,
+	// --device-code) gets the link without commentary. --local is the
+	// person's word that the browser is right here and wins over the host
+	// heuristics.
+	switch {
+	case o.NoBrowser, o.Remote && !autoRemote:
 		o.NoBrowser = true
+	case config.NonInteractiveEnv():
+		o.NoBrowser, o.headlessReason = true, "BASECAMP_NONINTERACTIVE is set"
+	case !o.Local:
+		if reason := hostutil.HeadlessReason(); reason != "" {
+			o.NoBrowser, o.headlessReason = true, reason
+		}
 	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {
 		o.BrowserLauncher = openBrowser
+	}
+}
+
+// announceBrowser tries the launch and says what happened in one line. A
+// failed launch is not a failed login — the link is already on screen — so
+// the line points back at it. Explicit --no-browser prints nothing: the
+// person asked for the link alone.
+func (o *LoginOptions) announceBrowser(target string) {
+	switch {
+	case o.headlessReason != "":
+		o.log(fmt.Sprintf("Not opening a browser here (%s). Open the link on any device.", o.headlessReason))
+	case o.NoBrowser || o.BrowserLauncher == nil:
+	case o.BrowserLauncher(target) != nil:
+		o.log("Couldn't open a browser. Open the link above.")
+	default:
+		o.log("Opening your browser… If nothing appears, open the link above.")
 	}
 }
 
@@ -577,17 +620,12 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 		}
 		defer func() { _ = listener.Close() }()
 
-		// Open browser for authentication
-		if opts.BrowserLauncher != nil {
-			if launchErr := opts.BrowserLauncher(authURL); launchErr != nil {
-				opts.log("\nCouldn't open browser automatically.\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-			} else {
-				opts.log("\nOpening browser for authentication...")
-				opts.log("If the browser doesn't open, visit: " + authURL + "\n\nWaiting for authentication...")
-			}
-		} else {
-			opts.log("\nOpen this URL in your browser:\n" + authURL + "\n\nWaiting for authentication...")
-		}
+		opts.log("\nSign in to Basecamp\n")
+		opts.log("  Open this link in your browser")
+		opts.log("  " + authURL)
+		opts.log("")
+		opts.announceBrowser(authURL)
+		opts.log("Waiting for you to finish signing in… (times out in 5 minutes)")
 
 		// Wait for OAuth callback with a hard timeout to avoid hanging indefinitely
 		waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -676,6 +714,7 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 	defer cancelDev()
 
 	var displayErr error
+	var wait *approvalWait
 	display := func(devAuth oauth.DeviceAuthorization) {
 		// Validate the raw server-supplied URIs before printing or launching
 		// anything: browser target is the code-embedding URI when valid,
@@ -701,28 +740,43 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 			return
 		}
 
-		opts.log("\nTo authenticate, open this URL in a browser on any device:")
-		opts.log("  " + shownURI)
-		opts.log("")
-		opts.log("and enter the code: " + userCode)
-		if devAuth.ExpiresIn > 0 {
-			opts.log(fmt.Sprintf("The code expires in %v.", time.Duration(devAuth.ExpiresIn)*time.Second))
+		// Link first, code second, each on its own line so a double-click
+		// or a triple-click copies exactly one of them; the lifetime is
+		// stated where the code is. The warning is RFC 8628 §5.4's remote
+		// phishing defense in one sentence: a code someone else handed over
+		// approves their device, not this one.
+		lifetime := time.Duration(devAuth.ExpiresIn) * time.Second
+		codeStep := "  2. Enter this one-time code when asked"
+		if lifetime > 0 {
+			codeStep += " (expires in " + expiresIn(lifetime) + ")"
 		}
+		opts.log("\nSign in to Basecamp\n")
+		opts.log("  1. Open this link on any device")
+		opts.log("     " + shownURI)
+		opts.log(codeStep)
+		opts.log("     " + userCode)
+		opts.log("")
+		opts.log("Only continue if you started this login yourself. If a website or another")
+		opts.log("person gave you this code, press Ctrl-C now.")
+		opts.log("")
 		// Flag matrix: default/--local launch the browser; --remote,
 		// --device-code, and --no-browser (Remote implies NoBrowser) print
 		// only. defaults() leaves BrowserLauncher nil in headless modes, but
-		// honor NoBrowser too so an injected launcher can't override it.
-		if !opts.NoBrowser && opts.BrowserLauncher != nil {
-			if launchErr := opts.BrowserLauncher(target); launchErr != nil {
-				opts.log("\nCouldn't open browser automatically — use the URL above.")
-			} else {
-				opts.log("\nOpening browser for authentication...")
+		// announceBrowser honors NoBrowser too so an injected launcher can't
+		// override it.
+		opts.announceBrowser(target)
+		if lifetime > 0 {
+			if wait = startApprovalWait(opts.Progress, time.Now().Add(lifetime)); wait != nil {
+				return
 			}
+			opts.log("Waiting for approval… (the code expires in " + expiresIn(lifetime) + ")")
+			return
 		}
-		opts.log("\nWaiting for approval...")
+		opts.log("Waiting for approval…")
 	}
 
 	token, err := oauth.PerformDeviceLogin(devCtx, oauthCfg, bc5ClientID, display, devOpts...)
+	wait.Stop()
 	if displayErr != nil {
 		// The malformed display data — not the cancellation it triggered —
 		// is the real cause.

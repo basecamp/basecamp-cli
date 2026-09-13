@@ -150,6 +150,9 @@ func newDeviceTestManager(t *testing.T, baseURL string) *Manager {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 	// A pinned issuer in the developer's environment would bypass the
 	// discovery every test here exercises.
 	t.Setenv("BASECAMP_OAUTH_ISSUER", "")
@@ -386,7 +389,98 @@ func TestLoginDevice_BrowserLaunchFailureContinues(t *testing.T) {
 	})
 	require.NoError(t, err, "launch failure must not abort the flow")
 	assert.Equal(t, "bc5", result.OAuthType)
-	assert.Contains(t, cl.joined(), "Couldn't open browser")
+	assert.Contains(t, cl.joined(), "Couldn't open a browser. Open the link above.")
+}
+
+// TestLoginDevice_Transcript pins the device-flow copy: link first, code
+// second, each on its own line, the lifetime beside the code, the phishing
+// warning, and one browser line that says what happened.
+func TestLoginDevice_Transcript(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+
+	t.Run("browser opens", func(t *testing.T) {
+		m := newDeviceTestManager(t, resource.URL)
+		cl := &collectLogger{}
+		_, err := m.Login(context.Background(), LoginOptions{
+			Logger:          cl.log,
+			BrowserLauncher: func(string) error { return nil },
+			deviceOptions:   []oauth.DeviceOption{instantSleep()},
+		})
+		require.NoError(t, err)
+		assert.Contains(t, cl.joined(), strings.Join([]string{
+			"Sign in to Basecamp",
+			"",
+			"  1. Open this link on any device",
+			"     " + as.srv.URL + "/verify?user_code=ABCD-EFGH",
+			"  2. Enter this one-time code when asked (expires in 10 minutes)",
+			"     ABCD-EFGH",
+			"",
+			"Only continue if you started this login yourself. If a website or another",
+			"person gave you this code, press Ctrl-C now.",
+			"",
+			"Opening your browser… If nothing appears, open the link above.",
+			"Waiting for approval… (the code expires in 10 minutes)",
+		}, "\n"))
+	})
+
+	t.Run("headless host says why", func(t *testing.T) {
+		m := newDeviceTestManager(t, resource.URL)
+		t.Setenv("SSH_TTY", "/dev/pts/3")
+		cl := &collectLogger{}
+		launched := 0
+		_, err := m.Login(context.Background(), LoginOptions{
+			Logger:          cl.log,
+			BrowserLauncher: func(string) error { launched++; return nil },
+			deviceOptions:   []oauth.DeviceOption{instantSleep()},
+		})
+		require.NoError(t, err)
+		assert.Zero(t, launched)
+		assert.Contains(t, cl.joined(), "Not opening a browser here (SSH session). Open the link on any device.")
+	})
+
+	t.Run("--local overrides the host heuristics", func(t *testing.T) {
+		m := newDeviceTestManager(t, resource.URL)
+		t.Setenv("CI", "true")
+		launched := 0
+		_, err := m.Login(context.Background(), LoginOptions{
+			Local:           true,
+			BrowserLauncher: func(string) error { launched++; return nil },
+			deviceOptions:   []oauth.DeviceOption{instantSleep()},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, launched)
+	})
+
+	t.Run("--no-browser prints the link alone", func(t *testing.T) {
+		m := newDeviceTestManager(t, resource.URL)
+		cl := &collectLogger{}
+		_, err := m.Login(context.Background(), LoginOptions{
+			NoBrowser:       true,
+			Logger:          cl.log,
+			BrowserLauncher: func(string) error { t.Fatal("must not launch"); return nil },
+			deviceOptions:   []oauth.DeviceOption{instantSleep()},
+		})
+		require.NoError(t, err)
+		logs := cl.joined()
+		assert.NotContains(t, logs, "browser")
+		assert.Contains(t, logs, "Waiting for approval… (the code expires in 10 minutes)")
+	})
+
+	t.Run("a non-terminal progress writer gets the static line", func(t *testing.T) {
+		m := newDeviceTestManager(t, resource.URL)
+		cl := &collectLogger{}
+		var progress strings.Builder
+		_, err := m.Login(context.Background(), LoginOptions{
+			NoBrowser:     true,
+			Logger:        cl.log,
+			Progress:      &progress,
+			deviceOptions: []oauth.DeviceOption{instantSleep()},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, progress.String(), "nothing is drawn on a non-terminal")
+		assert.Contains(t, cl.joined(), "Waiting for approval… (the code expires in 10 minutes)")
+	})
 }
 
 func TestLoginDevice_ScopeWiring(t *testing.T) {
