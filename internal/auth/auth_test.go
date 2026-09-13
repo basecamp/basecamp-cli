@@ -2106,3 +2106,17 @@ func TestLoginCommand_QuotesTheProfile(t *testing.T) {
 		assert.Equal(t, want, m.LoginCommand(), "profile %q", name)
 	}
 }
+
+// TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin: a bc_at_ environment
+// token asks the same origin-level /authorization.json a stored BC5
+// credential does, even when the base URL carries a path.
+func TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+	cfg := config.Default()
+	cfg.BaseURL = "https://3.basecampapi.com/api/v1"
+	m := &Manager{cfg: cfg, store: newTestStore(t, t.TempDir())}
+
+	endpoint, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", endpoint)
+}

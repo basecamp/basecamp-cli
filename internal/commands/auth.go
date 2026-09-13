@@ -75,38 +75,55 @@ command to run.`,
 				return fmt.Errorf("app not initialized")
 			}
 
+			// The server check goes first: the request may refresh the stored
+			// credential, or forget a dead one, and the report must describe
+			// what is stored afterwards.
+			var verdict *checkVerdict
+			if check && (os.Getenv("BASECAMP_TOKEN") != "" || app.Auth.IsAuthenticated()) {
+				v, err := checkWithServer(cmd.Context(), app)
+				if err != nil {
+					return err
+				}
+				verdict = v
+			}
 			report, err := authStatusReport(app)
 			if err != nil {
 				return err
 			}
-			if check && report.data["authenticated"] == true {
-				if err := report.checkWithServer(cmd.Context(), app); err != nil {
-					return err
-				}
+			if verdict != nil {
+				report.record(app, verdict)
 			}
 
 			if !humanOutput(app) {
 				opts := []output.ResponseOption{output.WithSummary(report.summary)}
 				if report.hint != "" {
-					opts = append(opts, output.WithBreadcrumbs(output.Breadcrumb{
-						Action: "login", Cmd: app.Auth.LoginCommand(), Description: "Log in to Basecamp",
-					}))
+					opts = append(opts, output.WithNotice(report.hint))
 				}
 				return app.OK(report.data, opts...)
 			}
 
+			// A direct terminal sink: every line carries config and stored
+			// values, so each is reduced to one terminal-safe line first, as
+			// the envelope renderer would.
 			w := cmd.OutOrStdout()
-			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
+			r := output.NewRendererWithTheme(w, app.Flags.Styled, tui.ResolveTheme(tui.DetectDark()))
 			headline := r.Summary
 			if report.data["authenticated"] == true {
 				headline = r.Success
 			}
-			fmt.Fprintln(w, headline.Render(report.summary))
+			fmt.Fprintln(w, headline.Render(richtext.SanitizeSingleLine(report.summary)))
 			for _, line := range report.details {
-				fmt.Fprintln(w, r.Muted.Render("  "+line))
+				fmt.Fprintln(w, r.Muted.Render("  "+richtext.SanitizeSingleLine(line)))
 			}
 			if report.hint != "" {
-				fmt.Fprintln(w, r.Data.Render("  "+report.hint))
+				fmt.Fprintln(w, r.Data.Render("  "+richtext.SanitizeSingleLine(report.hint)))
+			}
+			if app.Flags.Stats && !app.Flags.NoStats && app.Collector != nil {
+				stats := app.Collector.Summary()
+				if parts := stats.FormatParts(); len(parts) > 0 {
+					fmt.Fprintln(w)
+					fmt.Fprintln(w, r.Muted.Render(strings.Join(parts, " · ")))
+				}
 			}
 			return nil
 		},
@@ -117,29 +134,51 @@ command to run.`,
 	return cmd
 }
 
-// checkWithServer makes the one authenticated request --check promises and
-// records the verdict. An auth-class failure — the server refused the token,
-// or the credential could not be refreshed — is the "rejected" answer, not
-// an error: that is what the caller asked. Anything else (the server could
-// not be reached, a fault) is returned as itself, since no verdict was had.
-func (s *authStatus) checkWithServer(ctx context.Context, app *appctx.App) error {
+// checkVerdict is the server's answer to --check: whether it accepted the
+// token the CLI would send right now.
+type checkVerdict struct {
+	valid bool
+}
+
+// checkWithServer makes the one authenticated request --check promises. An
+// auth-class failure — the server refused the token, or the credential could
+// not be refreshed — is the "rejected" verdict, not an error: that is what
+// the caller asked. Anything else (the server could not be reached, a fault)
+// is returned as itself, since no verdict was had.
+func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error) {
 	endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	_, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
 	switch {
 	case err == nil:
-		s.data["valid"] = true
-		s.details = append(s.details, "Token: valid (checked just now)")
+		return &checkVerdict{valid: true}, nil
 	case output.AsError(err).Code == output.CodeAuth:
-		s.data["valid"] = false
-		s.details = append(s.details, "Token: rejected by the server")
-		s.hint = app.Auth.LoginHint()
+		return &checkVerdict{valid: false}, nil
 	default:
-		return convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
-	return nil
+}
+
+// envTokenRejectedHint is the remedy when the server refuses BASECAMP_TOKEN:
+// every request sends the environment token ahead of any stored login, so
+// logging in would change nothing.
+const envTokenRejectedHint = "BASECAMP_TOKEN is set and the server rejected it; unset it, or export a token the server accepts"
+
+// record adds the server's verdict to the report.
+func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
+	s.data["valid"] = v.valid
+	if v.valid {
+		s.details = append(s.details, "Token: valid (checked just now)")
+		return
+	}
+	s.details = append(s.details, "Token: rejected by the server")
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		s.hint = envTokenRejectedHint
+	} else {
+		s.hint = app.Auth.LoginHint()
+	}
 }
 
 // humanOutput reports whether the command's output is read by a person: the
@@ -188,6 +227,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		report.data["authenticated"] = true
 		report.data["source"] = "BASECAMP_TOKEN"
 		report.data["storage"] = "env"
+		report.data["refreshable"] = false
 		report.summary = "Logged in to " + baseURL + " via BASECAMP_TOKEN"
 		report.details = []string{strings.Join(append(where, "Source: BASECAMP_TOKEN", "Storage: env"), " · ")}
 		return report, nil
@@ -258,16 +298,22 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if creds.ExpiresAt > 0 {
 		expiresAt := time.Unix(creds.ExpiresAt, 0)
 		expiresIn := time.Until(expiresAt)
+		// A token with nothing to refresh with is refused inside the refresh
+		// window, so from the CLI's side it is already expired there.
+		expired := expiresIn < 0 || (!refreshable && expiresIn <= auth.RefreshWindow)
 		report.data["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
 		report.data["expires_in"] = expiresIn.Round(time.Second).String()
-		report.data["expired"] = expiresIn < 0
+		report.data["expired"] = expired
 		switch {
-		case expiresIn >= 0 && refreshable:
+		case !expired && refreshable:
 			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically"
-		case expiresIn >= 0:
+		case !expired:
 			expiry = "expires in " + coarseDuration(expiresIn)
 		case refreshable:
 			expiry = "expired, will refresh on next use"
+		case expiresIn >= 0:
+			expiry = "expires in " + coarseDuration(expiresIn) + ", inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry"
+			report.hint = app.Auth.LoginHint()
 		default:
 			expiry = "expired"
 			report.hint = app.Auth.LoginHint()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ type statusEnvelope struct {
 	OK          bool           `json:"ok"`
 	Data        map[string]any `json:"data"`
 	Summary     string         `json:"summary"`
+	Notice      string         `json:"notice"`
 	Breadcrumbs []struct {
 		Action string `json:"action"`
 		Cmd    string `json:"cmd"`
@@ -28,10 +30,10 @@ type statusEnvelope struct {
 }
 
 // runAuthStatus executes `auth status` on app and returns the parsed JSON
-// envelope. Breadcrumbs are kept so the login remedy can be asserted on.
+// envelope. Hints stay off: the login remedy must not depend on them.
 func runAuthStatus(t *testing.T, app *appctx.App, buf *bytes.Buffer) statusEnvelope {
 	t.Helper()
-	app.Flags.Hints = true
+	app.Flags.Hints = false
 	require.NoError(t, executeProfileCommand(newAuthStatusCmd(), app))
 	var envelope statusEnvelope
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
@@ -81,7 +83,7 @@ func TestAuthStatusReportsTheWholeCredential(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["refreshable"])
 	assert.Equal(t, "file", envelope.Data["storage"], "BASECAMP_NO_KEYRING puts the credential in a file")
 	assert.NotContains(t, envelope.Data, "profile")
-	assert.Empty(t, envelope.Breadcrumbs, "a live credential needs no remedy")
+	assert.Empty(t, envelope.Notice, "a live credential needs no remedy")
 
 	report, err := authStatusReport(app)
 	require.NoError(t, err)
@@ -112,7 +114,7 @@ func TestAuthStatusExpiredButRefreshable(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["refreshable"])
 	assert.Equal(t, "work", envelope.Data["profile"])
 	assert.NotContains(t, envelope.Data, "scope", "Launchpad has no scopes")
-	assert.Empty(t, envelope.Breadcrumbs, "a refreshable token renews itself on the next command")
+	assert.Empty(t, envelope.Notice, "a refreshable token renews itself on the next command")
 
 	report, err := authStatusReport(app)
 	require.NoError(t, err)
@@ -142,8 +144,7 @@ func TestAuthStatusExpiredImportedTokenNamesTheLogin(t *testing.T) {
 	assert.Equal(t, "token", envelope.Data["source"])
 	assert.Equal(t, true, envelope.Data["expired"])
 	assert.Equal(t, false, envelope.Data["refreshable"])
-	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp auth login -P bot", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 
 	report, err := authStatusReport(app)
 	require.NoError(t, err)
@@ -164,9 +165,8 @@ func TestAuthStatusNotLoggedIn(t *testing.T) {
 	assert.Equal(t, "https://3.basecampapi.com", envelope.Data["base_url"])
 	assert.Equal(t, "work", envelope.Data["profile"])
 	assert.Equal(t, "Not logged in to https://3.basecampapi.com", envelope.Summary)
-	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "login", envelope.Breadcrumbs[0].Action)
-	assert.Equal(t, "basecamp auth login -P work", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "Run: basecamp auth login -P work", envelope.Notice, "the remedy does not depend on --hints")
+	assert.Empty(t, envelope.Breadcrumbs)
 }
 
 func TestAuthStatusEnvToken(t *testing.T) {
@@ -178,6 +178,7 @@ func TestAuthStatusEnvToken(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["authenticated"])
 	assert.Equal(t, "BASECAMP_TOKEN", envelope.Data["source"])
 	assert.Equal(t, "env", envelope.Data["storage"])
+	assert.Equal(t, false, envelope.Data["refreshable"])
 	assert.Equal(t, "999", envelope.Data["account_id"])
 	assert.Equal(t, "Logged in to https://3.basecampapi.com via BASECAMP_TOKEN", envelope.Summary)
 	assert.NotContains(t, buf.String(), "bc_at_env", "the token itself is never printed")
@@ -233,7 +234,6 @@ func checkedStatus(t *testing.T, storedToken string, authorizationStatus int) (s
 	srv := startLoginIdentityServer(t, "live-tok")
 	srv.authorizationStatus = authorizationStatus
 	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
-	app.Flags.Hints = true
 	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
 		AccessToken: storedToken,
 		OAuthType:   "bc5",
@@ -264,7 +264,7 @@ func TestAuthStatusCheckAcceptedToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, true, envelope.Data["authenticated"])
 	assert.Equal(t, true, envelope.Data["valid"])
-	assert.Empty(t, envelope.Breadcrumbs)
+	assert.Empty(t, envelope.Notice)
 }
 
 // TestAuthStatusCheckRejectedToken: a 401 is the "rejected" verdict, still
@@ -274,8 +274,7 @@ func TestAuthStatusCheckRejectedToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, true, envelope.Data["authenticated"], "the credential is still stored")
 	assert.Equal(t, false, envelope.Data["valid"])
-	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp auth login -P bot", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 }
 
 // TestAuthStatusCheckServerFault: a fault that is not a verdict on the token
@@ -298,4 +297,104 @@ func TestAuthStatusWithoutCheckMakesNoRequest(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["authenticated"])
 	assert.NotContains(t, envelope.Data, "valid")
 	assert.Empty(t, srv.seenPaths(), "no request without --check")
+}
+
+// TestAuthStatusCheckRejectedEnvToken: a login cannot replace what
+// BASECAMP_TOKEN sends, so the remedy names the variable.
+func TestAuthStatusCheckRejectedEnvToken(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_live")
+	app, buf := loginTestApp(t, srv, &config.Config{})
+	t.Setenv("BASECAMP_TOKEN", "bc_at_stale")
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "BASECAMP_TOKEN", envelope.Data["source"])
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Contains(t, envelope.Notice, "BASECAMP_TOKEN is set")
+	assert.NotContains(t, envelope.Notice, "auth login")
+}
+
+// TestAuthStatusCheckReportsTheRefreshedCredential: the check's request
+// refreshes an expired credential first, and the report describes the
+// credential as it is stored afterwards, not the one the command started
+// with.
+func TestAuthStatusCheckReportsTheRefreshedCredential(t *testing.T) {
+	srv := startLoginIdentityServer(t, "dev-tok")
+	srv.srv.Config.Handler = deviceGrantThen(t, srv.srv.Config.Handler)
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken:   "stale-tok",
+		RefreshToken:  "stale-ref",
+		OAuthType:     "bc5",
+		TokenEndpoint: srv.srv.URL + "/oauth/tokens",
+		Scope:         "full",
+		ExpiresAt:     time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, true, envelope.Data["valid"])
+	assert.Equal(t, false, envelope.Data["expired"], "the report is built after the refresh")
+	assert.Empty(t, envelope.Notice)
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, "dev-tok", creds.AccessToken)
+}
+
+// TestAuthStatusNonRefreshableTokenInsideTheRefreshWindow: a token with
+// nothing to refresh with is refused by every command once it is inside
+// the refresh window, so status calls it expired there too.
+func TestAuthStatusNonRefreshableTokenInsideTheRefreshWindow(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	cfg := statusTestConfig(t)
+	cfg.ActiveProfile = "bot"
+	app, buf := setupProfileTestApp(t, cfg)
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken: "tok",
+		OAuthType:   "bc5",
+		Scope:       "full",
+		Source:      auth.CredentialSourceToken,
+		ExpiresAt:   time.Now().Add(2 * time.Minute).Unix(),
+	}))
+
+	envelope := runAuthStatus(t, app, buf)
+	assert.Equal(t, true, envelope.Data["expired"])
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	assert.Contains(t, report.details[1], "inside the 5m the CLI keeps clear of expiry")
+}
+
+// TestAuthStatusHumanOutputSanitizesValues: config and stored values reach
+// the terminal only as single, control-free lines.
+func TestAuthStatusHumanOutputSanitizesValues(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	cfg := statusTestConfig(t)
+	cfg.AccountID = "999\x1b[31m\nfake"
+	app, _ := setupProfileTestApp(t, cfg)
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &bytes.Buffer{}})
+	require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok", OAuthType: "bc5", Scope: "full", UserEmail: "a@example.com\x1b[0m",
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	require.NoError(t, cmd.Execute())
+	assert.NotContains(t, out.String(), "\x1b")
+	assert.Equal(t, 3, strings.Count(out.String(), "\n"), "no injected line breaks")
 }
