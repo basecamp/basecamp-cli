@@ -2,13 +2,16 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/basecamp/cli/credstore"
 	"github.com/charmbracelet/x/term"
+	"github.com/zalando/go-keyring"
 )
 
 // Credentials holds OAuth tokens and metadata.
@@ -19,8 +22,14 @@ type Credentials struct {
 	Scope         string `json:"scope"`
 	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", or legacy "bc3"
 	TokenEndpoint string `json:"token_endpoint"`
-	UserID        string `json:"user_id,omitempty"`
-	UserEmail     string `json:"user_email,omitempty"`
+
+	// Issuer is the RFC 8414 issuer of the authorization server that minted
+	// a BC5 credential — where its metadata, and so its revocation endpoint,
+	// is found at logout. Credentials stored before it was recorded derive
+	// it from TokenEndpoint (see credentialIssuer).
+	Issuer    string `json:"issuer,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
 
 	// Source records how the credential was obtained when that is not the
 	// OAuth flow: "token" for an imported personal access token, which has
@@ -133,13 +142,34 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 	s.warnFallback()
 	data, err := s.ensure().Load(origin)
 	if err != nil {
+		if isMissingCredential(err) {
+			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
+		}
 		return nil, err
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("invalid credentials: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
 	return &creds, nil
+}
+
+// ErrNoCredential marks a key with nothing stored under it — as opposed to
+// a store that could not be read, which is not "not logged in".
+var ErrNoCredential = errors.New("no stored credential")
+
+// ErrInvalidCredentials marks a stored blob that is present but not a
+// credential any command can read — as opposed to nothing stored at all.
+var ErrInvalidCredentials = errors.New("invalid credentials")
+
+// isMissingCredential tells a missing entry apart from a store that could
+// not be read. credstore has no sentinel of its own: the keyring backend
+// wraps go-keyring's ErrNotFound (and every other keyring failure, a locked
+// keychain included, under the same "credentials not found:" prefix), and
+// the file backend reports a miss as "credentials not found for <key>" —
+// the one phrase the file backend uses for nothing else.
+func isMissingCredential(err error) bool {
+	return errors.Is(err, keyring.ErrNotFound) || strings.Contains(err.Error(), "credentials not found for ")
 }
 
 // Save stores credentials for the given origin.
