@@ -70,6 +70,28 @@ basecamp skill
 basecamp skill install
 ```
 
+## Skills sync
+
+Stable releases mirror `skills/` into [basecamp/skills](https://github.com/basecamp/skills),
+which several CLIs share. `scripts/sync-skills.sh` owns only this CLI's skills there:
+it records the names it published in `.managed-skills.basecamp-cli` at the target root
+and removes a `skills/<name>` only when that manifest lists it, the release no longer
+ships it, and no other CLI's `.managed-skills.*` claims it (a collision is warned about
+and left alone), and refuses outright to publish a name another CLI's manifest holds.
+A target with no `.managed-skills.basecamp-cli` yet is a first run: nothing is removed.
+A push rejected because another CLI published first is retried by applying the whole
+sync again from the remote's new tip, not by replaying the stale commit. The legacy shared `.managed-skills` is rewritten as a comment-only
+tombstone so a CLI still on the pre-fix script — which deleted everything its own tree
+lacked — deletes nothing (basecamp/skills#5).
+
+If the release-time sync fails, recover with the `Sync skills` workflow
+(`workflow_dispatch`, stable tag, optional dry run). It refuses anything but the latest
+stable release so it cannot roll the distribution repo back, and it runs the sync script
+from the dispatching branch against the tag's skills tree — so when the failure was a
+defect in `sync-skills.sh` itself, merge the fix to main and dispatch; no new release
+needed. `scripts/test-sync-skills.sh` (`make test-sync-skills`, in `bin/ci`) pins the
+ownership contract by running the script as both CLIs against a throwaway target.
+
 ## Requirements
 
 - On `main` branch with clean, synced working tree
