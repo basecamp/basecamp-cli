@@ -2023,7 +2023,8 @@ func TestRefresh_PreservesIdentityAndBinding(t *testing.T) {
 // TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential: two
 // processes can refresh at once; when the other one has already saved the
 // rotated token, the refusal this one gets for reusing the old token must
-// not delete the fresh credential.
+// not delete the fresh credential, and is not a failure: the store holds a
+// live credential for the caller to reload.
 func TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential(t *testing.T) {
 	var m *Manager
 	var key string
@@ -2046,14 +2047,16 @@ func TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential(t *testing.T) {
 		TokenEndpoint: srv.URL + "/oauth/tokens", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
 	}))
 
-	err := m.Refresh(context.Background())
-	var cliErr *output.Error
-	require.ErrorAs(t, err, &cliErr)
-	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	require.NoError(t, m.Refresh(context.Background()), "the other process's rotation is this refresh's success")
 
 	creds, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr, "the rotated credential must survive")
 	assert.Equal(t, "rotated-ref", creds.RefreshToken)
+
+	t.Setenv("BASECAMP_TOKEN", "")
+	token, err := m.AccessToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "rotated-tok", token, "the caller reloads the live credential")
 }
 
 // TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential: a Launchpad
