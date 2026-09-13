@@ -612,6 +612,7 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 
 	if opts.Verify != nil {
 		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeLaunchpad); err != nil {
+			m.discardGrant(ctx, creds, opts.log)
 			return nil, err
 		}
 	}
@@ -758,6 +759,7 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 
 	if opts.Verify != nil {
 		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeBC5); err != nil {
+			m.discardGrant(ctx, creds, opts.log)
 			return nil, err
 		}
 	}
