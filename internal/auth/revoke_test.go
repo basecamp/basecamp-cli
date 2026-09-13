@@ -409,6 +409,19 @@ func TestRevokeStored_KeepsTheCredentialWhenTheServerRefuses(t *testing.T) {
 	err = m.RevokeStored(context.Background())
 	require.Error(t, err)
 	assert.False(t, output.AsError(err).Retryable, "a 400 will not change on retry")
+	assert.Equal(t, output.CodeAPI, output.AsError(err).Code)
+
+	as.revoke = func(int) (int, string) { return http.StatusTooManyRequests, `{"error":"rate_limited"}` }
+	err = m.RevokeStored(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, output.CodeRateLimit, output.AsError(err).Code, "a 429 is a rate limit, as everywhere else in the CLI")
+	assert.True(t, output.AsError(err).Retryable)
+
+	as.revoke = func(int) (int, string) { return http.StatusInsufficientStorage, `{}` }
+	err = m.RevokeStored(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, output.CodeLimitExceeded, output.AsError(err).Code)
+	assert.False(t, output.AsError(err).Retryable, "a 507 is a verdict, not a 5xx to retry")
 
 	as.srv.Close()
 	err = m.RevokeStored(context.Background())

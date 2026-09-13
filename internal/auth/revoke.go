@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -182,12 +183,26 @@ func transportFailure(msg string, cause error) error {
 }
 
 // statusFailure is a revocation request the server answered with something
-// other than 200: retryable when the server says to come back (5xx, 429),
-// final otherwise.
-func statusFailure(msg string, status int) error {
-	e := output.ErrAPI(status, msg)
-	e.Retryable = status >= 500 || status == http.StatusTooManyRequests
-	return e
+// other than 200, classified the way the SDK classifies any other response:
+// 429 is a rate limit (retryable, with its Retry-After), 507 an account
+// limit (a verdict, not retryable), any other 5xx retryable, the rest final.
+func statusFailure(msg string, resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		retryAfter, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+		e := output.ErrRateLimit(retryAfter)
+		e.Message = msg
+		e.HTTPStatus = resp.StatusCode
+		return e
+	case http.StatusInsufficientStorage:
+		e := output.ErrAPI(resp.StatusCode, msg)
+		e.Code = output.CodeLimitExceeded
+		return e
+	default:
+		e := output.ErrAPI(resp.StatusCode, msg)
+		e.Retryable = resp.StatusCode >= 500 && resp.StatusCode < 600
+		return e
+	}
 }
 
 // revokeSkipReason says why creds are not the CLI's to revoke, or "" when
@@ -302,7 +317,7 @@ func (m *Manager) revocationEndpoint(ctx context.Context, client *http.Client, i
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", statusFailure(fmt.Sprintf("authorization server metadata returned HTTP %d", resp.StatusCode), resp.StatusCode)
+		return "", statusFailure(fmt.Sprintf("authorization server metadata returned HTTP %d", resp.StatusCode), resp)
 	}
 
 	var doc struct {
@@ -345,7 +360,7 @@ func revokeToken(ctx context.Context, client *http.Client, endpoint, token, hint
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRevocationBodyBytes))
 	if resp.StatusCode != http.StatusOK {
-		return statusFailure(fmt.Sprintf("revoking the %s: the server answered HTTP %d", what, resp.StatusCode), resp.StatusCode)
+		return statusFailure(fmt.Sprintf("revoking the %s: the server answered HTTP %d", what, resp.StatusCode), resp)
 	}
 	return nil
 }
