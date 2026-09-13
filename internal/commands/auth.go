@@ -91,8 +91,14 @@ command to run (the envelope's "notice").`,
 			if err != nil {
 				return err
 			}
-			if verdict != nil {
+			switch {
+			case verdict != nil:
 				report.record(app, verdict)
+			case check:
+				// Nothing to send: the contract still answers "valid",
+				// without claiming a request was made.
+				report.data["valid"] = false
+				report.details = append(report.details, "Token: none to check")
 			}
 
 			if !humanOutput(app) {
