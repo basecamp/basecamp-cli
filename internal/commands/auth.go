@@ -149,11 +149,16 @@ command to run (the envelope's "notice").`,
 // token the CLI would send right now.
 type checkVerdict struct {
 	valid bool
+	// sent is whether the authorization request was made at all; when the
+	// credential could not produce a token to send (nothing to refresh
+	// with, or a refresh the token endpoint refused), reason says why.
+	sent   bool
+	reason string
 }
 
 // checkWithServer makes the one authenticated request --check promises. An
 // auth-class failure — the server refused the token, or the credential could
-// not be refreshed — is the "rejected" verdict, not an error: that is what
+// not produce one — is the "rejected" verdict, not an error: that is what
 // the caller asked. Anything else (the server could not be reached, a fault)
 // is returned as itself, since no verdict was had.
 func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error) {
@@ -161,12 +166,23 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	if err != nil {
 		return nil, err
 	}
+	// The token is produced first, so a refusal that never reaches the
+	// authorization server — no refresh token inside the refresh window, a
+	// refresh the token endpoint turned down — is reported as that, not as
+	// the server's answer. The request's own token lookup then finds it
+	// stored.
+	if _, err := app.Auth.AccessToken(ctx); err != nil {
+		if e := output.AsError(err); e.Code == output.CodeAuth {
+			return &checkVerdict{valid: false, reason: e.Message}, nil
+		}
+		return nil, err
+	}
 	_, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
 	switch {
 	case err == nil:
-		return &checkVerdict{valid: true}, nil
+		return &checkVerdict{valid: true, sent: true}, nil
 	case output.AsError(err).Code == output.CodeAuth:
-		return &checkVerdict{valid: false}, nil
+		return &checkVerdict{valid: false, sent: true}, nil
 	default:
 		return nil, convertSDKError(err)
 	}
@@ -184,7 +200,18 @@ func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
 		s.details = append(s.details, "Token: valid (checked just now)")
 		return
 	}
-	s.details = append(s.details, "Token: rejected by the server")
+	// A refresh the check just had refused makes the offline line's promise
+	// false; the verdict replaces it rather than sitting beside it.
+	for i, line := range s.details {
+		if line == "Token: expired, will refresh on next use · Storage: "+s.storage {
+			s.details[i] = "Token: expired, and the refresh was refused · Storage: " + s.storage
+		}
+	}
+	if v.sent {
+		s.details = append(s.details, "Token: rejected by the server")
+	} else {
+		s.details = append(s.details, "Token: none could be sent ("+v.reason+")")
+	}
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		s.hint = envTokenRejectedHint
 	} else {
@@ -207,6 +234,7 @@ type authStatus struct {
 	summary string
 	details []string
 	hint    string
+	storage string
 }
 
 // authStatusReport inspects the active credential without touching the
@@ -269,7 +297,11 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if store.UsingKeyring() {
 		storage = "keyring"
 	}
-	refreshable := creds.RefreshToken != ""
+	// A refresh token alone is not a refresh: the removed bc3 development
+	// flow's grants cannot be redeemed, and a BC5 credential without its
+	// token endpoint has nowhere to send one.
+	refreshable := creds.RefreshToken != "" && creds.OAuthType != "bc3" && !(creds.OAuthType == "bc5" && creds.TokenEndpoint == "")
+	report.storage = storage
 
 	report.data["authenticated"] = true
 	report.data["source"] = source

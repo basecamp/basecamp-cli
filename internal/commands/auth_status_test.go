@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -206,13 +208,14 @@ func TestAuthStatusHumanOutput(t *testing.T) {
 	assert.Equal(t, "Not logged in to https://3.basecampapi.com\n  Run: basecamp auth login -P bot\n", runHuman())
 
 	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
-		AccessToken:  "tok",
-		RefreshToken: "ref",
-		OAuthType:    "bc5",
-		Scope:        "full",
-		UserID:       "12345",
-		UserEmail:    "jeremy@example.com",
-		ExpiresAt:    time.Now().Add(3*time.Hour + 5*time.Minute).Unix(),
+		AccessToken:   "tok",
+		RefreshToken:  "ref",
+		OAuthType:     "bc5",
+		TokenEndpoint: "https://3.basecamp.com/oauth/tokens",
+		Scope:         "full",
+		UserID:        "12345",
+		UserEmail:     "jeremy@example.com",
+		ExpiresAt:     time.Now().Add(3*time.Hour + 5*time.Minute).Unix(),
 	}))
 	assert.Equal(t, "Logged in to https://3.basecampapi.com as jeremy@example.com (user 12345)\n"+
 		"  Profile: bot · Account: 999 · Access: full · Source: oauth (bc5)\n"+
@@ -444,4 +447,93 @@ func TestAuthStatusCheckWithNothingStored(t *testing.T) {
 	report, err := authStatusReport(app)
 	require.NoError(t, err)
 	assert.NotContains(t, strings.Join(report.details, "\n"), "rejected")
+}
+
+// TestAuthStatusLegacyBC3IsNotRefreshable: the removed bc3 development flow
+// cannot redeem its refresh tokens, so a stored one does not count.
+func TestAuthStatusLegacyBC3IsNotRefreshable(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	app, buf := setupProfileTestApp(t, statusTestConfig(t))
+	require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok", RefreshToken: "ref", OAuthType: "bc3", Scope: "read",
+		TokenEndpoint: "https://example.com/token", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	envelope := runAuthStatus(t, app, buf)
+	assert.Equal(t, false, envelope.Data["refreshable"])
+	assert.Equal(t, true, envelope.Data["expired"])
+	assert.Equal(t, "Run: basecamp auth login", envelope.Notice)
+}
+
+// TestAuthStatusCheckWithNothingToSend: a token the CLI refuses to send
+// (inside the refresh window with nothing to refresh with) is reported as
+// that, not as the server's rejection, and no request is made.
+func TestAuthStatusCheckWithNothingToSend(t *testing.T) {
+	srv := startLoginIdentityServer(t, "live-tok")
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken: "live-tok", OAuthType: "bc5", Scope: "full", Source: auth.CredentialSourceToken,
+		ExpiresAt: time.Now().Add(2 * time.Minute).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
+	assert.Empty(t, srv.seenPaths(), "no token could be sent, so no request")
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	report.record(app, &checkVerdict{valid: false, reason: "No refresh token available"})
+	joined := strings.Join(report.details, "\n")
+	assert.Contains(t, joined, "Token: none could be sent (No refresh token available)")
+	assert.NotContains(t, joined, "rejected by the server")
+}
+
+// TestAuthStatusCheckRefusedRefreshReplacesThePromise: a Launchpad
+// credential whose refresh the token endpoint refuses is kept, and the
+// report must not still promise it will refresh on next use.
+func TestAuthStatusCheckRefusedRefreshReplacesThePromise(t *testing.T) {
+	srv := startLoginIdentityServer(t, "live-tok")
+	inner := srv.srv.Config.Handler
+	srv.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/authorization/token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"invalid_grant"}`)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.srv.URL)
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken: "stale-tok", RefreshToken: "stale-ref", OAuthType: "launchpad",
+		TokenEndpoint: srv.srv.URL + "/authorization/token", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Equal(t, true, envelope.Data["authenticated"], "a Launchpad credential is kept after a refused refresh")
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	report.record(app, &checkVerdict{valid: false, reason: "Your session has expired or was revoked"})
+	joined := strings.Join(report.details, "\n")
+	assert.Contains(t, joined, "expired, and the refresh was refused")
+	assert.NotContains(t, joined, "will refresh on next use")
 }
