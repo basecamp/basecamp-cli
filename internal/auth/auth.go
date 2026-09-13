@@ -302,14 +302,22 @@ func invalidGrant(err error) (string, bool) {
 // the gap between this Load and Delete; a rotation landing inside it is
 // lost, which costs one login, and a cross-process lock on a store that is
 // usually the OS keyring is not a price worth paying for that.
-func (m *Manager) forgetRefusedGrant(origin, refusedToken string) {
+//
+// It reports whether the store holds a credential other than the refused
+// one — another process's rotation, which is a live credential the caller
+// can reload rather than a session that has ended.
+func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool) {
 	current, err := m.store.Load(origin)
-	if err != nil || current.RefreshToken != refusedToken {
-		return
+	if err != nil {
+		return false
+	}
+	if current.RefreshToken != refusedToken {
+		return true
 	}
 	if err := m.store.Delete(origin); err != nil {
 		m.warnf("could not forget the refused credential for %s: %v", origin, err)
 	}
+	return false
 }
 
 func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Credentials) error {
@@ -409,8 +417,11 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 		// different client too, which is not proof the grant is dead. The
 		// delete's own outcome cannot change the answer — the session is
 		// over either way.
-		if creds.OAuthType == oauthTypeBC5 {
-			m.forgetRefusedGrant(origin, creds.RefreshToken)
+		if creds.OAuthType == oauthTypeBC5 && m.forgetRefusedGrant(origin, creds.RefreshToken) {
+			// Another process rotated the credential while this refresh
+			// was in flight: the store holds a live one, which the callers
+			// reload, so this refresh has succeeded by proxy.
+			return nil
 		}
 		msg := "Your session has expired or was revoked"
 		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
