@@ -159,8 +159,9 @@ func (rl *RateLimiter) gateError(blocked bool, wait, waited time.Duration) *Gate
 			sentinel: basecamp.ErrRateLimited,
 		}
 	}
+	requestsPerSecond := rl.config.RefillRate / rl.config.TokensPerRequest
 	return &GateError{
-		Message:  fmt.Sprintf("Too many requests (client limit %g/s); waited %s", rl.config.RefillRate, waited.Round(time.Second)),
+		Message:  fmt.Sprintf("Too many requests (client limit %g/s); waited %s", requestsPerSecond, waited.Round(time.Second)),
 		Hint:     "Re-run, or lower parallelism.",
 		sentinel: basecamp.ErrRateLimited,
 	}

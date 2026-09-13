@@ -85,7 +85,7 @@ func (s *Store) lockPath() string {
 // writes back a stale copy, which can resurrect a slot another live process
 // had just released. TestStoreLockContentionDoesNotLoseReleases shows that
 // loss once the budget is squeezed to a millisecond.
-const LockTimeout = 2 * time.Second
+var LockTimeout = 2 * time.Second
 
 // fileLock represents an acquired file lock.
 type fileLock struct {

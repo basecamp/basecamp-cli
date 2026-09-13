@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -251,6 +252,57 @@ func TestRateLimiterWaitGivesUpWhenTheRefillOutlastsTheDeadline(t *testing.T) {
 	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
 	assert.Equal(t, "Too many requests (client limit 10/s); waited 0s", gateErr.Message)
 	assert.Equal(t, "Re-run, or lower parallelism.", gateErr.Hint)
+}
+
+func TestRateLimiterWaitReportsTheEffectiveRequestRate(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{MaxTokens: 5, RefillRate: 10, TokensPerRequest: 5})
+	_, _ = rl.Allow()
+
+	err := rl.Wait(context.Background(), time.Now().Add(20*time.Millisecond))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.Equal(t, "Too many requests (client limit 2/s); waited 0s", gateErr.Message)
+}
+
+// holdStoreLock takes the store's lock from a second file description and
+// keeps it for d, the way a busy neighboring process would.
+func holdStoreLock(t *testing.T, store *Store, d time.Duration) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(store.Dir(), 0o700))
+	held := flock.New(store.lockPath())
+	require.NoError(t, held.Lock())
+	go func() {
+		time.Sleep(d)
+		_ = held.Unlock()
+	}()
+}
+
+// An Update that meets a held lock waits for it within LockTimeout and lands
+// on the state the holder left, where a budget shorter than the hold falls
+// open and writes over it. The production budget is the wide one.
+func TestStoreLockTimeoutCoversAHeldLock(t *testing.T) {
+	previous := LockTimeout
+	t.Cleanup(func() { LockTimeout = previous })
+	const hold = 150 * time.Millisecond
+
+	update := func(dir string) (waited time.Duration) {
+		store := NewStore(dir)
+		require.NoError(t, store.Save(&State{Bulkhead: BulkheadState{ActivePIDs: []int{os.Getppid()}}}))
+		holdStoreLock(t, store, hold)
+		start := time.Now()
+		require.NoError(t, store.Update(func(state *State) error {
+			state.Bulkhead.AddPID(os.Getpid())
+			return nil
+		}))
+		return time.Since(start)
+	}
+
+	LockTimeout = 2 * time.Second
+	assert.GreaterOrEqual(t, update(t.TempDir()), hold, "waited for the holder")
+
+	LockTimeout = 20 * time.Millisecond
+	assert.Less(t, update(t.TempDir()), hold, "fell open before the holder released")
 }
 
 func TestRateLimiterWaitOutlastsAShortRetryAfter(t *testing.T) {

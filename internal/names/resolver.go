@@ -19,7 +19,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/output"
-	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 // Resolver resolves names to IDs for projects, people, and todolists.
@@ -691,14 +690,8 @@ func convertSDKError(err error) error {
 	}
 
 	// A gate that queued and gave up says which limit, how long, and what to do
-	var gateErr *resilience.GateError
-	if errors.As(err, &gateErr) {
-		return &output.Error{
-			Code:      basecamp.CodeRateLimit,
-			Message:   gateErr.Message,
-			Hint:      gateErr.Hint,
-			Retryable: true,
-		}
+	if gateErr := output.AsGateError(err); gateErr != nil {
+		return gateErr
 	}
 
 	// Handle resilience sentinel errors (use errors.Is for wrapped errors)
