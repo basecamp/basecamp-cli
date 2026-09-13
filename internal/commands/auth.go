@@ -67,8 +67,8 @@ request (the same authorization lookup "basecamp me" makes) and reports
 whether the server still accepts the token: "valid" in the JSON data.
 
 Exits 0 whether or not you are logged in; scripts read "authenticated" from
-the JSON envelope. When nothing is stored, the summary names the login
-command to run.`,
+the JSON envelope. When nothing is stored, the output names the login
+command to run (the envelope's "notice").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -181,13 +181,12 @@ func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
 	}
 }
 
-// humanOutput reports whether the command's output is read by a person: the
-// styled or markdown renderer, which the output writer resolves from flags,
-// config, and whether stdout is a terminal. Anything else — JSON, quiet,
-// a pipe — is a machine consumer that gets the envelope.
+// humanOutput reports whether the command's output is the styled terminal
+// renderer, which the output writer resolves from flags, config, and whether
+// stdout is a terminal. Everything else — JSON, quiet, a pipe, and Markdown,
+// which must stay literal and portable — goes through the envelope.
 func humanOutput(app *appctx.App) bool {
-	format := app.Output.EffectiveFormat()
-	return format == output.FormatStyled || format == output.FormatMarkdown
+	return app.Output.EffectiveFormat() == output.FormatStyled
 }
 
 // authStatus is what `auth status` learned about the active credential:
@@ -312,7 +311,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		case refreshable:
 			expiry = "expired, will refresh on next use"
 		case expiresIn >= 0:
-			expiry = "expires in " + coarseDuration(expiresIn) + ", inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry"
+			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and no refresh token)"
 			report.hint = app.Auth.LoginHint()
 		default:
 			expiry = "expired"
