@@ -408,7 +408,18 @@ type LoginOptions struct {
 
 // defaults fills in default values for LoginOptions.
 func (o *LoginOptions) defaults() {
-	autoRemote := !o.Remote && !o.Local && hostutil.IsRemoteSession()
+	// A host that cannot show a browser (SSH, CI, no display) is a remote
+	// one whatever else was asked: the link is going to be opened on some
+	// other device, so a Launchpad login must take the pasted callback
+	// rather than listen on this host's loopback, which that device could
+	// never reach. --local is the person's word that the browser is right
+	// here and wins over the host heuristics; --no-browser only silences
+	// the launch and must not silence this.
+	hostReason := ""
+	if !o.Local {
+		hostReason = hostutil.HeadlessReason()
+	}
+	autoRemote := !o.Remote && hostReason != ""
 	if autoRemote {
 		o.Remote = true
 	}
@@ -416,23 +427,14 @@ func (o *LoginOptions) defaults() {
 	// reason is kept for the transcript when the CLI decided that on its
 	// own: the environment says no one is at this terminal, or the host has
 	// nowhere to open one. A caller who asked (--no-browser, --remote,
-	// --device-code) gets the link without commentary. --local is the
-	// person's word that the browser is right here and wins over the host
-	// heuristics.
-	//
-	// A headless host is also a remote one: the link is going to be opened
-	// on some other device, so a Launchpad login must take the pasted
-	// callback rather than listen on this host's loopback, which that
-	// device could never reach.
+	// --device-code) gets the link without commentary.
 	switch {
 	case o.NoBrowser, o.Remote && !autoRemote:
 		o.NoBrowser = true
 	case config.NonInteractiveEnv():
 		o.NoBrowser, o.headlessReason = true, "BASECAMP_NONINTERACTIVE is set"
-	case !o.Local:
-		if reason := hostutil.HeadlessReason(); reason != "" {
-			o.NoBrowser, o.Remote, o.headlessReason = true, true, reason
-		}
+	case autoRemote:
+		o.NoBrowser, o.headlessReason = true, hostReason
 	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {
 		o.BrowserLauncher = openBrowser

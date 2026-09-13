@@ -1909,4 +1909,10 @@ func TestLoginLaunchpad_HeadlessHostTakesThePastedCallback(t *testing.T) {
 	local.defaults()
 	assert.False(t, local.Remote, "--local keeps the loopback listener")
 	assert.False(t, local.NoBrowser)
+
+	quiet := LoginOptions{NoBrowser: true}
+	quiet.defaults()
+	assert.True(t, quiet.Remote, "--no-browser silences the launch, not the headless routing")
+	assert.True(t, quiet.NoBrowser)
+	assert.Empty(t, quiet.headlessReason, "the person asked for the link alone; no commentary")
 }

@@ -264,11 +264,12 @@ func buildLoginCmd(use string) *cobra.Command {
 		Short: "Authenticate with Basecamp",
 		Long: `Start the OAuth flow to authenticate with Basecamp, or import a personal access token.
 
-The default flow prints a link and a one-time code, opens the link in your
-browser, and waits for you to approve it. Over SSH, in CI, or on a host with no
-display the browser is skipped and the link is yours to open on any device —
-your phone included; --local forces a launch anyway, --no-browser skips it.
-Ctrl-C cancels the wait.
+Against Basecamp's own authorization server the flow prints a link and a
+one-time code, opens the link in your browser, and waits for you to approve it
+(a Launchpad server signs you in through a browser callback instead). Over SSH,
+in CI, or on a host with no display the browser is skipped and the link is yours
+to open on any device — your phone included; --local forces a launch anyway,
+--no-browser skips it. Ctrl-C cancels the wait.
 
 Examples:
   basecamp auth login                              # Browser (or device) flow
@@ -343,13 +344,11 @@ named profile, creating the profile when --account is given.
 				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
 			}
 
-			ctx, stop := loginContext(cmd)
-			defer stop()
-
 			// With an expectation the login is assertive: the token is
 			// checked before it is stored, and a mismatch stores nothing.
 			// Without one the identity line stays informational.
 			verifier := &loginVerifier{app: app, expectIdentity: expect, account: app.Config.AccountID, strict: expect != 0}
+			ctx, stop := loginContext(cmd)
 			result, err := app.Auth.Login(ctx, auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
@@ -360,8 +359,10 @@ named profile, creating the profile when --account is given.
 				Progress:  w,
 				Verify:    verifier.verify,
 			})
+			err = loginOutcome(ctx, err, w, r)
+			stop()
 			if err != nil {
-				return loginOutcome(ctx, err, w, r)
+				return err
 			}
 
 			fmt.Fprintln(w)
@@ -412,18 +413,22 @@ func registerLoginFlowFlags(cmd *cobra.Command, noBrowser, remote, local, device
 // loginContext derives the context an interactive login waits under: Ctrl-C
 // (and a SIGTERM) cancels it instead of killing the process mid-line, so
 // the flow can put the terminal back — clear the live wait line, close the
-// loopback listener, stop polling — and say it was canceled. Callers must
-// stop it before printing their outcome.
+// loopback listener, stop polling — and say it was canceled. The stop
+// function must run as soon as Login returns, after loginOutcome has read
+// the context: stopping cancels the context too, and while the handler is
+// registered a signal is swallowed instead of ending whatever the command
+// does next.
 func loginContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 }
 
-// loginOutcome turns a failed Login into the error the root will render. A
-// login the person canceled is not a failure: the human line goes to the
-// terminal here and the error carries the interrupted code, which the root
-// exits with silently. Everything else is returned as it came.
+// loginOutcome turns the result of Login into the error the root will
+// render. A login the person canceled is not a failure: the human line goes
+// to the terminal here and the error carries the interrupted code, which
+// the root exits with silently. Everything else, nil included, is returned
+// as it came.
 func loginOutcome(ctx context.Context, err error, w io.Writer, r *output.Renderer) error {
-	if !errors.Is(ctx.Err(), context.Canceled) {
+	if err == nil || !errors.Is(ctx.Err(), context.Canceled) {
 		return err
 	}
 	fmt.Fprintln(w)

@@ -277,10 +277,9 @@ Examples:
 			// With an expectation the credential is checked before it is
 			// stored and a mismatch stores nothing; without one the
 			// identity lookup stays informational.
-			ctx, stop := loginContext(cmd)
-			defer stop()
 			w := cmd.OutOrStdout()
 			verifier := &loginVerifier{app: app, expectIdentity: expect, account: accountID, strict: expect != 0}
+			ctx, stop := loginContext(cmd)
 			loginResult, err := app.Auth.Login(ctx, auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
@@ -290,12 +289,14 @@ Examples:
 				Progress:  w,
 				Verify:    verifier.verify,
 			})
+			err = loginOutcome(ctx, err, w, output.NewRenderer(w, false))
+			stop()
 			if err != nil {
 				// Restore in-memory state
 				delete(app.Config.Profiles, name)
 				app.Config.ActiveProfile = prevActiveProfile
 				app.Config.BaseURL = prevBaseURL
-				return loginOutcome(ctx, err, w, output.NewRenderer(w, false))
+				return err
 			}
 
 			// Login succeeded — persist profile to config

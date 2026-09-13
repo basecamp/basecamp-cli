@@ -320,13 +320,15 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles, showRes
 
 	loggerPrefix := showAuthenticationStart(w, styles, showResult)
 	ctx, stop := loginContext(cmd)
-	defer stop()
 	result, err := app.Auth.Login(ctx, auth.LoginOptions{
 		Logger:   authenticationLogger(w, loggerPrefix),
 		Progress: w,
 	})
+	err = loginOutcome(ctx, err, w, output.NewRenderer(w, false))
+	canceled := errors.Is(ctx.Err(), context.Canceled)
+	stop()
 	if err != nil {
-		if err = loginOutcome(ctx, err, w, output.NewRenderer(w, false)); errors.Is(ctx.Err(), context.Canceled) {
+		if canceled {
 			return "", err
 		}
 		return "", fmt.Errorf("authentication failed: %w", err)
