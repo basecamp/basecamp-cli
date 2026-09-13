@@ -1504,8 +1504,7 @@ You can pass either an item ID or a Basecamp URL:
 
 				// If all probes failed, check if first error was 404 or something else
 				if result == nil && firstErr != nil {
-					sdkErr := basecamp.AsError(firstErr)
-					if sdkErr.Code != basecamp.CodeNotFound {
+					if sdkErr := basecamp.AsError(firstErr); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
 						// Return actual error (auth, permission, network, etc.)
 						return convertSDKError(firstErr)
 					}
@@ -2155,8 +2154,7 @@ You can pass either an item ID or a Basecamp URL:
 							detectedType = "upload"
 						} else {
 							// All probes failed - check if first error was 404 or something else
-							sdkErr := basecamp.AsError(firstErr)
-							if sdkErr.Code != basecamp.CodeNotFound {
+							if sdkErr := basecamp.AsError(firstErr); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
 								// Return actual error (auth, permission, network, etc.)
 								return convertSDKError(firstErr)
 							}

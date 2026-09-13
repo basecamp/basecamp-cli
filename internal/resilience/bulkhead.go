@@ -93,7 +93,8 @@ const slotPoll = 25 * time.Millisecond
 
 // Wait acquires a slot, polling with jitter until deadline. It returns nil
 // once the slot is held (Acquire fails open on a store error), a *GateError
-// when the deadline passes first, or ctx.Err(). A canceled caller reserves
+// once the deadline has passed, or ctx.Err(). Cancellation and the deadline
+// are checked before every attempt, so an expired or canceled gate reserves
 // nothing, and cancellation outranks the deadline.
 func (b *Bulkhead) Wait(ctx context.Context, deadline time.Time) error {
 	start := b.now()
@@ -101,19 +102,16 @@ func (b *Bulkhead) Wait(ctx context.Context, deadline time.Time) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if acquired, _ := b.Acquire(); acquired { //nolint:contextcheck // lock acquisition is context-independent by design
-			return nil
-		}
 		remaining := deadline.Sub(b.now())
 		if remaining <= 0 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
 			return &GateError{
 				Message:  fmt.Sprintf("Too many concurrent basecamp processes (limit %d); waited %s", b.config.MaxConcurrent, b.now().Sub(start).Round(time.Second)),
 				Hint:     "Re-run, or lower parallelism.",
 				sentinel: basecamp.ErrBulkheadFull,
 			}
+		}
+		if acquired, _ := b.Acquire(); acquired { //nolint:contextcheck // lock acquisition is context-independent by design
+			return nil
 		}
 		if err := pause(ctx, min(jittered(slotPoll), remaining)); err != nil {
 			return err

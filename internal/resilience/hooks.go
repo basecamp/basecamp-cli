@@ -71,6 +71,11 @@ func NewGatingHooksFromConfig(store *Store, cfg *Config) *GatingHooks {
 // Returns a context that should be used for the operation and an error
 // if the operation should be rejected.
 func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.OperationInfo) (context.Context, error) {
+	// A canceled caller is answered before anything is read or reserved.
+	if err := ctx.Err(); err != nil {
+		return ctx, err
+	}
+
 	// An open circuit fails fast before any queueing: waiting for a token
 	// only to be refused by the breaker would defeat its purpose during an
 	// outage. Nothing is reserved here; the reserving check still runs last.

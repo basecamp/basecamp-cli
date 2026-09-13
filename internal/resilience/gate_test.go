@@ -277,9 +277,10 @@ func TestRateLimiterWaitReportsALongRetryAfterImmediately(t *testing.T) {
 	assert.Less(t, time.Since(start), 100*time.Millisecond, "did not burn the budget on a block it cannot outlast")
 }
 
-// The jitter that spreads retries must not stretch a sleep past the budget:
-// a block that lifts just inside the deadline is waited out, not overshot.
-// Pinned to the maximum jitter, which uncapped would overshoot by half.
+// The jitter that spreads retries must not stretch a sleep to or past the
+// budget: a block that lifts just inside the deadline is waited out and the
+// token taken, not overshot or rejected at the wire. Pinned to the maximum
+// jitter, which unchecked would overshoot by half.
 func TestRateLimiterWaitNeverSleepsPastTheDeadline(t *testing.T) {
 	previous := jitter
 	jitter = func(d time.Duration) time.Duration { return d / 2 }
@@ -463,6 +464,40 @@ func TestGatingHooksFailsFastOnAnOpenCircuitBeforeQueueing(t *testing.T) {
 	tokens, tokensErr := hooks.rateLimiter.Tokens()
 	require.NoError(t, tokensErr)
 	assert.Less(t, tokens, 1.0, "no token consumed")
+}
+
+// An expired budget rejects before the attempt, so a slot or token that
+// happens to be free at the deadline is not taken past it.
+func TestWaitsRejectAnExpiredDeadlineWithoutReserving(t *testing.T) {
+	store := NewStore(t.TempDir())
+	past := time.Now().Add(-time.Millisecond)
+
+	bh := NewBulkhead(store, BulkheadConfig{MaxConcurrent: 1})
+	assert.ErrorIs(t, bh.Wait(context.Background(), past), basecamp.ErrBulkheadFull)
+	state, err := store.Load()
+	require.NoError(t, err)
+	assert.Empty(t, state.Bulkhead.ActivePIDs, "free slot left untaken")
+
+	rl := NewRateLimiter(store, RateLimiterConfig{MaxTokens: 5, RefillRate: 0.001})
+	assert.ErrorIs(t, rl.Wait(context.Background(), past), basecamp.ErrRateLimited)
+	tokens, err := rl.Tokens()
+	require.NoError(t, err)
+	assert.Equal(t, float64(5), tokens, "no token consumed")
+}
+
+func TestGatingHooksAnswersCancellationBeforeTheCircuit(t *testing.T) {
+	store := NewStore(t.TempDir())
+	require.NoError(t, store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitOpen
+		state.CircuitBreaker.OpenedAt = time.Now()
+		return nil
+	}))
+	hooks := NewGatingHooksFromConfig(store, DefaultConfig())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := hooks.OnOperationGate(ctx, basecamp.OperationInfo{Service: "Todos", Operation: "Complete"})
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestGateErrorUnwrapsToTheSDKSentinel(t *testing.T) {
