@@ -1385,7 +1385,8 @@ leave the skill only and surface the per-agent `basecamp setup <id>` commands.
 
 **Authentication errors:**
 ```bash
-basecamp auth status                              # Check auth
+basecamp auth status                              # Who you are logged in as, where, token expiry (no request made)
+basecamp auth status --check                      # Also ask the server whether the stored token is still accepted
 basecamp auth login                               # Re-authenticate
 basecamp auth login --scope full                  # Full access (the default; ignored by Launchpad)
 basecamp auth login --scope read                  # Read-only access (ignored by Launchpad)

@@ -53,87 +53,247 @@ func newAuthLogoutCmd() *cobra.Command {
 }
 
 func newAuthStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var check bool
+
+	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show authentication status",
-		Long:  "Display the current authentication status and token information.",
+		Short: "Show who you are logged in as",
+		Long: `Show the active credential: who it authenticates as, which server and
+account it addresses, its access level and source, when the token expires,
+and where it is stored.
+
+Nothing is fetched unless --check is given, which makes one authenticated
+request (the same authorization lookup "basecamp me" makes) and reports
+whether the server still accepts the token: "valid" in the JSON data.
+
+Exits 0 whether or not you are logged in; scripts read "authenticated" from
+the JSON envelope. When nothing is stored, the summary names the login
+command to run.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
 
-			credKey := app.Auth.CredentialKey()
-
-			// Check if using BASECAMP_TOKEN environment variable
-			if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
-				result := map[string]any{
-					"authenticated": true,
-					"source":        "BASECAMP_TOKEN",
-				}
-				if app.Config.ActiveProfile != "" {
-					result["profile"] = app.Config.ActiveProfile
-				}
-				return app.OK(result, output.WithSummary("Authenticated via BASECAMP_TOKEN env var"))
-			}
-
-			if !app.Auth.IsAuthenticated() {
-				result := map[string]any{
-					"authenticated": false,
-				}
-				if app.Config.ActiveProfile != "" {
-					result["profile"] = app.Config.ActiveProfile
-				}
-				return app.OK(result, output.WithSummary("Not authenticated"))
-			}
-
-			// Get stored credentials info
-			store := app.Auth.GetStore()
-			creds, err := store.Load(credKey)
+			report, err := authStatusReport(app)
 			if err != nil {
 				return err
 			}
-
-			// Suppress scope for Launchpad (scopes are not supported)
-			effectiveScope := creds.Scope
-			if creds.OAuthType == "launchpad" {
-				effectiveScope = ""
+			if check && report.data["authenticated"] == true {
+				if err := report.checkWithServer(cmd.Context(), app); err != nil {
+					return err
+				}
 			}
 
-			source := "oauth"
-			if creds.Source != "" {
-				source = creds.Source
-			}
-			status := map[string]any{
-				"authenticated": true,
-				"source":        source,
-				"oauth_type":    creds.OAuthType,
-			}
-			if effectiveScope != "" {
-				status["scope"] = effectiveScope
-			}
-			if app.Config.ActiveProfile != "" {
-				status["profile"] = app.Config.ActiveProfile
+			if !humanOutput(app) {
+				opts := []output.ResponseOption{output.WithSummary(report.summary)}
+				if report.hint != "" {
+					opts = append(opts, output.WithBreadcrumbs(output.Breadcrumb{
+						Action: "login", Cmd: app.Auth.LoginCommand(), Description: "Log in to Basecamp",
+					}))
+				}
+				return app.OK(report.data, opts...)
 			}
 
-			if creds.UserID != "" {
-				status["user_id"] = creds.UserID
+			w := cmd.OutOrStdout()
+			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
+			headline := r.Summary
+			if report.data["authenticated"] == true {
+				headline = r.Success
 			}
-
-			// Token expiration
-			if creds.ExpiresAt > 0 {
-				expiresIn := time.Until(time.Unix(creds.ExpiresAt, 0))
-				status["expires_in"] = expiresIn.Round(time.Second).String()
-				status["expired"] = expiresIn < 0
+			fmt.Fprintln(w, headline.Render(report.summary))
+			for _, line := range report.details {
+				fmt.Fprintln(w, r.Muted.Render("  "+line))
 			}
-
-			summary := "Authenticated"
-			if effectiveScope != "" {
-				summary += fmt.Sprintf(" (scope: %s)", effectiveScope)
+			if report.hint != "" {
+				fmt.Fprintln(w, r.Data.Render("  "+report.hint))
 			}
-
-			return app.OK(status, output.WithSummary(summary))
+			return nil
 		},
+	}
+
+	cmd.Flags().BoolVar(&check, "check", false, "Ask the server whether the stored token is still accepted (one authenticated request)")
+
+	return cmd
+}
+
+// checkWithServer makes the one authenticated request --check promises and
+// records the verdict. An auth-class failure — the server refused the token,
+// or the credential could not be refreshed — is the "rejected" answer, not
+// an error: that is what the caller asked. Anything else (the server could
+// not be reached, a fault) is returned as itself, since no verdict was had.
+func (s *authStatus) checkWithServer(ctx context.Context, app *appctx.App) error {
+	endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	switch {
+	case err == nil:
+		s.data["valid"] = true
+		s.details = append(s.details, "Token: valid (checked just now)")
+	case output.AsError(err).Code == output.CodeAuth:
+		s.data["valid"] = false
+		s.details = append(s.details, "Token: rejected by the server")
+		s.hint = app.Auth.LoginHint()
+	default:
+		return convertSDKError(err)
+	}
+	return nil
+}
+
+// humanOutput reports whether the command's output is read by a person: the
+// styled or markdown renderer, which the output writer resolves from flags,
+// config, and whether stdout is a terminal. Anything else — JSON, quiet,
+// a pipe — is a machine consumer that gets the envelope.
+func humanOutput(app *appctx.App) bool {
+	format := app.Output.EffectiveFormat()
+	return format == output.FormatStyled || format == output.FormatMarkdown
+}
+
+// authStatus is what `auth status` learned about the active credential:
+// the envelope data, and the same facts as prose for a terminal.
+type authStatus struct {
+	data    map[string]any
+	summary string
+	details []string
+	hint    string
+}
+
+// authStatusReport inspects the active credential without touching the
+// network. A BASECAMP_TOKEN session never reaches the credential store, so
+// it neither pays the keyring probe nor reports another credential's
+// identity as its own.
+func authStatusReport(app *appctx.App) (*authStatus, error) {
+	baseURL := config.NormalizeBaseURL(app.Config.BaseURL)
+	profile := app.Config.ActiveProfile
+	account := app.Config.AccountID
+
+	report := &authStatus{data: map[string]any{"base_url": baseURL}}
+	if profile != "" {
+		report.data["profile"] = profile
+	}
+	if account != "" {
+		report.data["account_id"] = account
+	}
+	where := []string{}
+	if profile != "" {
+		where = append(where, "Profile: "+profile)
+	}
+	if account != "" {
+		where = append(where, "Account: "+account)
+	}
+
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		report.data["authenticated"] = true
+		report.data["source"] = "BASECAMP_TOKEN"
+		report.data["storage"] = "env"
+		report.summary = "Logged in to " + baseURL + " via BASECAMP_TOKEN"
+		report.details = []string{strings.Join(append(where, "Source: BASECAMP_TOKEN", "Storage: env"), " · ")}
+		return report, nil
+	}
+
+	if !app.Auth.IsAuthenticated() {
+		report.data["authenticated"] = false
+		report.summary = "Not logged in to " + baseURL
+		report.hint = app.Auth.LoginHint()
+		return report, nil
+	}
+
+	store := app.Auth.GetStore()
+	creds, err := store.Load(app.Auth.CredentialKey())
+	if err != nil {
+		return nil, err
+	}
+
+	// Launchpad ignores scope; its tokens are read-write.
+	scope := creds.Scope
+	if creds.OAuthType == "launchpad" {
+		scope = ""
+	}
+	source := "oauth"
+	if creds.Source != "" {
+		source = creds.Source
+	}
+	storage := "file"
+	if store.UsingKeyring() {
+		storage = "keyring"
+	}
+	refreshable := creds.RefreshToken != ""
+
+	report.data["authenticated"] = true
+	report.data["source"] = source
+	report.data["oauth_type"] = creds.OAuthType
+	report.data["refreshable"] = refreshable
+	report.data["storage"] = storage
+	if scope != "" {
+		report.data["scope"] = scope
+	}
+	if creds.UserID != "" {
+		report.data["user_id"] = creds.UserID
+	}
+	if creds.UserEmail != "" {
+		report.data["user_email"] = creds.UserEmail
+	}
+
+	report.summary = "Logged in to " + baseURL
+	if email := richtext.SanitizeSingleLine(creds.UserEmail); email != "" {
+		report.summary += " as " + email
+	}
+	if creds.UserID != "" {
+		report.summary += " (user " + creds.UserID + ")"
+	}
+
+	if scope != "" {
+		where = append(where, "Access: "+scope)
+	}
+	sourceLabel := source
+	if creds.OAuthType != "" {
+		sourceLabel += " (" + creds.OAuthType + ")"
+	}
+	where = append(where, "Source: "+sourceLabel)
+	report.details = append(report.details, strings.Join(where, " · "))
+
+	expiry := "no expiry reported"
+	if creds.ExpiresAt > 0 {
+		expiresAt := time.Unix(creds.ExpiresAt, 0)
+		expiresIn := time.Until(expiresAt)
+		report.data["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
+		report.data["expires_in"] = expiresIn.Round(time.Second).String()
+		report.data["expired"] = expiresIn < 0
+		switch {
+		case expiresIn >= 0 && refreshable:
+			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically"
+		case expiresIn >= 0:
+			expiry = "expires in " + coarseDuration(expiresIn)
+		case refreshable:
+			expiry = "expired, will refresh on next use"
+		default:
+			expiry = "expired"
+			report.hint = app.Auth.LoginHint()
+		}
+	}
+	report.details = append(report.details, "Token: "+expiry+" · Storage: "+storage)
+
+	return report, nil
+}
+
+// coarseDuration renders a duration at the precision a person reads an
+// expiry at: seconds under a minute, minutes under an hour, hours and
+// minutes under two days, days beyond.
+func coarseDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		if m := int(d.Minutes()) % 60; m != 0 {
+			return fmt.Sprintf("%dh %dm", int(d.Hours()), m)
+		}
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }
 
