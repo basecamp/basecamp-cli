@@ -383,7 +383,7 @@ check-smoke-coverage: build
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e check-naming check-surface check-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -564,6 +564,11 @@ sync-skills:
 	RELEASE_TAG=$(TAG) SOURCE_SHA=$$(git rev-parse HEAD) DRY_RUN=local scripts/sync-skills.sh
 
 # Sync skills (dry-run against real target repo)
+# Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
+.PHONY: test-sync-skills
+test-sync-skills:
+	scripts/test-sync-skills.sh
+
 # Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=ghp_...
 .PHONY: sync-skills-remote
 sync-skills-remote:
@@ -647,6 +652,7 @@ help:
 	@echo ""
 	@echo "Skills:"
 	@echo "  sync-skills         Local dry-run of skill sync (TAG=v1.2.3)"
+	@echo "  test-sync-skills    Run the skills sync as two CLIs against a throwaway target"
 	@echo "  sync-skills-remote  Remote dry-run (TAG=v1.2.3 SKILLS_TOKEN=...)"
 	@echo ""
 	@echo "  help           Show this help"
