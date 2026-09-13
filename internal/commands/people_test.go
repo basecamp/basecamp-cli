@@ -1272,3 +1272,22 @@ func TestMeIdentityOnlyFallsBackToTheIdentity(t *testing.T) {
 	assert.Equal(t, "1", creds.UserID)
 	assert.Equal(t, "kept@example.com", creds.UserEmail, "an omitted email must not blank the stored one")
 }
+
+// TestMeUnderEnvTokenLeavesStoredIdentityAlone: the person `me` resolves
+// for BASECAMP_TOKEN belongs to that token, so it is shown but never
+// written over the stored credential's identity.
+func TestMeUnderEnvTokenLeavesStoredIdentityAlone(t *testing.T) {
+	app, buf := setupIdentityOnlyTestApp(t, http.StatusOK)
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Ada Lovelace <ada@example.com> - 1 Basecamp account(s)", envelope.Summary)
+
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "1", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail)
+}
