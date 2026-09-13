@@ -17,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewProfileCmd creates the profile command group.
@@ -386,7 +387,9 @@ func newProfileDeleteCmd() *cobra.Command {
 			case errors.Is(err, auth.ErrNoCredential):
 				// A profile that never logged in has nothing to revoke.
 			case err != nil:
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not delete credentials for profile %q: %v\n", name, err)
+				// Written straight to the terminal, so the store's error text
+				// (paths, endpoint hosts) is scrubbed here rather than at a sink.
+				fmt.Fprintln(cmd.ErrOrStderr(), richtext.SanitizeSingleLine(fmt.Sprintf("Warning: could not delete credentials for profile %q: %v", name, err)))
 			default:
 				var outcome map[string]any
 				summary, outcome = describeLogout(summary, result)

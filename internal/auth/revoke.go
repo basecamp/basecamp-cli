@@ -65,16 +65,28 @@ type LogoutResult struct {
 	// Remaining names what Err left usable (one of the Remaining* values);
 	// empty when Err is nil.
 	Remaining string
+	// ExpiresAt is the stored access token's expiry (Unix seconds; zero
+	// when the server reported none), for saying how long RemainingAccess
+	// lasts.
+	ExpiresAt int64
 }
 
 // Outstanding describes, for a human, what a failed revocation left usable;
-// empty when nothing did.
+// empty when nothing did. The access token's lifetime is the one the server
+// reported for it, not an assumed one.
 func (r *LogoutResult) Outstanding() string {
 	switch r.Remaining {
 	case RemainingRefresh:
 		return "the refresh token stays valid until it is revoked"
 	case RemainingAccess:
-		return "only the access token remains and it expires within the hour"
+		switch left := time.Until(time.Unix(r.ExpiresAt, 0)).Round(time.Minute); {
+		case r.ExpiresAt == 0:
+			return "only the access token remains and it reports no expiry"
+		case left <= 0:
+			return "only the access token remains and it has already expired"
+		default:
+			return "only the access token remains and it expires in " + left.String()
+		}
 	default:
 		return ""
 	}
@@ -129,7 +141,7 @@ func (m *Manager) revokeForDiscard(ctx context.Context, creds *Credentials, base
 		return &LogoutResult{Skipped: skipped}
 	}
 	if remaining, err := m.revoke(ctx, creds, baseURL); err != nil {
-		return &LogoutResult{Err: err, Remaining: remaining}
+		return &LogoutResult{Err: err, Remaining: remaining, ExpiresAt: creds.ExpiresAt}
 	}
 	return &LogoutResult{Revoked: true}
 }

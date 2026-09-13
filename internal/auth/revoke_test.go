@@ -226,8 +226,11 @@ func TestLogout_ReportsWhatAFailureLeftUsable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, result.Err.Error(), "revoking the access token")
 	assert.Equal(t, RemainingAccess, result.Remaining)
-	assert.Contains(t, result.Outstanding(), "only the access token remains")
+	assert.Contains(t, result.Outstanding(), "only the access token remains and it expires in 1h0m0s", "the lifetime is the one the server reported")
 	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
+
+	assert.Equal(t, "only the access token remains and it reports no expiry", (&LogoutResult{Remaining: RemainingAccess}).Outstanding())
+	assert.Equal(t, "only the access token remains and it has already expired", (&LogoutResult{Remaining: RemainingAccess, ExpiresAt: 1}).Outstanding())
 
 	as.metadata = func() string { return `{}` }
 	noRefresh := bc5Credentials(as)
