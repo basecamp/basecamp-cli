@@ -686,7 +686,9 @@ type loginIdentity struct {
 }
 
 // label renders the identity for a one-line terminal sink. Name and email
-// are server-supplied, so they are reduced to single lines first.
+// are server-supplied, so they are reduced to single lines first. An
+// identity the server reported without either (an in-house bc3 token's)
+// is named by its ids alone rather than as a blank with ids in brackets.
 func (l *loginIdentity) label() string {
 	label := richtext.SanitizeSingleLine(l.Name)
 	if email := richtext.SanitizeSingleLine(l.Email); email != "" {
@@ -699,7 +701,10 @@ func (l *loginIdentity) label() string {
 	if l.PersonID != 0 {
 		parts = append(parts, fmt.Sprintf("person %d", l.PersonID))
 	}
-	if len(parts) > 0 {
+	switch {
+	case strings.TrimSpace(label) == "":
+		return strings.Join(parts, ", ")
+	case len(parts) > 0:
 		label += " (" + strings.Join(parts, ", ") + ")"
 	}
 	return strings.TrimSpace(label)

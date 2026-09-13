@@ -1162,3 +1162,182 @@ func TestPeopleOutOfOfficeShowStatus(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
 	assert.True(t, result.Data.Enabled)
 }
+
+// setupIdentityOnlyTestApp mirrors an in-house (bc3) token: the stored
+// credential is bc5-typed against a server whose /authorization.json names
+// only the identity id, and whose account person record answers with
+// personStatus. The stored credential carries a user email a login left.
+func setupIdentityOnlyTestApp(t *testing.T, personStatus int) (*appctx.App, *bytes.Buffer) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/authorization.json":
+			json.NewEncoder(w).Encode(map[string]any{
+				"identity": map[string]any{"id": 28142355},
+				"accounts": []map[string]any{{"id": 555, "name": "Token Corp", "href": "https://3.basecampapi.com/555", "product": "bc3"}},
+			})
+		case "/555/my/profile.json":
+			w.WriteHeader(personStatus)
+			if personStatus == http.StatusOK {
+				json.NewEncoder(w).Encode(map[string]any{"id": 51177542, "name": "Ada Lovelace", "email_address": "ada@example.com"})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: server.URL, CacheDir: t.TempDir()}
+	authMgr := auth.NewManager(cfg, nil)
+	authMgr.SetStore(auth.NewStore(filepath.Join(tmpDir, "basecamp")))
+	require.NoError(t, authMgr.GetStore().Save(config.NormalizeBaseURL(server.URL), &auth.Credentials{
+		AccessToken: "bc_at_stored",
+		OAuthType:   "bc5",
+		UserID:      "1",
+		UserEmail:   "kept@example.com",
+		ExpiresAt:   9999999999,
+	}))
+
+	buf := &bytes.Buffer{}
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: server.URL}, &peopleTestTokenProvider{}, basecamp.WithMaxRetries(1))
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+		Flags:  appctx.GlobalFlags{Hints: true},
+	}
+	return app, buf
+}
+
+type meEnvelope struct {
+	Summary string `json:"summary"`
+	Data    struct {
+		Identity struct {
+			ID int64 `json:"id"`
+		} `json:"identity"`
+		Person *struct {
+			ID    int64  `json:"id"`
+			Name  string `json:"name"`
+			Email string `json:"email"`
+		} `json:"person"`
+	} `json:"data"`
+}
+
+// TestMeIdentityOnlyResolvesThePerson: an authorization document with only
+// an identity id is completed from the configured account's person record,
+// which the summary and the stored label then use.
+func TestMeIdentityOnlyResolvesThePerson(t *testing.T) {
+	app, buf := setupIdentityOnlyTestApp(t, http.StatusOK)
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Ada Lovelace <ada@example.com> - 1 Basecamp account(s)", envelope.Summary)
+	assert.Equal(t, int64(28142355), envelope.Data.Identity.ID)
+	require.NotNil(t, envelope.Data.Person)
+	assert.Equal(t, int64(51177542), envelope.Data.Person.ID)
+	assert.Equal(t, "ada@example.com", envelope.Data.Person.Email)
+
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "51177542", creds.UserID)
+	assert.Equal(t, "ada@example.com", creds.UserEmail)
+}
+
+// TestMeIdentityOnlyFallsBackToTheIdentity: when the person lookup fails,
+// the summary names the identity id — never a blank " <>" — and the stored
+// email is left as the login wrote it.
+func TestMeIdentityOnlyFallsBackToTheIdentity(t *testing.T) {
+	app, buf := setupIdentityOnlyTestApp(t, http.StatusNotFound)
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "identity 28142355 - 1 Basecamp account(s)", envelope.Summary)
+	assert.Nil(t, envelope.Data.Person)
+
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "1", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail, "an omitted email must not blank the stored one")
+}
+
+// TestMeUnderEnvTokenLeavesStoredIdentityAlone: the person `me` resolves
+// for BASECAMP_TOKEN belongs to that token, so it is shown but never
+// written over the stored credential's identity.
+func TestMeUnderEnvTokenLeavesStoredIdentityAlone(t *testing.T) {
+	app, buf := setupIdentityOnlyTestApp(t, http.StatusOK)
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Ada Lovelace <ada@example.com> - 1 Basecamp account(s)", envelope.Summary)
+
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "1", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail)
+}
+
+// TestMeKeepsTheIdentityEmailOverThePersons: the person record fills gaps
+// in the authorization document only; a field the document already named
+// is kept even when the record carries a different value.
+func TestMeKeepsTheIdentityEmailOverThePersons(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/authorization.json":
+			json.NewEncoder(w).Encode(map[string]any{
+				"identity": map[string]any{"id": 28142355, "email_address": "identity@example.com"},
+				"accounts": []map[string]any{{"id": 555, "name": "Token Corp", "product": "bc3"}},
+			})
+		case "/555/my/profile.json":
+			json.NewEncoder(w).Encode(map[string]any{"id": 51177542, "name": "Ada Lovelace", "email_address": "person@example.com"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: server.URL, CacheDir: t.TempDir()}
+	authMgr := auth.NewManager(cfg, nil)
+	authMgr.SetStore(auth.NewStore(filepath.Join(tmpDir, "basecamp")))
+	require.NoError(t, authMgr.GetStore().Save(config.NormalizeBaseURL(server.URL), &auth.Credentials{
+		AccessToken: "bc_at_stored", OAuthType: "bc5", ExpiresAt: 9999999999,
+	}))
+	buf := &bytes.Buffer{}
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: server.URL}, &peopleTestTokenProvider{}, basecamp.WithMaxRetries(1))
+	app := &appctx.App{
+		Config: cfg, Auth: authMgr, SDK: sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Ada Lovelace <identity@example.com> - 1 Basecamp account(s)", envelope.Summary)
+
+	creds, err := authMgr.GetStore().Load(authMgr.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "51177542", creds.UserID)
+	assert.Equal(t, "identity@example.com", creds.UserEmail, "the merged email is what gets stored")
+}

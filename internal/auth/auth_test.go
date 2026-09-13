@@ -1884,3 +1884,46 @@ func TestLoginLaunchpadVerifyRunsBeforeStore(t *testing.T) {
 	_, loadErr := m.store.Load(credKey)
 	assert.Error(t, loadErr, "a rejected token is never stored")
 }
+
+// TestSetUserIdentity_EmptyValuesAreOmissions: an authorization document
+// that names only an identity id must not blank the name a login stored.
+func TestSetUserIdentity_EmptyValuesAreOmissions(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	m := &Manager{cfg: config.Default(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "tok", OAuthType: "bc5", UserID: "1", UserEmail: "kept@example.com",
+	}))
+
+	require.NoError(t, m.SetUserEmail(""))
+	require.NoError(t, m.SetUserIdentity("", ""))
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "1", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail)
+
+	require.NoError(t, m.SetUserIdentity("2", ""))
+	creds, err = m.store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "2", creds.UserID)
+	assert.Equal(t, "kept@example.com", creds.UserEmail, "an omitted email leaves the stored one")
+
+	require.NoError(t, m.SetUserEmail("new@example.com"))
+	assert.Equal(t, "new@example.com", m.GetUserEmail())
+}
+
+// TestSetUserIdentity_WritesUnderEnvToken: a login records who its new
+// credential verified as whatever BASECAMP_TOKEN holds; the environment
+// token is the caller's concern (me skips the write), not this method's.
+func TestSetUserIdentity_WritesUnderEnvToken(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+	m := &Manager{cfg: config.Default(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{AccessToken: "tok", OAuthType: "bc5"}))
+
+	require.NoError(t, m.SetUserIdentity("2", "who@example.com"))
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "2", creds.UserID)
+	assert.Equal(t, "who@example.com", creds.UserEmail)
+}
