@@ -1292,3 +1292,27 @@ func TestDiscoverOAuth_PinnedIssuerIsSanitizedForTheTerminal(t *testing.T) {
 	assert.NotContains(t, err.Error(), "\u0085")
 	assert.NotContains(t, cl.joined(), "\u0085")
 }
+
+// TestLoginDevice_CancelDuringVerifyStoresNothing: a cancel that lands after
+// the token was issued but before it is stored — Ctrl-C in the same instant
+// the approval completes — must not save the credential, even though a
+// non-strict verifier answers a canceled request with nil.
+func TestLoginDevice_CancelDuringVerifyStoresNothing(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := m.Login(ctx, LoginOptions{
+		NoBrowser:     true,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify: func(context.Context, string, string) error {
+			cancel()
+			return nil
+		},
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	_, loadErr := m.store.Load(config.NormalizeBaseURL(resource.URL))
+	require.Error(t, loadErr, "a canceled login stores nothing")
+}

@@ -419,6 +419,11 @@ func (o *LoginOptions) defaults() {
 	// --device-code) gets the link without commentary. --local is the
 	// person's word that the browser is right here and wins over the host
 	// heuristics.
+	//
+	// A headless host is also a remote one: the link is going to be opened
+	// on some other device, so a Launchpad login must take the pasted
+	// callback rather than listen on this host's loopback, which that
+	// device could never reach.
 	switch {
 	case o.NoBrowser, o.Remote && !autoRemote:
 		o.NoBrowser = true
@@ -426,7 +431,7 @@ func (o *LoginOptions) defaults() {
 		o.NoBrowser, o.headlessReason = true, "BASECAMP_NONINTERACTIVE is set"
 	case !o.Local:
 		if reason := hostutil.HeadlessReason(); reason != "" {
-			o.NoBrowser, o.headlessReason = true, reason
+			o.NoBrowser, o.Remote, o.headlessReason = true, true, reason
 		}
 	}
 	if o.BrowserLauncher == nil && !o.NoBrowser {
@@ -648,10 +653,8 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
 	creds.Scope = ""
 
-	if opts.Verify != nil {
-		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeLaunchpad); err != nil {
-			return nil, err
-		}
+	if err := verifyBeforeStore(ctx, opts, creds.AccessToken, oauthTypeLaunchpad); err != nil {
+		return nil, err
 	}
 	if err := m.store.Save(credKey, creds); err != nil {
 		return nil, err
@@ -809,16 +812,32 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	if opts.Verify != nil {
-		if err := opts.Verify(ctx, creds.AccessToken, oauthTypeBC5); err != nil {
-			return nil, err
-		}
+	if err := verifyBeforeStore(ctx, opts, creds.AccessToken, oauthTypeBC5); err != nil {
+		return nil, err
 	}
 	if err := m.store.Save(credKey, creds); err != nil {
 		return nil, err
 	}
 
 	return &LoginResult{OAuthType: oauthTypeBC5, Scope: effectiveScope}, nil
+}
+
+// verifyBeforeStore runs the caller's Verify hook and refuses to let a
+// canceled login reach the store. The token arrives from the flow after
+// the person may already have pressed Ctrl-C — the poll or exchange can
+// complete in the same instant — and a non-strict verifier answers a
+// canceled request with nil, so without this check a login the person
+// stopped would still be saved and announced as a success.
+func verifyBeforeStore(ctx context.Context, opts *LoginOptions, accessToken, oauthType string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if opts.Verify != nil {
+		if err := opts.Verify(ctx, accessToken, oauthType); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
 }
 
 // validVerificationURL validates a server-supplied verification URI with the

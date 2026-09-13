@@ -385,10 +385,7 @@ named profile, creating the profile when --account is given.
 	}
 
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
-	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the link instead of opening a browser")
-	cmd.Flags().BoolVar(&remote, "remote", false, "Treat this as a remote session: print the link, and paste the callback URL back when the server has no device flow (auto-detected over SSH)")
-	cmd.Flags().BoolVar(&local, "local", false, "Treat this as a local session: open the browser here even over SSH, in CI, or without a display")
-	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Print a link and one-time code to approve from any device; never opens a browser here")
+	registerLoginFlowFlags(cmd, &noBrowser, &remote, &local, &deviceCode)
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin instead of running OAuth (requires --profile)")
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
 	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as on the device-flow approval page (ignored by Launchpad)")
@@ -399,6 +396,17 @@ named profile, creating the profile when --account is given.
 	}
 
 	return cmd
+}
+
+// registerLoginFlowFlags declares the flags that choose how the OAuth flow
+// reaches a browser, once, for every command that runs a login (auth login,
+// profile create): their help text is the one place the headless behavior
+// is described, so the two commands must not drift.
+func registerLoginFlowFlags(cmd *cobra.Command, noBrowser, remote, local, deviceCode *bool) {
+	cmd.Flags().BoolVar(noBrowser, "no-browser", false, "Print the link instead of opening a browser")
+	cmd.Flags().BoolVar(remote, "remote", false, "Treat this as a remote session: print the link without opening a browser, and paste the callback URL back when the server has no device flow (auto-detected over SSH, in CI, and without a display)")
+	cmd.Flags().BoolVar(local, "local", false, "Treat this as a local session: open the browser here even over SSH, in CI, or without a display")
+	cmd.Flags().BoolVar(deviceCode, "device-code", false, "Print a link and one-time code to approve from any device, never opening a browser here (Launchpad has no device flow: paste the callback URL back instead)")
 }
 
 // loginContext derives the context an interactive login waits under: Ctrl-C

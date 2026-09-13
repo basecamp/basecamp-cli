@@ -1886,3 +1886,27 @@ func TestLoginLaunchpadVerifyRunsBeforeStore(t *testing.T) {
 	_, loadErr := m.store.Load(credKey)
 	assert.Error(t, loadErr, "a rejected token is never stored")
 }
+
+// TestLoginLaunchpad_HeadlessHostTakesThePastedCallback: a host that cannot
+// show a browser (here a CI runner) is also one whose loopback the browser
+// on another device could never reach, so the Launchpad flow must ask for
+// the pasted callback URL rather than listen.
+func TestLoginLaunchpad_HeadlessHostTakesThePastedCallback(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("CI", "true")
+
+	opts := LoginOptions{}
+	opts.defaults()
+	assert.True(t, opts.Remote, "a headless host pastes the callback")
+	assert.True(t, opts.NoBrowser)
+	assert.Equal(t, "CI environment", opts.headlessReason)
+
+	local := LoginOptions{Local: true}
+	local.defaults()
+	assert.False(t, local.Remote, "--local keeps the loopback listener")
+	assert.False(t, local.NoBrowser)
+}
