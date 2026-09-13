@@ -4,6 +4,7 @@ package auth
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -170,6 +171,21 @@ func (m *Manager) errAuth(msg string) *output.Error {
 	return e
 }
 
+// hintLogin gives an auth_required error that carries no remedy, or only
+// the profile-less default, the login naming the active profile; every
+// other error passes through unchanged. The error is copied rather than
+// rewritten: a lane client's setup error is cached and returned to every
+// later caller.
+func (m *Manager) hintLogin(err error) error {
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != output.CodeAuth || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
+		return err
+	}
+	hinted := *e
+	hinted.Hint = m.LoginHint()
+	return &hinted
+}
+
 // AccessToken returns a valid access token, refreshing if needed.
 // If BASECAMP_TOKEN env var is set, it's used directly without OAuth.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
@@ -320,7 +336,16 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 	return false
 }
 
+// refreshLocked rotates the stored credential under the manager lock. The
+// credential is the active profile's, so whatever auth-class failure the
+// refresh hits — an unusable stored endpoint, a half-configured OAuth
+// client, a refused grant — the remedy is the login that writes that
+// profile's credential, not the bare one.
 func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Credentials) error {
+	return m.hintLogin(m.refreshCredential(ctx, origin, creds))
+}
+
+func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *Credentials) error {
 	if creds.RefreshToken == "" {
 		return m.errAuth("No refresh token available")
 	}

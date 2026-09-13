@@ -118,7 +118,7 @@ func ErrAuth(msg string) *Error {
 	return &Error{
 		Code:    CodeAuth,
 		Message: msg,
-		Hint:    "Run: basecamp auth login",
+		Hint:    DefaultAuthHint,
 	}
 }
 

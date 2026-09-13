@@ -2106,3 +2106,57 @@ func TestLoginCommand_QuotesTheProfile(t *testing.T) {
 		assert.Equal(t, want, m.LoginCommand(), "profile %q", name)
 	}
 }
+
+// profiledRefresh is a Manager whose active profile holds the given
+// credential, for refresh failures that never reach a token endpoint.
+func profiledRefresh(t *testing.T, creds *Credentials) (*Manager, string) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.ActiveProfile = "work"
+	m := &Manager{cfg: cfg, httpClient: &http.Client{}, store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+	require.NoError(t, m.store.Save(key, creds))
+	return m, key
+}
+
+// TestRefresh_UnsafeTokenEndpointHintsTheProfile: a stored endpoint the
+// refresh refuses to POST to is an auth failure of the profile's
+// credential, and its remedy names the profile like the refused-grant path
+// does; the credential is kept, since nothing was learned about the grant.
+func TestRefresh_UnsafeTokenEndpointHintsTheProfile(t *testing.T) {
+	m, key := profiledRefresh(t, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: "bc5",
+		TokenEndpoint: "https://user@evil.example/oauth/tokens",
+	})
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "invalid token endpoint")
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.Equal(t, "old-ref", creds.RefreshToken)
+}
+
+// TestRefresh_HalfConfiguredClientHintsTheProfile: a Launchpad refresh
+// with only one of the OAuth client variables set fails before any request,
+// and that failure also names the profile.
+func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+	m, _ := profiledRefresh(t, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: oauthTypeLaunchpad,
+		TokenEndpoint: "https://launchpad.example/authorization/token",
+	})
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_SECRET is required")
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+}
