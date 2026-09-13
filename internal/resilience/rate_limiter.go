@@ -1,7 +1,11 @@
 package resilience
 
 import (
+	"context"
+	"fmt"
 	"time"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
 // RateLimiter implements the token bucket algorithm with cross-process persistence.
@@ -61,15 +65,22 @@ func (rl *RateLimiter) refill(state *RateLimiterState, now time.Time) {
 // Returns true if the request can proceed, false if it should be rejected.
 // On success, consumes tokens from the bucket.
 func (rl *RateLimiter) Allow() (bool, error) {
-	var allowed bool
+	allowed, _, _ := rl.take()
+	return allowed, nil
+}
 
+// take is one non-blocking pass through the bucket. When the request is not
+// allowed, wait is how long until it could be: the remainder of a Retry-After
+// block (blocked is true) or the refill time for the missing tokens. A store
+// error allows the request (fail open), as every primitive here does.
+func (rl *RateLimiter) take() (allowed bool, wait time.Duration, blocked bool) {
 	err := rl.store.Update(func(state *State) error {
 		rlState := &state.RateLimiter
 		now := rl.now()
 
 		// Check Retry-After block
 		if rlState.IsBlocked() {
-			allowed = false
+			allowed, blocked, wait = false, true, rlState.BlockedFor()
 			return nil
 		}
 
@@ -79,7 +90,8 @@ func (rl *RateLimiter) Allow() (bool, error) {
 			rlState.Tokens -= rl.config.TokensPerRequest
 			allowed = true
 		} else {
-			allowed = false
+			deficit := rl.config.TokensPerRequest - rlState.Tokens
+			allowed, wait = false, time.Duration(deficit/rl.config.RefillRate*float64(time.Second))
 		}
 
 		state.UpdatedAt = now
@@ -87,11 +99,52 @@ func (rl *RateLimiter) Allow() (bool, error) {
 	})
 
 	if err != nil {
-		// On error, allow the request (fail open)
-		return true, nil //nolint:nilerr // Intentional fail-open: allow request when state cannot be updated
+		return true, 0, false
 	}
 
-	return allowed, nil
+	return allowed, wait, blocked
+}
+
+// minRefillWait floors the sleep between token attempts: a deficit of a few
+// microseconds is not worth a wakeup, and under contention the refill is
+// consumed by whichever process reaches the lock first anyway.
+const minRefillWait = 5 * time.Millisecond
+
+// Wait consumes tokens for one request, sleeping for refills or for a
+// Retry-After block to lift, until deadline. It returns nil when the request
+// may proceed, a *GateError when the deadline would pass first, or ctx.Err().
+// A Retry-After block that outlasts the deadline is reported immediately
+// rather than waited on, with the remaining time in the message.
+func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
+	start := rl.now()
+	for {
+		allowed, wait, blocked := rl.take() //nolint:contextcheck // lock acquisition is context-independent by design
+		if allowed {
+			return nil
+		}
+		remaining := deadline.Sub(rl.now())
+		if wait > remaining {
+			return rl.gateError(blocked, wait, rl.now().Sub(start))
+		}
+		if err := pause(ctx, jittered(max(wait, minRefillWait))); err != nil {
+			return err
+		}
+	}
+}
+
+func (rl *RateLimiter) gateError(blocked bool, wait, waited time.Duration) *GateError {
+	if blocked {
+		return &GateError{
+			Message:  fmt.Sprintf("Rate limited by the server; retry after %s", wait.Round(time.Second)),
+			Hint:     fmt.Sprintf("Wait %s, then re-run.", wait.Round(time.Second)),
+			sentinel: basecamp.ErrRateLimited,
+		}
+	}
+	return &GateError{
+		Message:  fmt.Sprintf("Too many requests (client limit %g/s); waited %s", rl.config.RefillRate, waited.Round(time.Second)),
+		Hint:     "Re-run, or lower parallelism.",
+		sentinel: basecamp.ErrRateLimited,
+	}
 }
 
 // SetRetryAfter sets a block until the given time due to a 429 response.

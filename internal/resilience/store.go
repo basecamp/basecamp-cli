@@ -77,7 +77,15 @@ func (s *Store) lockPath() string {
 
 // LockTimeout is the maximum time to wait for acquiring the file lock.
 // If exceeded, operations proceed without locking (fail-open) to avoid CLI hangs.
-const LockTimeout = 100 * time.Millisecond
+//
+// The lock is held only for one read-modify-write of a small JSON file, so
+// a wait this long means the holder is wedged (NFS, a stopped process), not
+// busy. The budget has to cover a queue of parallel invocations all polling
+// the state file on a slow disk: a process that times out falls open and
+// writes back a stale copy, which can resurrect a slot another live process
+// had just released. TestStoreLockContentionDoesNotLoseReleases shows that
+// loss once the budget is squeezed to a millisecond.
+const LockTimeout = 2 * time.Second
 
 // fileLock represents an acquired file lock.
 type fileLock struct {

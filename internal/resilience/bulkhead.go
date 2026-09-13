@@ -1,8 +1,12 @@
 package resilience
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"time"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
 // Bulkhead implements the bulkhead pattern with cross-process persistence.
@@ -80,6 +84,34 @@ func (b *Bulkhead) Acquire() (bool, error) {
 	}
 
 	return acquired, nil
+}
+
+// slotPoll is the base interval between slot attempts while queued. A slot
+// frees when another process finishes its operation, which is network-bound,
+// so tens of milliseconds is fine-grained enough without hammering the lock.
+const slotPoll = 25 * time.Millisecond
+
+// Wait acquires a slot, polling with jitter until deadline. It returns nil
+// once the slot is held (Acquire fails open on a store error), a *GateError
+// when the deadline passes first, or ctx.Err().
+func (b *Bulkhead) Wait(ctx context.Context, deadline time.Time) error {
+	start := b.now()
+	for {
+		if acquired, _ := b.Acquire(); acquired { //nolint:contextcheck // lock acquisition is context-independent by design
+			return nil
+		}
+		remaining := deadline.Sub(b.now())
+		if remaining <= 0 {
+			return &GateError{
+				Message:  fmt.Sprintf("Too many concurrent basecamp processes (limit %d); waited %s", b.config.MaxConcurrent, b.now().Sub(start).Round(time.Second)),
+				Hint:     "Re-run, or lower parallelism.",
+				sentinel: basecamp.ErrBulkheadFull,
+			}
+		}
+		if err := pause(ctx, min(jittered(slotPoll), remaining)); err != nil {
+			return err
+		}
+	}
 }
 
 // Release releases the slot held by this process.

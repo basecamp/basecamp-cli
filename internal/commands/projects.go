@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 // NewProjectsCmd creates the projects command group.
@@ -431,6 +432,17 @@ func newProjectsDeleteCmd() *cobra.Command {
 func convertSDKError(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	// A gate that queued and gave up says which limit, how long, and what to do
+	var gateErr *resilience.GateError
+	if errors.As(err, &gateErr) {
+		return &output.Error{
+			Code:      basecamp.CodeRateLimit,
+			Message:   gateErr.Message,
+			Hint:      gateErr.Hint,
+			Retryable: true,
+		}
 	}
 
 	// Handle resilience sentinel errors (use errors.Is for wrapped errors)
