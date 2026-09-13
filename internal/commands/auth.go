@@ -64,7 +64,8 @@ and where it is stored.
 
 Nothing is fetched unless --check is given, which makes one authenticated
 request (the same authorization lookup "basecamp me" makes) and reports
-whether the server still accepts the token: "valid" in the JSON data.
+whether the server accepts the token the CLI would send — BASECAMP_TOKEN
+when it is set, otherwise the stored login: "valid" in the JSON data.
 
 Exits 0 whether or not you are logged in; scripts read "authenticated" from
 the JSON envelope. When nothing is stored, the output names the login
@@ -111,25 +112,29 @@ command to run (the envelope's "notice").`,
 			if report.data["authenticated"] == true {
 				headline = r.Success
 			}
-			fmt.Fprintln(w, headline.Render(richtext.SanitizeSingleLine(report.summary)))
+			lines := []string{headline.Render(richtext.SanitizeSingleLine(report.summary))}
 			for _, line := range report.details {
-				fmt.Fprintln(w, r.Muted.Render("  "+richtext.SanitizeSingleLine(line)))
+				lines = append(lines, r.Muted.Render("  "+richtext.SanitizeSingleLine(line)))
 			}
 			if report.hint != "" {
-				fmt.Fprintln(w, r.Data.Render("  "+richtext.SanitizeSingleLine(report.hint)))
+				lines = append(lines, r.Data.Render("  "+richtext.SanitizeSingleLine(report.hint)))
 			}
 			if app.Flags.Stats && !app.Flags.NoStats && app.Collector != nil {
 				stats := app.Collector.Summary()
 				if parts := stats.FormatParts(); len(parts) > 0 {
-					fmt.Fprintln(w)
-					fmt.Fprintln(w, r.Muted.Render(strings.Join(parts, " · ")))
+					lines = append(lines, "", r.Muted.Render(strings.Join(parts, " · ")))
+				}
+			}
+			for _, line := range lines {
+				if _, err := fmt.Fprintln(w, line); err != nil {
+					return err
 				}
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVar(&check, "check", false, "Ask the server whether the stored token is still accepted (one authenticated request)")
+	cmd.Flags().BoolVar(&check, "check", false, "Ask the server whether the active token (BASECAMP_TOKEN, else the stored login) is accepted (one authenticated request)")
 
 	return cmd
 }
