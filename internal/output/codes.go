@@ -40,6 +40,16 @@ const (
 	ExitLimit      = 10 // Account limit reached (507)
 )
 
+// CodeInterrupted marks a command the person stopped with Ctrl-C after it
+// had started waiting on them (a login waiting for approval). The command
+// has already said what happened on its own terms, so the root renders
+// nothing more and exits with the shell's conventional status for a
+// SIGINT-terminated process.
+const (
+	CodeInterrupted = "interrupted"
+	ExitInterrupted = 130
+)
+
 // ExitCodeFor returns the exit code for a given error code.
 func ExitCodeFor(code string) int {
 	switch code {
@@ -47,6 +57,8 @@ func ExitCodeFor(code string) int {
 		return ExitValidation
 	case CodeLimitExceeded:
 		return ExitLimit
+	case CodeInterrupted:
+		return ExitInterrupted
 	}
 	return clioutput.ExitCodeFor(code)
 }

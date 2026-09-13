@@ -246,6 +246,8 @@ func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 
 	// No protected-resource metadata (404) → Launchpad fallback, pointed at
 	// this server. The token endpoint is never reached.
@@ -285,6 +287,40 @@ func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
 	require.Error(t, err, "EOF on the paste prompt must abort the login")
 	assert.Contains(t, err.Error(), "no input received",
 		"--device-code must select the remote paste-callback flow")
+}
+
+// TestProfileCreateRefusesMachineOutput: the login transcript and the live
+// wait line share stdout with the envelope, so an explicit machine-output
+// flag refuses the flow before discovery, as auth login does.
+func TestProfileCreateRefusesMachineOutput(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("no request may be made under a machine output mode: %s", r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{BaseURL: srv.URL, CacheDir: t.TempDir(), Sources: make(map[string]string)}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+	app.Flags.JSON = true
+
+	root := &cobra.Command{Use: "basecamp"}
+	root.AddCommand(NewProfileCmd())
+	root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", srv.URL})
+	root.SetContext(appctx.WithApp(context.Background(), app))
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+
+	err := root.Execute()
+	require.Error(t, err)
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Message, "machine output mode")
 }
 
 // TestProfileCreateRefusesNonInteractiveEnv: profile create runs the same
@@ -1277,6 +1313,8 @@ func TestProfileCreateExpectIdentityCreatesNothingOnMismatch(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "")
 	t.Setenv("SSH_CLIENT", "")
 	t.Setenv("SSH_TTY", "")
+	t.Setenv("CI", "")
+	t.Setenv("DISPLAY", ":0")
 	create := func(expect string) error {
 		return executeProfileCommand(NewProfileCmd(), app, "create", "bot", "--base-url", srv.srv.URL, "--account", "999", "--device-code", "--expect-identity", expect)
 	}

@@ -3,12 +3,15 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -261,9 +264,16 @@ func buildLoginCmd(use string) *cobra.Command {
 		Short: "Authenticate with Basecamp",
 		Long: `Start the OAuth flow to authenticate with Basecamp, or import a personal access token.
 
+Against Basecamp's own authorization server the flow prints a link and a
+one-time code, opens the link in your browser, and waits for you to approve it
+(a Launchpad server signs you in through a browser callback instead). Over SSH,
+in CI, or on a host with no display the browser is skipped and the link is yours
+to open on any device — your phone included; --local forces a launch anyway,
+--no-browser skips it. Ctrl-C cancels the wait.
+
 Examples:
   basecamp auth login                              # Browser (or device) flow
-  basecamp auth login --device-code                # Headless: approve the printed code elsewhere
+  basecamp auth login --device-code                # Headless: approve the printed code from any device
   basecamp auth login --expect-identity 12345      # Refuse the login unless it is this identity
 
 Import a personal access token from stdin (never pass it as an argument):
@@ -298,11 +308,8 @@ named profile, creating the profile when --account is given.
 			if app.Flags.JQFilter != "" {
 				return output.ErrJQNotSupported("the login command")
 			}
-			if machineOutputFlagSet(app) {
-				return output.ErrUsageHint("Interactive login cannot run under a machine output mode",
-					"Browser and device logins print instructions and wait for approval, which no envelope can carry. "+
-						"Check credentials with `basecamp auth status`, or import a token headlessly: "+
-						"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
+			if err := refuseMachineOutputLogin(app); err != nil {
+				return err
 			}
 			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
 				return err
@@ -338,15 +345,19 @@ named profile, creating the profile when --account is given.
 			// checked before it is stored, and a mismatch stores nothing.
 			// Without one the identity line stays informational.
 			verifier := &loginVerifier{app: app, expectIdentity: expect, account: app.Config.AccountID, strict: expect != 0}
-			result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
+			ctx, stop := loginContext(cmd)
+			result, err := app.Auth.Login(ctx, auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
 				Remote:    remote,
 				Local:     local,
 				LoginHint: loginHint,
 				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
+				Progress:  w,
 				Verify:    verifier.verify,
 			})
+			err = loginOutcome(ctx, err, w, r)
+			stop()
 			if err != nil {
 				return err
 			}
@@ -372,10 +383,7 @@ named profile, creating the profile when --account is given.
 	}
 
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
-	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
-	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
-	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
-	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
+	registerLoginFlowFlags(cmd, &noBrowser, &remote, &local, &deviceCode)
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin instead of running OAuth (requires --profile)")
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
 	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as on the device-flow approval page (ignored by Launchpad)")
@@ -386,6 +394,43 @@ named profile, creating the profile when --account is given.
 	}
 
 	return cmd
+}
+
+// registerLoginFlowFlags declares the flags that choose how the OAuth flow
+// reaches a browser, once, for every command that runs a login (auth login,
+// profile create): their help text is the one place the headless behavior
+// is described, so the two commands must not drift.
+func registerLoginFlowFlags(cmd *cobra.Command, noBrowser, remote, local, deviceCode *bool) {
+	cmd.Flags().BoolVar(noBrowser, "no-browser", false, "Print the link instead of opening a browser")
+	cmd.Flags().BoolVar(remote, "remote", false, "Treat this as a remote session: print the link without opening a browser, and paste the callback URL back when the server has no device flow (auto-detected over SSH, in CI, and without a display)")
+	cmd.Flags().BoolVar(local, "local", false, "Treat this as a local session: open the browser here even over SSH, in CI, or without a display")
+	cmd.Flags().BoolVar(deviceCode, "device-code", false, "Print a link and one-time code to approve from any device, never opening a browser here (Launchpad has no device flow: paste the callback URL back instead)")
+}
+
+// loginContext derives the context an interactive login waits under: Ctrl-C
+// (and a SIGTERM) cancels it instead of killing the process mid-line, so
+// the flow can put the terminal back — clear the live wait line, close the
+// loopback listener, stop polling — and say it was canceled. The stop
+// function must run as soon as Login returns, after loginOutcome has read
+// the context: stopping cancels the context too, and while the handler is
+// registered a signal is swallowed instead of ending whatever the command
+// does next.
+func loginContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+}
+
+// loginOutcome turns the result of Login into the error the root will
+// render. A login the person canceled is not a failure: the human line goes
+// to the terminal here and the error carries the interrupted code, which
+// the root exits with silently. Everything else, nil included, is returned
+// as it came.
+func loginOutcome(ctx context.Context, err error, w io.Writer, r *output.Renderer) error {
+	if err == nil || !errors.Is(ctx.Err(), context.Canceled) {
+		return err
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, r.Muted.Render("Login canceled. Nothing was stored."))
+	return output.ErrInterrupted("login canceled")
 }
 
 // runLoginWithToken imports a personal access token from stdin as the
@@ -640,6 +685,21 @@ func refuseNonInteractiveLogin(deviceCode bool) error {
 			"Import a token headlessly: `... | basecamp auth login --with-token -P <profile> --account <id>`; "+
 			"pass --device-code where the server offers the device flow (Launchpad does not) to approve the printed code from any device; "+
 			"or check credentials with `basecamp auth status`.")
+}
+
+// refuseMachineOutputLogin is the output half of the login gate, shared by
+// every command that runs an OAuth flow: the transcript and the live wait
+// line go to stdout, which a machine-output envelope also owns, so a
+// login under --json would write prose and control sequences ahead of the
+// envelope.
+func refuseMachineOutputLogin(app *appctx.App) error {
+	if !machineOutputFlagSet(app) {
+		return nil
+	}
+	return output.ErrUsageHint("Interactive login cannot run under a machine output mode",
+		"Browser and device logins print instructions and wait for approval, which no envelope can carry. "+
+			"Check credentials with `basecamp auth status`, or import a token headlessly: "+
+			"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
 }
 
 // machineOutputFlagSet reports whether an explicit output flag asked for a

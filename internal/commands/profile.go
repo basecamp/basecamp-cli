@@ -246,6 +246,9 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
+			if err := refuseMachineOutputLogin(app); err != nil {
+				return err
+			}
 			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
 				return err
 			}
@@ -277,15 +280,20 @@ Examples:
 			// With an expectation the credential is checked before it is
 			// stored and a mismatch stores nothing; without one the
 			// identity lookup stays informational.
+			w := cmd.OutOrStdout()
 			verifier := &loginVerifier{app: app, expectIdentity: expect, account: accountID, strict: expect != 0}
-			loginResult, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
+			ctx, stop := loginContext(cmd)
+			loginResult, err := app.Auth.Login(ctx, auth.LoginOptions{
 				Scope:     scope,
 				NoBrowser: noBrowser,
 				Remote:    remote,
 				Local:     local,
-				Logger:    func(msg string) { fmt.Println(msg) },
+				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
+				Progress:  w,
 				Verify:    verifier.verify,
 			})
+			err = loginOutcome(ctx, err, w, output.NewRenderer(w, false))
+			stop()
 			if err != nil {
 				// Restore in-memory state
 				delete(app.Config.Profiles, name)
@@ -330,10 +338,7 @@ Examples:
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Basecamp API base URL (default: https://3.basecampapi.com)")
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
 	cmd.Flags().StringVar(&accountID, "account", "", "Account ID")
-	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically")
-	cmd.Flags().BoolVar(&remote, "remote", false, "Force remote/headless mode (paste callback URL instead of local listener)")
-	cmd.Flags().BoolVar(&local, "local", false, "Force local mode (override SSH auto-detection)")
-	cmd.Flags().BoolVar(&deviceCode, "device-code", false, "Headless authentication with manual browser instructions")
+	registerLoginFlowFlags(cmd, &noBrowser, &remote, &local, &deviceCode)
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise create nothing")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")

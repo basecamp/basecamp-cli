@@ -380,20 +380,20 @@ func TestShowFastAuthenticationStart(t *testing.T) {
 	prefix := showAuthenticationStart(&buf, styles, false)
 	log := authenticationLogger(&buf, prefix)
 	log("Authenticating via launchpad (https://launchpad.37signals.com/authorization/new)")
-	log("\nOpening browser for authentication...")
+	log("Opening your browser… If nothing appears, open the link above.")
 
 	assert.Empty(t, prefix)
-	assert.Equal(t, "Opening browser for Basecamp login...\n", buf.String())
+	assert.Equal(t, "Opening your browser… If nothing appears, open the link above.\n", buf.String(),
+		"the discovery line is dropped; the flow's own browser line is the only one")
 	assert.NotContains(t, buf.String(), "Step 1")
 	assert.NotContains(t, buf.String(), "launchpad")
-	assert.NotContains(t, buf.String(), "Opening browser for authentication")
 
 	var deviceFlow bytes.Buffer
 	deviceLog := authenticationLogger(&deviceFlow, "")
 	deviceLog("Authenticating via https://3.basecampapi.com (device flow)")
-	deviceLog("\nOpening browser for authentication...")
+	deviceLog("Opening your browser… If nothing appears, open the link above.")
 	assert.Contains(t, deviceFlow.String(), "Authenticating via https://3.basecampapi.com (device flow)")
-	assert.Contains(t, deviceFlow.String(), "Opening browser for authentication")
+	assert.Contains(t, deviceFlow.String(), "Opening your browser")
 }
 
 func TestShowFastSuccess(t *testing.T) {
