@@ -834,6 +834,9 @@ func buildLogoutCmd(use string) *cobra.Command {
 		Use:   use,
 		Short: "Log out and revoke the credential",
 		Long:  "Revoke the current credential with the server when it can be, and remove it from local storage.",
+		// A stray argument (`auth logout work`, meant as a profile name) must
+		// not revoke the selected credential instead: select with --profile.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {

@@ -165,8 +165,11 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 		// retryable, a refusal does not — under the revocation's own message
 		// and remedy.
 		e := *output.AsError(err)
-		e.Message = "could not revoke the token server-side: " + e.Message + "; the credential is kept so you can retry"
-		e.Hint = "Retry: basecamp auth revoke — or forget it locally: basecamp auth logout"
+		e.Message = "could not revoke the token server-side: " + e.Message + "; the credential is kept"
+		e.Hint = "Forget it locally: basecamp auth logout"
+		if e.Retryable {
+			e.Hint = "Retry: basecamp auth revoke — or forget it locally: basecamp auth logout"
+		}
 		e.Cause = err
 		return &e
 	}
@@ -321,10 +324,17 @@ func (m *Manager) revocationEndpoint(ctx context.Context, client *http.Client, i
 	}
 
 	var doc struct {
+		Issuer             string `json:"issuer"`
 		RevocationEndpoint string `json:"revocation_endpoint"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxRevocationBodyBytes)).Decode(&doc); err != nil {
 		return "", fmt.Errorf("parsing authorization server metadata: %w", err)
+	}
+	// Bind the document to the issuer it was fetched for (RFC 8414 §3.3),
+	// as login discovery does: the GET may follow redirects, and another
+	// server's perfectly valid metadata must not name where the tokens go.
+	if strings.TrimRight(doc.Issuer, "/") != issuer {
+		return "", errors.New("authorization server metadata names a different issuer")
 	}
 	if doc.RevocationEndpoint == "" {
 		return "", errors.New("authorization server advertises no revocation endpoint")

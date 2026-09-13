@@ -225,7 +225,9 @@ func TestAuthRevokeKeepsTheCredentialWhenItCannotRevoke(t *testing.T) {
 	err := runAuthSubcommand(t, app, "revoke")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not revoke the token server-side: authorization server metadata returned HTTP 404")
-	assert.Contains(t, output.AsError(err).Hint, "basecamp auth revoke")
+	assert.False(t, output.AsError(err).Retryable, "a 404 will not change on retry")
+	assert.NotContains(t, output.AsError(err).Hint, "basecamp auth revoke", "no retry is advertised for a final refusal")
+	assert.Contains(t, output.AsError(err).Hint, "basecamp auth logout")
 	assert.Empty(t, s.revoked())
 	assert.True(t, app.Auth.IsAuthenticated(), "the credential stays for a retry")
 }
@@ -272,6 +274,24 @@ func TestAuthLogoutAndRevokeRefuseUnderEnvToken(t *testing.T) {
 			assert.NoError(t, loadErr, "the stored credential is left alone")
 		})
 	}
+}
+
+// `auth logout work` is a profile name where none is taken; it must not
+// revoke the selected credential instead.
+func TestAuthLogoutRefusesPositionalArguments(t *testing.T) {
+	s := startRevocationServer(t)
+	app, _ := newLogoutTestApp(t, s, output.FormatJSON, bc5LogoutCredentials(s))
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"logout", "work"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	require.Error(t, cmd.Execute())
+	assert.Empty(t, s.revoked())
+	assert.True(t, app.Auth.IsAuthenticated(), "the selected credential is untouched")
 }
 
 func TestAuthLogoutJSONCarriesTheReason(t *testing.T) {

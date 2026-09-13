@@ -128,6 +128,21 @@ func TestRevoke_RefusesAnInsecureRevocationEndpoint(t *testing.T) {
 	assert.Empty(t, as.revokeCalls())
 }
 
+// Metadata is bound to the issuer it was fetched for: a redirect to another
+// server's valid document must not decide where the tokens are POSTed.
+func TestRevoke_RefusesMetadataForAnotherIssuer(t *testing.T) {
+	as := startDeviceAS(t)
+	other := startDeviceAS(t)
+	as.metadata = func() string { return other.metadata() }
+	m := newDeviceTestManager(t, as.srv.URL)
+
+	err := m.Revoke(context.Background(), bc5Credentials(as))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "different issuer")
+	assert.Empty(t, as.revokeCalls())
+	assert.Empty(t, other.revokeCalls())
+}
+
 func TestRevoke_ReportsARefusalWithoutTheToken(t *testing.T) {
 	as := startDeviceAS(t)
 	as.revoke = func(int) (int, string) { return http.StatusServiceUnavailable, `{"error":"temporarily_unavailable"}` }
@@ -398,7 +413,7 @@ func TestRevokeStored_KeepsTheCredentialWhenTheServerRefuses(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not revoke the token server-side")
 	assert.Contains(t, err.Error(), "HTTP 503")
-	assert.Contains(t, err.Error(), "kept so you can retry")
+	assert.Contains(t, err.Error(), "the credential is kept")
 	assert.NotContains(t, err.Error(), "dev-ref")
 	assert.Contains(t, output.AsError(err).Hint, "basecamp auth revoke")
 	assert.True(t, output.AsError(err).Retryable, "a 503 is the server saying come back")
@@ -410,6 +425,8 @@ func TestRevokeStored_KeepsTheCredentialWhenTheServerRefuses(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, output.AsError(err).Retryable, "a 400 will not change on retry")
 	assert.Equal(t, output.CodeAPI, output.AsError(err).Code)
+	assert.NotContains(t, output.AsError(err).Hint, "auth revoke", "no retry is advertised for a final refusal")
+	assert.Contains(t, output.AsError(err).Hint, "basecamp auth logout")
 
 	as.revoke = func(int) (int, string) { return http.StatusTooManyRequests, `{"error":"rate_limited"}` }
 	err = m.RevokeStored(context.Background())
