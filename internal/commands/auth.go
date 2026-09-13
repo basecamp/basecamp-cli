@@ -300,7 +300,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	// A refresh token alone is not a refresh: the removed bc3 development
 	// flow's grants cannot be redeemed, and a BC5 credential without its
 	// token endpoint has nowhere to send one.
-	refreshable := creds.RefreshToken != "" && creds.OAuthType != "bc3" && !(creds.OAuthType == "bc5" && creds.TokenEndpoint == "")
+	refreshable := creds.RefreshToken != "" && creds.OAuthType != "bc3" && (creds.OAuthType != "bc5" || creds.TokenEndpoint != "")
 	report.storage = storage
 
 	report.data["authenticated"] = true
