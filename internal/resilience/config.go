@@ -6,6 +6,13 @@ import (
 
 // Config holds configuration for all resilience primitives.
 type Config struct {
+	// MaxWait bounds how long a gated operation queues for a rate-limiter
+	// token or a bulkhead slot before it is rejected. Parallel invocations
+	// of the CLI share one bucket and one slot table, so a burst that would
+	// otherwise fail fast waits its turn instead.
+	// Default: 10 seconds
+	MaxWait time.Duration
+
 	// CircuitBreaker configures the circuit breaker pattern.
 	CircuitBreaker CircuitBreakerConfig
 
@@ -67,6 +74,7 @@ type BulkheadConfig struct {
 // DefaultConfig returns a Config with sensible defaults for the Basecamp API.
 func DefaultConfig() *Config {
 	return &Config{
+		MaxWait: DefaultMaxWait,
 		CircuitBreaker: CircuitBreakerConfig{
 			FailureThreshold:    5,
 			SuccessThreshold:    2,

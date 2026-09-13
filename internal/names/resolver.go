@@ -689,6 +689,11 @@ func convertSDKError(err error) error {
 		return nil
 	}
 
+	// A gate that queued and gave up says which limit, how long, and what to do
+	if gateErr := output.AsGateError(err); gateErr != nil {
+		return gateErr
+	}
+
 	// Handle resilience sentinel errors (use errors.Is for wrapped errors)
 	if errors.Is(err, basecamp.ErrRateLimited) {
 		return &output.Error{

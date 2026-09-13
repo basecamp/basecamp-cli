@@ -26,14 +26,17 @@ type GatingHooks struct {
 	circuitBreaker *CircuitBreaker
 	rateLimiter    *RateLimiter
 	bulkhead       *Bulkhead
+	maxWait        time.Duration
 }
 
-// NewGatingHooks creates a new GatingHooks with the given primitives.
+// NewGatingHooks creates a new GatingHooks with the given primitives and the
+// default queueing bound.
 func NewGatingHooks(cb *CircuitBreaker, rl *RateLimiter, bh *Bulkhead) *GatingHooks {
 	return &GatingHooks{
 		circuitBreaker: cb,
 		rateLimiter:    rl,
 		bulkhead:       bh,
+		maxWait:        DefaultMaxWait,
 	}
 }
 
@@ -42,12 +45,19 @@ func NewGatingHooksFromConfig(store *Store, cfg *Config) *GatingHooks {
 	cb := NewCircuitBreaker(store, cfg.CircuitBreaker)
 	rl := NewRateLimiter(store, cfg.RateLimiter)
 	bh := NewBulkhead(store, cfg.Bulkhead)
-	return NewGatingHooks(cb, rl, bh)
+	hooks := NewGatingHooks(cb, rl, bh)
+	if cfg.MaxWait > 0 {
+		hooks.maxWait = cfg.MaxWait
+	}
+	return hooks
 }
 
 // OnOperationGate is called before OnOperationStart.
 // It checks rate limiter, bulkhead, and circuit breaker before allowing
-// the operation to proceed.
+// the operation to proceed. The rate limiter and bulkhead queue rather than
+// reject: parallel CLI invocations share both, and a burst that briefly
+// exceeds a limit waits its turn within one maxWait budget shared by the
+// two, failing with a *GateError only when the budget runs out.
 //
 // Gate order is important: rate limiter and bulkhead are checked BEFORE
 // circuit breaker because the circuit breaker reserves a half-open slot
@@ -61,19 +71,40 @@ func NewGatingHooksFromConfig(store *Store, cfg *Config) *GatingHooks {
 // Returns a context that should be used for the operation and an error
 // if the operation should be rejected.
 func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.OperationInfo) (context.Context, error) {
-	// Check rate limiter first (no state reservation, safe to reject)
+	// A canceled caller is answered before anything is read or reserved.
+	if err := ctx.Err(); err != nil {
+		return ctx, err
+	}
+
+	// An open circuit fails fast before any queueing: waiting for a token
+	// only to be refused by the breaker would defeat its purpose during an
+	// outage. Nothing is reserved here; the reserving check still runs last.
+	if h.circuitBreaker != nil && h.circuitBreaker.Tripped() {
+		return ctx, basecamp.ErrCircuitOpen
+	}
+
+	start := time.Now()
+	deadline := start.Add(h.maxWait)
+
+	// Rate limiter first: it queues for a refill and consumes a token on
+	// success, which is the only state it holds, so a later rejection wastes
+	// at most that token.
 	if h.rateLimiter != nil {
-		allowed, _ := h.rateLimiter.Allow() // Fail open on error
-		if !allowed {
-			return ctx, basecamp.ErrRateLimited
+		if err := h.rateLimiter.waitSince(ctx, start, deadline); err != nil {
+			return ctx, err
 		}
 	}
 
 	// Acquire bulkhead slot (PID-based, released in OnOperationEnd)
 	if h.bulkhead != nil {
-		acquired, _ := h.bulkhead.Acquire() // Fail open on error
-		if !acquired {
-			return ctx, basecamp.ErrBulkheadFull
+		if err := h.bulkhead.waitSince(ctx, start, deadline); err != nil {
+			return ctx, err
+		}
+		// A cancellation that landed while the slot was being taken must not
+		// go on to reserve a half-open attempt.
+		if err := ctx.Err(); err != nil {
+			_ = h.bulkhead.Release()
+			return ctx, err
 		}
 		// Store marker in context so OnOperationEnd knows to release the slot
 		ctx = context.WithValue(ctx, releaseKey{}, true)

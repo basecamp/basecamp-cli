@@ -7,6 +7,8 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	clioutput "github.com/basecamp/cli/output"
+
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 // Error is a structured error with code, message, and optional hint.
@@ -32,6 +34,9 @@ func ErrAmbiguous(resource string, matches []string) *Error {
 }
 
 func AsError(err error) *Error {
+	if gateErr := AsGateError(err); gateErr != nil {
+		return gateErr
+	}
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
 		message := err.Error()
@@ -51,6 +56,23 @@ func AsError(err error) *Error {
 		}
 	}
 	return clioutput.AsError(err)
+}
+
+// AsGateError converts a resilience gate rejection, which arrives through
+// any SDK operation, into the rate-limit error the user sees: the gate's own
+// message and hint (which limit, how long it waited, what to do), retryable.
+// Nil when err is not a gate rejection.
+func AsGateError(err error) *Error {
+	var gateErr *resilience.GateError
+	if !errors.As(err, &gateErr) {
+		return nil
+	}
+	return &Error{
+		Code:      CodeRateLimit,
+		Message:   gateErr.Message,
+		Hint:      gateErr.Hint,
+		Retryable: true,
+	}
 }
 
 // RequestID returns the SDK request ID carried by err, if present.

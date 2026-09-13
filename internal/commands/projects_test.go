@@ -2,13 +2,16 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +23,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 type mockProjectUpdateTransport struct {
@@ -189,4 +193,27 @@ func TestProjectsCreateErrorEnvelopeCarriesRetryable(t *testing.T) {
 			assert.Equal(t, tc.retryable, decoded["retryable"], "envelope: %s", buf.String())
 		})
 	}
+}
+
+// A gate that queued and gave up reaches the user with its own message and
+// hint (which limit, how long it waited, what to do) rather than the generic
+// sentinel wording, while keeping the rate-limit code and retryable flag.
+func TestConvertSDKErrorCarriesTheGateMessageAndHint(t *testing.T) {
+	store := resilience.NewStore(t.TempDir())
+	require.NoError(t, store.Update(func(state *resilience.State) error {
+		state.Bulkhead.ActivePIDs = []int{os.Getppid()}
+		return nil
+	}))
+	bh := resilience.NewBulkhead(store, resilience.BulkheadConfig{MaxConcurrent: 1})
+	gateErr := bh.Wait(context.Background(), time.Now())
+	require.Error(t, gateErr)
+
+	err := convertSDKError(fmt.Errorf("listing projects: %w", gateErr))
+
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Equal(t, basecamp.CodeRateLimit, outErr.Code)
+	assert.Equal(t, "Too many concurrent basecamp processes (limit 1); waited 0s", outErr.Message)
+	assert.Equal(t, "Re-run, or lower parallelism.", outErr.Hint)
+	assert.True(t, outErr.Retryable)
 }
