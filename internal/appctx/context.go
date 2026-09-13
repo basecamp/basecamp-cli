@@ -282,7 +282,7 @@ func (a *App) Err(err error) error {
 	}
 
 	// Print the error response
-	if outputErr := a.Output.Err(err, opts...); outputErr != nil {
+	if outputErr := a.Output.Err(a.withAuthRemedy(err), opts...); outputErr != nil {
 		return outputErr
 	}
 
@@ -292,6 +292,31 @@ func (a *App) Err(err error) error {
 		a.printStatsToStderr(&stats)
 	}
 	return nil
+}
+
+// withAuthRemedy replaces the generic login hint on an auth_required error
+// with one that fits the credential actually in play. A 401 is classified
+// far from the profile and the environment, so the SDK conversion can only
+// say "basecamp auth login": under an active profile that command would
+// store the new credential somewhere the failing command never reads, and
+// under BASECAMP_TOKEN no login changes what requests send. Errors whose
+// hint is already specific (the credential manager names the profile
+// itself) are left alone.
+func (a *App) withAuthRemedy(err error) error {
+	e := output.AsError(err)
+	if e.Code != output.CodeAuth || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
+		return err
+	}
+	hinted := *e
+	switch {
+	case os.Getenv("BASECAMP_TOKEN") != "":
+		hinted.Hint = "BASECAMP_TOKEN is set and every request uses it instead of a stored login; unset it, or export a token the server accepts"
+	case a.Auth != nil:
+		hinted.Hint = a.Auth.LoginHint()
+	default:
+		return err
+	}
+	return &hinted
 }
 
 // shouldIncludeStatsInError returns true if stats should be included in the error envelope.

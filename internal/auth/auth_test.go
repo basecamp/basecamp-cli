@@ -2019,3 +2019,70 @@ func TestRefresh_PreservesIdentityAndBinding(t *testing.T) {
 	assert.Equal(t, "urn:bc:account:999", creds.Resource)
 	assert.Equal(t, "bc5", creds.OAuthType)
 }
+
+// TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential: two
+// processes can refresh at once; when the other one has already saved the
+// rotated token, the refusal this one gets for reusing the old token must
+// not delete the fresh credential.
+func TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential(t *testing.T) {
+	var m *Manager
+	var key string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The other process wins the race while this request is in flight.
+		require.NoError(t, m.store.Save(key, &Credentials{
+			AccessToken: "rotated-tok", RefreshToken: "rotated-ref", OAuthType: "bc5",
+			TokenEndpoint: "http://" + r.Host + "/oauth/tokens", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		}))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+
+	m = &Manager{cfg: config.Default(), httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key = m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: "bc5",
+		TokenEndpoint: srv.URL + "/oauth/tokens", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr, "the rotated credential must survive")
+	assert.Equal(t, "rotated-ref", creds.RefreshToken)
+}
+
+// TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential: a Launchpad
+// refresh sends whichever client the environment names, and the server
+// also answers invalid_grant for a token issued to another client, so the
+// refusal is reported but the credential is not deleted.
+func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "custom-secret")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+
+	m := &Manager{cfg: config.Default(), httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: oauthTypeLaunchpad,
+		TokenEndpoint: srv.URL + "/authorization/token", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr, "a Launchpad refusal is not proof the grant is dead")
+	assert.Equal(t, "old-ref", creds.RefreshToken)
+}
