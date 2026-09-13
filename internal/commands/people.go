@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -93,14 +94,25 @@ func runMe(cmd *cobra.Command, args []string) error {
 	if (name == "" || email == "") && app.RequireAccount() == nil && authorizesAccount(authInfo, currentAccountID) {
 		if p, err := app.Account().People().Me(cmd.Context()); err == nil {
 			person = &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress}
-			name, email = p.Name, p.EmailAddress
+			// The person record fills gaps; a field the authorization document
+			// already named is kept when the record omits it.
+			if p.Name != "" {
+				name = p.Name
+			}
+			if p.EmailAddress != "" {
+				email = p.EmailAddress
+			}
 		}
 	}
 	// Stored for display purposes (non-fatal if it fails). Empty values are
-	// omissions and leave what a login stored in place.
-	if person != nil {
-		_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), person.Email)
-	} else {
+	// omissions and leave what a login stored in place. Under BASECAMP_TOKEN
+	// nothing is written: what was learned names the environment token's
+	// user, not whoever the stored credential belongs to.
+	switch {
+	case os.Getenv("BASECAMP_TOKEN") != "":
+	case person != nil:
+		_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), email)
+	default:
 		_ = app.Auth.SetUserEmail(email)
 	}
 

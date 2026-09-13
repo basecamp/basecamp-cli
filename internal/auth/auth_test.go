@@ -1912,20 +1912,18 @@ func TestSetUserIdentity_EmptyValuesAreOmissions(t *testing.T) {
 	assert.Equal(t, "new@example.com", m.GetUserEmail())
 }
 
-// TestSetUserIdentity_EnvTokenWritesNothing: under BASECAMP_TOKEN the
-// identity belongs to the environment token, so the stored credential is
-// left alone — the same rule SetUserEmail applies.
-func TestSetUserIdentity_EnvTokenWritesNothing(t *testing.T) {
+// TestSetUserIdentity_WritesUnderEnvToken: a login records who its new
+// credential verified as whatever BASECAMP_TOKEN holds; the environment
+// token is the caller's concern (me skips the write), not this method's.
+func TestSetUserIdentity_WritesUnderEnvToken(t *testing.T) {
 	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
 	m := &Manager{cfg: config.Default(), store: newTestStore(t, t.TempDir())}
 	key := m.credentialKey()
-	require.NoError(t, m.store.Save(key, &Credentials{
-		AccessToken: "tok", OAuthType: "bc5", UserID: "1", UserEmail: "kept@example.com",
-	}))
+	require.NoError(t, m.store.Save(key, &Credentials{AccessToken: "tok", OAuthType: "bc5"}))
 
-	require.NoError(t, m.SetUserIdentity("2", "other@example.com"))
+	require.NoError(t, m.SetUserIdentity("2", "who@example.com"))
 	creds, err := m.store.Load(key)
 	require.NoError(t, err)
-	assert.Equal(t, "1", creds.UserID)
-	assert.Equal(t, "kept@example.com", creds.UserEmail)
+	assert.Equal(t, "2", creds.UserID)
+	assert.Equal(t, "who@example.com", creds.UserEmail)
 }

@@ -1374,11 +1374,12 @@ func (m *Manager) SetUserEmail(email string) error {
 }
 
 // SetUserIdentity stores the user ID and email for the current credential
-// key. As with SetUserEmail, an empty value leaves the stored field alone,
-// and a BASECAMP_TOKEN session writes nothing: what it learned names the
-// environment token's user, not whoever the stored credential belongs to.
+// key. As with SetUserEmail, an empty value leaves the stored field alone.
+// Unlike it, BASECAMP_TOKEN does not suppress the write: a login stores
+// its new credential and then records who it verified as, whatever the
+// environment holds, so the caller decides whose identity this is.
 func (m *Manager) SetUserIdentity(userID, email string) error {
-	if os.Getenv("BASECAMP_TOKEN") != "" || (userID == "" && email == "") {
+	if userID == "" && email == "" {
 		return nil
 	}
 
