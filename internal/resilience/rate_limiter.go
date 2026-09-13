@@ -126,7 +126,7 @@ func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
 		if wait > remaining {
 			return rl.gateError(blocked, wait, rl.now().Sub(start))
 		}
-		if err := pause(ctx, jittered(max(wait, minRefillWait))); err != nil {
+		if err := pause(ctx, min(jittered(max(wait, minRefillWait)), remaining)); err != nil {
 			return err
 		}
 	}
@@ -134,9 +134,12 @@ func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
 
 func (rl *RateLimiter) gateError(blocked bool, wait, waited time.Duration) *GateError {
 	if blocked {
+		// Rounded up: a "retry after 40s" that is really 40.4s would send the
+		// re-run into the tail of the block.
+		retryAfter := ceilSeconds(wait)
 		return &GateError{
-			Message:  fmt.Sprintf("Rate limited by the server; retry after %s", wait.Round(time.Second)),
-			Hint:     fmt.Sprintf("Wait %s, then re-run.", wait.Round(time.Second)),
+			Message:  fmt.Sprintf("Rate limited by the server; retry after %s", retryAfter),
+			Hint:     fmt.Sprintf("Wait %s, then re-run.", retryAfter),
 			sentinel: basecamp.ErrRateLimited,
 		}
 	}

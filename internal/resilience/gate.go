@@ -45,3 +45,11 @@ func pause(ctx context.Context, d time.Duration) error {
 func jittered(d time.Duration) time.Duration {
 	return d + rand.N(d/2+1) //nolint:gosec // jitter spreads retries; it guards nothing
 }
+
+// ceilSeconds rounds d up to a whole second.
+func ceilSeconds(d time.Duration) time.Duration {
+	if d%time.Second == 0 {
+		return d
+	}
+	return d.Truncate(time.Second) + time.Second
+}

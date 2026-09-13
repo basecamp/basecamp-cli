@@ -277,6 +277,38 @@ func TestRateLimiterWaitReportsALongRetryAfterImmediately(t *testing.T) {
 	assert.Less(t, time.Since(start), 100*time.Millisecond, "did not burn the budget on a block it cannot outlast")
 }
 
+// The jitter that spreads retries must not stretch a sleep past the budget:
+// a block that lifts just inside the deadline is waited out, not overshot.
+func TestRateLimiterWaitNeverSleepsPastTheDeadline(t *testing.T) {
+	for range 4 {
+		rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+		require.NoError(t, rl.SetRetryAfterDuration(300*time.Millisecond))
+
+		start := time.Now()
+		budget := 320 * time.Millisecond
+		require.NoError(t, rl.Wait(context.Background(), start.Add(budget)))
+		assert.Less(t, time.Since(start), budget+25*time.Millisecond)
+	}
+}
+
+func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+	require.NoError(t, rl.SetRetryAfterDuration(40*time.Second+400*time.Millisecond))
+
+	err := rl.Wait(context.Background(), time.Now().Add(time.Second))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.Equal(t, "Rate limited by the server; retry after 41s", gateErr.Message)
+	assert.Equal(t, "Wait 41s, then re-run.", gateErr.Hint)
+}
+
+func TestCeilSeconds(t *testing.T) {
+	assert.Equal(t, 41*time.Second, ceilSeconds(40*time.Second+time.Millisecond))
+	assert.Equal(t, 40*time.Second, ceilSeconds(40*time.Second))
+	assert.Equal(t, time.Second, ceilSeconds(time.Millisecond))
+}
+
 func TestRateLimiterWaitStopsWhenTheContextIsCancelled(t *testing.T) {
 	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
 	require.NoError(t, rl.SetRetryAfterDuration(5*time.Second))
