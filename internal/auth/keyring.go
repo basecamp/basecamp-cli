@@ -19,8 +19,14 @@ type Credentials struct {
 	Scope         string `json:"scope"`
 	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", or legacy "bc3"
 	TokenEndpoint string `json:"token_endpoint"`
-	UserID        string `json:"user_id,omitempty"`
-	UserEmail     string `json:"user_email,omitempty"`
+
+	// Issuer is the RFC 8414 issuer of the authorization server that minted
+	// a BC5 credential — where its metadata, and so its revocation endpoint,
+	// is found at logout. Credentials stored before it was recorded derive
+	// it from TokenEndpoint (see credentialIssuer).
+	Issuer    string `json:"issuer,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
 
 	// Source records how the credential was obtained when that is not the
 	// OAuth flow: "token" for an imported personal access token, which has

@@ -1393,6 +1393,7 @@ basecamp auth login --device-code                 # Headless authentication with
 BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE, and only where the server offers the device flow (Launchpad does not); browser and pasted-callback flows refuse — prefer --with-token
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
+basecamp auth revoke                              # Revoke the token with the server and forget it; refuses when it cannot revoke (auth logout forgets regardless)
 basecamp profile create <name> --account <id> --expect-identity <id>  # Same assertion for a new profile
 ```
 

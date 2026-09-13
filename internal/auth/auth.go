@@ -744,6 +744,7 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		RefreshToken:  token.RefreshToken,
 		OAuthType:     oauthTypeBC5,
 		TokenEndpoint: oauthCfg.TokenEndpoint,
+		Issuer:        oauthCfg.Issuer,
 		Scope:         effectiveScope,
 		// The RFC 8707 account binding: a trusted-client device login mints a
 		// multi-account refresh token, and refreshing one without echoing this
@@ -808,12 +809,6 @@ func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.store.Save(m.credentialKey(), creds)
-}
-
-// Logout removes stored credentials.
-func (m *Manager) Logout() error {
-	credKey := m.credentialKey()
-	return m.store.Delete(credKey)
 }
 
 // discovery is the outcome of provider selection: the OAuth config to use

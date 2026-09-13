@@ -2,7 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -345,7 +347,7 @@ func newProfileDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a profile",
-		Long:  "Remove a profile configuration and its stored credentials.",
+		Long:  "Remove a profile configuration and its stored credentials, revoking the credential with the server when it can be.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -369,21 +371,25 @@ func newProfileDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			// Remove credentials
-			credKey := "profile:" + name
-			store := app.Auth.GetStore()
-			if err := store.Delete(credKey); err != nil {
+			summary := fmt.Sprintf("Deleted profile %q", name)
+			fields := map[string]any{"name": name, "status": "deleted"}
+			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name)
+			switch {
+			case errors.Is(err, auth.ErrNoCredential):
+				// A profile that never logged in has nothing to revoke.
+			case err != nil:
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not delete credentials for profile %q: %v\n", name, err)
+			default:
+				var outcome map[string]any
+				summary, outcome = describeLogout(summary, result)
+				maps.Copy(fields, outcome)
 			}
 
 			if err := unregisterProfile(name); err != nil {
 				return err
 			}
 
-			return app.OK(map[string]any{
-				"name":   name,
-				"status": "deleted",
-			}, output.WithSummary(fmt.Sprintf("Deleted profile %q", name)))
+			return app.OK(fields, output.WithSummary(summary))
 		},
 	}
 }

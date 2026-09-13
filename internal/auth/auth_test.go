@@ -321,12 +321,17 @@ func TestLogout(t *testing.T) {
 	}
 	manager.store.Save("https://3.basecampapi.com", creds)
 
-	// Logout
-	err := manager.Logout()
+	// Credentials without an OAuth type are Launchpad's: nothing to revoke,
+	// but the local copy still goes.
+	result, err := manager.Logout(context.Background())
 	require.NoError(t, err, "Logout failed")
+	assert.Equal(t, &LogoutResult{Skipped: RevokeSkippedLaunchpad}, result)
 
 	// Should no longer be authenticated
 	assert.False(t, manager.IsAuthenticated(), "Should not be authenticated after logout")
+
+	_, err = manager.Logout(context.Background())
+	assert.ErrorIs(t, err, ErrNoCredential)
 }
 
 func TestCredentialsJSON(t *testing.T) {
