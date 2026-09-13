@@ -374,15 +374,15 @@ func newProfileDeleteCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("Deleted profile %q", name)
 			fields := map[string]any{"name": name, "status": "deleted"}
-			// The revocation's egress policy follows the profile being deleted.
-			// For the active profile that is the effective configuration —
-			// environment overrides included, as at its login — and for any
-			// other its saved base URL.
-			anchor := app.Config.Profiles[name].BaseURL
-			if name == app.Config.ActiveProfile {
-				anchor = ""
-			}
-			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name, anchor)
+			// The revocation's egress policy is anchored on the deleted
+			// profile's own saved base URL — the operator's configuration for
+			// that profile — never on the active configuration, whose base URL
+			// may belong to another profile or to a transient override. A
+			// credential minted under an override at login time is not
+			// recorded as such (the store must not choose its own policy), so
+			// that case reaches the summary as a failed revocation, not a
+			// silent success.
+			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name, app.Config.Profiles[name].BaseURL)
 			switch {
 			case errors.Is(err, auth.ErrNoCredential):
 				// A profile that never logged in has nothing to revoke.
