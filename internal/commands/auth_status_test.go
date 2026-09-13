@@ -420,3 +420,28 @@ func TestAuthStatusMarkdownStaysLiteral(t *testing.T) {
 	assert.Contains(t, md.String(), "Run: basecamp auth login -P bot")
 	assert.NotContains(t, md.String(), "\x1b")
 }
+
+// TestAuthStatusCheckWithNothingStored: --check with no credential makes no
+// request but still answers the contract: valid is false and the login is
+// the remedy.
+func TestAuthStatusCheckWithNothingStored(t *testing.T) {
+	srv := startLoginIdentityServer(t, "live-tok")
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["authenticated"])
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
+	assert.Empty(t, srv.seenPaths(), "nothing to send, so no request")
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	assert.NotContains(t, strings.Join(report.details, "\n"), "rejected")
+}
