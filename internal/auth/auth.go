@@ -273,6 +273,18 @@ func invalidGrant(err error) (string, bool) {
 	}
 }
 
+// forgetRefusedGrant deletes the stored credential only while it still
+// carries the refresh token the server just refused. Each process has its
+// own Manager lock, so two of them can enter the refresh window together:
+// the first rotates and saves, the second is refused for reusing the old
+// token, and an unconditional delete here would throw away the fresh
+// credential the first one stored.
+func (m *Manager) forgetRefusedGrant(origin, refusedToken string) {
+	if current, err := m.store.Load(origin); err == nil && current.RefreshToken == refusedToken {
+		_ = m.store.Delete(origin)
+	}
+}
+
 func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Credentials) error {
 	if creds.RefreshToken == "" {
 		return m.errAuth("No refresh token available")
@@ -363,9 +375,16 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 		// rather than re-tried by every later command: Basecamp's abuse
 		// tracker bans the client and address after a handful of
 		// invalid_grant failures, which would turn one expired session
-		// into a lockout. The delete's own outcome cannot change the
-		// answer — the session is over either way.
-		_ = m.store.Delete(origin)
+		// into a lockout. Only a BC5 credential is forgotten: its client is
+		// the fixed public one, so the refusal can only be about the grant.
+		// A Launchpad refresh sends whatever client the environment names,
+		// and the server answers invalid_grant for a token issued to a
+		// different client too, which is not proof the grant is dead. The
+		// delete's own outcome cannot change the answer — the session is
+		// over either way.
+		if creds.OAuthType == oauthTypeBC5 {
+			m.forgetRefusedGrant(origin, creds.RefreshToken)
+		}
 		msg := "Your session has expired or was revoked"
 		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
 			msg += " (" + desc + ")"
