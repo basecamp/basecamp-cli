@@ -449,6 +449,9 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 			return nil
 		}
 		msg := "Your session has expired or was revoked"
+		if creds.OAuthType != oauthTypeBC5 {
+			msg = "The refresh token was refused: the session has expired or was revoked, or BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client than the one it was issued to"
+		}
 		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
 			msg += " (" + desc + ")"
 		}

@@ -2084,6 +2084,8 @@ func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
 	var cliErr *output.Error
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client", "the message names the client mismatch the refusal may mean")
+	assert.Equal(t, "Run: basecamp auth login", cliErr.Hint)
 
 	creds, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr, "a Launchpad refusal is not proof the grant is dead")
