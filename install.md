@@ -118,7 +118,7 @@ This opens browser OAuth. Grant access when prompted.
 **Verify:**
 ```bash
 basecamp auth status
-# Expected: Authenticated (BC3 OAuth may show "Authenticated (scope: read)")
+# Expected: Logged in to https://3.basecampapi.com as you@example.com (user <id>)
 ```
 
 ---
