@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -143,10 +144,14 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("invalid credentials: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
 	return &creds, nil
 }
+
+// ErrInvalidCredentials marks a stored blob that is present but not a
+// credential any command can read — as opposed to nothing stored at all.
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 // Save stores credentials for the given origin.
 func (s *Store) Save(origin string, creds *Credentials) error {

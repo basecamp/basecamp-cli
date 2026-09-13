@@ -156,7 +156,7 @@ func TestAuthLogoutHumanCopy(t *testing.T) {
 		s.metadataStatus = http.StatusNotFound
 		app, buf := newLogoutTestApp(t, s, output.FormatStyled, bc5LogoutCredentials(s))
 		require.NoError(t, runLogout(t, app), "a failed revocation is not a failed logout")
-		assert.Contains(t, buf.String(), "Logged out locally; could not revoke the token server-side: authorization server metadata returned HTTP 404 — it expires within the hour")
+		assert.Contains(t, buf.String(), "Logged out locally; could not revoke the token server-side: authorization server metadata returned HTTP 404 — the access token expires within the hour, but the refresh token stays valid until it is revoked")
 		assert.Empty(t, s.revoked())
 		assert.False(t, app.Auth.IsAuthenticated(), "the local copy goes regardless")
 	})

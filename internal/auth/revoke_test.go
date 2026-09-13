@@ -218,7 +218,7 @@ func TestLogoutCredential_ClearsTheNamedKey(t *testing.T) {
 	require.NoError(t, m.store.Save("profile:bot", bc5Credentials(as)))
 	require.NoError(t, m.store.Save(config.NormalizeBaseURL(as.srv.URL), bc5Credentials(as)))
 
-	result, err := m.LogoutCredential(context.Background(), "profile:bot")
+	result, err := m.LogoutCredential(context.Background(), "profile:bot", "")
 	require.NoError(t, err)
 	assert.True(t, result.Revoked)
 	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
@@ -226,8 +226,49 @@ func TestLogoutCredential_ClearsTheNamedKey(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, m.IsAuthenticated(), "the other credential is untouched")
 
-	_, err = m.LogoutCredential(context.Background(), "profile:bot")
+	_, err = m.LogoutCredential(context.Background(), "profile:bot", "")
 	assert.ErrorIs(t, err, ErrNoCredential)
+}
+
+// The revocation's egress policy follows the profile being deleted, not the
+// active configuration: with production active, a loopback development
+// profile's issuer is still reachable when the delete is anchored on that
+// profile's own base URL.
+func TestLogoutCredential_AnchorsTheLaneOnTheProfileBaseURL(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, "https://3.basecampapi.com")
+	m.httpClient = nil // the real per-anchor lanes, address policy included
+	m.Warnf = func(string, ...any) {}
+
+	require.NoError(t, m.store.Save("profile:dev", bc5Credentials(as)))
+	result, err := m.LogoutCredential(context.Background(), "profile:dev", "")
+	require.NoError(t, err)
+	assert.False(t, result.Revoked)
+	require.Error(t, result.Err, "the production lane refuses a loopback issuer")
+	assert.Empty(t, as.revokeCalls())
+
+	require.NoError(t, m.store.Save("profile:dev", bc5Credentials(as)))
+	result, err = m.LogoutCredential(context.Background(), "profile:dev", as.srv.URL)
+	require.NoError(t, err)
+	assert.Equal(t, &LogoutResult{Revoked: true}, result)
+	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
+}
+
+// A stored blob that is not a credential is cleared, and only then is the
+// key reported empty.
+func TestLogout_ClearsAnUnreadableCredential(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	credKey := config.NormalizeBaseURL(as.srv.URL)
+	require.NoError(t, m.store.ensure().Save(credKey, []byte(`["not a credential"]`)))
+	_, err := m.store.Load(credKey)
+	require.ErrorIs(t, err, ErrInvalidCredentials)
+
+	_, err = m.Logout(context.Background())
+	assert.ErrorIs(t, err, ErrNoCredential)
+	_, err = m.store.ensure().Load(credKey)
+	assert.Error(t, err, "the blob is gone")
+	assert.Empty(t, as.revokeCalls())
 }
 
 // A stored login records where it can be revoked.

@@ -373,7 +373,7 @@ func newProfileDeleteCmd() *cobra.Command {
 
 			summary := fmt.Sprintf("Deleted profile %q", name)
 			fields := map[string]any{"name": name, "status": "deleted"}
-			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name)
+			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name, app.Config.Profiles[name].BaseURL)
 			switch {
 			case errors.Is(err, auth.ErrNoCredential):
 				// A profile that never logged in has nothing to revoke.

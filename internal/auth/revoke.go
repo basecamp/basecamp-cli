@@ -61,23 +61,32 @@ type LogoutResult struct {
 // it can be, then removes it from local storage regardless. ErrNoCredential
 // means there was nothing to remove.
 func (m *Manager) Logout(ctx context.Context) (*LogoutResult, error) {
-	return m.LogoutCredential(ctx, m.credentialKey())
+	return m.LogoutCredential(ctx, m.credentialKey(), "")
 }
 
 // LogoutCredential is Logout for the credential stored under credKey — the
-// path profile deletion takes for "profile:<name>".
-func (m *Manager) LogoutCredential(ctx context.Context, credKey string) (*LogoutResult, error) {
+// path profile deletion takes for "profile:<name>". baseURL anchors the
+// egress policy of the revocation request: the deleted profile's own base
+// URL, which need not be the active configuration's — a loopback
+// development profile deleted while production is active must still reach
+// its loopback issuer. Empty means the active configuration.
+func (m *Manager) LogoutCredential(ctx context.Context, credKey, baseURL string) (*LogoutResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	creds, err := m.store.Load(credKey)
-	if err != nil {
-		// Nothing usable under the key: absent, or a blob no command can
-		// read. Either way the key ends up clear.
-		_ = m.store.Delete(credKey)
+	switch {
+	case errors.Is(err, ErrInvalidCredentials):
+		// A blob no command can read is still stored; clearing it is the
+		// one thing a logout can do for it, and failing to is reported.
+		if err := m.store.Delete(credKey); err != nil {
+			return nil, err
+		}
+		return nil, ErrNoCredential
+	case err != nil:
 		return nil, ErrNoCredential
 	}
-	result := m.revokeForDiscard(ctx, creds)
+	result := m.revokeForDiscard(ctx, creds, baseURL)
 	if err := m.store.Delete(credKey); err != nil {
 		return nil, err
 	}
@@ -87,11 +96,11 @@ func (m *Manager) LogoutCredential(ctx context.Context, credKey string) (*Logout
 // revokeForDiscard revokes creds when they are the CLI's to revoke and
 // classifies the outcome for the caller's copy. Best effort by design: the
 // caller discards the credential locally whatever happened here.
-func (m *Manager) revokeForDiscard(ctx context.Context, creds *Credentials) *LogoutResult {
+func (m *Manager) revokeForDiscard(ctx context.Context, creds *Credentials, baseURL string) *LogoutResult {
 	if skipped := revokeSkipReason(creds); skipped != "" {
 		return &LogoutResult{Skipped: skipped}
 	}
-	if err := m.Revoke(ctx, creds); err != nil {
+	if err := m.revoke(ctx, creds, baseURL); err != nil {
 		return &LogoutResult{Err: err}
 	}
 	return &LogoutResult{Revoked: true}
@@ -151,6 +160,10 @@ func revokeSkipReason(creds *Credentials) string {
 // could not be reached, did not describe a revocation endpoint, or did not
 // answer 200; the tokens never appear in it.
 func (m *Manager) Revoke(ctx context.Context, creds *Credentials) error {
+	return m.revoke(ctx, creds, "")
+}
+
+func (m *Manager) revoke(ctx context.Context, creds *Credentials, baseURL string) error {
 	if creds.RefreshToken == "" && creds.AccessToken == "" {
 		return errors.New("stored credential carries no token")
 	}
@@ -158,7 +171,7 @@ func (m *Manager) Revoke(ctx context.Context, creds *Credentials) error {
 	if err != nil {
 		return err
 	}
-	client, err := m.bc5Client()
+	client, err := m.revocationClient(baseURL)
 	if err != nil {
 		return err
 	}
@@ -178,6 +191,17 @@ func (m *Manager) Revoke(ctx context.Context, creds *Credentials) error {
 		}
 	}
 	return nil
+}
+
+// revocationClient is the egress lane a revocation rides: the BC5 lane of
+// the active configuration, or one built on baseURL when the credential
+// belongs to a profile anchored elsewhere. A caller-owned httpClient
+// carries everything, as it does for every other OAuth request.
+func (m *Manager) revocationClient(baseURL string) (*http.Client, error) {
+	if m.httpClient != nil || baseURL == "" || baseURL == m.cfg.BaseURL {
+		return m.bc5Client()
+	}
+	return m.buildLaneClient(baseURL, "profile base URL")
 }
 
 // credentialIssuer names the authorization server that minted creds. Logins

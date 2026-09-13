@@ -911,7 +911,7 @@ func describeLogout(done string, result *auth.LogoutResult) (summary string, fie
 		summary = done + " (forgot the imported token; it stays valid until revoked in Basecamp)"
 	case result.Err != nil:
 		fields["reason"] = result.Err.Error()
-		summary = done + " locally; could not revoke the token server-side: " + result.Err.Error() + " — it expires within the hour"
+		summary = done + " locally; could not revoke the token server-side: " + result.Err.Error() + " — the access token expires within the hour, but the refresh token stays valid until it is revoked"
 	default:
 		fields["reason"] = result.Skipped
 		summary = done
