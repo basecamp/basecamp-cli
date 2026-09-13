@@ -308,11 +308,8 @@ named profile, creating the profile when --account is given.
 			if app.Flags.JQFilter != "" {
 				return output.ErrJQNotSupported("the login command")
 			}
-			if machineOutputFlagSet(app) {
-				return output.ErrUsageHint("Interactive login cannot run under a machine output mode",
-					"Browser and device logins print instructions and wait for approval, which no envelope can carry. "+
-						"Check credentials with `basecamp auth status`, or import a token headlessly: "+
-						"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
+			if err := refuseMachineOutputLogin(app); err != nil {
+				return err
 			}
 			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
 				return err
@@ -688,6 +685,21 @@ func refuseNonInteractiveLogin(deviceCode bool) error {
 			"Import a token headlessly: `... | basecamp auth login --with-token -P <profile> --account <id>`; "+
 			"pass --device-code where the server offers the device flow (Launchpad does not) to approve the printed code from any device; "+
 			"or check credentials with `basecamp auth status`.")
+}
+
+// refuseMachineOutputLogin is the output half of the login gate, shared by
+// every command that runs an OAuth flow: the transcript and the live wait
+// line go to stdout, which a machine-output envelope also owns, so a
+// login under --json would write prose and control sequences ahead of the
+// envelope.
+func refuseMachineOutputLogin(app *appctx.App) error {
+	if !machineOutputFlagSet(app) {
+		return nil
+	}
+	return output.ErrUsageHint("Interactive login cannot run under a machine output mode",
+		"Browser and device logins print instructions and wait for approval, which no envelope can carry. "+
+			"Check credentials with `basecamp auth status`, or import a token headlessly: "+
+			"`... | basecamp auth login --with-token -P <profile> --account <id> --json`.")
 }
 
 // machineOutputFlagSet reports whether an explicit output flag asked for a
