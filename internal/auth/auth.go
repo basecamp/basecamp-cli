@@ -145,13 +145,17 @@ func (m *Manager) LoginCommand() string {
 // spelled '\”. Profile names come from configuration files, which do not
 // apply the create-time name check.
 func shellQuote(s string) string {
-	inert := s != "" && strings.IndexFunc(s, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=-", r))
-	}) < 0
-	if inert {
+	if s != "" && strings.IndexFunc(s, shellActive) < 0 {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellActive reports whether r can mean anything to a POSIX shell outside
+// quotes; letters, digits and a few inert punctuation marks cannot.
+func shellActive(r rune) bool {
+	inert := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=-", r)
+	return !inert
 }
 
 // LoginHint is LoginCommand as an error hint.
