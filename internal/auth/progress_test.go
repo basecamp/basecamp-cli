@@ -2,6 +2,7 @@ package auth
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,12 +29,15 @@ func (b *syncBuffer) String() string {
 
 func TestApprovalWaitDrawsCountdownAndClears(t *testing.T) {
 	base := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	clock := base
+	// The drawing goroutine reads the clock while the test advances it, so
+	// the elapsed time lives in an atomic.
+	var elapsed atomic.Int64
+	now := func() time.Time { return base.Add(time.Duration(elapsed.Load())) }
 	buf := &syncBuffer{}
-	wait := runApprovalWait(buf, base.Add(10*time.Minute), func() time.Time { return clock }, time.Millisecond)
+	wait := runApprovalWait(buf, base.Add(10*time.Minute), now, time.Millisecond)
 
 	require.Eventually(t, func() bool { return strings.Contains(buf.String(), "code expires in 10:00") }, time.Second, time.Millisecond)
-	clock = base.Add(19 * time.Second)
+	elapsed.Store(int64(19 * time.Second))
 	require.Eventually(t, func() bool { return strings.Contains(buf.String(), "code expires in 9:41") }, time.Second, time.Millisecond)
 
 	wait.Stop()
