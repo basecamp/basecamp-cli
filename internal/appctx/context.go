@@ -308,18 +308,23 @@ func (a *App) Err(err error) error {
 func (a *App) withAuthRemedy(err error) error {
 	var sdkErr *basecamp.Error
 	e := output.AsError(err)
-	if e.Code != output.CodeAuth || !errors.As(err, &sdkErr) || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
+	if e.Code != output.CodeAuth || !errors.As(err, &sdkErr) || (e.Hint != "" && !strings.HasPrefix(e.Hint, output.DefaultAuthHint)) {
 		return err
 	}
-	hinted := *e
+	var remedy string
 	switch {
 	case os.Getenv("BASECAMP_TOKEN") != "":
-		hinted.Hint = "BASECAMP_TOKEN is set and every request uses it instead of a stored login; unset it, or export a token the server accepts"
+		remedy = "BASECAMP_TOKEN is set and every request uses it instead of a stored login; unset it, or export a token the server accepts"
 	case a.Auth != nil:
-		hinted.Hint = a.Auth.LoginHint()
+		remedy = a.Auth.LoginHint()
 	default:
 		return err
 	}
+	// A command may have appended guidance of its own to the default hint
+	// (a partial reorder's rerun note); the remedy replaces the default
+	// and keeps the rest.
+	hinted := *e
+	hinted.Hint = remedy + strings.TrimPrefix(e.Hint, output.DefaultAuthHint)
 	return &hinted
 }
 
