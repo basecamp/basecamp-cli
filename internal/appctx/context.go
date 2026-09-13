@@ -3,6 +3,7 @@ package appctx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -294,17 +295,20 @@ func (a *App) Err(err error) error {
 	return nil
 }
 
-// withAuthRemedy replaces the generic login hint on an auth_required error
-// with one that fits the credential actually in play. A 401 is classified
-// far from the profile and the environment, so the SDK conversion can only
-// say "basecamp auth login": under an active profile that command would
-// store the new credential somewhere the failing command never reads, and
-// under BASECAMP_TOKEN no login changes what requests send. Errors whose
-// hint is already specific (the credential manager names the profile
-// itself) are left alone.
+// withAuthRemedy replaces the generic login hint on an API 401 with one that
+// fits the credential the request actually sent. The SDK classifies a 401
+// far from the profile and the environment, so its conversion can only say
+// "basecamp auth login": under an active profile that command would store
+// the new credential somewhere the failing command never reads, and under
+// BASECAMP_TOKEN — which every request sends ahead of any stored login — no
+// login changes anything. Only errors carrying an SDK error are rewritten:
+// the credential manager's own failures name the profile themselves, and
+// come from stored-credential operations (auth refresh, auth token
+// --stored) that ignore the environment token by design.
 func (a *App) withAuthRemedy(err error) error {
+	var sdkErr *basecamp.Error
 	e := output.AsError(err)
-	if e.Code != output.CodeAuth || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
+	if e.Code != output.CodeAuth || !errors.As(err, &sdkErr) || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
 		return err
 	}
 	hinted := *e

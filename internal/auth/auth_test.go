@@ -2086,3 +2086,20 @@ func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
 	require.NoError(t, loadErr, "a Launchpad refusal is not proof the grant is dead")
 	assert.Equal(t, "old-ref", creds.RefreshToken)
 }
+
+// TestLoginCommand_QuotesTheProfile: the remedy is pasted into a shell, and
+// profile names loaded from configuration are not checked at load time.
+func TestLoginCommand_QuotesTheProfile(t *testing.T) {
+	for name, want := range map[string]string{
+		"":             "basecamp auth login",
+		"work":         "basecamp auth login -P work",
+		"work profile": "basecamp auth login -P 'work profile'",
+		"it's":         `basecamp auth login -P 'it'\''s'`,
+		"$(rm -rf x)":  "basecamp auth login -P '$(rm -rf x)'",
+	} {
+		cfg := config.Default()
+		cfg.ActiveProfile = name
+		m := &Manager{cfg: cfg}
+		assert.Equal(t, want, m.LoginCommand(), "profile %q", name)
+	}
+}

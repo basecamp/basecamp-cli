@@ -130,12 +130,28 @@ func (m *Manager) credentialKey() string {
 
 // LoginCommand is the command that re-establishes the active credential:
 // addressed to the active profile when there is one, since a bare login
-// would store the new credential under the base URL instead.
+// would store the new credential under the base URL instead. The command
+// is meant to be pasted, so the profile name is shell-quoted.
 func (m *Manager) LoginCommand() string {
 	if m.cfg.ActiveProfile != "" {
-		return "basecamp auth login -P " + m.cfg.ActiveProfile
+		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile)
 	}
 	return "basecamp auth login"
+}
+
+// shellQuote renders s safe to embed in an emitted shell command: a clearly
+// inert name passes through bare, anything else is single-quoted — the one
+// POSIX form in which nothing substitutes — with embedded single quotes
+// spelled '\”. Profile names come from configuration files, which do not
+// apply the create-time name check.
+func shellQuote(s string) string {
+	inert := s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=-", r))
+	}) < 0
+	if inert {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // LoginHint is LoginCommand as an error hint.
@@ -278,10 +294,17 @@ func invalidGrant(err error) (string, bool) {
 // own Manager lock, so two of them can enter the refresh window together:
 // the first rotates and saves, the second is refused for reusing the old
 // token, and an unconditional delete here would throw away the fresh
-// credential the first one stored.
+// credential the first one stored. The re-read closes that window down to
+// the gap between this Load and Delete; a rotation landing inside it is
+// lost, which costs one login, and a cross-process lock on a store that is
+// usually the OS keyring is not a price worth paying for that.
 func (m *Manager) forgetRefusedGrant(origin, refusedToken string) {
-	if current, err := m.store.Load(origin); err == nil && current.RefreshToken == refusedToken {
-		_ = m.store.Delete(origin)
+	current, err := m.store.Load(origin)
+	if err != nil || current.RefreshToken != refusedToken {
+		return
+	}
+	if err := m.store.Delete(origin); err != nil {
+		m.warnf("could not forget the refused credential for %s: %v", origin, err)
 	}
 }
 
