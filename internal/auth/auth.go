@@ -604,6 +604,9 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 		opts.log("  4. Copy the full URL from your browser's address bar and")
 		opts.log("     paste it below.")
 		opts.log("")
+		// Remote implies NoBrowser, so this never launches: it says why the
+		// CLI chose this flow when the host, not a flag, chose it.
+		opts.announceBrowser(authURL)
 
 		reader := opts.InputReader
 		if reader == nil {

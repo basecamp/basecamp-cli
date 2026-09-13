@@ -22,6 +22,11 @@ type approvalWait struct {
 	deadline time.Time
 	now      func() time.Time
 	interval time.Duration
+	// width is the terminal's column count, which picks the line's form:
+	// the full sentence, a short one, or nothing at all when even that
+	// would wrap — a wrapped line is redrawn from its continuation row and
+	// leaves the previous row behind on every tick.
+	width int
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -32,29 +37,56 @@ var approvalFrames = [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦"
 
 const approvalInterval = 100 * time.Millisecond
 
+// Column budgets for the two forms of the live line, counted on the
+// widest countdown they render ("99:59"); a terminal narrower than the
+// short form draws nothing and the caller logs the static line instead.
+const (
+	approvalLineFullWidth  = len("⠋ Waiting for approval… code expires in 99:59") - 4 // multibyte glyphs count once
+	approvalLineShortWidth = len("⠋ Waiting… 99:59") - 4
+)
+
 // startApprovalWait begins drawing on w when it is a terminal and returns
 // nil otherwise, so callers can treat "no live line" uniformly: Stop on a
 // nil *approvalWait is a no-op.
 func startApprovalWait(w io.Writer, deadline time.Time) *approvalWait {
-	if !writerIsTerminal(w) {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(f.Fd()) {
 		return nil
 	}
-	return runApprovalWait(w, deadline, time.Now, approvalInterval)
+	width, _, err := term.GetSize(f.Fd())
+	if err != nil {
+		width = 80
+	}
+	return runApprovalWait(w, deadline, time.Now, approvalInterval, width)
 }
 
 // runApprovalWait is the injectable core: tests drive it with a buffer, a
-// fixed clock, and a short interval.
-func runApprovalWait(w io.Writer, deadline time.Time, now func() time.Time, interval time.Duration) *approvalWait {
+// fixed clock, a short interval, and a chosen width. A width too narrow
+// for even the short form yields nil, like a non-terminal.
+func runApprovalWait(w io.Writer, deadline time.Time, now func() time.Time, interval time.Duration, width int) *approvalWait {
+	if width < approvalLineShortWidth {
+		return nil
+	}
 	a := &approvalWait{
 		w:        w,
 		deadline: deadline,
 		now:      now,
 		interval: interval,
+		width:    width,
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 	}
 	go a.run()
 	return a
+}
+
+// line renders one tick of the live line in the form the width allows.
+func (a *approvalWait) line(frame int) string {
+	left := remaining(a.deadline.Sub(a.now()))
+	if a.width < approvalLineFullWidth {
+		return fmt.Sprintf("%s Waiting… %s", approvalFrames[frame], left)
+	}
+	return fmt.Sprintf("%s Waiting for approval… code expires in %s", approvalFrames[frame], left)
 }
 
 func (a *approvalWait) run() {
@@ -63,7 +95,7 @@ func (a *approvalWait) run() {
 	defer ticker.Stop()
 	frame := 0
 	for {
-		fmt.Fprintf(a.w, "\r\033[2K%s Waiting for approval… code expires in %s", approvalFrames[frame], remaining(a.deadline.Sub(a.now())))
+		fmt.Fprint(a.w, "\r\033[2K"+a.line(frame))
 		select {
 		case <-a.stop:
 			fmt.Fprint(a.w, "\r\033[2K")
@@ -108,9 +140,4 @@ func expiresIn(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%d seconds", int(d/time.Second))
 	}
-}
-
-func writerIsTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	return ok && term.IsTerminal(f.Fd())
 }

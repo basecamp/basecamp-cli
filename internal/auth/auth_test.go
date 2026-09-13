@@ -1916,3 +1916,46 @@ func TestLoginLaunchpad_HeadlessHostTakesThePastedCallback(t *testing.T) {
 	assert.True(t, quiet.NoBrowser)
 	assert.Empty(t, quiet.headlessReason, "the person asked for the link alone; no commentary")
 }
+
+// TestLoginLaunchpad_RemoteTranscriptSaysWhyWhenTheHostChose: the pasted
+// callback flow announces the headless reason when the CLI selected it,
+// and stays silent when --remote asked for it.
+func TestLoginLaunchpad_RemoteTranscriptSaysWhyWhenTheHostChose(t *testing.T) {
+	t.Setenv("BASECAMP_NONINTERACTIVE", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("DISPLAY", ":0")
+	t.Setenv("CI", "")
+
+	// newDeviceTestManager pins the interactive host, so the CI variable
+	// is set after it; both cases select remote mode, so a loopback
+	// listener (and its five-minute wait) never starts.
+	run := func(t *testing.T, ci string, opts LoginOptions) string {
+		t.Helper()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+		t.Cleanup(srv.Close)
+		t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+		m := newDeviceTestManager(t, srv.URL)
+		t.Setenv("CI", ci)
+		cl := &collectLogger{}
+		opts.Logger = cl.log
+		opts.InputReader = strings.NewReader("")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, err := m.Login(ctx, opts)
+		require.Error(t, err, "EOF on the paste prompt ends the login")
+		return cl.joined()
+	}
+
+	t.Run("host chose", func(t *testing.T) {
+		out := run(t, "true", LoginOptions{})
+		assert.Contains(t, out, "Paste the callback URL")
+		assert.Contains(t, out, "Not opening a browser here (CI environment). Open the link on any device.")
+	})
+	t.Run("--remote asked", func(t *testing.T) {
+		out := run(t, "", LoginOptions{Remote: true})
+		assert.Contains(t, out, "Paste the callback URL")
+		assert.NotContains(t, out, "Not opening a browser")
+	})
+}

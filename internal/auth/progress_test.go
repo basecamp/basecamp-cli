@@ -34,7 +34,7 @@ func TestApprovalWaitDrawsCountdownAndClears(t *testing.T) {
 	var elapsed atomic.Int64
 	now := func() time.Time { return base.Add(time.Duration(elapsed.Load())) }
 	buf := &syncBuffer{}
-	wait := runApprovalWait(buf, base.Add(10*time.Minute), now, time.Millisecond)
+	wait := runApprovalWait(buf, base.Add(10*time.Minute), now, time.Millisecond, 80)
 
 	require.Eventually(t, func() bool { return strings.Contains(buf.String(), "code expires in 10:00") }, time.Second, time.Millisecond)
 	elapsed.Store(int64(19 * time.Second))
@@ -55,6 +55,24 @@ func TestApprovalWaitDrawsCountdownAndClears(t *testing.T) {
 func TestStartApprovalWaitNeedsATerminal(t *testing.T) {
 	assert.Nil(t, startApprovalWait(nil, time.Now().Add(time.Minute)))
 	assert.Nil(t, startApprovalWait(&strings.Builder{}, time.Now().Add(time.Minute)))
+}
+
+// TestApprovalWaitFitsTheTerminalWidth: a narrow pane gets the short form
+// and a pane too narrow for that gets no live line, so the redraw never
+// wraps onto a second row it cannot clear.
+func TestApprovalWaitFitsTheTerminalWidth(t *testing.T) {
+	base := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	now := func() time.Time { return base }
+	deadline := base.Add(9*time.Minute + 41*time.Second)
+
+	buf := &syncBuffer{}
+	wait := runApprovalWait(buf, deadline, now, time.Millisecond, 30)
+	require.NotNil(t, wait)
+	require.Eventually(t, func() bool { return strings.Contains(buf.String(), "Waiting… 9:41") }, time.Second, time.Millisecond)
+	wait.Stop()
+	assert.NotContains(t, buf.String(), "Waiting for approval", "the full form does not fit in 30 columns")
+
+	assert.Nil(t, runApprovalWait(&syncBuffer{}, deadline, now, time.Millisecond, 10), "narrower than the short form draws nothing")
 }
 
 func TestRemainingAndExpiresIn(t *testing.T) {
