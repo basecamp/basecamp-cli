@@ -245,7 +245,7 @@ assert_output "skills/hey/reference/commands.md"
 assert_output "No network operations performed"
 if grep -q "embed.go" "$out"; then not_ok "preview leaves out embed.go"; else ok "preview leaves out embed.go"; fi
 
-# --- Another publisher pushes first: the push is retried after a rebase ---
+# --- Another publisher pushes first: the sync is applied again from its tip ---
 
 echo "# a concurrent publisher wins the race to origin"
 origin="${work}/origin.git"
@@ -309,6 +309,18 @@ git -C "$target" remote set-url --push origin https://github.com/someone/skills.
 sync_expecting_failure hey-cli "$a" DRY_RUN=local SKILLS_TARGET="$target"
 assert_output "origin pushurl 'https://github.com/someone/skills.git' does not point to github.com/basecamp/skills"
 git -C "$target" config --unset remote.origin.pushurl
+
+echo "# every push URL, and every fetch URL, is a push destination: one bad one is refused"
+git -C "$target" remote set-url --push origin git@github.com:someone/skills.git
+git -C "$target" remote set-url --push --add origin https://github.com/basecamp/skills.git
+sync_expecting_failure hey-cli "$a" DRY_RUN=local SKILLS_TARGET="$target"
+assert_output "origin pushurl 'git@github.com:someone/skills.git' does not point to github.com/basecamp/skills"
+git -C "$target" config --unset-all remote.origin.pushurl
+git -C "$target" config --replace-all remote.origin.url https://github.com/someone/skills.git
+git -C "$target" remote set-url --add origin https://github.com/basecamp/skills.git
+sync_expecting_failure hey-cli "$a" DRY_RUN=local SKILLS_TARGET="$target"
+assert_output "origin url 'https://github.com/someone/skills.git' does not point to github.com/basecamp/skills"
+git -C "$target" config --replace-all remote.origin.url https://github.com/basecamp/skills.git
 
 git -C "$target" checkout -q -b not-main
 sync_expecting_failure hey-cli "$a" DRY_RUN=local SKILLS_TARGET="$target"

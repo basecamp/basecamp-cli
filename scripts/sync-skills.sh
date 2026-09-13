@@ -121,18 +121,22 @@ claimed_by_other() {
 
 # The URLs as configured: `remote get-url` would show them after any insteadOf
 # rewrite, so an operator's rewrite could pass this check with a repo that is not
-# the target. A push URL of its own is where `git push origin` would actually go.
+# the target. Push URLs of its own are where `git push origin` would actually go,
+# and a remote may carry several of either kind, each one a push destination.
 assert_remote_url() {
-  local kind url
+  local kind url urls
   for kind in url pushurl; do
-    url=$(git -C "$1" config --get "remote.origin.${kind}" || true)
-    [[ -z "$url" && "$kind" == pushurl ]] && continue
-    case "${url%.git}" in
-      "https://github.com/${TARGET_REPO}") ;;
-      https://x-access-token:*@github.com/"${TARGET_REPO}") ;;
-      "git@github.com:${TARGET_REPO}") ;;
-      *) die "origin ${kind} '$(echo "$url" | sed -E 's#(https://[^:@]+:)[^@]*@#\1***@#')' does not point to github.com/${TARGET_REPO}" ;;
-    esac
+    urls=$(git -C "$1" config --get-all "remote.origin.${kind}" || true)
+    [[ -z "$urls" && "$kind" == url ]] && die "origin has no url configured"
+    while IFS= read -r url; do
+      [[ -n "$url" ]] || continue
+      case "${url%.git}" in
+        "https://github.com/${TARGET_REPO}") ;;
+        https://x-access-token:*@github.com/"${TARGET_REPO}") ;;
+        "git@github.com:${TARGET_REPO}") ;;
+        *) die "origin ${kind} '$(echo "$url" | sed -E 's#(https://[^:@]+:)[^@]*@#\1***@#')' does not point to github.com/${TARGET_REPO}" ;;
+      esac
+    done <<< "$urls"
   done
 }
 
@@ -206,7 +210,7 @@ fi
 # --- Git configuration for the target ---
 #
 # A private global config for every git call below: the bot is the identity for
-# the commit and for the rebase a retried push needs, the token goes in as a URL
+# the commit, and for the one a rejected push makes again, the token goes in as a URL
 # rewrite so it never appears in argv or in the remote URL, and nothing from the
 # ambient environment (signing, hooks, defaults) reaches the target.
 export GIT_CONFIG_GLOBAL="${tmpdir}/gitconfig"
