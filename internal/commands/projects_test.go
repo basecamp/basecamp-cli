@@ -190,3 +190,73 @@ func TestProjectsCreateErrorEnvelopeCarriesRetryable(t *testing.T) {
 		})
 	}
 }
+
+// unauthorizedTransport answers every request with a bare 401.
+type unauthorizedTransport struct{}
+
+func (unauthorizedTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return jsonResponse(http.StatusUnauthorized, `{"error":"authentication required"}`, http.Header{"Content-Type": []string{"application/json"}}), nil
+}
+
+// TestProjectsList401CarriesTheLoginHint: a 401 from the API arrives without
+// a remedy, and the rendered error must still say what to run.
+func TestProjectsList401CarriesTheLoginHint(t *testing.T) {
+	app, out := setupProjectsMockApp(t, unauthorizedTransport{})
+
+	err := executeCommand(NewProjectsCmd(), app, "list")
+	require.Error(t, err)
+
+	converted := output.AsError(err)
+	assert.Equal(t, output.CodeAuth, converted.Code)
+	assert.Equal(t, "Run: basecamp auth login", converted.Hint)
+
+	require.NoError(t, app.Err(err))
+	var envelope struct {
+		OK   bool   `json:"ok"`
+		Code string `json:"code"`
+		Hint string `json:"hint"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	assert.False(t, envelope.OK)
+	assert.Equal(t, "auth_required", envelope.Code)
+	assert.Equal(t, "Run: basecamp auth login", envelope.Hint)
+}
+
+// TestProjectsList401HintNamesTheProfile: the rendered remedy must be the
+// login that repairs the credential the command used.
+func TestProjectsList401HintNamesTheProfile(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	app, out := setupProjectsMockApp(t, unauthorizedTransport{})
+	app.Config.ActiveProfile = "work"
+
+	err := executeCommand(NewProjectsCmd(), app, "list")
+	require.Error(t, err)
+	require.NoError(t, app.Err(err))
+
+	var envelope struct {
+		Code string `json:"code"`
+		Hint string `json:"hint"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	assert.Equal(t, "auth_required", envelope.Code)
+	assert.Equal(t, "Run: basecamp auth login -P work", envelope.Hint)
+}
+
+// TestProjectsList401HintUnderEnvToken: a login cannot help while
+// BASECAMP_TOKEN shadows every stored credential, so the remedy names the
+// variable instead.
+func TestProjectsList401HintUnderEnvToken(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_rejected")
+	app, out := setupProjectsMockApp(t, unauthorizedTransport{})
+
+	err := executeCommand(NewProjectsCmd(), app, "list")
+	require.Error(t, err)
+	require.NoError(t, app.Err(err))
+
+	var envelope struct {
+		Hint string `json:"hint"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	assert.Contains(t, envelope.Hint, "BASECAMP_TOKEN is set")
+	assert.NotContains(t, envelope.Hint, "auth login")
+}

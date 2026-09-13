@@ -128,6 +128,48 @@ func (m *Manager) credentialKey() string {
 	return config.NormalizeBaseURL(m.cfg.BaseURL)
 }
 
+// LoginCommand is the command that re-establishes the active credential:
+// addressed to the active profile when there is one, since a bare login
+// would store the new credential under the base URL instead. The command
+// is meant to be pasted, so the profile name is shell-quoted.
+func (m *Manager) LoginCommand() string {
+	if m.cfg.ActiveProfile != "" {
+		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile)
+	}
+	return "basecamp auth login"
+}
+
+// shellQuote renders s safe to embed in an emitted shell command: a clearly
+// inert name passes through bare, anything else is single-quoted — the one
+// POSIX form in which nothing substitutes — with embedded single quotes
+// spelled '\”. Profile names come from configuration files, which do not
+// apply the create-time name check.
+func shellQuote(s string) string {
+	if s != "" && strings.IndexFunc(s, shellActive) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellActive reports whether r can mean anything to a POSIX shell outside
+// quotes; letters, digits and a few inert punctuation marks cannot.
+func shellActive(r rune) bool {
+	inert := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=-", r)
+	return !inert
+}
+
+// LoginHint is LoginCommand as an error hint.
+func (m *Manager) LoginHint() string {
+	return "Run: " + m.LoginCommand()
+}
+
+// errAuth is an auth_required error whose remedy names the active profile.
+func (m *Manager) errAuth(msg string) *output.Error {
+	e := output.ErrAuth(msg)
+	e.Hint = m.LoginHint()
+	return e
+}
+
 // AccessToken returns a valid access token, refreshing if needed.
 // If BASECAMP_TOKEN env var is set, it's used directly without OAuth.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
@@ -142,7 +184,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return "", output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
+		return "", m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
 	}
 
 	// Check if token is expired (with 5 minute buffer).
@@ -155,12 +197,12 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		// Reload refreshed credentials
 		creds, err = m.store.Load(credKey)
 		if err != nil {
-			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
+			return "", m.errAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
 		}
 	}
 
 	if creds.AccessToken == "" {
-		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
+		return "", m.errAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
 	}
 
 	return creds.AccessToken, nil
@@ -176,7 +218,7 @@ func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return "", output.ErrAuth(fmt.Sprintf("No stored credentials for %s: %v", credKey, err))
+		return "", m.errAuth(fmt.Sprintf("No stored credentials for %s: %v", credKey, err))
 	}
 
 	// Check if token is expired (with the refresh-window buffer)
@@ -188,12 +230,12 @@ func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
 		// Reload refreshed credentials
 		creds, err = m.store.Load(credKey)
 		if err != nil {
-			return "", output.ErrAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
+			return "", m.errAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
 		}
 	}
 
 	if creds.AccessToken == "" {
-		return "", output.ErrAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
+		return "", m.errAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
 	}
 
 	return creds.AccessToken, nil
@@ -223,15 +265,64 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return output.ErrAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
+		return m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
 	}
 
 	return m.refreshLocked(ctx, credKey, creds)
 }
 
+// invalidGrantPrefix is how the SDK's token exchanger renders an RFC 6749
+// token-endpoint error: it returns the response as an untyped error, so the
+// OAuth error code is recoverable only from the message. Coupled to
+// basecamp-sdk oauth.Exchanger; a re-pin that types the error can replace
+// the string match.
+const invalidGrantPrefix = "token error: invalid_grant"
+
+// invalidGrant reports whether a refresh was refused with invalid_grant —
+// the refresh token is expired, revoked, or reused — and returns the
+// server's error_description when it sent one.
+func invalidGrant(err error) (string, bool) {
+	rest, ok := strings.CutPrefix(err.Error(), invalidGrantPrefix)
+	switch {
+	case !ok:
+		return "", false
+	case rest == "":
+		return "", true
+	default:
+		return strings.CutPrefix(rest, " - ")
+	}
+}
+
+// forgetRefusedGrant deletes the stored credential only while it still
+// carries the refresh token the server just refused. Each process has its
+// own Manager lock, so two of them can enter the refresh window together:
+// the first rotates and saves, the second is refused for reusing the old
+// token, and an unconditional delete here would throw away the fresh
+// credential the first one stored. The re-read closes that window down to
+// the gap between this Load and Delete; a rotation landing inside it is
+// lost, which costs one login, and a cross-process lock on a store that is
+// usually the OS keyring is not a price worth paying for that.
+//
+// It reports whether the store holds a credential other than the refused
+// one — another process's rotation, which is a live credential the caller
+// can reload rather than a session that has ended.
+func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool) {
+	current, err := m.store.Load(origin)
+	if err != nil {
+		return false
+	}
+	if current.RefreshToken != refusedToken {
+		return true
+	}
+	if err := m.store.Delete(origin); err != nil {
+		m.warnf("could not forget the refused credential for %s: %v", origin, err)
+	}
+	return false
+}
+
 func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Credentials) error {
 	if creds.RefreshToken == "" {
-		return output.ErrAuth("No refresh token available")
+		return m.errAuth("No refresh token available")
 	}
 
 	// Migrate old credentials missing OAuthType
@@ -242,7 +333,7 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	// Migrate old credentials missing TokenEndpoint
 	if creds.TokenEndpoint == "" {
 		if creds.OAuthType == "bc3" || creds.OAuthType == oauthTypeBC5 {
-			return output.ErrAuth("Stored credentials missing token endpoint — please re-authenticate: basecamp auth login")
+			return m.errAuth("Stored credentials are missing their token endpoint and cannot be refreshed")
 		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
@@ -268,7 +359,7 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	case "bc3":
 		// DCR-era development flow, removed. Its per-install dynamic clients
 		// can't be resolved anymore, so the refresh token is unusable.
-		return output.ErrAuth("Stored credentials are from a removed development flow — please re-authenticate: basecamp auth login")
+		return m.errAuth("Stored credentials are from a removed development flow and cannot be refreshed")
 	case oauthTypeBC5:
 		// Pre-registered public client: no secret.
 		clientID = bc5ClientID
@@ -311,7 +402,32 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 
 	token, err := exchanger.Refresh(ctx, req)
 	if err != nil {
-		return wrapOAuthError("token refresh failed", err)
+		desc, dead := invalidGrant(err)
+		if !dead {
+			return wrapOAuthError("token refresh failed", err)
+		}
+		// The grant is gone for good, so the credential is forgotten now
+		// rather than re-tried by every later command: Basecamp's abuse
+		// tracker bans the client and address after a handful of
+		// invalid_grant failures, which would turn one expired session
+		// into a lockout. Only a BC5 credential is forgotten: its client is
+		// the fixed public one, so the refusal can only be about the grant.
+		// A Launchpad refresh sends whatever client the environment names,
+		// and the server answers invalid_grant for a token issued to a
+		// different client too, which is not proof the grant is dead. The
+		// delete's own outcome cannot change the answer — the session is
+		// over either way.
+		if creds.OAuthType == oauthTypeBC5 && m.forgetRefusedGrant(origin, creds.RefreshToken) {
+			// Another process rotated the credential while this refresh
+			// was in flight: the store holds a live one, which the callers
+			// reload, so this refresh has succeeded by proxy.
+			return nil
+		}
+		msg := "Your session has expired or was revoked"
+		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
+			msg += " (" + desc + ")"
+		}
+		return m.errAuth(msg)
 	}
 
 	creds.AccessToken = token.AccessToken

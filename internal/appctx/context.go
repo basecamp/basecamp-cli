@@ -3,6 +3,7 @@ package appctx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -282,7 +283,7 @@ func (a *App) Err(err error) error {
 	}
 
 	// Print the error response
-	if outputErr := a.Output.Err(err, opts...); outputErr != nil {
+	if outputErr := a.Output.Err(a.withAuthRemedy(err), opts...); outputErr != nil {
 		return outputErr
 	}
 
@@ -292,6 +293,39 @@ func (a *App) Err(err error) error {
 		a.printStatsToStderr(&stats)
 	}
 	return nil
+}
+
+// withAuthRemedy replaces the generic login hint on an API 401 with one that
+// fits the credential the request actually sent. The SDK classifies a 401
+// far from the profile and the environment, so its conversion can only say
+// "basecamp auth login": under an active profile that command would store
+// the new credential somewhere the failing command never reads, and under
+// BASECAMP_TOKEN — which every request sends ahead of any stored login — no
+// login changes anything. Only errors carrying an SDK error are rewritten:
+// the credential manager's own failures name the profile themselves, and
+// come from stored-credential operations (auth refresh, auth token
+// --stored) that ignore the environment token by design.
+func (a *App) withAuthRemedy(err error) error {
+	var sdkErr *basecamp.Error
+	e := output.AsError(err)
+	if e.Code != output.CodeAuth || !errors.As(err, &sdkErr) || (e.Hint != "" && !strings.HasPrefix(e.Hint, output.DefaultAuthHint)) {
+		return err
+	}
+	var remedy string
+	switch {
+	case os.Getenv("BASECAMP_TOKEN") != "":
+		remedy = "BASECAMP_TOKEN is set and every request uses it instead of a stored login; unset it, or export a token the server accepts"
+	case a.Auth != nil:
+		remedy = a.Auth.LoginHint()
+	default:
+		return err
+	}
+	// A command may have appended guidance of its own to the default hint
+	// (a partial reorder's rerun note); the remedy replaces the default
+	// and keeps the rest.
+	hinted := *e
+	hinted.Hint = remedy + strings.TrimPrefix(e.Hint, output.DefaultAuthHint)
+	return &hinted
 }
 
 // shouldIncludeStatsInError returns true if stats should be included in the error envelope.
