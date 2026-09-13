@@ -462,14 +462,14 @@ func convertSDKError(err error) error {
 	// Handle structured SDK errors
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
-		return &output.Error{
+		return output.WithAuthHint(&output.Error{
 			Code:       sdkErr.Code,
 			Message:    sdkErr.Message,
 			Hint:       sdkErr.Hint,
 			HTTPStatus: sdkErr.HTTPStatus,
 			Retryable:  sdkErr.Retryable,
 			Cause:      sdkErr,
-		}
+		})
 	}
 	return err
 }

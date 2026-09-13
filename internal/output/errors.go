@@ -41,16 +41,31 @@ func AsError(err error) *Error {
 		if message == "" {
 			message = sdkErr.Message
 		}
-		return &Error{
+		return WithAuthHint(&Error{
 			Code:       sdkErr.Code,
 			Message:    message,
 			Hint:       sdkErr.Hint,
 			HTTPStatus: sdkErr.HTTPStatus,
 			Retryable:  sdkErr.Retryable,
 			Cause:      sdkErr,
-		}
+		})
 	}
-	return clioutput.AsError(err)
+	return WithAuthHint(clioutput.AsError(err))
+}
+
+// WithAuthHint gives an auth_required error that names no remedy the login
+// command. A 401 from the API and the SDK's own auth errors arrive without
+// one, and "authentication required" alone leaves the reader to guess what
+// to run. Errors that already carry a hint, or are not auth errors, pass
+// through untouched; a hinted copy is returned so the caller's error is not
+// rewritten under it.
+func WithAuthHint(e *Error) *Error {
+	if e.Code != CodeAuth || e.Hint != "" {
+		return e
+	}
+	hinted := *e
+	hinted.Hint = "Run: basecamp auth login"
+	return &hinted
 }
 
 // RequestID returns the SDK request ID carried by err, if present.

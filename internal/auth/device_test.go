@@ -800,7 +800,10 @@ func TestRefreshLocked_LegacyBC3RequiresReauth(t *testing.T) {
 
 	err := m.refreshLocked(context.Background(), "test", creds)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "re-authenticate")
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Equal(t, "Run: basecamp auth login", cliErr.Hint)
 	assert.False(t, transport.attempted.Load(), "legacy bc3 refresh must fail without any network request")
 }
 
