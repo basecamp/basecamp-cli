@@ -1291,3 +1291,53 @@ func TestMeUnderEnvTokenLeavesStoredIdentityAlone(t *testing.T) {
 	assert.Equal(t, "1", creds.UserID)
 	assert.Equal(t, "kept@example.com", creds.UserEmail)
 }
+
+// TestMeKeepsTheIdentityEmailWhenThePersonHasNone: the person record fills
+// gaps in the authorization document; a field the document already named
+// is not replaced by the record's omission.
+func TestMeKeepsTheIdentityEmailWhenThePersonHasNone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/authorization.json":
+			json.NewEncoder(w).Encode(map[string]any{
+				"identity": map[string]any{"id": 28142355, "email_address": "identity@example.com"},
+				"accounts": []map[string]any{{"id": 555, "name": "Token Corp", "product": "bc3"}},
+			})
+		case "/555/my/profile.json":
+			json.NewEncoder(w).Encode(map[string]any{"id": 51177542, "name": "Ada Lovelace"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: server.URL, CacheDir: t.TempDir()}
+	authMgr := auth.NewManager(cfg, nil)
+	authMgr.SetStore(auth.NewStore(filepath.Join(tmpDir, "basecamp")))
+	require.NoError(t, authMgr.GetStore().Save(config.NormalizeBaseURL(server.URL), &auth.Credentials{
+		AccessToken: "bc_at_stored", OAuthType: "bc5", ExpiresAt: 9999999999,
+	}))
+	buf := &bytes.Buffer{}
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: server.URL}, &peopleTestTokenProvider{}, basecamp.WithMaxRetries(1))
+	app := &appctx.App{
+		Config: cfg, Auth: authMgr, SDK: sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope meEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Ada Lovelace <identity@example.com> - 1 Basecamp account(s)", envelope.Summary)
+
+	creds, err := authMgr.GetStore().Load(authMgr.CredentialKey())
+	require.NoError(t, err)
+	assert.Equal(t, "51177542", creds.UserID)
+	assert.Equal(t, "identity@example.com", creds.UserEmail, "the merged email is what gets stored")
+}
