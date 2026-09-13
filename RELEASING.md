@@ -89,8 +89,10 @@ If the release-time sync fails, recover with the `Sync skills` workflow
 stable release so it cannot roll the distribution repo back, and it runs the sync script
 from the dispatching branch against the tag's skills tree — so when the failure was a
 defect in `sync-skills.sh` itself, merge the fix to main and dispatch; no new release
-needed. `scripts/test-sync-skills.sh` (`make test-sync-skills`, in `bin/ci`) pins the
-ownership contract by running the script as both CLIs against a throwaway target.
+needed. The script always clones the target fresh and pushes only the commit it made,
+so there is no checkout to hand it. `scripts/test-sync-skills.sh` (`make test-sync-skills`,
+in `bin/ci`) pins the ownership contract by running the script as both CLIs against a
+local bare repository — real clones, commits and pushes, no network.
 
 ## Requirements
 
