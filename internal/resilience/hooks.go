@@ -83,20 +83,27 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 		return ctx, basecamp.ErrCircuitOpen
 	}
 
-	deadline := time.Now().Add(h.maxWait)
+	start := time.Now()
+	deadline := start.Add(h.maxWait)
 
 	// Rate limiter first: it queues for a refill and consumes a token on
 	// success, which is the only state it holds, so a later rejection wastes
 	// at most that token.
 	if h.rateLimiter != nil {
-		if err := h.rateLimiter.Wait(ctx, deadline); err != nil {
+		if err := h.rateLimiter.waitSince(ctx, start, deadline); err != nil {
 			return ctx, err
 		}
 	}
 
 	// Acquire bulkhead slot (PID-based, released in OnOperationEnd)
 	if h.bulkhead != nil {
-		if err := h.bulkhead.Wait(ctx, deadline); err != nil {
+		if err := h.bulkhead.waitSince(ctx, start, deadline); err != nil {
+			return ctx, err
+		}
+		// A cancellation that landed while the slot was being taken must not
+		// go on to reserve a half-open attempt.
+		if err := ctx.Err(); err != nil {
+			_ = h.bulkhead.Release()
 			return ctx, err
 		}
 		// Store marker in context so OnOperationEnd knows to release the slot

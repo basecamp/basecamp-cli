@@ -119,7 +119,11 @@ const minRefillWait = 5 * time.Millisecond
 // expired or canceled gate consumes nothing, and cancellation outranks the
 // deadline.
 func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
-	start := rl.now()
+	return rl.waitSince(ctx, rl.now(), deadline)
+}
+
+// waitSince is Wait for a gate that started queueing at start.
+func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

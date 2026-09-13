@@ -552,6 +552,55 @@ func TestGatingHooksAnswersCancellationBeforeTheCircuit(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// The bulkhead's give-up message counts the whole gate wait, not only the
+// slot phase: a gate that spent its budget on the rate limiter and then met
+// a full bulkhead reports the total.
+func TestBulkheadWaitReportsTheWholeGateWait(t *testing.T) {
+	store := NewStore(t.TempDir())
+	occupyBulkhead(t, store, 1)
+	bh := NewBulkhead(store, BulkheadConfig{MaxConcurrent: 1})
+	start := time.Now().Add(-9 * time.Second)
+
+	err := bh.waitSince(context.Background(), start, time.Now().Add(20*time.Millisecond))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.Equal(t, "Too many concurrent basecamp processes (limit 1); waited 9s", gateErr.Message)
+}
+
+// slotHeldCancel is a context that reports cancellation from the moment this
+// process holds a bulkhead slot: the narrow window between the slot phase
+// succeeding and the circuit breaker reserving an attempt.
+type slotHeldCancel struct {
+	context.Context
+	store *Store
+}
+
+func (c slotHeldCancel) Err() error {
+	state, err := c.store.Load()
+	if err == nil && state.Bulkhead.HasPID(os.Getpid()) {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestGatingHooksReleasesTheSlotWhenCancellationLandsBeforeTheCircuit(t *testing.T) {
+	store := NewStore(t.TempDir())
+	require.NoError(t, store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitHalfOpen
+		return nil
+	}))
+	hooks := NewGatingHooksFromConfig(store, DefaultConfig())
+
+	_, err := hooks.OnOperationGate(slotHeldCancel{context.Background(), store}, basecamp.OperationInfo{Service: "Todos", Operation: "Complete"})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	state, loadErr := store.Load()
+	require.NoError(t, loadErr)
+	assert.Empty(t, state.Bulkhead.ActivePIDs, "slot released")
+	assert.Zero(t, state.CircuitBreaker.HalfOpenAttempts, "no half-open attempt reserved")
+}
+
 func TestGateErrorUnwrapsToTheSDKSentinel(t *testing.T) {
 	err := fmt.Errorf("listing projects: %w", &GateError{Message: "m", Hint: "h", sentinel: basecamp.ErrBulkheadFull})
 	assert.ErrorIs(t, err, basecamp.ErrBulkheadFull)

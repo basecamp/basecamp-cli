@@ -97,7 +97,12 @@ const slotPoll = 25 * time.Millisecond
 // are checked before every attempt, so an expired or canceled gate reserves
 // nothing, and cancellation outranks the deadline.
 func (b *Bulkhead) Wait(ctx context.Context, deadline time.Time) error {
-	start := b.now()
+	return b.waitSince(ctx, b.now(), deadline)
+}
+
+// waitSince is Wait for a gate that started queueing at start, so the wait
+// it reports covers the whole gate and not only the slot phase.
+func (b *Bulkhead) waitSince(ctx context.Context, start, deadline time.Time) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
