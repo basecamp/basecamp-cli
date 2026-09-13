@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
+	"github.com/basecamp/cli/credstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zalando/go-keyring"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -184,8 +187,86 @@ func TestLogout_DeletesEvenWhenRevocationFails(t *testing.T) {
 	assert.Empty(t, result.Skipped)
 	require.Error(t, result.Err)
 	assert.Contains(t, result.Err.Error(), "HTTP 500")
+	assert.Equal(t, RemainingRefresh, result.Remaining, "a refused refresh revocation leaves the whole family live")
+	assert.Contains(t, result.Outstanding(), "refresh token stays valid")
 	_, err = m.store.Load(credKey)
 	assert.Error(t, err, "the local copy is gone regardless")
+}
+
+// What a failure left usable depends on where it struck: before the refresh
+// token was accepted the family is live; after, only the access token.
+func TestLogout_ReportsWhatAFailureLeftUsable(t *testing.T) {
+	as := startDeviceAS(t)
+	as.revoke = func(call int) (int, string) {
+		if call == 0 {
+			return http.StatusOK, `{}`
+		}
+		return http.StatusInternalServerError, `{}`
+	}
+	m := newDeviceTestManager(t, as.srv.URL)
+	credKey := config.NormalizeBaseURL(as.srv.URL)
+	require.NoError(t, m.store.Save(credKey, bc5Credentials(as)))
+
+	result, err := m.Logout(context.Background())
+	require.NoError(t, err)
+	assert.Contains(t, result.Err.Error(), "revoking the access token")
+	assert.Equal(t, RemainingAccess, result.Remaining)
+	assert.Contains(t, result.Outstanding(), "only the access token remains")
+	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
+
+	as.metadata = func() string { return `{}` }
+	noRefresh := bc5Credentials(as)
+	noRefresh.RefreshToken = ""
+	require.NoError(t, m.store.Save(credKey, noRefresh))
+	result, err = m.Logout(context.Background())
+	require.NoError(t, err)
+	require.Error(t, result.Err)
+	assert.Equal(t, RemainingAccess, result.Remaining, "with no refresh token only the access token was ever at stake")
+}
+
+// lockedCredStore is a credential store that cannot be reached at all — a
+// locked keyring, an unreadable file — as opposed to one with nothing in it.
+type lockedCredStore struct{ err error }
+
+func (s lockedCredStore) Load(string) ([]byte, error) { return nil, s.err }
+func (s lockedCredStore) Save(string, []byte) error   { return s.err }
+func (s lockedCredStore) Delete(string) error         { return s.err }
+func (lockedCredStore) MigrateToKeyring() error       { return nil }
+func (lockedCredStore) UsingKeyring() bool            { return false }
+func (lockedCredStore) FallbackWarning() string       { return "" }
+
+// A store that cannot be read is not "not logged in": the credential may be
+// there, live on both sides, so the failure is the answer.
+func TestLogout_PropagatesAnUnreachableStore(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	swapNewCredStore(t, func(credstore.StoreOptions) credStore { return lockedCredStore{err: errors.New("keyring locked")} })
+	m.store = NewStore(t.TempDir())
+
+	_, err := m.Logout(context.Background())
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.ErrorContains(t, err, "keyring locked")
+
+	_, err = m.LogoutCredential(context.Background(), "profile:bot", "")
+	assert.ErrorContains(t, err, "keyring locked")
+
+	err = m.RevokeStored(context.Background())
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.ErrorContains(t, err, "keyring locked")
+	assert.Empty(t, as.revokeCalls())
+}
+
+// The file backend's miss is the one error that means "nothing stored".
+func TestStoreLoad_TellsAMissFromAFailure(t *testing.T) {
+	store := newTestStore(t, t.TempDir())
+	_, err := store.Load("profile:absent")
+	assert.ErrorIs(t, err, ErrNoCredential)
+
+	assert.True(t, isMissingCredential(fmt.Errorf("credentials not found: %w", keyring.ErrNotFound)))
+	assert.False(t, isMissingCredential(errors.New("credentials not found: keychain locked")),
+		"a keyring failure under credstore's not-found prefix is not a miss")
+	assert.False(t, isMissingCredential(errors.New("open credentials.json: permission denied")))
 }
 
 func TestLogout_SkipsWhatIsNotItsToRevoke(t *testing.T) {
@@ -320,7 +401,20 @@ func TestRevokeStored_KeepsTheCredentialWhenTheServerRefuses(t *testing.T) {
 	assert.Contains(t, err.Error(), "kept so you can retry")
 	assert.NotContains(t, err.Error(), "dev-ref")
 	assert.Contains(t, output.AsError(err).Hint, "basecamp auth revoke")
+	assert.True(t, output.AsError(err).Retryable, "a 503 is the server saying come back")
+	assert.Equal(t, http.StatusServiceUnavailable, output.AsError(err).HTTPStatus)
 	assert.True(t, m.IsAuthenticated(), "the credential stays for a retry")
+
+	as.revoke = func(int) (int, string) { return http.StatusBadRequest, `{"error":"unsupported_token_type"}` }
+	err = m.RevokeStored(context.Background())
+	require.Error(t, err)
+	assert.False(t, output.AsError(err).Retryable, "a 400 will not change on retry")
+
+	as.srv.Close()
+	err = m.RevokeStored(context.Background())
+	require.Error(t, err)
+	assert.True(t, output.AsError(err).Retryable, "an unreachable server may come back")
+	assert.Contains(t, err.Error(), "fetching authorization server metadata")
 }
 
 func TestRevokeStored_RefusesWhatIsNotItsToRevoke(t *testing.T) {

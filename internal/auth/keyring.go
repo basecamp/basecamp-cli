@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/basecamp/cli/credstore"
 	"github.com/charmbracelet/x/term"
+	"github.com/zalando/go-keyring"
 )
 
 // Credentials holds OAuth tokens and metadata.
@@ -140,6 +142,9 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 	s.warnFallback()
 	data, err := s.ensure().Load(origin)
 	if err != nil {
+		if isMissingCredential(err) {
+			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
+		}
 		return nil, err
 	}
 	var creds Credentials
@@ -149,9 +154,23 @@ func (s *Store) Load(origin string) (*Credentials, error) {
 	return &creds, nil
 }
 
+// ErrNoCredential marks a key with nothing stored under it — as opposed to
+// a store that could not be read, which is not "not logged in".
+var ErrNoCredential = errors.New("no stored credential")
+
 // ErrInvalidCredentials marks a stored blob that is present but not a
 // credential any command can read — as opposed to nothing stored at all.
 var ErrInvalidCredentials = errors.New("invalid credentials")
+
+// isMissingCredential tells a missing entry apart from a store that could
+// not be read. credstore has no sentinel of its own: the keyring backend
+// wraps go-keyring's ErrNotFound (and every other keyring failure, a locked
+// keychain included, under the same "credentials not found:" prefix), and
+// the file backend reports a miss as "credentials not found for <key>" —
+// the one phrase the file backend uses for nothing else.
+func isMissingCredential(err error) bool {
+	return errors.Is(err, keyring.ErrNotFound) || strings.Contains(err.Error(), "credentials not found for ")
+}
 
 // Save stores credentials for the given origin.
 func (s *Store) Save(origin string, creds *Credentials) error {

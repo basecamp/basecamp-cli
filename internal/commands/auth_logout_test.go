@@ -156,7 +156,7 @@ func TestAuthLogoutHumanCopy(t *testing.T) {
 		s.metadataStatus = http.StatusNotFound
 		app, buf := newLogoutTestApp(t, s, output.FormatStyled, bc5LogoutCredentials(s))
 		require.NoError(t, runLogout(t, app), "a failed revocation is not a failed logout")
-		assert.Contains(t, buf.String(), "Logged out locally; could not revoke the token server-side: authorization server metadata returned HTTP 404 — the access token expires within the hour, but the refresh token stays valid until it is revoked")
+		assert.Contains(t, buf.String(), "Logged out locally; could not revoke the token server-side: authorization server metadata returned HTTP 404 — the refresh token stays valid until it is revoked")
 		assert.Empty(t, s.revoked())
 		assert.False(t, app.Auth.IsAuthenticated(), "the local copy goes regardless")
 	})
@@ -254,6 +254,26 @@ func TestAuthRevokeRefusesWhatItCannotRevoke(t *testing.T) {
 	})
 }
 
+// With BASECAMP_TOKEN in use the stored credential is not the session being
+// ended, and revoking it would kill an unrelated refresh family for good.
+func TestAuthLogoutAndRevokeRefuseUnderEnvToken(t *testing.T) {
+	for _, sub := range []string{"logout", "revoke"} {
+		t.Run(sub, func(t *testing.T) {
+			s := startRevocationServer(t)
+			app, _ := newLogoutTestApp(t, s, output.FormatJSON, bc5LogoutCredentials(s))
+			t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+
+			err := runAuthSubcommand(t, app, sub)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "BASECAMP_TOKEN is set")
+			assert.Contains(t, output.AsError(err).Hint, "Unset BASECAMP_TOKEN")
+			assert.Empty(t, s.revoked())
+			_, loadErr := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+			assert.NoError(t, loadErr, "the stored credential is left alone")
+		})
+	}
+}
+
 func TestAuthLogoutJSONCarriesTheReason(t *testing.T) {
 	t.Run("revocation failed", func(t *testing.T) {
 		s := startRevocationServer(t)
@@ -264,6 +284,7 @@ func TestAuthLogoutJSONCarriesTheReason(t *testing.T) {
 		assert.Equal(t, "logged_out", data["status"])
 		assert.Equal(t, false, data["revoked"])
 		assert.Equal(t, "authorization server metadata returned HTTP 404", data["reason"])
+		assert.Equal(t, "refresh_token", data["remaining"])
 	})
 
 	t.Run("imported token", func(t *testing.T) {

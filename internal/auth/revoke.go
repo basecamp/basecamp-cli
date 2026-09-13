@@ -29,10 +29,6 @@ const maxRevocationBodyBytes = 64 * 1024
 // issuer origin.
 const wellKnownAuthorizationServer = "/.well-known/oauth-authorization-server"
 
-// ErrNoCredential reports that nothing is stored under the credential key a
-// logout was asked to clear.
-var ErrNoCredential = errors.New("no stored credential")
-
 // Reasons a credential is removed locally without a revocation attempt.
 const (
 	// RevokeSkippedLaunchpad: the legacy provider has no revocation endpoint.
@@ -45,6 +41,16 @@ const (
 	RevokeSkippedImported = "imported_token"
 )
 
+// What a failed revocation left usable.
+const (
+	// RemainingRefresh: the refresh token was not revoked, so the whole
+	// family — its access token included — stays valid until it is.
+	RemainingRefresh = "refresh_token"
+	// RemainingAccess: only the access token remains (the refresh token was
+	// revoked, or there never was one); it expires on its own.
+	RemainingAccess = "access_token"
+)
+
 // LogoutResult reports what became of a credential server-side. The local
 // copy is gone either way.
 type LogoutResult struct {
@@ -55,6 +61,22 @@ type LogoutResult struct {
 	Skipped string
 	// Err is why an attempted revocation did not go through; nil otherwise.
 	Err error
+	// Remaining names what Err left usable (one of the Remaining* values);
+	// empty when Err is nil.
+	Remaining string
+}
+
+// Outstanding describes, for a human, what a failed revocation left usable;
+// empty when nothing did.
+func (r *LogoutResult) Outstanding() string {
+	switch r.Remaining {
+	case RemainingRefresh:
+		return "the refresh token stays valid until it is revoked"
+	case RemainingAccess:
+		return "only the access token remains and it expires within the hour"
+	default:
+		return ""
+	}
 }
 
 // Logout revokes the current credential with its authorization server when
@@ -76,6 +98,8 @@ func (m *Manager) LogoutCredential(ctx context.Context, credKey, baseURL string)
 
 	creds, err := m.store.Load(credKey)
 	switch {
+	case errors.Is(err, ErrNoCredential):
+		return nil, ErrNoCredential
 	case errors.Is(err, ErrInvalidCredentials):
 		// A blob no command can read is still stored; clearing it is the
 		// one thing a logout can do for it, and failing to is reported.
@@ -84,7 +108,10 @@ func (m *Manager) LogoutCredential(ctx context.Context, credKey, baseURL string)
 		}
 		return nil, ErrNoCredential
 	case err != nil:
-		return nil, ErrNoCredential
+		// A store that could not be read (a locked keyring, an unreadable
+		// file) is not "not logged in": the credential may well be there,
+		// live on both sides, and a logout that says otherwise is a lie.
+		return nil, err
 	}
 	result := m.revokeForDiscard(ctx, creds, baseURL)
 	if err := m.store.Delete(credKey); err != nil {
@@ -100,8 +127,8 @@ func (m *Manager) revokeForDiscard(ctx context.Context, creds *Credentials, base
 	if skipped := revokeSkipReason(creds); skipped != "" {
 		return &LogoutResult{Skipped: skipped}
 	}
-	if err := m.revoke(ctx, creds, baseURL); err != nil {
-		return &LogoutResult{Err: err}
+	if remaining, err := m.revoke(ctx, creds, baseURL); err != nil {
+		return &LogoutResult{Err: err, Remaining: remaining}
 	}
 	return &LogoutResult{Revoked: true}
 }
@@ -118,8 +145,11 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
-	if err != nil {
+	if errors.Is(err, ErrNoCredential) {
 		return ErrNoCredential
+	}
+	if err != nil {
+		return err
 	}
 	switch revokeSkipReason(creds) {
 	case RevokeSkippedLaunchpad:
@@ -130,12 +160,34 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 			"Forget the credential locally instead: basecamp auth logout")
 	}
 	if err := m.Revoke(ctx, creds); err != nil {
-		e := output.ErrAPI(0, "could not revoke the token server-side: "+err.Error()+"; the credential is kept so you can retry")
+		// Keep the failure's taxonomy — a transport failure or a 5xx stays
+		// retryable, a refusal does not — under the revocation's own message
+		// and remedy.
+		e := *output.AsError(err)
+		e.Message = "could not revoke the token server-side: " + e.Message + "; the credential is kept so you can retry"
 		e.Hint = "Retry: basecamp auth revoke — or forget it locally: basecamp auth logout"
 		e.Cause = err
-		return e
+		return &e
 	}
 	return m.store.Delete(credKey)
+}
+
+// transportFailure is a revocation request that got no answer: retryable,
+// under a message that names the step rather than the SDK's generic one.
+func transportFailure(msg string, cause error) error {
+	e := output.ErrNetwork(cause)
+	e.Message = msg + ": " + cause.Error()
+	e.Hint = ""
+	return e
+}
+
+// statusFailure is a revocation request the server answered with something
+// other than 200: retryable when the server says to come back (5xx, 429),
+// final otherwise.
+func statusFailure(msg string, status int) error {
+	e := output.ErrAPI(status, msg)
+	e.Retryable = status >= 500 || status == http.StatusTooManyRequests
+	return e
 }
 
 // revokeSkipReason says why creds are not the CLI's to revoke, or "" when
@@ -160,37 +212,44 @@ func revokeSkipReason(creds *Credentials) string {
 // could not be reached, did not describe a revocation endpoint, or did not
 // answer 200; the tokens never appear in it.
 func (m *Manager) Revoke(ctx context.Context, creds *Credentials) error {
-	return m.revoke(ctx, creds, "")
+	_, err := m.revoke(ctx, creds, "")
+	return err
 }
 
-func (m *Manager) revoke(ctx context.Context, creds *Credentials, baseURL string) error {
+// revoke reports, alongside a failure, which token it left usable: the
+// refresh token until its own POST is accepted, only the access token after.
+func (m *Manager) revoke(ctx context.Context, creds *Credentials, baseURL string) (remaining string, err error) {
+	remaining = RemainingAccess
+	if creds.RefreshToken != "" {
+		remaining = RemainingRefresh
+	}
 	if creds.RefreshToken == "" && creds.AccessToken == "" {
-		return errors.New("stored credential carries no token")
+		return remaining, errors.New("stored credential carries no token")
 	}
 	issuer, err := credentialIssuer(creds)
 	if err != nil {
-		return err
+		return remaining, err
 	}
 	client, err := m.revocationClient(baseURL)
 	if err != nil {
-		return err
+		return remaining, err
 	}
 	endpoint, err := m.revocationEndpoint(ctx, client, issuer)
 	if err != nil {
-		return err
+		return remaining, err
 	}
-	for _, tok := range []struct{ value, hint string }{
-		{creds.RefreshToken, "refresh_token"},
-		{creds.AccessToken, "access_token"},
-	} {
-		if tok.value == "" {
-			continue
+	if creds.RefreshToken != "" {
+		if err := revokeToken(ctx, client, endpoint, creds.RefreshToken, RemainingRefresh); err != nil {
+			return remaining, err
 		}
-		if err := revokeToken(ctx, client, endpoint, tok.value, tok.hint); err != nil {
-			return err
+		remaining = RemainingAccess
+	}
+	if creds.AccessToken != "" {
+		if err := revokeToken(ctx, client, endpoint, creds.AccessToken, RemainingAccess); err != nil {
+			return remaining, err
 		}
 	}
-	return nil
+	return "", nil
 }
 
 // revocationClient is the egress lane a revocation rides: the BC5 lane of
@@ -239,11 +298,11 @@ func (m *Manager) revocationEndpoint(ctx context.Context, client *http.Client, i
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetching authorization server metadata: %w", err)
+		return "", transportFailure("fetching authorization server metadata", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("authorization server metadata returned HTTP %d", resp.StatusCode)
+		return "", statusFailure(fmt.Sprintf("authorization server metadata returned HTTP %d", resp.StatusCode), resp.StatusCode)
 	}
 
 	var doc struct {
@@ -281,12 +340,12 @@ func revokeToken(ctx context.Context, client *http.Client, endpoint, token, hint
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("revoking the %s: %w", what, err)
+		return transportFailure("revoking the "+what, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRevocationBodyBytes))
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("revoking the %s: the server answered HTTP %d", what, resp.StatusCode)
+		return statusFailure(fmt.Sprintf("revoking the %s: the server answered HTTP %d", what, resp.StatusCode), resp.StatusCode)
 	}
 	return nil
 }

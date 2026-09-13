@@ -840,6 +840,9 @@ func buildLogoutCmd(use string) *cobra.Command {
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := refuseEnvTokenLogout(); err != nil {
+				return err
+			}
 			result, err := app.Auth.Logout(cmd.Context())
 			if errors.Is(err, auth.ErrNoCredential) {
 				return app.OK(map[string]any{
@@ -877,6 +880,9 @@ revoke an imported token in Basecamp.`,
 				return fmt.Errorf("app not initialized")
 			}
 
+			if err := refuseEnvTokenLogout(); err != nil {
+				return err
+			}
 			err := app.Auth.RevokeStored(cmd.Context())
 			if errors.Is(err, auth.ErrNoCredential) {
 				return app.OK(map[string]any{
@@ -895,6 +901,18 @@ revoke an imported token in Basecamp.`,
 	}
 }
 
+// refuseEnvTokenLogout keeps logout and revoke off the stored credential
+// while BASECAMP_TOKEN is the one in use. Every request follows the
+// environment token, so the stored credential is not the session being
+// ended — and revoking it would kill an unrelated refresh family for good.
+func refuseEnvTokenLogout() error {
+	if os.Getenv("BASECAMP_TOKEN") == "" {
+		return nil
+	}
+	return output.ErrUsageHint("BASECAMP_TOKEN is set: the CLI cannot revoke or forget an environment token, and the stored credential is not the one in use",
+		"Unset BASECAMP_TOKEN to log out of the stored credential; revoke an environment token where it was issued.")
+}
+
 // describeLogout renders what became of a credential server-side for a
 // human — appended to `done`, the local outcome — and the fields the JSON
 // envelope carries for it.
@@ -911,7 +929,8 @@ func describeLogout(done string, result *auth.LogoutResult) (summary string, fie
 		summary = done + " (forgot the imported token; it stays valid until revoked in Basecamp)"
 	case result.Err != nil:
 		fields["reason"] = result.Err.Error()
-		summary = done + " locally; could not revoke the token server-side: " + result.Err.Error() + " — the access token expires within the hour, but the refresh token stays valid until it is revoked"
+		fields["remaining"] = result.Remaining
+		summary = done + " locally; could not revoke the token server-side: " + result.Err.Error() + " — " + result.Outstanding()
 	default:
 		fields["reason"] = result.Skipped
 		summary = done
