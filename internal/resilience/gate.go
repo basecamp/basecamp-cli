@@ -43,7 +43,12 @@ func pause(ctx context.Context, d time.Duration) error {
 // jittered stretches d by up to half again so that processes which woke
 // together do not retry in lockstep and starve each other at the lock.
 func jittered(d time.Duration) time.Duration {
-	return d + rand.N(d/2+1) //nolint:gosec // jitter spreads retries; it guards nothing
+	return d + jitter(d)
+}
+
+// jitter is the random stretch jittered adds; a variable so tests can pin it.
+var jitter = func(d time.Duration) time.Duration {
+	return rand.N(d/2 + 1) //nolint:gosec // jitter spreads retries; it guards nothing
 }
 
 // ceilSeconds rounds d up to a whole second.

@@ -279,16 +279,19 @@ func TestRateLimiterWaitReportsALongRetryAfterImmediately(t *testing.T) {
 
 // The jitter that spreads retries must not stretch a sleep past the budget:
 // a block that lifts just inside the deadline is waited out, not overshot.
+// Pinned to the maximum jitter, which uncapped would overshoot by half.
 func TestRateLimiterWaitNeverSleepsPastTheDeadline(t *testing.T) {
-	for range 4 {
-		rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
-		require.NoError(t, rl.SetRetryAfterDuration(300*time.Millisecond))
+	previous := jitter
+	jitter = func(d time.Duration) time.Duration { return d / 2 }
+	t.Cleanup(func() { jitter = previous })
 
-		start := time.Now()
-		budget := 320 * time.Millisecond
-		require.NoError(t, rl.Wait(context.Background(), start.Add(budget)))
-		assert.Less(t, time.Since(start), budget+25*time.Millisecond)
-	}
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+	require.NoError(t, rl.SetRetryAfterDuration(200*time.Millisecond))
+
+	start := time.Now()
+	budget := 220 * time.Millisecond
+	require.NoError(t, rl.Wait(context.Background(), start.Add(budget)))
+	assert.Less(t, time.Since(start), budget+60*time.Millisecond)
 }
 
 func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
@@ -388,6 +391,78 @@ func TestGatingHooksGateSharesOneWaitBudgetAndLeaksNoSlot(t *testing.T) {
 	state, err := store.Load()
 	require.NoError(t, err)
 	assert.False(t, state.Bulkhead.HasPID(os.Getpid()), "a rejected gate holds no slot")
+}
+
+func TestBulkheadWaitReturnsCancellationWithoutReservingASlot(t *testing.T) {
+	store := NewStore(t.TempDir())
+	bh := NewBulkhead(store, BulkheadConfig{MaxConcurrent: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := bh.Wait(ctx, time.Now().Add(time.Second))
+
+	assert.ErrorIs(t, err, context.Canceled)
+	state, loadErr := store.Load()
+	require.NoError(t, loadErr)
+	assert.Empty(t, state.Bulkhead.ActivePIDs)
+}
+
+func TestRateLimiterWaitReturnsCancellationWithoutConsumingAToken(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{MaxTokens: 5, RefillRate: 0.001})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := rl.Wait(ctx, time.Now().Add(time.Second))
+
+	assert.ErrorIs(t, err, context.Canceled)
+	tokens, tokensErr := rl.Tokens()
+	require.NoError(t, tokensErr)
+	assert.Equal(t, float64(5), tokens)
+}
+
+func TestCircuitBreakerTripped(t *testing.T) {
+	store := NewStore(t.TempDir())
+	cb := NewCircuitBreaker(store, CircuitBreakerConfig{OpenTimeout: time.Minute})
+	clock := newFakeClock()
+	cb.nowFn = clock.Now
+	assert.False(t, cb.Tripped(), "closed")
+
+	require.NoError(t, store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitOpen
+		state.CircuitBreaker.OpenedAt = clock.Now()
+		return nil
+	}))
+	assert.True(t, cb.Tripped(), "open, timeout running")
+
+	clock.Advance(2 * time.Minute)
+	assert.False(t, cb.Tripped(), "open, timeout expired: Allow decides")
+}
+
+// With the circuit open, an invocation must not spend its queue budget
+// waiting for a token it would only be refused with.
+func TestGatingHooksFailsFastOnAnOpenCircuitBeforeQueueing(t *testing.T) {
+	store := NewStore(t.TempDir())
+	require.NoError(t, store.Update(func(state *State) error {
+		state.CircuitBreaker.State = CircuitOpen
+		state.CircuitBreaker.OpenedAt = time.Now()
+		return nil
+	}))
+	cfg := DefaultConfig()
+	cfg.MaxWait = 2 * time.Second
+	cfg.RateLimiter = RateLimiterConfig{MaxTokens: 1, RefillRate: 2, TokensPerRequest: 1}
+	hooks := NewGatingHooksFromConfig(store, cfg)
+	allowed, err := hooks.rateLimiter.Allow()
+	require.NoError(t, err)
+	require.True(t, allowed, "bucket drained")
+
+	start := time.Now()
+	_, err = hooks.OnOperationGate(context.Background(), basecamp.OperationInfo{Service: "Todos", Operation: "Complete"})
+
+	assert.ErrorIs(t, err, basecamp.ErrCircuitOpen)
+	assert.Less(t, time.Since(start), 100*time.Millisecond, "no queueing for a refill")
+	tokens, tokensErr := hooks.rateLimiter.Tokens()
+	require.NoError(t, tokensErr)
+	assert.Less(t, tokens, 1.0, "no token consumed")
 }
 
 func TestGateErrorUnwrapsToTheSDKSentinel(t *testing.T) {

@@ -114,16 +114,23 @@ const minRefillWait = 5 * time.Millisecond
 // Retry-After block to lift, until deadline. It returns nil when the request
 // may proceed, a *GateError when the deadline would pass first, or ctx.Err().
 // A Retry-After block that outlasts the deadline is reported immediately
-// rather than waited on, with the remaining time in the message.
+// rather than waited on, with the remaining time in the message. A canceled
+// caller consumes nothing, and cancellation outranks the deadline.
 func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
 	start := rl.now()
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		allowed, wait, blocked := rl.take() //nolint:contextcheck // lock acquisition is context-independent by design
 		if allowed {
 			return nil
 		}
 		remaining := deadline.Sub(rl.now())
 		if wait > remaining {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return rl.gateError(blocked, wait, rl.now().Sub(start))
 		}
 		if err := pause(ctx, min(jittered(max(wait, minRefillWait)), remaining)); err != nil {
