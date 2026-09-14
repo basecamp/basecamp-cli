@@ -204,11 +204,13 @@ func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
 		s.details = append(s.details, "Token: valid (checked just now)")
 		return
 	}
-	// A refresh the check just had refused makes the offline line's promise
-	// false; the verdict replaces it rather than sitting beside it.
+	// A refresh the check just watched fail makes the offline line's promise
+	// false; the verdict replaces it rather than sitting beside it. The
+	// failure is named on the line after, and is not always the endpoint's
+	// refusal: a half-configured OAuth client fails before any request.
 	for i, line := range s.details {
 		if line == "Token: expired, will refresh on next use · Storage: "+s.storage {
-			s.details[i] = "Token: expired, and the refresh was refused · Storage: " + s.storage
+			s.details[i] = "Token: expired, and the refresh failed · Storage: " + s.storage
 		}
 	}
 	if v.sent {

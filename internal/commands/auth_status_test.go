@@ -534,7 +534,7 @@ func TestAuthStatusCheckRefusedRefreshReplacesThePromise(t *testing.T) {
 	require.NoError(t, err)
 	report.record(app, &checkVerdict{valid: false, reason: "Your session has expired or was revoked"})
 	joined := strings.Join(report.details, "\n")
-	assert.Contains(t, joined, "expired, and the refresh was refused")
+	assert.Contains(t, joined, "Token: expired, and the refresh failed · Storage: file\nToken: none could be sent (Your session has expired or was revoked)")
 	assert.NotContains(t, joined, "will refresh on next use")
 }
 
