@@ -537,3 +537,71 @@ func TestAuthStatusCheckRefusedRefreshReplacesThePromise(t *testing.T) {
 	assert.Contains(t, joined, "expired, and the refresh was refused")
 	assert.NotContains(t, joined, "will refresh on next use")
 }
+
+// TestAuthStatusSummaryKeepsTheRawEmail: the envelope stores the summary
+// verbatim and terminal sinks sanitize at render time, so JSON output must
+// carry the stored email as it is; sanitizing only decides whether there
+// is anything displayable to name.
+func TestAuthStatusSummaryKeepsTheRawEmail(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	app, buf := setupProfileTestApp(t, statusTestConfig(t))
+	require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok", OAuthType: "bc5", Scope: "full", UserEmail: "a@example.com\x1b[0m",
+	}))
+
+	envelope := runAuthStatus(t, app, buf)
+	assert.Equal(t, "Logged in to https://3.basecampapi.com as a@example.com\x1b[0m", envelope.Summary)
+	assert.Equal(t, "a@example.com\x1b[0m", envelope.Data["user_email"])
+
+	require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
+		AccessToken: "tok", OAuthType: "bc5", Scope: "full", UserEmail: "\x1b[0m\x07",
+	}))
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	assert.Equal(t, "Logged in to https://3.basecampapi.com", report.summary, "an email with nothing displayable is not named")
+}
+
+// TestAuthStatusNamesWhyTheTokenWillNotRefresh: a credential that holds a
+// refresh token the CLI will not redeem is not one with "no refresh token";
+// inside the refresh window the report says which it is.
+func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	for name, tc := range map[string]struct {
+		creds  auth.Credentials
+		reason string
+	}{
+		"without a refresh token": {
+			creds:  auth.Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"},
+			reason: "and no refresh token)",
+		},
+		"legacy bc3": {
+			creds:  auth.Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"},
+			reason: "and a refresh token from a removed development flow that cannot be redeemed)",
+		},
+		"bc5 without its token endpoint": {
+			creds:  auth.Credentials{OAuthType: "bc5", RefreshToken: "ref"},
+			reason: "and no token endpoint to refresh at)",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app, buf := setupProfileTestApp(t, statusTestConfig(t))
+			creds := tc.creds
+			creds.AccessToken = "tok"
+			creds.Scope = "full"
+			creds.ExpiresAt = time.Now().Add(2 * time.Minute).Unix()
+			require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &creds))
+
+			envelope := runAuthStatus(t, app, buf)
+			assert.Equal(t, false, envelope.Data["refreshable"])
+			assert.Equal(t, true, envelope.Data["expired"])
+			assert.Equal(t, "Run: basecamp auth login", envelope.Notice)
+
+			report, err := authStatusReport(app)
+			require.NoError(t, err)
+			assert.True(t, strings.HasSuffix(report.details[1], tc.reason+" · Storage: file"), report.details[1])
+			if tc.creds.RefreshToken != "" {
+				assert.NotContains(t, report.details[1], "no refresh token")
+			}
+		})
+	}
+}

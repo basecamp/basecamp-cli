@@ -303,8 +303,18 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	}
 	// A refresh token alone is not a refresh: the removed bc3 development
 	// flow's grants cannot be redeemed, and a BC5 credential without its
-	// token endpoint has nowhere to send one.
-	refreshable := creds.RefreshToken != "" && creds.OAuthType != "bc3" && (creds.OAuthType != "bc5" || creds.TokenEndpoint != "")
+	// token endpoint has nowhere to send one. The reason is what the report
+	// gives when it leaves a still-live token unusable.
+	var notRefreshable string
+	switch {
+	case creds.RefreshToken == "":
+		notRefreshable = "no refresh token"
+	case creds.OAuthType == "bc3":
+		notRefreshable = "a refresh token from a removed development flow that cannot be redeemed"
+	case creds.OAuthType == "bc5" && creds.TokenEndpoint == "":
+		notRefreshable = "no token endpoint to refresh at"
+	}
+	refreshable := notRefreshable == ""
 	report.storage = storage
 
 	report.data["authenticated"] = true
@@ -322,9 +332,11 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		report.data["user_email"] = creds.UserEmail
 	}
 
+	// The summary is stored verbatim, as the envelope contract has it;
+	// sanitizing only decides whether the email is displayable at all.
 	report.summary = "Logged in to " + baseURL
-	if email := richtext.SanitizeSingleLine(creds.UserEmail); email != "" {
-		report.summary += " as " + email
+	if richtext.SanitizeSingleLine(creds.UserEmail) != "" {
+		report.summary += " as " + creds.UserEmail
 	}
 	if creds.UserID != "" {
 		report.summary += " (user " + creds.UserID + ")"
@@ -358,7 +370,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		case refreshable:
 			expiry = "expired, will refresh on next use"
 		case expiresIn >= 0:
-			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and no refresh token)"
+			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and " + notRefreshable + ")"
 			report.hint = app.Auth.LoginHint()
 		default:
 			expiry = "expired"
