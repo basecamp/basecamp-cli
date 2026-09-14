@@ -22,11 +22,16 @@
 # every run as a comment-only tombstone. The pre-fix script skips any line it cannot
 # parse as a skill name, but treats a missing file as licence to own every skills/*
 # directory — so the tombstone is what stops an un-upgraded sibling from deleting
-# anyone's skills, whichever CLI upgrades first (basecamp/skills#5). One case is
-# accepted: a skill a still-pre-fix sibling drops after the tombstone exists stays
-# behind in the target (that script has no names left to delete by, and the
-# sibling's own first run here removes nothing) — a lingering directory to remove
-# by hand, which beats guessing ownership from the legacy file.
+# this source's skills, whichever CLI upgrades first (basecamp/skills#5). It shields
+# only the sources that have upgraded: a pre-fix sibling still writes its own names
+# to .managed-skills, and a second pre-fix sibling still deletes those — the #5
+# clobber, confined to the CLIs yet to upgrade and gone once each has; nothing the
+# target holds can make that script delete less, since a file it cannot read widens
+# its reach to every skills/* directory. One more case is accepted: a skill a
+# still-pre-fix sibling drops after the tombstone exists stays behind in the target
+# (that script has no names left to delete by, and the sibling's own first run here
+# removes nothing) — a lingering directory to remove by hand, which beats guessing
+# ownership from the legacy file.
 #
 # Required env vars:
 #   RELEASE_TAG      — the release tag (e.g. v1.2.3)
