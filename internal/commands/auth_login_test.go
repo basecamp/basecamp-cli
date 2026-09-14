@@ -743,6 +743,15 @@ func TestAuthLoginRefusesMachineOutputForInteractiveFlows(t *testing.T) {
 			assert.Empty(t, srv.seenBearers())
 		})
 	}
+	t.Run("jq", func(t *testing.T) {
+		srv := startLoginIdentityServer(t, "bc_at_secret")
+		app, _ := loginTestApp(t, srv, &config.Config{})
+		app.Flags.JQFilter = ".name"
+		_, err := runLogin(t, app, strings.NewReader(""), "--device-code")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--jq is not supported by the login command")
+		assert.Empty(t, srv.seenBearers())
+	})
 }
 
 // TestAuthLoginRefusesNonInteractiveEnvWithoutDeviceCode covers the env half

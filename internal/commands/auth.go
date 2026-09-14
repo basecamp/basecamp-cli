@@ -306,10 +306,7 @@ named profile, creating the profile when --account is given.
 				return runLoginWithToken(cmd, app, scope, expect)
 			}
 
-			if app.Flags.JQFilter != "" {
-				return output.ErrJQNotSupported("the login command")
-			}
-			if err := refuseMachineOutputLogin(app); err != nil {
+			if err := refuseMachineOutputLogin(app, "the login command"); err != nil {
 				return err
 			}
 			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
@@ -718,7 +715,10 @@ func refuseNonInteractiveLogin(deviceCode bool) error {
 // line go to stdout, which a machine-output envelope also owns, so a
 // login under --json would write prose and control sequences ahead of the
 // envelope.
-func refuseMachineOutputLogin(app *appctx.App) error {
+func refuseMachineOutputLogin(app *appctx.App, command string) error {
+	if app.Flags.JQFilter != "" {
+		return output.ErrJQNotSupported(command)
+	}
 	if !machineOutputFlagSet(app) {
 		return nil
 	}

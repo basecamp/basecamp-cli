@@ -249,7 +249,7 @@ Examples:
 				profileCfg.AccountID = accountID
 			}
 
-			if err := refuseMachineOutputLogin(app); err != nil {
+			if err := refuseMachineOutputLogin(app, "profile create"); err != nil {
 				return err
 			}
 			if err := refuseNonInteractiveLogin(deviceCode); err != nil {

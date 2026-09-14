@@ -291,36 +291,47 @@ func TestProfileCreateDeviceCodeForcesRemoteMode(t *testing.T) {
 
 // TestProfileCreateRefusesMachineOutput: the login transcript and the live
 // wait line share stdout with the envelope, so an explicit machine-output
-// flag refuses the flow before discovery, as auth login does.
+// flag — --jq included — refuses the flow before discovery, as auth login
+// does.
 func TestProfileCreateRefusesMachineOutput(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("no request may be made under a machine output mode: %s", r.URL.Path)
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
+	for name, tc := range map[string]struct {
+		set     func(*appctx.App)
+		message string
+	}{
+		"json": {func(a *appctx.App) { a.Flags.JSON = true }, "machine output mode"},
+		"jq":   {func(a *appctx.App) { a.Flags.JQFilter = ".name" }, "--jq is not supported by profile create"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("no request may be made under a machine output mode: %s", r.URL.Path)
+				http.NotFound(w, r)
+			}))
+			defer srv.Close()
 
-	cfg := &config.Config{BaseURL: srv.URL, CacheDir: t.TempDir(), Sources: make(map[string]string)}
-	authMgr := auth.NewManager(cfg, srv.Client())
-	app := &appctx.App{Config: cfg, Auth: authMgr}
-	app.Flags.JSON = true
+			cfg := &config.Config{BaseURL: srv.URL, CacheDir: t.TempDir(), Sources: make(map[string]string)}
+			authMgr := auth.NewManager(cfg, srv.Client())
+			app := &appctx.App{Config: cfg, Auth: authMgr}
+			tc.set(app)
 
-	root := &cobra.Command{Use: "basecamp"}
-	root.AddCommand(NewProfileCmd())
-	root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", srv.URL})
-	root.SetContext(appctx.WithApp(context.Background(), app))
-	root.SetOut(&bytes.Buffer{})
-	root.SetErr(&bytes.Buffer{})
-	root.SilenceErrors = true
-	root.SilenceUsage = true
+			root := &cobra.Command{Use: "basecamp"}
+			root.AddCommand(NewProfileCmd())
+			root.SetArgs([]string{"profile", "create", "test-profile", "--base-url", srv.URL})
+			root.SetContext(appctx.WithApp(context.Background(), app))
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			root.SilenceErrors = true
+			root.SilenceUsage = true
 
-	err := root.Execute()
-	require.Error(t, err)
-	var outErr *output.Error
-	require.ErrorAs(t, err, &outErr)
-	assert.Equal(t, output.CodeUsage, outErr.Code)
-	assert.Contains(t, outErr.Message, "machine output mode")
+			err := root.Execute()
+			require.Error(t, err)
+			var outErr *output.Error
+			require.ErrorAs(t, err, &outErr)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Message, tc.message)
+		})
+	}
 }
 
 // TestProfileCreateRefusesNonInteractiveEnv: profile create runs the same
