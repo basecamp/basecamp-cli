@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -386,6 +390,149 @@ func TestLoginDevice_RecordsTheIssuer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, as.srv.URL, creds.Issuer)
 	assert.Empty(t, as.revokeCalls(), "an accepted login revokes nothing")
+}
+
+// A login refused by Verify (an --expect-identity mismatch) stores nothing,
+// and now also leaves nothing live: the grant it minted is revoked before
+// the refusal is returned.
+func TestLoginDevice_VerifyFailureRevokesTheGrant(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+	credKey := config.NormalizeBaseURL(resource.URL)
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify:        func(context.Context, string, string) error { return output.ErrAuth("not you") },
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not you", "the refusal stays the error the caller sees")
+	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
+	assert.NotContains(t, cl.joined(), "warning")
+	_, loadErr := m.store.Load(credKey)
+	assert.Error(t, loadErr, "a rejected token is never stored")
+}
+
+func TestLoginDevice_VerifyFailureWarnsWhenTheGrantOutlivesIt(t *testing.T) {
+	as := startDeviceAS(t)
+	as.revoke = func(int) (int, string) { return http.StatusInternalServerError, `{}` }
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	cl := &collectLogger{}
+	_, err := m.Login(context.Background(), LoginOptions{
+		Remote:        true,
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify:        func(context.Context, string, string) error { return output.ErrAuth("not you") },
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not you")
+	assert.Contains(t, cl.joined(), "warning: could not revoke the refused credential server-side")
+	assert.Contains(t, cl.joined(), "refresh token stays valid until it is revoked")
+	assert.NotContains(t, cl.joined(), "dev-ref")
+	assert.NotContains(t, cl.joined(), "dev-tok")
+}
+
+// A refusal after the login context is gone — Verify timed out or was
+// canceled — must still revoke: that is exactly when the grant would
+// otherwise be orphaned.
+func TestLoginDevice_VerifyFailureRevokesAfterCancellation(t *testing.T) {
+	as := startDeviceAS(t)
+	resource := startResourceServer(t, as.srv.URL)
+	m := newDeviceTestManager(t, resource.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cl := &collectLogger{}
+	_, err := m.Login(ctx, LoginOptions{
+		Remote:        true,
+		Logger:        cl.log,
+		deviceOptions: []oauth.DeviceOption{instantSleep()},
+		Verify: func(context.Context, string, string) error {
+			cancel()
+			return output.ErrAuth("not you")
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not you")
+	assertRevoked(t, as.revokeCalls(), "dev-ref", "dev-tok")
+	assert.NotContains(t, cl.joined(), "warning")
+}
+
+// A refused Launchpad login stores nothing and revokes nothing: Launchpad
+// has no revocation endpoint, so no request leaves and no warning prints.
+func TestLoginLaunchpad_VerifyFailureRevokesNothing(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/authorization/token":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"access_token":"remote-tok","token_type":"bearer","refresh_token":"remote-refresh"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.URL)
+	t.Setenv("BASECAMP_OAUTH_ISSUER", "")
+	cfg := &config.Config{BaseURL: srv.URL}
+	m := NewManager(cfg, srv.Client())
+	m.store = newTestStore(t, tmpDir)
+	credKey := config.NormalizeBaseURL(srv.URL)
+
+	sl := newSyncLogger()
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := m.Login(context.Background(), LoginOptions{
+			Remote:      true,
+			Logger:      sl.log,
+			InputReader: pr,
+			Verify:      func(context.Context, string, string) error { return output.ErrAuth("not you") },
+		})
+		errCh <- err
+	}()
+
+	var authURL string
+	select {
+	case authURL = <-sl.authReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for auth URL to be logged")
+	}
+	u, err := url.Parse(authURL)
+	require.NoError(t, err)
+	_, err = fmt.Fprintf(pw, "http://127.0.0.1:8976/callback?code=test-code&state=%s\n", u.Query().Get("state"))
+	require.NoError(t, err)
+	pw.Close()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not you")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Login timed out")
+	}
+
+	_, loadErr := m.store.Load(credKey)
+	assert.Error(t, loadErr, "a rejected token is never stored")
+	assert.NotContains(t, strings.Join(sl.snapshot(), "\n"), "could not revoke")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, paths, "/authorization/token")
+	assert.NotContains(t, paths, "/.well-known/oauth-authorization-server", "no revocation metadata is fetched for a Launchpad grant")
+	assert.NotContains(t, paths, "/oauth/revocations")
 }
 
 func TestRevokeStored_RevokesThenDeletes(t *testing.T) {

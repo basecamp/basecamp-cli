@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // revokeRequestTimeout bounds each revocation round trip — the metadata
@@ -217,6 +218,22 @@ func statusFailure(msg string, resp *http.Response) error {
 		e := output.ErrAPI(resp.StatusCode, msg)
 		e.Retryable = resp.StatusCode >= 500 && resp.StatusCode < 600
 		return e
+	}
+}
+
+// discardGrant revokes a freshly minted credential the login refused to
+// store (a Verify failure). Without it the grant would stay live and
+// full-scope with no local record of it. The refusal is the error the
+// caller sees; a failed revocation is logged, with what it left usable,
+// so the operator knows a live token is out there.
+//
+// The cleanup runs detached from the login's context: a Verify that failed
+// because that context was canceled or timed out is exactly the case where
+// the grant would otherwise be orphaned, and the per-request timeouts in
+// revoke still bound the calls.
+func (m *Manager) discardGrant(ctx context.Context, creds *Credentials, log func(string)) {
+	if result := m.revokeForDiscard(context.WithoutCancel(ctx), creds, ""); result.Err != nil {
+		log(richtext.SanitizeSingleLine("warning: could not revoke the refused credential server-side: " + result.Err.Error() + " — " + result.Outstanding()))
 	}
 }
 
