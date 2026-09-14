@@ -76,7 +76,7 @@ func TestTemplatesLibraryUsesCanonicalTodolistsEndpoint(t *testing.T) {
 	app.Config.ActiveProfile = "work profile"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "list")
 	require.NoError(t, err)
 
 	request := transport.last(t)
@@ -98,7 +98,7 @@ func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {
 	buf := &bytes.Buffer{}
 	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: buf})
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "list")
 	require.NoError(t, err)
 
 	assert.Contains(t, buf.String(), "Project kickoff")
@@ -119,7 +119,7 @@ func TestTemplatesCopyNamesTheProjectAndLetsBasecampPickTheContainer(t *testing.
 	app.Config.ActiveProfile = "work profile"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "Test Project")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplicate", "3", "--in", "Test Project")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -149,7 +149,7 @@ func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
 	)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -167,7 +167,7 @@ func TestTemplatesCopyRejectsTodosetFromAnotherProject(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, projectsRoute(), templateCopyTodosetRoute(456))
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -189,7 +189,7 @@ func TestTemplatesCopyRejectsDisabledTodoset(t *testing.T) {
 	)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -213,7 +213,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	app.Config.ActiveProfile = "work profile; echo unsafe"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "123")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplicate", "3", "--in", "123")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -239,7 +239,7 @@ func TestTemplatesConstructSendsStartDateUnderProjectEnvelope(t *testing.T) {
 	buf := captureTemplateOutput(app)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"construct", "2085958507", "--name", "Marketing Campaign",
+		"projects", "construct", "2085958507", "--name", "Marketing Campaign",
 		"--description", "For Client: Xyz Corp Conference", "--start-date", "2026-09-01")
 	require.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestTemplatesConstructOmitsStartDateWhenUnset(t *testing.T) {
 	)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -288,7 +288,7 @@ func TestTemplatesConstructParsesNaturalStartDate(t *testing.T) {
 	captureTemplateOutput(app)
 
 	before := time.Now()
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
 	after := time.Now()
 	require.NoError(t, err)
 
@@ -308,7 +308,7 @@ func TestTemplatesConstructRejectsBlankStartDate(t *testing.T) {
 	app, transport := setupRecordingTestApp(t)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "")
 	outErr := requireUsageErr(t, err)
 	assert.Contains(t, outErr.Message, "Invalid start date")
 	assert.Empty(t, transport.recorded())
@@ -318,7 +318,7 @@ func TestTemplatesConstructRejectsMalformedStartDateBeforeAnyRequest(t *testing.
 	app, transport := setupRecordingTestApp(t)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "someday")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "someday")
 	outErr := requireUsageErr(t, err)
 	assert.Contains(t, outErr.Message, "Invalid start date")
 	assert.Empty(t, transport.recorded())
@@ -354,7 +354,7 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 			app.Config.ActiveProfile = "work profile"
 			app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-			err := executeRecordingCommand(NewTemplatesCmd(), app, "copy-status", "5")
+			err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplication", "5")
 			require.NoError(t, err)
 
 			request := transport.last(t)
@@ -548,4 +548,64 @@ func TestCardTablesTemplatificationReportsTheBoardItMade(t *testing.T) {
 		"a nil destination would fall through to the generic completion line")
 	require.Len(t, envelope.Breadcrumbs, 1)
 	assert.Equal(t, "basecamp templates card-tables list", envelope.Breadcrumbs[0].Cmd)
+}
+
+func templateStatusRoute(status string) stubRoute {
+	return stubRoute{
+		method: http.MethodPut,
+		path:   fmt.Sprintf("/99999/recordings/3/status/%s.json", status),
+		status: http.StatusNoContent,
+	}
+}
+
+func TestTemplatesCardTablesArchiveGoesThroughTheRecordingsEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("archived"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "archive", "3")
+	require.NoError(t, err)
+
+	request := transport.last(t)
+	assert.Equal(t, http.MethodPut, request.Method)
+	assert.Equal(t, "/99999/recordings/3/status/archived.json", request.Path,
+		"the project-template routes serve project templates only and 404 for a library template")
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Archived card table template #3", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 2)
+	assert.Equal(t, "basecamp templates card-tables restore 3", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesTodolistsTrashGoesThroughTheRecordingsEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("trashed"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "trash", "3")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/recordings/3/status/trashed.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Trashed to-do list template #3", envelope.Summary)
+	assert.Equal(t, "basecamp templates todolists restore 3", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesRestorePointsBackAtDuplicating(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("active"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "restore", "3")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/recordings/3/status/active.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Restored to-do list template #3", envelope.Summary)
+	assert.Equal(t, "basecamp templates todolists duplicate 3 --in <project>", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesArchiveRejectsANonNumericID(t *testing.T) {
+	app, transport := setupRecordingTestApp(t)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "archive", "kickoff")
+	require.Error(t, err)
+
+	assert.Empty(t, transport.recorded(), "a bad ID is caught before any request goes out")
 }
