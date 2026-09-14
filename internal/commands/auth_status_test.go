@@ -562,32 +562,42 @@ func TestAuthStatusSummaryKeepsTheRawEmail(t *testing.T) {
 }
 
 // TestAuthStatusNamesWhyTheTokenWillNotRefresh: a credential that holds a
-// refresh token the CLI will not redeem is not one with "no refresh token";
-// inside the refresh window the report says which it is.
+// refresh token the CLI will not send is not one with "no refresh token";
+// inside the refresh window the report gives the refusal the next command's
+// refresh would make.
 func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
 	for name, tc := range map[string]struct {
-		creds  auth.Credentials
-		reason string
+		creds    auth.Credentials
+		clientID string
+		reason   string
 	}{
 		"without a refresh token": {
 			creds:  auth.Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"},
-			reason: "and no refresh token)",
+			reason: "No refresh token available",
 		},
 		"legacy bc3": {
 			creds:  auth.Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"},
-			reason: "and a refresh token from a removed development flow that cannot be redeemed)",
+			reason: "Stored credentials are from a removed development flow and cannot be refreshed",
 		},
 		"bc5 without its token endpoint": {
 			creds:  auth.Credentials{OAuthType: "bc5", RefreshToken: "ref"},
-			reason: "and no token endpoint to refresh at)",
+			reason: "Stored credentials are missing their token endpoint and cannot be refreshed",
 		},
 		"stored token endpoint the CLI will not post to": {
 			creds:  auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/authorization/token"},
-			reason: "and a stored token endpoint the CLI will not send a refresh to)",
+			reason: "invalid token endpoint \"https://user@evil.example/authorization/token\": must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port",
+		},
+		"half-configured OAuth client": {
+			creds:    auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://launchpad.37signals.com/authorization/token"},
+			clientID: "only-the-id",
+			reason:   "BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Setenv("BASECAMP_OAUTH_CLIENT_ID", tc.clientID)
 			app, buf := setupProfileTestApp(t, statusTestConfig(t))
 			creds := tc.creds
 			creds.AccessToken = "tok"
@@ -602,9 +612,9 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 
 			report, err := authStatusReport(app)
 			require.NoError(t, err)
-			assert.True(t, strings.HasSuffix(report.details[1], tc.reason+" · Storage: file"), report.details[1])
+			assert.True(t, strings.HasSuffix(report.details[1], "the CLI keeps clear of expiry, and the refresh would be refused: "+tc.reason+") · Storage: file"), report.details[1])
 			if tc.creds.RefreshToken != "" {
-				assert.NotContains(t, report.details[1], "no refresh token")
+				assert.NotContains(t, report.details[1], "No refresh token")
 			}
 		})
 	}

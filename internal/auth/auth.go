@@ -336,25 +336,16 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 	return false
 }
 
-// RefreshRefusal is why a refresh of creds would be refused before anything
-// is sent — no refresh token, a grant from the removed bc3 development flow,
-// a BC5 credential without its token endpoint, or a stored endpoint the CLI
-// will not post to — or "" when a refresh would be attempted. It is the
-// pre-request part of refreshCredential, for a report that must say what
+// RefreshRefusal is the error a refresh of creds would fail with before
+// anything is sent — no refresh token, a grant from the removed bc3
+// development flow, a missing or unusable token endpoint, a half-configured
+// OAuth client — or nil when a refresh would be attempted. It runs the same
+// preparation the refresh does, on a copy, for a report that must say what
 // the next command will do without doing it.
-func RefreshRefusal(creds *Credentials) string {
-	switch {
-	case creds.RefreshToken == "":
-		return "no refresh token"
-	case creds.OAuthType == "bc3":
-		return "a refresh token from a removed development flow that cannot be redeemed"
-	case creds.OAuthType == oauthTypeBC5 && creds.TokenEndpoint == "":
-		return "no token endpoint to refresh at"
-	case creds.TokenEndpoint != "" && requireSecureOAuthEndpoint("token endpoint", creds.TokenEndpoint) != nil:
-		return "a stored token endpoint the CLI will not send a refresh to"
-	default:
-		return ""
-	}
+func (m *Manager) RefreshRefusal(creds *Credentials) error {
+	prepared := *creds
+	_, _, err := m.prepareRefresh(&prepared)
+	return err
 }
 
 // refreshLocked rotates the stored credential under the manager lock. The
@@ -366,9 +357,12 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	return m.hintLogin(m.refreshCredential(ctx, origin, creds))
 }
 
-func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *Credentials) error {
+// prepareRefresh is the half of a refresh that sends nothing: it migrates
+// the credential's missing fields in place, checks what it holds, and
+// resolves the client and lane the request would go out through.
+func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oauth.Exchanger, error) {
 	if creds.RefreshToken == "" {
-		return m.errAuth("No refresh token available")
+		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
 	}
 
 	// Migrate old credentials missing OAuthType
@@ -379,11 +373,11 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// Migrate old credentials missing TokenEndpoint
 	if creds.TokenEndpoint == "" {
 		if creds.OAuthType == "bc3" || creds.OAuthType == oauthTypeBC5 {
-			return m.errAuth("Stored credentials are missing their token endpoint and cannot be refreshed")
+			return oauth.RefreshRequest{}, nil, m.errAuth("Stored credentials are missing their token endpoint and cannot be refreshed")
 		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
-			return lpErr
+			return oauth.RefreshRequest{}, nil, lpErr
 		}
 		creds.TokenEndpoint = lpURL + "/authorization/token"
 	}
@@ -396,7 +390,7 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// empty-host, or opaque/malformed https forms, so apply the same strict
 	// check used for the other OAuth endpoints before any POST.
 	if err := requireSecureOAuthEndpoint("token endpoint", tokenEndpoint); err != nil {
-		return err
+		return oauth.RefreshRequest{}, nil, err
 	}
 
 	// Resolve client credentials for the refresh request
@@ -405,14 +399,14 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	case "bc3":
 		// DCR-era development flow, removed. Its per-install dynamic clients
 		// can't be resolved anymore, so the refresh token is unusable.
-		return m.errAuth("Stored credentials are from a removed development flow and cannot be refreshed")
+		return oauth.RefreshRequest{}, nil, m.errAuth("Stored credentials are from a removed development flow and cannot be refreshed")
 	case oauthTypeBC5:
 		// Pre-registered public client: no secret.
 		clientID = bc5ClientID
 	default:
 		// Launchpad (or old credentials defaulted to launchpad)
 		if envCreds, err := resolveClientCredentials(func(string) {}); err != nil {
-			return err
+			return oauth.RefreshRequest{}, nil, err
 		} else if envCreds != nil {
 			clientID = envCreds.ClientID
 			clientSecret = envCreds.ClientSecret
@@ -431,7 +425,7 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		laneClient, laneErr = m.bc5Client()
 	}
 	if laneErr != nil {
-		return laneErr
+		return oauth.RefreshRequest{}, nil, laneErr
 	}
 	exchanger := oauth.NewExchanger(laneClient)
 
@@ -444,6 +438,15 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		// BC5 multi-account refresh tokens are rejected without it.
 		Resource:        creds.Resource,
 		UseLegacyFormat: creds.OAuthType == oauthTypeLaunchpad,
+	}
+
+	return req, exchanger, nil
+}
+
+func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *Credentials) error {
+	req, exchanger, err := m.prepareRefresh(creds)
+	if err != nil {
+		return err
 	}
 
 	token, err := exchanger.Refresh(ctx, req)

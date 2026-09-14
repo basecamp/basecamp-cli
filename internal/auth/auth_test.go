@@ -2300,25 +2300,41 @@ func TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin(t *testing.T) {
 	assert.Equal(t, "https://3.basecampapi.com/authorization.json", endpoint)
 }
 
-// TestRefreshRefusal: the pre-request refusals refreshCredential makes, as a
-// report can state them without sending anything.
+// TestRefreshRefusal: the refusals a refresh makes before sending anything,
+// as a report can state them without a request — and without the migration
+// a real refresh writes into the credential.
 func TestRefreshRefusal(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "")
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com"}, http.DefaultClient)
 	for name, tc := range map[string]struct {
-		creds Credentials
-		want  string
+		creds    Credentials
+		clientID string
+		want     string
 	}{
-		"launchpad with a refresh token":    {Credentials{OAuthType: "launchpad", RefreshToken: "ref"}, ""},
-		"bc5 with its token endpoint":       {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, ""},
-		"loopback endpoint for development": {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "http://localhost:3000/oauth/tokens"}, ""},
-		"no refresh token":                  {Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, "no refresh token"},
-		"legacy bc3":                        {Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"}, "a refresh token from a removed development flow that cannot be redeemed"},
-		"bc5 without its token endpoint":    {Credentials{OAuthType: "bc5", RefreshToken: "ref"}, "no token endpoint to refresh at"},
-		"endpoint carrying userinfo":        {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/oauth/tokens"}, "a stored token endpoint the CLI will not send a refresh to"},
-		"plain http endpoint off loopback":  {Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "http://launchpad.example/authorization/token"}, "a stored token endpoint the CLI will not send a refresh to"},
-		"endpoint with an undialable port":  {Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://host:70000/token"}, "a stored token endpoint the CLI will not send a refresh to"},
+		"launchpad with a refresh token":    {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref"}},
+		"bc5 with its token endpoint":       {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}},
+		"loopback endpoint for development": {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "http://localhost:3000/oauth/tokens"}},
+		"no refresh token":                  {creds: Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, want: "No refresh token available"},
+		"legacy bc3":                        {creds: Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"}, want: "Stored credentials are from a removed development flow and cannot be refreshed"},
+		"bc5 without its token endpoint":    {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref"}, want: "Stored credentials are missing their token endpoint and cannot be refreshed"},
+		"endpoint carrying userinfo":        {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/oauth/tokens"}, want: "invalid token endpoint"},
+		"plain http endpoint off loopback":  {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "http://launchpad.example/authorization/token"}, want: "invalid token endpoint"},
+		"endpoint with an undialable port":  {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://host:70000/token"}, want: "invalid token endpoint"},
+		"half-configured OAuth client":      {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref"}, clientID: "only-the-id", want: "BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.want, RefreshRefusal(&tc.creds))
+			t.Setenv("BASECAMP_OAUTH_CLIENT_ID", tc.clientID)
+			before := tc.creds
+			err := m.RefreshRefusal(&tc.creds)
+			assert.Equal(t, before, tc.creds, "the caller's credential is left as stored")
+			if tc.want == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.want)
+			}
 		})
 	}
 }

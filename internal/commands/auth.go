@@ -303,11 +303,11 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if store.UsingKeyring() {
 		storage = "keyring"
 	}
-	// A refresh token alone is not a refresh: the reason the CLI would refuse
-	// one before sending anything is what the report gives when that leaves
+	// A refresh token alone is not a refresh: what the CLI would refuse one
+	// for before sending anything is what the report gives when that leaves
 	// a still-live token unusable.
-	notRefreshable := auth.RefreshRefusal(creds)
-	refreshable := notRefreshable == ""
+	refusal := app.Auth.RefreshRefusal(creds)
+	refreshable := refusal == nil
 	report.storage = storage
 
 	report.data["authenticated"] = true
@@ -363,7 +363,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		case refreshable:
 			expiry = "expired, will refresh on next use"
 		case expiresIn >= 0:
-			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and " + notRefreshable + ")"
+			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
 			report.hint = app.Auth.LoginHint()
 		default:
 			expiry = "expired"
