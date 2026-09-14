@@ -567,7 +567,7 @@ sync-skills:
 # Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
 .PHONY: test-sync-skills
 test-sync-skills:
-	scripts/test-sync-skills.sh
+	EXPECTED_SOURCE=basecamp-cli scripts/test-sync-skills.sh
 
 # Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=ghp_...
 .PHONY: sync-skills-remote
