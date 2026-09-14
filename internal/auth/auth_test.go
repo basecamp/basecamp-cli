@@ -1884,3 +1884,281 @@ func TestLoginLaunchpadVerifyRunsBeforeStore(t *testing.T) {
 	_, loadErr := m.store.Load(credKey)
 	assert.Error(t, loadErr, "a rejected token is never stored")
 }
+
+// refreshRefusedBy is a token endpoint that answers every refresh with the
+// given RFC 6749 error body, and a Manager whose active profile's credential
+// refreshes against it.
+func refreshRefusedBy(t *testing.T, status int, body string) (*Manager, string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := config.Default()
+	cfg.ActiveProfile = "work"
+	m := &Manager{cfg: cfg, httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken:   "old-tok",
+		RefreshToken:  "old-ref",
+		OAuthType:     "bc5",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		Scope:         "full",
+		ExpiresAt:     time.Now().Add(-time.Hour).Unix(),
+	}))
+	return m, key
+}
+
+// TestRefresh_InvalidGrantForgetsTheCredential: a refresh token the server
+// no longer honors is an auth failure with the login to run, and the dead
+// credential is deleted so later commands do not keep re-trying it.
+func TestRefresh_InvalidGrantForgetsTheCredential(t *testing.T) {
+	m, key := refreshRefusedBy(t, http.StatusBadRequest,
+		`{"error":"invalid_grant","error_description":"The refresh token was revoked\u001b[31m"}`)
+
+	err := m.Refresh(context.Background())
+	require.Error(t, err)
+
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.True(t, strings.HasPrefix(cliErr.Message, "Your session has expired or was revoked (The refresh token was revoked"), cliErr.Message)
+	assert.NotContains(t, cliErr.Message, "\x1b", "the server's description is sanitized for the terminal")
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+
+	_, loadErr := m.store.Load(key)
+	assert.Error(t, loadErr, "the dead credential must be forgotten")
+	assert.False(t, m.IsAuthenticated())
+}
+
+// TestRefresh_InvalidGrantWithoutDescription: the server may send the bare
+// error code; that is still the session-over answer.
+func TestRefresh_InvalidGrantWithoutDescription(t *testing.T) {
+	m, key := refreshRefusedBy(t, http.StatusBadRequest, `{"error":"invalid_grant"}`)
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Equal(t, "Your session has expired or was revoked", cliErr.Message)
+	_, loadErr := m.store.Load(key)
+	assert.Error(t, loadErr)
+}
+
+// TestRefresh_InvalidRequestKeepsTheCredential: any other refusal keeps its
+// existing class and leaves the credential in place — a malformed request
+// or a server fault says nothing about the grant.
+func TestRefresh_InvalidRequestKeepsTheCredential(t *testing.T) {
+	m, key := refreshRefusedBy(t, http.StatusBadRequest,
+		`{"error":"invalid_request","error_description":"resource is required"}`)
+
+	err := m.Refresh(context.Background())
+	require.Error(t, err)
+
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAPI, cliErr.Code)
+	assert.True(t, strings.HasPrefix(cliErr.Message, "token refresh failed: "), cliErr.Message)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.Equal(t, "old-ref", creds.RefreshToken)
+}
+
+// TestAccessToken_InvalidGrantHintsTheProfile: the automatic refresh on an
+// ordinary command takes the same path as `auth refresh`.
+func TestAccessToken_InvalidGrantHintsTheProfile(t *testing.T) {
+	m, key := refreshRefusedBy(t, http.StatusBadRequest, `{"error":"invalid_grant"}`)
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	_, err := m.AccessToken(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	_, loadErr := m.store.Load(key)
+	assert.Error(t, loadErr)
+}
+
+// TestRefresh_PreservesIdentityAndBinding: a rotation replaces the tokens
+// and nothing else — the stored user, scope, and account binding survive a
+// token response that does not repeat them.
+func TestRefresh_PreservesIdentityAndBinding(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"access_token":"new-tok","refresh_token":"new-ref","expires_in":3600}`)
+	}))
+	defer srv.Close()
+
+	m := &Manager{cfg: config.Default(), httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken:   "old-tok",
+		RefreshToken:  "old-ref",
+		OAuthType:     "bc5",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		Scope:         "full",
+		UserID:        "51177542",
+		UserEmail:     "bot@example.com",
+		Resource:      "urn:bc:account:999",
+		ExpiresAt:     time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	require.NoError(t, m.Refresh(context.Background()))
+
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "new-tok", creds.AccessToken)
+	assert.Equal(t, "new-ref", creds.RefreshToken)
+	assert.Equal(t, "51177542", creds.UserID)
+	assert.Equal(t, "bot@example.com", creds.UserEmail)
+	assert.Equal(t, "full", creds.Scope)
+	assert.Equal(t, "urn:bc:account:999", creds.Resource)
+	assert.Equal(t, "bc5", creds.OAuthType)
+}
+
+// TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential: two
+// processes can refresh at once; when the other one has already saved the
+// rotated token, the refusal this one gets for reusing the old token must
+// not delete the fresh credential, and is not a failure: the store holds a
+// live credential for the caller to reload.
+func TestRefresh_InvalidGrantKeepsAConcurrentlyRotatedCredential(t *testing.T) {
+	var m *Manager
+	var key string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The other process wins the race while this request is in flight.
+		require.NoError(t, m.store.Save(key, &Credentials{
+			AccessToken: "rotated-tok", RefreshToken: "rotated-ref", OAuthType: "bc5",
+			TokenEndpoint: "http://" + r.Host + "/oauth/tokens", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		}))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+
+	m = &Manager{cfg: config.Default(), httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key = m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: "bc5",
+		TokenEndpoint: srv.URL + "/oauth/tokens", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	require.NoError(t, m.Refresh(context.Background()), "the other process's rotation is this refresh's success")
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr, "the rotated credential must survive")
+	assert.Equal(t, "rotated-ref", creds.RefreshToken)
+
+	t.Setenv("BASECAMP_TOKEN", "")
+	token, err := m.AccessToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "rotated-tok", token, "the caller reloads the live credential")
+}
+
+// TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential: a Launchpad
+// refresh sends whichever client the environment names, and the server
+// also answers invalid_grant for a token issued to another client, so the
+// refusal is reported but the credential is not deleted.
+func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "custom-secret")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+
+	m := &Manager{cfg: config.Default(), httpClient: srv.Client(), store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	require.NoError(t, m.store.Save(key, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: oauthTypeLaunchpad,
+		TokenEndpoint: srv.URL + "/authorization/token", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+	}))
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client", "the message names the client mismatch the refusal may mean")
+	assert.Equal(t, "Run: basecamp auth login", cliErr.Hint)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr, "a Launchpad refusal is not proof the grant is dead")
+	assert.Equal(t, "old-ref", creds.RefreshToken)
+}
+
+// TestLoginCommand_QuotesTheProfile: the remedy is pasted into a shell, and
+// profile names loaded from configuration are not checked at load time.
+func TestLoginCommand_QuotesTheProfile(t *testing.T) {
+	for name, want := range map[string]string{
+		"":             "basecamp auth login",
+		"work":         "basecamp auth login -P work",
+		"work profile": "basecamp auth login -P 'work profile'",
+		"it's":         `basecamp auth login -P 'it'\''s'`,
+		"$(rm -rf x)":  "basecamp auth login -P '$(rm -rf x)'",
+	} {
+		cfg := config.Default()
+		cfg.ActiveProfile = name
+		m := &Manager{cfg: cfg}
+		assert.Equal(t, want, m.LoginCommand(), "profile %q", name)
+	}
+}
+
+// profiledRefresh is a Manager whose active profile holds the given
+// credential, for refresh failures that never reach a token endpoint.
+func profiledRefresh(t *testing.T, creds *Credentials) (*Manager, string) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.ActiveProfile = "work"
+	m := &Manager{cfg: cfg, httpClient: &http.Client{}, store: newTestStore(t, t.TempDir())}
+	key := m.credentialKey()
+	creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+	require.NoError(t, m.store.Save(key, creds))
+	return m, key
+}
+
+// TestRefresh_UnsafeTokenEndpointHintsTheProfile: a stored endpoint the
+// refresh refuses to POST to is an auth failure of the profile's
+// credential, and its remedy names the profile like the refused-grant path
+// does; the credential is kept, since nothing was learned about the grant.
+func TestRefresh_UnsafeTokenEndpointHintsTheProfile(t *testing.T) {
+	m, key := profiledRefresh(t, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: "bc5",
+		TokenEndpoint: "https://user@evil.example/oauth/tokens",
+	})
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "invalid token endpoint")
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.Equal(t, "old-ref", creds.RefreshToken)
+}
+
+// TestRefresh_HalfConfiguredClientHintsTheProfile: a Launchpad refresh
+// with only one of the OAuth client variables set fails before any request,
+// and that failure also names the profile.
+func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+	m, _ := profiledRefresh(t, &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: oauthTypeLaunchpad,
+		TokenEndpoint: "https://launchpad.example/authorization/token",
+	})
+
+	err := m.Refresh(context.Background())
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_SECRET is required")
+	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+}
