@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +57,26 @@ func TestApprovalWaitDrawsCountdownAndClears(t *testing.T) {
 func TestStartApprovalWaitNeedsATerminal(t *testing.T) {
 	assert.Nil(t, startApprovalWait(nil, time.Now().Add(time.Minute)))
 	assert.Nil(t, startApprovalWait(&strings.Builder{}, time.Now().Add(time.Minute)))
+}
+
+// TestStartApprovalWaitSkipsADumbTerminal: a TTY that reports TERM=dumb
+// cannot erase the line, so the redraw stays off there and the static wait
+// line is what the caller logs.
+func TestStartApprovalWaitSkipsADumbTerminal(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer r.Close()
+	defer w.Close()
+	isTerminal = func(uintptr) bool { return true }
+	defer func() { isTerminal = term.IsTerminal }()
+
+	t.Setenv("TERM", "dumb")
+	assert.Nil(t, startApprovalWait(w, time.Now().Add(time.Minute)))
+
+	t.Setenv("TERM", "xterm-256color")
+	wait := startApprovalWait(w, time.Now().Add(time.Minute))
+	require.NotNil(t, wait, "a capable terminal gets the live line")
+	wait.Stop()
 }
 
 // TestApprovalWaitFitsTheTerminalWidth: a narrow pane gets the short form

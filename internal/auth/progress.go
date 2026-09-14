@@ -45,12 +45,18 @@ const (
 	approvalLineShortWidth = len("⠋ Waiting… 99:59") - 4
 )
 
-// startApprovalWait begins drawing on w when it is a terminal and returns
-// nil otherwise, so callers can treat "no live line" uniformly: Stop on a
-// nil *approvalWait is a no-op.
+// isTerminal is term.IsTerminal, swappable so a test can stand a pipe in
+// for a terminal.
+var isTerminal = term.IsTerminal
+
+// startApprovalWait begins drawing on w when it is a terminal that can take
+// the redraw and returns nil otherwise, so callers can treat "no live line"
+// uniformly: Stop on a nil *approvalWait is a no-op. A dumb terminal (an
+// editor's shell buffer, a screen reader's session) is a real TTY that
+// cannot erase a line, so it gets the static line like a pipe would.
 func startApprovalWait(w io.Writer, deadline time.Time) *approvalWait {
 	f, ok := w.(*os.File)
-	if !ok || !term.IsTerminal(f.Fd()) {
+	if !ok || !isTerminal(f.Fd()) || os.Getenv("TERM") == "dumb" {
 		return nil
 	}
 	width, _, err := term.GetSize(f.Fd())
