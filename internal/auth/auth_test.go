@@ -575,6 +575,7 @@ func TestResolveClientCredentials(t *testing.T) {
 			if tt.wantErrMsg != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErrMsg)
+				assert.Equal(t, ClientEnvHint, output.AsError(err).Hint, "logging in reads the same pair, so it is no remedy")
 				return
 			}
 			require.NoError(t, err)
@@ -587,6 +588,30 @@ func TestResolveClientCredentials(t *testing.T) {
 			assert.Equal(t, tt.wantSecret, creds.ClientSecret)
 		})
 	}
+}
+
+// TestRequireSecureOAuthEndpoint_DoesNotEchoSecrets: the refusal names the
+// endpoint so the reader can find it in the store, but its userinfo is
+// masked whole — a secret can sit in the username as well as the password —
+// and an endpoint that does not parse is not echoed at all, since the
+// message reaches status output and transcripts.
+func TestRequireSecureOAuthEndpoint_DoesNotEchoSecrets(t *testing.T) {
+	err := requireSecureOAuthEndpoint("token endpoint", "https://client:s3cret@evil.example/token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid token endpoint "https://xxxxx@evil.example/token": must be`)
+	assert.NotContains(t, err.Error(), "s3cret")
+	assert.NotContains(t, err.Error(), "client")
+
+	err = requireSecureOAuthEndpoint("token endpoint", "https://s3cret@evil.example/token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid token endpoint "https://xxxxx@evil.example/token": must be`)
+	assert.NotContains(t, err.Error(), "s3cret")
+
+	err = requireSecureOAuthEndpoint("token endpoint", "https://client:s3cret@evil.example:port/token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid token endpoint: invalid port")
+	assert.NotContains(t, err.Error(), "s3cret")
+	assert.NotContains(t, err.Error(), "evil.example")
 }
 
 func TestBuildAuthURL_UsesResolvedRedirectURI(t *testing.T) {
@@ -2151,10 +2176,11 @@ func TestRefresh_UnsafeTokenEndpointHintsTheProfile(t *testing.T) {
 	assert.Equal(t, "old-ref", creds.RefreshToken)
 }
 
-// TestRefresh_HalfConfiguredClientHintsTheProfile: a Launchpad refresh
+// TestRefresh_HalfConfiguredClientNamesTheEnvironment: a Launchpad refresh
 // with only one of the OAuth client variables set fails before any request,
-// and that failure also names the profile.
-func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
+// and since the profile's login reads the same pair, the remedy it names is
+// the environment.
+func TestRefresh_HalfConfiguredClientNamesTheEnvironment(t *testing.T) {
 	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
 	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
 	m, _ := profiledRefresh(t, &Credentials{
@@ -2167,7 +2193,7 @@ func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_SECRET is required")
-	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.Equal(t, ClientEnvHint, cliErr.Hint)
 }
 
 // TestSetUserIdentity_EmptyValuesAreOmissions: an authorization document
@@ -2284,4 +2310,57 @@ func TestLoginLaunchpad_RemoteTranscriptSaysWhyWhenTheHostChose(t *testing.T) {
 		assert.Contains(t, out, "Paste the callback URL")
 		assert.NotContains(t, out, "Not opening a browser")
 	})
+}
+
+// TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin: a bc_at_ environment
+// token asks the same origin-level /authorization.json a stored BC5
+// credential does, even when the base URL carries a path.
+func TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+	cfg := config.Default()
+	cfg.BaseURL = "https://3.basecampapi.com/api/v1"
+	m := &Manager{cfg: cfg, store: newTestStore(t, t.TempDir())}
+
+	endpoint, err := m.AuthorizationEndpoint(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://3.basecampapi.com/authorization.json", endpoint)
+}
+
+// TestRefreshRefusal: the refusals a refresh makes before sending anything,
+// as a report can state them without a request — and without the migration
+// a real refresh writes into the credential.
+func TestRefreshRefusal(t *testing.T) {
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", "")
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com"}, http.DefaultClient)
+	for name, tc := range map[string]struct {
+		creds    Credentials
+		clientID string
+		want     string
+	}{
+		"launchpad with a refresh token":    {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref"}},
+		"bc5 with its token endpoint":       {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}},
+		"loopback endpoint for development": {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "http://localhost:3000/oauth/tokens"}},
+		"no refresh token":                  {creds: Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, want: "No refresh token available"},
+		"legacy bc3":                        {creds: Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"}, want: "Stored credentials are from a removed development flow and cannot be refreshed"},
+		"bc5 without its token endpoint":    {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref"}, want: "Stored credentials are missing their token endpoint and cannot be refreshed"},
+		"endpoint carrying userinfo":        {creds: Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/oauth/tokens"}, want: "invalid token endpoint"},
+		"plain http endpoint off loopback":  {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "http://launchpad.example/authorization/token"}, want: "invalid token endpoint"},
+		"endpoint with an undialable port":  {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://host:70000/token"}, want: "invalid token endpoint"},
+		"half-configured OAuth client":      {creds: Credentials{OAuthType: "launchpad", RefreshToken: "ref"}, clientID: "only-the-id", want: "BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BASECAMP_OAUTH_CLIENT_ID", tc.clientID)
+			before := tc.creds
+			err := m.RefreshRefusal(&tc.creds)
+			assert.Equal(t, before, tc.creds, "the caller's credential is left as stored")
+			if tc.want == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.want)
+			}
+		})
+	}
 }

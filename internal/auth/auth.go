@@ -336,6 +336,18 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 	return false
 }
 
+// RefreshRefusal is the error a refresh of creds would fail with before
+// anything is sent — no refresh token, a grant from the removed bc3
+// development flow, a missing or unusable token endpoint, a half-configured
+// OAuth client — or nil when a refresh would be attempted. It runs the same
+// preparation the refresh does, on a copy, for a report that must say what
+// the next command will do without doing it.
+func (m *Manager) RefreshRefusal(creds *Credentials) error {
+	prepared := *creds
+	_, _, err := m.prepareRefresh(&prepared)
+	return err
+}
+
 // refreshLocked rotates the stored credential under the manager lock. The
 // credential is the active profile's, so whatever auth-class failure the
 // refresh hits — an unusable stored endpoint, a half-configured OAuth
@@ -345,9 +357,12 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 	return m.hintLogin(m.refreshCredential(ctx, origin, creds))
 }
 
-func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *Credentials) error {
+// prepareRefresh is the half of a refresh that sends nothing: it migrates
+// the credential's missing fields in place, checks what it holds, and
+// resolves the client and lane the request would go out through.
+func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oauth.Exchanger, error) {
 	if creds.RefreshToken == "" {
-		return m.errAuth("No refresh token available")
+		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
 	}
 
 	// Migrate old credentials missing OAuthType
@@ -358,11 +373,11 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// Migrate old credentials missing TokenEndpoint
 	if creds.TokenEndpoint == "" {
 		if creds.OAuthType == "bc3" || creds.OAuthType == oauthTypeBC5 {
-			return m.errAuth("Stored credentials are missing their token endpoint and cannot be refreshed")
+			return oauth.RefreshRequest{}, nil, m.errAuth("Stored credentials are missing their token endpoint and cannot be refreshed")
 		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
-			return lpErr
+			return oauth.RefreshRequest{}, nil, lpErr
 		}
 		creds.TokenEndpoint = lpURL + "/authorization/token"
 	}
@@ -375,7 +390,7 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// empty-host, or opaque/malformed https forms, so apply the same strict
 	// check used for the other OAuth endpoints before any POST.
 	if err := requireSecureOAuthEndpoint("token endpoint", tokenEndpoint); err != nil {
-		return err
+		return oauth.RefreshRequest{}, nil, err
 	}
 
 	// Resolve client credentials for the refresh request
@@ -384,14 +399,14 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	case "bc3":
 		// DCR-era development flow, removed. Its per-install dynamic clients
 		// can't be resolved anymore, so the refresh token is unusable.
-		return m.errAuth("Stored credentials are from a removed development flow and cannot be refreshed")
+		return oauth.RefreshRequest{}, nil, m.errAuth("Stored credentials are from a removed development flow and cannot be refreshed")
 	case oauthTypeBC5:
 		// Pre-registered public client: no secret.
 		clientID = bc5ClientID
 	default:
 		// Launchpad (or old credentials defaulted to launchpad)
 		if envCreds, err := resolveClientCredentials(func(string) {}); err != nil {
-			return err
+			return oauth.RefreshRequest{}, nil, err
 		} else if envCreds != nil {
 			clientID = envCreds.ClientID
 			clientSecret = envCreds.ClientSecret
@@ -410,7 +425,7 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		laneClient, laneErr = m.bc5Client()
 	}
 	if laneErr != nil {
-		return laneErr
+		return oauth.RefreshRequest{}, nil, laneErr
 	}
 	exchanger := oauth.NewExchanger(laneClient)
 
@@ -423,6 +438,15 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		// BC5 multi-account refresh tokens are rejected without it.
 		Resource:        creds.Resource,
 		UseLegacyFormat: creds.OAuthType == oauthTypeLaunchpad,
+	}
+
+	return req, exchanger, nil
+}
+
+func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *Credentials) error {
+	req, exchanger, err := m.prepareRefresh(creds)
+	if err != nil {
+		return err
 	}
 
 	token, err := exchanger.Refresh(ctx, req)
@@ -1233,6 +1257,11 @@ func launchpadClientCredentials(log func(string)) (*ClientCredentials, error) {
 	}, nil
 }
 
+// ClientEnvHint is the remedy for a half-set BASECAMP_OAUTH_CLIENT_ID and
+// BASECAMP_OAUTH_CLIENT_SECRET pair. Logging in reads the same pair and
+// fails the same way, so the login is no remedy; the environment is.
+const ClientEnvHint = "Set both BASECAMP_OAUTH_CLIENT_ID and BASECAMP_OAUTH_CLIENT_SECRET, or unset both to use the built-in client"
+
 // resolveClientCredentials reads OAuth client credentials from environment
 // variables BASECAMP_OAUTH_CLIENT_ID and BASECAMP_OAUTH_CLIENT_SECRET.
 // Both must be set together. Returns nil, nil when neither is set.
@@ -1244,14 +1273,22 @@ func resolveClientCredentials(log func(string)) (*ClientCredentials, error) {
 		return nil, nil
 	}
 	if clientID == "" {
-		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_ID is required when BASECAMP_OAUTH_CLIENT_SECRET is set")
+		return nil, errClientEnv("BASECAMP_OAUTH_CLIENT_ID is required when BASECAMP_OAUTH_CLIENT_SECRET is set")
 	}
 	if clientSecret == "" {
-		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set")
+		return nil, errClientEnv("BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set")
 	}
 
 	log("Using custom OAuth client credentials from BASECAMP_OAUTH_CLIENT_ID/SECRET")
 	return &ClientCredentials{ClientID: clientID, ClientSecret: clientSecret}, nil
+}
+
+// errClientEnv is an auth_required error whose remedy is the client
+// environment, not a login.
+func errClientEnv(msg string) *output.Error {
+	e := output.ErrAuth(msg)
+	e.Hint = ClientEnvHint
+	return e
 }
 
 // isSecureEndpointURL reports whether u uses a scheme safe for OAuth endpoints
@@ -1289,14 +1326,24 @@ func isSecureEndpointURL(u *url.URL) bool {
 
 // requireSecureOAuthEndpoint parses and validates a server-controlled OAuth
 // endpoint URL with isSecureEndpointURL, returning an auth-class error naming
-// the endpoint when it fails.
+// the endpoint when it fails. The endpoint is echoed with its userinfo
+// masked, and not at all when it does not parse: the error reaches status
+// output and transcripts, and a stored endpoint is exactly where a secret
+// in userinfo would sit.
 func requireSecureOAuthEndpoint(name, endpoint string) error {
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return output.ErrAuth(fmt.Sprintf("invalid %s %q: %v", name, endpoint, err))
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return output.ErrAuth(fmt.Sprintf("invalid %s: %v", name, err))
 	}
 	if !isSecureEndpointURL(u) {
-		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, endpoint))
+		if u.User != nil {
+			u.User = url.User("xxxxx")
+		}
+		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, u.String()))
 	}
 	return nil
 }
@@ -1465,7 +1512,9 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 	// BASECAMP_TOKEN wins — match AccessToken() precedence (auth.go line 75).
 	if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
 		if strings.HasPrefix(envToken, bc3TokenPrefix) {
-			return config.NormalizeBaseURL(m.cfg.BaseURL) + "/authorization.json", nil
+			// The same origin-level document a stored BC5 credential asks
+			// for: a pathful base URL must not turn it into /api/v1/...
+			return m.AuthorizationEndpointFor(oauthTypeBC5)
 		}
 		lpURL, err := m.launchpadURL()
 		if err != nil {

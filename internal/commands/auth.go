@@ -57,87 +57,378 @@ func newAuthLogoutCmd() *cobra.Command {
 }
 
 func newAuthStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var check bool
+
+	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show authentication status",
-		Long:  "Display the current authentication status and token information.",
+		Short: "Show who you are logged in as",
+		Long: `Show the active credential: who it authenticates as, which server and
+account it addresses, its access level and source, when the token expires,
+and where it is stored.
+
+Nothing is fetched unless --check is given, which makes one authenticated
+request (the same authorization lookup "basecamp me" makes) and reports
+whether the server accepts the token the CLI would send — BASECAMP_TOKEN
+when it is set, otherwise the stored login: "valid" in the JSON data.
+
+Exits 0 whether or not you are logged in; scripts read "authenticated" from
+the JSON envelope. When nothing is stored, the output names the login
+command to run (the envelope's "notice").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
 
-			credKey := app.Auth.CredentialKey()
-
-			// Check if using BASECAMP_TOKEN environment variable
-			if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
-				result := map[string]any{
-					"authenticated": true,
-					"source":        "BASECAMP_TOKEN",
+			// The server check goes first: the request may refresh the stored
+			// credential, or forget a dead one, and the report must describe
+			// what is stored afterwards.
+			var verdict *checkVerdict
+			if check && (os.Getenv("BASECAMP_TOKEN") != "" || app.Auth.IsAuthenticated()) {
+				v, err := checkWithServer(cmd.Context(), app)
+				if err != nil {
+					return err
 				}
-				if app.Config.ActiveProfile != "" {
-					result["profile"] = app.Config.ActiveProfile
-				}
-				return app.OK(result, output.WithSummary("Authenticated via BASECAMP_TOKEN env var"))
+				verdict = v
 			}
-
-			if !app.Auth.IsAuthenticated() {
-				result := map[string]any{
-					"authenticated": false,
-				}
-				if app.Config.ActiveProfile != "" {
-					result["profile"] = app.Config.ActiveProfile
-				}
-				return app.OK(result, output.WithSummary("Not authenticated"))
-			}
-
-			// Get stored credentials info
-			store := app.Auth.GetStore()
-			creds, err := store.Load(credKey)
+			report, err := authStatusReport(app)
 			if err != nil {
 				return err
 			}
-
-			// Suppress scope for Launchpad (scopes are not supported)
-			effectiveScope := creds.Scope
-			if creds.OAuthType == "launchpad" {
-				effectiveScope = ""
+			switch {
+			case verdict != nil:
+				report.record(app, verdict)
+			case check:
+				// Nothing to send: the contract still answers "valid",
+				// without claiming a request was made.
+				report.data["valid"] = false
+				report.details = append(report.details, "Token: none to check")
 			}
 
-			source := "oauth"
-			if creds.Source != "" {
-				source = creds.Source
-			}
-			status := map[string]any{
-				"authenticated": true,
-				"source":        source,
-				"oauth_type":    creds.OAuthType,
-			}
-			if effectiveScope != "" {
-				status["scope"] = effectiveScope
-			}
-			if app.Config.ActiveProfile != "" {
-				status["profile"] = app.Config.ActiveProfile
+			if !humanOutput(app) {
+				opts := []output.ResponseOption{output.WithSummary(report.summary)}
+				if report.hint != "" {
+					opts = append(opts, output.WithNotice(report.hint))
+				}
+				return app.OK(report.data, opts...)
 			}
 
-			if creds.UserID != "" {
-				status["user_id"] = creds.UserID
+			// A direct terminal sink: every line carries config and stored
+			// values, so each is reduced to one terminal-safe line first, as
+			// the envelope renderer would.
+			w := cmd.OutOrStdout()
+			r := output.NewRendererWithTheme(w, app.Flags.Styled, tui.ResolveTheme(tui.DetectDark()))
+			headline := r.Summary
+			if report.data["authenticated"] == true {
+				headline = r.Success
 			}
-
-			// Token expiration
-			if creds.ExpiresAt > 0 {
-				expiresIn := time.Until(time.Unix(creds.ExpiresAt, 0))
-				status["expires_in"] = expiresIn.Round(time.Second).String()
-				status["expired"] = expiresIn < 0
+			lines := []string{headline.Render(richtext.SanitizeSingleLine(report.summary))}
+			for _, line := range report.details {
+				lines = append(lines, r.Muted.Render("  "+richtext.SanitizeSingleLine(line)))
 			}
-
-			summary := "Authenticated"
-			if effectiveScope != "" {
-				summary += fmt.Sprintf(" (scope: %s)", effectiveScope)
+			if report.hint != "" {
+				lines = append(lines, r.Data.Render("  "+richtext.SanitizeSingleLine(report.hint)))
 			}
-
-			return app.OK(status, output.WithSummary(summary))
+			if app.Flags.Stats && !app.Flags.NoStats && app.Collector != nil {
+				stats := app.Collector.Summary()
+				if parts := stats.FormatParts(); len(parts) > 0 {
+					lines = append(lines, "", r.Muted.Render(strings.Join(parts, " · ")))
+				}
+			}
+			for _, line := range lines {
+				if _, err := fmt.Fprintln(w, line); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
+	}
+
+	cmd.Flags().BoolVar(&check, "check", false, "Ask the server whether the active token (BASECAMP_TOKEN, else the stored login) is accepted (one authenticated request)")
+
+	return cmd
+}
+
+// checkVerdict is the server's answer to --check: whether it accepted the
+// token the CLI would send right now.
+type checkVerdict struct {
+	valid bool
+	// sent is whether the authorization request was made at all; when the
+	// credential could not produce a token to send (nothing to refresh
+	// with, or a refresh the token endpoint refused), reason says why.
+	sent   bool
+	reason string
+	// remedy is what the refusal itself said to do about it, when that is
+	// something other than logging in.
+	remedy string
+}
+
+// remedyFor is the refusal's own remedy when it names one beyond the default
+// login — a client environment to fix — and the active profile's login
+// otherwise, which is what every refusal about the credential itself comes
+// down to.
+func remedyFor(app *appctx.App, refusal error) string {
+	if e := output.AsError(refusal); e.Hint != "" && e.Hint != output.DefaultAuthHint {
+		return e.Hint
+	}
+	return app.Auth.LoginHint()
+}
+
+// checkWithServer makes the one authenticated request --check promises. An
+// auth-class failure — the server refused the token, or the credential could
+// not produce one — is the "rejected" verdict, not an error: that is what
+// the caller asked. Anything else (the server could not be reached, a fault)
+// is returned as itself, since no verdict was had.
+func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error) {
+	endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The token is produced first, so a refusal that never reaches the
+	// authorization server — no refresh token inside the refresh window, a
+	// refresh the token endpoint turned down — is reported as that, not as
+	// the server's answer. The request's own token lookup then finds it
+	// stored.
+	token, err := app.Auth.AccessToken(ctx)
+	if err != nil {
+		if e := output.AsError(err); e.Code == output.CodeAuth {
+			return &checkVerdict{valid: false, reason: e.Message, remedy: remedyFor(app, err)}, nil
+		}
+		return nil, err
+	}
+	// The request sends exactly the token just produced. The SDK's own
+	// lookup would produce it again, and a token crossing the refresh-window
+	// boundary between the two could fail there, locally, and be reported
+	// as the server's refusal.
+	client := app.SDKClientFor(&basecamp.StaticTokenProvider{Token: token})
+	_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	switch {
+	case err == nil:
+		return &checkVerdict{valid: true, sent: true}, nil
+	case output.AsError(err).Code == output.CodeAuth:
+		return &checkVerdict{valid: false, sent: true}, nil
+	default:
+		return nil, convertSDKError(err)
+	}
+}
+
+// envTokenRejectedHint is the remedy when the server refuses BASECAMP_TOKEN:
+// every request sends the environment token ahead of any stored login, so
+// logging in would change nothing.
+const envTokenRejectedHint = "BASECAMP_TOKEN is set and the server rejected it; unset it, or export a token the server accepts"
+
+// record adds the server's verdict to the report.
+func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
+	s.data["valid"] = v.valid
+	if v.valid {
+		s.details = append(s.details, "Token: valid (checked just now)")
+		return
+	}
+	// No token to send means the refresh the offline line counted on was
+	// tried and failed, so the promise is taken back rather than left beside
+	// the verdict. The failure is named on the line after, and is not always
+	// the endpoint's refusal: a half-configured OAuth client fails before
+	// any request.
+	if !v.sent && s.refreshPromise != "" {
+		for i, line := range s.details {
+			if line == s.tokenLine(s.refreshPromise) {
+				s.details[i] = s.tokenLine(s.refreshFailed)
+			}
+		}
+	}
+	if v.sent {
+		s.details = append(s.details, "Token: rejected by the server")
+	} else {
+		s.details = append(s.details, "Token: none could be sent ("+v.reason+")")
+	}
+	switch {
+	case os.Getenv("BASECAMP_TOKEN") != "":
+		s.hint = envTokenRejectedHint
+	case v.remedy != "":
+		s.hint = v.remedy
+	default:
+		s.hint = app.Auth.LoginHint()
+	}
+}
+
+// humanOutput reports whether the command's output is the styled terminal
+// renderer, which the output writer resolves from flags, config, and whether
+// stdout is a terminal. Everything else — JSON, quiet, a pipe, and Markdown,
+// which must stay literal and portable — goes through the envelope.
+func humanOutput(app *appctx.App) bool {
+	return app.Output.EffectiveFormat() == output.FormatStyled
+}
+
+// authStatus is what `auth status` learned about the active credential:
+// the envelope data, and the same facts as prose for a terminal.
+type authStatus struct {
+	data    map[string]any
+	summary string
+	details []string
+	hint    string
+	storage string
+	// refreshPromise is the expiry phrase written on the strength of a
+	// refresh succeeding, and refreshFailed what replaces it once --check
+	// has watched that refresh fail; both empty when nothing was promised.
+	refreshPromise, refreshFailed string
+}
+
+// tokenLine is the report's expiry line: the phrase, and where the
+// credential lives.
+func (s *authStatus) tokenLine(expiry string) string {
+	return "Token: " + expiry + " · Storage: " + s.storage
+}
+
+// authStatusReport inspects the active credential without touching the
+// network. A BASECAMP_TOKEN session never reaches the credential store, so
+// it neither pays the keyring probe nor reports another credential's
+// identity as its own.
+func authStatusReport(app *appctx.App) (*authStatus, error) {
+	baseURL := config.NormalizeBaseURL(app.Config.BaseURL)
+	profile := app.Config.ActiveProfile
+	account := app.Config.AccountID
+
+	report := &authStatus{data: map[string]any{"base_url": baseURL}}
+	if profile != "" {
+		report.data["profile"] = profile
+	}
+	if account != "" {
+		report.data["account_id"] = account
+	}
+	where := []string{}
+	if profile != "" {
+		where = append(where, "Profile: "+profile)
+	}
+	if account != "" {
+		where = append(where, "Account: "+account)
+	}
+
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		report.data["authenticated"] = true
+		report.data["source"] = "BASECAMP_TOKEN"
+		report.data["storage"] = "env"
+		report.data["refreshable"] = false
+		report.summary = "Logged in to " + baseURL + " via BASECAMP_TOKEN"
+		report.details = []string{strings.Join(append(where, "Source: BASECAMP_TOKEN", "Storage: env"), " · ")}
+		return report, nil
+	}
+
+	if !app.Auth.IsAuthenticated() {
+		report.data["authenticated"] = false
+		report.summary = "Not logged in to " + baseURL
+		report.hint = app.Auth.LoginHint()
+		return report, nil
+	}
+
+	store := app.Auth.GetStore()
+	creds, err := store.Load(app.Auth.CredentialKey())
+	if err != nil {
+		return nil, err
+	}
+
+	// Launchpad ignores scope; its tokens are read-write.
+	scope := creds.Scope
+	if creds.OAuthType == "launchpad" {
+		scope = ""
+	}
+	source := "oauth"
+	if creds.Source != "" {
+		source = creds.Source
+	}
+	storage := "file"
+	if store.UsingKeyring() {
+		storage = "keyring"
+	}
+	// A refresh token alone is not a refresh: what the CLI would refuse one
+	// for before sending anything is what the report gives when that leaves
+	// a still-live token unusable.
+	refusal := app.Auth.RefreshRefusal(creds)
+	refreshable := refusal == nil
+	report.storage = storage
+
+	report.data["authenticated"] = true
+	report.data["source"] = source
+	report.data["oauth_type"] = creds.OAuthType
+	report.data["refreshable"] = refreshable
+	report.data["storage"] = storage
+	if scope != "" {
+		report.data["scope"] = scope
+	}
+	if creds.UserID != "" {
+		report.data["user_id"] = creds.UserID
+	}
+	if creds.UserEmail != "" {
+		report.data["user_email"] = creds.UserEmail
+	}
+
+	// The summary is stored verbatim, as the envelope contract has it;
+	// sanitizing only decides whether the email is displayable at all.
+	report.summary = "Logged in to " + baseURL
+	if richtext.SanitizeSingleLine(creds.UserEmail) != "" {
+		report.summary += " as " + creds.UserEmail
+	}
+	if creds.UserID != "" {
+		report.summary += " (user " + creds.UserID + ")"
+	}
+
+	if scope != "" {
+		where = append(where, "Access: "+scope)
+	}
+	sourceLabel := source
+	if creds.OAuthType != "" {
+		sourceLabel += " (" + creds.OAuthType + ")"
+	}
+	where = append(where, "Source: "+sourceLabel)
+	report.details = append(report.details, strings.Join(where, " · "))
+
+	expiry := "no expiry reported"
+	if creds.ExpiresAt > 0 {
+		expiresAt := time.Unix(creds.ExpiresAt, 0)
+		expiresIn := time.Until(expiresAt)
+		// A token with nothing to refresh with is refused inside the refresh
+		// window, so from the CLI's side it is already expired there.
+		expired := expiresIn < 0 || (!refreshable && expiresIn <= auth.RefreshWindow)
+		report.data["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
+		report.data["expires_in"] = expiresIn.Round(time.Second).String()
+		report.data["expired"] = expired
+		switch {
+		case !expired && refreshable:
+			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically"
+			report.refreshPromise, report.refreshFailed = expiry, "expires in "+coarseDuration(expiresIn)+", and the refresh failed"
+		case !expired:
+			expiry = "expires in " + coarseDuration(expiresIn)
+		case refreshable:
+			expiry = "expired, will refresh on next use"
+			report.refreshPromise, report.refreshFailed = expiry, "expired, and the refresh failed"
+		case expiresIn >= 0:
+			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
+			report.hint = remedyFor(app, refusal)
+		default:
+			expiry = "expired"
+			report.hint = app.Auth.LoginHint()
+		}
+	}
+	report.details = append(report.details, report.tokenLine(expiry))
+
+	return report, nil
+}
+
+// coarseDuration renders a duration at the precision a person reads an
+// expiry at: seconds under a minute, minutes under an hour, hours and
+// minutes under two days, days beyond.
+func coarseDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 48*time.Hour:
+		if m := int(d.Minutes()) % 60; m != 0 {
+			return fmt.Sprintf("%dh %dm", int(d.Hours()), m)
+		}
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }
 
