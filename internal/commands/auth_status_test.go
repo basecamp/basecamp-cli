@@ -538,6 +538,49 @@ func TestAuthStatusCheckRefusedRefreshReplacesThePromise(t *testing.T) {
 	assert.NotContains(t, joined, "will refresh on next use")
 }
 
+// TestAuthStatusCheckRefusedRefreshInsideTheWindowReplacesThePromise: a
+// still-live Launchpad token inside the refresh window is refreshed on
+// use, so when --check watches that refresh fail the report must not keep
+// saying it refreshes automatically.
+func TestAuthStatusCheckRefusedRefreshInsideTheWindowReplacesThePromise(t *testing.T) {
+	srv := startLoginIdentityServer(t, "live-tok")
+	inner := srv.srv.Config.Handler
+	srv.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/authorization/token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"invalid_grant"}`)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.srv.URL)
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken: "stale-tok", RefreshToken: "stale-ref", OAuthType: "launchpad",
+		TokenEndpoint: srv.srv.URL + "/authorization/token", ExpiresAt: time.Now().Add(3 * time.Minute).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Equal(t, false, envelope.Data["expired"], "the token itself is still live")
+	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	report.record(app, &checkVerdict{valid: false, reason: "Your session has expired or was revoked"})
+	joined := strings.Join(report.details, "\n")
+	assert.Contains(t, joined, "Token: expires in 2m, and the refresh failed · Storage: file\nToken: none could be sent (Your session has expired or was revoked)")
+	assert.NotContains(t, joined, "refreshes automatically")
+}
+
 // TestAuthStatusSummaryKeepsTheRawEmail: the envelope stores the summary
 // verbatim and terminal sinks sanitize at render time, so JSON output must
 // carry the stored email as it is; sanitizing only decides whether there

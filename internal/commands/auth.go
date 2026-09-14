@@ -204,13 +204,16 @@ func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
 		s.details = append(s.details, "Token: valid (checked just now)")
 		return
 	}
-	// A refresh the check just watched fail makes the offline line's promise
-	// false; the verdict replaces it rather than sitting beside it. The
-	// failure is named on the line after, and is not always the endpoint's
-	// refusal: a half-configured OAuth client fails before any request.
-	for i, line := range s.details {
-		if line == "Token: expired, will refresh on next use · Storage: "+s.storage {
-			s.details[i] = "Token: expired, and the refresh failed · Storage: " + s.storage
+	// No token to send means the refresh the offline line counted on was
+	// tried and failed, so the promise is taken back rather than left beside
+	// the verdict. The failure is named on the line after, and is not always
+	// the endpoint's refusal: a half-configured OAuth client fails before
+	// any request.
+	if !v.sent && s.refreshPromise != "" {
+		for i, line := range s.details {
+			if line == s.tokenLine(s.refreshPromise) {
+				s.details[i] = s.tokenLine(s.refreshFailed)
+			}
 		}
 	}
 	if v.sent {
@@ -241,6 +244,16 @@ type authStatus struct {
 	details []string
 	hint    string
 	storage string
+	// refreshPromise is the expiry phrase written on the strength of a
+	// refresh succeeding, and refreshFailed what replaces it once --check
+	// has watched that refresh fail; both empty when nothing was promised.
+	refreshPromise, refreshFailed string
+}
+
+// tokenLine is the report's expiry line: the phrase, and where the
+// credential lives.
+func (s *authStatus) tokenLine(expiry string) string {
+	return "Token: " + expiry + " · Storage: " + s.storage
 }
 
 // authStatusReport inspects the active credential without touching the
@@ -358,10 +371,12 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		switch {
 		case !expired && refreshable:
 			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically"
+			report.refreshPromise, report.refreshFailed = expiry, "expires in "+coarseDuration(expiresIn)+", and the refresh failed"
 		case !expired:
 			expiry = "expires in " + coarseDuration(expiresIn)
 		case refreshable:
 			expiry = "expired, will refresh on next use"
+			report.refreshPromise, report.refreshFailed = expiry, "expired, and the refresh failed"
 		case expiresIn >= 0:
 			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
 			report.hint = app.Auth.LoginHint()
@@ -370,7 +385,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 			report.hint = app.Auth.LoginHint()
 		}
 	}
-	report.details = append(report.details, "Token: "+expiry+" · Storage: "+storage)
+	report.details = append(report.details, report.tokenLine(expiry))
 
 	return report, nil
 }
