@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -274,13 +275,13 @@ func showAuthenticationStart(w io.Writer, styles *tui.Styles, stepByStep bool) s
 	return "  "
 }
 
+// authenticationLogger indents the login transcript under the wizard's
+// step and drops the Launchpad discovery line: it names an authorization
+// URL nobody needs to see, and the flow's own "Sign in to Basecamp" block
+// that follows says everything the person does.
 func authenticationLogger(w io.Writer, prefix string) func(string) {
-	launchpadOpeningShown := false
 	return func(message string) {
 		if strings.HasPrefix(message, "Authenticating via launchpad (") {
-			message = "Opening browser for Basecamp login..."
-			launchpadOpeningShown = true
-		} else if launchpadOpeningShown && strings.TrimSpace(message) == "Opening browser for authentication..." {
 			return
 		}
 		fmt.Fprintln(w, prefix+message)
@@ -318,10 +319,18 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles, showRes
 	}
 
 	loggerPrefix := showAuthenticationStart(w, styles, showResult)
-	result, err := app.Auth.Login(cmd.Context(), auth.LoginOptions{
-		Logger: authenticationLogger(w, loggerPrefix),
+	ctx, stop := loginContext(cmd)
+	result, err := app.Auth.Login(ctx, auth.LoginOptions{
+		Logger:   authenticationLogger(w, loggerPrefix),
+		Progress: w,
 	})
+	err = loginOutcome(ctx, err, w, output.NewRenderer(w, false))
+	canceled := errors.Is(ctx.Err(), context.Canceled)
+	stop()
 	if err != nil {
+		if canceled {
+			return "", err
+		}
 		return "", fmt.Errorf("authentication failed: %w", err)
 	}
 

@@ -421,6 +421,13 @@ func Execute() {
 		// Convert error to structured output
 		apiErr := output.AsError(err)
 
+		// An interrupted command has already told the person what stopped;
+		// an error envelope on top would dress a Ctrl-C or a SIGTERM up as
+		// a failure.
+		if apiErr.Code == output.CodeInterrupted || apiErr.Code == output.CodeTerminated {
+			os.Exit(output.ExitCodeFor(apiErr.Code))
+		}
+
 		// Commands whose stdout speaks a wire protocol (basecamp mcp:
 		// JSON-RPC) keep errors off stdout entirely — an error envelope
 		// there is a malformed protocol message that hides the real failure
