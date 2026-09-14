@@ -128,6 +128,12 @@ func ErrInterrupted(msg string) *Error {
 	return &Error{Code: CodeInterrupted, Message: msg}
 }
 
+// ErrTerminated reports a command stopped by a SIGTERM while it waited.
+// msg is for machine consumers; the command prints its own human line.
+func ErrTerminated(msg string) *Error {
+	return &Error{Code: CodeTerminated, Message: msg}
+}
+
 func ErrForbiddenScope() *Error {
 	return &Error{
 		Code:       CodeForbidden,

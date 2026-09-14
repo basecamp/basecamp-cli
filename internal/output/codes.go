@@ -41,13 +41,16 @@ const (
 )
 
 // CodeInterrupted marks a command the person stopped with Ctrl-C after it
-// had started waiting on them (a login waiting for approval). The command
-// has already said what happened on its own terms, so the root renders
-// nothing more and exits with the shell's conventional status for a
-// SIGINT-terminated process.
+// had started waiting on them (a login waiting for approval);
+// CodeTerminated the same stop by a SIGTERM from whatever supervises the
+// process. The command has already said what happened on its own terms, so
+// the root renders nothing more and exits with the shell's conventional
+// status for a process the signal ended.
 const (
 	CodeInterrupted = "interrupted"
 	ExitInterrupted = 130
+	CodeTerminated  = "terminated"
+	ExitTerminated  = 143
 )
 
 // ExitCodeFor returns the exit code for a given error code.
@@ -59,6 +62,8 @@ func ExitCodeFor(code string) int {
 		return ExitLimit
 	case CodeInterrupted:
 		return ExitInterrupted
+	case CodeTerminated:
+		return ExitTerminated
 	}
 	return clioutput.ExitCodeFor(code)
 }

@@ -422,9 +422,10 @@ func Execute() {
 		apiErr := output.AsError(err)
 
 		// An interrupted command has already told the person what stopped;
-		// an error envelope on top would dress a Ctrl-C up as a failure.
-		if apiErr.Code == output.CodeInterrupted {
-			os.Exit(output.ExitInterrupted)
+		// an error envelope on top would dress a Ctrl-C or a SIGTERM up as
+		// a failure.
+		if apiErr.Code == output.CodeInterrupted || apiErr.Code == output.CodeTerminated {
+			os.Exit(output.ExitCodeFor(apiErr.Code))
 		}
 
 		// Commands whose stdout speaks a wire protocol (basecamp mcp:

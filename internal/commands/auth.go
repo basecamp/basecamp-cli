@@ -411,26 +411,51 @@ func registerLoginFlowFlags(cmd *cobra.Command, noBrowser, remote, local, device
 // loginContext derives the context an interactive login waits under: Ctrl-C
 // (and a SIGTERM) cancels it instead of killing the process mid-line, so
 // the flow can put the terminal back — clear the live wait line, close the
-// loopback listener, stop polling — and say it was canceled. The stop
-// function must run as soon as Login returns, after loginOutcome has read
-// the context: stopping cancels the context too, and while the handler is
-// registered a signal is swallowed instead of ending whatever the command
-// does next.
+// loopback listener, stop polling, discard a grant the server already
+// issued — and say it was canceled. The signal that fired is the context's
+// cause, so the exit status still tells an interrupt from a termination.
+// The stop function must run as soon as Login returns, after loginOutcome
+// has read the context: stopping cancels the context too, and while the
+// handler is registered a signal is swallowed instead of ending whatever
+// the command does next.
 func loginContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithCancelCause(cmd.Context())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case sig := <-signals:
+			cancel(loginSignalError{sig})
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(signals)
+		cancel(nil)
+	}
 }
+
+// loginSignalError is the cause a login context is canceled with when a signal,
+// rather than the parent context, ended the wait.
+type loginSignalError struct{ os.Signal }
+
+func (s loginSignalError) Error() string { return "login stopped by " + s.String() }
 
 // loginOutcome turns the result of Login into the error the root will
 // render. A login the person canceled is not a failure: the human line goes
-// to the terminal here and the error carries the interrupted code, which
-// the root exits with silently. Everything else, nil included, is returned
-// as it came.
+// to the terminal here and the error carries the interrupted code — or the
+// terminated code when a SIGTERM ended the wait — which the root exits with
+// silently. Everything else, nil included, is returned as it came.
 func loginOutcome(ctx context.Context, err error, w io.Writer, r *output.Renderer) error {
 	if err == nil || !errors.Is(ctx.Err(), context.Canceled) {
 		return err
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, r.Muted.Render("Login canceled. Nothing was stored."))
+	var sig loginSignalError
+	if errors.As(context.Cause(ctx), &sig) && sig.Signal == syscall.SIGTERM {
+		return output.ErrTerminated("login terminated")
+	}
 	return output.ErrInterrupted("login canceled")
 }
 
