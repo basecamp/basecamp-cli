@@ -563,12 +563,12 @@ sync-skills:
 	@test -n "$(TAG)" || (echo "Usage: make sync-skills TAG=v1.2.3" && exit 1)
 	RELEASE_TAG=$(TAG) SOURCE_SHA=$$(git rev-parse HEAD) DRY_RUN=local scripts/sync-skills.sh
 
-# Sync skills (dry-run against real target repo)
 # Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
 .PHONY: test-sync-skills
 test-sync-skills:
 	EXPECTED_SOURCE=basecamp-cli scripts/test-sync-skills.sh
 
+# Sync skills (dry-run against real target repo)
 # Usage: make sync-skills-remote TAG=v1.2.3 SKILLS_TOKEN=ghp_...
 .PHONY: sync-skills-remote
 sync-skills-remote:
