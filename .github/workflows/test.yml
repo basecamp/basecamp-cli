@@ -181,6 +181,9 @@ jobs:
       - name: Run BATS integration tests
         run: make test-e2e
 
+      - name: Test the skills sync
+        run: make test-sync-skills
+
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest

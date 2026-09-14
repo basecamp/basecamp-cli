@@ -7,8 +7,10 @@
 # a way back without cutting a new tag. This is it.
 #
 # scripts/sync-skills.sh mirrors the skills/ tree at the given ref into
-# basecamp/skills and no-ops when the content already matches, so re-running it
-# for an already-synced release is safe.
+# basecamp/skills — only this CLI's skills, tracked in its own manifest there
+# (.managed-skills.basecamp-cli); other CLIs' skills are never touched — and
+# no-ops when the content already matches, so re-running it for an
+# already-synced release is safe.
 name: Sync skills
 
 on:
@@ -52,8 +54,8 @@ jobs:
             exit 1
           fi
 
-          # sync-skills.sh mirrors the tree wholesale, so syncing an older tag
-          # would roll basecamp/skills back. Unlike the AUR, there is no
+          # sync-skills.sh mirrors this CLI's skills wholesale, so syncing an
+          # older tag would roll them back in basecamp/skills. Unlike the AUR, there is no
           # independent record of what the distribution repo currently holds, and
           # the only reason to run this by hand is that the newest release failed
           # to sync — so require exactly that release.
@@ -63,11 +65,24 @@ jobs:
             exit 1
           fi
 
-      # Check out the tag itself, not main: the sync must mirror the skills tree
-      # as it was released, even if main has moved on since.
+      # Two checkouts: sync logic from the dispatching ref, skills content from
+      # the release tag. A defect in scripts/sync-skills.sh is one of the ways
+      # the automatic sync fails, and running the tagged copy here would just
+      # re-run the defective script — recovery must be able to run a fix merged
+      # to main without cutting a new tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      # The content still mirrors the skills tree as it was released, even if
+      # main has moved on since: SKILLS_SOURCE points the script at this
+      # checkout. Fully qualified: actions/checkout resolves a bare name as a
+      # branch before a tag, so a branch sharing the tag's name would win and
+      # mirror unreleased content.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          path: release
           persist-credentials: false
 
       # Needed for dry runs too: the honest preview clones the target, so it
@@ -83,12 +98,14 @@ jobs:
           repositories: skills
           permission-contents: ${{ inputs.dry_run && 'read' || 'write' }}
 
-      # github.sha is the dispatching ref's SHA (main), not the tag's, so resolve
-      # the commit actually checked out — otherwise the sync records the wrong
-      # provenance for the release it claims to mirror.
+      # github.sha is the dispatching ref's SHA (main), not the tag's, so
+      # resolve the tagged commit from its own checkout — otherwise the sync
+      # records the wrong provenance for the release it claims to mirror.
       - name: Resolve the tagged commit
         id: source
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ inputs.tag }}
+        run: echo "sha=$(git -C release rev-parse --verify "refs/tags/${TAG}^{commit}")" >> "$GITHUB_OUTPUT"
 
       # DRY_RUN=remote, not local: the local path never clones basecamp/skills
       # and diffs against an empty repo, so every skill reads as newly added and
@@ -100,5 +117,6 @@ jobs:
           SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}
           RELEASE_TAG: ${{ inputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SKILLS_SOURCE: release/skills
           DRY_RUN: ${{ inputs.dry_run && 'remote' || '' }}
         run: scripts/sync-skills.sh
