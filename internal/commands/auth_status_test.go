@@ -669,11 +669,11 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 		},
 		"stored token endpoint the CLI will not post to": {
 			creds:  auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/authorization/token"},
-			reason: "invalid token endpoint \"https://user@evil.example/authorization/token\": must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port",
+			reason: "invalid token endpoint \"https://xxxxx@evil.example/authorization/token\": must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port",
 		},
 		"stored token endpoint carrying a secret": {
 			creds:  auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://client:s3cret@evil.example/authorization/token"},
-			reason: "invalid token endpoint \"https://client:xxxxx@evil.example/authorization/token\": must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port",
+			reason: "invalid token endpoint \"https://xxxxx@evil.example/authorization/token\": must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port",
 		},
 		"half-configured OAuth client": {
 			creds:    auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://launchpad.37signals.com/authorization/token"},

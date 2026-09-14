@@ -591,13 +591,20 @@ func TestResolveClientCredentials(t *testing.T) {
 }
 
 // TestRequireSecureOAuthEndpoint_DoesNotEchoSecrets: the refusal names the
-// endpoint so the reader can find it in the store, but a password in its
-// userinfo is masked, and an endpoint that does not parse is not echoed
-// at all, since the message reaches status output and transcripts.
+// endpoint so the reader can find it in the store, but its userinfo is
+// masked whole — a secret can sit in the username as well as the password —
+// and an endpoint that does not parse is not echoed at all, since the
+// message reaches status output and transcripts.
 func TestRequireSecureOAuthEndpoint_DoesNotEchoSecrets(t *testing.T) {
 	err := requireSecureOAuthEndpoint("token endpoint", "https://client:s3cret@evil.example/token")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `invalid token endpoint "https://client:xxxxx@evil.example/token": must be`)
+	assert.Contains(t, err.Error(), `invalid token endpoint "https://xxxxx@evil.example/token": must be`)
+	assert.NotContains(t, err.Error(), "s3cret")
+	assert.NotContains(t, err.Error(), "client")
+
+	err = requireSecureOAuthEndpoint("token endpoint", "https://s3cret@evil.example/token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid token endpoint "https://xxxxx@evil.example/token": must be`)
 	assert.NotContains(t, err.Error(), "s3cret")
 
 	err = requireSecureOAuthEndpoint("token endpoint", "https://client:s3cret@evil.example:port/token")

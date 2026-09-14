@@ -1326,7 +1326,7 @@ func isSecureEndpointURL(u *url.URL) bool {
 
 // requireSecureOAuthEndpoint parses and validates a server-controlled OAuth
 // endpoint URL with isSecureEndpointURL, returning an auth-class error naming
-// the endpoint when it fails. The endpoint is echoed with any password
+// the endpoint when it fails. The endpoint is echoed with its userinfo
 // masked, and not at all when it does not parse: the error reaches status
 // output and transcripts, and a stored endpoint is exactly where a secret
 // in userinfo would sit.
@@ -1340,7 +1340,10 @@ func requireSecureOAuthEndpoint(name, endpoint string) error {
 		return output.ErrAuth(fmt.Sprintf("invalid %s: %v", name, err))
 	}
 	if !isSecureEndpointURL(u) {
-		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, u.Redacted()))
+		if u.User != nil {
+			u.User = url.User("xxxxx")
+		}
+		return output.ErrAuth(fmt.Sprintf("invalid %s %q: must be an absolute https URL (or http on loopback) with a hostname, no userinfo, and a valid port", name, u.String()))
 	}
 	return nil
 }
