@@ -187,6 +187,26 @@ func (w *Writer) Err(err error, opts ...ErrorResponseOption) error {
 // ErrorResponseOption modifies an ErrorResponse.
 type ErrorResponseOption func(*ErrorResponse)
 
+// ErrorMetaProvider supplies command-specific structured error metadata.
+type ErrorMetaProvider interface {
+	ErrorMetadata() map[string]any
+}
+
+// WithErrorMeta adds command-specific structured details to an error response.
+func WithErrorMeta(meta map[string]any) ErrorResponseOption {
+	return func(r *ErrorResponse) {
+		if len(meta) == 0 {
+			return
+		}
+		if r.Meta == nil {
+			r.Meta = make(map[string]any)
+		}
+		for key, value := range meta {
+			r.Meta[key] = value
+		}
+	}
+}
+
 // WithErrorStats adds session metrics to the error response metadata.
 func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 	return func(r *ErrorResponse) {

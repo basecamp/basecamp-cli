@@ -277,6 +277,10 @@ func (a *App) OK(data any, opts ...output.ResponseOption) error {
 func (a *App) Err(err error) error {
 	// Determine if we should include stats
 	var opts []output.ErrorResponseOption
+	var carrier output.ErrorMetaProvider
+	if errors.As(err, &carrier) {
+		opts = append(opts, output.WithErrorMeta(carrier.ErrorMetadata()))
+	}
 	if a.shouldIncludeStatsInError() {
 		stats := a.Collector.Summary()
 		opts = append(opts, output.WithErrorStats(&stats))
