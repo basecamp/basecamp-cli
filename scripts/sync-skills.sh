@@ -192,10 +192,13 @@ fi
 #
 # A private global config for every git call below: the bot is the identity for
 # the commit, and for the one a rejected push makes again, and the token goes in as
-# a URL rewrite so it never appears in argv or in the remote URL. Only the user's
-# global file is replaced (~/.gitconfig: identity, signing, credential helpers, hooks
-# path); the system config and any GIT_CONFIG_COUNT/GIT_CONFIG_KEY_* settings in the
-# environment still apply — the test's race case injects a hooks path that way.
+# an Authorization header scoped to github.com, the way actions/checkout sends it —
+# not as a URL rewrite, which git expands before handing the URL to git-remote-https
+# in argv. The remote URL stays clean; the token is only in this file, mode 600,
+# removed with the tmpdir. Only the user's global file is replaced (~/.gitconfig:
+# identity, signing, credential helpers, hooks path); the system config and any
+# GIT_CONFIG_COUNT/GIT_CONFIG_KEY_* settings in the environment still apply — the
+# test's race case injects a hooks path that way.
 export GIT_CONFIG_GLOBAL="${tmpdir}/gitconfig"
 cat > "$GIT_CONFIG_GLOBAL" <<GITCFG
 [user]
@@ -206,8 +209,8 @@ chmod 600 "$GIT_CONFIG_GLOBAL"
 if [[ "$SKILLS_REPO_URL" == https://github.com/* ]]; then
   [[ -n "$SKILLS_TOKEN" ]] || die "SKILLS_TOKEN is required to push to ${SKILLS_REPO_URL} (set DRY_RUN=local for offline testing)"
   cat >> "$GIT_CONFIG_GLOBAL" <<GITCFG
-[url "https://x-access-token:${SKILLS_TOKEN}@github.com/"]
-	insteadOf = https://github.com/
+[http "https://github.com/"]
+	extraheader = AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SKILLS_TOKEN" | base64 | tr -d '\n')
 GITCFG
 fi
 
