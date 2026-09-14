@@ -2299,3 +2299,26 @@ func TestAuthorizationEndpoint_EnvBC3TokenUsesTheOrigin(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://3.basecampapi.com/authorization.json", endpoint)
 }
+
+// TestRefreshRefusal: the pre-request refusals refreshCredential makes, as a
+// report can state them without sending anything.
+func TestRefreshRefusal(t *testing.T) {
+	for name, tc := range map[string]struct {
+		creds Credentials
+		want  string
+	}{
+		"launchpad with a refresh token":    {Credentials{OAuthType: "launchpad", RefreshToken: "ref"}, ""},
+		"bc5 with its token endpoint":       {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, ""},
+		"loopback endpoint for development": {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "http://localhost:3000/oauth/tokens"}, ""},
+		"no refresh token":                  {Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"}, "no refresh token"},
+		"legacy bc3":                        {Credentials{OAuthType: "bc3", RefreshToken: "ref", TokenEndpoint: "https://example.com/token"}, "a refresh token from a removed development flow that cannot be redeemed"},
+		"bc5 without its token endpoint":    {Credentials{OAuthType: "bc5", RefreshToken: "ref"}, "no token endpoint to refresh at"},
+		"endpoint carrying userinfo":        {Credentials{OAuthType: "bc5", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/oauth/tokens"}, "a stored token endpoint the CLI will not send a refresh to"},
+		"plain http endpoint off loopback":  {Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "http://launchpad.example/authorization/token"}, "a stored token endpoint the CLI will not send a refresh to"},
+		"endpoint with an undialable port":  {Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://host:70000/token"}, "a stored token endpoint the CLI will not send a refresh to"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, RefreshRefusal(&tc.creds))
+		})
+	}
+}

@@ -336,6 +336,27 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 	return false
 }
 
+// RefreshRefusal is why a refresh of creds would be refused before anything
+// is sent — no refresh token, a grant from the removed bc3 development flow,
+// a BC5 credential without its token endpoint, or a stored endpoint the CLI
+// will not post to — or "" when a refresh would be attempted. It is the
+// pre-request part of refreshCredential, for a report that must say what
+// the next command will do without doing it.
+func RefreshRefusal(creds *Credentials) string {
+	switch {
+	case creds.RefreshToken == "":
+		return "no refresh token"
+	case creds.OAuthType == "bc3":
+		return "a refresh token from a removed development flow that cannot be redeemed"
+	case creds.OAuthType == oauthTypeBC5 && creds.TokenEndpoint == "":
+		return "no token endpoint to refresh at"
+	case creds.TokenEndpoint != "" && requireSecureOAuthEndpoint("token endpoint", creds.TokenEndpoint) != nil:
+		return "a stored token endpoint the CLI will not send a refresh to"
+	default:
+		return ""
+	}
+}
+
 // refreshLocked rotates the stored credential under the manager lock. The
 // credential is the active profile's, so whatever auth-class failure the
 // refresh hits — an unusable stored endpoint, a half-configured OAuth

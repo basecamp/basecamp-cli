@@ -303,19 +303,10 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if store.UsingKeyring() {
 		storage = "keyring"
 	}
-	// A refresh token alone is not a refresh: the removed bc3 development
-	// flow's grants cannot be redeemed, and a BC5 credential without its
-	// token endpoint has nowhere to send one. The reason is what the report
-	// gives when it leaves a still-live token unusable.
-	var notRefreshable string
-	switch {
-	case creds.RefreshToken == "":
-		notRefreshable = "no refresh token"
-	case creds.OAuthType == "bc3":
-		notRefreshable = "a refresh token from a removed development flow that cannot be redeemed"
-	case creds.OAuthType == "bc5" && creds.TokenEndpoint == "":
-		notRefreshable = "no token endpoint to refresh at"
-	}
+	// A refresh token alone is not a refresh: the reason the CLI would refuse
+	// one before sending anything is what the report gives when that leaves
+	// a still-live token unusable.
+	notRefreshable := auth.RefreshRefusal(creds)
 	refreshable := notRefreshable == ""
 	report.storage = storage
 

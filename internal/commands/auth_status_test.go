@@ -582,6 +582,10 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 			creds:  auth.Credentials{OAuthType: "bc5", RefreshToken: "ref"},
 			reason: "and no token endpoint to refresh at)",
 		},
+		"stored token endpoint the CLI will not post to": {
+			creds:  auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://user@evil.example/authorization/token"},
+			reason: "and a stored token endpoint the CLI will not send a refresh to)",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			app, buf := setupProfileTestApp(t, statusTestConfig(t))
