@@ -891,6 +891,60 @@ func TestProfileDeleteRemovesFromConfig(t *testing.T) {
 	assert.Equal(t, "keep-me", configData["default_profile"], "default should remain unchanged")
 }
 
+// Deleting a profile takes the logout path for its credential: revoked with
+// the server when it can be, forgotten locally either way.
+func TestProfileDeleteRevokesTheCredential(t *testing.T) {
+	s := startRevocationServer(t)
+	cfg := &config.Config{
+		BaseURL:  s.srv.URL,
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+		Profiles: map[string]*config.ProfileConfig{
+			"bot": {BaseURL: s.srv.URL},
+		},
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+	authMgr := auth.NewManager(cfg, s.srv.Client())
+	authMgr.SetStore(auth.NewStore(t.TempDir()))
+	require.NoError(t, authMgr.GetStore().Save("profile:bot", bc5LogoutCredentials(s)))
+	app.Auth = authMgr
+	writeConfigFile(t, map[string]any{
+		"profiles": map[string]any{"bot": map[string]any{"base_url": s.srv.URL}},
+	})
+
+	require.NoError(t, executeProfileCommand(newProfileDeleteCmd(), app, "bot"))
+
+	assert.Equal(t, []string{"rt-1", "at-1"}, s.revoked())
+	_, err := authMgr.GetStore().Load("profile:bot")
+	assert.Error(t, err, "the credential is forgotten")
+	data := decodeLogoutJSON(t, buf)
+	assert.Equal(t, "deleted", data["status"])
+	assert.Equal(t, "bot", data["name"])
+	assert.Equal(t, true, data["revoked"])
+	assert.NotContains(t, readConfigFile(t), "profiles")
+}
+
+func TestProfileDeleteWithoutCredentialsRevokesNothing(t *testing.T) {
+	s := startRevocationServer(t)
+	cfg := &config.Config{
+		BaseURL:  s.srv.URL,
+		CacheDir: t.TempDir(),
+		Sources:  make(map[string]string),
+		Profiles: map[string]*config.ProfileConfig{"bot": {BaseURL: s.srv.URL}},
+	}
+	app, buf := setupProfileTestApp(t, cfg)
+	writeConfigFile(t, map[string]any{
+		"profiles": map[string]any{"bot": map[string]any{"base_url": s.srv.URL}},
+	})
+
+	require.NoError(t, executeProfileCommand(newProfileDeleteCmd(), app, "bot"))
+
+	assert.Empty(t, s.revoked())
+	data := decodeLogoutJSON(t, buf)
+	assert.Equal(t, "deleted", data["status"])
+	assert.NotContains(t, data, "revoked", "a profile that never logged in has nothing to report")
+}
+
 func TestProfileDeleteClearsDefaultWhenDeletingDefaultProfile(t *testing.T) {
 	cfg := &config.Config{
 		BaseURL:        "https://3.basecampapi.com",

@@ -16,6 +16,10 @@ load smoke_helper
   mark_out_of_scope "Requires OAuth credentials"
 }
 
+@test "auth revoke is out of scope" {
+  mark_out_of_scope "Revokes the account's OAuth credentials"
+}
+
 @test "login is out of scope" {
   mark_out_of_scope "Alias for auth login — interactive OAuth flow"
 }

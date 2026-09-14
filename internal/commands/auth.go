@@ -3,6 +3,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,6 +37,7 @@ func NewAuthCmd() *cobra.Command {
 	cmd.AddCommand(
 		newAuthLoginCmd(),
 		newAuthLogoutCmd(),
+		newAuthRevokeCmd(),
 		newAuthStatusCmd(),
 		newAuthRefreshCmd(),
 		newAuthTokenCmd(),
@@ -830,23 +832,113 @@ func authorizedAccountIDs(info *basecamp.AuthorizationInfo) string {
 func buildLogoutCmd(use string) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
-		Short: "Remove stored credentials",
-		Long:  "Remove stored authentication credentials for the current origin.",
+		Short: "Log out and revoke the credential",
+		Long:  "Revoke the current credential with the server when it can be, and remove it from local storage.",
+		// A stray argument (`auth logout work`, meant as a profile name) must
+		// not revoke the selected credential instead: select with --profile.
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := app.Auth.Logout(); err != nil {
+			if err := refuseEnvTokenLogout(); err != nil {
+				return err
+			}
+			result, err := app.Auth.Logout(cmd.Context())
+			if errors.Is(err, auth.ErrNoCredential) {
+				return app.OK(map[string]any{
+					"status":  "not_logged_in",
+					"revoked": false,
+				}, output.WithSummary("Not logged in"))
+			}
+			if err != nil {
 				return err
 			}
 
-			return app.OK(map[string]string{
-				"status": "logged_out",
-			}, output.WithSummary("Successfully logged out"))
+			summary, fields := describeLogout("Logged out", result)
+			fields["status"] = "logged_out"
+			return app.OK(fields, output.WithSummary(summary))
 		},
 	}
+}
+
+func newAuthRevokeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "revoke",
+		Short: "Revoke the credential with the server",
+		Long: `Revoke the current credential with its authorization server, then remove it
+from local storage — a revoked token leaves nothing usable behind.
+
+Unlike auth logout, which always forgets the credential and only tries to
+revoke it, this refuses to forget a token it could not revoke: the credential
+stays so the revocation can be retried. Launchpad tokens and imported personal
+access tokens cannot be revoked from the CLI — log out to forget them, and
+revoke an imported token in Basecamp.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+
+			if err := refuseEnvTokenLogout(); err != nil {
+				return err
+			}
+			err := app.Auth.RevokeStored(cmd.Context())
+			if errors.Is(err, auth.ErrNoCredential) {
+				return app.OK(map[string]any{
+					"status":  "not_logged_in",
+					"revoked": false,
+				}, output.WithSummary("Not logged in"))
+			}
+			if err != nil {
+				return err
+			}
+			return app.OK(map[string]any{
+				"status":  "revoked",
+				"revoked": true,
+			}, output.WithSummary("Revoked the token with the server and removed the credential"))
+		},
+	}
+}
+
+// refuseEnvTokenLogout keeps logout and revoke off the stored credential
+// while BASECAMP_TOKEN is the one in use. Every request follows the
+// environment token, so the stored credential is not the session being
+// ended — and revoking it would kill an unrelated refresh family for good.
+func refuseEnvTokenLogout() error {
+	if os.Getenv("BASECAMP_TOKEN") == "" {
+		return nil
+	}
+	return output.ErrUsageHint("BASECAMP_TOKEN is set: the CLI cannot revoke or forget an environment token, and the stored credential is not the one in use",
+		"Unset BASECAMP_TOKEN to log out of the stored credential; revoke an environment token where it was issued.")
+}
+
+// describeLogout renders what became of a credential server-side for a
+// human — appended to `done`, the local outcome — and the fields the JSON
+// envelope carries for it.
+func describeLogout(done string, result *auth.LogoutResult) (summary string, fields map[string]any) {
+	fields = map[string]any{"revoked": result.Revoked}
+	switch {
+	case result.Revoked:
+		summary = done + " (token revoked)"
+	case result.Skipped == auth.RevokeSkippedLaunchpad:
+		fields["reason"] = result.Skipped
+		summary = done + " (Launchpad tokens cannot be revoked from the CLI)"
+	case result.Skipped == auth.RevokeSkippedImported:
+		fields["reason"] = result.Skipped
+		summary = done + " (forgot the imported token; it stays valid until revoked in Basecamp)"
+	case result.Err != nil:
+		fields["reason"] = result.Err.Error()
+		fields["remaining"] = result.Remaining
+		summary = done + " locally; could not revoke the token server-side: " + result.Err.Error() + " — " + result.Outstanding()
+	default:
+		fields["reason"] = result.Skipped
+		summary = done
+	}
+	return summary, fields
 }
 
 // printAgentNudge prints a hint about coding agent setup after login.

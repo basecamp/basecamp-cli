@@ -523,6 +523,7 @@ CMD basecamp auth
 CMD basecamp auth login
 CMD basecamp auth logout
 CMD basecamp auth refresh
+CMD basecamp auth revoke
 CMD basecamp auth status
 CMD basecamp auth token
 CMD basecamp bonfire
@@ -2022,6 +2023,27 @@ FLAG basecamp auth refresh --stats type=bool
 FLAG basecamp auth refresh --styled type=bool
 FLAG basecamp auth refresh --todolist type=string
 FLAG basecamp auth refresh --verbose type=count
+FLAG basecamp auth revoke --account type=string
+FLAG basecamp auth revoke --agent type=bool
+FLAG basecamp auth revoke --cache-dir type=string
+FLAG basecamp auth revoke --count type=bool
+FLAG basecamp auth revoke --help type=bool
+FLAG basecamp auth revoke --hints type=bool
+FLAG basecamp auth revoke --ids-only type=bool
+FLAG basecamp auth revoke --in type=string
+FLAG basecamp auth revoke --jq type=string
+FLAG basecamp auth revoke --json type=bool
+FLAG basecamp auth revoke --markdown type=bool
+FLAG basecamp auth revoke --md type=bool
+FLAG basecamp auth revoke --no-hints type=bool
+FLAG basecamp auth revoke --no-stats type=bool
+FLAG basecamp auth revoke --profile type=string
+FLAG basecamp auth revoke --project type=string
+FLAG basecamp auth revoke --quiet type=bool
+FLAG basecamp auth revoke --stats type=bool
+FLAG basecamp auth revoke --styled type=bool
+FLAG basecamp auth revoke --todolist type=string
+FLAG basecamp auth revoke --verbose type=count
 FLAG basecamp auth status --account type=string
 FLAG basecamp auth status --agent type=bool
 FLAG basecamp auth status --cache-dir type=string
@@ -18212,6 +18234,7 @@ SUB basecamp auth
 SUB basecamp auth login
 SUB basecamp auth logout
 SUB basecamp auth refresh
+SUB basecamp auth revoke
 SUB basecamp auth status
 SUB basecamp auth token
 SUB basecamp bonfire

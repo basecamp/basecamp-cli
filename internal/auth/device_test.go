@@ -29,6 +29,7 @@ type deviceAS struct {
 	mu          sync.Mutex
 	deviceForms []url.Values
 	tokenForms  []url.Values
+	revokeForms []url.Values
 
 	// metadata renders the AS metadata JSON. Defaults to a device-capable doc
 	// with issuer = the server's own origin.
@@ -37,6 +38,8 @@ type deviceAS struct {
 	deviceAuth func() (status int, body string)
 	// token renders the nth (0-based) token poll response.
 	token func(call int) (status int, body string)
+	// revoke renders the nth (0-based) RFC 7009 revocation response.
+	revoke func(call int) (status int, body string)
 }
 
 func startDeviceAS(t *testing.T) *deviceAS {
@@ -69,12 +72,24 @@ func startDeviceAS(t *testing.T) *deviceAS {
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
 	}
+	revokeHandler := func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		as.mu.Lock()
+		call := len(as.revokeForms)
+		as.revokeForms = append(as.revokeForms, r.PostForm)
+		as.mu.Unlock()
+		status, body := as.revoke(call)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}
 	mux.HandleFunc("/oauth/device", deviceHandler)
 	mux.HandleFunc("/oauth/token", tokenHandler)
 	// The paths Basecamp mounts, which a pinned BASECAMP_OAUTH_ISSUER derives
 	// without reading metadata.
 	mux.HandleFunc("/oauth/device_authorizations", deviceHandler)
 	mux.HandleFunc("/oauth/tokens", tokenHandler)
+	mux.HandleFunc("/oauth/revocations", revokeHandler)
 
 	as.srv = httptest.NewServer(mux)
 	t.Cleanup(as.srv.Close)
@@ -84,9 +99,12 @@ func startDeviceAS(t *testing.T) *deviceAS {
 			"issuer": %q,
 			"token_endpoint": %q,
 			"device_authorization_endpoint": %q,
+			"revocation_endpoint": %q,
+			"revocation_endpoint_auth_methods_supported": ["none", "client_secret_post"],
 			"grant_types_supported": ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]
-		}`, as.srv.URL, as.srv.URL+"/oauth/token", as.srv.URL+"/oauth/device")
+		}`, as.srv.URL, as.srv.URL+"/oauth/token", as.srv.URL+"/oauth/device", as.srv.URL+"/oauth/revocations")
 	}
+	as.revoke = func(int) (int, string) { return http.StatusOK, `{}` }
 	as.deviceAuth = func() (int, string) {
 		return http.StatusOK, fmt.Sprintf(
 			`{"device_code":"dev-code-1","user_code":"ABCD-EFGH","verification_uri":%q,"verification_uri_complete":%q,"expires_in":600,"interval":1}`,
@@ -108,6 +126,12 @@ func (as *deviceAS) tokenCalls() []url.Values {
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	return append([]url.Values(nil), as.tokenForms...)
+}
+
+func (as *deviceAS) revokeCalls() []url.Values {
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	return append([]url.Values(nil), as.revokeForms...)
 }
 
 // startResourceServer starts a mock protected resource advertising the given

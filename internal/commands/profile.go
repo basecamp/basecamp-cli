@@ -2,7 +2,9 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewProfileCmd creates the profile command group.
@@ -345,7 +348,7 @@ func newProfileDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a profile",
-		Long:  "Remove a profile configuration and its stored credentials.",
+		Long:  "Remove a profile configuration and its stored credentials, revoking the credential with the server when it can be.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -369,21 +372,35 @@ func newProfileDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			// Remove credentials
-			credKey := "profile:" + name
-			store := app.Auth.GetStore()
-			if err := store.Delete(credKey); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not delete credentials for profile %q: %v\n", name, err)
+			summary := fmt.Sprintf("Deleted profile %q", name)
+			fields := map[string]any{"name": name, "status": "deleted"}
+			// The revocation's egress policy is anchored on the deleted
+			// profile's own saved base URL — the operator's configuration for
+			// that profile — never on the active configuration, whose base URL
+			// may belong to another profile or to a transient override. A
+			// credential minted under an override at login time is not
+			// recorded as such (the store must not choose its own policy), so
+			// that case reaches the summary as a failed revocation, not a
+			// silent success.
+			result, err := app.Auth.LogoutCredential(cmd.Context(), "profile:"+name, app.Config.Profiles[name].BaseURL)
+			switch {
+			case errors.Is(err, auth.ErrNoCredential):
+				// A profile that never logged in has nothing to revoke.
+			case err != nil:
+				// Written straight to the terminal, so the store's error text
+				// (paths, endpoint hosts) is scrubbed here rather than at a sink.
+				fmt.Fprintln(cmd.ErrOrStderr(), richtext.SanitizeSingleLine(fmt.Sprintf("Warning: could not delete credentials for profile %q: %v", name, err)))
+			default:
+				var outcome map[string]any
+				summary, outcome = describeLogout(summary, result)
+				maps.Copy(fields, outcome)
 			}
 
 			if err := unregisterProfile(name); err != nil {
 				return err
 			}
 
-			return app.OK(map[string]any{
-				"name":   name,
-				"status": "deleted",
-			}, output.WithSummary(fmt.Sprintf("Deleted profile %q", name)))
+			return app.OK(fields, output.WithSummary(summary))
 		},
 	}
 }
