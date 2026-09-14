@@ -339,18 +339,14 @@ ARG basecamp subscriptions remove 01 [person_ids]
 ARG basecamp subscriptions show 00 <id|url>
 ARG basecamp subscriptions subscribe 00 <id|url>
 ARG basecamp subscriptions unsubscribe 00 <id|url>
+ARG basecamp templates card-tables archive 00 <template_id>
 ARG basecamp templates card-tables copy 00 <template_id>
 ARG basecamp templates card-tables copy-status 00 <duplication_id>
 ARG basecamp templates card-tables create 00 <name>
 ARG basecamp templates card-tables duplicate 00 <template_id>
 ARG basecamp templates card-tables duplication 00 <duplication_id>
-ARG basecamp templates construct 00 <template_id>
-ARG basecamp templates construction 00 <template_id>
-ARG basecamp templates construction 01 <construction_id>
-ARG basecamp templates copy 00 <template_id>
-ARG basecamp templates copy-status 00 <copy_id>
-ARG basecamp templates create 00 <name>
-ARG basecamp templates delete 00 <id>
+ARG basecamp templates card-tables restore 00 <template_id>
+ARG basecamp templates card-tables trash 00 <template_id>
 ARG basecamp templates projects construct 00 <template_id>
 ARG basecamp templates projects construction 00 <template_id>
 ARG basecamp templates projects construction 01 <construction_id>
@@ -358,13 +354,14 @@ ARG basecamp templates projects create 00 <name>
 ARG basecamp templates projects delete 00 <id>
 ARG basecamp templates projects show 00 <id>
 ARG basecamp templates projects update 00 <id>
-ARG basecamp templates show 00 <id>
+ARG basecamp templates todolists archive 00 <template_id>
 ARG basecamp templates todolists copy 00 <template_id>
 ARG basecamp templates todolists copy-status 00 <duplication_id>
 ARG basecamp templates todolists create 00 <name>
 ARG basecamp templates todolists duplicate 00 <template_id>
 ARG basecamp templates todolists duplication 00 <duplication_id>
-ARG basecamp templates update 00 <id>
+ARG basecamp templates todolists restore 00 <template_id>
+ARG basecamp templates todolists trash 00 <template_id>
 ARG basecamp timeline 00 [me]
 ARG basecamp timesheet item 00 <id>
 ARG basecamp timesheet recording 00 <id>
@@ -1033,20 +1030,15 @@ CMD basecamp subscriptions subscribe
 CMD basecamp subscriptions unsubscribe
 CMD basecamp templates
 CMD basecamp templates card-tables
+CMD basecamp templates card-tables archive
 CMD basecamp templates card-tables copy
 CMD basecamp templates card-tables copy-status
 CMD basecamp templates card-tables create
 CMD basecamp templates card-tables duplicate
 CMD basecamp templates card-tables duplication
 CMD basecamp templates card-tables list
-CMD basecamp templates construct
-CMD basecamp templates construction
-CMD basecamp templates copy
-CMD basecamp templates copy-status
-CMD basecamp templates create
-CMD basecamp templates delete
-CMD basecamp templates library
-CMD basecamp templates list
+CMD basecamp templates card-tables restore
+CMD basecamp templates card-tables trash
 CMD basecamp templates projects
 CMD basecamp templates projects construct
 CMD basecamp templates projects construction
@@ -1055,15 +1047,16 @@ CMD basecamp templates projects delete
 CMD basecamp templates projects list
 CMD basecamp templates projects show
 CMD basecamp templates projects update
-CMD basecamp templates show
 CMD basecamp templates todolists
+CMD basecamp templates todolists archive
 CMD basecamp templates todolists copy
 CMD basecamp templates todolists copy-status
 CMD basecamp templates todolists create
 CMD basecamp templates todolists duplicate
 CMD basecamp templates todolists duplication
 CMD basecamp templates todolists list
-CMD basecamp templates update
+CMD basecamp templates todolists restore
+CMD basecamp templates todolists trash
 CMD basecamp timeline
 CMD basecamp timesheet
 CMD basecamp timesheet item
@@ -13610,6 +13603,27 @@ FLAG basecamp templates card-tables --stats type=bool
 FLAG basecamp templates card-tables --styled type=bool
 FLAG basecamp templates card-tables --todolist type=string
 FLAG basecamp templates card-tables --verbose type=count
+FLAG basecamp templates card-tables archive --account type=string
+FLAG basecamp templates card-tables archive --agent type=bool
+FLAG basecamp templates card-tables archive --cache-dir type=string
+FLAG basecamp templates card-tables archive --count type=bool
+FLAG basecamp templates card-tables archive --help type=bool
+FLAG basecamp templates card-tables archive --hints type=bool
+FLAG basecamp templates card-tables archive --ids-only type=bool
+FLAG basecamp templates card-tables archive --in type=string
+FLAG basecamp templates card-tables archive --jq type=string
+FLAG basecamp templates card-tables archive --json type=bool
+FLAG basecamp templates card-tables archive --markdown type=bool
+FLAG basecamp templates card-tables archive --md type=bool
+FLAG basecamp templates card-tables archive --no-hints type=bool
+FLAG basecamp templates card-tables archive --no-stats type=bool
+FLAG basecamp templates card-tables archive --profile type=string
+FLAG basecamp templates card-tables archive --project type=string
+FLAG basecamp templates card-tables archive --quiet type=bool
+FLAG basecamp templates card-tables archive --stats type=bool
+FLAG basecamp templates card-tables archive --styled type=bool
+FLAG basecamp templates card-tables archive --todolist type=string
+FLAG basecamp templates card-tables archive --verbose type=count
 FLAG basecamp templates card-tables copy --account type=string
 FLAG basecamp templates card-tables copy --agent type=bool
 FLAG basecamp templates card-tables copy --cache-dir type=string
@@ -13739,184 +13753,48 @@ FLAG basecamp templates card-tables list --stats type=bool
 FLAG basecamp templates card-tables list --styled type=bool
 FLAG basecamp templates card-tables list --todolist type=string
 FLAG basecamp templates card-tables list --verbose type=count
-FLAG basecamp templates construct --account type=string
-FLAG basecamp templates construct --agent type=bool
-FLAG basecamp templates construct --cache-dir type=string
-FLAG basecamp templates construct --count type=bool
-FLAG basecamp templates construct --desc type=string
-FLAG basecamp templates construct --description type=string
-FLAG basecamp templates construct --help type=bool
-FLAG basecamp templates construct --hints type=bool
-FLAG basecamp templates construct --ids-only type=bool
-FLAG basecamp templates construct --in type=string
-FLAG basecamp templates construct --jq type=string
-FLAG basecamp templates construct --json type=bool
-FLAG basecamp templates construct --markdown type=bool
-FLAG basecamp templates construct --md type=bool
-FLAG basecamp templates construct --name type=string
-FLAG basecamp templates construct --no-hints type=bool
-FLAG basecamp templates construct --no-stats type=bool
-FLAG basecamp templates construct --profile type=string
-FLAG basecamp templates construct --project type=string
-FLAG basecamp templates construct --quiet type=bool
-FLAG basecamp templates construct --start-date type=string
-FLAG basecamp templates construct --stats type=bool
-FLAG basecamp templates construct --styled type=bool
-FLAG basecamp templates construct --todolist type=string
-FLAG basecamp templates construct --verbose type=count
-FLAG basecamp templates construction --account type=string
-FLAG basecamp templates construction --agent type=bool
-FLAG basecamp templates construction --cache-dir type=string
-FLAG basecamp templates construction --count type=bool
-FLAG basecamp templates construction --help type=bool
-FLAG basecamp templates construction --hints type=bool
-FLAG basecamp templates construction --ids-only type=bool
-FLAG basecamp templates construction --in type=string
-FLAG basecamp templates construction --jq type=string
-FLAG basecamp templates construction --json type=bool
-FLAG basecamp templates construction --markdown type=bool
-FLAG basecamp templates construction --md type=bool
-FLAG basecamp templates construction --no-hints type=bool
-FLAG basecamp templates construction --no-stats type=bool
-FLAG basecamp templates construction --profile type=string
-FLAG basecamp templates construction --project type=string
-FLAG basecamp templates construction --quiet type=bool
-FLAG basecamp templates construction --stats type=bool
-FLAG basecamp templates construction --styled type=bool
-FLAG basecamp templates construction --todolist type=string
-FLAG basecamp templates construction --verbose type=count
-FLAG basecamp templates copy --account type=string
-FLAG basecamp templates copy --agent type=bool
-FLAG basecamp templates copy --cache-dir type=string
-FLAG basecamp templates copy --confirm-adding-people type=bool
-FLAG basecamp templates copy --count type=bool
-FLAG basecamp templates copy --help type=bool
-FLAG basecamp templates copy --hints type=bool
-FLAG basecamp templates copy --ids-only type=bool
-FLAG basecamp templates copy --in type=string
-FLAG basecamp templates copy --jq type=string
-FLAG basecamp templates copy --json type=bool
-FLAG basecamp templates copy --markdown type=bool
-FLAG basecamp templates copy --md type=bool
-FLAG basecamp templates copy --no-hints type=bool
-FLAG basecamp templates copy --no-stats type=bool
-FLAG basecamp templates copy --profile type=string
-FLAG basecamp templates copy --project type=string
-FLAG basecamp templates copy --quiet type=bool
-FLAG basecamp templates copy --stats type=bool
-FLAG basecamp templates copy --styled type=bool
-FLAG basecamp templates copy --todolist type=string
-FLAG basecamp templates copy --todoset type=string
-FLAG basecamp templates copy --verbose type=count
-FLAG basecamp templates copy-status --account type=string
-FLAG basecamp templates copy-status --agent type=bool
-FLAG basecamp templates copy-status --cache-dir type=string
-FLAG basecamp templates copy-status --count type=bool
-FLAG basecamp templates copy-status --help type=bool
-FLAG basecamp templates copy-status --hints type=bool
-FLAG basecamp templates copy-status --ids-only type=bool
-FLAG basecamp templates copy-status --in type=string
-FLAG basecamp templates copy-status --jq type=string
-FLAG basecamp templates copy-status --json type=bool
-FLAG basecamp templates copy-status --markdown type=bool
-FLAG basecamp templates copy-status --md type=bool
-FLAG basecamp templates copy-status --no-hints type=bool
-FLAG basecamp templates copy-status --no-stats type=bool
-FLAG basecamp templates copy-status --profile type=string
-FLAG basecamp templates copy-status --project type=string
-FLAG basecamp templates copy-status --quiet type=bool
-FLAG basecamp templates copy-status --stats type=bool
-FLAG basecamp templates copy-status --styled type=bool
-FLAG basecamp templates copy-status --todolist type=string
-FLAG basecamp templates copy-status --verbose type=count
-FLAG basecamp templates create --account type=string
-FLAG basecamp templates create --agent type=bool
-FLAG basecamp templates create --cache-dir type=string
-FLAG basecamp templates create --count type=bool
-FLAG basecamp templates create --desc type=string
-FLAG basecamp templates create --description type=string
-FLAG basecamp templates create --help type=bool
-FLAG basecamp templates create --hints type=bool
-FLAG basecamp templates create --ids-only type=bool
-FLAG basecamp templates create --in type=string
-FLAG basecamp templates create --jq type=string
-FLAG basecamp templates create --json type=bool
-FLAG basecamp templates create --markdown type=bool
-FLAG basecamp templates create --md type=bool
-FLAG basecamp templates create --name type=string
-FLAG basecamp templates create --no-hints type=bool
-FLAG basecamp templates create --no-stats type=bool
-FLAG basecamp templates create --profile type=string
-FLAG basecamp templates create --project type=string
-FLAG basecamp templates create --quiet type=bool
-FLAG basecamp templates create --stats type=bool
-FLAG basecamp templates create --styled type=bool
-FLAG basecamp templates create --todolist type=string
-FLAG basecamp templates create --verbose type=count
-FLAG basecamp templates delete --account type=string
-FLAG basecamp templates delete --agent type=bool
-FLAG basecamp templates delete --cache-dir type=string
-FLAG basecamp templates delete --count type=bool
-FLAG basecamp templates delete --help type=bool
-FLAG basecamp templates delete --hints type=bool
-FLAG basecamp templates delete --ids-only type=bool
-FLAG basecamp templates delete --in type=string
-FLAG basecamp templates delete --jq type=string
-FLAG basecamp templates delete --json type=bool
-FLAG basecamp templates delete --markdown type=bool
-FLAG basecamp templates delete --md type=bool
-FLAG basecamp templates delete --no-hints type=bool
-FLAG basecamp templates delete --no-stats type=bool
-FLAG basecamp templates delete --profile type=string
-FLAG basecamp templates delete --project type=string
-FLAG basecamp templates delete --quiet type=bool
-FLAG basecamp templates delete --stats type=bool
-FLAG basecamp templates delete --styled type=bool
-FLAG basecamp templates delete --todolist type=string
-FLAG basecamp templates delete --verbose type=count
-FLAG basecamp templates library --account type=string
-FLAG basecamp templates library --agent type=bool
-FLAG basecamp templates library --cache-dir type=string
-FLAG basecamp templates library --count type=bool
-FLAG basecamp templates library --help type=bool
-FLAG basecamp templates library --hints type=bool
-FLAG basecamp templates library --ids-only type=bool
-FLAG basecamp templates library --in type=string
-FLAG basecamp templates library --jq type=string
-FLAG basecamp templates library --json type=bool
-FLAG basecamp templates library --markdown type=bool
-FLAG basecamp templates library --md type=bool
-FLAG basecamp templates library --no-hints type=bool
-FLAG basecamp templates library --no-stats type=bool
-FLAG basecamp templates library --profile type=string
-FLAG basecamp templates library --project type=string
-FLAG basecamp templates library --quiet type=bool
-FLAG basecamp templates library --stats type=bool
-FLAG basecamp templates library --styled type=bool
-FLAG basecamp templates library --todolist type=string
-FLAG basecamp templates library --verbose type=count
-FLAG basecamp templates list --account type=string
-FLAG basecamp templates list --agent type=bool
-FLAG basecamp templates list --cache-dir type=string
-FLAG basecamp templates list --count type=bool
-FLAG basecamp templates list --help type=bool
-FLAG basecamp templates list --hints type=bool
-FLAG basecamp templates list --ids-only type=bool
-FLAG basecamp templates list --in type=string
-FLAG basecamp templates list --jq type=string
-FLAG basecamp templates list --json type=bool
-FLAG basecamp templates list --markdown type=bool
-FLAG basecamp templates list --md type=bool
-FLAG basecamp templates list --no-hints type=bool
-FLAG basecamp templates list --no-stats type=bool
-FLAG basecamp templates list --profile type=string
-FLAG basecamp templates list --project type=string
-FLAG basecamp templates list --quiet type=bool
-FLAG basecamp templates list --stats type=bool
-FLAG basecamp templates list --status type=string
-FLAG basecamp templates list --styled type=bool
-FLAG basecamp templates list --todolist type=string
-FLAG basecamp templates list --verbose type=count
+FLAG basecamp templates card-tables restore --account type=string
+FLAG basecamp templates card-tables restore --agent type=bool
+FLAG basecamp templates card-tables restore --cache-dir type=string
+FLAG basecamp templates card-tables restore --count type=bool
+FLAG basecamp templates card-tables restore --help type=bool
+FLAG basecamp templates card-tables restore --hints type=bool
+FLAG basecamp templates card-tables restore --ids-only type=bool
+FLAG basecamp templates card-tables restore --in type=string
+FLAG basecamp templates card-tables restore --jq type=string
+FLAG basecamp templates card-tables restore --json type=bool
+FLAG basecamp templates card-tables restore --markdown type=bool
+FLAG basecamp templates card-tables restore --md type=bool
+FLAG basecamp templates card-tables restore --no-hints type=bool
+FLAG basecamp templates card-tables restore --no-stats type=bool
+FLAG basecamp templates card-tables restore --profile type=string
+FLAG basecamp templates card-tables restore --project type=string
+FLAG basecamp templates card-tables restore --quiet type=bool
+FLAG basecamp templates card-tables restore --stats type=bool
+FLAG basecamp templates card-tables restore --styled type=bool
+FLAG basecamp templates card-tables restore --todolist type=string
+FLAG basecamp templates card-tables restore --verbose type=count
+FLAG basecamp templates card-tables trash --account type=string
+FLAG basecamp templates card-tables trash --agent type=bool
+FLAG basecamp templates card-tables trash --cache-dir type=string
+FLAG basecamp templates card-tables trash --count type=bool
+FLAG basecamp templates card-tables trash --help type=bool
+FLAG basecamp templates card-tables trash --hints type=bool
+FLAG basecamp templates card-tables trash --ids-only type=bool
+FLAG basecamp templates card-tables trash --in type=string
+FLAG basecamp templates card-tables trash --jq type=string
+FLAG basecamp templates card-tables trash --json type=bool
+FLAG basecamp templates card-tables trash --markdown type=bool
+FLAG basecamp templates card-tables trash --md type=bool
+FLAG basecamp templates card-tables trash --no-hints type=bool
+FLAG basecamp templates card-tables trash --no-stats type=bool
+FLAG basecamp templates card-tables trash --profile type=string
+FLAG basecamp templates card-tables trash --project type=string
+FLAG basecamp templates card-tables trash --quiet type=bool
+FLAG basecamp templates card-tables trash --stats type=bool
+FLAG basecamp templates card-tables trash --styled type=bool
+FLAG basecamp templates card-tables trash --todolist type=string
+FLAG basecamp templates card-tables trash --verbose type=count
 FLAG basecamp templates projects --account type=string
 FLAG basecamp templates projects --agent type=bool
 FLAG basecamp templates projects --cache-dir type=string
@@ -14096,27 +13974,6 @@ FLAG basecamp templates projects update --stats type=bool
 FLAG basecamp templates projects update --styled type=bool
 FLAG basecamp templates projects update --todolist type=string
 FLAG basecamp templates projects update --verbose type=count
-FLAG basecamp templates show --account type=string
-FLAG basecamp templates show --agent type=bool
-FLAG basecamp templates show --cache-dir type=string
-FLAG basecamp templates show --count type=bool
-FLAG basecamp templates show --help type=bool
-FLAG basecamp templates show --hints type=bool
-FLAG basecamp templates show --ids-only type=bool
-FLAG basecamp templates show --in type=string
-FLAG basecamp templates show --jq type=string
-FLAG basecamp templates show --json type=bool
-FLAG basecamp templates show --markdown type=bool
-FLAG basecamp templates show --md type=bool
-FLAG basecamp templates show --no-hints type=bool
-FLAG basecamp templates show --no-stats type=bool
-FLAG basecamp templates show --profile type=string
-FLAG basecamp templates show --project type=string
-FLAG basecamp templates show --quiet type=bool
-FLAG basecamp templates show --stats type=bool
-FLAG basecamp templates show --styled type=bool
-FLAG basecamp templates show --todolist type=string
-FLAG basecamp templates show --verbose type=count
 FLAG basecamp templates todolists --account type=string
 FLAG basecamp templates todolists --agent type=bool
 FLAG basecamp templates todolists --cache-dir type=string
@@ -14138,6 +13995,27 @@ FLAG basecamp templates todolists --stats type=bool
 FLAG basecamp templates todolists --styled type=bool
 FLAG basecamp templates todolists --todolist type=string
 FLAG basecamp templates todolists --verbose type=count
+FLAG basecamp templates todolists archive --account type=string
+FLAG basecamp templates todolists archive --agent type=bool
+FLAG basecamp templates todolists archive --cache-dir type=string
+FLAG basecamp templates todolists archive --count type=bool
+FLAG basecamp templates todolists archive --help type=bool
+FLAG basecamp templates todolists archive --hints type=bool
+FLAG basecamp templates todolists archive --ids-only type=bool
+FLAG basecamp templates todolists archive --in type=string
+FLAG basecamp templates todolists archive --jq type=string
+FLAG basecamp templates todolists archive --json type=bool
+FLAG basecamp templates todolists archive --markdown type=bool
+FLAG basecamp templates todolists archive --md type=bool
+FLAG basecamp templates todolists archive --no-hints type=bool
+FLAG basecamp templates todolists archive --no-stats type=bool
+FLAG basecamp templates todolists archive --profile type=string
+FLAG basecamp templates todolists archive --project type=string
+FLAG basecamp templates todolists archive --quiet type=bool
+FLAG basecamp templates todolists archive --stats type=bool
+FLAG basecamp templates todolists archive --styled type=bool
+FLAG basecamp templates todolists archive --todolist type=string
+FLAG basecamp templates todolists archive --verbose type=count
 FLAG basecamp templates todolists copy --account type=string
 FLAG basecamp templates todolists copy --agent type=bool
 FLAG basecamp templates todolists copy --cache-dir type=string
@@ -14271,30 +14149,48 @@ FLAG basecamp templates todolists list --stats type=bool
 FLAG basecamp templates todolists list --styled type=bool
 FLAG basecamp templates todolists list --todolist type=string
 FLAG basecamp templates todolists list --verbose type=count
-FLAG basecamp templates update --account type=string
-FLAG basecamp templates update --agent type=bool
-FLAG basecamp templates update --cache-dir type=string
-FLAG basecamp templates update --count type=bool
-FLAG basecamp templates update --desc type=string
-FLAG basecamp templates update --description type=string
-FLAG basecamp templates update --help type=bool
-FLAG basecamp templates update --hints type=bool
-FLAG basecamp templates update --ids-only type=bool
-FLAG basecamp templates update --in type=string
-FLAG basecamp templates update --jq type=string
-FLAG basecamp templates update --json type=bool
-FLAG basecamp templates update --markdown type=bool
-FLAG basecamp templates update --md type=bool
-FLAG basecamp templates update --name type=string
-FLAG basecamp templates update --no-hints type=bool
-FLAG basecamp templates update --no-stats type=bool
-FLAG basecamp templates update --profile type=string
-FLAG basecamp templates update --project type=string
-FLAG basecamp templates update --quiet type=bool
-FLAG basecamp templates update --stats type=bool
-FLAG basecamp templates update --styled type=bool
-FLAG basecamp templates update --todolist type=string
-FLAG basecamp templates update --verbose type=count
+FLAG basecamp templates todolists restore --account type=string
+FLAG basecamp templates todolists restore --agent type=bool
+FLAG basecamp templates todolists restore --cache-dir type=string
+FLAG basecamp templates todolists restore --count type=bool
+FLAG basecamp templates todolists restore --help type=bool
+FLAG basecamp templates todolists restore --hints type=bool
+FLAG basecamp templates todolists restore --ids-only type=bool
+FLAG basecamp templates todolists restore --in type=string
+FLAG basecamp templates todolists restore --jq type=string
+FLAG basecamp templates todolists restore --json type=bool
+FLAG basecamp templates todolists restore --markdown type=bool
+FLAG basecamp templates todolists restore --md type=bool
+FLAG basecamp templates todolists restore --no-hints type=bool
+FLAG basecamp templates todolists restore --no-stats type=bool
+FLAG basecamp templates todolists restore --profile type=string
+FLAG basecamp templates todolists restore --project type=string
+FLAG basecamp templates todolists restore --quiet type=bool
+FLAG basecamp templates todolists restore --stats type=bool
+FLAG basecamp templates todolists restore --styled type=bool
+FLAG basecamp templates todolists restore --todolist type=string
+FLAG basecamp templates todolists restore --verbose type=count
+FLAG basecamp templates todolists trash --account type=string
+FLAG basecamp templates todolists trash --agent type=bool
+FLAG basecamp templates todolists trash --cache-dir type=string
+FLAG basecamp templates todolists trash --count type=bool
+FLAG basecamp templates todolists trash --help type=bool
+FLAG basecamp templates todolists trash --hints type=bool
+FLAG basecamp templates todolists trash --ids-only type=bool
+FLAG basecamp templates todolists trash --in type=string
+FLAG basecamp templates todolists trash --jq type=string
+FLAG basecamp templates todolists trash --json type=bool
+FLAG basecamp templates todolists trash --markdown type=bool
+FLAG basecamp templates todolists trash --md type=bool
+FLAG basecamp templates todolists trash --no-hints type=bool
+FLAG basecamp templates todolists trash --no-stats type=bool
+FLAG basecamp templates todolists trash --profile type=string
+FLAG basecamp templates todolists trash --project type=string
+FLAG basecamp templates todolists trash --quiet type=bool
+FLAG basecamp templates todolists trash --stats type=bool
+FLAG basecamp templates todolists trash --styled type=bool
+FLAG basecamp templates todolists trash --todolist type=string
+FLAG basecamp templates todolists trash --verbose type=count
 FLAG basecamp timeline --account type=string
 FLAG basecamp timeline --agent type=bool
 FLAG basecamp timeline --all type=bool
@@ -19414,20 +19310,15 @@ SUB basecamp subscriptions subscribe
 SUB basecamp subscriptions unsubscribe
 SUB basecamp templates
 SUB basecamp templates card-tables
+SUB basecamp templates card-tables archive
 SUB basecamp templates card-tables copy
 SUB basecamp templates card-tables copy-status
 SUB basecamp templates card-tables create
 SUB basecamp templates card-tables duplicate
 SUB basecamp templates card-tables duplication
 SUB basecamp templates card-tables list
-SUB basecamp templates construct
-SUB basecamp templates construction
-SUB basecamp templates copy
-SUB basecamp templates copy-status
-SUB basecamp templates create
-SUB basecamp templates delete
-SUB basecamp templates library
-SUB basecamp templates list
+SUB basecamp templates card-tables restore
+SUB basecamp templates card-tables trash
 SUB basecamp templates projects
 SUB basecamp templates projects construct
 SUB basecamp templates projects construction
@@ -19436,15 +19327,16 @@ SUB basecamp templates projects delete
 SUB basecamp templates projects list
 SUB basecamp templates projects show
 SUB basecamp templates projects update
-SUB basecamp templates show
 SUB basecamp templates todolists
+SUB basecamp templates todolists archive
 SUB basecamp templates todolists copy
 SUB basecamp templates todolists copy-status
 SUB basecamp templates todolists create
 SUB basecamp templates todolists duplicate
 SUB basecamp templates todolists duplication
 SUB basecamp templates todolists list
-SUB basecamp templates update
+SUB basecamp templates todolists restore
+SUB basecamp templates todolists trash
 SUB basecamp timeline
 SUB basecamp timesheet
 SUB basecamp timesheet item

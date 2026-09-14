@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -27,8 +28,8 @@ func NewTemplatesCmd() *cobra.Command {
   todolists   To-do list templates: duplicate a reusable list into a project.
   card-tables Card table templates: duplicate a reusable board into a project.
 
-The pre-grouping spellings (templates list, templates library, templates copy,
-and the rest) still work and resolve to the same commands.`,
+Every verb lives under the kind it acts on: templates projects delete, not
+templates delete.`,
 		Annotations: map[string]string{"agent_notes": "Project construction and to-do list or card table template duplication are asynchronous. Poll templates projects construction or templates <kind> duplication until status=completed. construct --start-date anchors the template's relative dates to the Sunday of that week; without it they anchor to the week of construction. Duplicating grants referenced people project access only with --confirm-adding-people."},
 	}
 
@@ -37,7 +38,6 @@ and the rest) still work and resolve to the same commands.`,
 		newTemplatesTodolistsCmd(),
 		newTemplatesCardTablesCmd(),
 	)
-	cmd.AddCommand(templatesBackCompatCmds()...)
 
 	return cmd
 }
@@ -78,32 +78,14 @@ existing project's To-dos tool.`,
 	}
 
 	cmd.AddCommand(
-		newTemplatesLibraryListCmd("list"),
+		newTemplatesLibraryListCmd(),
 		newTemplatesTodolistsCreateCmd(),
 		newTemplatesDuplicateCmd(kind, "duplicate <template_id>", "copy"),
 		newTemplatesDuplicationCmd(kind, "duplication <duplication_id>", "copy-status"),
 	)
+	cmd.AddCommand(newTemplatesLibraryStatusCmds("todolists", "to-do list")...)
 
 	return cmd
-}
-
-func templatesBackCompatCmds() []*cobra.Command {
-	kind := todolistTemplateKind()
-
-	// Registered a second time rather than aliased: cobra aliases rename a
-	// command where it sits, and these moved a level down the tree.
-	return []*cobra.Command{
-		newTemplatesListCmd(),
-		newTemplatesShowCmd(),
-		newTemplatesCreateCmd(),
-		newTemplatesUpdateCmd(),
-		newTemplatesDeleteCmd(),
-		newTemplatesConstructCmd(),
-		newTemplatesConstructionCmd(),
-		newTemplatesLibraryListCmd("library"),
-		newTemplatesDuplicateCmd(kind, "copy <template_id>"),
-		newTemplatesDuplicationCmd(kind, "copy-status <copy_id>"),
-	}
 }
 
 func newTemplatesCardTablesCmd() *cobra.Command {
@@ -124,6 +106,7 @@ adds it to an existing project.`,
 		newTemplatesDuplicateCmd(kind, "duplicate <template_id>", "copy"),
 		newTemplatesDuplicationCmd(kind, "duplication <duplication_id>", "copy-status"),
 	)
+	cmd.AddCommand(newTemplatesLibraryStatusCmds("card-tables", "card table")...)
 
 	return cmd
 }
@@ -459,9 +442,9 @@ func runTemplatesList(cmd *cobra.Command, status string) error {
 	)
 }
 
-func newTemplatesLibraryListCmd(use string) *cobra.Command {
+func newTemplatesLibraryListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   use,
+		Use:   "list",
 		Short: "List to-do list templates",
 		Long:  "List the account's active to-do list templates.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -502,6 +485,107 @@ func newTemplatesLibraryListCmd(use string) *cobra.Command {
 				),
 			)
 		},
+	}
+}
+
+// templateStatusChange is one of the three status changes a library template
+// can undergo, bundled so the run helper needs no dispatch of its own.
+type templateStatusChange struct {
+	state string // status the template ends up in
+	past  string // summary verb
+	apply func(*basecamp.RecordingsService, context.Context, int64) error
+}
+
+func newTemplatesLibraryStatusCmds(group, noun string) []*cobra.Command {
+	archive := templateStatusChange{state: "archived", past: "Archived", apply: (*basecamp.RecordingsService).Archive}
+	trash := templateStatusChange{state: "trashed", past: "Trashed", apply: (*basecamp.RecordingsService).Trash}
+	restore := templateStatusChange{state: "active", past: "Restored", apply: (*basecamp.RecordingsService).Unarchive}
+
+	return []*cobra.Command{
+		{
+			Use:   "archive <template_id>",
+			Short: fmt.Sprintf("Archive a %s template", noun),
+			Long: fmt.Sprintf(`Archive a %s template, taking it out of the library.
+
+Archiving keeps the template around: restore it later with
+basecamp templates %s restore <template_id>.`, noun, group),
+			Args: cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runTemplatesLibraryStatus(cmd, group, noun, args[0], archive)
+			},
+		},
+		{
+			Use:   "trash <template_id>",
+			Short: fmt.Sprintf("Move a %s template to the trash", noun),
+			Long: fmt.Sprintf(`Move a %s template to the trash, taking it out of the library.
+
+Restore it with basecamp templates %s restore <template_id> while it is
+still in the trash.`, noun, group),
+			Args: cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runTemplatesLibraryStatus(cmd, group, noun, args[0], trash)
+			},
+		},
+		{
+			Use:   "restore <template_id>",
+			Short: fmt.Sprintf("Restore a %s template", noun),
+			Long:  fmt.Sprintf("Return an archived or trashed %s template to the library.", noun),
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runTemplatesLibraryStatus(cmd, group, noun, args[0], restore)
+			},
+		},
+	}
+}
+
+func runTemplatesLibraryStatus(cmd *cobra.Command, group, noun, templateIDArg string, change templateStatusChange) error {
+	app := appctx.FromContext(cmd.Context())
+	persistentAccount := hasPersistentAccount(app.Config)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+	contextArgs := templateCommandContextArgs(
+		app.Config.ActiveProfile,
+		persistentAccount,
+		app.Config.AccountID,
+	)
+
+	templateID, err := strconv.ParseInt(templateIDArg, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid template ID")
+	}
+
+	// A library template is a recording, so its status changes go through the
+	// recordings endpoint; the project-template routes 404 for one.
+	if err := change.apply(app.Account().Recordings(), cmd.Context(), templateID); err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(map[string]any{"id": templateID, "status": change.state},
+		output.WithSummary(fmt.Sprintf("%s %s template #%d", change.past, noun, templateID)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "list",
+				Cmd:         fmt.Sprintf("basecamp templates %s list%s", group, contextArgs),
+				Description: fmt.Sprintf("List %s templates", noun),
+			},
+			templateStatusFollowUp(group, templateID, contextArgs, change),
+		),
+	)
+}
+
+func templateStatusFollowUp(group string, templateID int64, contextArgs string, change templateStatusChange) output.Breadcrumb {
+	if change.state == "active" {
+		return output.Breadcrumb{
+			Action:      "duplicate",
+			Cmd:         fmt.Sprintf("basecamp templates %s duplicate %d --in <project>%s", group, templateID, contextArgs),
+			Description: "Duplicate the template into a project",
+		}
+	}
+	return output.Breadcrumb{
+		Action:      "restore",
+		Cmd:         fmt.Sprintf("basecamp templates %s restore %d%s", group, templateID, contextArgs),
+		Description: "Put the template back in the library",
 	}
 }
 

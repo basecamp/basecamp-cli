@@ -40,6 +40,15 @@ the canonical `<group> <action>` form (`cards create`, `todos create`,
 `todos complete`, etc.). Introducing a new top-level verb that shadows an
 existing group noun is not allowed.
 
+Where a group is split by the kind of thing it holds, every verb lives under the
+kind it acts on. `templates` has `projects`, `todolists`, and `card-tables`; the
+flat pre-grouping spellings (`templates list`, `templates show`, `templates
+create`, `templates update`, `templates delete`, `templates construct`,
+`templates construction`, `templates library`, `templates copy`,
+`templates copy-status`) have been removed. Use `templates projects delete`,
+never `templates delete` — a flat verb cannot say which kind it acts on, and the
+three kinds hit different endpoints.
+
 Shortcut commands without a sibling plural group — `search`, `url`,
 `recordings`, `timesheet`, `assignments`, `notifications`, `setup`, `completion`
 — may have both `RunE` and subcommands. `scripts/check-bare-groups.sh` enforces

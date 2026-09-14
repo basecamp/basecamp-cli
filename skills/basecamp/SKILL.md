@@ -987,12 +987,23 @@ basecamp templates todolists list --json          # List active to-do list templ
 basecamp templates todolists create "List Name"   # Create empty to-do list template
 basecamp templates todolists duplicate <template_id> --in <project>  # Duplicate into To-dos (async)
 basecamp templates todolists duplication <id>     # Check duplication status
+basecamp templates todolists archive <template_id>  # Take out of the library, keep it
+basecamp templates todolists trash <template_id>    # Move to the trash
+basecamp templates todolists restore <template_id>  # Put it back in the library
 
 basecamp templates card-tables list --json        # List active card table templates
 basecamp templates card-tables create "Board Name"  # Create empty card table template
 basecamp templates card-tables duplicate <template_id> --in <project>  # Duplicate into project (async)
 basecamp templates card-tables duplication <id>   # Check duplication status
+basecamp templates card-tables archive <template_id>
+basecamp templates card-tables trash <template_id>
+basecamp templates card-tables restore <template_id>
 ```
+
+`archive`, `trash`, and `restore` are the library kinds' equivalent of
+`templates projects delete`, which serves project templates only and 404s for a
+to-do list or card table template. `list` shows active templates, so note the ID
+before archiving or trashing one.
 
 Save existing work into the library from the source group, mirroring the
 product, where "Save as a template..." is an action on the item itself:
@@ -1017,12 +1028,13 @@ has more than one; `card-tables duplicate` has no container flag because a
 project has exactly one dock. To-do list
 templates land in the project's To-dos tool, which `--todoset` can pin.
 
-**Older spellings still work.** The flat commands that shipped before the grouping
+**Every verb lives under its kind.** The flat pre-grouping spellings
 (`templates list`, `templates show`, `templates create`, `templates update`,
 `templates delete`, `templates construct`, `templates construction`,
-`templates library`, `templates copy`, `templates copy-status`) remain as aliases.
-`copy` and `copy-status` also work inside `templates todolists`. Prefer the grouped,
-canonical spellings above when writing new commands.
+`templates library`, `templates copy`, `templates copy-status`) have been
+removed — use `templates projects delete`, not `templates delete`. `copy` and
+`copy-status` still work inside `templates todolists` and
+`templates card-tables` as aliases of `duplicate` and `duplication`.
 
 **Asynchronous results:** `construct` returns a construction ID; poll `construction`
 until `status="completed"` to get the project. A template's dates are relative to its

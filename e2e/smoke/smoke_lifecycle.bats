@@ -93,34 +93,6 @@ load smoke_helper
 
 # --- Account-wide / dangerous mutations ---
 
-@test "templates construct is out of scope" {
-  mark_out_of_scope "Creates project from template — account-wide mutation"
-}
-
-@test "templates construction is out of scope" {
-  mark_out_of_scope "Depends on templates construct (OOS)"
-}
-
-@test "templates copy is out of scope" {
-  mark_out_of_scope "Copies a to-do list into a project and may grant project access"
-}
-
-@test "templates copy-status is out of scope" {
-  mark_out_of_scope "Depends on templates copy (OOS)"
-}
-
-@test "templates create is out of scope" {
-  mark_out_of_scope "Account-wide template mutation"
-}
-
-@test "templates update is out of scope" {
-  mark_out_of_scope "Account-wide template mutation"
-}
-
-@test "templates delete is out of scope" {
-  mark_out_of_scope "Account-wide template mutation"
-}
-
 @test "templates projects construct is out of scope" {
   mark_out_of_scope "Creates project from template — account-wide mutation"
 }
@@ -157,6 +129,18 @@ load smoke_helper
   mark_out_of_scope "Alias of templates todolists duplication (OOS)"
 }
 
+@test "templates todolists archive is out of scope" {
+  mark_out_of_scope "Takes a template out of the account library"
+}
+
+@test "templates todolists trash is out of scope" {
+  mark_out_of_scope "Takes a template out of the account library"
+}
+
+@test "templates todolists restore is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
+}
+
 @test "templates card-tables create is out of scope" {
   mark_out_of_scope "Account-wide template mutation"
 }
@@ -175,6 +159,18 @@ load smoke_helper
 
 @test "templates card-tables copy-status is out of scope" {
   mark_out_of_scope "Alias of templates card-tables duplication (OOS)"
+}
+
+@test "templates card-tables archive is out of scope" {
+  mark_out_of_scope "Takes a template out of the account library"
+}
+
+@test "templates card-tables trash is out of scope" {
+  mark_out_of_scope "Takes a template out of the account library"
+}
+
+@test "templates card-tables restore is out of scope" {
+  mark_out_of_scope "Account-wide template mutation"
 }
 
 @test "templates todolists create is out of scope" {

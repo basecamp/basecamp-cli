@@ -15,14 +15,14 @@ setup_file() {
   assert_json_not_null '.data[0].id'
 }
 
-@test "templates list returns templates" {
-  run_smoke basecamp templates list --json
+@test "templates projects list returns templates" {
+  run_smoke basecamp templates projects list --json
   assert_success
   assert_json_value '.ok' 'true'
 }
 
-@test "templates library returns to-do list templates" {
-  run_smoke basecamp templates library --json
+@test "templates todolists list returns to-do list templates" {
+  run_smoke basecamp templates todolists list --json
   [[ "$status" -ne 0 ]] && mark_unverifiable "Template library not available in this account"
   assert_success
   assert_json_value '.ok' 'true'
@@ -48,14 +48,14 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
-@test "templates show returns template detail" {
+@test "templates projects show returns template detail" {
   local out
-  out=$(basecamp templates list --json 2>/dev/null) || mark_unverifiable "Cannot list templates"
+  out=$(basecamp templates projects list --json 2>/dev/null) || mark_unverifiable "Cannot list templates"
   local tmpl_id
   tmpl_id=$(echo "$out" | jq -r '.data[0].id // empty')
   [[ -n "$tmpl_id" ]] || mark_unverifiable "No templates found"
 
-  run_smoke basecamp templates show "$tmpl_id" --json
+  run_smoke basecamp templates projects show "$tmpl_id" --json
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
