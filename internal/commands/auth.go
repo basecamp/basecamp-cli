@@ -189,13 +189,19 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	// refresh the token endpoint turned down — is reported as that, not as
 	// the server's answer. The request's own token lookup then finds it
 	// stored.
-	if _, err := app.Auth.AccessToken(ctx); err != nil {
+	token, err := app.Auth.AccessToken(ctx)
+	if err != nil {
 		if e := output.AsError(err); e.Code == output.CodeAuth {
 			return &checkVerdict{valid: false, reason: e.Message, remedy: remedyFor(app, err)}, nil
 		}
 		return nil, err
 	}
-	_, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	// The request sends exactly the token just produced. The SDK's own
+	// lookup would produce it again, and a token crossing the refresh-window
+	// boundary between the two could fail there, locally, and be reported
+	// as the server's refusal.
+	client := app.SDKClientFor(&basecamp.StaticTokenProvider{Token: token})
+	_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
 	switch {
 	case err == nil:
 		return &checkVerdict{valid: true, sent: true}, nil
