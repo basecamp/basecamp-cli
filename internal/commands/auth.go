@@ -158,6 +158,20 @@ type checkVerdict struct {
 	// with, or a refresh the token endpoint refused), reason says why.
 	sent   bool
 	reason string
+	// remedy is what the refusal itself said to do about it, when that is
+	// something other than logging in.
+	remedy string
+}
+
+// remedyFor is the refusal's own remedy when it names one beyond the default
+// login — a client environment to fix — and the active profile's login
+// otherwise, which is what every refusal about the credential itself comes
+// down to.
+func remedyFor(app *appctx.App, refusal error) string {
+	if e := output.AsError(refusal); e.Hint != "" && e.Hint != output.DefaultAuthHint {
+		return e.Hint
+	}
+	return app.Auth.LoginHint()
 }
 
 // checkWithServer makes the one authenticated request --check promises. An
@@ -177,7 +191,7 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	// stored.
 	if _, err := app.Auth.AccessToken(ctx); err != nil {
 		if e := output.AsError(err); e.Code == output.CodeAuth {
-			return &checkVerdict{valid: false, reason: e.Message}, nil
+			return &checkVerdict{valid: false, reason: e.Message, remedy: remedyFor(app, err)}, nil
 		}
 		return nil, err
 	}
@@ -221,9 +235,12 @@ func (s *authStatus) record(app *appctx.App, v *checkVerdict) {
 	} else {
 		s.details = append(s.details, "Token: none could be sent ("+v.reason+")")
 	}
-	if os.Getenv("BASECAMP_TOKEN") != "" {
+	switch {
+	case os.Getenv("BASECAMP_TOKEN") != "":
 		s.hint = envTokenRejectedHint
-	} else {
+	case v.remedy != "":
+		s.hint = v.remedy
+	default:
 		s.hint = app.Auth.LoginHint()
 	}
 }
@@ -379,7 +396,7 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 			report.refreshPromise, report.refreshFailed = expiry, "expired, and the refresh failed"
 		case expiresIn >= 0:
 			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
-			report.hint = app.Auth.LoginHint()
+			report.hint = remedyFor(app, refusal)
 		default:
 			expiry = "expired"
 			report.hint = app.Auth.LoginHint()

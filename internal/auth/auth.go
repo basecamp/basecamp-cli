@@ -1257,6 +1257,11 @@ func launchpadClientCredentials(log func(string)) (*ClientCredentials, error) {
 	}, nil
 }
 
+// ClientEnvHint is the remedy for a half-set BASECAMP_OAUTH_CLIENT_ID and
+// BASECAMP_OAUTH_CLIENT_SECRET pair. Logging in reads the same pair and
+// fails the same way, so the login is no remedy; the environment is.
+const ClientEnvHint = "Set both BASECAMP_OAUTH_CLIENT_ID and BASECAMP_OAUTH_CLIENT_SECRET, or unset both to use the built-in client"
+
 // resolveClientCredentials reads OAuth client credentials from environment
 // variables BASECAMP_OAUTH_CLIENT_ID and BASECAMP_OAUTH_CLIENT_SECRET.
 // Both must be set together. Returns nil, nil when neither is set.
@@ -1268,14 +1273,22 @@ func resolveClientCredentials(log func(string)) (*ClientCredentials, error) {
 		return nil, nil
 	}
 	if clientID == "" {
-		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_ID is required when BASECAMP_OAUTH_CLIENT_SECRET is set")
+		return nil, errClientEnv("BASECAMP_OAUTH_CLIENT_ID is required when BASECAMP_OAUTH_CLIENT_SECRET is set")
 	}
 	if clientSecret == "" {
-		return nil, output.ErrAuth("BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set")
+		return nil, errClientEnv("BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set")
 	}
 
 	log("Using custom OAuth client credentials from BASECAMP_OAUTH_CLIENT_ID/SECRET")
 	return &ClientCredentials{ClientID: clientID, ClientSecret: clientSecret}, nil
+}
+
+// errClientEnv is an auth_required error whose remedy is the client
+// environment, not a login.
+func errClientEnv(msg string) *output.Error {
+	e := output.ErrAuth(msg)
+	e.Hint = ClientEnvHint
+	return e
 }
 
 // isSecureEndpointURL reports whether u uses a scheme safe for OAuth endpoints

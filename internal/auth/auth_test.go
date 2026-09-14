@@ -575,6 +575,7 @@ func TestResolveClientCredentials(t *testing.T) {
 			if tt.wantErrMsg != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErrMsg)
+				assert.Equal(t, ClientEnvHint, output.AsError(err).Hint, "logging in reads the same pair, so it is no remedy")
 				return
 			}
 			require.NoError(t, err)
@@ -2151,10 +2152,11 @@ func TestRefresh_UnsafeTokenEndpointHintsTheProfile(t *testing.T) {
 	assert.Equal(t, "old-ref", creds.RefreshToken)
 }
 
-// TestRefresh_HalfConfiguredClientHintsTheProfile: a Launchpad refresh
+// TestRefresh_HalfConfiguredClientNamesTheEnvironment: a Launchpad refresh
 // with only one of the OAuth client variables set fails before any request,
-// and that failure also names the profile.
-func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
+// and since the profile's login reads the same pair, the remedy it names is
+// the environment.
+func TestRefresh_HalfConfiguredClientNamesTheEnvironment(t *testing.T) {
 	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "custom-id")
 	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
 	m, _ := profiledRefresh(t, &Credentials{
@@ -2167,7 +2169,7 @@ func TestRefresh_HalfConfiguredClientHintsTheProfile(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_SECRET is required")
-	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.Equal(t, ClientEnvHint, cliErr.Hint)
 }
 
 // TestSetUserIdentity_EmptyValuesAreOmissions: an authorization document

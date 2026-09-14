@@ -581,6 +581,43 @@ func TestAuthStatusCheckRefusedRefreshInsideTheWindowReplacesThePromise(t *testi
 	assert.NotContains(t, joined, "refreshes automatically")
 }
 
+// TestAuthStatusCheckHalfConfiguredClientNamesTheEnvironment: a refresh
+// the check could not make because only one of BASECAMP_OAUTH_CLIENT_ID and
+// BASECAMP_OAUTH_CLIENT_SECRET is set is not cured by logging in, which
+// reads the same pair; the remedy is the environment, and nothing is sent.
+func TestAuthStatusCheckHalfConfiguredClientNamesTheEnvironment(t *testing.T) {
+	srv := startLoginIdentityServer(t, "live-tok")
+	t.Setenv("BASECAMP_LAUNCHPAD_URL", srv.srv.URL)
+	t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "only-the-id")
+	t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "bot"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", &auth.Credentials{
+		AccessToken: "live-tok", RefreshToken: "ref", OAuthType: "launchpad",
+		TokenEndpoint: srv.srv.URL + "/authorization/token", ExpiresAt: time.Now().Add(2 * time.Minute).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["valid"])
+	assert.Equal(t, auth.ClientEnvHint, envelope.Notice)
+	assert.Empty(t, srv.seenPaths(), "the refusal is made before any request")
+
+	report, err := authStatusReport(app)
+	require.NoError(t, err)
+	assert.Equal(t, auth.ClientEnvHint, report.hint, "the offline report gives the same remedy")
+	verdict, err := checkWithServer(context.Background(), app)
+	require.NoError(t, err)
+	report.record(app, verdict)
+	assert.Equal(t, auth.ClientEnvHint, report.hint)
+	assert.Contains(t, strings.Join(report.details, "\n"), "Token: none could be sent (BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set)")
+}
+
 // TestAuthStatusSummaryKeepsTheRawEmail: the envelope stores the summary
 // verbatim and terminal sinks sanitize at render time, so JSON output must
 // carry the stored email as it is; sanitizing only decides whether there
@@ -616,6 +653,7 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 		creds    auth.Credentials
 		clientID string
 		reason   string
+		hint     string
 	}{
 		"without a refresh token": {
 			creds:  auth.Credentials{OAuthType: "bc5", TokenEndpoint: "https://3.basecamp.com/oauth/tokens"},
@@ -637,6 +675,7 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 			creds:    auth.Credentials{OAuthType: "launchpad", RefreshToken: "ref", TokenEndpoint: "https://launchpad.37signals.com/authorization/token"},
 			clientID: "only-the-id",
 			reason:   "BASECAMP_OAUTH_CLIENT_SECRET is required when BASECAMP_OAUTH_CLIENT_ID is set",
+			hint:     auth.ClientEnvHint,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -651,7 +690,11 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 			envelope := runAuthStatus(t, app, buf)
 			assert.Equal(t, false, envelope.Data["refreshable"])
 			assert.Equal(t, true, envelope.Data["expired"])
-			assert.Equal(t, "Run: basecamp auth login", envelope.Notice)
+			hint := tc.hint
+			if hint == "" {
+				hint = "Run: basecamp auth login"
+			}
+			assert.Equal(t, hint, envelope.Notice, "the remedy is the login unless the refusal names a better one")
 
 			report, err := authStatusReport(app)
 			require.NoError(t, err)
