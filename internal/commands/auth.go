@@ -411,10 +411,12 @@ func registerLoginFlowFlags(cmd *cobra.Command, noBrowser, remote, local, device
 // loopback listener, stop polling, discard a grant the server already
 // issued — and say it was canceled. The signal that fired is the context's
 // cause, so the exit status still tells an interrupt from a termination.
-// The stop function must run as soon as Login returns, after loginOutcome
-// has read the context: stopping cancels the context too, and while the
-// handler is registered a signal is swallowed instead of ending whatever
-// the command does next.
+// The handler is released by the first signal, so a second one while the
+// cleanup is still under way ends the process the default way instead of
+// being swallowed. The stop function must run as soon as Login returns,
+// after loginOutcome has read the context: stopping cancels the context
+// too, and while the handler is registered a signal is swallowed instead
+// of ending whatever the command does next.
 func loginContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancelCause(cmd.Context())
 	signals := make(chan os.Signal, 1)
@@ -422,6 +424,7 @@ func loginContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 	go func() {
 		select {
 		case sig := <-signals:
+			signal.Stop(signals)
 			cancel(loginSignalError{sig})
 		case <-ctx.Done():
 		}
