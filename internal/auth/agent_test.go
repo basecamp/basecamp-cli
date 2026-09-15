@@ -799,7 +799,12 @@ func TestOnlyACredentialRefusalAsksForTheSecretAgain(t *testing.T) {
 		"a timeout in front of it": {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
 		"a misconfigured endpoint": {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
 		"a rate limit":             {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
-		"a server fault":           {http.StatusBadGateway, `<html>Bad Gateway</html>`, output.CodeAPI},
+		// The STATUS decides: a server saying invalid_client alongside a
+		// 429 or a 503 is saying two things at once, and the status is the
+		// one that says what to do next.
+		"a rate limit naming the client":   {http.StatusTooManyRequests, `{"error":"invalid_client"}`, output.CodeRateLimit},
+		"a server fault naming the client": {http.StatusServiceUnavailable, `{"error":"invalid_client"}`, output.CodeAPI},
+		"a server fault":                   {http.StatusBadGateway, `<html>Bad Gateway</html>`, output.CodeAPI},
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := startDeviceAS(t)
@@ -818,4 +823,28 @@ func TestOnlyACredentialRefusalAsksForTheSecretAgain(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestARateLimitedMintKeepsItsRetryAfter: a token endpoint that names a
+// credential refusal while rate limiting must not cost the caller the
+// delay it was told to wait.
+func TestARateLimitedMintKeepsItsRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"error":"invalid_client"}`)
+	}))
+	defer srv.Close()
+
+	m := newDeviceTestManager(t, srv.URL)
+	storeAgent(t, m, agentCredential(srv.URL+"/oauth/tokens", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	e := output.AsError(err)
+	assert.Equal(t, output.CodeRateLimit, e.Code)
+	assert.True(t, e.Retryable)
+	assert.Contains(t, e.Hint, "30 seconds")
+	assert.NotContains(t, e.Hint, "--with-client-credentials")
 }

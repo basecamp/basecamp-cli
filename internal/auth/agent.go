@@ -347,18 +347,25 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		detail = "token error: " + code
 	}
 
-	// A refusal OF THE CLIENT is one the server named as such, or a 401 or
-	// 403, which nothing but the credentials produces. Those are what no
-	// retry fixes and a fresh login does, so those get the login as their
-	// remedy.
+	// The STATUS decides first, whatever code the body carries. A 429 is a
+	// rate limit with a Retry-After to honor and a 5xx is the server's own
+	// trouble and retryable, and a body naming invalid_client alongside
+	// either does not make it a verdict on the caller's credentials — it
+	// makes it a server saying two things at once, of which the status is
+	// the one that says what to do next.
+	if resp.StatusCode < 400 || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		return statusFailure("minting an agent token: "+detail, resp)
+	}
+
+	// Among the remaining 4xx, a refusal OF THE CLIENT is one the server
+	// named as such, or a bare 401 or 403, which nothing but the
+	// credentials produces. Those are what no retry fixes and a fresh
+	// login does, so those get the login as their remedy.
 	//
-	// Every other 4xx keeps its own class. A proxy's bare 400, a 408
-	// nobody meant as a verdict, a 404 at a misconfigured endpoint — none
-	// of them say the secret is wrong, and telling an automated caller to
-	// fetch its secret again for one of them is advice that cannot help.
-	// 429 is the clearest case: the client is fine and the caller is
-	// early. statusFailure keeps the status, the retryability and the
-	// Retry-After for all of them.
+	// The rest keep their own class. A proxy's bare 400, a 408 nobody
+	// meant as a verdict, a 404 at a misconfigured endpoint — none of them
+	// say the secret is wrong, and telling an automated caller to fetch
+	// its secret again for one of them is advice that cannot help.
 	if clientRefusalCodes[code] || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID)
 	}
