@@ -661,3 +661,30 @@ func TestCanceledTokenImportStoresNothing(t *testing.T) {
 	_, loadErr := m.store.Load("profile:bot")
 	assert.ErrorIs(t, loadErr, ErrNoCredential)
 }
+
+// TestUnstorableScopeNeverEchoesTheClientSecret: the scope is another
+// field the server controls, on a request that carried the secret. Every
+// server-derived string reaches a person through one renderer so that a
+// new message cannot forget this.
+func TestUnstorableScopeNeverEchoesTheClientSecret(t *testing.T) {
+	for name, scope := range map[string]string{
+		"the secret verbatim":                    "agent-secret",
+		"the secret split by a control sequence": `agent-\u001b[31msecret`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startDeviceAS(t)
+			as.token = func(int) (int, string) {
+				return http.StatusOK, fmt.Sprintf(
+					`{"access_token":"minted","token_type":"bearer","expires_in":3600,"scope":"%s"}`, scope)
+			}
+
+			m := newDeviceTestManager(t, as.srv.URL)
+			storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "agent-secret")
+			assert.Contains(t, err.Error(), "only read or full can be stored")
+		})
+	}
+}

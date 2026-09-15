@@ -272,7 +272,8 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 
 	var token oauth.Token
 	if err := json.Unmarshal(body, &token); err != nil {
-		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf("minting an agent token: parsing the token response: %v", err))
+		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: parsing the token response: "+
+			safeServerText(err.Error(), mint.clientSecret))
 	}
 	if token.AccessToken == "" {
 		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response carries no access_token")
@@ -284,7 +285,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	if token.Scope != "" && token.Scope != scopeRead && token.Scope != scopeFull {
 		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf(
 			"minting an agent token: the server reports scope %q, and only read or full can be stored",
-			richtext.SanitizeSingleLine(token.Scope)))
+			safeServerText(token.Scope, mint.clientSecret)))
 	}
 	if token.RefreshToken != "" {
 		// Not fatal — the token is usable — but worth saying out loud: a
@@ -313,14 +314,7 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// token endpoint that quotes the credential it rejected ("Rejected
 	// client_secret=...") would otherwise put it on a terminal and into an
 	// error envelope. Sanitizing strips control sequences, not secrets.
-	secret := mint.clientSecret
-	safe := func(text string) string {
-		// Redact, sanitize, redact again. Stripping control sequences can
-		// close a gap one held open inside the secret
-		// ("agent-\x1b[31msecret"), which the first pass cannot see and
-		// which would otherwise be reassembled on its way to the terminal.
-		return truncate(redactSecret(richtext.SanitizeSingleLine(redactSecret(text, secret)), secret), maxAgentErrorBytes)
-	}
+	safe := func(text string) string { return safeServerText(text, mint.clientSecret) }
 	detail := fmt.Sprintf("the server answered HTTP %d: %s", resp.StatusCode, safe(string(body)))
 	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
 		detail = "token error: " + safe(errResp.Error)
@@ -392,6 +386,21 @@ func isRedirect(status int) bool {
 		return true
 	}
 	return false
+}
+
+// safeServerText renders server-controlled text for a message a person
+// will read. EVERY such string goes through here — a refusal's excerpt, a
+// scope the CLI cannot store, a parse failure — because the request that
+// produced it carried a client secret and there is no second place to
+// remember that.
+//
+// Redact, sanitize, redact again, bound. The second redaction is not
+// belt-and-braces: stripping a control sequence can close a gap one held
+// open inside the secret ("agent-\x1b[31msecret"), which the first pass
+// cannot see and which would otherwise be reassembled on its way to the
+// terminal.
+func safeServerText(text, secret string) string {
+	return truncate(redactSecret(richtext.SanitizeSingleLine(redactSecret(text, secret)), secret), maxAgentErrorBytes)
 }
 
 // redactSecret removes the client secret this request sent from text the
