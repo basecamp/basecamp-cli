@@ -603,6 +603,14 @@ client credentials are what is kept.
 				return err
 			}
 
+			// --client-id names which agent is being authenticated, so
+			// running an ordinary interactive login with it set would sign
+			// somebody else in and say nothing about the flag it ignored.
+			if clientID != "" && !withClientCredentials {
+				return output.ErrUsageHint("--client-id only applies to an agent login",
+					"Add --with-client-credentials, or drop --client-id.")
+			}
+
 			if withToken {
 				return runLoginWithToken(cmd, app, scope, expect)
 			}

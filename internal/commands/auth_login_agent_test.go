@@ -290,3 +290,17 @@ func TestAuthLoginWithClientCredentialsRefusesAnIdentityExpectation(t *testing.T
 	assert.Contains(t, err.Error(), "not a person")
 	assert.Empty(t, as.calls())
 }
+
+// TestAuthLoginRejectsAClientIDWithoutAnAgentLogin: --client-id names which
+// agent is being authenticated. Ignoring it and running the ordinary
+// interactive login would sign somebody else in and say nothing about it.
+func TestAuthLoginRejectsAClientIDWithoutAnAgentLogin(t *testing.T) {
+	as := startAgentAS(t)
+	app, _ := agentLoginApp(t, as, &config.Config{ActiveProfile: "clawdito"})
+	withAccount(app, "999", "flag")
+
+	_, err := runLogin(t, app, strings.NewReader(""), "--client-id", "agent-client")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--client-id only applies to an agent login")
+	assert.Empty(t, as.calls())
+}

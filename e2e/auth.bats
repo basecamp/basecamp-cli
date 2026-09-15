@@ -137,6 +137,13 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
+@test "basecamp auth login rejects --client-id on its own" {
+  run basecamp auth login --client-id abc </dev/null
+  assert_failure
+  assert_json_value '.error' '--client-id only applies to an agent login'
+  assert_json_value '.code' 'usage'
+}
+
 @test "basecamp auth login --with-client-credentials rejects --with-token" {
   run basecamp auth login --with-client-credentials --with-token </dev/null
   assert_failure

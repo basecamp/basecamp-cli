@@ -161,10 +161,11 @@ func (s *Store) withStoreLock(fn func() error) error {
 // the person presses Ctrl-C, and without the second check it would go on
 // to store the credential they stopped as soon as the holder released.
 func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if s.ensure().UsingKeyring() {
+		// No lock to take, so make the check lockFile would have made.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return fn()
 	}
 	release, err := s.lockFile(storeLockName, "credential store", ctx.Done(), ctx.Err)
@@ -172,9 +173,6 @@ func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error
 		return err
 	}
 	defer release()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	return fn()
 }
 
@@ -227,12 +225,27 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 		return noop, nil
 	}
 
+	// A caller whose wait is already over gets nothing: the lock would be
+	// taken and the critical section run — a credential revoked, deleted,
+	// replaced — for a command that has been canceled.
+	if err := lockCause(cause); err != nil {
+		return noop, err
+	}
+
 	fl := flock.New(filepath.Join(s.lockDir(), name))
 	deadline := time.Now().Add(credentialLockWait)
 	for {
 		locked, err := fl.TryLock()
 		switch {
 		case locked:
+			// The same check again, because the acquisition itself is a
+			// window: a waiter can be canceled in the instant the holder
+			// releases, and would otherwise proceed as if nothing had
+			// happened.
+			if cancelErr := lockCause(cause); cancelErr != nil {
+				_ = fl.Close()
+				return noop, cancelErr
+			}
 			return func() { _ = fl.Close() }, nil
 		case err != nil:
 			// The lock file could not be opened or locked at all — a
@@ -242,12 +255,10 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 			return noop, nil
 		}
 
-		if cause != nil {
-			if err := cause(); err != nil {
-				// The caller's own wait ended (Ctrl-C, a request
-				// deadline); that is theirs to report, not a lock failure.
-				return noop, err
-			}
+		if err := lockCause(cause); err != nil {
+			// The caller's own wait ended (Ctrl-C, a request deadline);
+			// that is theirs to report, not a lock failure.
+			return noop, err
 		}
 		if !time.Now().Before(deadline) {
 			// Not an auth_required failure: the credential is fine and
@@ -272,15 +283,22 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 			// that a broken pairing can never return "no lock, no error",
 			// which would run the critical section unsynchronized and say
 			// nothing.
-			if cause != nil {
-				if err := cause(); err != nil {
-					return noop, err
-				}
+			if err := lockCause(cause); err != nil {
+				return noop, err
 			}
 			return noop, context.Canceled
 		case <-time.After(credentialLockPoll):
 		}
 	}
+}
+
+// lockCause is why the caller's wait ended, or nil for a caller that has
+// no wait to end.
+func lockCause(cause func() error) error {
+	if cause == nil {
+		return nil
+	}
+	return cause()
 }
 
 // warnUnlockable says once per process that credential operations are

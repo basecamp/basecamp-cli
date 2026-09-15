@@ -518,6 +518,65 @@ func TestCanceledSaveWaitingOnTheStoreLockWritesNothing(t *testing.T) {
 	assert.Equal(t, "original", creds.AccessToken, "a canceled save wrote anyway")
 }
 
+// TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so
+// it would be taken and the work done — a credential revoked, deleted,
+// replaced — for a command the person already stopped. Every caller is
+// covered by the check inside the lock rather than by each of them
+// remembering to make it.
+func TestCanceledCallerNeverEntersTheCriticalSection(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ran := false
+	err := store.withKeyLock(ctx, "profile:bot", func() error {
+		ran = true
+		return nil
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, ran, "a canceled caller ran the critical section")
+}
+
+// TestCanceledLogoutRevokesNothing is that check where it matters most: a
+// logout revokes the token server-side and then deletes it, and neither
+// should happen for a command that was stopped.
+func TestCanceledLogoutRevokesNothing(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{
+		AccessToken:   "live",
+		RefreshToken:  "refresh-0",
+		OAuthType:     oauthTypeBC5,
+		Issuer:        srv.URL,
+		TokenEndpoint: srv.URL + "/token",
+	}))
+
+	m := NewManager(&config.Config{BaseURL: srv.URL, ActiveProfile: "bot"}, srv.Client())
+	m.SetStore(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := m.LogoutCredential(ctx, "profile:bot", "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, requests, "a canceled logout revoked the token")
+
+	creds, loadErr := store.Load("profile:bot")
+	require.NoError(t, loadErr, "a canceled logout deleted the credential")
+	assert.Equal(t, "live", creds.AccessToken)
+}
+
 // TestCredentialLockReleasedByProcessDeathIsNotStale: a holder that dies
 // takes its lock with it. The kernel drops an flock when the descriptor
 // closes, process death included, so there is no stale lock to reap and no
