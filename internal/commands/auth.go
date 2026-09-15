@@ -91,7 +91,7 @@ command to run (the envelope's "notice").`,
 				}
 				verdict = v
 			}
-			report, err := authStatusReport(app)
+			report, err := authStatusReport(cmd.Context(), app)
 			if err != nil {
 				return err
 			}
@@ -283,7 +283,7 @@ func (s *authStatus) tokenLine(expiry string) string {
 // network. A BASECAMP_TOKEN session never reaches the credential store, so
 // it neither pays the keyring probe nor reports another credential's
 // identity as its own.
-func authStatusReport(app *appctx.App) (*authStatus, error) {
+func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error) {
 	baseURL := config.NormalizeBaseURL(app.Config.BaseURL)
 	profile := app.Config.ActiveProfile
 	account := app.Config.AccountID
@@ -313,26 +313,40 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		return report, nil
 	}
 
-	if !app.Auth.IsAuthenticated() {
+	// One load, and the three answers it can give told apart.
+	//
+	// Nothing usable stored is "not logged in", and a login is the answer.
+	// A store that could not be READ is neither: saying "not logged in"
+	// there would be a lie, and worse than a lie — the rules people follow
+	// to recover decide from oauth_type, so an absent one sends them to
+	// the interactive login, which is how an agent gets replaced by a
+	// person BY FOLLOWING THE INSTRUCTIONS. And a credential that is there
+	// but holds no usable token is reported as what it is, with its kind,
+	// rather than as an absence.
+	store := app.Auth.GetStore()
+	creds, err := store.LoadContext(ctx, app.Auth.CredentialKey())
+	switch {
+	case errors.Is(err, auth.ErrNoCredential), errors.Is(err, auth.ErrInvalidCredentials):
 		report.data["authenticated"] = false
 		report.summary = "Not logged in to " + baseURL
 		report.hint = app.Auth.LoginHint()
-		// A credential can be stored and still not authenticate anyone —
-		// one holding no access token. Saying only "not logged in" there
-		// hides WHICH credential is broken, and a reader deciding how to
-		// recover from oauth_type would find it absent and reach for the
-		// interactive login, which is how an agent gets replaced by a
-		// person. The type is reported even when the token is not.
-		if creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey()); err == nil && creds.OAuthType != "" {
-			report.data["oauth_type"] = creds.OAuthType
-		}
 		return report, nil
+	case err != nil:
+		return nil, err
 	}
 
-	store := app.Auth.GetStore()
-	creds, err := store.Load(app.Auth.CredentialKey())
-	if err != nil {
-		return nil, err
+	// Asking what a renewal would do also tells the manager what this
+	// credential IS, so every remedy from here names the right login.
+	refusal := app.Auth.RefreshRefusal(creds)
+	refreshable := refusal == nil
+
+	if creds.AccessToken == "" {
+		report.data["authenticated"] = false
+		report.data["oauth_type"] = creds.OAuthType
+		report.data["refreshable"] = refreshable
+		report.summary = "Not logged in to " + baseURL
+		report.hint = app.Auth.LoginHint()
+		return report, nil
 	}
 
 	// Launchpad ignores scope; its tokens are read-write.
@@ -348,11 +362,6 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if store.UsingKeyring() {
 		storage = "keyring"
 	}
-	// A refresh token alone is not a refresh: what the CLI would refuse one
-	// for before sending anything is what the report gives when that leaves
-	// a still-live token unusable.
-	refusal := app.Auth.RefreshRefusal(creds)
-	refreshable := refusal == nil
 	report.storage = storage
 
 	report.data["authenticated"] = true

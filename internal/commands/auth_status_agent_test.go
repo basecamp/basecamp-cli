@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -186,4 +188,28 @@ func TestAuthStatusNamesTheKindEvenWhenItCannotAuthenticate(t *testing.T) {
 	assert.Equal(t, false, envelope.Data["authenticated"])
 	assert.Equal(t, "agent", envelope.Data["oauth_type"], "the report hid which credential was broken")
 	assert.Contains(t, envelope.Notice, "--with-client-credentials")
+}
+
+// TestAuthStatusClaimsNothingWhenTheStoreCannotBeRead: "not logged in" is a
+// statement about the credential, and a store that could not be read makes
+// none. Saying it anyway would be worse than wrong here, because the rules
+// people follow to recover decide from oauth_type — absent, they reach for
+// the interactive login, which for an agent profile replaces the identity.
+func TestAuthStatusClaimsNothingWhenTheStoreCannotBeRead(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	// A directory where credentials.json belongs: present, unreadable as
+	// anything, and not "no credential stored".
+	require.NoError(t, os.MkdirAll(filepath.Join(config.GlobalConfigDir(), "credentials.json"), 0o700))
+
+	cfg := &config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, http.DefaultClient)
+	authMgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+
+	_, err := authStatusReport(context.Background(), app)
+	require.Error(t, err, "status reported a verdict on a credential it could not read")
 }
