@@ -1173,7 +1173,10 @@ func validVerificationURL(raw string) string {
 // the token near expiry with "No refresh token available" rather than
 // letting requests start failing — either way the remedy is to import
 // again. Scope is what the token was verified or declared to carry.
-func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt time.Time) error {
+//
+// ctx bounds the wait for the credential's cross-process lock, so a
+// canceled import stores nothing.
+func (m *Manager) ImportToken(ctx context.Context, token, scope, userID, userEmail string, expiresAt time.Time) error {
 	if scope != scopeRead && scope != scopeFull {
 		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
@@ -1193,9 +1196,11 @@ func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt 
 	credKey := m.credentialKey()
 	// Under the credential's cross-process lock so the import cannot land
 	// in the middle of another process's refresh, which would then save
-	// the credential this one replaced back over it.
-	return m.store.withKeyLock(context.Background(), credKey, func() error {
-		return m.store.Save(credKey, creds)
+	// the credential this one replaced back over it — and under the
+	// caller's context, so a person who stops the import while it waits
+	// for that lock does not get the token stored a moment later anyway.
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		return m.store.SaveContext(ctx, credKey, creds)
 	})
 }
 

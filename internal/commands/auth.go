@@ -1089,7 +1089,7 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		return err
 	}
 
-	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email, who.ExpiresAt); err != nil {
+	if err := app.Auth.ImportToken(cmd.Context(), token, scope, strconv.FormatInt(who.PersonID, 10), who.Email, who.ExpiresAt); err != nil {
 		return fmt.Errorf("profile %q is registered but the token could not be stored (rerun the import): %w", name, err)
 	}
 

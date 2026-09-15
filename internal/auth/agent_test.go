@@ -620,3 +620,44 @@ func (c *countingStore) Delete(string) error       { return nil }
 func (c *countingStore) MigrateToKeyring() error   { return nil }
 func (c *countingStore) UsingKeyring() bool        { return false }
 func (c *countingStore) FallbackWarning() string   { return "" }
+
+// TestMintedScopeMustBeOneTheCLICanStore: the response scope is stored
+// with the credential, written into the profile entry, and printed. A
+// server naming something else — or smuggling terminal controls through
+// the field — is refused rather than persisted.
+func TestMintedScopeMustBeOneTheCLICanStore(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusOK, `{"access_token":"minted","token_type":"bearer","expires_in":3600,"scope":"everything"}`
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only read or full can be stored")
+
+	stored, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.Equal(t, "spent", stored.AccessToken, "a token with an unstorable scope was applied anyway")
+	assert.Equal(t, scopeFull, stored.Scope)
+}
+
+// TestCanceledTokenImportStoresNothing: --with-token waits for the
+// credential's lock like everything else, and a person who stops it there
+// must not get the token stored the moment the lock frees up.
+func TestCanceledTokenImportStoresNothing(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.cfg.ActiveProfile = "bot"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := m.ImportToken(ctx, "bc_at_secret", scopeFull, "1", "bot@example.com", time.Time{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	_, loadErr := m.store.Load("profile:bot")
+	assert.ErrorIs(t, loadErr, ErrNoCredential)
+}

@@ -277,6 +277,15 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	if token.AccessToken == "" {
 		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response carries no access_token")
 	}
+	// The CLI can only represent read and full, and this value is stored
+	// with the credential, written into the profile entry, and printed.
+	// A response naming anything else is refused rather than persisted —
+	// the same judgment the interactive login's verifier makes.
+	if token.Scope != "" && token.Scope != scopeRead && token.Scope != scopeFull {
+		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf(
+			"minting an agent token: the server reports scope %q, and only read or full can be stored",
+			richtext.SanitizeSingleLine(token.Scope)))
+	}
 	if token.RefreshToken != "" {
 		// Not fatal — the token is usable — but worth saying out loud: a
 		// refresh token here means the server's idea of this grant has
