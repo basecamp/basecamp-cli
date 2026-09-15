@@ -440,13 +440,22 @@ func (m *Manager) CheckAuthenticated(ctx context.Context) (bool, error) {
 	creds, err := m.store.LoadContext(ctx, m.credentialKey())
 	switch {
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
-		// The store spoke: there is nothing usable stored.
+		// The store spoke: there is nothing stored, or nothing readable.
+		// A login is the answer, and the caller may go and get one.
 		return false, nil
 	case err != nil:
 		return false, err
 	}
 	m.remember(creds)
-	return creds.AccessToken != "", nil
+	if creds.AccessToken == "" {
+		// Stored, and unusable. That is NOT the same as nothing being
+		// stored: a caller that reads this as "go and log in" would, for
+		// an agent profile, sign a person in over it. It is a broken
+		// credential, and the remedy is the one for what it is — which
+		// errAuth takes from what was just remembered.
+		return false, m.errAuth(fmt.Sprintf("Stored credentials for %s have empty access token", m.credentialKey()))
+	}
+	return true, nil
 }
 
 // Refresh forces a token renewal whatever the stored expiry says. The

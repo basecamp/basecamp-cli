@@ -778,10 +778,13 @@ func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
 	m.cfg.Sources = map[string]string{}
 	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
 
-	// An entry that exists WITHOUT an account is the same situation: the
-	// login binds one and refuses without it.
+	// An entry that EXISTS without an account gets no --account: whether
+	// the login can bind one depends on which config layer defines the
+	// profile, which is not visible from here, and a command handed over
+	// to be run verbatim must not be one that cannot work. The login
+	// refuses by naming what it needs, layer included.
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL}}
-	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
+	assert.NotContains(t, m.agentLoginCommand("c", ""), "--account")
 
 	// A profile that exists and is already bound needs nothing added.
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL, AccountID: "999"}}
@@ -938,4 +941,32 @@ func TestAnAbsurdTokenLifetimeIsCapped(t *testing.T) {
 	stored, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
 	assert.InDelta(t, time.Now().Add(maxAgentTokenLifetime).Unix(), stored.ExpiresAt, 60)
+}
+
+// TestAStoredButUnusableCredentialIsNotAbsence: a credential that is
+// stored and cannot serve a token is not "nothing is stored". A caller
+// reading it that way goes and gets a login — which for an agent profile
+// means signing a PERSON in over it.
+func TestAStoredButUnusableCredentialIsNotAbsence(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.cfg.ActiveProfile = "clawdito"
+
+	// Nothing stored at all: an answer, not a failure.
+	authenticated, err := m.CheckAuthenticated(context.Background())
+	require.NoError(t, err)
+	assert.False(t, authenticated)
+
+	// Stored, agent-owned, and holding nothing usable.
+	require.NoError(t, m.store.Save("profile:clawdito", &Credentials{
+		OAuthType:     oauthTypeAgent,
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: as.srv.URL + "/oauth/token",
+	}))
+	authenticated, err = m.CheckAuthenticated(context.Background())
+	require.Error(t, err, "a broken agent credential was reported as no credential at all")
+	assert.False(t, authenticated)
+	assert.Contains(t, output.AsError(err).Hint, "--with-client-credentials")
+	assert.Contains(t, output.AsError(err).Hint, "--client-id agent-client")
 }

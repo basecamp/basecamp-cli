@@ -500,9 +500,18 @@ func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	// A profile with no entry yet is one the login creates, and creating
 	// one needs the account it addresses. That is not an edge case here: a
 	// refused FIRST mint registers nothing, which is exactly when this
-	// command is handed over. An entry that exists without an account is
-	// the same situation — the login binds one, and refuses without it.
-	if entry, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered || entry == nil || entry.AccountID == "" {
+	// command is handed over.
+	//
+	// An entry that EXISTS without an account deliberately gets no
+	// --account. The login binds one there only when the global config
+	// file is the layer that defines the profile, and from here there is
+	// no way to know which layer did — a repo or system config that
+	// defines it accountless would make this command fail with "not the
+	// global config's entry", and a command handed over to be run
+	// verbatim should not be one that cannot work. Without it the login
+	// refuses by naming exactly what it needs, layer included, which is
+	// better guidance than a guess.
+	if entry, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered || entry == nil {
 		command += " --account " + m.accountToBind()
 	}
 	// A read-only agent told to re-authenticate without this would come
