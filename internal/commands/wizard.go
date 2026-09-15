@@ -293,7 +293,16 @@ func authenticationLogger(w io.Writer, prefix string) func(string) {
 func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles, showResult bool) (string, error) {
 	w := cmd.OutOrStdout()
 
-	if app.Auth.IsAuthenticated() {
+	// CheckAuthenticated, not IsAuthenticated: a false here falls through
+	// to an interactive login, and a store that could not be read — a lock
+	// another process holds for the length of one write — must not send
+	// someone through a person login that would replace the credential
+	// already sitting there.
+	authenticated, authErr := app.Auth.CheckAuthenticated(cmd.Context())
+	if authErr != nil {
+		return "", authErr
+	}
+	if authenticated {
 		endpoint, epErr := app.Auth.AuthorizationEndpoint(cmd.Context())
 		var info *basecamp.AuthorizationInfo
 		var err error
