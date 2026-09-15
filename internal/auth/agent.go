@@ -88,11 +88,11 @@ type agentMint struct {
 func (m *Manager) prepareAgentMint(creds *Credentials) (*agentMint, error) {
 	switch {
 	case creds.ClientID == "":
-		return nil, m.errAgentAuth("Agent credentials are missing their OAuth client id and cannot mint a token", creds.ClientID)
+		return nil, m.errAuth("Agent credentials are missing their OAuth client id and cannot mint a token")
 	case creds.ClientSecret == "":
-		return nil, m.errAgentAuth("Agent credentials are missing their OAuth client secret and cannot mint a token", creds.ClientID)
+		return nil, m.errAuth("Agent credentials are missing their OAuth client secret and cannot mint a token")
 	case creds.TokenEndpoint == "":
-		return nil, m.errAgentAuth("Agent credentials are missing their token endpoint and cannot mint a token", creds.ClientID)
+		return nil, m.errAuth("Agent credentials are missing their token endpoint and cannot mint a token")
 	}
 
 	// The token endpoint is a persisted value and receives the client
@@ -256,7 +256,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, m.agentMintRefusal(resp, body, mint.clientID)
+		return nil, m.agentMintRefusal(resp, body, mint.clientSecret)
 	}
 
 	var token oauth.Token
@@ -283,16 +283,23 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 // keeps the status and a bounded, single-line excerpt of whatever came
 // back — the body is server-controlled and reaches terminals and
 // transcripts.
-func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, clientID string) error {
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, secret string) error {
 	var errResp struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
-	detail := fmt.Sprintf("the server answered HTTP %d: %s",
-		resp.StatusCode, truncate(richtext.SanitizeSingleLine(string(body)), maxAgentErrorBytes))
+	// Everything below is server-controlled text about a request that
+	// carried a client secret, so the secret comes out of it first: a
+	// token endpoint that quotes the credential it rejected ("Rejected
+	// client_secret=...") would otherwise put it on a terminal and into an
+	// error envelope. Sanitizing strips control sequences, not secrets.
+	safe := func(text string) string {
+		return truncate(richtext.SanitizeSingleLine(redactSecret(text, secret)), maxAgentErrorBytes)
+	}
+	detail := fmt.Sprintf("the server answered HTTP %d: %s", resp.StatusCode, safe(string(body)))
 	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-		detail = "token error: " + errResp.Error
-		if desc := truncate(richtext.SanitizeSingleLine(errResp.ErrorDescription), maxAgentErrorBytes); desc != "" {
+		detail = "token error: " + safe(errResp.Error)
+		if desc := safe(errResp.ErrorDescription); desc != "" {
 			detail += " - " + desc
 		}
 	}
@@ -307,38 +314,27 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, clientID st
 	// package's own classifier, which is how a 5xx stays retryable and a
 	// 429 keeps its Retry-After.
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-		return m.errAgentAuth("Minting an agent token was refused ("+detail+")", clientID)
+		return m.errAuth("Minting an agent token was refused (" + detail + ")")
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
-}
-
-// errAgentAuth is an auth_required error about an agent credential, with
-// the AGENT login as its remedy.
-//
-// m.errAuth's remedy is `basecamp auth login -P <profile>`, which signs a
-// PERSON in: an operator who followed it after a refused mint would
-// replace the agent's credential with their own and only find out later.
-// The command here re-runs the login this credential came from, with the
-// client it already carries, and says where the secret goes.
-func (m *Manager) errAgentAuth(msg, clientID string) *output.Error {
-	e := output.ErrAuth(msg)
-	e.Hint = "Pipe the agent's client secret in: `... | " + m.agentLoginCommand(clientID) + "`"
-	return e
 }
 
 // agentLoginCommand is the client-credentials login addressed to the
 // active profile, naming the client whose secret is being replaced. Both
 // values come from configuration and a credential store, so both are
-// shell-quoted: the command is meant to be pasted.
+// shell-quoted; either one that is missing — which is itself a reason this
+// command is being suggested — becomes a placeholder, so the command reads
+// as something to fill in rather than something to paste and watch fail.
 func (m *Manager) agentLoginCommand(clientID string) string {
-	cmd := "basecamp auth login --with-client-credentials"
+	id := "<client-id>"
 	if clientID != "" {
-		cmd += " --client-id " + shellQuote(clientID)
+		id = shellQuote(clientID)
 	}
+	profile := "<profile>"
 	if m.cfg.ActiveProfile != "" {
-		cmd += " -P " + shellQuote(m.cfg.ActiveProfile)
+		profile = shellQuote(m.cfg.ActiveProfile)
 	}
-	return cmd
+	return "... | basecamp auth login --with-client-credentials --client-id " + id + " -P " + profile
 }
 
 // isRedirect reports whether status is one of the redirects a
@@ -351,6 +347,33 @@ func isRedirect(status int) bool {
 	}
 	return false
 }
+
+// redactSecret removes the client secret this request sent from text the
+// server sent back — verbatim and percent-encoded, since a body that
+// quotes the submitted form carries the latter — and withholds the text
+// entirely when the secret survives in some other escaping. Only the value
+// actually sent is matched, so nothing else in the server's message is
+// altered.
+func redactSecret(text, secret string) string {
+	if secret == "" {
+		return text
+	}
+	text = strings.ReplaceAll(text, secret, secretRedaction)
+	if encoded := url.QueryEscape(secret); encoded != secret {
+		text = strings.ReplaceAll(text, encoded, secretRedaction)
+	}
+	// A server is free to escape what it echoes however it likes, and
+	// chasing every spelling is a losing game. So: if the text still
+	// carries the secret once its percent-escapes are undone, none of it
+	// is shown. A diagnostic excerpt is not worth a leaked credential.
+	if decoded, err := url.QueryUnescape(text); err == nil && strings.Contains(decoded, secret) {
+		return secretRedaction
+	}
+	return text
+}
+
+// secretRedaction is what stands in for a secret the server echoed back.
+const secretRedaction = "[redacted]"
 
 // truncate bounds a server-supplied string for display.
 func truncate(s string, limit int) string {

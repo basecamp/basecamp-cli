@@ -132,12 +132,41 @@ func (m *Manager) credentialKey() string {
 // LoginCommand is the command that re-establishes the active credential:
 // addressed to the active profile when there is one, since a bare login
 // would store the new credential under the base URL instead. The command
-// is meant to be pasted, so the profile name is shell-quoted.
+// is meant to be pasted, so every interpolated value is shell-quoted.
 func (m *Manager) LoginCommand() string {
-	if m.cfg.ActiveProfile != "" {
-		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile)
+	command, _ := m.loginRemedy()
+	return command
+}
+
+// loginRemedy is the command that re-establishes the active credential and
+// the words that introduce it.
+//
+// An agent profile gets the client-credentials login, not the interactive
+// one. `basecamp auth login` signs a PERSON in, so an operator who
+// followed it after an agent's credential failed would store their own
+// credential under the agent's profile and only find out later — and that
+// remedy is what every auth_required error about the credential ends up
+// carrying, from the mint's own refusals to a 401 the SDK classified far
+// from here.
+//
+// Deciding it here rather than at each error site is the point: an error
+// path added later cannot forget. The store read costs nothing new — every
+// caller of this has already been through the credential store — and a
+// store that cannot be read simply falls back to the interactive form.
+func (m *Manager) loginRemedy() (command, lead string) {
+	// Every caller of this has already been through the credential store,
+	// so the read costs no probe that has not been paid; a store that
+	// cannot be read — or a Manager built without one — falls back to the
+	// interactive form rather than failing a hint.
+	if m.store != nil {
+		if creds, err := m.store.Load(m.credentialKey()); err == nil && creds.OAuthType == oauthTypeAgent {
+			return m.agentLoginCommand(creds.ClientID), "Pipe the agent's client secret in:"
+		}
 	}
-	return "basecamp auth login"
+	if m.cfg.ActiveProfile != "" {
+		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile), "Run:"
+	}
+	return "basecamp auth login", "Run:"
 }
 
 // shellQuote renders s safe to embed in an emitted shell command: a clearly
@@ -161,7 +190,8 @@ func shellActive(r rune) bool {
 
 // LoginHint is LoginCommand as an error hint.
 func (m *Manager) LoginHint() string {
-	return "Run: " + m.LoginCommand()
+	command, lead := m.loginRemedy()
+	return lead + " " + command
 }
 
 // errAuth is an auth_required error whose remedy names the active profile.

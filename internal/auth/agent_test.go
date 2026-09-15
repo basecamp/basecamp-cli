@@ -482,8 +482,13 @@ func TestRateLimitedMintStaysRetryable(t *testing.T) {
 
 // TestAgentFailureNeverPointsAtTheInteractiveLogin: the default remedy for
 // an auth_required error is `basecamp auth login -P <profile>`, which
-// signs a PERSON in. An operator who followed it after a refused mint
-// would replace the agent's credential with their own.
+// signs a PERSON in. An operator who followed it after an agent's
+// credential failed would store their own under the agent's profile.
+//
+// The remedy is decided from the stored credential rather than at each
+// error site, so it holds for failures that never went near agent.go — a
+// poisoned token endpoint, a 401 the SDK classified — as well as a refused
+// mint.
 func TestAgentFailureNeverPointsAtTheInteractiveLogin(t *testing.T) {
 	as := startDeviceAS(t)
 	as.token = func(int) (int, string) {
@@ -492,19 +497,75 @@ func TestAgentFailureNeverPointsAtTheInteractiveLogin(t *testing.T) {
 
 	m := newDeviceTestManager(t, as.srv.URL)
 	m.cfg.ActiveProfile = "clawdito"
-	storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	wantAgentRemedy := func(t *testing.T, err error) {
+		t.Helper()
+		require.Error(t, err)
+		hint := output.AsError(err).Hint
+		assert.Contains(t, hint, "--with-client-credentials")
+		assert.Contains(t, hint, "--client-id agent-client")
+		assert.Contains(t, hint, "-P clawdito")
+		assert.NotContains(t, hint, "Run: basecamp auth login -P")
+	}
 
 	_, err := m.AccessToken(context.Background())
-	require.Error(t, err)
-	hint := output.AsError(err).Hint
-	assert.Contains(t, hint, "--with-client-credentials")
-	assert.Contains(t, hint, "--client-id agent-client")
-	assert.Contains(t, hint, "-P clawdito")
-	assert.NotEqual(t, m.LoginCommand(), hint, "the remedy is the interactive login")
+	wantAgentRemedy(t, err)
 
-	// The same for a credential that cannot mint at all.
-	broken := agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))
-	broken.ClientSecret = ""
-	hint = output.AsError(m.RefreshRefusal(broken)).Hint
-	assert.Contains(t, hint, "--with-client-credentials")
+	// A stored endpoint the CLI refuses to post to fails before agent.go
+	// classifies anything, and must still not send the operator to the
+	// interactive login.
+	poisoned := agentCredential("http://evil.example/token", time.Now().Add(-time.Minute))
+	require.NoError(t, m.store.Save(key, poisoned))
+	_, err = m.AccessToken(context.Background())
+	wantAgentRemedy(t, err)
+
+	// And the hint an API 401 would be given, which is produced from the
+	// credential alone.
+	assert.Contains(t, m.LoginHint(), "--with-client-credentials")
+	assert.Contains(t, m.LoginHint(), "Pipe the agent's client secret in:")
+}
+
+// TestAgentLoginCommandFillsInWhatIsMissing: a credential missing its
+// client id is one of the things this command is suggested for, so the
+// command must read as something to complete rather than something to
+// paste and watch fail with the error that produced it.
+func TestAgentLoginCommandFillsInWhatIsMissing(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+
+	m.cfg.ActiveProfile = ""
+	assert.Contains(t, m.agentLoginCommand(""), "--client-id <client-id>")
+	assert.Contains(t, m.agentLoginCommand(""), "-P <profile>")
+
+	m.cfg.ActiveProfile = "clawdito"
+	assert.Contains(t, m.agentLoginCommand("a client"), "--client-id 'a client'")
+	assert.Contains(t, m.agentLoginCommand("a client"), "-P clawdito")
+}
+
+// TestAgentMintRefusalNeverEchoesTheClientSecret: the request carried the
+// secret, and a token endpoint that quotes the credential it rejected
+// would otherwise put it on a terminal and into the error envelope.
+// Sanitizing strips control sequences, not secrets.
+func TestAgentMintRefusalNeverEchoesTheClientSecret(t *testing.T) {
+	for name, body := range map[string]string{
+		"in the description": `{"error":"invalid_client","error_description":"Rejected client_secret=agent-secret for this client"}`,
+		"in a raw body":      `<html>bad request: client_secret=agent-secret</html>`,
+		"percent-encoded":    `{"error":"invalid_client","error_description":"got client_secret=agent%2Dsecret"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startDeviceAS(t)
+			as.token = func(int) (int, string) { return http.StatusBadRequest, body }
+
+			m := newDeviceTestManager(t, as.srv.URL)
+			storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+			e := output.AsError(err)
+			assert.NotContains(t, e.Message, "agent-secret")
+			assert.NotContains(t, e.Hint, "agent-secret")
+			assert.Contains(t, e.Message, "[redacted]")
+		})
+	}
 }
