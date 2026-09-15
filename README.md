@@ -222,6 +222,26 @@ an envelope with the profile, account, identity and person, `oauth_type`,
 `null` when it reports none). A token has no refresh token, so near a reported
 expiry the CLI refuses it and asks for a fresh import.
 
+### Agents
+
+A Basecamp agent is a principal with no person behind it, so it has no browser
+to sign in with and is granted no refresh token. It authenticates with the
+OAuth `client_credentials` grant instead: its client id and secret mint a
+short-lived self-token, and the CLI mints another whenever that one nears
+expiry. The client secret is read from stdin (never an argument) and stored
+with the token it mints — in the OS keyring where one is available — because
+the client, not a refresh token, is what survives an expiry:
+
+```bash
+op read "op://Vault/Item/credential" | basecamp auth login --with-client-credentials --client-id <id> -P agent --account 999
+```
+
+The login mints once, which is what proves the client id and secret: a refused
+mint stores nothing. `--account` is required when the profile does not exist
+yet. `basecamp auth logout` forgets the credential; there is no useful
+revocation, since the same client would mint another — rotate the client
+secret in Basecamp to end an agent's access.
+
 ### Multiple Identities
 
 Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:

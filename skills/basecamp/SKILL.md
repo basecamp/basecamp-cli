@@ -1395,6 +1395,7 @@ basecamp auth login --scope read                  # Read-only access (ignored by
 basecamp auth login --device-code                 # Print a link and one-time code to approve from any device, never opening a browser here (Launchpad has no device flow: paste the callback URL back instead)
 BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE, and only where the server offers the device flow (Launchpad does not); browser and pasted-callback flows refuse — prefer --with-token
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
+basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
 basecamp auth revoke                              # Revoke the token with the server and forget it; refuses when it cannot revoke (auth logout forgets regardless)
 basecamp profile create <name> --account <id> --expect-identity <id>  # Same assertion for a new profile
