@@ -41,6 +41,11 @@ const (
 	// CLI's to revoke — the same token lives in the operator's secret store
 	// and stays valid until revoked in Basecamp.
 	RevokeSkippedImported = "imported_token"
+	// RevokeSkippedAgent: an agent self-token is minted on demand from a
+	// client id and secret, so revoking one accomplishes nothing — the
+	// same client mints another on the next command. Ending an agent's
+	// access means rotating the client secret in Basecamp.
+	RevokeSkippedAgent = "agent"
 )
 
 // What a failed revocation left usable.
@@ -186,6 +191,9 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 		case RevokeSkippedImported:
 			return output.ErrUsageHint("An imported personal access token is not the CLI's to revoke; revoke it in Basecamp",
 				"Forget the credential locally instead: basecamp auth logout")
+		case RevokeSkippedAgent:
+			return output.ErrUsageHint("An agent self-token is not worth revoking: the client that minted it can mint another",
+				"Forget the credential locally instead (basecamp auth logout), and rotate the client secret in Basecamp to end the agent's access")
 		}
 		if err := m.Revoke(ctx, creds); err != nil {
 			// Keep the failure's taxonomy — a transport failure or a 5xx
@@ -258,6 +266,8 @@ func revokeSkipReason(creds *Credentials) string {
 	switch {
 	case creds.Source == CredentialSourceToken:
 		return RevokeSkippedImported
+	case creds.OAuthType == oauthTypeAgent:
+		return RevokeSkippedAgent
 	case creds.OAuthType != oauthTypeBC5:
 		return RevokeSkippedLaunchpad
 	default:

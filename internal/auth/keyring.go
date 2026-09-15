@@ -20,8 +20,17 @@ type Credentials struct {
 	RefreshToken  string `json:"refresh_token"`
 	ExpiresAt     int64  `json:"expires_at"`
 	Scope         string `json:"scope"`
-	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", or legacy "bc3"
+	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", "agent", or legacy "bc3"
 	TokenEndpoint string `json:"token_endpoint"`
+
+	// ClientID and ClientSecret are the confidential OAuth client an
+	// "agent" credential mints its own access tokens with (see agent.go).
+	// An agent principal is granted no refresh token, so these — not a
+	// refresh token — are what survives an expiry, and they are stored
+	// with the token in the OS keyring wherever one is available. Empty
+	// for every other kind of credential.
+	ClientID     string `json:"client_id,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
 
 	// Issuer is the RFC 8414 issuer of the authorization server that minted
 	// a BC5 credential — where its metadata, and so its revocation endpoint,

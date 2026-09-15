@@ -241,7 +241,7 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 		}
 		if needsRenewal(creds) {
 			// Preserves the renewal's own error type (API, network, auth).
-			if renewErr := m.refreshLocked(ctx, credKey, creds); renewErr != nil {
+			if renewErr := m.renewLocked(ctx, credKey, creds); renewErr != nil {
 				return renewErr
 			}
 			// Read back what the renewal stored rather than trusting the
@@ -308,8 +308,20 @@ func (m *Manager) Refresh(ctx context.Context) error {
 		if err != nil {
 			return m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
 		}
-		return m.refreshLocked(ctx, credKey, creds)
+		return m.renewLocked(ctx, credKey, creds)
 	})
+}
+
+// renewLocked produces a fresh access token for creds and stores it. An
+// agent credential has no refresh token to rotate — it mints a new
+// self-token from its client credentials — and every other kind refreshes.
+//
+// The caller holds m.mu and the credential key's cross-process lock.
+func (m *Manager) renewLocked(ctx context.Context, origin string, creds *Credentials) error {
+	if creds.OAuthType == oauthTypeAgent {
+		return m.hintLogin(m.mintAgentCredential(ctx, origin, creds))
+	}
+	return m.refreshLocked(ctx, origin, creds)
 }
 
 // invalidGrantPrefix is how the SDK's token exchanger renders an RFC 6749
@@ -361,14 +373,19 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 	return false
 }
 
-// RefreshRefusal is the error a refresh of creds would fail with before
+// RefreshRefusal is the error renewing creds would fail with before
 // anything is sent — no refresh token, a grant from the removed bc3
 // development flow, a missing or unusable token endpoint, a half-configured
-// OAuth client — or nil when a refresh would be attempted. It runs the same
-// preparation the refresh does, on a copy, for a report that must say what
+// OAuth client, an agent credential missing the client that mints its
+// tokens — or nil when a renewal would be attempted. It runs the same
+// preparation the renewal does, on a copy, for a report that must say what
 // the next command will do without doing it.
 func (m *Manager) RefreshRefusal(creds *Credentials) error {
 	prepared := *creds
+	if creds.OAuthType == oauthTypeAgent {
+		_, err := m.prepareAgentMint(&prepared)
+		return err
+	}
 	_, _, err := m.prepareRefresh(&prepared)
 	return err
 }
@@ -1561,7 +1578,11 @@ func (m *Manager) AuthorizationEndpoint(ctx context.Context) (string, error) {
 // credential of the given OAuth type, whether or not it is stored yet.
 func (m *Manager) AuthorizationEndpointFor(oauthType string) (string, error) {
 	switch oauthType {
-	case "bc3", oauthTypeBC5:
+	case "bc3", oauthTypeBC5, oauthTypeAgent:
+		// An agent self-token is minted by Basecamp's own authorization
+		// server, so it asks the same origin-level document a bc5
+		// credential does.
+		//
 		// resourceOrigin, not NormalizeBaseURL: the latter only trims a
 		// trailing slash, so a pathful BaseURL (https://host/api/v1 —
 		// explicitly supported by resourceOrigin) would yield a misrouted
