@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -552,6 +553,12 @@ func TestAgentMintRefusalNeverEchoesTheClientSecret(t *testing.T) {
 		"in the description": `{"error":"invalid_client","error_description":"Rejected client_secret=agent-secret for this client"}`,
 		"in a raw body":      `<html>bad request: client_secret=agent-secret</html>`,
 		"percent-encoded":    `{"error":"invalid_client","error_description":"got client_secret=agent%2Dsecret"}`,
+		// url.QueryUnescape refuses a whole string over one bad escape, so
+		// a stray per-cent sign in prose must not switch the check off.
+		"percent-encoded beside a stray per-cent": `{"error":"invalid_client","error_description":"Rejected agent%2Dsecret; quota 100%"}`,
+		// Stripping the control sequence closes the gap it held open,
+		// which the pass before sanitizing cannot see.
+		"split by a control sequence": "{\"error\":\"invalid_client\",\"error_description\":\"got agent-\u001b[31msecret\"}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := startDeviceAS(t)
@@ -569,3 +576,47 @@ func TestAgentMintRefusalNeverEchoesTheClientSecret(t *testing.T) {
 		})
 	}
 }
+
+// TestRefusedAgentLoginNeverReadsTheCredentialStore: a login's first mint
+// happens before anything is stored, so rendering its refusal must not be
+// the thing that reaches for the OS keyring — nor answer with the
+// interactive login for an operation that is explicitly an agent's.
+func TestRefusedAgentLoginNeverReadsTheCredentialStore(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusUnauthorized, `{"error":"invalid_client"}`
+	}
+	resource := startResourceServer(t, as.srv.URL)
+
+	m := newDeviceTestManager(t, resource.URL)
+	m.cfg.ActiveProfile = "clawdito"
+	reads := &countingStore{}
+	m.store.inner = reads
+	m.store.initOnce.Do(func() {})
+
+	_, err := m.LoginClientCredentials(context.Background(), ClientCredentialsOptions{
+		ClientID:     "agent-client",
+		ClientSecret: "wrong",
+	})
+	require.Error(t, err)
+	assert.Zero(t, reads.loads, "a refused login read the credential store to render its error")
+
+	hint := output.AsError(err).Hint
+	assert.Contains(t, hint, "--with-client-credentials")
+	assert.Contains(t, hint, "--client-id agent-client")
+	assert.Contains(t, hint, "-P clawdito")
+}
+
+// countingStore is a credStore that holds nothing and counts what it was
+// asked for.
+type countingStore struct{ loads int }
+
+func (c *countingStore) Load(string) ([]byte, error) {
+	c.loads++
+	return nil, errors.New("credentials not found for test")
+}
+func (c *countingStore) Save(string, []byte) error { return nil }
+func (c *countingStore) Delete(string) error       { return nil }
+func (c *countingStore) MigrateToKeyring() error   { return nil }
+func (c *countingStore) UsingKeyring() bool        { return false }
+func (c *countingStore) FallbackWarning() string   { return "" }

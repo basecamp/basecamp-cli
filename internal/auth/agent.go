@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,13 +87,23 @@ type agentMint struct {
 // out through. It mutates nothing, so a report can ask what the next
 // command would do without doing it.
 func (m *Manager) prepareAgentMint(creds *Credentials) (*agentMint, error) {
+	mint, err := m.resolveAgentMint(creds)
+	if err != nil {
+		return nil, m.agentRemedy(err, creds.ClientID)
+	}
+	return mint, nil
+}
+
+// resolveAgentMint is prepareAgentMint without the remedy: it raises the
+// plain auth errors, which its caller re-hints.
+func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 	switch {
 	case creds.ClientID == "":
-		return nil, m.errAuth("Agent credentials are missing their OAuth client id and cannot mint a token")
+		return nil, output.ErrAuth("Agent credentials are missing their OAuth client id and cannot mint a token")
 	case creds.ClientSecret == "":
-		return nil, m.errAuth("Agent credentials are missing their OAuth client secret and cannot mint a token")
+		return nil, output.ErrAuth("Agent credentials are missing their OAuth client secret and cannot mint a token")
 	case creds.TokenEndpoint == "":
-		return nil, m.errAuth("Agent credentials are missing their token endpoint and cannot mint a token")
+		return nil, output.ErrAuth("Agent credentials are missing their token endpoint and cannot mint a token")
 	}
 
 	// The token endpoint is a persisted value and receives the client
@@ -256,7 +267,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, m.agentMintRefusal(resp, body, mint.clientSecret)
+		return nil, m.agentMintRefusal(resp, body, mint)
 	}
 
 	var token oauth.Token
@@ -283,7 +294,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 // keeps the status and a bounded, single-line excerpt of whatever came
 // back — the body is server-controlled and reaches terminals and
 // transcripts.
-func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, secret string) error {
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) error {
 	var errResp struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
@@ -293,8 +304,13 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, secret stri
 	// token endpoint that quotes the credential it rejected ("Rejected
 	// client_secret=...") would otherwise put it on a terminal and into an
 	// error envelope. Sanitizing strips control sequences, not secrets.
+	secret := mint.clientSecret
 	safe := func(text string) string {
-		return truncate(richtext.SanitizeSingleLine(redactSecret(text, secret)), maxAgentErrorBytes)
+		// Redact, sanitize, redact again. Stripping control sequences can
+		// close a gap one held open inside the secret
+		// ("agent-\x1b[31msecret"), which the first pass cannot see and
+		// which would otherwise be reassembled on its way to the terminal.
+		return truncate(redactSecret(richtext.SanitizeSingleLine(redactSecret(text, secret)), secret), maxAgentErrorBytes)
 	}
 	detail := fmt.Sprintf("the server answered HTTP %d: %s", resp.StatusCode, safe(string(body)))
 	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
@@ -314,9 +330,30 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, secret stri
 	// package's own classifier, which is how a 5xx stays retryable and a
 	// 429 keeps its Retry-After.
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-		return m.errAuth("Minting an agent token was refused (" + detail + ")")
+		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
+}
+
+// agentRemedy replaces the default login remedy on an auth error raised
+// on a path that already knows it is minting for an agent.
+//
+// The general remedy (Manager.loginRemedy) derives this from the STORED
+// credential, which is right everywhere it is reached from — but not here.
+// A login's first mint has not touched the store yet, so deriving the
+// remedy would make rendering a refusal the thing that probes the OS
+// keyring, and would answer with the interactive login (or a previous
+// person's) for an operation that is explicitly an agent's. The client id
+// in hand is also the one being authenticated, which the stored credential
+// need not be.
+func (m *Manager) agentRemedy(err error, clientID string) error {
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != output.CodeAuth || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
+		return err
+	}
+	hinted := *e
+	hinted.Hint = "Pipe the agent's client secret in: " + m.agentLoginCommand(clientID)
+	return &hinted
 }
 
 // agentLoginCommand is the client-credentials login addressed to the
@@ -366,10 +403,47 @@ func redactSecret(text, secret string) string {
 	// chasing every spelling is a losing game. So: if the text still
 	// carries the secret once its percent-escapes are undone, none of it
 	// is shown. A diagnostic excerpt is not worth a leaked credential.
-	if decoded, err := url.QueryUnescape(text); err == nil && strings.Contains(decoded, secret) {
+	if strings.Contains(percentDecodeLoose(text), secret) {
 		return secretRedaction
 	}
 	return text
+}
+
+// percentDecodeLoose undoes the valid percent-escapes in s and leaves the
+// malformed ones alone. url.QueryUnescape refuses the whole string over
+// one bad escape, and a stray per-cent sign in prose ("quota 100%") is
+// enough to produce that — switching the check off exactly where a server
+// is quoting the request back.
+func percentDecodeLoose(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] == '%' && i+2 < len(s) {
+			if hi, ok := unhexDigit(s[i+1]); ok {
+				if lo, lowOK := unhexDigit(s[i+2]); lowOK {
+					b.WriteByte(hi<<4 | lo)
+					i += 3
+					continue
+				}
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// unhexDigit is one hexadecimal digit's value, and whether c was one.
+func unhexDigit(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
 }
 
 // secretRedaction is what stands in for a secret the server echoed back.
