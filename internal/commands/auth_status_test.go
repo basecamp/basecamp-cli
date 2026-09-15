@@ -87,7 +87,7 @@ func TestAuthStatusReportsTheWholeCredential(t *testing.T) {
 	assert.NotContains(t, envelope.Data, "profile")
 	assert.Empty(t, envelope.Notice, "a live credential needs no remedy")
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.Equal(t, []string{
 		"Account: 999 · Access: full · Source: oauth (bc5)",
@@ -118,7 +118,7 @@ func TestAuthStatusExpiredButRefreshable(t *testing.T) {
 	assert.NotContains(t, envelope.Data, "scope", "Launchpad has no scopes")
 	assert.Empty(t, envelope.Notice, "a refreshable token renews itself on the next command")
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.Equal(t, []string{
 		"Profile: work · Account: 999 · Source: oauth (launchpad)",
@@ -148,7 +148,7 @@ func TestAuthStatusExpiredImportedTokenNamesTheLogin(t *testing.T) {
 	assert.Equal(t, false, envelope.Data["refreshable"])
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.Equal(t, "Token: expired · Storage: file", report.details[1])
 	assert.Equal(t, "Run: basecamp auth login -P bot", report.hint)
@@ -376,7 +376,7 @@ func TestAuthStatusNonRefreshableTokenInsideTheRefreshWindow(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["expired"])
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(report.details[1], "Token: expired ("), report.details[1])
 	assert.Contains(t, report.details[1], "inside the 5m the CLI keeps clear of expiry")
@@ -444,7 +444,7 @@ func TestAuthStatusCheckWithNothingStored(t *testing.T) {
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 	assert.Empty(t, srv.seenPaths(), "nothing to send, so no request")
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.NotContains(t, strings.Join(report.details, "\n"), "rejected")
 }
@@ -488,7 +488,7 @@ func TestAuthStatusCheckWithNothingToSend(t *testing.T) {
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 	assert.Empty(t, srv.seenPaths(), "no token could be sent, so no request")
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	report.record(app, &checkVerdict{valid: false, reason: "No refresh token available"})
 	joined := strings.Join(report.details, "\n")
@@ -530,7 +530,7 @@ func TestAuthStatusCheckRefusedRefreshReplacesThePromise(t *testing.T) {
 	assert.Equal(t, true, envelope.Data["authenticated"], "a Launchpad credential is kept after a refused refresh")
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	report.record(app, &checkVerdict{valid: false, reason: "Your session has expired or was revoked"})
 	joined := strings.Join(report.details, "\n")
@@ -573,7 +573,7 @@ func TestAuthStatusCheckRefusedRefreshInsideTheWindowReplacesThePromise(t *testi
 	assert.Equal(t, false, envelope.Data["expired"], "the token itself is still live")
 	assert.Equal(t, "Run: basecamp auth login -P bot", envelope.Notice)
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	report.record(app, &checkVerdict{valid: false, reason: "Your session has expired or was revoked"})
 	joined := strings.Join(report.details, "\n")
@@ -608,7 +608,7 @@ func TestAuthStatusCheckHalfConfiguredClientNamesTheEnvironment(t *testing.T) {
 	assert.Equal(t, auth.ClientEnvHint, envelope.Notice)
 	assert.Empty(t, srv.seenPaths(), "the refusal is made before any request")
 
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.Equal(t, auth.ClientEnvHint, report.hint, "the offline report gives the same remedy")
 	verdict, err := checkWithServer(context.Background(), app)
@@ -636,7 +636,7 @@ func TestAuthStatusSummaryKeepsTheRawEmail(t *testing.T) {
 	require.NoError(t, app.Auth.GetStore().Save("https://3.basecampapi.com", &auth.Credentials{
 		AccessToken: "tok", OAuthType: "bc5", Scope: "full", UserEmail: "\x1b[0m\x07",
 	}))
-	report, err := authStatusReport(app)
+	report, err := authStatusReport(context.Background(), app)
 	require.NoError(t, err)
 	assert.Equal(t, "Logged in to https://3.basecampapi.com", report.summary, "an email with nothing displayable is not named")
 }
@@ -700,7 +700,7 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 			}
 			assert.Equal(t, hint, envelope.Notice, "the remedy is the login unless the refusal names a better one")
 
-			report, err := authStatusReport(app)
+			report, err := authStatusReport(context.Background(), app)
 			require.NoError(t, err)
 			assert.True(t, strings.HasSuffix(report.details[1], "the CLI keeps clear of expiry, and the refresh would be refused: "+tc.reason+") · Storage: file"), report.details[1])
 			if tc.creds.RefreshToken != "" {

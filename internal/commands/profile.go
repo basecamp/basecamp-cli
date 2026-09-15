@@ -327,7 +327,7 @@ Examples:
 			}
 			if who := verifier.who; who != nil {
 				if who.PersonID != 0 {
-					_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
+					_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(who.PersonID, 10), who.Email)
 				}
 				result["identity"] = map[string]any{"id": who.IdentityID, "email": who.IdentityEmail}
 				if who.PersonID != 0 {

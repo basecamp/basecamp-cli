@@ -117,8 +117,14 @@ func (r *Resolver) ListAccounts(ctx context.Context) ([]basecamp.AuthorizedAccou
 
 // fetchAccounts retrieves the list of available Basecamp accounts.
 func (r *Resolver) fetchAccounts(ctx context.Context) ([]basecamp.AuthorizedAccount, error) {
-	// Check authentication
-	if !r.auth.IsAuthenticated() {
+	// CheckAuthenticated, not IsAuthenticated: this refuses to discover
+	// accounts, and a store that could not be read is not a statement
+	// about whether there is a credential in it.
+	authenticated, err := r.auth.CheckAuthenticated(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !authenticated {
 		return nil, output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 

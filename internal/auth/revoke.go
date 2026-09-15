@@ -41,6 +41,11 @@ const (
 	// CLI's to revoke — the same token lives in the operator's secret store
 	// and stays valid until revoked in Basecamp.
 	RevokeSkippedImported = "imported_token"
+	// RevokeSkippedAgent: an agent self-token is minted on demand from a
+	// client id and secret, so revoking one accomplishes nothing — the
+	// same client mints another on the next command. Ending an agent's
+	// access means rotating the client secret in Basecamp.
+	RevokeSkippedAgent = "agent"
 )
 
 // What a failed revocation left usable.
@@ -110,25 +115,36 @@ func (m *Manager) LogoutCredential(ctx context.Context, credKey, baseURL string)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(credKey)
-	switch {
-	case errors.Is(err, ErrNoCredential):
-		return nil, ErrNoCredential
-	case errors.Is(err, ErrInvalidCredentials):
-		// A blob no command can read is still stored; clearing it is the
-		// one thing a logout can do for it, and failing to is reported.
-		if err := m.store.Delete(credKey); err != nil {
-			return nil, err
+	// Load, revoke and delete are one read-modify-write over the
+	// credential, so they are taken under its cross-process lock: another
+	// process refreshing in the gap would otherwise save a rotated
+	// credential that this delete then removes anyway — or, worse, save it
+	// just after the delete and leave a revoked credential stored.
+	var result *LogoutResult
+	err := m.store.withKeyLock(ctx, credKey, func() error {
+		creds, err := m.store.LoadContext(ctx, credKey)
+		switch {
+		case errors.Is(err, ErrNoCredential):
+			return ErrNoCredential
+		case errors.Is(err, ErrInvalidCredentials):
+			// A blob no command can read is still stored; clearing it is
+			// the one thing a logout can do for it, and failing to is
+			// reported.
+			if err := m.store.Delete(credKey); err != nil {
+				return err
+			}
+			return ErrNoCredential
+		case err != nil:
+			// A store that could not be read (a locked keyring, an
+			// unreadable file) is not "not logged in": the credential may
+			// well be there, live on both sides, and a logout that says
+			// otherwise is a lie.
+			return err
 		}
-		return nil, ErrNoCredential
-	case err != nil:
-		// A store that could not be read (a locked keyring, an unreadable
-		// file) is not "not logged in": the credential may well be there,
-		// live on both sides, and a logout that says otherwise is a lie.
-		return nil, err
-	}
-	result := m.revokeForDiscard(ctx, creds, baseURL)
-	if err := m.store.Delete(credKey); err != nil {
+		result = m.revokeForDiscard(ctx, creds, baseURL)
+		return m.store.Delete(credKey)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -158,35 +174,42 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if errors.Is(err, ErrNoCredential) {
-		return ErrNoCredential
-	}
-	if err != nil {
-		return err
-	}
-	switch revokeSkipReason(creds) {
-	case RevokeSkippedLaunchpad:
-		return output.ErrUsageHint("Launchpad tokens cannot be revoked from the CLI",
-			"Forget the credential locally instead: basecamp auth logout")
-	case RevokeSkippedImported:
-		return output.ErrUsageHint("An imported personal access token is not the CLI's to revoke; revoke it in Basecamp",
-			"Forget the credential locally instead: basecamp auth logout")
-	}
-	if err := m.Revoke(ctx, creds); err != nil {
-		// Keep the failure's taxonomy — a transport failure or a 5xx stays
-		// retryable, a refusal does not — under the revocation's own message
-		// and remedy.
-		e := *output.AsError(err)
-		e.Message = "could not revoke the token server-side: " + e.Message + "; the credential is kept"
-		e.Hint = "Forget it locally: basecamp auth logout"
-		if e.Retryable {
-			e.Hint = "Retry: basecamp auth revoke — or forget it locally: basecamp auth logout"
+	// One read-modify-write over the credential, under its cross-process
+	// lock for the reason LogoutCredential gives.
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		creds, err := m.store.LoadContext(ctx, credKey)
+		if errors.Is(err, ErrNoCredential) {
+			return ErrNoCredential
 		}
-		e.Cause = err
-		return &e
-	}
-	return m.store.Delete(credKey)
+		if err != nil {
+			return err
+		}
+		switch revokeSkipReason(creds) {
+		case RevokeSkippedLaunchpad:
+			return output.ErrUsageHint("Launchpad tokens cannot be revoked from the CLI",
+				"Forget the credential locally instead: basecamp auth logout")
+		case RevokeSkippedImported:
+			return output.ErrUsageHint("An imported personal access token is not the CLI's to revoke; revoke it in Basecamp",
+				"Forget the credential locally instead: basecamp auth logout")
+		case RevokeSkippedAgent:
+			return output.ErrUsageHint("An agent self-token is not worth revoking: the client that minted it can mint another",
+				"Forget the credential locally instead (basecamp auth logout), and rotate the client secret in Basecamp to end the agent's access")
+		}
+		if err := m.Revoke(ctx, creds); err != nil {
+			// Keep the failure's taxonomy — a transport failure or a 5xx
+			// stays retryable, a refusal does not — under the revocation's
+			// own message and remedy.
+			e := *output.AsError(err)
+			e.Message = "could not revoke the token server-side: " + e.Message + "; the credential is kept"
+			e.Hint = "Forget it locally: basecamp auth logout"
+			if e.Retryable {
+				e.Hint = "Retry: basecamp auth revoke — or forget it locally: basecamp auth logout"
+			}
+			e.Cause = err
+			return &e
+		}
+		return m.store.Delete(credKey)
+	})
 }
 
 // transportFailure is a revocation request that got no answer: retryable,
@@ -243,6 +266,8 @@ func revokeSkipReason(creds *Credentials) string {
 	switch {
 	case creds.Source == CredentialSourceToken:
 		return RevokeSkippedImported
+	case creds.OAuthType == oauthTypeAgent:
+		return RevokeSkippedAgent
 	case creds.OAuthType != oauthTypeBC5:
 		return RevokeSkippedLaunchpad
 	default:

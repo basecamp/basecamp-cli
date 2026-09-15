@@ -199,6 +199,19 @@ basecamp search "meeting" --json
 
 ## Troubleshooting
 
+**Check what you are fixing first.** `basecamp auth status --json` reports
+`oauth_type`, and `agent` means the profile is a Basecamp agent: a principal
+with no person behind it, which authenticates with its OAuth client rather than
+a sign-in. None of the logins below apply to one — they would store a person's
+credential over it — and `auth logout` would throw away the client credentials
+it needs to recover. An agent re-authenticates with its own login, which
+replaces the credential in place. When `oauth_type` is absent, run whatever
+the status output's own hint names rather than choosing from the list below:
+
+```bash
+op read "op://<vault>/<item>/credential" | basecamp auth login --with-client-credentials --client-id <id> -P <profile> --account <id>
+```
+
 **Not authenticated:**
 ```bash
 basecamp auth login

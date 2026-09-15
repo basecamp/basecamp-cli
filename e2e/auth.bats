@@ -115,6 +115,41 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
+@test "basecamp auth login --help shows the agent client-credentials flags" {
+  run basecamp auth login --help
+  assert_success
+  assert_output_contains "--with-client-credentials"
+  assert_output_contains "--client-id"
+  assert_output_contains "no refresh token"
+}
+
+@test "basecamp auth login --with-client-credentials requires a client id" {
+  run basecamp auth login --with-client-credentials -P agent </dev/null
+  assert_failure
+  assert_json_value '.error' '--with-client-credentials needs the agent'"'"'s OAuth client id'
+  assert_json_value '.code' 'usage'
+}
+
+@test "basecamp auth login --with-client-credentials requires a profile" {
+  run env -u BASECAMP_PROFILE basecamp auth login --with-client-credentials --client-id abc </dev/null
+  assert_failure
+  assert_json_value '.error' '--with-client-credentials stores the credential under a named profile'
+  assert_json_value '.code' 'usage'
+}
+
+@test "basecamp auth login rejects --client-id on its own" {
+  run basecamp auth login --client-id abc </dev/null
+  assert_failure
+  assert_json_value '.error' '--client-id only applies to an agent login'
+  assert_json_value '.code' 'usage'
+}
+
+@test "basecamp auth login --with-client-credentials rejects --with-token" {
+  run basecamp auth login --with-client-credentials --with-token </dev/null
+  assert_failure
+  assert_output_contains "with-client-credentials"
+}
+
 @test "basecamp auth login --with-token rejects --device-code" {
   run basecamp auth login --with-token --device-code </dev/null
   assert_failure

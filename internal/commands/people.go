@@ -62,7 +62,11 @@ func NewMeCmd() *cobra.Command {
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if !app.Auth.IsAuthenticated() {
+	authenticated, err := app.Auth.CheckAuthenticated(cmd.Context())
+	if err != nil {
+		return err
+	}
+	if !authenticated {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
@@ -111,9 +115,9 @@ func runMe(cmd *cobra.Command, args []string) error {
 	switch {
 	case os.Getenv("BASECAMP_TOKEN") != "":
 	case person != nil:
-		_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), email)
+		_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(person.ID, 10), email)
 	default:
-		_ = app.Auth.SetUserEmail(email)
+		_ = app.Auth.SetUserEmail(cmd.Context(), email)
 	}
 
 	// Build account output (already filtered to bc3 by SDK)

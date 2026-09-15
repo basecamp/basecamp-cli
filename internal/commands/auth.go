@@ -91,7 +91,7 @@ command to run (the envelope's "notice").`,
 				}
 				verdict = v
 			}
-			report, err := authStatusReport(app)
+			report, err := authStatusReport(cmd.Context(), app)
 			if err != nil {
 				return err
 			}
@@ -283,7 +283,7 @@ func (s *authStatus) tokenLine(expiry string) string {
 // network. A BASECAMP_TOKEN session never reaches the credential store, so
 // it neither pays the keyring probe nor reports another credential's
 // identity as its own.
-func authStatusReport(app *appctx.App) (*authStatus, error) {
+func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error) {
 	baseURL := config.NormalizeBaseURL(app.Config.BaseURL)
 	profile := app.Config.ActiveProfile
 	account := app.Config.AccountID
@@ -313,17 +313,40 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		return report, nil
 	}
 
-	if !app.Auth.IsAuthenticated() {
+	// One load, and the three answers it can give told apart.
+	//
+	// Nothing usable stored is "not logged in", and a login is the answer.
+	// A store that could not be READ is neither: saying "not logged in"
+	// there would be a lie, and worse than a lie — the rules people follow
+	// to recover decide from oauth_type, so an absent one sends them to
+	// the interactive login, which is how an agent gets replaced by a
+	// person BY FOLLOWING THE INSTRUCTIONS. And a credential that is there
+	// but holds no usable token is reported as what it is, with its kind,
+	// rather than as an absence.
+	store := app.Auth.GetStore()
+	creds, err := store.LoadContext(ctx, app.Auth.CredentialKey())
+	switch {
+	case errors.Is(err, auth.ErrNoCredential), errors.Is(err, auth.ErrInvalidCredentials):
 		report.data["authenticated"] = false
 		report.summary = "Not logged in to " + baseURL
 		report.hint = app.Auth.LoginHint()
 		return report, nil
+	case err != nil:
+		return nil, err
 	}
 
-	store := app.Auth.GetStore()
-	creds, err := store.Load(app.Auth.CredentialKey())
-	if err != nil {
-		return nil, err
+	// Asking what a renewal would do also tells the manager what this
+	// credential IS, so every remedy from here names the right login.
+	refusal := app.Auth.RefreshRefusal(creds)
+	refreshable := refusal == nil
+
+	if creds.AccessToken == "" {
+		report.data["authenticated"] = false
+		report.data["oauth_type"] = creds.OAuthType
+		report.data["refreshable"] = refreshable
+		report.summary = "Not logged in to " + baseURL
+		report.hint = app.Auth.LoginHint()
+		return report, nil
 	}
 
 	// Launchpad ignores scope; its tokens are read-write.
@@ -339,11 +362,6 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 	if store.UsingKeyring() {
 		storage = "keyring"
 	}
-	// A refresh token alone is not a refresh: what the CLI would refuse one
-	// for before sending anything is what the report gives when that leaves
-	// a still-live token unusable.
-	refusal := app.Auth.RefreshRefusal(creds)
-	refreshable := refusal == nil
 	report.storage = storage
 
 	report.data["authenticated"] = true
@@ -548,6 +566,8 @@ func buildLoginCmd(use string) *cobra.Command {
 	var local bool
 	var deviceCode bool
 	var withToken bool
+	var withClientCredentials bool
+	var clientID string
 	var expectIdentity string
 	var loginHint string
 
@@ -576,6 +596,14 @@ Import a personal access token from stdin (never pass it as an argument):
 and that it can reach the profile's account — before storing it under the
 named profile, creating the profile when --account is given.
 
+Authenticate as a Basecamp agent, reading its OAuth client secret from stdin:
+  op read "op://<vault>/<item>/credential" | basecamp auth login --with-client-credentials --client-id <id> -P agent --account 999
+
+--with-client-credentials mints a self-token from the agent's client id and
+secret and stores both, so later commands mint another when it expires. An
+agent is not a person and is granted no refresh token, which is why the
+client credentials are what is kept.
+
 --login-hint names the account to sign in as on the device-flow approval page
 (ignored by Launchpad).`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
@@ -593,8 +621,23 @@ named profile, creating the profile when --account is given.
 				return err
 			}
 
+			// --client-id names which agent is being authenticated, so
+			// running an ordinary interactive login with it set would sign
+			// somebody else in and say nothing about the flag it ignored.
+			if clientID != "" && !withClientCredentials {
+				return output.ErrUsageHint("--client-id only applies to an agent login",
+					"Add --with-client-credentials, or drop --client-id.")
+			}
+
 			if withToken {
 				return runLoginWithToken(cmd, app, scope, expect)
+			}
+
+			if withClientCredentials {
+				if expect != 0 {
+					return output.ErrUsage("--expect-identity cannot be checked for an agent login: an agent is not a person")
+				}
+				return runLoginClientCredentials(cmd, app, clientID, scope)
 			}
 
 			if err := refuseMachineOutputLogin(app, "the login command"); err != nil {
@@ -660,7 +703,7 @@ named profile, creating the profile when --account is given.
 
 			if who := verifier.who; who != nil {
 				if who.PersonID != 0 {
-					_ = app.Auth.SetUserIdentity(strconv.FormatInt(who.PersonID, 10), who.Email)
+					_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(who.PersonID, 10), who.Email)
 				}
 				fmt.Fprintln(w, r.Data.Render("Logged in as: "+who.label()))
 			}
@@ -674,13 +717,18 @@ named profile, creating the profile when --account is given.
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope: 'read' or 'full' (default full; ignored by Launchpad)")
 	registerLoginFlowFlags(cmd, &noBrowser, &remote, &local, &deviceCode)
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "Read a personal access token from stdin instead of running OAuth (requires --profile)")
+	cmd.Flags().BoolVar(&withClientCredentials, "with-client-credentials", false, "Authenticate as a Basecamp agent: read its OAuth client secret from stdin and mint a self-token (requires --client-id and --profile)")
+	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID of the agent to authenticate as (with --with-client-credentials)")
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
 	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as on the device-flow approval page (ignored by Launchpad)")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 	for _, flag := range []string{"device-code", "remote", "local", "no-browser", "login-hint"} {
 		cmd.MarkFlagsMutuallyExclusive("with-token", flag)
+		cmd.MarkFlagsMutuallyExclusive("with-client-credentials", flag)
 	}
+	cmd.MarkFlagsMutuallyExclusive("with-token", "with-client-credentials")
+	cmd.MarkFlagsMutuallyExclusive("with-token", "client-id")
 
 	return cmd
 }
@@ -750,6 +798,265 @@ func loginOutcome(ctx context.Context, err error, w io.Writer, r *output.Rendere
 	return output.ErrInterrupted("login canceled")
 }
 
+// headlessLogin names one of the logins that store a credential without a
+// browser — an imported personal access token, an agent's client
+// credentials — for the profile handling they share. The fields are only
+// wording: which flag selected this login, what it stores (named twice,
+// because the two sentences read differently), and what rerunning it is
+// called.
+type headlessLogin struct {
+	flag       string
+	stores     string
+	credential string
+	rerun      string
+}
+
+// profileTarget is where a headless login stores its credential and what
+// the config file needs written for it. Resolved before the secret is read
+// so nothing is consumed on the way to a usage error.
+type profileTarget struct {
+	name    string
+	account string
+
+	// created is the entry to register when the profile is new, nil when
+	// one is already configured.
+	created *config.ProfileConfig
+	// existing is the configured entry, nil when created is set.
+	existing *config.ProfileConfig
+	// bind is set when existing carries no account and must take one.
+	bind bool
+}
+
+// resolveHeadlessProfile works out which profile a headless login writes
+// to, and what registering it will take, WITHOUT writing anything: the
+// caller reads its secret afterwards, so every refusal that can be reached
+// without one is reached first.
+//
+// The effective account and base URL are what every later command will
+// address under this profile, so they are what the credential must be good
+// for — and they must be the profile's own.
+func resolveHeadlessProfile(app *appctx.App, login headlessLogin) (*profileTarget, error) {
+	name := app.Config.ActiveProfile
+	if name == "" {
+		return nil, output.ErrUsageHint(login.flag+" stores "+login.stores+" under a named profile",
+			"Pass -P/--profile <name>; add --account <id> when the profile does not exist yet.")
+	}
+	if !isValidProfileName(name) {
+		return nil, output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
+	}
+
+	account := app.Config.AccountID
+	existing := app.Config.Profiles[name]
+	if existing != nil {
+		if err := requireProfileBinding(app, name, existing); err != nil {
+			return nil, err
+		}
+	}
+	globalUnbound := false
+	if existing != nil && existing.AccountID == "" {
+		unbound, err := globalProfileIsUnbound(name)
+		if err != nil {
+			return nil, err
+		}
+		globalUnbound = unbound
+	}
+
+	target := &profileTarget{name: name, account: account, existing: existing}
+	switch {
+	case existing == nil && !accountGivenExplicitly(app):
+		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
+			"Pass --account <id> to create it alongside "+login.credential+".")
+	case existing == nil:
+		target.created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
+		target.existing = nil
+	case existing.AccountID == "" && !accountGivenExplicitly(app):
+		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
+			"Pass --account <id> to bind it alongside "+login.credential+".")
+	case existing.AccountID == "" && !globalUnbound:
+		// Binding rewrites the global config file. The effective profile
+		// is accountless, so if the global entry is missing or already
+		// carries an account, the accountless one came from a system, repo
+		// or local config and would keep shadowing whatever is written.
+		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is not the global config's entry", name),
+			"Add account_id to the config file that defines it, then rerun "+login.rerun+".")
+	case existing.AccountID == "":
+		target.bind = true
+	}
+	if err := requireNumericAccount(account); err != nil {
+		return nil, err
+	}
+	// Registering or binding rewrites the global config file; prove it can
+	// be before the secret is consumed and sent anywhere.
+	if target.created != nil || target.bind {
+		if err := globalConfigTakesProfiles(); err != nil {
+			return nil, err
+		}
+	}
+	return target, nil
+}
+
+// register writes the profile entry this login needs, if any, and reports
+// whether the profile is the default one.
+//
+// The entry goes in before the credential: an entry without a credential is
+// a visible, harmless state (profile list shows it unauthenticated), where
+// a stored secret without an entry would be an orphan.
+func (t *profileTarget) register(app *appctx.App, scope string) (bool, error) {
+	isDefault := app.Config.DefaultProfile == t.name
+	switch {
+	case t.created != nil:
+		t.created.Scope = scope
+		registered, err := registerProfile(t.name, t.created)
+		if err != nil {
+			return false, err
+		}
+		isDefault = registered
+		if app.Config.Profiles == nil {
+			app.Config.Profiles = make(map[string]*config.ProfileConfig)
+		}
+		app.Config.Profiles[t.name] = t.created
+	case t.bind:
+		if err := bindProfileAccount(t.name, t.account); err != nil {
+			return false, err
+		}
+		t.existing.AccountID = t.account
+	}
+	return isDefault, nil
+}
+
+// runLoginClientCredentials authenticates as a Basecamp agent principal:
+// the agent's OAuth client id comes from --client-id, its client secret
+// from stdin, and the credential is stored under the named profile.
+//
+// The agent has no person behind it and is granted no refresh token, so the
+// client credentials ARE the durable credential and are stored with the
+// self-token they mint. That makes the profile a machine identity in the
+// same sense --with-token's is, and it is set up the same way: an existing
+// profile, or a new one created alongside the credential when --account
+// says which account it addresses.
+func runLoginClientCredentials(cmd *cobra.Command, app *appctx.App, clientID, scope string) error {
+	if clientID == "" {
+		return output.ErrUsageHint("--with-client-credentials needs the agent's OAuth client id",
+			"Pass --client-id <id>; the matching secret goes on stdin.")
+	}
+	if scope != "" && scope != "read" && scope != "full" {
+		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
+	}
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return errEnvTokenShadows("BASECAMP_TOKEN is set")
+	}
+
+	target, err := resolveHeadlessProfile(app, headlessLogin{
+		flag:       "--with-client-credentials",
+		stores:     "the credential",
+		credential: "the agent credential",
+		rerun:      "the login",
+	})
+	if err != nil {
+		return err
+	}
+
+	secret, err := readClientSecretFromStdin(cmd)
+	if err != nil {
+		return err
+	}
+
+	// Machine output is not refused the way an interactive login is: nothing
+	// here waits on a person, so the log lines are the only thing that would
+	// pollute an envelope, and they are suppressed instead.
+	w := cmd.OutOrStdout()
+	logger := func(msg string) { fmt.Fprintln(w, msg) }
+	if app.IsMachineOutput() {
+		logger = nil
+	}
+
+	// The profile entry is written between the mint that proves the client
+	// and the write that stores it: a credential the config file knows
+	// nothing about would be an orphaned client secret, and the mint has
+	// to have succeeded before anything is registered for it.
+	var isDefault bool
+	result, err := app.Auth.LoginClientCredentials(cmd.Context(), auth.ClientCredentialsOptions{
+		ClientID:     clientID,
+		ClientSecret: secret,
+		Scope:        scope,
+		Logger:       logger,
+		BeforeStore: func(result *auth.LoginResult) error {
+			registered, regErr := target.register(app, result.Scope)
+			isDefault = registered
+			return regErr
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	data := map[string]any{
+		"profile":         target.name,
+		"account_id":      target.account,
+		"base_url":        app.Config.BaseURL,
+		"source":          "client_credentials",
+		"oauth_type":      result.OAuthType,
+		"scope":           result.Scope,
+		"client_id":       clientID,
+		"profile_created": target.created != nil,
+	}
+	if isDefault {
+		data["default"] = true
+	}
+
+	summary := fmt.Sprintf("Authenticated profile %q as an agent", target.name)
+	if app.IsMachineOutput() {
+		return app.OK(data, output.WithSummary(summary))
+	}
+
+	r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
+	fmt.Fprintln(w, r.Success.Render(summary))
+	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: minted on demand, no refresh token",
+		target.name, target.account, result.Scope)))
+	if target.created != nil {
+		line := fmt.Sprintf("Created profile %q for account %s", target.name, target.account)
+		if isDefault {
+			line += " (default)"
+		}
+		fmt.Fprintln(w, r.Muted.Render(line))
+	}
+	return nil
+}
+
+// readClientSecretFromStdin reads the agent's OAuth client secret, with the
+// same rules --with-token reads a token by: one line, from a pipe, never an
+// argument, so it stays out of shell history and the process table.
+func readClientSecretFromStdin(cmd *cobra.Command) (string, error) {
+	in := cmd.InOrStdin()
+	if stdinarg.IsTerminal(in) {
+		return "", output.ErrUsageHint("--with-client-credentials reads the client secret from stdin, and stdin is a terminal",
+			"Pipe it in from a secret store: `op read \"op://<vault>/<item>/credential\" | basecamp auth login --with-client-credentials --client-id <id> -P <profile> --account <id>`.")
+	}
+
+	data, err := io.ReadAll(io.LimitReader(in, maxTokenBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("reading the client secret from stdin: %w", err)
+	}
+	if len(data) > maxTokenBytes {
+		return "", output.ErrUsage(fmt.Sprintf("Client secret on stdin is longer than %d bytes; expected a single secret", maxTokenBytes))
+	}
+
+	secret := string(data)
+	if strings.HasSuffix(secret, "\r\n") {
+		secret = strings.TrimSuffix(secret, "\r\n")
+	} else {
+		secret = strings.TrimSuffix(secret, "\n")
+	}
+	if secret == "" {
+		return "", output.ErrUsageHint("No client secret on stdin",
+			"Pipe it in from a secret store: `op read \"op://<vault>/<item>/credential\" | basecamp auth login --with-client-credentials --client-id <id> -P <profile> --account <id>`.")
+	}
+	if strings.IndexFunc(secret, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) >= 0 {
+		return "", output.ErrUsage("Client secret on stdin must be a single line with no whitespace or control characters (one trailing line ending is allowed)")
+	}
+	return secret, nil
+}
+
 // runLoginWithToken imports a personal access token from stdin as the
 // active profile's credential. Everything that can be checked without the
 // token is checked before stdin is read; the token is then verified through
@@ -766,64 +1073,16 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 		return errEnvTokenShadows("BASECAMP_TOKEN is set")
 	}
 
-	name := app.Config.ActiveProfile
-	if name == "" {
-		return output.ErrUsageHint("--with-token stores the token under a named profile",
-			"Pass -P/--profile <name>; add --account <id> when the profile does not exist yet.")
-	}
-	if !isValidProfileName(name) {
-		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
-	}
-
-	// The effective account and base URL are what every later command will
-	// address under this profile, so they are what the token must be
-	// verified for — and they must be the profile's own.
-	account := app.Config.AccountID
-	existing := app.Config.Profiles[name]
-	if existing != nil {
-		if err := requireProfileBinding(app, name, existing); err != nil {
-			return err
-		}
-	}
-	globalUnbound := false
-	if existing != nil && existing.AccountID == "" {
-		unbound, err := globalProfileIsUnbound(name)
-		if err != nil {
-			return err
-		}
-		globalUnbound = unbound
-	}
-	var created *config.ProfileConfig
-	bindAccount := false
-	switch {
-	case existing == nil && !accountGivenExplicitly(app):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
-			"Pass --account <id> to create it alongside the imported token.")
-	case existing == nil:
-		created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
-	case existing.AccountID == "" && !accountGivenExplicitly(app):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
-			"Pass --account <id> to bind it alongside the imported token.")
-	case existing.AccountID == "" && !globalUnbound:
-		// Binding rewrites the global config file. The effective profile
-		// is accountless, so if the global entry is missing or already
-		// carries an account, the accountless one came from a system, repo
-		// or local config and would keep shadowing whatever is written.
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is not the global config's entry", name),
-			"Add account_id to the config file that defines it, then rerun the import.")
-	case existing.AccountID == "":
-		bindAccount = true
-	}
-	if err := requireNumericAccount(account); err != nil {
+	target, err := resolveHeadlessProfile(app, headlessLogin{
+		flag:       "--with-token",
+		stores:     "the token",
+		credential: "the imported token",
+		rerun:      "the import",
+	})
+	if err != nil {
 		return err
 	}
-	// Registering or binding rewrites the global config file; prove it can
-	// be before the token is consumed and sent anywhere.
-	if created != nil || bindAccount {
-		if err := globalConfigTakesProfiles(); err != nil {
-			return err
-		}
-	}
+	name, account, created := target.name, target.account, target.created
 
 	token, err := readTokenFromStdin(cmd)
 	if err != nil {
@@ -843,25 +1102,12 @@ func runLoginWithToken(cmd *cobra.Command, app *appctx.App, scope string, expect
 	// The profile entry goes first: an entry without a credential is a
 	// visible, harmless state (profile list shows it unauthenticated), where
 	// a stored secret without an entry would be an orphan.
-	isDefault := app.Config.DefaultProfile == name
-	switch {
-	case created != nil:
-		created.Scope = scope
-		if isDefault, err = registerProfile(name, created); err != nil {
-			return err
-		}
-		if app.Config.Profiles == nil {
-			app.Config.Profiles = make(map[string]*config.ProfileConfig)
-		}
-		app.Config.Profiles[name] = created
-	case bindAccount:
-		if err := bindProfileAccount(name, account); err != nil {
-			return err
-		}
-		existing.AccountID = account
+	isDefault, err := target.register(app, scope)
+	if err != nil {
+		return err
 	}
 
-	if err := app.Auth.ImportToken(token, scope, strconv.FormatInt(who.PersonID, 10), who.Email, who.ExpiresAt); err != nil {
+	if err := app.Auth.ImportToken(cmd.Context(), token, scope, strconv.FormatInt(who.PersonID, 10), who.Email, who.ExpiresAt); err != nil {
 		return fmt.Errorf("profile %q is registered but the token could not be stored (rerun the import): %w", name, err)
 	}
 
@@ -1313,6 +1559,9 @@ func describeLogout(done string, result *auth.LogoutResult) (summary string, fie
 	case result.Skipped == auth.RevokeSkippedImported:
 		fields["reason"] = result.Skipped
 		summary = done + " (forgot the imported token; it stays valid until revoked in Basecamp)"
+	case result.Skipped == auth.RevokeSkippedAgent:
+		fields["reason"] = result.Skipped
+		summary = done + " (forgot the agent credential; rotate the client secret in Basecamp to end its access)"
 	case result.Err != nil:
 		fields["reason"] = result.Err.Error()
 		fields["remaining"] = result.Remaining

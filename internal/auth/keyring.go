@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,8 +21,25 @@ type Credentials struct {
 	RefreshToken  string `json:"refresh_token"`
 	ExpiresAt     int64  `json:"expires_at"`
 	Scope         string `json:"scope"`
-	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", or legacy "bc3"
+	OAuthType     string `json:"oauth_type"` // "bc5", "launchpad", "agent", or legacy "bc3"
 	TokenEndpoint string `json:"token_endpoint"`
+
+	// ClientID and ClientSecret are the confidential OAuth client an
+	// "agent" credential mints its own access tokens with (see agent.go).
+	// An agent principal is granted no refresh token, so these — not a
+	// refresh token — are what survives an expiry, and they are stored
+	// with the token in the OS keyring wherever one is available. Empty
+	// for every other kind of credential.
+	ClientID     string `json:"client_id,omitempty"`
+	ClientSecret string `json:"client_secret,omitempty"`
+
+	// RenewAfter is when this credential should be renewed, in Unix
+	// seconds, when that is LATER than the usual RefreshWindow before
+	// ExpiresAt. It exists for a token whose whole lifetime is shorter
+	// than that window, which the default margin would put back inside the
+	// renewal window the instant it was issued. Zero — every credential
+	// today except a minted agent self-token — means the default.
+	RenewAfter int64 `json:"renew_after,omitempty"`
 
 	// Issuer is the RFC 8414 issuer of the authorization server that minted
 	// a BC5 credential — where its metadata, and so its revocation endpoint,
@@ -56,6 +74,10 @@ type Store struct {
 	initOnce    sync.Once
 	inner       credStore
 	warnOnce    sync.Once
+
+	// lockWarnOnce fires the one warning a process gets when credential
+	// locking is impossible on this host (see lock.go).
+	lockWarnOnce sync.Once
 }
 
 // credStore is the slice of credstore.Store this wrapper uses, as an
@@ -138,9 +160,29 @@ func (s *Store) warnFallback() {
 }
 
 // Load retrieves credentials for the given origin.
+//
+// The read takes a SHARED store lock on the file backend (see lock.go):
+// readers do not queue behind each other, but none of them can land in the
+// middle of a writer's replacement of credentials.json.
 func (s *Store) Load(origin string) (*Credentials, error) {
+	return s.load(origin, lockRequest{})
+}
+
+// LoadContext is Load for a caller that can be canceled: the wait for the
+// store lock ends when ctx does. Every credential operation with a command
+// behind it uses this, so a stopped command stops waiting.
+func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, error) {
+	return s.load(origin, lockRequest{done: ctx.Done(), cause: ctx.Err})
+}
+
+func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
-	data, err := s.ensure().Load(origin)
+	var data []byte
+	err := s.withStoreReadLock(req, func() error {
+		var loadErr error
+		data, loadErr = s.ensure().Load(origin)
+		return loadErr
+	})
 	if err != nil {
 		if isMissingCredential(err) {
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
@@ -173,20 +215,57 @@ func isMissingCredential(err error) bool {
 }
 
 // Save stores credentials for the given origin.
+//
+// The write is taken under the whole-store lock: the file backend keeps
+// every key in one credentials.json and rewrites the entire document, so
+// two processes saving DIFFERENT keys at once would otherwise drop one of
+// them. See lock.go.
 func (s *Store) Save(origin string, creds *Credentials) error {
+	return s.save(s.withStoreLock, origin, creds)
+}
+
+// SaveContext is Save for a caller that can be canceled: the wait for the
+// store lock ends when ctx does, and a cancellation that lands while
+// waiting abandons the write rather than making it the moment the lock
+// frees up. A login uses it so a Ctrl-C between its last check and the
+// write cannot store the credential the person stopped.
+func (s *Store) SaveContext(ctx context.Context, origin string, creds *Credentials) error {
+	return s.save(func(fn func() error) error { return s.withStoreLockContext(ctx, fn) }, origin, creds)
+}
+
+// save marshals creds and writes them under the lock the caller chose.
+func (s *Store) save(under func(func() error) error, origin string, creds *Credentials) error {
 	s.warnFallback()
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
 	}
-	return s.ensure().Save(origin, data)
+	return under(func() error { return s.ensure().Save(origin, data) })
 }
 
-// Delete removes credentials for the given origin.
-func (s *Store) Delete(origin string) error { return s.ensure().Delete(origin) }
+// Delete removes credentials for the given origin. Locked for the same
+// reason Save is: the file backend rewrites the whole document.
+func (s *Store) Delete(origin string) error {
+	return s.withStoreLock(func() error { return s.ensure().Delete(origin) })
+}
 
-// MigrateToKeyring migrates credentials from file to keyring.
-func (s *Store) MigrateToKeyring() error { return s.ensure().MigrateToKeyring() }
+// MigrateToKeyring migrates credentials from file to keyring. It reads
+// credentials.json, saves every key it finds into the keyring, and removes
+// the file, so it is a whole-store read-modify-write and takes the store
+// lock — unconditionally, since it does its file work precisely when the
+// keyring is in use and the ordinary store lock steps aside.
+//
+// The lock keeps it exclusive with any file-backed save, which is the race
+// that could lose a credential outright (read the file, another process
+// adds a key, remove the file). It does not serialize the per-key writes
+// against a concurrent refresh of one of those keys: that would mean
+// taking every key's lock underneath the store lock, inverting the order
+// the rest of this package holds them in. A refresh landing inside a
+// migration can therefore be re-saved from the file copy — one stale
+// credential, one login to repair, against a deadlock in the common path.
+func (s *Store) MigrateToKeyring() error {
+	return s.withStoreFileLock(func() error { return s.ensure().MigrateToKeyring() })
+}
 
 // UsingKeyring returns true if the store is using the system keyring.
 func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }

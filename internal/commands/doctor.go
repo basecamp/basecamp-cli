@@ -108,7 +108,7 @@ Examples:
 			}
 
 			// Build breadcrumbs based on failures
-			breadcrumbs := buildDoctorBreadcrumbs(checks)
+			breadcrumbs := buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand())
 
 			opts := []output.ResponseOption{
 				output.WithSummary(result.Summary()),
@@ -164,7 +164,11 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 			Name:    "Authentication",
 			Status:  "skip",
 			Message: "Skipped (no credentials)",
-			Hint:    "Run: basecamp auth login",
+			// The command that re-establishes THIS credential: a stored
+			// agent credential with nothing usable in it is still an
+			// agent's, and the interactive login would replace it with a
+			// person's.
+			Hint: app.Auth.LoginHint(),
 		})
 	}
 
@@ -707,7 +711,7 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	if !app.Auth.IsAuthenticated() {
 		check.Status = "fail"
 		check.Message = "No credentials found"
-		check.Hint = "Run: basecamp auth login"
+		check.Hint = app.Auth.LoginHint()
 		return check
 	}
 
@@ -768,7 +772,7 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 	if err != nil {
 		check.Status = "fail"
 		check.Message = "Cannot load credentials"
-		check.Hint = "Run: basecamp auth login"
+		check.Hint = app.Auth.LoginHint()
 		return check
 	}
 
@@ -781,7 +785,11 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 			if err := app.Auth.Refresh(ctx); err != nil {
 				check.Status = "fail"
 				check.Message = "Token expired and refresh failed"
-				check.Hint = "Run: basecamp auth login"
+				// The failure's own remedy, not a blanket login: for an
+				// agent credential `basecamp auth login` signs a PERSON
+				// in, and doctor is read by people (and agents) looking
+				// for exactly the command to run.
+				check.Hint = remedyFor(app, err)
 				return check
 			}
 			check.Status = "pass"
@@ -1090,8 +1098,11 @@ func summarizeChecks(checks []Check) *DoctorResult {
 	return result
 }
 
-// buildDoctorBreadcrumbs creates helpful next-step suggestions based on failures.
-func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
+// buildDoctorBreadcrumbs creates helpful next-step suggestions based on
+// failures. login is the command that re-establishes the active
+// credential — an agent profile's is not the interactive one, and doctor
+// is read by people (and agents) looking for exactly the command to run.
+func buildDoctorBreadcrumbs(checks []Check, login string) []output.Breadcrumb {
 	var breadcrumbs []output.Breadcrumb
 
 	for _, c := range checks {
@@ -1103,7 +1114,7 @@ func buildDoctorBreadcrumbs(checks []Check) []output.Breadcrumb {
 		case "Credentials", "Authentication":
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "login",
-				Cmd:         "basecamp auth login",
+				Cmd:         login,
 				Description: "Authenticate with Basecamp",
 			})
 		case "API Connectivity":

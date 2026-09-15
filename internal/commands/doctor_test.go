@@ -303,7 +303,7 @@ func TestBuildDoctorBreadcrumbs(t *testing.T) {
 		{Name: "API Connectivity", Status: "pass"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 
 	// Should have one breadcrumb for auth login (deduplicated)
 	assert.Len(t, breadcrumbs, 1)
@@ -317,7 +317,7 @@ func TestBuildDoctorBreadcrumbsDeduplication(t *testing.T) {
 		{Name: "Authentication", Status: "fail"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 	assert.Len(t, breadcrumbs, 1, "should deduplicate identical suggestions")
 }
 
@@ -327,7 +327,7 @@ func TestBuildDoctorBreadcrumbsNoFailures(t *testing.T) {
 		{Name: "Authentication", Status: "pass"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 	assert.Empty(t, breadcrumbs, "should have no breadcrumbs when all pass")
 }
 
@@ -650,7 +650,7 @@ func TestBuildDoctorBreadcrumbs_BinarySignatureWarn(t *testing.T) {
 		{Name: "Binary Signature", Status: "warn"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 	require.Len(t, breadcrumbs, 1)
 	assert.Equal(t, "basecamp upgrade", breadcrumbs[0].Cmd)
 }
@@ -784,7 +784,7 @@ func TestBuildDoctorBreadcrumbs_SkillVersionWarn(t *testing.T) {
 		{Name: "Skill Version", Status: "warn"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 	require.Len(t, breadcrumbs, 1)
 	assert.Equal(t, "basecamp skill install", breadcrumbs[0].Cmd)
 }
@@ -828,7 +828,7 @@ func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {
 		{Name: "Codex Plugin Version", Status: "warn"},
 	}
 
-	breadcrumbs := buildDoctorBreadcrumbs(checks)
+	breadcrumbs := buildDoctorBreadcrumbs(checks, "basecamp auth login")
 
 	require.Len(t, breadcrumbs, 1)
 	assert.Equal(t, "basecamp setup codex", breadcrumbs[0].Cmd)
@@ -839,14 +839,14 @@ func TestBuildDoctorBreadcrumbs_Codex(t *testing.T) {
 func TestBuildDoctorBreadcrumbs_SkillAgents(t *testing.T) {
 	for _, agent := range harness.SkillAgents() {
 		t.Run(agent.ID, func(t *testing.T) {
-			breadcrumbs := buildDoctorBreadcrumbs([]Check{{Name: agent.Name + " Skill", Status: "fail"}})
+			breadcrumbs := buildDoctorBreadcrumbsForTest([]Check{{Name: agent.Name + " Skill", Status: "fail"}})
 
 			require.Len(t, breadcrumbs, 1)
 			assert.Equal(t, "setup_"+agent.ID, breadcrumbs[0].Action)
 			assert.Equal(t, "basecamp setup "+agent.ID, breadcrumbs[0].Cmd)
 		})
 	}
-	assert.Empty(t, buildDoctorBreadcrumbs([]Check{{Name: "Grok Skill", Status: "pass"}}), "a passing check needs no remediation")
+	assert.Empty(t, buildDoctorBreadcrumbsForTest([]Check{{Name: "Grok Skill", Status: "pass"}}), "a passing check needs no remediation")
 }
 
 func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
@@ -921,4 +921,10 @@ func TestAttachGitHubAuthFallsBackToGithubToken(t *testing.T) {
 	require.NoError(t, err)
 	attachGitHubAuth(req)
 	assert.Equal(t, "Bearer action-tok", req.Header.Get("Authorization"))
+}
+
+// buildDoctorBreadcrumbsForTest is buildDoctorBreadcrumbs with the ordinary
+// interactive login, for the cases that are not about which login.
+func buildDoctorBreadcrumbsForTest(checks []Check) []output.Breadcrumb {
+	return buildDoctorBreadcrumbs(checks, "basecamp auth login")
 }

@@ -242,8 +242,14 @@ func runCompletionRefresh(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("app not initialized")
 	}
 
-	// Check authentication first for friendly error message
-	if !app.Auth.IsAuthenticated() {
+	// CheckAuthenticated, not IsAuthenticated: this refuses the command,
+	// and a store it merely could not read is not a statement about
+	// whether there is a credential in it.
+	authenticated, err := app.Auth.CheckAuthenticated(cmd.Context())
+	if err != nil {
+		return err
+	}
+	if !authenticated {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
