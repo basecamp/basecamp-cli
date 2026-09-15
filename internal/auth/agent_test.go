@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -712,4 +713,60 @@ func TestUnstorableScopeIsNeverRepeated(t *testing.T) {
 			assert.Contains(t, err.Error(), "only those can be stored")
 		})
 	}
+}
+
+// TestMintedTokenMustBeABearerCredential: every request this CLI makes
+// sends the token as a Bearer credential, so a response naming another
+// scheme is not a successful login — it is one that would be stored and
+// then fail every command.
+func TestMintedTokenMustBeABearerCredential(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusOK, `{"access_token":"minted","token_type":"DPoP","expires_in":3600}`
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only sends Bearer credentials")
+	assert.NotContains(t, err.Error(), "DPoP", "the server's value was repeated back")
+
+	stored, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.Equal(t, "spent", stored.AccessToken, "a token the CLI cannot send was stored")
+
+	// An omitted type is Bearer, and a differently-cased one is too.
+	for _, body := range []string{
+		`{"access_token":"minted","expires_in":3600}`,
+		`{"access_token":"minted","token_type":"bearer","expires_in":3600}`,
+		`{"access_token":"minted","token_type":"Bearer","expires_in":3600}`,
+	} {
+		as.token = func(int) (int, string) { return http.StatusOK, body }
+		require.NoError(t, m.store.Save(key, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))))
+		token, tokenErr := m.AccessToken(context.Background())
+		require.NoError(t, tokenErr, body)
+		assert.Equal(t, "minted", token)
+	}
+}
+
+// TestAgentRetryCommandCreatesTheProfileItNeeds: a refused first mint
+// registers no profile, and the login that would fix it creates one — which
+// needs the account it addresses. Handing over a command that fails with
+// "profile does not exist" would be worse than saying nothing.
+func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.cfg.ActiveProfile = "clawdito"
+
+	m.cfg.AccountID = "999"
+	assert.Contains(t, m.agentLoginCommand("c"), "--account 999")
+
+	m.cfg.AccountID = ""
+	assert.Contains(t, m.agentLoginCommand("c"), "--account <account-id>")
+
+	// A profile that already exists is not created, so it needs no account.
+	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL}}
+	assert.NotContains(t, m.agentLoginCommand("c"), "--account")
 }

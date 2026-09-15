@@ -284,6 +284,15 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 		return nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server reported a scope other than read or full, and only those can be stored")
 	}
+	// Every request this CLI makes sends the token as a Bearer credential,
+	// so a scheme it cannot send is not a successful login — it is one
+	// that would be stored and then fail every command. An omitted type is
+	// Bearer by RFC 6750 convention; the value itself is not repeated,
+	// for the reason oauthErrorCodes gives.
+	if token.TokenType != "" && !strings.EqualFold(token.TokenType, "bearer") {
+		return nil, output.ErrAPI(resp.StatusCode,
+			"minting an agent token: the server issued a token of a type this CLI cannot send; it only sends Bearer credentials")
+	}
 	if token.RefreshToken != "" {
 		// Not fatal — the token is usable — but worth saying out loud: a
 		// refresh token here means the server's idea of this grant has
@@ -398,7 +407,19 @@ func (m *Manager) agentLoginCommand(clientID string) string {
 	if m.cfg.ActiveProfile != "" {
 		profile = shellQuote(m.cfg.ActiveProfile)
 	}
-	return "... | basecamp auth login --with-client-credentials --client-id " + id + " -P " + profile
+	command := "... | basecamp auth login --with-client-credentials --client-id " + id + " -P " + profile
+	// A profile with no entry yet is one the login creates, and creating
+	// one needs the account it addresses. That is not an edge case here: a
+	// refused FIRST mint registers nothing, which is exactly when this
+	// command is handed over.
+	if _, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered {
+		account := "<account-id>"
+		if m.cfg.AccountID != "" {
+			account = shellQuote(m.cfg.AccountID)
+		}
+		command += " --account " + account
+	}
+	return command
 }
 
 // ClientCredentialsOptions configures an agent login.
