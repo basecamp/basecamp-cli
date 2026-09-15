@@ -186,7 +186,6 @@ func TestRefusedMintIsAnAuthErrorAndAServerFaultIsNot(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, output.CodeAuth, output.AsError(err).Code)
 	assert.Contains(t, err.Error(), "invalid_client")
-	assert.Contains(t, err.Error(), "unknown client")
 
 	as.token = func(int) (int, string) { return http.StatusBadGateway, `no json here` }
 	_, err = m.AccessToken(context.Background())
@@ -403,6 +402,28 @@ func TestAgentLogoutSaysRotatingTheSecretIsTheRemedy(t *testing.T) {
 	assert.ErrorIs(t, loadErr, ErrNoCredential)
 }
 
+// TestAgentRevokeIsRefusedAndKeepsTheCredential: `auth revoke` is the
+// not-best-effort path — it refuses rather than discarding when it cannot
+// revoke — and an agent self-token is one it will not try for, since the
+// client that minted it can mint another. It must say so without
+// contacting the authorization server and without losing the credential.
+func TestAgentRevokeIsRefusedAndKeepsTheCredential(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(time.Hour)))
+
+	err := m.RevokeStored(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+	assert.Contains(t, err.Error(), "rotate the client secret")
+	assert.Empty(t, as.revokeCalls(), "a revocation was sent for an agent self-token")
+
+	creds, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr, "a refused revoke removed the credential")
+	assert.Equal(t, "spent", creds.AccessToken)
+	assert.Equal(t, "agent-secret", creds.ClientSecret)
+}
+
 // TestShortLivedAgentTokenIsNotRenewedOnEveryCommand: a token whose whole
 // lifetime is inside the five-minute refresh window would, on the default
 // margin, be back inside the renewal window the instant it was minted —
@@ -544,25 +565,27 @@ func TestAgentLoginCommandFillsInWhatIsMissing(t *testing.T) {
 	assert.Contains(t, m.agentLoginCommand("a client"), "-P clawdito")
 }
 
-// TestAgentMintRefusalNeverEchoesTheClientSecret: the request carried the
-// secret, and a token endpoint that quotes the credential it rejected
-// would otherwise put it on a terminal and into the error envelope.
-// Sanitizing strips control sequences, not secrets.
-func TestAgentMintRefusalNeverEchoesTheClientSecret(t *testing.T) {
-	for name, body := range map[string]string{
-		"in the description": `{"error":"invalid_client","error_description":"Rejected client_secret=agent-secret for this client"}`,
-		"in a raw body":      `<html>bad request: client_secret=agent-secret</html>`,
-		"percent-encoded":    `{"error":"invalid_client","error_description":"got client_secret=agent%2Dsecret"}`,
-		// url.QueryUnescape refuses a whole string over one bad escape, so
-		// a stray per-cent sign in prose must not switch the check off.
-		"percent-encoded beside a stray per-cent": `{"error":"invalid_client","error_description":"Rejected agent%2Dsecret; quota 100%"}`,
-		// Stripping the control sequence closes the gap it held open,
-		// which the pass before sanitizing cannot see.
-		"split by a control sequence": "{\"error\":\"invalid_client\",\"error_description\":\"got agent-\u001b[31msecret\"}",
+// TestAgentMintRefusalRepeatsNothingTheServerWrote: the request carried a
+// client secret, and a token endpoint is free to quote back what it
+// rejected — in any escaping it likes. Nothing free-form from the response
+// reaches the operator, so none of these spellings can matter.
+func TestAgentMintRefusalRepeatsNothingTheServerWrote(t *testing.T) {
+	type refusal struct{ body, want string }
+	for name, c := range map[string]refusal{
+		"in the description": {`{"error":"invalid_client","error_description":"Rejected client_secret=agent-secret for this client"}`, "invalid_client"},
+		"percent-encoded":    {`{"error":"invalid_client","error_description":"got client_secret=agent%2Dsecret"}`, "invalid_client"},
+		"html-escaped":       {`{"error":"invalid_client","error_description":"got agent&#45;secret"}`, "invalid_client"},
+		// Not JSON, or not parseable as it: the status is all there is to
+		// say.
+		"in a raw body":               {`<html>bad request: client_secret=agent-secret</html>`, "HTTP 400"},
+		"split by a control sequence": {"{\"error\":\"invalid_client\",\"error_description\":\"got agent-\u001b[31msecret\"}", "HTTP 400"},
+		// An error code outside RFC 6749's vocabulary is server-chosen
+		// text like any other, so it is not repeated either.
+		"an invented error code": {`{"error":"you-are-holding-it-wrong <script>","error_description":"agent-secret"}`, "HTTP 400"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := startDeviceAS(t)
-			as.token = func(int) (int, string) { return http.StatusBadRequest, body }
+			as.token = func(int) (int, string) { return http.StatusBadRequest, c.body }
 
 			m := newDeviceTestManager(t, as.srv.URL)
 			storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
@@ -571,8 +594,11 @@ func TestAgentMintRefusalNeverEchoesTheClientSecret(t *testing.T) {
 			require.Error(t, err)
 			e := output.AsError(err)
 			assert.NotContains(t, e.Message, "agent-secret")
-			assert.NotContains(t, e.Hint, "agent-secret")
-			assert.Contains(t, e.Message, "[redacted]")
+			assert.NotContains(t, e.Message, "agent%2Dsecret")
+			assert.NotContains(t, e.Message, "agent&#45;secret")
+			assert.NotContains(t, e.Message, "Rejected")
+			assert.NotContains(t, e.Message, "script")
+			assert.Contains(t, e.Message, c.want)
 		})
 	}
 }
@@ -636,7 +662,7 @@ func TestMintedScopeMustBeOneTheCLICanStore(t *testing.T) {
 
 	_, err := m.AccessToken(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only read or full can be stored")
+	assert.Contains(t, err.Error(), "only those can be stored")
 
 	stored, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
@@ -662,11 +688,10 @@ func TestCanceledTokenImportStoresNothing(t *testing.T) {
 	assert.ErrorIs(t, loadErr, ErrNoCredential)
 }
 
-// TestUnstorableScopeNeverEchoesTheClientSecret: the scope is another
-// field the server controls, on a request that carried the secret. Every
-// server-derived string reaches a person through one renderer so that a
-// new message cannot forget this.
-func TestUnstorableScopeNeverEchoesTheClientSecret(t *testing.T) {
+// TestUnstorableScopeIsNeverRepeated: the scope is another field the
+// server controls on a request that carried the secret, so the value is
+// refused without being quoted back.
+func TestUnstorableScopeIsNeverRepeated(t *testing.T) {
 	for name, scope := range map[string]string{
 		"the secret verbatim":                    "agent-secret",
 		"the secret split by a control sequence": `agent-\u001b[31msecret`,
@@ -684,7 +709,7 @@ func TestUnstorableScopeNeverEchoesTheClientSecret(t *testing.T) {
 			_, err := m.AccessToken(context.Background())
 			require.Error(t, err)
 			assert.NotContains(t, err.Error(), "agent-secret")
-			assert.Contains(t, err.Error(), "only read or full can be stored")
+			assert.Contains(t, err.Error(), "only those can be stored")
 		})
 	}
 }

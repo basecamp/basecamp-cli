@@ -14,7 +14,6 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Agent self-tokens: the RFC 6749 §4.4 client_credentials grant.
@@ -66,10 +65,6 @@ const agentMintTimeout = 30 * time.Second
 // maxAgentTokenBytes bounds the token response read. A token response is a
 // few hundred bytes; this is the SDK exchanger's own ceiling.
 const maxAgentTokenBytes int64 = 1 << 20
-
-// maxAgentErrorBytes bounds how much of a server's error text is repeated
-// back, matching the SDK exchanger.
-const maxAgentErrorBytes = 500
 
 // agentMint is everything one client_credentials request needs, resolved
 // and checked without sending anything.
@@ -272,8 +267,8 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 
 	var token oauth.Token
 	if err := json.Unmarshal(body, &token); err != nil {
-		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: parsing the token response: "+
-			safeServerText(err.Error(), mint.clientSecret))
+		// Not even the parser's complaint: it quotes a byte of the body.
+		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response could not be parsed")
 	}
 	if token.AccessToken == "" {
 		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response carries no access_token")
@@ -283,9 +278,11 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	// A response naming anything else is refused rather than persisted —
 	// the same judgment the interactive login's verifier makes.
 	if token.Scope != "" && token.Scope != scopeRead && token.Scope != scopeFull {
-		return nil, output.ErrAPI(resp.StatusCode, fmt.Sprintf(
-			"minting an agent token: the server reports scope %q, and only read or full can be stored",
-			safeServerText(token.Scope, mint.clientSecret)))
+		// The value is not repeated, for the reason oauthErrorCodes gives:
+		// it is another field the server chose on a request that carried
+		// the secret.
+		return nil, output.ErrAPI(resp.StatusCode,
+			"minting an agent token: the server reported a scope other than read or full, and only those can be stored")
 	}
 	if token.RefreshToken != "" {
 		// Not fatal — the token is usable — but worth saying out loud: a
@@ -299,28 +296,44 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	return &token, nil
 }
 
-// agentMintRefusal renders a non-200 token response. An RFC 6749 §5.2
-// error object is rendered in the SDK exchanger's shape; anything else
-// keeps the status and a bounded, single-line excerpt of whatever came
-// back — the body is server-controlled and reaches terminals and
-// transcripts.
+// oauthErrorCodes are the RFC 6749 §5.2 token-endpoint error codes (and
+// the RFC 8628 additions a Basecamp endpoint may reuse). They are the ONLY
+// thing a mint repeats from a response body.
+//
+// A client_credentials request puts a client secret on the wire, and a
+// token endpoint is free to quote back what it rejected. Redacting the
+// secret out of an echoed body is an arms race that cannot be won — a
+// percent escape, an HTML entity, a control sequence splitting it in two,
+// and each one only found after someone thinks of it — so nothing
+// free-form is repeated at all. What is left is a fixed vocabulary, which
+// is what an operator acts on anyway, and the status.
+//
+// The cost is `error_description`, which sometimes says something useful.
+// It is not worth a credential that a terminal, a transcript and a JSON
+// envelope would all carry.
+var oauthErrorCodes = map[string]bool{
+	"invalid_request":        true,
+	"invalid_client":         true,
+	"invalid_grant":          true,
+	"unauthorized_client":    true,
+	"unsupported_grant_type": true,
+	"invalid_scope":          true,
+	"access_denied":          true,
+	"authorization_pending":  true,
+	"expired_token":          true,
+	"slow_down":              true,
+}
+
+// agentMintRefusal renders a non-200 token response: the RFC 6749 §5.2
+// error code when the body carries one this package knows, and the HTTP
+// status otherwise. See oauthErrorCodes for why nothing else is repeated.
 func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) error {
+	detail := fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
 	var errResp struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
+		Error string `json:"error"`
 	}
-	// Everything below is server-controlled text about a request that
-	// carried a client secret, so the secret comes out of it first: a
-	// token endpoint that quotes the credential it rejected ("Rejected
-	// client_secret=...") would otherwise put it on a terminal and into an
-	// error envelope. Sanitizing strips control sequences, not secrets.
-	safe := func(text string) string { return safeServerText(text, mint.clientSecret) }
-	detail := fmt.Sprintf("the server answered HTTP %d: %s", resp.StatusCode, safe(string(body)))
-	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-		detail = "token error: " + safe(errResp.Error)
-		if desc := safe(errResp.ErrorDescription); desc != "" {
-			detail += " - " + desc
-		}
+	if json.Unmarshal(body, &errResp) == nil && oauthErrorCodes[errResp.Error] {
+		detail = "token error: " + errResp.Error
 	}
 
 	// A 4xx says the CLIENT is wrong — an unknown client, a rotated
@@ -336,6 +349,17 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
+}
+
+// isRedirect reports whether status is one of the redirects a
+// credential-carrying POST refuses to follow.
+func isRedirect(status int) bool {
+	switch status {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
 }
 
 // agentRemedy replaces the default login remedy on an auth error raised
@@ -375,105 +399,6 @@ func (m *Manager) agentLoginCommand(clientID string) string {
 		profile = shellQuote(m.cfg.ActiveProfile)
 	}
 	return "... | basecamp auth login --with-client-credentials --client-id " + id + " -P " + profile
-}
-
-// isRedirect reports whether status is one of the redirects a
-// credential-carrying POST refuses to follow.
-func isRedirect(status int) bool {
-	switch status {
-	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
-		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		return true
-	}
-	return false
-}
-
-// safeServerText renders server-controlled text for a message a person
-// will read. EVERY such string goes through here — a refusal's excerpt, a
-// scope the CLI cannot store, a parse failure — because the request that
-// produced it carried a client secret and there is no second place to
-// remember that.
-//
-// Redact, sanitize, redact again, bound. The second redaction is not
-// belt-and-braces: stripping a control sequence can close a gap one held
-// open inside the secret ("agent-\x1b[31msecret"), which the first pass
-// cannot see and which would otherwise be reassembled on its way to the
-// terminal.
-func safeServerText(text, secret string) string {
-	return truncate(redactSecret(richtext.SanitizeSingleLine(redactSecret(text, secret)), secret), maxAgentErrorBytes)
-}
-
-// redactSecret removes the client secret this request sent from text the
-// server sent back — verbatim and percent-encoded, since a body that
-// quotes the submitted form carries the latter — and withholds the text
-// entirely when the secret survives in some other escaping. Only the value
-// actually sent is matched, so nothing else in the server's message is
-// altered.
-func redactSecret(text, secret string) string {
-	if secret == "" {
-		return text
-	}
-	text = strings.ReplaceAll(text, secret, secretRedaction)
-	if encoded := url.QueryEscape(secret); encoded != secret {
-		text = strings.ReplaceAll(text, encoded, secretRedaction)
-	}
-	// A server is free to escape what it echoes however it likes, and
-	// chasing every spelling is a losing game. So: if the text still
-	// carries the secret once its percent-escapes are undone, none of it
-	// is shown. A diagnostic excerpt is not worth a leaked credential.
-	if strings.Contains(percentDecodeLoose(text), secret) {
-		return secretRedaction
-	}
-	return text
-}
-
-// percentDecodeLoose undoes the valid percent-escapes in s and leaves the
-// malformed ones alone. url.QueryUnescape refuses the whole string over
-// one bad escape, and a stray per-cent sign in prose ("quota 100%") is
-// enough to produce that — switching the check off exactly where a server
-// is quoting the request back.
-func percentDecodeLoose(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		if s[i] == '%' && i+2 < len(s) {
-			if hi, ok := unhexDigit(s[i+1]); ok {
-				if lo, lowOK := unhexDigit(s[i+2]); lowOK {
-					b.WriteByte(hi<<4 | lo)
-					i += 3
-					continue
-				}
-			}
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
-
-// unhexDigit is one hexadecimal digit's value, and whether c was one.
-func unhexDigit(c byte) (byte, bool) {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0', true
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
-	}
-	return 0, false
-}
-
-// secretRedaction is what stands in for a secret the server echoed back.
-const secretRedaction = "[redacted]"
-
-// truncate bounds a server-supplied string for display.
-func truncate(s string, limit int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= limit {
-		return s
-	}
-	return s[:limit-3] + "..."
 }
 
 // ClientCredentialsOptions configures an agent login.
