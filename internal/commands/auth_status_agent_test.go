@@ -76,3 +76,45 @@ func TestAuthStatusOnABrokenAgentOffersTheAgentLogin(t *testing.T) {
 	assert.Contains(t, envelope.Notice, "--client-id agent-client")
 	assert.NotContains(t, envelope.Notice, "Run: basecamp auth login -P")
 }
+
+// TestDoctorOffersTheAgentLoginForABrokenAgent: doctor is the diagnostic
+// people (and agents) read for exactly the command to run, in its check
+// hints and its breadcrumbs. Naming the interactive login there would have
+// them sign in as themselves over the agent's credential.
+func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		AccessToken:   "spent",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		// Nothing to mint with, so the check fails and has to say what
+		// to do about it.
+		ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+	}))
+
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+
+	check := checkAuthentication(context.Background(), app, false)
+	assert.Equal(t, "fail", check.Status)
+	assert.Contains(t, check.Hint, "--with-client-credentials")
+	assert.NotContains(t, check.Hint, "Run: basecamp auth login -P")
+
+	crumbs := buildDoctorBreadcrumbs([]Check{{Name: "Credentials", Status: "fail"}}, app.Auth.LoginCommand())
+	require.NotEmpty(t, crumbs)
+	assert.Contains(t, crumbs[0].Cmd, "--with-client-credentials")
+	assert.Contains(t, crumbs[0].Cmd, "--client-id agent-client")
+}

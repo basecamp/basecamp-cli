@@ -1396,6 +1396,18 @@ basecamp auth login --device-code                 # Print a link and one-time co
 BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE, and only where the server offers the device flow (Launchpad does not); browser and pasted-callback flows refuse — prefer --with-token
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
+```
+
+**Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
+status --json` reports it, and `agent` means the profile is a Basecamp agent: a
+principal with no person behind it, which authenticates with its OAuth client
+rather than a sign-in. `basecamp auth login` and `--with-token` would both store
+a PERSON's credential under that profile and silently replace the agent; its
+recovery is `--with-client-credentials` with the client secret piped in. The
+CLI's own `hint` on a failing agent credential already names that command with
+the client id filled in — prefer it verbatim.
+
+```bash
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity
 basecamp auth revoke                              # Revoke the token with the server and forget it; refuses when it cannot revoke (auth logout forgets regardless)
 basecamp profile create <name> --account <id> --expect-identity <id>  # Same assertion for a new profile
@@ -1479,7 +1491,7 @@ basecamp people list --jq '[.data[] | {name: .name, email: .email_address}]'
 | 0 | OK | — |
 | 1 | Usage error | Check `basecamp <cmd> --help` |
 | 2 | Not found | Verify ID/URL exists |
-| 3 | Auth error | `basecamp auth login` |
+| 3 | Auth error | `basecamp auth login` — but check `oauth_type` first: an `agent` profile recovers with `--with-client-credentials`, and a plain login would replace it |
 | 4 | Forbidden | Check account/project permissions |
 | 5 | Rate limit | Wait and retry (resilience layer handles Retry-After automatically) |
 | 6 | Network error | Check connectivity, `basecamp doctor` |
