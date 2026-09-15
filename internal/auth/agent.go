@@ -88,11 +88,11 @@ type agentMint struct {
 func (m *Manager) prepareAgentMint(creds *Credentials) (*agentMint, error) {
 	switch {
 	case creds.ClientID == "":
-		return nil, m.errAuth("Agent credentials are missing their OAuth client id and cannot mint a token")
+		return nil, m.errAgentAuth("Agent credentials are missing their OAuth client id and cannot mint a token", creds.ClientID)
 	case creds.ClientSecret == "":
-		return nil, m.errAuth("Agent credentials are missing their OAuth client secret and cannot mint a token")
+		return nil, m.errAgentAuth("Agent credentials are missing their OAuth client secret and cannot mint a token", creds.ClientID)
 	case creds.TokenEndpoint == "":
-		return nil, m.errAuth("Agent credentials are missing their token endpoint and cannot mint a token")
+		return nil, m.errAgentAuth("Agent credentials are missing their token endpoint and cannot mint a token", creds.ClientID)
 	}
 
 	// The token endpoint is a persisted value and receives the client
@@ -256,7 +256,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, m.agentMintRefusal(resp, body)
+		return nil, m.agentMintRefusal(resp, body, mint.clientID)
 	}
 
 	var token oauth.Token
@@ -283,7 +283,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 // keeps the status and a bounded, single-line excerpt of whatever came
 // back — the body is server-controlled and reaches terminals and
 // transcripts.
-func (m *Manager) agentMintRefusal(resp *http.Response, body []byte) error {
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, clientID string) error {
 	var errResp struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
@@ -307,9 +307,38 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte) error {
 	// package's own classifier, which is how a 5xx stays retryable and a
 	// 429 keeps its Retry-After.
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-		return m.errAuth("Minting an agent token was refused (" + detail + ")")
+		return m.errAgentAuth("Minting an agent token was refused ("+detail+")", clientID)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
+}
+
+// errAgentAuth is an auth_required error about an agent credential, with
+// the AGENT login as its remedy.
+//
+// m.errAuth's remedy is `basecamp auth login -P <profile>`, which signs a
+// PERSON in: an operator who followed it after a refused mint would
+// replace the agent's credential with their own and only find out later.
+// The command here re-runs the login this credential came from, with the
+// client it already carries, and says where the secret goes.
+func (m *Manager) errAgentAuth(msg, clientID string) *output.Error {
+	e := output.ErrAuth(msg)
+	e.Hint = "Pipe the agent's client secret in: `... | " + m.agentLoginCommand(clientID) + "`"
+	return e
+}
+
+// agentLoginCommand is the client-credentials login addressed to the
+// active profile, naming the client whose secret is being replaced. Both
+// values come from configuration and a credential store, so both are
+// shell-quoted: the command is meant to be pasted.
+func (m *Manager) agentLoginCommand(clientID string) string {
+	cmd := "basecamp auth login --with-client-credentials"
+	if clientID != "" {
+		cmd += " --client-id " + shellQuote(clientID)
+	}
+	if m.cfg.ActiveProfile != "" {
+		cmd += " -P " + shellQuote(m.cfg.ActiveProfile)
+	}
+	return cmd
 }
 
 // isRedirect reports whether status is one of the redirects a

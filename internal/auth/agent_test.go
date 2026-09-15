@@ -479,3 +479,32 @@ func TestRateLimitedMintStaysRetryable(t *testing.T) {
 	assert.Equal(t, output.CodeRateLimit, e.Code)
 	assert.True(t, e.Retryable)
 }
+
+// TestAgentFailureNeverPointsAtTheInteractiveLogin: the default remedy for
+// an auth_required error is `basecamp auth login -P <profile>`, which
+// signs a PERSON in. An operator who followed it after a refused mint
+// would replace the agent's credential with their own.
+func TestAgentFailureNeverPointsAtTheInteractiveLogin(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusUnauthorized, `{"error":"invalid_client"}`
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.cfg.ActiveProfile = "clawdito"
+	storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	hint := output.AsError(err).Hint
+	assert.Contains(t, hint, "--with-client-credentials")
+	assert.Contains(t, hint, "--client-id agent-client")
+	assert.Contains(t, hint, "-P clawdito")
+	assert.NotEqual(t, m.LoginCommand(), hint, "the remedy is the interactive login")
+
+	// The same for a credential that cannot mint at all.
+	broken := agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))
+	broken.ClientSecret = ""
+	hint = output.AsError(m.RefreshRefusal(broken)).Hint
+	assert.Contains(t, hint, "--with-client-credentials")
+}
