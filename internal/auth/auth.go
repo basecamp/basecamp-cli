@@ -246,10 +246,13 @@ func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
 // a rotated refresh token safe, since no other process can be between its
 // own load and save while this one holds it.
 //
-// The fast path — a credential comfortably inside its lifetime — takes no
-// lock at all, which is every command in a normal hour. Reading one key is
-// atomic in both backends (the file backend replaces credentials.json by
-// rename), so a reader has nothing to race with.
+// The fast path — a credential comfortably inside its lifetime, which is
+// every command in a normal hour — takes no KEY lock: there is nothing to
+// renew, so nothing for it to be exclusive with. The read itself is still
+// taken under the store's shared lock on the file backend, because
+// replacing credentials.json is not atomic on every platform; readers
+// never queue behind each other there, only behind a writer, and no
+// network happens under that lock.
 func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

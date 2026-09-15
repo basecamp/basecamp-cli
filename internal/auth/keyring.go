@@ -160,9 +160,18 @@ func (s *Store) warnFallback() {
 }
 
 // Load retrieves credentials for the given origin.
+//
+// The read takes a SHARED store lock on the file backend (see lock.go):
+// readers do not queue behind each other, but none of them can land in the
+// middle of a writer's replacement of credentials.json.
 func (s *Store) Load(origin string) (*Credentials, error) {
 	s.warnFallback()
-	data, err := s.ensure().Load(origin)
+	var data []byte
+	err := s.withStoreReadLock(func() error {
+		var loadErr error
+		data, loadErr = s.ensure().Load(origin)
+		return loadErr
+	})
 	if err != nil {
 		if isMissingCredential(err) {
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)

@@ -12,6 +12,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Cross-process credential locking.
@@ -153,6 +154,28 @@ func (s *Store) withStoreLock(fn func() error) error {
 	return s.withStoreFileLock(fn)
 }
 
+// withStoreReadLock runs a file-backed READ under a shared store lock, so
+// readers do not queue behind each other but do wait out a writer.
+//
+// It is here because the file backend's replacement is not atomic
+// everywhere: on Windows, when the rename over an existing
+// credentials.json fails, the underlying store falls back to removing the
+// file and renaming into its place — and an unlocked read landing in that
+// gap sees no file, reports the store as empty, and produces the very
+// "Not authenticated for profile:" this package exists to stop. On a
+// keyring-backed store there is nothing to wait for.
+func (s *Store) withStoreReadLock(fn func() error) error {
+	if s.ensure().UsingKeyring() {
+		return fn()
+	}
+	release, err := s.lockFile(storeLockName, "credential store", true, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return fn()
+}
+
 // withStoreLockContext is withStoreLock for a caller that can be canceled.
 //
 // The wait ends when ctx does, and — this is the point — the cancellation
@@ -168,7 +191,7 @@ func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error
 		}
 		return fn()
 	}
-	release, err := s.lockFile(storeLockName, "credential store", ctx.Done(), ctx.Err)
+	release, err := s.lockFile(storeLockName, "credential store", false, ctx.Done(), ctx.Err)
 	if err != nil {
 		return err
 	}
@@ -183,7 +206,7 @@ func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error
 // through withStoreLock would skip the lock precisely when it is doing the
 // file work the lock exists for.
 func (s *Store) withStoreFileLock(fn func() error) error {
-	release, err := s.lockFile(storeLockName, "credential store", nil, nil)
+	release, err := s.lockFile(storeLockName, "credential store", false, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -196,12 +219,12 @@ func (s *Store) withStoreFileLock(fn func() error) error {
 // locking one credential; the whole-store lock has no context and goes
 // through lockFile directly.
 func (s *Store) acquire(ctx context.Context, name string) (func(), error) {
-	return s.lockFile(name, "credential", ctx.Done(), ctx.Err)
+	return s.lockFile(name, "credential", false, ctx.Done(), ctx.Err)
 }
 
-// lockFile takes the exclusive lock named name, waiting up to
-// credentialLockWait for whoever holds it, and returns the release to
-// defer. The release is always safe to call. done and cause are a caller's
+// lockFile takes the lock named name — exclusive, or shared when the
+// caller only reads — waiting up to credentialLockWait for whoever holds
+// it, and returns the release to defer. The release is always safe to call. done and cause are a caller's
 // cancellation, or both nil for a wait that runs to its bound.
 //
 // The two failure modes are answered differently on purpose. A lock that
@@ -213,7 +236,7 @@ func (s *Store) acquire(ctx context.Context, name string) (func(), error) {
 // the opposite: someone is demonstrably inside the critical section, so an
 // expired wait is an error rather than a race, and the caller is told what
 // to look for.
-func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() error) (func(), error) {
+func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, cause func() error) (func(), error) {
 	noop := func() {}
 
 	// A caller whose wait is already over gets nothing — this before
@@ -232,9 +255,13 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 	}
 
 	fl := flock.New(filepath.Join(s.lockDir(), name))
+	try := fl.TryLock
+	if shared {
+		try = fl.TryRLock
+	}
 	deadline := time.Now().Add(credentialLockWait)
 	for {
-		locked, err := fl.TryLock()
+		locked, err := try()
 		switch {
 		case locked:
 			// The same check again, because the acquisition itself is a
@@ -324,8 +351,13 @@ func lockCause(cause func() error) error {
 // to prevent are back for as long as it holds.
 func (s *Store) warnUnlockable(what, reason string) {
 	s.lockWarnOnce.Do(func() {
+		// The reason carries a filesystem error, and so the configured
+		// config directory — which comes from XDG_CONFIG_HOME and can hold
+		// anything, newlines and terminal control sequences included. This
+		// goes straight to stderr with no renderer in between, so it is
+		// reduced to one safe line here.
 		fmt.Fprintf(os.Stderr,
 			"warning: cannot lock the %s (%s); concurrent basecamp processes may lose a credential\n",
-			what, reason)
+			what, richtext.SanitizeSingleLine(reason))
 	})
 }

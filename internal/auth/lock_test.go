@@ -518,6 +518,63 @@ func TestCanceledSaveWaitingOnTheStoreLockWritesNothing(t *testing.T) {
 	assert.Equal(t, "original", creds.AccessToken, "a canceled save wrote anyway")
 }
 
+// TestHeldStoreLockBlocksAFileBackedRead: replacing credentials.json is
+// not atomic on every platform — where the rename over an existing file
+// fails, the underlying store removes it and renames into its place — so a
+// read landing in that gap would report the store empty and produce the
+// "Not authenticated for profile:" this package exists to stop. Readers
+// therefore take the store's SHARED lock and wait out a writer.
+func TestHeldStoreLockBlocksAFileBackedRead(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "original"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+
+	done := make(chan *Credentials, 1)
+	go func() {
+		creds, loadErr := store.Load("profile:bot")
+		assert.NoError(t, loadErr)
+		done <- creds
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("a read completed while a writer held the store lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	require.NoError(t, held.Close())
+
+	select {
+	case creds := <-done:
+		assert.Equal(t, "original", creds.AccessToken)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the read never completed after the lock was released")
+	}
+}
+
+// TestFileBackedReadsDoNotQueueBehindEachOther: the read lock is shared,
+// so twenty commands asking for a token at once do not serialize on it.
+func TestFileBackedReadsDoNotQueueBehindEachOther(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "original"}))
+
+	// One reader holds its shared lock while another takes one too.
+	release, err := store.lockFile(storeLockName, "credential store", true, nil, nil)
+	require.NoError(t, err)
+	defer release()
+
+	restoreLockWait(t, time.Second)
+	creds, err := store.Load("profile:bot")
+	require.NoError(t, err, "a read waited for another read")
+	assert.Equal(t, "original", creds.AccessToken)
+}
+
 // TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so
 // it would be taken and the work done — a credential revoked, deleted,
 // replaced — for a command the person already stopped. Every caller is
@@ -594,7 +651,7 @@ func TestCancellationDuringLockSetupIsStillRefused(t *testing.T) {
 
 	// A nil done channel is never selected on here: the fall-through is
 	// reached before any wait.
-	release, err := store.lockFile(keyLockName("profile:bot"), "credential", nil, cause)
+	release, err := store.lockFile(keyLockName("profile:bot"), "credential", false, nil, cause)
 	release()
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 2, calls, "the fall-through never rechecked the caller's wait")
