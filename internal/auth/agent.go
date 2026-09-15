@@ -341,23 +341,41 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	var errResp struct {
 		Error string `json:"error"`
 	}
+	code := ""
 	if json.Unmarshal(body, &errResp) == nil && oauthErrorCodes[errResp.Error] {
-		detail = "token error: " + errResp.Error
+		code = errResp.Error
+		detail = "token error: " + code
 	}
 
-	// A 4xx says the CLIENT is wrong — an unknown client, a rotated
-	// secret, a scope it was never granted — which no retry fixes and a
-	// fresh login does, so it is an auth-class failure with the login as
-	// its remedy. 429 is the exception: the client is fine, the caller is
-	// early, and answering "authenticate again" would send an automated
-	// caller into a re-login loop against a server already asking it to
-	// slow down. Everything else keeps its own class through the
-	// package's own classifier, which is how a 5xx stays retryable and a
-	// 429 keeps its Retry-After.
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+	// A refusal OF THE CLIENT is one the server named as such, or a 401 or
+	// 403, which nothing but the credentials produces. Those are what no
+	// retry fixes and a fresh login does, so those get the login as their
+	// remedy.
+	//
+	// Every other 4xx keeps its own class. A proxy's bare 400, a 408
+	// nobody meant as a verdict, a 404 at a misconfigured endpoint — none
+	// of them say the secret is wrong, and telling an automated caller to
+	// fetch its secret again for one of them is advice that cannot help.
+	// 429 is the clearest case: the client is fine and the caller is
+	// early. statusFailure keeps the status, the retryability and the
+	// Retry-After for all of them.
+	if clientRefusalCodes[code] || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
+}
+
+// clientRefusalCodes are the RFC 6749 §5.2 codes that say the CLIENT
+// CREDENTIALS are the problem — as opposed to the request's shape
+// (invalid_request), the server's capabilities (unsupported_grant_type),
+// or a caller going too fast (slow_down), none of which a fresh login
+// repairs.
+var clientRefusalCodes = map[string]bool{
+	"invalid_client":      true,
+	"invalid_grant":       true,
+	"unauthorized_client": true,
+	"invalid_scope":       true,
+	"access_denied":       true,
 }
 
 // isRedirect reports whether status is one of the redirects a

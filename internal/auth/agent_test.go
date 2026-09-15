@@ -775,3 +775,47 @@ func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL, AccountID: "999"}}
 	assert.NotContains(t, m.agentLoginCommand("c"), "--account")
 }
+
+// TestOnlyACredentialRefusalAsksForTheSecretAgain: telling an automated
+// caller to fetch its client secret again is advice that only helps when
+// the credentials are actually the problem. A proxy's bare 400, a 408, a
+// 404 at a misconfigured endpoint — none of those are verdicts on the
+// client, and none of them should send it looking for a new secret.
+func TestOnlyACredentialRefusalAsksForTheSecretAgain(t *testing.T) {
+	type refusal struct {
+		status int
+		body   string
+		code   string
+	}
+	for name, c := range map[string]refusal{
+		"a named client refusal":   {http.StatusBadRequest, `{"error":"invalid_client"}`, output.CodeAuth},
+		"a named grant refusal":    {http.StatusBadRequest, `{"error":"invalid_grant"}`, output.CodeAuth},
+		"an unauthorized client":   {http.StatusBadRequest, `{"error":"unauthorized_client"}`, output.CodeAuth},
+		"a bare 401":               {http.StatusUnauthorized, `nothing useful`, output.CodeAuth},
+		"a bare 403":               {http.StatusForbidden, `nothing useful`, output.CodeAuth},
+		"a malformed request":      {http.StatusBadRequest, `{"error":"invalid_request"}`, output.CodeAPI},
+		"a grant the server lacks": {http.StatusBadRequest, `{"error":"unsupported_grant_type"}`, output.CodeAPI},
+		"a proxy's bare 400":       {http.StatusBadRequest, `<html>Bad Request</html>`, output.CodeAPI},
+		"a timeout in front of it": {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
+		"a misconfigured endpoint": {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
+		"a rate limit":             {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
+		"a server fault":           {http.StatusBadGateway, `<html>Bad Gateway</html>`, output.CodeAPI},
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startDeviceAS(t)
+			as.token = func(int) (int, string) { return c.status, c.body }
+
+			m := newDeviceTestManager(t, as.srv.URL)
+			storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+			e := output.AsError(err)
+			assert.Equal(t, c.code, e.Code)
+			if c.code != output.CodeAuth {
+				assert.NotContains(t, e.Hint, "--with-client-credentials",
+					"a response that is not a verdict on the client asked for its secret again")
+			}
+		})
+	}
+}

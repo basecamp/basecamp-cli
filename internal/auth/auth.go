@@ -172,9 +172,10 @@ func (m *Manager) LoginCommand() string {
 // from here.
 //
 // Deciding it here rather than at each error site is the point: an error
-// path added later cannot forget. The store read costs nothing new — every
-// caller of this has already been through the credential store — and a
-// store that cannot be read simply falls back to the interactive form.
+// path added later cannot forget. It reads nothing — the answer comes from
+// what the Manager last had in its hands (see credentialKind), because
+// this is reached FROM a failure and must not be able to turn one into a
+// hang.
 func (m *Manager) loginRemedy() (command, lead string) {
 	// From what was remembered, never from a fresh read: this is reached
 	// FROM a failure, and must not be able to turn one into a hang. See
