@@ -165,7 +165,7 @@ func (s *Store) withStoreLock(fn func() error) error {
 // "Not authenticated for profile:" this package exists to stop. On a
 // keyring-backed store there is nothing to wait for.
 func (s *Store) withStoreReadLock(req lockRequest, fn func() error) error {
-	if req.unlocked || s.ensure().UsingKeyring() {
+	if s.ensure().UsingKeyring() {
 		if err := lockCause(req.cause); err != nil {
 			return err
 		}
@@ -242,13 +242,9 @@ type lockRequest struct {
 	what   string
 	shared bool
 	// wait bounds the attempt; zero means credentialLockWait.
-	wait time.Duration
-	// unlocked skips the lock altogether, for a reader whose answer is
-	// already "no" for anything it cannot read and which must not wait on
-	// another process's write. Only withStoreReadLock honors it.
-	unlocked bool
-	done     <-chan struct{}
-	cause    func() error
+	wait  time.Duration
+	done  <-chan struct{}
+	cause func() error
 }
 
 // lockFile takes the lock named name — exclusive, or shared when the

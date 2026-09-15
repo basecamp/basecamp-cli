@@ -62,7 +62,11 @@ func NewMeCmd() *cobra.Command {
 func runMe(cmd *cobra.Command, args []string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	if !app.Auth.IsAuthenticated() {
+	authenticated, err := app.Auth.CheckAuthenticated(cmd.Context())
+	if err != nil {
+		return err
+	}
+	if !authenticated {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 

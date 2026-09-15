@@ -718,39 +718,89 @@ func TestCanceledReadIsReportedAsCancellation(t *testing.T) {
 	}
 }
 
-// TestAuthenticationGateDoesNotWaitOnAWriter: IsAuthenticated is a probe
-// whose answer is already "no" for anything it cannot read — and it is a
-// gate, since `basecamp mcp` refuses to start on a false. Making it wait
-// on another process's write could only turn a right answer into a slow
-// wrong one, so it does not take the reader's lock.
-func TestAuthenticationGateDoesNotWaitOnAWriter(t *testing.T) {
+// TestAuthenticationGateWaitsOutAWriterInsteadOfGuessing: replacing
+// credentials.json is not atomic everywhere, so a gate that read without
+// the lock could see the file missing mid-replacement and refuse to start
+// for a credential that is sitting right there. The gate waits for the
+// writer and gets the right answer.
+func TestAuthenticationGateWaitsOutAWriterInsteadOfGuessing(t *testing.T) {
 	dir := t.TempDir()
 	store := newTestStore(t, dir)
 	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
 
+	// A writer holding the lock, with the file gone the way a non-atomic
+	// replacement leaves it.
 	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
 	locked, err := held.TryLock()
 	require.NoError(t, err)
 	require.True(t, locked)
-	defer func() { _ = held.Close() }()
-
-	// Budgets long enough that waiting on either would fail this test.
-	restoreLockWait(t, time.Hour)
-	original := reportWait
-	reportWait = time.Hour
-	t.Cleanup(func() { reportWait = original })
+	saved, err := os.ReadFile(filepath.Join(dir, "credentials.json"))
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(dir, "credentials.json")))
 
 	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
 	m.SetStore(store)
 
 	answered := make(chan bool, 1)
 	go func() { answered <- m.IsAuthenticated() }()
+
+	select {
+	case <-answered:
+		t.Fatal("the gate answered from inside the writer's window")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// The writer finishes: the file is back before the lock is released.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "credentials.json"), saved, 0o600))
+	require.NoError(t, held.Close())
+
 	select {
 	case authenticated := <-answered:
-		assert.True(t, authenticated, "a writer's lock made the gate report no credential")
+		assert.True(t, authenticated, "the gate reported no credential for one that was being replaced")
 	case <-time.After(30 * time.Second):
-		t.Fatal("the authentication gate waited on a writer")
+		t.Fatal("the gate never answered")
 	}
+}
+
+// TestCheckAuthenticatedTellsAbsentFromUnreadable: a bool cannot carry "I
+// could not reach the store", and a gate that reads that as "you are not
+// logged in" refuses work for a credential that is there. Anything that
+// stops a command asks this instead.
+func TestCheckAuthenticatedTellsAbsentFromUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	// Nothing stored is an answer, not a failure.
+	authenticated, err := m.CheckAuthenticated(context.Background())
+	require.NoError(t, err)
+	assert.False(t, authenticated)
+
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+	authenticated, err = m.CheckAuthenticated(context.Background())
+	require.NoError(t, err)
+	assert.True(t, authenticated)
+
+	// A store it could not reach is not an answer at all.
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, lockErr := held.TryLock()
+	require.NoError(t, lockErr)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	restoreLockWait(t, 100*time.Millisecond)
+	authenticated, err = m.CheckAuthenticated(context.Background())
+	require.Error(t, err)
+	assert.False(t, authenticated)
+	assert.Equal(t, output.CodeRateLimit, output.AsError(err).Code)
+
+	// And a canceled caller is told that, not that it is logged out.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = m.CheckAuthenticated(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 // TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so

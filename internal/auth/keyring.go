@@ -182,14 +182,6 @@ func (s *Store) loadForReport(origin string) (*Credentials, error) {
 	return s.load(origin, lockRequest{wait: reportWait})
 }
 
-// loadProbe reads WITHOUT the store lock, for a caller whose answer is
-// already "no" for anything it cannot read and which must not be made to
-// wait on another process's write. Everything that goes on to USE the
-// credential takes the lock when it asks for it.
-func (s *Store) loadProbe(origin string) (*Credentials, error) {
-	return s.load(origin, lockRequest{unlocked: true})
-}
-
 func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte

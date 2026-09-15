@@ -45,7 +45,15 @@ func NewMCPCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if !app.Auth.IsAuthenticated() {
+			// CheckAuthenticated, not IsAuthenticated: this refuses to
+			// start the server, and a store it merely could not read —
+			// another process mid-write, a keyring that would not open —
+			// must not be reported as "you are not logged in".
+			authenticated, err := app.Auth.CheckAuthenticated(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if !authenticated {
 				return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 			}
 			// Stdio belongs to the MCP wire, so the account cannot be

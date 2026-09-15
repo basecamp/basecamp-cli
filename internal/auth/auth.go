@@ -358,29 +358,50 @@ func (m *Manager) servableToken(credKey string, creds *Credentials) (string, err
 	return creds.AccessToken, nil
 }
 
-// IsAuthenticated checks if there are valid credentials.
-// Returns true if BASECAMP_TOKEN env var is set or if OAuth credentials exist.
+// IsAuthenticated reports whether a credential is stored, answering false
+// for anything it could not read — as it has always done for an unreadable
+// keyring. Returns true if BASECAMP_TOKEN env var is set or if OAuth
+// credentials exist.
+//
+// Use CheckAuthenticated where a false STOPS something: this one cannot
+// tell "nothing is stored" from "I could not look".
 func (m *Manager) IsAuthenticated() bool {
 	// Check for BASECAMP_TOKEN environment variable first
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return true
 	}
 
-	// Read WITHOUT the store lock. This is a probe: its answer is already
-	// "no" for anything it cannot read, as it has always been for an
-	// unreadable keyring. It is also used as a GATE — `basecamp mcp`
-	// refuses to start on a false, account discovery gives up on one — so
-	// making it wait on another process's write could only turn a right
-	// answer into a slow wrong one.
-	//
-	// What the reader's lock buys elsewhere is not being caught inside a
-	// non-atomic replacement of credentials.json; being caught there
-	// yields this same "no", so there is nothing here for it to save.
-	creds, err := m.store.loadProbe(m.credentialKey())
+	creds, err := m.store.Load(m.credentialKey())
 	if err != nil {
 		return false
 	}
 	return creds.AccessToken != ""
+}
+
+// CheckAuthenticated is IsAuthenticated for a caller that ACTS on the
+// answer rather than printing it: whether a credential is stored, and
+// separately why it could not tell.
+//
+// A bool cannot carry "I could not reach the store", and a gate that reads
+// that as "you are not logged in" refuses work for a credential that is
+// sitting right there — a store lock another process holds for the length
+// of one write, a keyring that will not open, a wait the person canceled.
+// Anything that stops a command uses this and says which it was; the bool
+// form stays for the reports and prompts that only need a hint.
+func (m *Manager) CheckAuthenticated(ctx context.Context) (bool, error) {
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return true, nil
+	}
+
+	creds, err := m.store.LoadContext(ctx, m.credentialKey())
+	switch {
+	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
+		// The store spoke: there is nothing usable stored.
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return creds.AccessToken != "", nil
 }
 
 // Refresh forces a token renewal whatever the stored expiry says. The
