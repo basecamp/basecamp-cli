@@ -216,6 +216,14 @@ func (s *Store) acquire(ctx context.Context, name string) (func(), error) {
 func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() error) (func(), error) {
 	noop := func() {}
 
+	// A caller whose wait is already over gets nothing — this before
+	// anything else, including the unlocked fall-throughs below, which
+	// would otherwise run the critical section (a credential revoked,
+	// deleted, replaced) for a command that has been canceled.
+	if err := lockCause(cause); err != nil {
+		return noop, err
+	}
+
 	if s.fallbackDir == "" {
 		s.warnUnlockable(what, "no configuration directory is set")
 		return noop, nil
@@ -223,13 +231,6 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 	if err := os.MkdirAll(s.lockDir(), 0o700); err != nil {
 		s.warnUnlockable(what, err.Error())
 		return noop, nil
-	}
-
-	// A caller whose wait is already over gets nothing: the lock would be
-	// taken and the critical section run — a credential revoked, deleted,
-	// replaced — for a command that has been canceled.
-	if err := lockCause(cause); err != nil {
-		return noop, err
 	}
 
 	fl := flock.New(filepath.Join(s.lockDir(), name))
@@ -250,7 +251,12 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 		case err != nil:
 			// The lock file could not be opened or locked at all — a
 			// permission this process does not have, a filesystem with no
-			// flock. Nobody can lock here, so say so and carry on.
+			// flock. Nobody can lock here, so say so and carry on — unless
+			// the caller's wait ended while we were finding that out, in
+			// which case there is nothing to carry on to.
+			if cancelErr := lockCause(cause); cancelErr != nil {
+				return noop, cancelErr
+			}
 			s.warnUnlockable(what, err.Error())
 			return noop, nil
 		}

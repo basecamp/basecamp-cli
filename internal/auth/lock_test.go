@@ -540,6 +540,36 @@ func TestCanceledCallerNeverEntersTheCriticalSection(t *testing.T) {
 	assert.False(t, ran, "a canceled caller ran the critical section")
 }
 
+// TestCanceledCallerIsRefusedEvenWhereLockingIsImpossible: a host where
+// the lock cannot be created falls through unlocked, which must not become
+// a way for a canceled command to do its work after all. The check comes
+// before the fall-through, not after it.
+func TestCanceledCallerIsRefusedEvenWhereLockingIsImpossible(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "original"}))
+	// A file where the lock directory has to go: MkdirAll cannot succeed.
+	require.NoError(t, os.RemoveAll(store.lockDir()))
+	require.NoError(t, os.WriteFile(store.lockDir(), []byte("not a directory"), 0o600))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ran := false
+	err := store.withKeyLock(ctx, "profile:bot", func() error {
+		ran = true
+		return nil
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, ran, "a canceled caller ran unlocked instead of being refused")
+
+	require.ErrorIs(t, store.SaveContext(ctx, "profile:bot", &Credentials{AccessToken: "replacement"}), context.Canceled)
+	creds, loadErr := store.Load("profile:bot")
+	require.NoError(t, loadErr)
+	assert.Equal(t, "original", creds.AccessToken, "a canceled save wrote anyway where locking was impossible")
+}
+
 // TestCanceledLogoutRevokesNothing is that check where it matters most: a
 // logout revokes the token server-side and then deletes it, and neither
 // should happen for a command that was stopped.
@@ -571,6 +601,14 @@ func TestCanceledLogoutRevokesNothing(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Zero(t, requests, "a canceled logout revoked the token")
+
+	// And again where the lock cannot be created at all, which falls
+	// through unlocked for a live caller and must not for this one.
+	require.NoError(t, os.RemoveAll(store.lockDir()))
+	require.NoError(t, os.WriteFile(store.lockDir(), []byte("not a directory"), 0o600))
+	_, err = m.LogoutCredential(ctx, "profile:bot", "")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, requests, "a canceled logout revoked the token where locking was impossible")
 
 	creds, loadErr := store.Load("profile:bot")
 	require.NoError(t, loadErr, "a canceled logout deleted the credential")
