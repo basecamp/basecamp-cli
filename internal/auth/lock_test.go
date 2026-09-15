@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,6 +61,18 @@ func TestCredentialLockHelperProcess(t *testing.T) {
 	key := os.Getenv(helperKeyEnv)
 	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: key}, http.DefaultClient)
 	m.SetStore(NewStore(dir))
+
+	if mode == "token" || mode == "save" {
+		// Announce readiness and wait to be released. Without the barrier
+		// the scheduler is free to run each child to completion before the
+		// next one starts, and a test of what happens when they overlap
+		// would never overlap.
+		fmt.Println("READY")
+		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+			fmt.Fprintf(os.Stderr, "ERR=never released: %v\n", err)
+			os.Exit(5)
+		}
+	}
 
 	switch mode {
 	case "token":
@@ -179,7 +193,11 @@ func TestConcurrentProcessesKeepTheRotatedCredential(t *testing.T) {
 	}))
 
 	const processes = 20
-	results := runHelpers(t, processes, "token", dir, "agentbot")
+	keys := make([]string, processes)
+	for i := range keys {
+		keys[i] = "agentbot"
+	}
+	results := runHelpers(t, "token", dir, keys)
 
 	for i, r := range results {
 		assert.NoErrorf(t, r.err, "process %d failed: %s", i, r.stderr)
@@ -220,16 +238,7 @@ func TestConcurrentProcessesKeepEveryProfilesCredential(t *testing.T) {
 		keys[i] = "p" + strconv.Itoa(i)
 	}
 
-	var wg sync.WaitGroup
-	results := make([]helperResult, processes)
-	for i, key := range keys {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			results[i] = runHelper(t, "save", dir, key)
-		}()
-	}
-	wg.Wait()
+	results := runHelpers(t, "save", dir, keys)
 
 	for i, r := range results {
 		assert.NoErrorf(t, r.err, "process %d failed: %s", i, r.stderr)
@@ -249,26 +258,56 @@ type helperResult struct {
 	err    error
 }
 
-// runHelpers starts n children at once and collects what each reported.
-// They are started from goroutines rather than in sequence so the window
-// they contend over is as wide as the process start-up jitter allows.
-func runHelpers(t *testing.T, n int, mode, dir, key string) []helperResult {
+// helper is one started, not-yet-released child process.
+type helper struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	// stderr is the package's mutex-guarded test buffer: os/exec writes a
+	// child's stderr from a copying goroutine of its own, so a parent
+	// reading it before Wait has returned — a readiness timeout's
+	// diagnostic, above all — would race that goroutine.
+	stderr *syncBuffer
+
+	// waitOnce makes this the only owner of cmd.Wait. exec.Cmd.Wait is not
+	// safe to call twice, and both the collector and the test cleanup that
+	// kills a stuck child want to.
+	waitOnce sync.Once
+	waitErr  error
+}
+
+// runHelpers starts one child per key, waits until EVERY one of them says
+// it is ready, releases them all at once, and collects what each reported.
+//
+// The barrier is the whole point. Starting processes from goroutines does
+// not make them overlap — the scheduler may run each to completion before
+// the next one starts — so without it a test of concurrent access could
+// pass having exercised no concurrency at all.
+func runHelpers(t *testing.T, mode, dir string, keys []string) []helperResult {
 	t.Helper()
-	results := make([]helperResult, n)
-	var wg sync.WaitGroup
-	for i := range results {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			results[i] = runHelper(t, mode, dir, key)
-		}()
+
+	helpers := make([]*helper, len(keys))
+	for i, key := range keys {
+		helpers[i] = startHelper(t, mode, dir, key)
 	}
-	wg.Wait()
+	for i, h := range helpers {
+		require.NoErrorf(t, h.await("READY", 60*time.Second), "process %d never became ready: %s", i, h.stderr)
+	}
+	for _, h := range helpers {
+		_, _ = io.WriteString(h.stdin, "go\n")
+		_ = h.stdin.Close()
+	}
+
+	results := make([]helperResult, len(helpers))
+	for i, h := range helpers {
+		results[i] = h.collect()
+	}
 	return results
 }
 
-// runHelper runs one child process of this test binary.
-func runHelper(t *testing.T, mode, dir, key string) helperResult {
+// startHelper starts one child process of this test binary, stopped at the
+// barrier.
+func startHelper(t *testing.T, mode, dir, key string) *helper {
 	t.Helper()
 	// #nosec G204 -- the command is this test binary, at a fixed test name.
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+helperTest+"$", "-test.v=false")
@@ -282,17 +321,71 @@ func runHelper(t *testing.T, mode, dir, key string) helperResult {
 		"BASECAMP_TOKEN=",
 		"XDG_CONFIG_HOME="+dir,
 	)
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	h := &helper{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: &syncBuffer{}}
+	cmd.Stderr = h.stderr
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = h.wait()
+	})
+	return h
+}
 
+// await reads lines until one carries want, or the deadline passes.
+func (h *helper) await(want string, within time.Duration) error {
+	line := make(chan string, 1)
+	fail := make(chan error, 1)
+	go func() {
+		for {
+			text, err := h.stdout.ReadString('\n')
+			if strings.Contains(text, want) {
+				line <- text
+				return
+			}
+			if err != nil {
+				fail <- err
+				return
+			}
+		}
+	}()
+	select {
+	case <-line:
+		return nil
+	case err := <-fail:
+		return err
+	case <-time.After(within):
+		return errors.New("timed out")
+	}
+}
+
+// wait reaps the child exactly once, whichever of the collector and the
+// cleanup gets there first; the other blocks on the Once and takes the
+// same answer.
+func (h *helper) wait() error {
+	h.waitOnce.Do(func() { h.waitErr = h.cmd.Wait() })
+	return h.waitErr
+}
+
+// collect drains the child's remaining output, reaps it, and only THEN
+// reads stderr — os/exec's stderr copier is only known to be finished once
+// Wait has returned.
+func (h *helper) collect() helperResult {
 	value := ""
-	for _, line := range strings.Split(string(out), "\n") {
+	for {
+		line, err := h.stdout.ReadString('\n')
 		if _, rest, found := strings.Cut(line, "="); found {
 			value = strings.TrimSpace(rest)
 		}
+		if err != nil {
+			break
+		}
 	}
-	return helperResult{value: value, stderr: stderr.String(), err: err}
+	err := h.wait()
+	return helperResult{value: value, stderr: h.stderr.String(), err: err}
 }
 
 // TestCredentialLockSerializesTheWholeRefresh proves the lock is held
@@ -335,6 +428,94 @@ func TestCredentialLockSerializesTheWholeRefresh(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "waiting for another basecamp process")
 	assert.Zero(t, requests, "the refresh was sent while another process held the lock")
+}
+
+// TestHeldStoreLockBlocksAnotherProcessSave shows the contention directly:
+// while this test holds the whole-store lock, a real second process's Save
+// cannot complete, and it completes the moment the lock is released. The
+// concurrency tests above assert the OUTCOME of that exclusion; this
+// asserts the exclusion itself, so neither can pass by never overlapping.
+func TestHeldStoreLockBlocksAnotherProcessSave(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, os.MkdirAll(store.lockDir(), 0o700))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	h := startHelper(t, "save", dir, "blocked")
+	require.NoError(t, h.await("READY", 60*time.Second), h.stderr)
+	_, _ = io.WriteString(h.stdin, "go\n")
+	require.NoError(t, h.stdin.Close())
+
+	done := make(chan helperResult, 1)
+	go func() { done <- h.collect() }()
+
+	select {
+	case r := <-done:
+		t.Fatalf("the save completed while the store lock was held (err %v, stderr %q)", r.err, r.stderr)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	require.NoError(t, held.Close())
+
+	select {
+	case r := <-done:
+		require.NoError(t, r.err, r.stderr)
+		creds, loadErr := store.Load("profile:blocked")
+		require.NoError(t, loadErr)
+		assert.Equal(t, "access-blocked", creds.AccessToken)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the save never completed after the lock was released")
+	}
+}
+
+// TestCanceledSaveWaitingOnTheStoreLockWritesNothing: a login's last
+// cancellation check happens under the KEY lock, and the store lock is
+// taken after it. Without a cancellation-aware wait there, a Ctrl-C landing
+// while the store lock is held by someone else would still store the
+// credential the person stopped, the moment the holder released.
+func TestCanceledSaveWaitingOnTheStoreLockWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "original"}))
+
+	require.NoError(t, os.MkdirAll(store.lockDir(), 0o700))
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- store.SaveContext(ctx, "profile:bot", &Credentials{AccessToken: "replacement"})
+	}()
+
+	// It must still be waiting, not writing.
+	select {
+	case saveErr := <-done:
+		t.Fatalf("the save completed while the store lock was held: %v", saveErr)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancel()
+	require.NoError(t, held.Close())
+
+	select {
+	case saveErr := <-done:
+		require.Error(t, saveErr)
+		assert.ErrorIs(t, saveErr, context.Canceled)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the canceled save never returned")
+	}
+
+	creds, err := store.Load("profile:bot")
+	require.NoError(t, err)
+	assert.Equal(t, "original", creds.AccessToken, "a canceled save wrote anyway")
 }
 
 // TestCredentialLockReleasedByProcessDeathIsNotStale: a holder that dies

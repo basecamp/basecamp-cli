@@ -163,7 +163,30 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	if token.Scope != "" {
 		creds.Scope = token.Scope
 	}
-	creds.ExpiresAt = agentTokenExpiry(token).Unix()
+	expiry := agentTokenExpiry(token)
+	creds.ExpiresAt = expiry.Unix()
+	creds.RenewAfter = agentRenewAfter(time.Now(), expiry).Unix()
+}
+
+// agentRenewAfter is when a self-token minted now and expiring at expiry
+// should be replaced.
+//
+// Normally that is RefreshWindow early, as for every other credential. The
+// exception is a token whose WHOLE LIFETIME is inside that window: at a
+// two-minute lifetime the default margin would put every freshly minted
+// token straight back inside the renewal window, so every command would
+// mint again and twenty concurrent ones would take twenty grants in turn
+// instead of sharing one. Below that threshold the margin becomes a
+// quarter of the lifetime, which keeps a short token usable for most of
+// what it was issued for. The grant's documented lifetime is an hour, so
+// this is insurance against a server that issues something else rather
+// than the expected path.
+func agentRenewAfter(now, expiry time.Time) time.Time {
+	margin := RefreshWindow
+	if quarter := expiry.Sub(now) / 4; quarter < margin {
+		margin = max(quarter, 0)
+	}
+	return expiry.Add(-margin)
 }
 
 // agentTokenExpiry is when a minted token stops being usable: what the
@@ -233,7 +256,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, m.agentMintRefusal(resp.StatusCode, body)
+		return nil, m.agentMintRefusal(resp, body)
 	}
 
 	var token oauth.Token
@@ -255,35 +278,38 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	return &token, nil
 }
 
-// agentMintRefusal renders a non-200 token response. An RFC 6749 §5.2 error
-// object is rendered in the SDK exchanger's shape; anything else keeps the
-// status and a bounded, single-line excerpt of whatever came back — the
-// body is server-controlled and reaches terminals and transcripts.
-func (m *Manager) agentMintRefusal(status int, body []byte) error {
+// agentMintRefusal renders a non-200 token response. An RFC 6749 §5.2
+// error object is rendered in the SDK exchanger's shape; anything else
+// keeps the status and a bounded, single-line excerpt of whatever came
+// back — the body is server-controlled and reaches terminals and
+// transcripts.
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte) error {
 	var errResp struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
 	}
+	detail := fmt.Sprintf("the server answered HTTP %d: %s",
+		resp.StatusCode, truncate(richtext.SanitizeSingleLine(string(body)), maxAgentErrorBytes))
 	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-		msg := "token error: " + errResp.Error
+		detail = "token error: " + errResp.Error
 		if desc := truncate(richtext.SanitizeSingleLine(errResp.ErrorDescription), maxAgentErrorBytes); desc != "" {
-			msg += " - " + desc
+			detail += " - " + desc
 		}
-		return m.errAgentMint(status, msg)
 	}
-	return m.errAgentMint(status, fmt.Sprintf("the server answered HTTP %d: %s",
-		status, truncate(richtext.SanitizeSingleLine(string(body)), maxAgentErrorBytes)))
-}
 
-// errAgentMint is a refused mint, classified the way the operator has to
-// act on it: a 4xx is the client's own credentials being wrong, which no
-// retry fixes and a fresh login does; anything else is the server's
-// problem and is worth trying again.
-func (m *Manager) errAgentMint(status int, detail string) error {
-	if status >= 400 && status < 500 {
+	// A 4xx says the CLIENT is wrong — an unknown client, a rotated
+	// secret, a scope it was never granted — which no retry fixes and a
+	// fresh login does, so it is an auth-class failure with the login as
+	// its remedy. 429 is the exception: the client is fine, the caller is
+	// early, and answering "authenticate again" would send an automated
+	// caller into a re-login loop against a server already asking it to
+	// slow down. Everything else keeps its own class through the
+	// package's own classifier, which is how a 5xx stays retryable and a
+	// 429 keeps its Retry-After.
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
 		return m.errAuth("Minting an agent token was refused (" + detail + ")")
 	}
-	return output.ErrAPI(status, "minting an agent token: "+detail)
+	return statusFailure("minting an agent token: "+detail, resp)
 }
 
 // isRedirect reports whether status is one of the redirects a
@@ -320,6 +346,16 @@ type ClientCredentialsOptions struct {
 
 	// Logger receives status messages during the login. Nil suppresses them.
 	Logger func(msg string)
+
+	// BeforeStore, when set, runs after the mint has proved the client and
+	// before the credential is written, with the result the login is about
+	// to return. A non-nil error aborts the login and nothing is stored.
+	//
+	// It is where a caller commits whatever must exist alongside the
+	// credential — the profile entry, above all. An entry without a
+	// credential is a visible, harmless state; a stored client secret under
+	// a profile nothing registered is an orphan nobody will find again.
+	BeforeStore func(result *LoginResult) error
 }
 
 // LoginClientCredentials authenticates as a Basecamp agent principal and
@@ -386,13 +422,15 @@ func (m *Manager) LoginClientCredentials(ctx context.Context, opts ClientCredent
 	}
 	applyAgentToken(creds, token)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.store.withKeyLock(ctx, credKey, func() error {
-		return m.store.Save(credKey, creds)
-	}); err != nil {
+	result := &LoginResult{OAuthType: oauthTypeAgent, Scope: creds.Scope}
+	if opts.BeforeStore != nil {
+		if err := opts.BeforeStore(result); err != nil {
+			return nil, err
+		}
+	}
+	if err := m.storeLoginCredential(ctx, credKey, creds); err != nil {
 		return nil, err
 	}
 
-	return &LoginResult{OAuthType: oauthTypeAgent, Scope: creds.Scope}, nil
+	return result, nil
 }

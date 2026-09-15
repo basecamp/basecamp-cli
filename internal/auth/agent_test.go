@@ -97,10 +97,12 @@ func TestAgentCredentialMintsOnceUntilItExpires(t *testing.T) {
 	assert.Equal(t, "minted-1", second)
 	assert.Len(t, as.tokenCalls(), 1, "a live self-token was re-minted")
 
-	// Push it into the refresh window and it mints again.
+	// Age the credential — an hour on, both the expiry it was minted with
+	// and the renewal moment ahead of it have gone by — and it mints again.
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
 	stored.ExpiresAt = time.Now().Add(RefreshWindow / 2).Unix()
+	stored.RenewAfter = time.Now().Add(-time.Minute).Unix()
 	require.NoError(t, m.store.Save(key, stored))
 
 	third, err := m.AccessToken(context.Background())
@@ -398,4 +400,82 @@ func TestAgentLogoutSaysRotatingTheSecretIsTheRemedy(t *testing.T) {
 
 	_, loadErr := m.store.Load(key)
 	assert.ErrorIs(t, loadErr, ErrNoCredential)
+}
+
+// TestShortLivedAgentTokenIsNotRenewedOnEveryCommand: a token whose whole
+// lifetime is inside the five-minute refresh window would, on the default
+// margin, be back inside the renewal window the instant it was minted —
+// every command would mint again, and twenty concurrent ones would take
+// twenty grants in turn instead of sharing one. The margin scales down with
+// the lifetime instead.
+func TestShortLivedAgentTokenIsNotRenewedOnEveryCommand(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(call int) (int, string) {
+		return http.StatusOK, fmt.Sprintf(
+			`{"access_token":"minted-%d","token_type":"bearer","expires_in":120}`, call+1)
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	first, err := m.AccessToken(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "minted-1", first)
+
+	stored, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.False(t, needsRenewal(stored), "a freshly minted two-minute token was already due for renewal")
+	// Renewed with 30 seconds left — a quarter of the lifetime — not five
+	// minutes before an expiry only two minutes away.
+	assert.InDelta(t, stored.ExpiresAt-30, stored.RenewAfter, 5)
+
+	for range 3 {
+		token, tokenErr := m.AccessToken(context.Background())
+		require.NoError(t, tokenErr)
+		assert.Equal(t, "minted-1", token)
+	}
+	assert.Len(t, as.tokenCalls(), 1, "a live short-lived token was re-minted on every command")
+}
+
+// TestAgentRenewAfterNeverOutlivesTheToken: the margin shrinks with the
+// lifetime but never inverts, and a zero or negative lifetime still asks to
+// be renewed rather than pinning a dead token.
+func TestAgentRenewAfterNeverOutlivesTheToken(t *testing.T) {
+	now := time.Now()
+	for name, lifetime := range map[string]time.Duration{
+		"an hour":      time.Hour,
+		"ten minutes":  10 * time.Minute,
+		"two minutes":  2 * time.Minute,
+		"ten seconds":  10 * time.Second,
+		"already gone": -time.Minute,
+	} {
+		t.Run(name, func(t *testing.T) {
+			expiry := now.Add(lifetime)
+			renewAfter := agentRenewAfter(now, expiry)
+			assert.False(t, renewAfter.After(expiry), "the renewal moment is past the expiry")
+			if lifetime > 0 {
+				assert.False(t, renewAfter.Before(now), "a token was due for renewal before it was minted")
+			}
+		})
+	}
+}
+
+// TestRateLimitedMintStaysRetryable: a 429 from the token endpoint says the
+// caller is early, not that the client is wrong. Reporting it as
+// "authenticate again" would send an automated caller into a re-login loop
+// against a server already asking it to slow down.
+func TestRateLimitedMintStaysRetryable(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusTooManyRequests, `{"error":"slow_down"}`
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	e := output.AsError(err)
+	assert.Equal(t, output.CodeRateLimit, e.Code)
+	assert.True(t, e.Retryable)
 }

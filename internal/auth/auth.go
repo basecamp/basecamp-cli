@@ -266,8 +266,22 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 // window and must be renewed before it is served. ExpiresAt==0 means a
 // non-expiring token (an imported personal access token, or a server that
 // reported no expiry) and is never renewed.
+//
+// A credential carrying RenewAfter can push the moment LATER than the
+// default margin, never earlier: that is for a token whose whole lifetime
+// is shorter than the window, which would otherwise be renewed on every
+// command.
 func needsRenewal(creds *Credentials) bool {
-	return creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds())
+	if creds.ExpiresAt <= 0 {
+		return false
+	}
+	renewAt := creds.ExpiresAt - int64(RefreshWindow.Seconds())
+	if creds.RenewAfter > renewAt {
+		// Never past the expiry itself: a stale or corrupt RenewAfter must
+		// not be able to keep an expired token in service.
+		renewAt = min(creds.RenewAfter, creds.ExpiresAt)
+	}
+	return time.Now().Unix() >= renewAt
 }
 
 // servableToken is creds' access token, or the auth error for a credential
@@ -541,6 +555,10 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		// so this won't re-trigger refresh on the next call.
 		creds.ExpiresAt = 0
 	}
+	// A refreshed token takes the default renewal margin; only a minted
+	// self-token sets its own, and leaving a stale one here would date the
+	// new expiry against the old token's lifetime.
+	creds.RenewAfter = 0
 
 	return m.store.Save(origin, creds)
 }
@@ -868,10 +886,7 @@ func (m *Manager) loginLaunchpad(ctx context.Context, credKey string, oauthCfg *
 	creds.TokenEndpoint = oauthCfg.TokenEndpoint
 	creds.Scope = ""
 
-	if err := m.verifyBeforeStore(ctx, opts, creds, oauthTypeLaunchpad); err != nil {
-		return nil, err
-	}
-	if err := m.store.Save(credKey, creds); err != nil {
+	if err := m.verifyAndStore(ctx, opts, credKey, creds, oauthTypeLaunchpad); err != nil {
 		return nil, err
 	}
 
@@ -1028,23 +1043,32 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	if err := m.verifyBeforeStore(ctx, opts, creds, oauthTypeBC5); err != nil {
-		return nil, err
-	}
-	if err := m.store.Save(credKey, creds); err != nil {
+	if err := m.verifyAndStore(ctx, opts, credKey, creds, oauthTypeBC5); err != nil {
 		return nil, err
 	}
 
 	return &LoginResult{OAuthType: oauthTypeBC5, Scope: effectiveScope}, nil
 }
 
-// verifyBeforeStore runs the caller's Verify hook and refuses to let a
-// canceled login reach the store. The token arrives from the flow after
-// the person may already have pressed Ctrl-C — the poll or exchange can
-// complete in the same instant — and a non-strict verifier answers a
-// canceled request with nil, so without this check a login the person
-// stopped would still be saved and announced as a success.
-func (m *Manager) verifyBeforeStore(ctx context.Context, opts *LoginOptions, creds *Credentials, oauthType string) error {
+// verifyAndStore runs the caller's Verify hook, refuses to let a canceled
+// login reach the store, and persists the credential it proved.
+//
+// The token arrives from the flow after the person may already have
+// pressed Ctrl-C — the poll or exchange can complete in the same instant —
+// and a non-strict verifier answers a canceled request with nil, so
+// without these checks a login the person stopped would still be saved and
+// announced as a success. The LAST check is made under the credential's
+// cross-process lock, because the wait for that lock is itself a window a
+// Ctrl-C can land in: the person stops the login, whoever held the lock
+// releases a moment later, and an unchecked save would store the
+// credential they stopped.
+//
+// A login replaces the whole credential, which is a mutation like any
+// other and has to be exclusive with them. Without the lock a refresh
+// already in flight in another process — loaded before this login started
+// — would save the OLD credential back over the new one a moment later,
+// quietly restoring the identity the person had just replaced.
+func (m *Manager) verifyAndStore(ctx context.Context, opts *LoginOptions, credKey string, creds *Credentials, oauthType string) error {
 	if err := ctx.Err(); err != nil {
 		m.discardGrant(ctx, creds, opts.log)
 		return err
@@ -1055,11 +1079,45 @@ func (m *Manager) verifyBeforeStore(ctx context.Context, opts *LoginOptions, cre
 			return err
 		}
 	}
-	if err := ctx.Err(); err != nil {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stored := false
+	err := m.store.withKeyLock(ctx, credKey, func() error {
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return cancelErr
+		}
+		if saveErr := m.store.SaveContext(ctx, credKey, creds); saveErr != nil {
+			return saveErr
+		}
+		stored = true
+		return nil
+	})
+	// A grant nothing kept is a grant to hand back, whatever ended the
+	// login: the person's Ctrl-C, or a lock this process could not get.
+	if err != nil && !stored {
 		m.discardGrant(ctx, creds, opts.log)
-		return err
 	}
-	return nil
+	return err
+}
+
+// storeLoginCredential writes the credential a login just proved, under
+// the manager lock and the credential key's cross-process lock. It is
+// verifyAndStore without the Verify hook, for the agent login, which has
+// no person to verify as and no interactive grant to hand back.
+//
+// The cancellation check is made under the lock for the reason
+// verifyAndStore gives: the wait for it is a window a Ctrl-C can land in.
+func (m *Manager) storeLoginCredential(ctx context.Context, credKey string, creds *Credentials) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return m.store.SaveContext(ctx, credKey, creds)
+	})
 }
 
 // validVerificationURL validates a server-supplied verification URI with the

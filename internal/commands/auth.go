@@ -944,17 +944,22 @@ func runLoginClientCredentials(cmd *cobra.Command, app *appctx.App, clientID, sc
 		logger = nil
 	}
 
+	// The profile entry is written between the mint that proves the client
+	// and the write that stores it: a credential the config file knows
+	// nothing about would be an orphaned client secret, and the mint has
+	// to have succeeded before anything is registered for it.
+	var isDefault bool
 	result, err := app.Auth.LoginClientCredentials(cmd.Context(), auth.ClientCredentialsOptions{
 		ClientID:     clientID,
 		ClientSecret: secret,
 		Scope:        scope,
 		Logger:       logger,
+		BeforeStore: func(result *auth.LoginResult) error {
+			registered, regErr := target.register(app, result.Scope)
+			isDefault = registered
+			return regErr
+		},
 	})
-	if err != nil {
-		return err
-	}
-
-	isDefault, err := target.register(app, result.Scope)
 	if err != nil {
 		return err
 	}

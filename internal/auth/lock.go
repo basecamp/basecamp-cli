@@ -58,12 +58,28 @@ import (
 // closes, process death included, so a crashed holder cannot wedge the
 // lock and there is no stale-lock reaping to get wrong.
 //
-// Caveat: flock's mutual exclusion is only as good as the filesystem's. On
-// Linux an flock over NFS is translated into a POSIX record lock and works
-// between hosts; on some other platforms and on a few network filesystems
-// it is local to the host, or a no-op. A config directory on such a share,
-// with processes on more than one host, degrades to today's unsynchronized
-// behavior rather than to something worse.
+// Three limits, all of which degrade to the behavior that shipped before
+// this file rather than to something worse:
+//
+//   - flock's mutual exclusion is only as good as the filesystem's. On
+//     Linux an flock over NFS is translated into a POSIX record lock and
+//     works between hosts; on some other platforms and on a few network
+//     filesystems it is local to the host, or a no-op. A config directory
+//     on such a share, with processes on more than one host, is
+//     unsynchronized.
+//   - a host where the lock cannot be created at all — an unwritable
+//     configuration directory, a filesystem that refuses flock — warns and
+//     runs unsynchronized rather than refusing to run. Failing closed there
+//     would take a setup that works today (a read-only config directory
+//     over a keyring-backed store, say) and break it outright, which is a
+//     worse outcome than the race it would prevent.
+//   - the locks live under the configuration directory, so two processes
+//     that disagree about XDG_CONFIG_HOME do not lock against each other
+//     even when the OS keyring underneath them is the same. Those two
+//     processes disagree about which profiles exist in the first place —
+//     the credential key is a profile name, and profiles are read from the
+//     configuration — so a shared keyring entry between them is an
+//     existing ambiguity in the store's key namespace, not one this adds.
 
 // credentialLockWait bounds the wait for another process's credential
 // lock. The work under a key lock is one credential load, at most one
@@ -115,12 +131,60 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 // store operation and must not make a network request: every process's
 // Save and Delete queue behind it.
 //
+// It applies to the FILE backend only. The lock exists for one reason —
+// credentials.json holds every key and is rewritten whole — and the
+// keyring writes one entry at a time, atomically, so there is nothing
+// there for it to protect. Taking it anyway would be worse than useless:
+// a macOS keychain that locks after the availability probe leaves
+// `security` waiting on a person who may never answer, inside a child
+// process nothing can cancel, and every other profile's save would queue
+// behind that until the wait expired. Per-key exclusion still holds on the
+// keyring: that is the key lock's job, and it is taken either way.
+//
 // The wait is not cancellable. Callers reach it through Store.Save and
 // Store.Delete, which carry no context to honor, and the section it guards
 // is local file I/O that is over in well under a millisecond — there is
 // nothing here long enough to want to interrupt, and the wait is bounded
 // either way.
 func (s *Store) withStoreLock(fn func() error) error {
+	if s.ensure().UsingKeyring() {
+		return fn()
+	}
+	return s.withStoreFileLock(fn)
+}
+
+// withStoreLockContext is withStoreLock for a caller that can be canceled.
+//
+// The wait ends when ctx does, and — this is the point — the cancellation
+// is checked again once the lock is in hand. A login that has already
+// passed its last check under the KEY lock can still be sitting here when
+// the person presses Ctrl-C, and without the second check it would go on
+// to store the credential they stopped as soon as the holder released.
+func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.ensure().UsingKeyring() {
+		return fn()
+	}
+	release, err := s.lockFile(storeLockName, "credential store", ctx.Done(), ctx.Err)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn()
+}
+
+// withStoreFileLock runs fn while holding the whole-store lock whatever
+// the backend. It is for the one operation that rewrites credentials.json
+// on a KEYRING-backed store: the migration, which reads the file, saves
+// every key it finds into the keyring, and removes the file. Routing that
+// through withStoreLock would skip the lock precisely when it is doing the
+// file work the lock exists for.
+func (s *Store) withStoreFileLock(fn func() error) error {
 	release, err := s.lockFile(storeLockName, "credential store", nil, nil)
 	if err != nil {
 		return err
