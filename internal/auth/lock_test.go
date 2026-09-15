@@ -641,46 +641,34 @@ func TestCanceledReadStopsWaitingForTheStoreLock(t *testing.T) {
 	}
 }
 
-// TestARemedyDoesNotWaitOutACredentialBudget: the remedy on an error is
-// built by reading the credential, and that read is reached FROM a
-// failure. A full budget there would let one error become a minute of
-// silence, so it takes the short one and falls back to the interactive
-// form it cannot rule out.
-//
-// IsAuthenticated deliberately does NOT: it looks like a report and is
-// used as a gate (`basecamp mcp` refuses to start on a false), so it waits
-// the full budget rather than calling a busy store an empty one.
-func TestARemedyDoesNotWaitOutACredentialBudget(t *testing.T) {
+// TestARemedyNeverReadsTheCredentialStore: the remedy on an error names
+// the login to run, and building it must not be able to turn one failure
+// into a hang — the store is usually the OS keyring, and a keychain that
+// locks after its availability probe waits on a person who may never
+// answer. So it comes from what the Manager already saw, not from a read.
+func TestARemedyNeverReadsTheCredentialStore(t *testing.T) {
 	dir := t.TempDir()
-	store := newTestStore(t, dir)
-	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live", OAuthType: oauthTypeAgent, ClientID: "c"}))
-
-	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
-	locked, err := held.TryLock()
-	require.NoError(t, err)
-	require.True(t, locked)
-	defer func() { _ = held.Close() }()
-
-	// A credential budget far longer than the test is willing to wait; the
-	// report budget is what must apply.
-	restoreLockWait(t, time.Hour)
-	original := reportWait
-	reportWait = 50 * time.Millisecond
-	t.Cleanup(func() { reportWait = original })
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	store := NewStore(dir)
+	reads := &countingStore{}
+	store.inner = reads
+	store.initOnce.Do(func() {})
 
 	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
 	m.SetStore(store)
 
-	answered := make(chan string, 1)
-	go func() { answered <- m.LoginHint() }()
-	select {
-	case hint := <-answered:
-		// The credential could not be read, so the remedy falls back to
-		// the interactive form rather than the agent one it would name.
-		assert.Contains(t, hint, "Run: basecamp auth login -P bot")
-	case <-time.After(30 * time.Second):
-		t.Fatal("a remedy waited out the credential budget")
-	}
+	// Nothing seen yet: the interactive form, and no read to find that out.
+	assert.Contains(t, m.LoginHint(), "Run: basecamp auth login -P bot")
+	assert.Zero(t, reads.loads, "building a remedy read the credential store")
+
+	// Once an agent credential has been in hand, the remedy is its login —
+	// still without going back for it.
+	m.remember(&Credentials{OAuthType: oauthTypeAgent, ClientID: "agent-client"})
+	hint := m.LoginHint()
+	assert.Contains(t, hint, "--with-client-credentials")
+	assert.Contains(t, hint, "--client-id agent-client")
+	assert.Contains(t, hint, "-P bot")
+	assert.Zero(t, reads.loads, "building a remedy read the credential store")
 }
 
 // TestCanceledReadIsReportedAsCancellation: a canceled command must not be

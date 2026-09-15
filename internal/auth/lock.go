@@ -180,14 +180,6 @@ func (s *Store) withStoreReadLock(req lockRequest, fn func() error) error {
 	return fn()
 }
 
-// reportWait bounds a read that only informs a report or a remedy —
-// "am I logged in", "what should this error tell them to run". Those
-// answer "don't know" gracefully, so waiting a full credential budget for
-// them would trade a wrong answer nobody sees for a minute of silence
-// everybody does.
-// A variable so tests can shorten it.
-var reportWait = 2 * time.Second
-
 // withStoreLockContext is withStoreLock for a caller that can be canceled.
 //
 // The wait ends when ctx does, and — this is the point — the cancellation

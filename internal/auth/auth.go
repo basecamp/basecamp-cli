@@ -104,6 +104,28 @@ type Manager struct {
 	Warnf func(format string, args ...any)
 
 	mu sync.Mutex
+
+	// kindMu guards kind, which is read while building an error's remedy
+	// and so cannot share the lock the credential operations hold.
+	kindMu sync.Mutex
+	kind   credentialKind
+}
+
+// credentialKind is what the credential in play turned out to be, kept so
+// an error's remedy can name the right login without going back to the
+// store for it.
+//
+// Rendering an error must not be able to block, and a store read can: it
+// is usually the OS keyring, and a keychain that locks after its
+// availability probe waits on a person who may never answer, inside a
+// child process nothing can cancel. A long-running connector reporting a
+// 401 would hang there, building a hint. Every path that raises such an
+// error has just had the credential in its hands, so the answer is already
+// known and only has to be kept. Nothing secret is: what the credential
+// was, and the public client id an agent mints with.
+type credentialKind struct {
+	agent    bool
+	clientID string
 }
 
 // NewManager creates a new auth manager.
@@ -154,17 +176,13 @@ func (m *Manager) LoginCommand() string {
 // caller of this has already been through the credential store — and a
 // store that cannot be read simply falls back to the interactive form.
 func (m *Manager) loginRemedy() (command, lead string) {
-	// Every caller of this has already been through the credential store,
-	// so the read costs no probe that has not been paid; a store that
-	// cannot be read — or a Manager built without one — falls back to the
-	// interactive form rather than failing a hint. It reads on the short
-	// budget for the same reason: a remedy is not worth waiting a minute
-	// for, and this is reached FROM an error, so it must not be able to
-	// turn one error into a long pause.
-	if m.store != nil {
-		if creds, err := m.store.loadForReport(m.credentialKey()); err == nil && creds.OAuthType == oauthTypeAgent {
-			return m.agentLoginCommand(creds.ClientID), "Pipe the agent's client secret in:"
-		}
+	// From what was remembered, never from a fresh read: this is reached
+	// FROM a failure, and must not be able to turn one into a hang. See
+	// credentialKind. Nothing remembered means the interactive form, which
+	// is the right answer for every profile that is not an agent's and a
+	// harmless one for an agent nobody has loaded yet.
+	if kind := m.rememberedKind(); kind.agent {
+		return m.agentLoginCommand(kind.clientID), "Pipe the agent's client secret in:"
 	}
 	if m.cfg.ActiveProfile != "" {
 		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile), "Run:"
@@ -189,6 +207,21 @@ func shellQuote(s string) string {
 func shellActive(r rune) bool {
 	inert := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=-", r)
 	return !inert
+}
+
+// remember records what the credential in play is, for the remedy an
+// error will carry. See credentialKind.
+func (m *Manager) remember(creds *Credentials) {
+	m.kindMu.Lock()
+	defer m.kindMu.Unlock()
+	m.kind = credentialKind{agent: creds.OAuthType == oauthTypeAgent, clientID: creds.ClientID}
+}
+
+// rememberedKind is what the last credential this Manager handled was.
+func (m *Manager) rememberedKind() credentialKind {
+	m.kindMu.Lock()
+	defer m.kindMu.Unlock()
+	return m.kind
 }
 
 // LoginHint is LoginCommand as an error hint.
@@ -265,6 +298,7 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	if err != nil {
 		return "", m.unreadable(missing, credKey, err)
 	}
+	m.remember(creds)
 	if !needsRenewal(creds) {
 		return m.servableToken(credKey, creds)
 	}
@@ -275,6 +309,7 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 		if loadErr != nil {
 			return m.unreadable(missing, credKey, loadErr)
 		}
+		m.remember(creds)
 		if needsRenewal(creds) {
 			// Preserves the renewal's own error type (API, network, auth).
 			if renewErr := m.renewLocked(ctx, credKey, creds); renewErr != nil {
@@ -401,6 +436,7 @@ func (m *Manager) CheckAuthenticated(ctx context.Context) (bool, error) {
 	case err != nil:
 		return false, err
 	}
+	m.remember(creds)
 	return creds.AccessToken != "", nil
 }
 
@@ -417,6 +453,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 		if err != nil {
 			return m.unreadable("Not authenticated for", credKey, err)
 		}
+		m.remember(creds)
 		return m.renewLocked(ctx, credKey, creds)
 	})
 }
@@ -1186,6 +1223,7 @@ func (m *Manager) verifyAndStore(ctx context.Context, opts *LoginOptions, credKe
 		if saveErr := m.store.SaveContext(ctx, credKey, creds); saveErr != nil {
 			return saveErr
 		}
+		m.remember(creds)
 		stored = true
 		return nil
 	})
@@ -1211,7 +1249,11 @@ func (m *Manager) storeLoginCredential(ctx context.Context, credKey string, cred
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return m.store.SaveContext(ctx, credKey, creds)
+		if err := m.store.SaveContext(ctx, credKey, creds); err != nil {
+			return err
+		}
+		m.remember(creds)
+		return nil
 	})
 }
 

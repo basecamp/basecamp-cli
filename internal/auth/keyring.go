@@ -175,13 +175,6 @@ func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, e
 	return s.load(origin, lockRequest{done: ctx.Done(), cause: ctx.Err})
 }
 
-// loadForReport is Load on the short budget reportWait, for a caller
-// whose answer is a report or a remedy and which handles "don't know"
-// gracefully. See reportWait.
-func (s *Store) loadForReport(origin string) (*Credentials, error) {
-	return s.load(origin, lockRequest{wait: reportWait})
-}
-
 func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte
