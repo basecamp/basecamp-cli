@@ -122,7 +122,7 @@ func (m *Manager) LogoutCredential(ctx context.Context, credKey, baseURL string)
 	// just after the delete and leave a revoked credential stored.
 	var result *LogoutResult
 	err := m.store.withKeyLock(ctx, credKey, func() error {
-		creds, err := m.store.Load(credKey)
+		creds, err := m.store.LoadContext(ctx, credKey)
 		switch {
 		case errors.Is(err, ErrNoCredential):
 			return ErrNoCredential
@@ -177,7 +177,7 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 	// One read-modify-write over the credential, under its cross-process
 	// lock for the reason LogoutCredential gives.
 	return m.store.withKeyLock(ctx, credKey, func() error {
-		creds, err := m.store.Load(credKey)
+		creds, err := m.store.LoadContext(ctx, credKey)
 		if errors.Is(err, ErrNoCredential) {
 			return ErrNoCredential
 		}

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // The concurrency tests below run REAL processes, not goroutines and not
@@ -565,7 +566,7 @@ func TestFileBackedReadsDoNotQueueBehindEachOther(t *testing.T) {
 	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "original"}))
 
 	// One reader holds its shared lock while another takes one too.
-	release, err := store.lockFile(storeLockName, "credential store", true, nil, nil)
+	release, err := store.lockFile(lockRequest{name: storeLockName, what: "credential store", shared: true})
 	require.NoError(t, err)
 	defer release()
 
@@ -573,6 +574,110 @@ func TestFileBackedReadsDoNotQueueBehindEachOther(t *testing.T) {
 	creds, err := store.Load("profile:bot")
 	require.NoError(t, err, "a read waited for another read")
 	assert.Equal(t, "original", creds.AccessToken)
+}
+
+// TestUnreadableStoreIsNotReportedAsNotAuthenticated: "not authenticated"
+// is a statement about the credential, and a store that could not be
+// reached makes none. Reporting contention as an auth failure would send
+// the operator to a login that fixes nothing and throw away a
+// classification they can act on.
+func TestUnreadableStoreIsNotReportedAsNotAuthenticated(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	restoreLockWait(t, 100*time.Millisecond)
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	_, err = m.AccessToken(context.Background())
+	require.Error(t, err)
+	e := output.AsError(err)
+	assert.Equal(t, output.CodeRateLimit, e.Code, "contention was reported as an auth failure")
+	assert.True(t, e.Retryable)
+	assert.NotContains(t, e.Message, "Not authenticated")
+}
+
+// TestCanceledReadStopsWaitingForTheStoreLock: a read waits for a writer,
+// so it has to stop waiting when the command does — otherwise a canceled
+// request sits on the manager lock for the whole budget.
+func TestCanceledReadStopsWaitingForTheStoreLock(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, loadErr := store.LoadContext(ctx, "profile:bot")
+		done <- loadErr
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("the read did not wait for the writer")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case loadErr := <-done:
+		assert.ErrorIs(t, loadErr, context.Canceled)
+	case <-time.After(30 * time.Second):
+		t.Fatal("a canceled read kept waiting")
+	}
+}
+
+// TestReportsDoNotWaitOutACredentialBudget: "am I logged in" and "what
+// should this error tell them to run" both answer "don't know" gracefully,
+// so neither may sit for the full credential budget behind a writer.
+func TestReportsDoNotWaitOutACredentialBudget(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live", OAuthType: oauthTypeAgent, ClientID: "c"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	// A credential budget far longer than the test is willing to wait; the
+	// report budget is what must apply.
+	restoreLockWait(t, time.Hour)
+	original := reportWait
+	reportWait = 50 * time.Millisecond
+	t.Cleanup(func() { reportWait = original })
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	answered := make(chan string, 1)
+	go func() {
+		m.IsAuthenticated()
+		answered <- m.LoginHint()
+	}()
+	select {
+	case hint := <-answered:
+		// The credential could not be read, so the remedy falls back to
+		// the interactive form rather than the agent one it would name.
+		assert.Contains(t, hint, "Run: basecamp auth login -P bot")
+	case <-time.After(30 * time.Second):
+		t.Fatal("a report waited out the credential budget")
+	}
 }
 
 // TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so
@@ -651,7 +756,7 @@ func TestCancellationDuringLockSetupIsStillRefused(t *testing.T) {
 
 	// A nil done channel is never selected on here: the fall-through is
 	// reached before any wait.
-	release, err := store.lockFile(keyLockName("profile:bot"), "credential", false, nil, cause)
+	release, err := store.lockFile(lockRequest{name: keyLockName("profile:bot"), what: "credential", cause: cause})
 	release()
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 2, calls, "the fall-through never rechecked the caller's wait")

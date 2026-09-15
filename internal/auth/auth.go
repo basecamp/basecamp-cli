@@ -157,9 +157,12 @@ func (m *Manager) loginRemedy() (command, lead string) {
 	// Every caller of this has already been through the credential store,
 	// so the read costs no probe that has not been paid; a store that
 	// cannot be read — or a Manager built without one — falls back to the
-	// interactive form rather than failing a hint.
+	// interactive form rather than failing a hint. It reads on the short
+	// budget for the same reason: a remedy is not worth waiting a minute
+	// for, and this is reached FROM an error, so it must not be able to
+	// turn one error into a long pause.
 	if m.store != nil {
-		if creds, err := m.store.Load(m.credentialKey()); err == nil && creds.OAuthType == oauthTypeAgent {
+		if creds, err := m.store.loadForReport(m.credentialKey()); err == nil && creds.OAuthType == oauthTypeAgent {
 			return m.agentLoginCommand(creds.ClientID), "Pipe the agent's client secret in:"
 		}
 	}
@@ -258,9 +261,9 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
+	creds, err := m.store.LoadContext(ctx, credKey)
 	if err != nil {
-		return "", m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
+		return "", m.unreadable(missing, credKey, err)
 	}
 	if !needsRenewal(creds) {
 		return m.servableToken(credKey, creds)
@@ -268,9 +271,9 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 
 	var token string
 	err = m.store.withKeyLock(ctx, credKey, func() error {
-		creds, loadErr := m.store.Load(credKey)
+		creds, loadErr := m.store.LoadContext(ctx, credKey)
 		if loadErr != nil {
-			return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, loadErr))
+			return m.unreadable(missing, credKey, loadErr)
 		}
 		if needsRenewal(creds) {
 			// Preserves the renewal's own error type (API, network, auth).
@@ -281,8 +284,8 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 			// in-memory copy: a refusal that another process's rotation
 			// had already answered leaves the store, not this copy,
 			// holding the live credential.
-			if creds, loadErr = m.store.Load(credKey); loadErr != nil {
-				return m.errAuth(fmt.Sprintf("Failed to load renewed credentials for %s: %v", credKey, loadErr))
+			if creds, loadErr = m.store.LoadContext(ctx, credKey); loadErr != nil {
+				return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
 			}
 		}
 		var tokenErr error
@@ -317,6 +320,22 @@ func needsRenewal(creds *Credentials) bool {
 	return time.Now().Unix() >= renewAt
 }
 
+// unreadable is the error for a credential the store would not give up.
+//
+// "Not authenticated" is the right answer only when the store SPOKE: it
+// has no such credential, or one nothing can read. A store that could not
+// be reached — a lock another process is holding, a keyring that would not
+// open — is not a statement about the credential, and turning it into one
+// would send the operator to a login that fixes nothing and throw away a
+// classification (retryable, rate-limited) the caller can act on.
+func (m *Manager) unreadable(missing, credKey string, err error) error {
+	var e *output.Error
+	if errors.As(err, &e) && e.Code != output.CodeAuth {
+		return err
+	}
+	return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
+}
+
 // servableToken is creds' access token, or the auth error for a credential
 // that holds none.
 func (m *Manager) servableToken(credKey string, creds *Credentials) (string, error) {
@@ -334,8 +353,9 @@ func (m *Manager) IsAuthenticated() bool {
 		return true
 	}
 
-	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
+	// The short budget, and false on anything unreadable: this answers a
+	// report, and has always said "no" for a store it could not read.
+	creds, err := m.store.loadForReport(m.credentialKey())
 	if err != nil {
 		return false
 	}
@@ -351,9 +371,9 @@ func (m *Manager) Refresh(ctx context.Context) error {
 
 	credKey := m.credentialKey()
 	return m.store.withKeyLock(ctx, credKey, func() error {
-		creds, err := m.store.Load(credKey)
+		creds, err := m.store.LoadContext(ctx, credKey)
 		if err != nil {
-			return m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
+			return m.unreadable("Not authenticated for", credKey, err)
 		}
 		return m.renewLocked(ctx, credKey, creds)
 	})

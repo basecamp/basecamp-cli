@@ -165,9 +165,27 @@ func (s *Store) warnFallback() {
 // readers do not queue behind each other, but none of them can land in the
 // middle of a writer's replacement of credentials.json.
 func (s *Store) Load(origin string) (*Credentials, error) {
+	return s.load(origin, lockRequest{})
+}
+
+// LoadContext is Load for a caller that can be canceled: the wait for the
+// store lock ends when ctx does. Every credential operation with a command
+// behind it uses this, so a stopped command stops waiting.
+func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, error) {
+	return s.load(origin, lockRequest{done: ctx.Done(), cause: ctx.Err})
+}
+
+// loadForReport is Load on the short budget reportWait, for a caller
+// whose answer is a report or a remedy and which handles "don't know"
+// gracefully. See reportWait.
+func (s *Store) loadForReport(origin string) (*Credentials, error) {
+	return s.load(origin, lockRequest{wait: reportWait})
+}
+
+func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte
-	err := s.withStoreReadLock(func() error {
+	err := s.withStoreReadLock(req, func() error {
 		var loadErr error
 		data, loadErr = s.ensure().Load(origin)
 		return loadErr

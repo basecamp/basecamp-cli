@@ -164,17 +164,29 @@ func (s *Store) withStoreLock(fn func() error) error {
 // gap sees no file, reports the store as empty, and produces the very
 // "Not authenticated for profile:" this package exists to stop. On a
 // keyring-backed store there is nothing to wait for.
-func (s *Store) withStoreReadLock(fn func() error) error {
+func (s *Store) withStoreReadLock(req lockRequest, fn func() error) error {
 	if s.ensure().UsingKeyring() {
+		if err := lockCause(req.cause); err != nil {
+			return err
+		}
 		return fn()
 	}
-	release, err := s.lockFile(storeLockName, "credential store", true, nil, nil)
+	req.name, req.what, req.shared = storeLockName, "credential store", true
+	release, err := s.lockFile(req)
 	if err != nil {
 		return err
 	}
 	defer release()
 	return fn()
 }
+
+// reportWait bounds a read that only informs a report or a remedy —
+// "am I logged in", "what should this error tell them to run". Those
+// answer "don't know" gracefully, so waiting a full credential budget for
+// them would trade a wrong answer nobody sees for a minute of silence
+// everybody does.
+// A variable so tests can shorten it.
+var reportWait = 2 * time.Second
 
 // withStoreLockContext is withStoreLock for a caller that can be canceled.
 //
@@ -191,7 +203,7 @@ func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error
 		}
 		return fn()
 	}
-	release, err := s.lockFile(storeLockName, "credential store", false, ctx.Done(), ctx.Err)
+	release, err := s.lockFile(lockRequest{name: storeLockName, what: "credential store", done: ctx.Done(), cause: ctx.Err})
 	if err != nil {
 		return err
 	}
@@ -206,7 +218,7 @@ func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error
 // through withStoreLock would skip the lock precisely when it is doing the
 // file work the lock exists for.
 func (s *Store) withStoreFileLock(fn func() error) error {
-	release, err := s.lockFile(storeLockName, "credential store", false, nil, nil)
+	release, err := s.lockFile(lockRequest{name: storeLockName, what: "credential store"})
 	if err != nil {
 		return err
 	}
@@ -219,7 +231,20 @@ func (s *Store) withStoreFileLock(fn func() error) error {
 // locking one credential; the whole-store lock has no context and goes
 // through lockFile directly.
 func (s *Store) acquire(ctx context.Context, name string) (func(), error) {
-	return s.lockFile(name, "credential", false, ctx.Done(), ctx.Err)
+	return s.lockFile(lockRequest{name: name, what: "credential", done: ctx.Done(), cause: ctx.Err})
+}
+
+// lockRequest is one attempt to take a lock: which file, what to call it
+// in a message, whether a shared (reader's) lock will do, how long to wait
+// for it, and the caller's cancellation if it has one.
+type lockRequest struct {
+	name   string
+	what   string
+	shared bool
+	// wait bounds the attempt; zero means credentialLockWait.
+	wait  time.Duration
+	done  <-chan struct{}
+	cause func() error
 }
 
 // lockFile takes the lock named name — exclusive, or shared when the
@@ -236,30 +261,34 @@ func (s *Store) acquire(ctx context.Context, name string) (func(), error) {
 // the opposite: someone is demonstrably inside the critical section, so an
 // expired wait is an error rather than a race, and the caller is told what
 // to look for.
-func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, cause func() error) (func(), error) {
+func (s *Store) lockFile(req lockRequest) (func(), error) {
 	noop := func() {}
 
 	// A caller whose wait is already over gets nothing — this before
 	// anything else, including the unlocked fall-throughs below, which
 	// would otherwise run the critical section (a credential revoked,
 	// deleted, replaced) for a command that has been canceled.
-	if err := lockCause(cause); err != nil {
+	if err := lockCause(req.cause); err != nil {
 		return noop, err
 	}
 
 	if s.fallbackDir == "" {
-		return s.unlocked(what, "no configuration directory is set", cause)
+		return s.unlocked(req, "no configuration directory is set")
 	}
 	if err := os.MkdirAll(s.lockDir(), 0o700); err != nil {
-		return s.unlocked(what, err.Error(), cause)
+		return s.unlocked(req, err.Error())
 	}
 
-	fl := flock.New(filepath.Join(s.lockDir(), name))
+	fl := flock.New(filepath.Join(s.lockDir(), req.name))
 	try := fl.TryLock
-	if shared {
+	if req.shared {
 		try = fl.TryRLock
 	}
-	deadline := time.Now().Add(credentialLockWait)
+	wait := req.wait
+	if wait <= 0 {
+		wait = credentialLockWait
+	}
+	deadline := time.Now().Add(wait)
 	for {
 		locked, err := try()
 		switch {
@@ -268,7 +297,7 @@ func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, c
 			// window: a waiter can be canceled in the instant the holder
 			// releases, and would otherwise proceed as if nothing had
 			// happened.
-			if cancelErr := lockCause(cause); cancelErr != nil {
+			if cancelErr := lockCause(req.cause); cancelErr != nil {
 				_ = fl.Close()
 				return noop, cancelErr
 			}
@@ -277,10 +306,10 @@ func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, c
 			// The lock file could not be opened or locked at all — a
 			// permission this process does not have, a filesystem with no
 			// flock.
-			return s.unlocked(what, err.Error(), cause)
+			return s.unlocked(req, err.Error())
 		}
 
-		if err := lockCause(cause); err != nil {
+		if err := lockCause(req.cause); err != nil {
 			// The caller's own wait ended (Ctrl-C, a request deadline);
 			// that is theirs to report, not a lock failure.
 			return noop, err
@@ -293,7 +322,7 @@ func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, c
 			return noop, &output.Error{
 				Code: output.CodeRateLimit,
 				Message: fmt.Sprintf("Timed out after %s waiting for another basecamp process to release the %s lock",
-					credentialLockWait, what),
+					wait, req.what),
 				Hint:      "Another basecamp process is holding it. Wait for it to finish, or stop it.",
 				Retryable: true,
 			}
@@ -302,13 +331,13 @@ func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, c
 		// A nil done channel blocks forever in a select, so an uncancelled
 		// wait is advanced by the poll timer alone.
 		select {
-		case <-done:
+		case <-req.done:
 			// done is only ever set together with cause, and a Done that
 			// has fired always yields an error. The fallback is there so
 			// that a broken pairing can never return "no lock, no error",
 			// which would run the critical section unsynchronized and say
 			// nothing.
-			if err := lockCause(cause); err != nil {
+			if err := lockCause(req.cause); err != nil {
 				return noop, err
 			}
 			return noop, context.Canceled
@@ -326,12 +355,12 @@ func (s *Store) lockFile(name, what string, shared bool, done <-chan struct{}, c
 // enough on its own: the steps between it and here touch a filesystem that
 // can block, and a wait that ended while one of them ran must leave
 // nothing to fall through to.
-func (s *Store) unlocked(what, reason string, cause func() error) (func(), error) {
+func (s *Store) unlocked(req lockRequest, reason string) (func(), error) {
 	noop := func() {}
-	if err := lockCause(cause); err != nil {
+	if err := lockCause(req.cause); err != nil {
 		return noop, err
 	}
-	s.warnUnlockable(what, reason)
+	s.warnUnlockable(req.what, reason)
 	return noop, nil
 }
 
