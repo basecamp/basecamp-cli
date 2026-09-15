@@ -225,12 +225,10 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 	}
 
 	if s.fallbackDir == "" {
-		s.warnUnlockable(what, "no configuration directory is set")
-		return noop, nil
+		return s.unlocked(what, "no configuration directory is set", cause)
 	}
 	if err := os.MkdirAll(s.lockDir(), 0o700); err != nil {
-		s.warnUnlockable(what, err.Error())
-		return noop, nil
+		return s.unlocked(what, err.Error(), cause)
 	}
 
 	fl := flock.New(filepath.Join(s.lockDir(), name))
@@ -251,14 +249,8 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 		case err != nil:
 			// The lock file could not be opened or locked at all — a
 			// permission this process does not have, a filesystem with no
-			// flock. Nobody can lock here, so say so and carry on — unless
-			// the caller's wait ended while we were finding that out, in
-			// which case there is nothing to carry on to.
-			if cancelErr := lockCause(cause); cancelErr != nil {
-				return noop, cancelErr
-			}
-			s.warnUnlockable(what, err.Error())
-			return noop, nil
+			// flock.
+			return s.unlocked(what, err.Error(), cause)
 		}
 
 		if err := lockCause(cause); err != nil {
@@ -296,6 +288,24 @@ func (s *Store) lockFile(name, what string, done <-chan struct{}, cause func() e
 		case <-time.After(credentialLockPoll):
 		}
 	}
+}
+
+// unlocked is the answer to a lock that could not be created at all: warn
+// once and let the critical section run unsynchronized, which is where
+// every process was before this file existed.
+//
+// Every such fall-through goes through here so that none of them can
+// forget the cancellation check. The check at the top of lockFile is not
+// enough on its own: the steps between it and here touch a filesystem that
+// can block, and a wait that ended while one of them ran must leave
+// nothing to fall through to.
+func (s *Store) unlocked(what, reason string, cause func() error) (func(), error) {
+	noop := func() {}
+	if err := lockCause(cause); err != nil {
+		return noop, err
+	}
+	s.warnUnlockable(what, reason)
+	return noop, nil
 }
 
 // lockCause is why the caller's wait ended, or nil for a caller that has

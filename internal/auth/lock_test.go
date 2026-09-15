@@ -570,6 +570,36 @@ func TestCanceledCallerIsRefusedEvenWhereLockingIsImpossible(t *testing.T) {
 	assert.Equal(t, "original", creds.AccessToken, "a canceled save wrote anyway where locking was impossible")
 }
 
+// TestCancellationDuringLockSetupIsStillRefused: the check at the top of
+// lockFile is not a sufficient gate on its own. The steps after it touch a
+// filesystem that can block, so a wait can end while one of them runs —
+// and every unlocked fall-through has to notice, not just the entry.
+//
+// The cause is stubbed rather than raced: it is live on entry and over by
+// the time the lock directory has failed, which is the sequence a slow
+// filesystem produces and a test cannot schedule.
+func TestCancellationDuringLockSetupIsStillRefused(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, os.WriteFile(store.lockDir(), []byte("not a directory"), 0o600))
+
+	calls := 0
+	cause := func() error {
+		calls++
+		if calls == 1 {
+			return nil
+		}
+		return context.Canceled
+	}
+
+	// A nil done channel is never selected on here: the fall-through is
+	// reached before any wait.
+	release, err := store.lockFile(keyLockName("profile:bot"), "credential", nil, cause)
+	release()
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 2, calls, "the fall-through never rechecked the caller's wait")
+}
+
 // TestCanceledLogoutRevokesNothing is that check where it matters most: a
 // logout revokes the token server-side and then deletes it, and neither
 // should happen for a command that was stopped.
