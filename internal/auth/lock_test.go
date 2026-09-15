@@ -641,10 +641,16 @@ func TestCanceledReadStopsWaitingForTheStoreLock(t *testing.T) {
 	}
 }
 
-// TestReportsDoNotWaitOutACredentialBudget: "am I logged in" and "what
-// should this error tell them to run" both answer "don't know" gracefully,
-// so neither may sit for the full credential budget behind a writer.
-func TestReportsDoNotWaitOutACredentialBudget(t *testing.T) {
+// TestARemedyDoesNotWaitOutACredentialBudget: the remedy on an error is
+// built by reading the credential, and that read is reached FROM a
+// failure. A full budget there would let one error become a minute of
+// silence, so it takes the short one and falls back to the interactive
+// form it cannot rule out.
+//
+// IsAuthenticated deliberately does NOT: it looks like a report and is
+// used as a gate (`basecamp mcp` refuses to start on a false), so it waits
+// the full budget rather than calling a busy store an empty one.
+func TestARemedyDoesNotWaitOutACredentialBudget(t *testing.T) {
 	dir := t.TempDir()
 	store := newTestStore(t, dir)
 	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live", OAuthType: oauthTypeAgent, ClientID: "c"}))
@@ -666,17 +672,49 @@ func TestReportsDoNotWaitOutACredentialBudget(t *testing.T) {
 	m.SetStore(store)
 
 	answered := make(chan string, 1)
-	go func() {
-		m.IsAuthenticated()
-		answered <- m.LoginHint()
-	}()
+	go func() { answered <- m.LoginHint() }()
 	select {
 	case hint := <-answered:
 		// The credential could not be read, so the remedy falls back to
 		// the interactive form rather than the agent one it would name.
 		assert.Contains(t, hint, "Run: basecamp auth login -P bot")
 	case <-time.After(30 * time.Second):
-		t.Fatal("a report waited out the credential budget")
+		t.Fatal("a remedy waited out the credential budget")
+	}
+}
+
+// TestCanceledReadIsReportedAsCancellation: a canceled command must not be
+// told it is not authenticated. The credential is fine; the wait ended.
+func TestCanceledReadIsReportedAsCancellation(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, tokenErr := m.AccessToken(ctx)
+		done <- tokenErr
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case tokenErr := <-done:
+		require.Error(t, tokenErr)
+		assert.ErrorIs(t, tokenErr, context.Canceled, "cancellation was reported as something else")
+		assert.NotContains(t, tokenErr.Error(), "Not authenticated")
+	case <-time.After(30 * time.Second):
+		t.Fatal("a canceled token lookup kept waiting")
 	}
 }
 

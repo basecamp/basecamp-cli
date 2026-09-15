@@ -329,9 +329,22 @@ func needsRenewal(creds *Credentials) bool {
 // would send the operator to a login that fixes nothing and throw away a
 // classification (retryable, rate-limited) the caller can act on.
 func (m *Manager) unreadable(missing, credKey string, err error) error {
-	var e *output.Error
-	if errors.As(err, &e) && e.Code != output.CodeAuth {
+	switch {
+	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
+		// The store spoke: nothing is stored, or nothing readable is.
+		// That IS "not authenticated", and a login is the remedy.
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The caller's own wait ended. Theirs to report, and the error
+		// must stay matchable as what it is.
 		return err
+	default:
+		var e *output.Error
+		if errors.As(err, &e) && e.Code != output.CodeAuth {
+			// Already classified as something other than an auth failure
+			// — contention, above all. Keep the class and the remedy it
+			// came with.
+			return err
+		}
 	}
 	return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
 }
@@ -353,9 +366,12 @@ func (m *Manager) IsAuthenticated() bool {
 		return true
 	}
 
-	// The short budget, and false on anything unreadable: this answers a
-	// report, and has always said "no" for a store it could not read.
-	creds, err := m.store.loadForReport(m.credentialKey())
+	// The full budget, not the report one. This looks like a report and
+	// is used as a gate: `basecamp mcp` refuses to start on a false here,
+	// and account discovery gives up on one. A short wait would turn a
+	// busy store into "you are not logged in" for something that acts on
+	// the answer rather than printing it.
+	creds, err := m.store.Load(m.credentialKey())
 	if err != nil {
 		return false
 	}

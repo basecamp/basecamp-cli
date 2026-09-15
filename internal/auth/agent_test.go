@@ -766,7 +766,12 @@ func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
 	m.cfg.AccountID = ""
 	assert.Contains(t, m.agentLoginCommand("c"), "--account <account-id>")
 
-	// A profile that already exists is not created, so it needs no account.
+	// An entry that exists WITHOUT an account is the same situation: the
+	// login binds one and refuses without it.
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL}}
+	assert.Contains(t, m.agentLoginCommand("c"), "--account <account-id>")
+
+	// A profile that exists and is already bound needs nothing added.
+	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL, AccountID: "999"}}
 	assert.NotContains(t, m.agentLoginCommand("c"), "--account")
 }

@@ -411,8 +411,9 @@ func (m *Manager) agentLoginCommand(clientID string) string {
 	// A profile with no entry yet is one the login creates, and creating
 	// one needs the account it addresses. That is not an edge case here: a
 	// refused FIRST mint registers nothing, which is exactly when this
-	// command is handed over.
-	if _, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered {
+	// command is handed over. An entry that exists without an account is
+	// the same situation — the login binds one, and refuses without it.
+	if entry, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered || entry == nil || entry.AccountID == "" {
 		account := "<account-id>"
 		if m.cfg.AccountID != "" {
 			account = shellQuote(m.cfg.AccountID)
