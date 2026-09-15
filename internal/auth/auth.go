@@ -717,11 +717,17 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	return m.store.Save(origin, creds)
 }
 
-// LoginResult holds the outcome of a successful Login().
-// Callers use this to determine the effective scope instead of their input.
+// LoginResult holds the outcome of a successful login — Login()'s, or
+// LoginClientCredentials()'s. Callers use this to determine the effective
+// scope instead of their input.
 type LoginResult struct {
-	OAuthType string // "bc5" or "launchpad" (stored credentials may also carry legacy "bc3")
-	Scope     string // effective scope: "read"/"full" for BC5, "" for Launchpad
+	// OAuthType is "bc5", "launchpad", or "agent" for a login that minted
+	// an agent's self-token. Stored credentials may also carry legacy
+	// "bc3", which no login produces.
+	OAuthType string
+	// Scope is the effective scope: "read"/"full" for BC5 and for an
+	// agent, "" for Launchpad, which has no scopes.
+	Scope string
 }
 
 // LoginOptions configures the login flow.
