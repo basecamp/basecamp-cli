@@ -4,6 +4,9 @@ go = "1.26"
 goreleaser = "2.15.4"
 # Keep in sync with .github/workflows/test.yml rhysd/actionlint version pin.
 actionlint = "1.7.12"
+# Runs the e2e suite. Keep in sync with the bats-core tag installed in
+# .github/workflows/test.yml and .github/workflows/release.yml.
+bats = "1.11.0"
 # Not invoked directly; actionlint shells out to it to lint workflow `run:`
 # scripts (CI uses the runner's preinstalled shellcheck).
 shellcheck = "0.11.0"
