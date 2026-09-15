@@ -56,6 +56,10 @@ type Store struct {
 	initOnce    sync.Once
 	inner       credStore
 	warnOnce    sync.Once
+
+	// lockWarnOnce fires the one warning a process gets when credential
+	// locking is impossible on this host (see lock.go).
+	lockWarnOnce sync.Once
 }
 
 // credStore is the slice of credstore.Store this wrapper uses, as an
@@ -173,20 +177,32 @@ func isMissingCredential(err error) bool {
 }
 
 // Save stores credentials for the given origin.
+//
+// The write is taken under the whole-store lock: the file backend keeps
+// every key in one credentials.json and rewrites the entire document, so
+// two processes saving DIFFERENT keys at once would otherwise drop one of
+// them. See lock.go.
 func (s *Store) Save(origin string, creds *Credentials) error {
 	s.warnFallback()
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
 	}
-	return s.ensure().Save(origin, data)
+	return s.withStoreLock(func() error { return s.ensure().Save(origin, data) })
 }
 
-// Delete removes credentials for the given origin.
-func (s *Store) Delete(origin string) error { return s.ensure().Delete(origin) }
+// Delete removes credentials for the given origin. Locked for the same
+// reason Save is: the file backend rewrites the whole document.
+func (s *Store) Delete(origin string) error {
+	return s.withStoreLock(func() error { return s.ensure().Delete(origin) })
+}
 
-// MigrateToKeyring migrates credentials from file to keyring.
-func (s *Store) MigrateToKeyring() error { return s.ensure().MigrateToKeyring() }
+// MigrateToKeyring migrates credentials from file to keyring. It reads
+// credentials.json, re-saves every key, and removes the file, so it is a
+// whole-store read-modify-write and takes the store lock.
+func (s *Store) MigrateToKeyring() error {
+	return s.withStoreLock(func() error { return s.ensure().MigrateToKeyring() })
+}
 
 // UsingKeyring returns true if the store is using the system keyring.
 func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }

@@ -186,74 +186,96 @@ func (m *Manager) hintLogin(err error) error {
 	return &hinted
 }
 
-// AccessToken returns a valid access token, refreshing if needed.
+// AccessToken returns a valid access token, renewing it if needed.
 // If BASECAMP_TOKEN env var is set, it's used directly without OAuth.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	// Check for BASECAMP_TOKEN environment variable first
 	if token := os.Getenv("BASECAMP_TOKEN"); token != "" {
 		return token, nil
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return "", m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
-	}
-
-	// Check if token is expired (with 5 minute buffer).
-	// ExpiresAt==0 means non-expiring token (e.g., from BASECAMP_TOKEN env var),
-	// so only refresh if ExpiresAt > 0 and is within the expiry window.
-	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds()) {
-		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
-			return "", err
-		}
-		// Reload refreshed credentials
-		creds, err = m.store.Load(credKey)
-		if err != nil {
-			return "", m.errAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
-		}
-	}
-
-	if creds.AccessToken == "" {
-		return "", m.errAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
-	}
-
-	return creds.AccessToken, nil
+	return m.storedAccessToken(ctx, "Not authenticated for")
 }
 
 // StoredAccessToken returns a valid access token from the credential store,
-// refreshing if needed. Unlike AccessToken, this ignores the BASECAMP_TOKEN
+// renewing it if needed. Unlike AccessToken, this ignores the BASECAMP_TOKEN
 // environment variable and always uses stored OAuth credentials.
 func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
+	return m.storedAccessToken(ctx, "No stored credentials for")
+}
+
+// storedAccessToken serves the stored credential's access token, renewing
+// it first when it is inside the refresh window. missing is how the absence
+// of a credential is phrased for the caller that asked.
+//
+// Renewal is the cross-process critical section, and it is taken in that
+// order deliberately: acquire the credential key's lock, re-load the
+// credential UNDER it, and check the expiry AGAIN. The second check is what
+// keeps twenty concurrent commands from making twenty token requests — the
+// first through renews, the rest find the fresh credential waiting and send
+// nothing — and holding the lock across load, renew and save is what keeps
+// a rotated refresh token safe, since no other process can be between its
+// own load and save while this one holds it.
+//
+// The fast path — a credential comfortably inside its lifetime — takes no
+// lock at all, which is every command in a normal hour. Reading one key is
+// atomic in both backends (the file backend replaces credentials.json by
+// rename), so a reader has nothing to race with.
+func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
 	creds, err := m.store.Load(credKey)
 	if err != nil {
-		return "", m.errAuth(fmt.Sprintf("No stored credentials for %s: %v", credKey, err))
+		return "", m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
+	}
+	if !needsRenewal(creds) {
+		return m.servableToken(credKey, creds)
 	}
 
-	// Check if token is expired (with the refresh-window buffer)
-	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds()) {
-		if err := m.refreshLocked(ctx, credKey, creds); err != nil {
-			// Preserve the original error type (API, network, etc.)
-			return "", err
+	var token string
+	err = m.store.withKeyLock(ctx, credKey, func() error {
+		creds, loadErr := m.store.Load(credKey)
+		if loadErr != nil {
+			return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, loadErr))
 		}
-		// Reload refreshed credentials
-		creds, err = m.store.Load(credKey)
-		if err != nil {
-			return "", m.errAuth(fmt.Sprintf("Failed to load refreshed credentials for %s: %v", credKey, err))
+		if needsRenewal(creds) {
+			// Preserves the renewal's own error type (API, network, auth).
+			if renewErr := m.refreshLocked(ctx, credKey, creds); renewErr != nil {
+				return renewErr
+			}
+			// Read back what the renewal stored rather than trusting the
+			// in-memory copy: a refusal that another process's rotation
+			// had already answered leaves the store, not this copy,
+			// holding the live credential.
+			if creds, loadErr = m.store.Load(credKey); loadErr != nil {
+				return m.errAuth(fmt.Sprintf("Failed to load renewed credentials for %s: %v", credKey, loadErr))
+			}
 		}
+		var tokenErr error
+		token, tokenErr = m.servableToken(credKey, creds)
+		return tokenErr
+	})
+	if err != nil {
+		return "", err
 	}
+	return token, nil
+}
 
+// needsRenewal reports whether a stored access token is inside the refresh
+// window and must be renewed before it is served. ExpiresAt==0 means a
+// non-expiring token (an imported personal access token, or a server that
+// reported no expiry) and is never renewed.
+func needsRenewal(creds *Credentials) bool {
+	return creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-int64(RefreshWindow.Seconds())
+}
+
+// servableToken is creds' access token, or the auth error for a credential
+// that holds none.
+func (m *Manager) servableToken(credKey string, creds *Credentials) (string, error) {
 	if creds.AccessToken == "" {
 		return "", m.errAuth(fmt.Sprintf("Stored credentials for %s have empty access token", credKey))
 	}
-
 	return creds.AccessToken, nil
 }
 
@@ -273,18 +295,21 @@ func (m *Manager) IsAuthenticated() bool {
 	return creds.AccessToken != ""
 }
 
-// Refresh forces a token refresh.
+// Refresh forces a token renewal whatever the stored expiry says. The
+// credential is loaded under the cross-process lock, so the credential it
+// renews is the one it saves.
 func (m *Manager) Refresh(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
-	}
-
-	return m.refreshLocked(ctx, credKey, creds)
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		creds, err := m.store.Load(credKey)
+		if err != nil {
+			return m.errAuth(fmt.Sprintf("Not authenticated for %s: %v", credKey, err))
+		}
+		return m.refreshLocked(ctx, credKey, creds)
+	})
 }
 
 // invalidGrantPrefix is how the SDK's token exchanger renders an RFC 6749
@@ -310,14 +335,14 @@ func invalidGrant(err error) (string, bool) {
 }
 
 // forgetRefusedGrant deletes the stored credential only while it still
-// carries the refresh token the server just refused. Each process has its
-// own Manager lock, so two of them can enter the refresh window together:
-// the first rotates and saves, the second is refused for reusing the old
-// token, and an unconditional delete here would throw away the fresh
-// credential the first one stored. The re-read closes that window down to
-// the gap between this Load and Delete; a rotation landing inside it is
-// lost, which costs one login, and a cross-process lock on a store that is
-// usually the OS keyring is not a price worth paying for that.
+// carries the refresh token the server just refused. Two processes used to
+// be able to enter the refresh window together — the first rotating and
+// saving, the second refused for reusing the old token — and an
+// unconditional delete here would have thrown away the fresh credential the
+// first one stored. The cross-process lock (lock.go) now keeps them out of
+// each other's refresh entirely, so this re-read no longer has a race to
+// close; it is kept because a host where the lock could not be taken at all
+// falls back to exactly the unsynchronized behavior it was written for.
 //
 // It reports whether the store holds a credential other than the refused
 // one — another process's rotation, which is a live credential the caller
@@ -1060,7 +1085,13 @@ func (m *Manager) ImportToken(token, scope, userID, userEmail string, expiresAt 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.store.Save(m.credentialKey(), creds)
+	credKey := m.credentialKey()
+	// Under the credential's cross-process lock so the import cannot land
+	// in the middle of another process's refresh, which would then save
+	// the credential this one replaced back over it.
+	return m.store.withKeyLock(context.Background(), credKey, func() error {
+		return m.store.Save(credKey, creds)
+	})
 }
 
 // discovery is the outcome of provider selection: the OAuth config to use
@@ -1636,13 +1667,21 @@ func (m *Manager) SetUserEmail(email string) error {
 		return nil
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return err
-	}
-	creds.UserEmail = email
-	return m.store.Save(credKey, creds)
+	// Load and save are one read-modify-write, so they are taken under the
+	// credential's cross-process lock: without it this write would put the
+	// whole credential back as it was read, undoing a token another process
+	// rotated in between.
+	return m.store.withKeyLock(context.Background(), credKey, func() error {
+		creds, err := m.store.Load(credKey)
+		if err != nil {
+			return err
+		}
+		creds.UserEmail = email
+		return m.store.Save(credKey, creds)
+	})
 }
 
 // SetUserIdentity stores the user ID and email for the current credential
@@ -1655,18 +1694,24 @@ func (m *Manager) SetUserIdentity(userID, email string) error {
 		return nil
 	}
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	credKey := m.credentialKey()
-	creds, err := m.store.Load(credKey)
-	if err != nil {
-		return err
-	}
-	if userID != "" {
-		creds.UserID = userID
-	}
-	if email != "" {
-		creds.UserEmail = email
-	}
-	return m.store.Save(credKey, creds)
+	// One read-modify-write, under the credential's cross-process lock for
+	// the reason SetUserEmail gives.
+	return m.store.withKeyLock(context.Background(), credKey, func() error {
+		creds, err := m.store.Load(credKey)
+		if err != nil {
+			return err
+		}
+		if userID != "" {
+			creds.UserID = userID
+		}
+		if email != "" {
+			creds.UserEmail = email
+		}
+		return m.store.Save(credKey, creds)
+	})
 }
 
 // CredentialKey returns the current credential storage key.
