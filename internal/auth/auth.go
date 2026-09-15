@@ -126,6 +126,7 @@ type Manager struct {
 type credentialKind struct {
 	agent    bool
 	clientID string
+	scope    string
 }
 
 // NewManager creates a new auth manager.
@@ -183,7 +184,7 @@ func (m *Manager) loginRemedy() (command, lead string) {
 	// is the right answer for every profile that is not an agent's and a
 	// harmless one for an agent nobody has loaded yet.
 	if kind := m.rememberedKind(); kind.agent {
-		return m.agentLoginCommand(kind.clientID), "Pipe the agent's client secret in:"
+		return m.agentLoginCommand(kind.clientID, kind.scope), "Pipe the agent's client secret in:"
 	}
 	if m.cfg.ActiveProfile != "" {
 		return "basecamp auth login -P " + shellQuote(m.cfg.ActiveProfile), "Run:"
@@ -221,7 +222,7 @@ func shellActive(r rune) bool {
 func (m *Manager) remember(creds *Credentials) {
 	m.kindMu.Lock()
 	defer m.kindMu.Unlock()
-	m.kind = credentialKind{agent: creds.OAuthType == oauthTypeAgent, clientID: creds.ClientID}
+	m.kind = credentialKind{agent: creds.OAuthType == oauthTypeAgent, clientID: creds.ClientID, scope: creds.Scope}
 }
 
 // rememberedKind is what the last credential this Manager handled was.

@@ -558,12 +558,12 @@ func TestAgentLoginCommandFillsInWhatIsMissing(t *testing.T) {
 	m := newDeviceTestManager(t, as.srv.URL)
 
 	m.cfg.ActiveProfile = ""
-	assert.Contains(t, m.agentLoginCommand(""), "--client-id <client-id>")
-	assert.Contains(t, m.agentLoginCommand(""), "-P <profile>")
+	assert.Contains(t, m.agentLoginCommand("", ""), "--client-id <client-id>")
+	assert.Contains(t, m.agentLoginCommand("", ""), "-P <profile>")
 
 	m.cfg.ActiveProfile = "clawdito"
-	assert.Contains(t, m.agentLoginCommand("a client"), "--client-id 'a client'")
-	assert.Contains(t, m.agentLoginCommand("a client"), "-P clawdito")
+	assert.Contains(t, m.agentLoginCommand("a client", ""), "--client-id 'a client'")
+	assert.Contains(t, m.agentLoginCommand("a client", ""), "-P clawdito")
 }
 
 // TestAgentMintRefusalRepeatsNothingTheServerWrote: the request carried a
@@ -761,19 +761,19 @@ func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
 	m.cfg.ActiveProfile = "clawdito"
 
 	m.cfg.AccountID = "999"
-	assert.Contains(t, m.agentLoginCommand("c"), "--account 999")
+	assert.Contains(t, m.agentLoginCommand("c", ""), "--account 999")
 
 	m.cfg.AccountID = ""
-	assert.Contains(t, m.agentLoginCommand("c"), "--account <account-id>")
+	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
 
 	// An entry that exists WITHOUT an account is the same situation: the
 	// login binds one and refuses without it.
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL}}
-	assert.Contains(t, m.agentLoginCommand("c"), "--account <account-id>")
+	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
 
 	// A profile that exists and is already bound needs nothing added.
 	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL, AccountID: "999"}}
-	assert.NotContains(t, m.agentLoginCommand("c"), "--account")
+	assert.NotContains(t, m.agentLoginCommand("c", ""), "--account")
 }
 
 // TestOnlyACredentialRefusalAsksForTheSecretAgain: telling an automated
@@ -788,17 +788,18 @@ func TestOnlyACredentialRefusalAsksForTheSecretAgain(t *testing.T) {
 		code   string
 	}
 	for name, c := range map[string]refusal{
-		"a named client refusal":   {http.StatusBadRequest, `{"error":"invalid_client"}`, output.CodeAuth},
-		"a named grant refusal":    {http.StatusBadRequest, `{"error":"invalid_grant"}`, output.CodeAuth},
-		"an unauthorized client":   {http.StatusBadRequest, `{"error":"unauthorized_client"}`, output.CodeAuth},
-		"a bare 401":               {http.StatusUnauthorized, `nothing useful`, output.CodeAuth},
-		"a bare 403":               {http.StatusForbidden, `nothing useful`, output.CodeAuth},
-		"a malformed request":      {http.StatusBadRequest, `{"error":"invalid_request"}`, output.CodeAPI},
-		"a grant the server lacks": {http.StatusBadRequest, `{"error":"unsupported_grant_type"}`, output.CodeAPI},
-		"a proxy's bare 400":       {http.StatusBadRequest, `<html>Bad Request</html>`, output.CodeAPI},
-		"a timeout in front of it": {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
-		"a misconfigured endpoint": {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
-		"a rate limit":             {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
+		"a named client refusal":         {http.StatusBadRequest, `{"error":"invalid_client"}`, output.CodeAuth},
+		"a named grant refusal":          {http.StatusBadRequest, `{"error":"invalid_grant"}`, output.CodeAuth},
+		"a client barred from the grant": {http.StatusBadRequest, `{"error":"unauthorized_client"}`, output.CodeAPI},
+		"a refused scope":                {http.StatusBadRequest, `{"error":"invalid_scope"}`, output.CodeAPI},
+		"a bare 401":                     {http.StatusUnauthorized, `nothing useful`, output.CodeAuth},
+		"a bare 403":                     {http.StatusForbidden, `nothing useful`, output.CodeAuth},
+		"a malformed request":            {http.StatusBadRequest, `{"error":"invalid_request"}`, output.CodeAPI},
+		"a grant the server lacks":       {http.StatusBadRequest, `{"error":"unsupported_grant_type"}`, output.CodeAPI},
+		"a proxy's bare 400":             {http.StatusBadRequest, `<html>Bad Request</html>`, output.CodeAPI},
+		"a timeout in front of it":       {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
+		"a misconfigured endpoint":       {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
+		"a rate limit":                   {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
 		// The STATUS decides: a server saying invalid_client alongside a
 		// 429 or a 503 is saying two things at once, and the status is the
 		// one that says what to do next.
@@ -847,4 +848,77 @@ func TestARateLimitedMintKeepsItsRetryAfter(t *testing.T) {
 	assert.True(t, e.Retryable)
 	assert.Contains(t, e.Hint, "30 seconds")
 	assert.NotContains(t, e.Hint, "--with-client-credentials")
+}
+
+// TestARecoveryCommandKeepsTheScope: a read-only agent told to
+// re-authenticate without --scope would come back with full access, or be
+// refused for asking for more than its client is allowed.
+func TestARecoveryCommandKeepsTheScope(t *testing.T) {
+	as := startDeviceAS(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.cfg.ActiveProfile = "clawdito"
+	m.cfg.Profiles = map[string]*config.ProfileConfig{"clawdito": {BaseURL: as.srv.URL, AccountID: "999"}}
+
+	assert.Contains(t, m.agentLoginCommand("c", scopeRead), "--scope read")
+	// full is the default; naming it says nothing.
+	assert.NotContains(t, m.agentLoginCommand("c", scopeFull), "--scope")
+
+	// And through a real refusal, from the credential's stored scope.
+	as.token = func(int) (int, string) {
+		return http.StatusUnauthorized, `{"error":"invalid_client"}`
+	}
+	creds := agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))
+	creds.Scope = scopeRead
+	storeAgent(t, m, creds)
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, output.AsError(err).Hint, "--scope read")
+}
+
+// TestATokenTheServerCallsExpiredIsNotGivenAnHour: an explicit
+// "expires_in": 0 is the server saying the token it just issued is already
+// spent, which is the opposite of an absent field. Assuming the documented
+// hour for it would serve a retired token for an hour.
+func TestATokenTheServerCallsExpiredIsNotGivenAnHour(t *testing.T) {
+	for name, body := range map[string]string{
+		"zero":     `{"access_token":"minted","token_type":"bearer","expires_in":0}`,
+		"negative": `{"access_token":"minted","token_type":"bearer","expires_in":-30}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startDeviceAS(t)
+			as.token = func(int) (int, string) { return http.StatusOK, body }
+
+			m := newDeviceTestManager(t, as.srv.URL)
+			key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "already expired")
+
+			stored, loadErr := m.store.Load(key)
+			require.NoError(t, loadErr)
+			assert.Equal(t, "spent", stored.AccessToken, "an already-expired token was stored")
+		})
+	}
+}
+
+// TestAnAbsurdTokenLifetimeIsCapped: the conversion to a Duration
+// overflows outright past a few hundred years, and nothing about a
+// one-hour grant should be planned around a lifetime past a day.
+func TestAnAbsurdTokenLifetimeIsCapped(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusOK, `{"access_token":"minted","token_type":"bearer","expires_in":999999999999}`
+	}
+
+	m := newDeviceTestManager(t, as.srv.URL)
+	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+
+	_, err := m.AccessToken(context.Background())
+	require.NoError(t, err)
+
+	stored, loadErr := m.store.Load(key)
+	require.NoError(t, loadErr)
+	assert.InDelta(t, time.Now().Add(maxAgentTokenLifetime).Unix(), stored.ExpiresAt, 60)
 }

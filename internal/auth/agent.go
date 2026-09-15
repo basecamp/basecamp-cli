@@ -84,7 +84,7 @@ type agentMint struct {
 func (m *Manager) prepareAgentMint(creds *Credentials) (*agentMint, error) {
 	mint, err := m.resolveAgentMint(creds)
 	if err != nil {
-		return nil, m.agentRemedy(err, creds.ClientID)
+		return nil, m.agentRemedy(err, creds.ClientID, creds.Scope)
 	}
 	return mint, nil
 }
@@ -195,6 +195,43 @@ func agentRenewAfter(now, expiry time.Time) time.Time {
 	return expiry.Add(-margin)
 }
 
+// maxAgentTokenLifetime caps what a reported expires_in is believed to
+// mean. A self-token lives an hour; anything past a day is not a lifetime
+// this CLI should plan around, and an unbounded one overflows the
+// conversion to a Duration outright.
+const maxAgentTokenLifetime = 24 * time.Hour
+
+// applyTokenLifetime sets the token's expiry from the response's
+// expires_in.
+//
+// The field is re-decoded through a *int because oauth.Token's plain int
+// cannot tell an ABSENT expires_in from an explicit zero, and the two mean
+// opposite things: absent leaves the grant's documented lifetime to be
+// assumed, while a zero or negative one is the server saying the token it
+// just issued is already spent. Assuming an hour for that would serve a
+// retired token for an hour.
+func applyTokenLifetime(token *oauth.Token, body []byte) error {
+	var reported struct {
+		ExpiresIn *int `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &reported); err != nil {
+		return errors.New("the token response could not be parsed")
+	}
+	if reported.ExpiresIn == nil {
+		// Absent: agentTokenExpiry assumes the documented lifetime.
+		return nil
+	}
+	if *reported.ExpiresIn <= 0 {
+		return errors.New("the server issued a token that has already expired")
+	}
+	lifetime := time.Duration(*reported.ExpiresIn) * time.Second
+	if *reported.ExpiresIn > int(maxAgentTokenLifetime/time.Second) {
+		lifetime = maxAgentTokenLifetime
+	}
+	token.ExpiresAt = time.Now().Add(lifetime)
+	return nil
+}
+
 // agentTokenExpiry is when a minted token stops being usable: what the
 // server reported, or the assumed lifetime when it reported nothing.
 func agentTokenExpiry(token *oauth.Token) time.Time {
@@ -299,8 +336,8 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 		// changed, and the CLI is about to drop it on the floor.
 		m.warnf("warning: the agent token response carried a refresh token; agent credentials re-mint instead and it will not be stored")
 	}
-	if token.ExpiresIn > 0 {
-		token.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+	if err := applyTokenLifetime(&token, body); err != nil {
+		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: "+err.Error())
 	}
 	return &token, nil
 }
@@ -367,22 +404,25 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// say the secret is wrong, and telling an automated caller to fetch
 	// its secret again for one of them is advice that cannot help.
 	if clientRefusalCodes[code] || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID)
+		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID, mint.scope)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
 }
 
-// clientRefusalCodes are the RFC 6749 §5.2 codes that say the CLIENT
-// CREDENTIALS are the problem — as opposed to the request's shape
-// (invalid_request), the server's capabilities (unsupported_grant_type),
-// or a caller going too fast (slow_down), none of which a fresh login
-// repairs.
+// clientRefusalCodes are the RFC 6749 §5.2 codes that say THE CREDENTIALS
+// PRESENTED are wrong, which is the only thing piping the secret in again
+// can repair.
+//
+// The near misses are all deliberately absent. invalid_scope refuses the
+// scope, not the client. unauthorized_client refuses the client's use of
+// this grant. access_denied is a policy verdict. invalid_request is about
+// the request's shape and unsupported_grant_type about the server's
+// capabilities. Re-running the login with the same client fixes none of
+// them, and telling someone to fetch their secret again for one is advice
+// that sends them looking in the wrong place.
 var clientRefusalCodes = map[string]bool{
-	"invalid_client":      true,
-	"invalid_grant":       true,
-	"unauthorized_client": true,
-	"invalid_scope":       true,
-	"access_denied":       true,
+	"invalid_client": true,
+	"invalid_grant":  true,
 }
 
 // isRedirect reports whether status is one of the redirects a
@@ -407,13 +447,13 @@ func isRedirect(status int) bool {
 // person's) for an operation that is explicitly an agent's. The client id
 // in hand is also the one being authenticated, which the stored credential
 // need not be.
-func (m *Manager) agentRemedy(err error, clientID string) error {
+func (m *Manager) agentRemedy(err error, clientID, scope string) error {
 	var e *output.Error
 	if !errors.As(err, &e) || e.Code != output.CodeAuth || (e.Hint != "" && e.Hint != output.DefaultAuthHint) {
 		return err
 	}
 	hinted := *e
-	hinted.Hint = "Pipe the agent's client secret in: " + m.agentLoginCommand(clientID)
+	hinted.Hint = "Pipe the agent's client secret in: " + m.agentLoginCommand(clientID, scope)
 	return &hinted
 }
 
@@ -423,7 +463,7 @@ func (m *Manager) agentRemedy(err error, clientID string) error {
 // shell-quoted; either one that is missing — which is itself a reason this
 // command is being suggested — becomes a placeholder, so the command reads
 // as something to fill in rather than something to paste and watch fail.
-func (m *Manager) agentLoginCommand(clientID string) string {
+func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	id := "<client-id>"
 	if clientID != "" {
 		id = shellQuote(clientID)
@@ -444,6 +484,12 @@ func (m *Manager) agentLoginCommand(clientID string) string {
 			account = shellQuote(m.cfg.AccountID)
 		}
 		command += " --account " + account
+	}
+	// A read-only agent told to re-authenticate without this would come
+	// back with full access, or be refused for asking for more than its
+	// client is allowed. full is the default and adding it says nothing.
+	if scope != "" && scope != scopeFull {
+		command += " --scope " + shellQuote(scope)
 	}
 	return command
 }
