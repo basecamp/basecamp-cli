@@ -1897,7 +1897,7 @@ func (m *Manager) GetUserEmail() string {
 // An empty email is an omission, not a value: an in-house (bc3) token's
 // authorization document carries only the identity id, and a caller
 // relaying that must not blank what a login stored.
-func (m *Manager) SetUserEmail(email string) error {
+func (m *Manager) SetUserEmail(ctx context.Context, email string) error {
 	if os.Getenv("BASECAMP_TOKEN") != "" || email == "" {
 		return nil
 	}
@@ -1909,13 +1909,17 @@ func (m *Manager) SetUserEmail(email string) error {
 	// credential's cross-process lock: without it this write would put the
 	// whole credential back as it was read, undoing a token another process
 	// rotated in between.
-	return m.store.withKeyLock(context.Background(), credKey, func() error {
-		creds, err := m.store.Load(credKey)
+	//
+	// Under the caller's context too. This is a best-effort writeback its
+	// callers do not even check, so it must not be able to hold a finished
+	// or canceled command for the length of another process's refresh.
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		creds, err := m.store.LoadContext(ctx, credKey)
 		if err != nil {
 			return err
 		}
 		creds.UserEmail = email
-		return m.store.Save(credKey, creds)
+		return m.store.SaveContext(ctx, credKey, creds)
 	})
 }
 
@@ -1924,7 +1928,7 @@ func (m *Manager) SetUserEmail(email string) error {
 // Unlike it, BASECAMP_TOKEN does not suppress the write: a login stores
 // its new credential and then records who it verified as, whatever the
 // environment holds, so the caller decides whose identity this is.
-func (m *Manager) SetUserIdentity(userID, email string) error {
+func (m *Manager) SetUserIdentity(ctx context.Context, userID, email string) error {
 	if userID == "" && email == "" {
 		return nil
 	}
@@ -1932,10 +1936,10 @@ func (m *Manager) SetUserIdentity(userID, email string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	credKey := m.credentialKey()
-	// One read-modify-write, under the credential's cross-process lock for
-	// the reason SetUserEmail gives.
-	return m.store.withKeyLock(context.Background(), credKey, func() error {
-		creds, err := m.store.Load(credKey)
+	// One read-modify-write, under the credential's cross-process lock and
+	// the caller's context, for the reasons SetUserEmail gives.
+	return m.store.withKeyLock(ctx, credKey, func() error {
+		creds, err := m.store.LoadContext(ctx, credKey)
 		if err != nil {
 			return err
 		}
@@ -1945,7 +1949,7 @@ func (m *Manager) SetUserIdentity(userID, email string) error {
 		if email != "" {
 			creds.UserEmail = email
 		}
-		return m.store.Save(credKey, creds)
+		return m.store.SaveContext(ctx, credKey, creds)
 	})
 }
 

@@ -354,7 +354,7 @@ func wizardAuth(cmd *cobra.Command, app *appctx.App, styles *tui.Styles, showRes
 			Email string `json:"email_address"`
 		}
 		if err := resp.UnmarshalData(&profile); err == nil {
-			_ = app.Auth.SetUserIdentity(fmt.Sprintf("%d", profile.ID), profile.Email)
+			_ = app.Auth.SetUserIdentity(cmd.Context(), fmt.Sprintf("%d", profile.ID), profile.Email)
 			authenticatedAs = strings.TrimSpace(profile.Name)
 			if authenticatedAs == "" {
 				authenticatedAs = profile.Email

@@ -791,6 +791,52 @@ func TestCheckAuthenticatedTellsAbsentFromUnreadable(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// TestCanceledIdentityWritebackDoesNotHoldTheCommand: recording who a
+// credential belongs to is best effort — its callers discard the error —
+// so it must not be able to hold a finished or canceled command for the
+// length of another process's refresh.
+func TestCanceledIdentityWritebackDoesNotHoldTheCommand(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+
+	// Another process mid-refresh, holding the credential's lock.
+	require.NoError(t, os.MkdirAll(store.lockDir(), 0o700))
+	held := flock.New(filepath.Join(store.lockDir(), keyLockName("profile:bot")))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	restoreLockWait(t, time.Hour)
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- m.SetUserIdentity(ctx, "1", "someone@example.com") }()
+
+	select {
+	case <-done:
+		t.Fatal("the writeback did not wait for the lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case writeErr := <-done:
+		assert.ErrorIs(t, writeErr, context.Canceled)
+	case <-time.After(30 * time.Second):
+		t.Fatal("a canceled command was held by a best-effort writeback")
+	}
+
+	// And the credential it could not write to is untouched.
+	creds, loadErr := store.Load("profile:bot")
+	require.NoError(t, loadErr)
+	assert.Empty(t, creds.UserID)
+}
+
 // TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so
 // it would be taken and the work done — a credential revoked, deleted,
 // replaced — for a command the person already stopped. Every caller is

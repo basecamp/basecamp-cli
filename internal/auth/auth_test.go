@@ -251,7 +251,7 @@ func TestSetUserEmail(t *testing.T) {
 	require.NoError(t, manager.store.Save("https://3.basecampapi.com", creds))
 
 	// Set email only
-	err := manager.SetUserEmail("test@example.com")
+	err := manager.SetUserEmail(context.Background(), "test@example.com")
 	require.NoError(t, err)
 
 	// Verify email was saved and UserID was not modified
@@ -275,7 +275,7 @@ func TestSetUserEmailSkipsStoreOnEnvToken(t *testing.T) {
 	manager := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com"}, http.DefaultClient)
 	manager.store = NewStore(t.TempDir())
 
-	require.NoError(t, manager.SetUserEmail("someone@example.com"))
+	require.NoError(t, manager.SetUserEmail(context.Background(), "someone@example.com"))
 }
 
 func TestSetUserIdentity(t *testing.T) {
@@ -295,7 +295,7 @@ func TestSetUserIdentity(t *testing.T) {
 	require.NoError(t, manager.store.Save("https://3.basecampapi.com", creds))
 
 	// Set user identity
-	err := manager.SetUserIdentity("67890", "test@example.com")
+	err := manager.SetUserIdentity(context.Background(), "67890", "test@example.com")
 	require.NoError(t, err)
 
 	// Verify both were saved
@@ -2206,20 +2206,20 @@ func TestSetUserIdentity_EmptyValuesAreOmissions(t *testing.T) {
 		AccessToken: "tok", OAuthType: "bc5", UserID: "1", UserEmail: "kept@example.com",
 	}))
 
-	require.NoError(t, m.SetUserEmail(""))
-	require.NoError(t, m.SetUserIdentity("", ""))
+	require.NoError(t, m.SetUserEmail(context.Background(), ""))
+	require.NoError(t, m.SetUserIdentity(context.Background(), "", ""))
 	creds, err := m.store.Load(key)
 	require.NoError(t, err)
 	assert.Equal(t, "1", creds.UserID)
 	assert.Equal(t, "kept@example.com", creds.UserEmail)
 
-	require.NoError(t, m.SetUserIdentity("2", ""))
+	require.NoError(t, m.SetUserIdentity(context.Background(), "2", ""))
 	creds, err = m.store.Load(key)
 	require.NoError(t, err)
 	assert.Equal(t, "2", creds.UserID)
 	assert.Equal(t, "kept@example.com", creds.UserEmail, "an omitted email leaves the stored one")
 
-	require.NoError(t, m.SetUserEmail("new@example.com"))
+	require.NoError(t, m.SetUserEmail(context.Background(), "new@example.com"))
 	assert.Equal(t, "new@example.com", m.GetUserEmail())
 }
 
@@ -2232,7 +2232,7 @@ func TestSetUserIdentity_WritesUnderEnvToken(t *testing.T) {
 	key := m.credentialKey()
 	require.NoError(t, m.store.Save(key, &Credentials{AccessToken: "tok", OAuthType: "bc5"}))
 
-	require.NoError(t, m.SetUserIdentity("2", "who@example.com"))
+	require.NoError(t, m.SetUserIdentity(context.Background(), "2", "who@example.com"))
 	creds, err := m.store.Load(key)
 	require.NoError(t, err)
 	assert.Equal(t, "2", creds.UserID)

@@ -115,9 +115,9 @@ func runMe(cmd *cobra.Command, args []string) error {
 	switch {
 	case os.Getenv("BASECAMP_TOKEN") != "":
 	case person != nil:
-		_ = app.Auth.SetUserIdentity(strconv.FormatInt(person.ID, 10), email)
+		_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(person.ID, 10), email)
 	default:
-		_ = app.Auth.SetUserEmail(email)
+		_ = app.Auth.SetUserEmail(cmd.Context(), email)
 	}
 
 	// Build account output (already filtered to bc3 by SDK)
