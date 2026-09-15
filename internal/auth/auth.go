@@ -366,12 +366,17 @@ func (m *Manager) IsAuthenticated() bool {
 		return true
 	}
 
-	// The full budget, not the report one. This looks like a report and
-	// is used as a gate: `basecamp mcp` refuses to start on a false here,
-	// and account discovery gives up on one. A short wait would turn a
-	// busy store into "you are not logged in" for something that acts on
-	// the answer rather than printing it.
-	creds, err := m.store.Load(m.credentialKey())
+	// Read WITHOUT the store lock. This is a probe: its answer is already
+	// "no" for anything it cannot read, as it has always been for an
+	// unreadable keyring. It is also used as a GATE — `basecamp mcp`
+	// refuses to start on a false, account discovery gives up on one — so
+	// making it wait on another process's write could only turn a right
+	// answer into a slow wrong one.
+	//
+	// What the reader's lock buys elsewhere is not being caught inside a
+	// non-atomic replacement of credentials.json; being caught there
+	// yields this same "no", so there is nothing here for it to save.
+	creds, err := m.store.loadProbe(m.credentialKey())
 	if err != nil {
 		return false
 	}

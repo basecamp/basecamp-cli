@@ -718,6 +718,41 @@ func TestCanceledReadIsReportedAsCancellation(t *testing.T) {
 	}
 }
 
+// TestAuthenticationGateDoesNotWaitOnAWriter: IsAuthenticated is a probe
+// whose answer is already "no" for anything it cannot read — and it is a
+// gate, since `basecamp mcp` refuses to start on a false. Making it wait
+// on another process's write could only turn a right answer into a slow
+// wrong one, so it does not take the reader's lock.
+func TestAuthenticationGateDoesNotWaitOnAWriter(t *testing.T) {
+	dir := t.TempDir()
+	store := newTestStore(t, dir)
+	require.NoError(t, store.Save("profile:bot", &Credentials{AccessToken: "live"}))
+
+	held := flock.New(filepath.Join(store.lockDir(), storeLockName))
+	locked, err := held.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = held.Close() }()
+
+	// Budgets long enough that waiting on either would fail this test.
+	restoreLockWait(t, time.Hour)
+	original := reportWait
+	reportWait = time.Hour
+	t.Cleanup(func() { reportWait = original })
+
+	m := NewManager(&config.Config{BaseURL: "https://3.basecampapi.com", ActiveProfile: "bot"}, http.DefaultClient)
+	m.SetStore(store)
+
+	answered := make(chan bool, 1)
+	go func() { answered <- m.IsAuthenticated() }()
+	select {
+	case authenticated := <-answered:
+		assert.True(t, authenticated, "a writer's lock made the gate report no credential")
+	case <-time.After(30 * time.Second):
+		t.Fatal("the authentication gate waited on a writer")
+	}
+}
+
 // TestCanceledCallerNeverEntersTheCriticalSection: the lock is free, so
 // it would be taken and the work done — a credential revoked, deleted,
 // replaced — for a command the person already stopped. Every caller is
