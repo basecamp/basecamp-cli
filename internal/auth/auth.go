@@ -210,7 +210,13 @@ func shellActive(r rune) bool {
 }
 
 // remember records what the credential in play is, for the remedy an
-// error will carry. See credentialKind.
+// error will carry. Every Manager path that gets its hands on a
+// credential — serving a token, renewing one, storing one, answering
+// whether there is one, reporting on one — calls this, because a remedy
+// built from nothing names the interactive login, and that is the one
+// answer an agent profile must never be given.
+//
+// See credentialKind.
 func (m *Manager) remember(creds *Credentials) {
 	m.kindMu.Lock()
 	defer m.kindMu.Unlock()
@@ -410,6 +416,7 @@ func (m *Manager) IsAuthenticated() bool {
 	if err != nil {
 		return false
 	}
+	m.remember(creds)
 	return creds.AccessToken != ""
 }
 
@@ -527,6 +534,10 @@ func (m *Manager) forgetRefusedGrant(origin, refusedToken string) (rotated bool)
 // preparation the renewal does, on a copy, for a report that must say what
 // the next command will do without doing it.
 func (m *Manager) RefreshRefusal(creds *Credentials) error {
+	// The caller handed over the credential, so this is a chance to learn
+	// what it is that costs nothing — and the report this feeds is exactly
+	// where naming the wrong login would hurt.
+	m.remember(creds)
 	prepared := *creds
 	if creds.OAuthType == oauthTypeAgent {
 		_, err := m.prepareAgentMint(&prepared)
@@ -1814,6 +1825,7 @@ func (m *Manager) GetOAuthType() string {
 	if err != nil {
 		return ""
 	}
+	m.remember(creds)
 	return creds.OAuthType
 }
 
@@ -1845,6 +1857,7 @@ func (m *Manager) AccountID() string {
 	if err != nil {
 		return ""
 	}
+	m.remember(creds)
 
 	id := strings.TrimPrefix(creds.Resource, accountResourceURNPrefix)
 	if id == creds.Resource || id == "" {
@@ -1868,6 +1881,7 @@ func (m *Manager) GetUserEmail() string {
 	if err != nil {
 		return ""
 	}
+	m.remember(creds)
 	return creds.UserEmail
 }
 
