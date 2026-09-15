@@ -1405,7 +1405,8 @@ rather than a sign-in. `basecamp auth login` and `--with-token` would both store
 a PERSON's credential under that profile and silently replace the agent; its
 recovery is `--with-client-credentials` with the client secret piped in. The
 CLI's own `hint` on a failing agent credential already names that command with
-the client id filled in — prefer it verbatim.
+the client id filled in — prefer it verbatim, and follow it rather than
+choosing for yourself whenever `oauth_type` is absent.
 
 ```bash
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity

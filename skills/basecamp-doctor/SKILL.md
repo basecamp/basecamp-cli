@@ -34,7 +34,8 @@ Report failures and warnings with their `hint` fields. Also inspect the top-leve
   login, with the client secret piped in:
   `op read "op://<vault>/<item>/credential" | basecamp auth login --with-client-credentials --client-id <id> -P <profile> --account <id>`
   The CLI's own `hint` on an agent credential already names this command with
-  the client id filled in — prefer it verbatim over reconstructing one.
+  the client id filled in — prefer it verbatim over reconstructing one, and
+  follow it rather than choosing for yourself whenever `oauth_type` is absent.
 - Agent plugin installation or version: `basecamp setup agents` (honors `BASECAMP_SETUP_AGENT`)
 - Codex plugin specifically: `basecamp setup codex`
 - Claude Code plugin specifically: `basecamp setup claude`

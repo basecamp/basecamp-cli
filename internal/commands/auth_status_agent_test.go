@@ -132,3 +132,58 @@ func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
 	assert.Contains(t, credentials.Hint, "--with-client-credentials")
 	assert.Contains(t, app.Auth.LoginCommand(), "--client-id agent-client")
 }
+
+// TestAuthStatusNamesTheKindEvenWhenItCannotAuthenticate: a credential can
+// be stored and still authenticate nobody — one holding no access token.
+// Reporting only "not logged in" there hides WHICH credential is broken,
+// and a reader deciding how to recover from `oauth_type` would find it
+// absent and reach for the interactive login: the way an agent gets
+// replaced by a person.
+func TestAuthStatusNamesTheKindEvenWhenItCannotAuthenticate(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+	}))
+
+	buf := &bytes.Buffer{}
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+	app.Flags.JSON = true
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	require.NoError(t, cmd.Execute())
+
+	var envelope struct {
+		Notice string         `json:"notice"`
+		Data   map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, false, envelope.Data["authenticated"])
+	assert.Equal(t, "agent", envelope.Data["oauth_type"], "the report hid which credential was broken")
+	assert.Contains(t, envelope.Notice, "--with-client-credentials")
+}

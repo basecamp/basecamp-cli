@@ -317,6 +317,15 @@ func authStatusReport(app *appctx.App) (*authStatus, error) {
 		report.data["authenticated"] = false
 		report.summary = "Not logged in to " + baseURL
 		report.hint = app.Auth.LoginHint()
+		// A credential can be stored and still not authenticate anyone —
+		// one holding no access token. Saying only "not logged in" there
+		// hides WHICH credential is broken, and a reader deciding how to
+		// recover from oauth_type would find it absent and reach for the
+		// interactive login, which is how an agent gets replaced by a
+		// person. The type is reported even when the token is not.
+		if creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey()); err == nil && creds.OAuthType != "" {
+			report.data["oauth_type"] = creds.OAuthType
+		}
 		return report, nil
 	}
 
