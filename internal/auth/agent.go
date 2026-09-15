@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -428,6 +429,26 @@ var clientRefusalCodes = map[string]bool{
 	"invalid_grant":  true,
 }
 
+// accountToBind is the account to name in a login that will create or bind
+// a profile — or a placeholder when this process cannot honestly say.
+//
+// The effective account is not necessarily THIS profile's: with no account
+// of its own, a profile inherits whatever the global or repo config set,
+// and emitting that as an explicit --account would turn an unrelated
+// inherited value into a binding the operator never asked for. The login
+// itself refuses exactly that (it takes an account only from a flag or the
+// environment), so a command suggesting it would be one that fails, or
+// worse, one that succeeds wrongly. Only a value the operator supplied for
+// this invocation is filled in.
+func (m *Manager) accountToBind() string {
+	source := config.Source(m.cfg.Sources["account_id"])
+	supplied := source == config.SourceFlag || source == config.SourceEnv
+	if supplied && m.cfg.AccountID != "" {
+		return shellQuote(m.cfg.AccountID)
+	}
+	return "<account-id>"
+}
+
 // isRedirect reports whether status is one of the redirects a
 // credential-carrying POST refuses to follow.
 func isRedirect(status int) bool {
@@ -482,11 +503,7 @@ func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	// command is handed over. An entry that exists without an account is
 	// the same situation — the login binds one, and refuses without it.
 	if entry, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered || entry == nil || entry.AccountID == "" {
-		account := "<account-id>"
-		if m.cfg.AccountID != "" {
-			account = shellQuote(m.cfg.AccountID)
-		}
-		command += " --account " + account
+		command += " --account " + m.accountToBind()
 	}
 	// A read-only agent told to re-authenticate without this would come
 	// back with full access, or be refused for asking for more than its

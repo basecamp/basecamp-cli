@@ -760,10 +760,22 @@ func TestAgentRetryCommandCreatesTheProfileItNeeds(t *testing.T) {
 	m := newDeviceTestManager(t, as.srv.URL)
 	m.cfg.ActiveProfile = "clawdito"
 
+	// Only an account THIS invocation supplied is named: a profile with
+	// none of its own inherits whatever the global or repo config set,
+	// and the login refuses to bind that — so suggesting it would be
+	// suggesting a command that fails, or one that succeeds wrongly.
 	m.cfg.AccountID = "999"
+	m.cfg.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 	assert.Contains(t, m.agentLoginCommand("c", ""), "--account 999")
 
+	m.cfg.Sources = map[string]string{"account_id": string(config.SourceEnv)}
+	assert.Contains(t, m.agentLoginCommand("c", ""), "--account 999")
+
+	m.cfg.Sources = map[string]string{"account_id": string(config.SourceGlobal)}
+	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
+
 	m.cfg.AccountID = ""
+	m.cfg.Sources = map[string]string{}
 	assert.Contains(t, m.agentLoginCommand("c", ""), "--account <account-id>")
 
 	// An entry that exists WITHOUT an account is the same situation: the
