@@ -117,4 +117,18 @@ func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
 	require.NotEmpty(t, crumbs)
 	assert.Contains(t, crumbs[0].Cmd, "--with-client-credentials")
 	assert.Contains(t, crumbs[0].Cmd, "--client-id agent-client")
+
+	// An agent credential with nothing usable in it is still an agent's.
+	// Doctor reports "no credentials found" for it, and must not answer
+	// that with the login that would replace the identity.
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+	}))
+	credentials := checkCredentials(app, false)
+	assert.Equal(t, "fail", credentials.Status)
+	assert.Contains(t, credentials.Hint, "--with-client-credentials")
+	assert.Contains(t, app.Auth.LoginCommand(), "--client-id agent-client")
 }

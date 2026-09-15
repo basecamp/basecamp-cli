@@ -164,7 +164,11 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 			Name:    "Authentication",
 			Status:  "skip",
 			Message: "Skipped (no credentials)",
-			Hint:    "Run: basecamp auth login",
+			// The command that re-establishes THIS credential: a stored
+			// agent credential with nothing usable in it is still an
+			// agent's, and the interactive login would replace it with a
+			// person's.
+			Hint: app.Auth.LoginHint(),
 		})
 	}
 
@@ -707,7 +711,7 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	if !app.Auth.IsAuthenticated() {
 		check.Status = "fail"
 		check.Message = "No credentials found"
-		check.Hint = "Run: basecamp auth login"
+		check.Hint = app.Auth.LoginHint()
 		return check
 	}
 
