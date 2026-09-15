@@ -794,12 +794,17 @@ func TestOnlyACredentialRefusalAsksForTheSecretAgain(t *testing.T) {
 		"a refused scope":                {http.StatusBadRequest, `{"error":"invalid_scope"}`, output.CodeAPI},
 		"a bare 401":                     {http.StatusUnauthorized, `nothing useful`, output.CodeAuth},
 		"a bare 403":                     {http.StatusForbidden, `nothing useful`, output.CodeAuth},
-		"a malformed request":            {http.StatusBadRequest, `{"error":"invalid_request"}`, output.CodeAPI},
-		"a grant the server lacks":       {http.StatusBadRequest, `{"error":"unsupported_grant_type"}`, output.CodeAPI},
-		"a proxy's bare 400":             {http.StatusBadRequest, `<html>Bad Request</html>`, output.CodeAPI},
-		"a timeout in front of it":       {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
-		"a misconfigured endpoint":       {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
-		"a rate limit":                   {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
+		// A named reason decides; the status does not get a second vote,
+		// or the narrowing of clientRefusalCodes would mean nothing.
+		"a 403 naming a policy refusal":     {http.StatusForbidden, `{"error":"access_denied"}`, output.CodeAPI},
+		"a 401 barring the client":          {http.StatusUnauthorized, `{"error":"unauthorized_client"}`, output.CodeAPI},
+		"a 401 naming a credential refusal": {http.StatusUnauthorized, `{"error":"invalid_client"}`, output.CodeAuth},
+		"a malformed request":               {http.StatusBadRequest, `{"error":"invalid_request"}`, output.CodeAPI},
+		"a grant the server lacks":          {http.StatusBadRequest, `{"error":"unsupported_grant_type"}`, output.CodeAPI},
+		"a proxy's bare 400":                {http.StatusBadRequest, `<html>Bad Request</html>`, output.CodeAPI},
+		"a timeout in front of it":          {http.StatusRequestTimeout, `<html>Request Timeout</html>`, output.CodeAPI},
+		"a misconfigured endpoint":          {http.StatusNotFound, `<html>Not Found</html>`, output.CodeAPI},
+		"a rate limit":                      {http.StatusTooManyRequests, `{"error":"slow_down"}`, output.CodeRateLimit},
 		// The STATUS decides: a server saying invalid_client alongside a
 		// 429 or a 503 is saying two things at once, and the status is the
 		// one that says what to do next.

@@ -394,16 +394,19 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		return statusFailure("minting an agent token: "+detail, resp)
 	}
 
-	// Among the remaining 4xx, a refusal OF THE CLIENT is one the server
-	// named as such, or a bare 401 or 403, which nothing but the
-	// credentials produces. Those are what no retry fixes and a fresh
-	// login does, so those get the login as their remedy.
+	// Among the remaining 4xx: when the server NAMED its reason, that name
+	// decides and the status does not get a second vote — a 403 saying
+	// access_denied is a policy refusal however it is numbered, and the
+	// narrowing above would mean nothing if the status could undo it.
+	// When it named nothing, a 401 or 403 is a credential verdict,
+	// because nothing but the credentials produces one.
 	//
-	// The rest keep their own class. A proxy's bare 400, a 408 nobody
-	// meant as a verdict, a 404 at a misconfigured endpoint — none of them
-	// say the secret is wrong, and telling an automated caller to fetch
-	// its secret again for one of them is advice that cannot help.
-	if clientRefusalCodes[code] || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	// Everything else keeps its own class. A proxy's bare 400, a 408
+	// nobody meant as a verdict, a 404 at a misconfigured endpoint — none
+	// of them say the secret is wrong, and telling an automated caller to
+	// fetch its secret again for one is advice that cannot help.
+	bareUnauthorized := code == "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden)
+	if clientRefusalCodes[code] || bareUnauthorized {
 		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID, mint.scope)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
