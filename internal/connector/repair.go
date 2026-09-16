@@ -24,6 +24,8 @@ import (
 type repairWalker struct {
 	ledger *Ledger
 	polls  eventfeed.PollSource
+	// maxPages caps the pages one pass walks; zero means maxRepairPagesPerPass.
+	maxPages int
 	// origin is the API origin every URL the walk follows must stay on.
 	origin   string
 	filters  eventfeed.Filters
@@ -103,6 +105,11 @@ func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
 	if _, err := w.walk(ctx, loss); err != nil && !errors.Is(err, errReconciliationEnded) {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		// The final attempt did not run to its end; closing now would condemn
+		// ids on a pass that never happened.
+		return err
+	}
 	if done, err := w.settled(ctx, *loss); err != nil || done {
 		return err
 	}
@@ -113,6 +120,9 @@ func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
 // A walk that ends in a failure no retry fixes leaves the loss open for the
 // next start — but not forever.
 func (w *repairWalker) closeIfExpired(ctx context.Context, loss Loss) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if w.now().Before(loss.DeadlineAt) {
 		return nil
 	}
@@ -166,7 +176,25 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 
 	last := loss.RepairCursor
 	pass := &repairPass{followed: map[string]bool{}}
-	for {
+	walked := map[string]bool{}
+	maxPages := w.maxPages
+	if maxPages <= 0 {
+		maxPages = maxRepairPagesPerPass
+	}
+	for pages := 0; ; {
+		if err := ctx.Err(); err != nil {
+			// Cancellation is a delay, never a verdict: the loss stays open
+			// on disk for the next start.
+			return last, err
+		}
+		if pages >= maxPages {
+			// Distinct positions forever evade cycle detection. The pass ends
+			// at the cap, and the next one resumes from the cursor saved on
+			// the last page.
+			w.log.Warn("a repair pass reached its page cap; resuming on the repair cadence", "loss_id", loss.ID, "pages", pages)
+			return last, nil
+		}
+		pages++
 		page, err := w.polls.Poll(ctx, cursor, w.filters)
 		if err != nil {
 			next, err := w.pollFailure(ctx, loss, cursor, err, pass)
@@ -205,6 +233,13 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 		}
 		// An empty page with a `next` is ordinary — the walk crossed rows the
 		// filters excluded — so the loop never stops on len(Events) == 0.
+		if walked[page.Next] || page.Next == cursor.PageURL {
+			// A next already walked this pass — itself, or a cycle — would
+			// spin. The pass ends and the repair cadence is the backoff.
+			w.log.Warn("a repair page's next repeats a URL this pass already walked; ending the pass", "loss_id", loss.ID)
+			return last, nil
+		}
+		walked[page.Next] = true
 		if err := sameOrigin(w.origin, page.Next); err != nil {
 			w.log.Error("a repair page's next URL leaves the API origin; the loss stays open for the next start", "loss_id", loss.ID)
 			return last, errReconciliationEnded
@@ -218,6 +253,11 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 // stops rather than looping back to find nothing missing and calling that a
 // full recovery.
 var errReconciliationEnded = errors.New("connector: reconciliation ended inside the repair walk")
+
+// maxRepairPagesPerPass bounds the pages one repair pass walks. A thousand
+// pages crosses up to a million ledger rows; past that the pass yields to the
+// repair cadence and resumes from its saved cursor.
+const maxRepairPagesPerPass = 1000
 
 // maxResumesPerPass bounds the 410 resumes one pass follows. Keyed by URL
 // alone, a server that signs or nonces its resume URLs would make every answer
@@ -253,6 +293,11 @@ func failureKind(err error) string {
 // to continue this pass at, nil with no error to end the pass and wait for the
 // next repair poll, or an error.
 func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor eventfeed.Cursor, err error, pass *repairPass) (*eventfeed.Cursor, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// The caller's cancellation, not the walk failing. It propagates, so
+		// nothing downstream mistakes a shutdown for a pass that ran.
+		return nil, ctxErr
+	}
 	var pollErr *eventfeed.PollError
 	if !errors.As(err, &pollErr) {
 		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
