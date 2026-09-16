@@ -598,6 +598,17 @@ func TestInboxHumanOutputCarriesTheResumeCommand(t *testing.T) {
 	assert.Contains(t, out.String(), "Resume from here with: basecamp inbox --position inbox-pos-1")
 }
 
+// An opaque position goes into a command somebody pastes, so it is quoted
+// rather than trusted to be a bare word.
+func TestAPositionIsShellQuotedInTheResumeCommand(t *testing.T) {
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK, feedPageJSON("pos 1; rm -rf /", "", 11)))
+	app.Flags.Hints = true
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "now"))
+
+	assert.Equal(t, `basecamp events poll --position 'pos 1; rm -rf /'`, resumeBreadcrumb(t, out))
+}
+
 // A capped walk says both things in one notice: more remains, and here is
 // where to continue from.
 func TestACappedWalkSaysSoAndStillHandsBackThePosition(t *testing.T) {

@@ -495,9 +495,11 @@ func (r feedRequest) resumeNotice(position string, capped bool, maxPages int) st
 // positionCommand is the invocation that resumes from a position. The filters
 // ride along because a position is bound to the set it was minted for: the
 // same command without them is a different filter set, and the server answers
-// 409.
+// 409. The position itself is shell-quoted — it is opaque server text going
+// into a command somebody pastes, and nothing about it promises to be a bare
+// word.
 func (r feedRequest) positionCommand(position string) string {
-	return fmt.Sprintf("%s --position %s%s", r.lane.pollCmd, position, r.filters)
+	return fmt.Sprintf("%s --position %s%s", r.lane.pollCmd, shellQuote(position), r.filters)
 }
 
 // newEventsPollCmd builds `basecamp events poll`.
