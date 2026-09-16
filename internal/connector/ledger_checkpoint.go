@@ -108,6 +108,18 @@ func (l *Ledger) LineagePollServedID(ctx context.Context, key eventfeed.Checkpoi
 	return id, nil
 }
 
+// LineageHasPosition reports whether this consumer holds a position under any
+// filter set.
+func (l *Ledger) LineageHasPosition(ctx context.Context, key eventfeed.CheckpointKey) (bool, error) {
+	var n int
+	err := l.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM checkpoints WHERE lineage = ? AND position <> ''`, lineageOf(key)).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("connector: read lineage positions: %w", err)
+	}
+	return n > 0, nil
+}
+
 // lineageOf is the checkpoint identity without its filter digest.
 func lineageOf(key eventfeed.CheckpointKey) string {
 	key.FilterKey = ""

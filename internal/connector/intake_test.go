@@ -122,7 +122,12 @@ func TestPointerLineCarriesNoContent(t *testing.T) {
 }
 
 func TestPollServedIDAdvancesOnlyOnAPageBoundary(t *testing.T) {
+	polls := &scriptedPolls{pages: []eventfeed.PollPage{{
+		Events:   []eventfeed.Event{testEvent(17099838500)},
+		Position: "p1",
+	}}}
 	intake, ledger, _ := newTestIntake(t, nil, nil)
+	intake.served = &servedPolls{inner: polls}
 	ctx := context.Background()
 
 	live := testEvent(17099999999)
@@ -130,17 +135,20 @@ func TestPollServedIDAdvancesOnlyOnAPageBoundary(t *testing.T) {
 	visible := true
 	live.VisibleToClients = &visible
 	require.NoError(t, intake.ingest(ctx, live, LaneOf(live)))
+	intake.confirmPollServed(ctx, "some-other-position")
 
-	intake.confirmPollServed(ctx)
 	served, err := ledger.LastPollServedID(ctx, intake.CheckpointKey())
 	require.NoError(t, err)
 	assert.Zero(t, served,
 		"a live id is far ahead of the poll lane; re-entering at one skips everything inside the safety delay")
 
-	polled := testEvent(17099838500)
-	require.NoError(t, intake.ingest(ctx, polled, LaneOf(polled)))
-	intake.confirmPollServed(ctx)
+	page, err := intake.served.Poll(ctx, eventfeed.Cursor{}, eventfeed.Filters{})
+	require.NoError(t, err)
+	served, err = ledger.LastPollServedID(ctx, intake.CheckpointKey())
+	require.NoError(t, err)
+	assert.Zero(t, served, "a page served but not yet delivered records nothing")
 
+	intake.confirmPollServed(ctx, page.Position)
 	served, err = ledger.LastPollServedID(ctx, intake.CheckpointKey())
 	require.NoError(t, err)
 	assert.Equal(t, int64(17099838500), served)

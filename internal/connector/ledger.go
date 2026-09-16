@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
+	"modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // RecordState is where an event sits in the ledger's lifecycle.
@@ -130,8 +131,16 @@ func retryBusy(fn func() error) error {
 }
 
 func isBusy(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	// The primary result code, without the extended bits.
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	}
+	return false
 }
 
 // securePath makes the ledger private or refuses it.

@@ -99,11 +99,9 @@ type Intake struct {
 	positions pollServedReader
 
 	mu sync.Mutex
-	// pollCandidates holds the ids delivered since the last page boundary that
-	// carry no push-lane transport fields. They become the last poll-served id
-	// only when a page boundary confirms a poll page actually landed.
-	pollCandidates []int64
-	snapshot       map[int64]bool
+	// served is the current connection's wrapped poll source.
+	served   *servedPolls
+	snapshot map[int64]bool
 	// learned holds buckets events proved visible that the lister did not
 	// name.
 	learned   map[int64]bool
@@ -118,7 +116,12 @@ type Intake struct {
 	// stored position; hasReentry says whether one is pending.
 	reentry    eventfeed.Start
 	hasReentry bool
-	reentryLog string
+	// replaying is whether this connection entered at the beginning of served
+	// history on purpose, to recover.
+	replaying bool
+	// reentryReplays is whether the pending re-entry is a replay.
+	reentryReplays bool
+	reentryLog     string
 	// abortErr ends the run: set when continuing could only mean entering
 	// the feed somewhere unsafe.
 	abortErr error
@@ -255,8 +258,9 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	in.mu.Lock()
 	in.cancelRun = cancel
 	in.promotedThisRun = false
-	reentry, hasReentry, reentryLog := in.reentry, in.hasReentry, in.reentryLog
+	reentry, hasReentry, reentryLog, reentryReplays := in.reentry, in.hasReentry, in.reentryLog, in.reentryReplays
 	in.hasReentry = false
+	in.replaying = false
 	in.mu.Unlock()
 	defer func() {
 		in.mu.Lock()
@@ -274,6 +278,10 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	if err != nil {
 		return err
 	}
+	lineageHasPosition, err := in.ledger.LineageHasPosition(runCtx, in.key)
+	if err != nil {
+		return err
+	}
 
 	start := eventfeed.StartResume()
 	switch {
@@ -282,6 +290,7 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		in.log.Info("entering the feed after an explicit event id", "since", since)
 	case hasReentry:
 		start = reentry
+		in.setReplaying(reentryReplays)
 		in.log.Warn("the stored position was refused; " + reentryLog)
 	case hadPosition:
 		in.log.Info("resuming the feed from the stored position", "filter_key", in.key.FilterKey)
@@ -292,6 +301,15 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		start = eventfeed.StartAfter(lineageServed)
 		in.log.Warn("no position for this filter set; re-entering after the last poll-served id under the previous one",
 			"since", lineageServed, "filter_key", in.key.FilterKey)
+	case lineageHasPosition:
+		// A filter change from a set that had read up to a position but
+		// recorded no served id. Entering at the present would skip what
+		// followed that position; replaying from the beginning costs reads
+		// the ledger absorbs.
+		start = eventfeed.StartBeginning()
+		in.setReplaying(true)
+		in.log.Warn("no position or poll-served id for this filter set, but the previous one had read up to a position; replaying from the beginning of served history",
+			"filter_key", in.key.FilterKey)
 	default:
 		// Said out loud because it is a real loss of history, not a neutral
 		// default: everything committed before this moment is never served.
@@ -312,7 +330,12 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		options = append(options, eventfeed.WithTransport(in.opts.Transport))
 	}
 
-	feed, err := eventfeed.New(in.key.Origin, in.opts.AccountID, in.opts.Minter, in.opts.Polls, options...)
+	served := &servedPolls{inner: in.opts.Polls}
+	in.mu.Lock()
+	in.served = served
+	in.mu.Unlock()
+
+	feed, err := eventfeed.New(in.key.Origin, in.opts.AccountID, in.opts.Minter, served, options...)
 	if err != nil {
 		return fmt.Errorf("connector: build feed: %w", err)
 	}
@@ -374,9 +397,6 @@ func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) 
 		// had been.
 		return err
 	}
-	if lane == LanePoll {
-		in.notePollCandidate(event.ID)
-	}
 	if !fresh {
 		// The ordinary case: the poll lane serving what the live lane already
 		// delivered, or a restart re-walking a page. Dedupe is the point.
@@ -404,11 +424,9 @@ func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) 
 // the vocabulary, and a *bool — rather than defaulting them, precisely so this
 // is answerable.
 //
-// It is used for one thing that matters, the last poll-served id, and it is
-// paired there with a page boundary: absence of the push fields nominates an
-// id, a delivered poll page confirms it. Erring towards "live" only costs
-// duplicates the ledger absorbs; erring towards "poll" would move the re-entry
-// past events the poll lane had not served.
+// It labels records and pointer lines. It decides nothing about re-entry: the
+// last poll-served id is taken from what the poll source served, not from
+// guessing which lane a delivery came from.
 func LaneOf(event eventfeed.Event) Lane {
 	if event.ActorType == "" && event.VisibleToClients == nil {
 		return LanePoll
@@ -416,25 +434,69 @@ func LaneOf(event eventfeed.Event) Lane {
 	return LaneLive
 }
 
-func (in *Intake) notePollCandidate(id int64) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	in.pollCandidates = append(in.pollCandidates, id)
+// servedPolls wraps the feed's poll source to record what each page SERVED.
+//
+// The last poll-served id has to count served events, not delivered ones. The
+// package suppresses the poll copy of any event the live lane already
+// delivered, and the poll lane runs about thirty seconds behind the live one
+// by design, so in steady state nearly every poll page delivers nothing.
+// Counting deliveries would leave the id at zero, and every re-entry that
+// needs it would fall back to a full replay. This is what the package counts
+// for its own reset cursor too.
+//
+// The repair walk does not go through here: its pages are not the feed's
+// position and must never advance the feed's re-entry.
+type servedPolls struct {
+	inner eventfeed.PollSource
+
+	mu sync.Mutex
+	// byPosition holds the highest id a page served, keyed by the position
+	// that page issued, until the package confirms the page was delivered.
+	byPosition map[string]int64
 }
 
-// confirmPollServed promotes the candidates a delivered poll page confirms.
-func (in *Intake) confirmPollServed(ctx context.Context) {
-	in.mu.Lock()
-	candidates := in.pollCandidates
-	in.pollCandidates = nil
-	in.mu.Unlock()
-
-	var highest int64
-	for _, id := range candidates {
-		if id > highest {
-			highest = id
-		}
+func (s *servedPolls) Poll(ctx context.Context, cursor eventfeed.Cursor, filters eventfeed.Filters) (eventfeed.PollPage, error) {
+	page, err := s.inner.Poll(ctx, cursor, filters)
+	if err != nil || page.Position == "" {
+		return page, err
 	}
+	var highest int64
+	for _, event := range page.Events {
+		highest = max(highest, event.ID)
+	}
+	if highest > 0 {
+		s.mu.Lock()
+		if s.byPosition == nil {
+			s.byPosition = make(map[string]int64)
+		}
+		s.byPosition[page.Position] = max(s.byPosition[page.Position], highest)
+		s.mu.Unlock()
+	}
+	return page, err
+}
+
+// confirmed returns the highest id served by the page that issued position,
+// and forgets every page served before it: pages are polled and delivered one
+// at a time, so nothing earlier can still be waiting.
+func (s *servedPolls) confirmed(position string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	highest := s.byPosition[position]
+	clear(s.byPosition)
+	return highest
+}
+
+// confirmPollServed records the served id of a page the package has just
+// finished delivering. Only then: an ingest that failed partway through a page
+// leaves the page undelivered and its ids unrecorded.
+func (in *Intake) confirmPollServed(ctx context.Context, position string) {
+	in.mu.Lock()
+	served := in.served
+	in.mu.Unlock()
+	if served == nil {
+		return
+	}
+	highest := served.confirmed(position)
 	if highest == 0 {
 		// An empty page. Ordinary — the walk crossed rows the filters exclude
 		// — and it serves no id, so it advances nothing here.
@@ -457,11 +519,11 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 			in.log.Warn("feed socket disconnected", "reason", reason, "error", err)
 		},
 		CatchUpStarted: func(eventfeed.Cursor) { in.log.Info("feed catch-up walk started") },
-		PageDelivered: func(int, string) {
+		PageDelivered: func(_ int, position string) {
 			// Detached deliberately: the position the page just moved must be
 			// recorded even if the run's context is on its way down, or a
 			// shutdown mid-page loses the id the next re-entry needs.
-			in.confirmPollServed(context.WithoutCancel(ctx)) //nolint:contextcheck // detached on purpose, see above
+			in.confirmPollServed(context.WithoutCancel(ctx), position) //nolint:contextcheck // detached on purpose, see above
 		},
 		CaughtUp: func() {
 			// "Caught up with the walk", not "caught up with the account":
@@ -528,12 +590,20 @@ func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
 		// is followed exactly as served — the entry class is the server's
 		// decision, read out of its cursor, never substituted.
 		epoch := s.EpochAfterID
+		note := "the feed's served history before the epoch is gone"
+		in.mu.Lock()
+		if in.replaying {
+			// Expected, not a loss: this connection chose to replay from the
+			// beginning to recover, and the beginning is below the epoch.
+			note = "a recovery replay from the beginning of served history met the epoch, as expected; not a loss"
+		}
+		in.mu.Unlock()
 		if _, err := in.ledger.RecordGap(ctx, Gap{
 			DetectedAt:   in.now(),
 			Class:        GapEpoch,
 			EpochAfterID: &epoch,
 			EntryClass:   entryClassOf(s.ResumeURL),
-			Note:         "the feed's served history before the epoch is gone",
+			Note:         note,
 		}); err != nil {
 			// A gap we cannot write down is a gap nothing will ever report.
 			in.log.Error("could not record the feed gap; refusing to continue past it", "error", err)
@@ -721,9 +791,16 @@ func (in *Intake) onPositionRejected(ctx context.Context) {
 		in.reentry = eventfeed.StartBeginning()
 		in.reentryLog = "no poll-served id for this filter set; re-entering at the beginning of served history"
 	}
+	in.reentryReplays = served == 0
 	in.hasReentry = true
 	in.mu.Unlock()
 	in.requestReconnect()
+}
+
+func (in *Intake) setReplaying(replaying bool) {
+	in.mu.Lock()
+	in.replaying = replaying
+	in.mu.Unlock()
 }
 
 // abort ends the current connection and the run with err.
