@@ -37,6 +37,7 @@ func NewAuthCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		newAuthAgentCmd(),
 		newAuthLoginCmd(),
 		newAuthLogoutCmd(),
 		newAuthRevokeCmd(),
