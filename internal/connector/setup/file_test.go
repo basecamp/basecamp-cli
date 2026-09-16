@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
@@ -221,6 +222,23 @@ func TestSaveRefusesWithoutAHeldCredential(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
 	require.Error(t, Save(nil, path, validFile(t)))
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "nothing is written")
+}
+
+// A proof this package could make for itself is not one auth made: a struct
+// that embeds the interface promotes its unexported method and can answer
+// anything, and Save refuses it.
+type forgedHold struct{ auth.HeldCredential }
+
+func (forgedHold) Valid() bool                    { return true }
+func (forgedHold) Key() string                    { return "profile:agent" }
+func (forgedHold) Credentials() *auth.Credentials { return &auth.Credentials{AccessToken: "forged"} }
+
+func TestSaveRefusesAForgedHold(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	require.Error(t, Save(forgedHold{}, path, validFile(t)))
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "nothing is written")
 }

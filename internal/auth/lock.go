@@ -164,9 +164,14 @@ func (s *Store) WithCredential(ctx context.Context, key string, fn func(HeldCred
 
 // HeldCredential is a credential read while its key's lock is held, and the
 // proof a write can ask for: a function that must not run without the lock
-// takes one. Only WithCredential can make a value that satisfies it — the
-// interface has a method no other package can implement — and the value
-// stops being valid when the lock is released.
+// takes one. Only WithCredential makes one, and it stops being valid when
+// the lock is released.
+//
+// A caller reads the proof with Held, never through this interface's
+// methods: an unexported method cannot be declared elsewhere, but it can be
+// PROMOTED by embedding the interface, and such a wrapper can answer
+// anything it likes. Held asks the auth package instead, which knows its own
+// value.
 type HeldCredential interface {
 	// Credentials is the credential as it was stored when the lock was
 	// taken, or nil once the lock has been released.
@@ -203,6 +208,18 @@ func (h *heldCredential) Key() string {
 func (h *heldCredential) Valid() bool { return !h.released.Load() }
 
 func (h *heldCredential) heldUnderLock() {}
+
+// Held reads a lock proof: the credential and key it was made with, and
+// whether the lock is still held. Anything this package did not make — a
+// nil, a struct embedding the interface — is reported as not held, whatever
+// its own methods say.
+func Held(h HeldCredential) (creds *Credentials, key string, held bool) {
+	own, ok := h.(*heldCredential)
+	if !ok || own == nil || !own.Valid() || own.creds == nil || own.key == "" {
+		return nil, "", false
+	}
+	return own.creds, own.key, true
+}
 
 // withStoreLock runs fn while holding the whole-store lock. fn must be one
 // store operation and must not make a network request: every process's
