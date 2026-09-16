@@ -1,0 +1,684 @@
+package connector
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/url"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+)
+
+// Defaults for the recovery timers.
+const (
+	// DefaultRepairInterval is how often a repair walk re-runs while a loss is
+	// open. It matches the feed's own repair poll, and it is deliberately
+	// longer than the poll lane's ~30s safety delay: a walk that outran the
+	// delay would call a still-committing event missing.
+	DefaultRepairInterval = 60 * time.Second
+	// DefaultRepairWindow is how long a loss stays open before the ids still
+	// missing are called unrecovered. Ten minutes is twenty repair polls past
+	// the safety delay.
+	DefaultRepairWindow = 10 * time.Minute
+	// DefaultMembershipInterval is how often the agent's project list is
+	// re-read. The cable snapshots the agent's buckets when it subscribes, so
+	// a project granted afterwards is invisible on the live lane until the
+	// connection is remade.
+	DefaultMembershipInterval = 10 * time.Minute
+)
+
+// MembershipSource lists the buckets the agent can currently see.
+type MembershipSource interface {
+	Buckets(ctx context.Context) ([]int64, error)
+}
+
+// Options configures intake.
+type Options struct {
+	// Origin is the API base URL. It is part of the checkpoint identity and
+	// the origin every continuation URL is validated against.
+	Origin string
+	// AccountID is the Basecamp account.
+	AccountID string
+	// ConsumerNamespace names this connector's checkpoint lineage. Two
+	// connectors in one account must not share one.
+	ConsumerNamespace string
+	// Filters is the feed's filter set. The checkpoint is keyed by its digest,
+	// so changing it re-enters under a new lineage.
+	Filters eventfeed.Filters
+	// SinceEventID, when positive, enters just after that event id whatever
+	// the ledger holds — the `--since` override.
+	SinceEventID int64
+
+	Ledger *Ledger
+	Queue  *Queue
+	Minter eventfeed.TicketMinter
+	Polls  eventfeed.PollSource
+
+	// Pointers receives one NDJSON line per newly seen event. Writes are
+	// serialized: an interleaved write tears a line and breaks the watcher
+	// reading it.
+	Pointers io.Writer
+	// Logger receives everything else. Pointer lines are the protocol;
+	// logging is not.
+	Logger *slog.Logger
+
+	// Membership, when set, drives the reconnect that makes a newly granted
+	// project visible on the live lane.
+	Membership         MembershipSource
+	MembershipInterval time.Duration
+
+	RepairInterval time.Duration
+	RepairWindow   time.Duration
+
+	Clock     func() time.Time
+	Transport eventfeed.CableTransport
+}
+
+// Intake is the feed's delivery path: write the pointer, hand over the id.
+//
+// Everything else — reading the recording, judging it, dispatching it — is
+// downstream of the queue, so a slow admission or a busy dispatcher can never
+// stall the socket.
+type Intake struct {
+	opts    Options
+	ledger  *Ledger
+	queue   *Queue
+	log     *slog.Logger
+	now     func() time.Time
+	pointer *pointerWriter
+
+	key eventfeed.CheckpointKey
+
+	mu sync.Mutex
+	// pollCandidates holds the ids delivered since the last page boundary that
+	// carry no push-lane transport fields. They become the last poll-served id
+	// only when a page boundary confirms a poll page actually landed.
+	pollCandidates []int64
+	snapshot       map[int64]bool
+	reconnect      chan struct{}
+
+	repairs sync.WaitGroup
+	// lifetime is Run's context. Repair walks are bound to it rather than to
+	// a connection, so a reconnect does not abandon a walk and a shutdown does
+	// not strand Run waiting on one — an unfinished walk simply resumes on the
+	// next start, which is what OpenLosses is for.
+	lifetime context.Context
+	// repairSleep replaces the wait between repair polls. Tests set it so ten
+	// minutes of repair cadence does not take ten minutes.
+	repairSleep func(ctx context.Context, d time.Duration) error
+}
+
+// New builds intake.
+func New(opts Options) (*Intake, error) {
+	switch {
+	case opts.Ledger == nil:
+		return nil, errors.New("connector: intake needs a ledger")
+	case opts.Queue == nil:
+		return nil, errors.New("connector: intake needs a queue")
+	case opts.Minter == nil || opts.Polls == nil:
+		return nil, errors.New("connector: intake needs the feed's two seams")
+	case opts.AccountID == "":
+		return nil, errors.New("connector: intake needs an account id")
+	case opts.ConsumerNamespace == "":
+		return nil, errors.New("connector: intake needs a consumer namespace")
+	}
+
+	origin, err := eventfeed.CanonicalOrigin(opts.Origin)
+	if err != nil {
+		return nil, fmt.Errorf("connector: intake origin: %w", err)
+	}
+	if err := opts.Filters.Validate(); err != nil {
+		return nil, fmt.Errorf("connector: intake filters: %w", err)
+	}
+
+	if opts.Clock == nil {
+		opts.Clock = time.Now
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.RepairInterval <= 0 {
+		opts.RepairInterval = DefaultRepairInterval
+	}
+	if opts.RepairWindow <= 0 {
+		opts.RepairWindow = DefaultRepairWindow
+	}
+	if opts.MembershipInterval <= 0 {
+		opts.MembershipInterval = DefaultMembershipInterval
+	}
+
+	in := &Intake{
+		opts:      opts,
+		ledger:    opts.Ledger,
+		queue:     opts.Queue,
+		log:       opts.Logger,
+		now:       opts.Clock,
+		pointer:   newPointerWriter(opts.Pointers),
+		reconnect: make(chan struct{}, 1),
+		key: eventfeed.CheckpointKey{
+			Origin:            origin,
+			AccountID:         opts.AccountID,
+			ConsumerNamespace: opts.ConsumerNamespace,
+			FilterKey:         opts.Filters.FilterKey(),
+		},
+	}
+	in.ledger.now = opts.Clock
+	return in, nil
+}
+
+// CheckpointKey is the identity this intake's position is stored under.
+func (in *Intake) CheckpointKey() eventfeed.CheckpointKey { return in.key }
+
+// Run consumes the feed until ctx is canceled or the feed terminates.
+//
+// It reconnects on its own only for membership: everything else the feed can
+// recover from, it recovers from inside the package.
+func (in *Intake) Run(ctx context.Context) error {
+	in.lifetime = ctx
+	if err := in.resumeReconciliation(ctx); err != nil {
+		return err
+	}
+	defer in.repairs.Wait()
+
+	for {
+		err := in.runOnce(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !errors.Is(err, errReconnect) {
+			return err
+		}
+		in.log.Info("reconnecting the feed", "reason", "membership changed")
+	}
+}
+
+// errReconnect asks the supervisor for a fresh connection. It is not a
+// failure: the cable's bucket snapshot is taken at subscribe, so a project
+// granted afterwards needs a new connection to be heard on the live lane.
+var errReconnect = errors.New("connector: reconnect the feed")
+
+func (in *Intake) runOnce(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	in.takeSnapshot(runCtx)
+
+	position, hadPosition, err := in.ledger.Load(runCtx, in.key)
+	if err != nil {
+		return err
+	}
+	_ = position
+
+	start := eventfeed.StartResume()
+	switch {
+	case in.opts.SinceEventID > 0:
+		start = eventfeed.StartAfter(in.opts.SinceEventID)
+		in.log.Info("entering the feed after an explicit event id", "since", in.opts.SinceEventID)
+	case hadPosition:
+		in.log.Info("resuming the feed from the stored position", "filter_key", in.key.FilterKey)
+	default:
+		// Said out loud because it is a real loss of history, not a neutral
+		// default: everything committed before this moment is never served.
+		in.log.Warn("no stored position: entering the feed at the present, so nothing committed before now will be served",
+			"filter_key", in.key.FilterKey)
+	}
+
+	options := []eventfeed.Option{
+		eventfeed.WithFilters(in.opts.Filters),
+		eventfeed.WithStart(start),
+		eventfeed.WithCheckpointStore(in.ledger),
+		eventfeed.WithConsumerNamespace(in.opts.ConsumerNamespace),
+		eventfeed.WithSignalHandler(in.handleSignal),
+		eventfeed.WithObserver(in.observer(runCtx)),
+		eventfeed.WithRepairInterval(in.opts.RepairInterval),
+	}
+	if in.opts.Transport != nil {
+		options = append(options, eventfeed.WithTransport(in.opts.Transport))
+	}
+
+	feed, err := eventfeed.New(in.key.Origin, in.opts.AccountID, in.opts.Minter, in.opts.Polls, options...)
+	if err != nil {
+		return fmt.Errorf("connector: build feed: %w", err)
+	}
+	defer func() {
+		_ = feed.Close()
+		feed.Wait()
+	}()
+
+	stopMembership := in.watchMembership(runCtx, cancel)
+	defer stopMembership()
+
+	var feedErr error
+	for event, err := range feed.Events(runCtx) {
+		if err != nil {
+			feedErr = err
+			break
+		}
+		if err := in.ingest(runCtx, event, LaneOf(event)); err != nil {
+			return err
+		}
+	}
+
+	if in.reconnectRequested() {
+		return errReconnect
+	}
+	return in.classifyTerminal(ctx, feedErr)
+}
+
+// ingest is the whole of intake: one pointer written, one id handed over.
+func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) error {
+	fresh, err := in.ledger.RecordSeen(ctx, event, lane)
+	if err != nil {
+		// A pointer that could not be written is a pointer the restart will
+		// not know about. Nothing downstream is allowed to proceed as if it
+		// had been.
+		return err
+	}
+	if lane == LanePoll {
+		in.notePollCandidate(event.ID)
+	}
+	if !fresh {
+		// The ordinary case: the poll lane serving what the live lane already
+		// delivered, or a restart re-walking a page. Dedupe is the point.
+		return nil
+	}
+
+	in.noteBucket(event.BucketID)
+	if err := in.pointer.write(event); err != nil {
+		return err
+	}
+	return in.queue.Offer(ctx, event.ID)
+}
+
+// LaneOf says which lane served an event.
+//
+// The rows are not labeled, but the two shapes differ: actor_type and
+// visible_to_clients are push-lane transport fields that poll rows omit, and
+// the SDK keeps both presence-bearing — a string whose empty value is outside
+// the vocabulary, and a *bool — rather than defaulting them, precisely so this
+// is answerable.
+//
+// It is used for one thing that matters, the last poll-served id, and it is
+// paired there with a page boundary: absence of the push fields nominates an
+// id, a delivered poll page confirms it. Erring towards "live" only costs
+// duplicates the ledger absorbs; erring towards "poll" would move the re-entry
+// past events the poll lane had not served.
+func LaneOf(event eventfeed.Event) Lane {
+	if event.ActorType == "" && event.VisibleToClients == nil {
+		return LanePoll
+	}
+	return LaneLive
+}
+
+func (in *Intake) notePollCandidate(id int64) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.pollCandidates = append(in.pollCandidates, id)
+}
+
+// confirmPollServed promotes the candidates a delivered poll page confirms.
+func (in *Intake) confirmPollServed(ctx context.Context) {
+	in.mu.Lock()
+	candidates := in.pollCandidates
+	in.pollCandidates = nil
+	in.mu.Unlock()
+
+	var highest int64
+	for _, id := range candidates {
+		if id > highest {
+			highest = id
+		}
+	}
+	if highest == 0 {
+		// An empty page. Ordinary — the walk crossed rows the filters exclude
+		// — and it serves no id, so it advances nothing here.
+		return
+	}
+	if err := in.ledger.NotePollServed(ctx, in.key, highest); err != nil {
+		in.log.Error("could not record the last poll-served id", "error", err)
+	}
+}
+
+func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
+	return eventfeed.Observer{
+		Connected: func() { in.log.Info("feed socket connected") },
+		Confirmed: func() { in.log.Info("feed subscription confirmed") },
+		Disconnected: func(reason string, err error) {
+			in.log.Warn("feed socket disconnected", "reason", reason, "error", err)
+		},
+		CatchUpStarted: func(eventfeed.Cursor) { in.log.Info("feed catch-up walk started") },
+		PageDelivered: func(int, string) {
+			// Detached deliberately: the position the page just moved must be
+			// recorded even if the run's context is on its way down, or a
+			// shutdown mid-page loses the id the next re-entry needs.
+			in.confirmPollServed(context.WithoutCancel(ctx)) //nolint:contextcheck // detached on purpose, see above
+		},
+		CaughtUp: func() {
+			// "Caught up with the walk", not "caught up with the account":
+			// delivery has write-time brakes that write no addressing and say
+			// nothing, so a quiet feed is never proof of a quiet project.
+			in.log.Info("feed walk reached its head and the buffer drained")
+		},
+		CheckpointSaveFailed: func(err error) {
+			in.log.Error("could not save the feed position", "error", err)
+		},
+		Gap: func(epochAfterID int64, resumeOrigin string) {
+			in.log.Warn("feed served a 410", "epoch_after_id", epochAfterID, "resume_origin", resumeOrigin)
+		},
+		PositionRejected: func(kind eventfeed.PollErrorKind) {
+			in.log.Warn("feed rejected the held position", "kind", kind.String())
+		},
+		FilterConflict: func(positionDigest, filtersDigest string) {
+			in.log.Warn("feed position was minted for a different filter set",
+				"position_digest", positionDigest, "filters_digest", filtersDigest)
+		},
+		StaleConnection: func(d time.Duration) {
+			in.log.Warn("feed socket went stale", "since_last_frame", d)
+		},
+		BufferOverflow: func(dropped int) {
+			in.log.Warn("live buffer overflowed", "dropped", dropped)
+		},
+	}
+}
+
+// classifyTerminal turns the feed's terminal error into the connector's own
+// verdict. The one case that needs saying is the inbox's 410 arriving on the
+// account lane: it is a different loss with a different resume, and it is
+// surfaced rather than absorbed.
+func (in *Intake) classifyTerminal(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	var retention *InboxRetentionGoneError
+	if errors.As(err, &retention) {
+		if _, recordErr := in.ledger.RecordGap(ctx, Gap{
+			DetectedAt: in.now(),
+			Class:      GapRetention,
+			EntryClass: EntryUnknown,
+			Note:       "a retention 410 was served on the account lane, which has an epoch instead; not resumed",
+		}); recordErr != nil {
+			in.log.Error("could not record the retention gap", "error", recordErr)
+		}
+		in.log.Error("the account feed answered the inbox lane's 410: its resume re-enters at the earliest retained item, not above an epoch, so it is not followed here")
+	}
+	return err
+}
+
+// handleSignal decides what a semantic signal means for this connector. It
+// runs synchronously on the delivery path, so it does only what must happen
+// before the disposition takes effect and starts the rest elsewhere.
+func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
+	ctx := context.WithoutCancel(context.Background())
+
+	switch s := signal.(type) {
+	case eventfeed.FeedGap:
+		// The ACCOUNT lane's 410, and the only one that reaches here: the
+		// adapter never maps a retention 410 onto this signal. The resume URL
+		// is followed exactly as served — the entry class is the server's
+		// decision, read out of its cursor, never substituted.
+		epoch := s.EpochAfterID
+		if _, err := in.ledger.RecordGap(ctx, Gap{
+			DetectedAt:   in.now(),
+			Class:        GapEpoch,
+			EpochAfterID: &epoch,
+			EntryClass:   entryClassOf(s.ResumeURL),
+			Note:         "the feed's served history before the epoch is gone",
+		}); err != nil {
+			// A gap we cannot write down is a gap nothing will ever report.
+			in.log.Error("could not record the feed gap; refusing to continue past it", "error", err)
+			return eventfeed.Terminate
+		}
+		return eventfeed.Accept
+
+	case eventfeed.BufferOverflow:
+		loss, err := in.ledger.RecordLoss(ctx, s.DroppedIDs, in.now(), in.opts.RepairWindow)
+		if err != nil {
+			// Accept means owning the incompleteness. Owning it begins with
+			// it being on disk: accepting after a failed write would leave a
+			// loss that no restart could ever find, which is the one outcome
+			// worse than terminating.
+			in.log.Error("could not record the buffer overflow; refusing to accept it", "error", err)
+			return eventfeed.Terminate
+		}
+		in.log.Warn("live buffer overflowed; reconciling",
+			"dropped", s.DroppedCount, "loss_id", loss.ID, "repair_since", loss.RepairSince)
+		in.startRepair(in.repairContext(), loss)
+		return eventfeed.Accept
+	}
+	return eventfeed.Terminate
+}
+
+// entryClassOf reads the entry class out of the cursor the server served.
+func entryClassOf(resumeURL string) EntryClass {
+	parsed, err := url.Parse(resumeURL)
+	if err != nil {
+		return EntryUnknown
+	}
+	switch since := parsed.Query().Get("since"); since {
+	case "now":
+		return EntryPresent
+	case "":
+		return EntryUnknown
+	default:
+		if _, err := strconv.ParseInt(since, 10, 64); err != nil {
+			return EntryUnknown
+		}
+		return EntryReplay
+	}
+}
+
+// resumeReconciliation restarts every open loss's repair walk on start. A
+// crash between the overflow and its repair is a delay, not a loss of the
+// record.
+func (in *Intake) resumeReconciliation(ctx context.Context) error {
+	losses, err := in.ledger.OpenLosses(ctx)
+	if err != nil {
+		return err
+	}
+	for _, loss := range losses {
+		in.log.Info("resuming reconciliation of an open loss", "loss_id", loss.ID, "repair_since", loss.RepairSince)
+		in.startRepair(ctx, loss)
+	}
+	return nil
+}
+
+// repairContext is the lifetime a repair walk runs under. handleSignal is
+// invoked by the feed with no context of its own, so the walk takes Run's.
+func (in *Intake) repairContext() context.Context {
+	if in.lifetime != nil {
+		return in.lifetime
+	}
+	return context.Background()
+}
+
+func (in *Intake) startRepair(ctx context.Context, loss Loss) {
+	if loss.ResolvedAt != nil {
+		return
+	}
+	in.repairs.Add(1)
+	go func() {
+		defer in.repairs.Done()
+		// Off the delivery path: nothing about live intake waits for this.
+		walker := &repairWalker{
+			ledger:   in.ledger,
+			polls:    in.opts.Polls,
+			filters:  in.opts.Filters,
+			ingest:   in.ingest,
+			now:      in.now,
+			interval: in.opts.RepairInterval,
+			log:      in.log,
+			sleep:    in.repairSleep,
+		}
+		switch err := walker.reconcile(ctx, loss); {
+		case err == nil:
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			// A shutdown mid-walk is a delay: the loss is still open on disk
+			// and the next start picks it up where this one left off.
+			in.log.Info("reconciliation paused by shutdown; it resumes on the next start", "loss_id", loss.ID)
+		default:
+			in.log.Error("reconciliation of a loss ended early", "loss_id", loss.ID, "error", err)
+		}
+	}()
+}
+
+// takeSnapshot records the buckets the agent can see at the moment this
+// connection subscribes — the same set the cable snapshots.
+func (in *Intake) takeSnapshot(ctx context.Context) {
+	if in.opts.Membership == nil {
+		return
+	}
+	buckets, err := in.opts.Membership.Buckets(ctx)
+	if err != nil {
+		in.log.Warn("could not read the agent's projects; keeping the previous snapshot", "error", err)
+		return
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.snapshot = make(map[int64]bool, len(buckets))
+	for _, id := range buckets {
+		in.snapshot[id] = true
+	}
+}
+
+// noteBucket asks for a reconnect when an event arrives from a bucket the live
+// snapshot did not hold. The poll lane authorizes at read time, so it covers
+// the new project immediately; the live lane cannot until it re-subscribes.
+func (in *Intake) noteBucket(bucketID int64) {
+	in.mu.Lock()
+	known := in.snapshot == nil || in.snapshot[bucketID]
+	in.mu.Unlock()
+	if known {
+		return
+	}
+	in.log.Info("an event arrived from a project the live subscription does not hold", "bucket_id", bucketID)
+	in.requestReconnect()
+}
+
+// watchMembership re-reads the agent's projects on a timer and asks for a
+// reconnect when the set changes. It returns a stop function.
+func (in *Intake) watchMembership(ctx context.Context, cancel context.CancelFunc) func() {
+	if in.opts.Membership == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(in.opts.MembershipInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				buckets, err := in.opts.Membership.Buckets(ctx)
+				if err != nil {
+					// A failed read leaves the snapshot alone. Treating it as
+					// a change would reconnect the feed every time the API
+					// hiccupped.
+					in.log.Warn("could not refresh the agent's projects", "error", err)
+					continue
+				}
+				if in.membershipChanged(buckets) {
+					in.requestReconnect()
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() { <-done }
+}
+
+func (in *Intake) membershipChanged(buckets []int64) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.snapshot == nil {
+		return false
+	}
+	if len(buckets) != len(in.snapshot) {
+		return true
+	}
+	for _, id := range buckets {
+		if !in.snapshot[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func (in *Intake) requestReconnect() {
+	select {
+	case in.reconnect <- struct{}{}:
+	default:
+	}
+}
+
+func (in *Intake) reconnectRequested() bool {
+	select {
+	case <-in.reconnect:
+		return true
+	default:
+		return false
+	}
+}
+
+// pointerWriter serializes the NDJSON pointer lines. One line is one write:
+// two goroutines interleaving inside a line tear it, and the reader on the
+// other end has no way to recover a torn line.
+type pointerWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func newPointerWriter(w io.Writer) *pointerWriter { return &pointerWriter{w: w} }
+
+// Pointer is the line intake writes to stdout for each newly seen event. It
+// carries what the feed carried and nothing more: no title, no body, no URL,
+// no names. Whoever wants those pays for a read.
+type Pointer struct {
+	EventID       int64  `json:"event_id"`
+	EventType     string `json:"event_type"`
+	Kind          string `json:"kind"`
+	Action        string `json:"action"`
+	BucketID      int64  `json:"bucket_id"`
+	CreatorID     int64  `json:"creator_id"`
+	PerformedByID *int64 `json:"performed_by_id"`
+	RecordingID   int64  `json:"recording_id"`
+	CreatedAt     string `json:"created_at"`
+	Lane          Lane   `json:"lane"`
+	State         string `json:"state"`
+}
+
+func (p *pointerWriter) write(event eventfeed.Event) error {
+	if p.w == nil {
+		return nil
+	}
+	line, err := json.Marshal(Pointer{
+		EventID:       event.ID,
+		EventType:     event.EventType,
+		Kind:          event.Kind,
+		Action:        event.Action,
+		BucketID:      event.BucketID,
+		CreatorID:     event.CreatorID,
+		PerformedByID: event.PerformedByID,
+		RecordingID:   event.RecordingID,
+		CreatedAt:     event.CreatedAt.UTC().Format(time.RFC3339),
+		Lane:          LaneOf(event),
+		State:         string(StateSeen),
+	})
+	if err != nil {
+		return fmt.Errorf("connector: encode pointer line: %w", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, err := p.w.Write(append(line, '\n')); err != nil {
+		return fmt.Errorf("connector: write pointer line: %w", err)
+	}
+	return nil
+}

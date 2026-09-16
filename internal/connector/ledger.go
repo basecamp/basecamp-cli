@@ -1,0 +1,205 @@
+package connector
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	_ "modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
+)
+
+// RecordState is where an event sits in the ledger's lifecycle.
+//
+// Intake only ever writes StateSeen. The rest of the vocabulary is declared
+// here because the states are one lifecycle, and a store that cannot name the
+// state a later card writes cannot recover it on start either.
+type RecordState string
+
+const (
+	// StateSeen is a pointer intake wrote and nothing has judged yet. Every
+	// seen record re-runs the gate on start.
+	StateSeen RecordState = "seen"
+	// StateAdmitted passed the gate and awaits dispatch.
+	StateAdmitted RecordState = "admitted"
+	// StateQueued waits behind another event on its conversation.
+	StateQueued RecordState = "queued"
+	// StateBlocked is retained and retried: a reason, never a transport
+	// failure dressed up as a verdict.
+	StateBlocked RecordState = "blocked"
+	// StateDispatched was handed to a worker.
+	StateDispatched RecordState = "dispatched"
+	// StateCompleted is terminal with an outcome.
+	StateCompleted RecordState = "completed"
+	// StateDiscarded is terminal with a verified verdict.
+	StateDiscarded RecordState = "discarded"
+)
+
+// Lane names which lane first served an event. It is diagnostic: dedupe is by
+// id, and the same event ordinarily arrives on both.
+type Lane string
+
+const (
+	// LaneLive is the WebSocket.
+	LaneLive Lane = "live"
+	// LanePoll is the catch-up or streaming poll walk.
+	LanePoll Lane = "poll"
+	// LaneRepair is a repair walk after an overflow — its own cursor, never
+	// the feed's.
+	LaneRepair Lane = "repair"
+)
+
+// Ledger is the connector's durable memory: the dedupe authority, the feed
+// position, and the record of what was lost.
+//
+// It is a SQLite file rather than a set in memory because every promise the
+// connector makes about a crash rests on the answer to "have I seen this id
+// before?" surviving the crash.
+type Ledger struct {
+	db  *sql.DB
+	now func() time.Time
+}
+
+// OpenLedger opens (creating if absent) the ledger at path and brings its
+// schema up to date.
+func OpenLedger(path string) (*Ledger, error) {
+	if path == "" {
+		return nil, errors.New("connector: ledger path is required")
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("connector: create ledger directory: %w", err)
+		}
+	}
+
+	// _txlock=immediate takes the write lock when a transaction opens rather
+	// than on its first write. Without it two connectors racing on one file
+	// can both start, both read, and one is refused at COMMIT with the work
+	// already done.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("connector: open ledger: %w", err)
+	}
+	// One writer. SQLite serializes writers anyway, and a pool merely turns
+	// that serialization into SQLITE_BUSY under load.
+	db.SetMaxOpenConns(1)
+
+	l := &Ledger{db: db, now: time.Now}
+	if err := l.migrate(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return l, nil
+}
+
+// Close releases the ledger's handle.
+func (l *Ledger) Close() error { return l.db.Close() }
+
+// migrations are applied in order, each exactly once. A migration is never
+// edited after it ships: the ledger outlives the binary that created it.
+var migrations = []string{
+	`
+CREATE TABLE events (
+  id                 INTEGER PRIMARY KEY,
+  state              TEXT    NOT NULL,
+  reason             TEXT    NOT NULL DEFAULT '',
+  lane               TEXT    NOT NULL,
+  event_type         TEXT    NOT NULL,
+  kind               TEXT    NOT NULL,
+  action             TEXT    NOT NULL,
+  bucket_id          INTEGER NOT NULL,
+  creator_id         INTEGER NOT NULL,
+  performed_by_id    INTEGER,
+  recording_id       INTEGER NOT NULL,
+  details            BLOB,
+  actor_type         TEXT    NOT NULL DEFAULT '',
+  visible_to_clients INTEGER,
+  created_at         TEXT    NOT NULL,
+  seen_at            TEXT    NOT NULL,
+  updated_at         TEXT    NOT NULL,
+  content_dropped    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX events_state_id ON events (state, id);
+
+CREATE TABLE checkpoints (
+  flat_key            TEXT PRIMARY KEY,
+  position            TEXT NOT NULL,
+  last_poll_served_id INTEGER NOT NULL DEFAULT 0,
+  updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE losses (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  detected_at   TEXT    NOT NULL,
+  dropped_count INTEGER NOT NULL,
+  repair_since  INTEGER NOT NULL,
+  repair_cursor TEXT    NOT NULL DEFAULT '',
+  deadline_at   TEXT    NOT NULL,
+  resolved_at   TEXT
+);
+
+CREATE TABLE loss_ids (
+  loss_id  INTEGER NOT NULL REFERENCES losses (id) ON DELETE CASCADE,
+  event_id INTEGER NOT NULL,
+  state    TEXT    NOT NULL,
+  PRIMARY KEY (loss_id, event_id)
+);
+CREATE INDEX loss_ids_event ON loss_ids (event_id, state);
+
+CREATE TABLE gaps (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  detected_at    TEXT    NOT NULL,
+  class          TEXT    NOT NULL,
+  epoch_after_id INTEGER,
+  entry_class    TEXT    NOT NULL DEFAULT '',
+  note           TEXT    NOT NULL DEFAULT ''
+);
+`,
+}
+
+func (l *Ledger) migrate(ctx context.Context) error {
+	if _, err := l.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+  version    INTEGER PRIMARY KEY,
+  applied_at TEXT NOT NULL
+)`); err != nil {
+		return fmt.Errorf("connector: create migration table: %w", err)
+	}
+
+	var applied int
+	if err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {
+		return fmt.Errorf("connector: read schema version: %w", err)
+	}
+
+	for i := applied; i < len(migrations); i++ {
+		version := i + 1
+		tx, err := l.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("connector: begin migration %d: %w", version, err)
+		}
+		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("connector: apply migration %d: %w", version, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, version, l.timestamp()); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("connector: record migration %d: %w", version, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("connector: commit migration %d: %w", version, err)
+		}
+	}
+	return nil
+}
+
+// SchemaVersion reports the highest applied migration.
+func (l *Ledger) SchemaVersion(ctx context.Context) (int, error) {
+	var version int
+	err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version)
+	return version, err
+}
+
+func (l *Ledger) timestamp() string { return l.now().UTC().Format(time.RFC3339Nano) }
