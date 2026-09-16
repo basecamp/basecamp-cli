@@ -89,6 +89,10 @@ type Options struct {
 // generated operations, with their redirect guard, their two-410 mapping and
 // their continuation checks. The caller fills in the rest (account, namespace,
 // ledger, queue, filters).
+//
+// Build the Live without a debug logger or request hooks in production: the
+// SDK client logs request URLs through them, and a poll URL carries the feed
+// position.
 func LiveOptions(live *eventfeed.Live) Options {
 	return Options{
 		Origin:   live.Origin(),
@@ -138,7 +142,10 @@ type Intake struct {
 	replaying bool
 	// reentryReplays is whether the pending re-entry is a replay.
 	reentryReplays bool
-	reentryLog     string
+	// enteredByReentry is whether this connection is itself the safe
+	// re-entry after a refused position.
+	enteredByReentry bool
+	reentryLog       string
 	// abortErr ends the run: set when continuing could only mean entering
 	// the feed somewhere unsafe.
 	abortErr error
@@ -283,6 +290,7 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	reentry, hasReentry, reentryLog, reentryReplays := in.reentry, in.hasReentry, in.reentryLog, in.reentryReplays
 	in.hasReentry = false
 	in.replaying = false
+	in.enteredByReentry = hasReentry
 	in.mu.Unlock()
 	defer func() {
 		in.mu.Lock()
@@ -293,6 +301,10 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	in.takeSnapshot(runCtx)
 
 	_, hadPosition, err := in.ledger.Load(runCtx, in.key)
+	if err != nil {
+		return err
+	}
+	ownServed, err := in.ledger.LastPollServedID(runCtx, in.key)
 	if err != nil {
 		return err
 	}
@@ -316,6 +328,13 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		in.log.Warn("the stored position was refused; " + reentryLog)
 	case hadPosition:
 		in.log.Info("resuming the feed from the stored position", "filter_key", in.key.FilterKey)
+	case ownServed > 0:
+		// This filter set has progress but no position: the package confirms
+		// a page before it saves the page's position, so a failed save leaves
+		// exactly this. Its own id, never another filter set's.
+		start = eventfeed.StartAfter(ownServed)
+		in.log.Warn("no stored position for this filter set; re-entering after its own last poll-served id",
+			"since", ownServed, "filter_key", in.key.FilterKey)
 	case lineageServed > 0:
 		// A filter change: this digest has no position, but the consumer's
 		// poll lane had reached this id under another. Entering at the
@@ -775,7 +794,15 @@ func (in *Intake) noteBucket(bucketID int64) {
 func (in *Intake) onPositionRejected(ctx context.Context) {
 	in.mu.Lock()
 	promoted := in.promotedThisRun
+	reentered := in.enteredByReentry
 	in.mu.Unlock()
+	if !promoted && reentered {
+		// The safe re-entry was itself refused before it served a page.
+		// Whatever the server objects to, another re-entry will not cure it,
+		// and reconnecting again would mint, dial and poll in a tight loop.
+		in.abort(errors.New("connector: the feed refused the safe re-entry after a refused position; not retrying"))
+		return
+	}
 	if promoted {
 		// The package's own reset cursor is this run's poll-served id, which
 		// is at least what the ledger holds.

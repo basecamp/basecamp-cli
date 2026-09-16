@@ -40,6 +40,14 @@ type repairWalker struct {
 
 func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 	for {
+		if !w.now().Before(loss.DeadlineAt) {
+			// Past the window already — perhaps across restarts whose walks
+			// each ended in a failure no retry fixes. One last pass is still
+			// worth trying; after it, the loss closes either way.
+			err := w.finalPass(ctx, &loss)
+			return err
+		}
+
 		done, err := w.settled(ctx, loss)
 		if err != nil || done {
 			return err
@@ -47,7 +55,7 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 
 		cursor, err := w.walk(ctx, &loss)
 		if errors.Is(err, errReconciliationEnded) {
-			return nil
+			return w.closeIfExpired(ctx, loss)
 		}
 		if err != nil {
 			return err
@@ -84,6 +92,42 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 			return err
 		}
 	}
+}
+
+// finalPass runs one walk for a loss past its window and then closes it,
+// whatever the walk managed: its missing ids become unrecovered.
+func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
+	if done, err := w.settled(ctx, *loss); err != nil || done {
+		return err
+	}
+	if _, err := w.walk(ctx, loss); err != nil && !errors.Is(err, errReconciliationEnded) {
+		return err
+	}
+	if done, err := w.settled(ctx, *loss); err != nil || done {
+		return err
+	}
+	return w.closeExpired(ctx, *loss)
+}
+
+// closeIfExpired closes a loss whose walk ended early, if its window is over.
+// A walk that ends in a failure no retry fixes leaves the loss open for the
+// next start — but not forever.
+func (w *repairWalker) closeIfExpired(ctx context.Context, loss Loss) error {
+	if w.now().Before(loss.DeadlineAt) {
+		return nil
+	}
+	return w.closeExpired(ctx, loss)
+}
+
+func (w *repairWalker) closeExpired(ctx context.Context, loss Loss) error {
+	unrecovered, err := w.ledger.CloseLoss(ctx, loss.ID, w.now())
+	if err != nil {
+		return err
+	}
+	if unrecovered > 0 {
+		w.log.Error("a buffer overflow's window closed with events unrecovered", "loss_id", loss.ID, "unrecovered", unrecovered)
+	}
+	return nil
 }
 
 // settled closes the loss and reports true when nothing is missing any more.
