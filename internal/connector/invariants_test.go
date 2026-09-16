@@ -208,21 +208,24 @@ func TestInvariantE2AStaleReconnectDoesNotSwallowATerminalError(t *testing.T) {
 		"a latch carried into the connection turns its terminal error into a reconnect")
 }
 
-// E3: membership detection catches every change to the listed set, ignores
-// learned buckets, and notices a learned bucket's revocation once the list
-// has named it.
+// E3: the listing the lister gives is what decides a change. A bucket learned
+// from an arriving event is provisional and never counts as one, and it is
+// revoked when a listing omits it.
 func TestInvariantE3MembershipComparison(t *testing.T) {
 	intake, _, _ := newTestIntake(t, nil, nil)
-	intake.snapshot = map[int64]bool{1: true, 2: true, 9: true}
-	intake.learned = map[int64]bool{9: true}
+	intake.opts.Membership = &flakyMembership{buckets: []int64{1, 2}}
 
-	assert.False(t, intake.membershipChanged([]int64{1, 2}), "a learned bucket the list omits is not a change")
-	assert.True(t, intake.membershipChanged([]int64{1}), "a listed bucket dropping off is a change")
+	require.False(t, intake.adoptListing([]int64{1, 2}), "the first listing is a baseline")
+	intake.noteBucket(9)
+	assert.False(t, intake.adoptListing([]int64{1, 2}), "a learned bucket the listing omits is not a change")
 
-	intake.snapshot = map[int64]bool{1: true, 2: true, 9: true}
-	intake.learned = map[int64]bool{9: true}
-	assert.False(t, intake.membershipChanged([]int64{1, 2, 9}), "the list catching up with a learned bucket is not a change")
-	assert.True(t, intake.membershipChanged([]int64{1, 2}), "and its later revocation is")
+	intake.mu.Lock()
+	held := intake.learned[9]
+	intake.mu.Unlock()
+	assert.False(t, held, "and that listing revoked it")
+
+	assert.True(t, intake.adoptListing([]int64{1}), "a listed bucket dropping off is a change")
+	assert.True(t, intake.adoptListing([]int64{1, 2}), "and its return is a change")
 }
 
 // H2 availability: two processes opening one fresh ledger both get it.

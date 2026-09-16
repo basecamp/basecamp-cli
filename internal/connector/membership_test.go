@@ -92,7 +92,7 @@ func TestAFailedFirstMembershipReadIsRetriedSoon(t *testing.T) {
 	require.Eventually(t, func() bool {
 		intake.mu.Lock()
 		defer intake.mu.Unlock()
-		return intake.snapshot != nil && intake.snapshot[48699913]
+		return intake.listed != nil && intake.listed[48699913]
 	}, 2*time.Second, 10*time.Millisecond, "the first successful read becomes the baseline")
 
 	cancel()
@@ -147,4 +147,47 @@ type alwaysFailingMembership struct{}
 
 func (alwaysFailingMembership) Buckets(context.Context) ([]int64, error) {
 	return nil, errors.New("projects listing unavailable")
+}
+
+// A bucket learned from an arriving event is provisional. The lister is the
+// trust boundary: once it lists projects and does not name that one, the
+// connector stops holding it, and the next event from it is unknown again.
+func TestALearnedProjectIsRevokedWhenTheListerStopsNamingIt(t *testing.T) {
+	intake, _, _ := newTestIntake(t, nil, nil)
+	intake.opts.Membership = &flakyMembership{buckets: []int64{1}}
+
+	require.False(t, intake.adoptListing([]int64{1}), "the first listing is a baseline")
+	intake.noteBucket(777)
+	intake.mu.Lock()
+	learned := intake.learned[777]
+	intake.mu.Unlock()
+	require.True(t, learned, "an event proved the project visible")
+
+	// A later listing that does not name it takes it back.
+	intake.adoptListing([]int64{1})
+	intake.mu.Lock()
+	stillHeld := intake.learned[777] || intake.listed[777]
+	intake.mu.Unlock()
+	assert.False(t, stillHeld, "the lister no longer names it, so the connector no longer holds it")
+
+	// And its next event is unknown again, not silently trusted. Relearning
+	// is rate-limited per bucket, so the clock has to move past the
+	// membership interval for the next event to count as new.
+	intake.reconnectRequested()
+	require.Empty(t, intake.reconnect)
+	intake.opts.MembershipInterval = 0
+	intake.noteBucket(777)
+	assert.Len(t, intake.reconnect, 1, "a revoked project's next event is unknown")
+}
+
+// The listing the lister does name is what changes trigger a reconnect.
+func TestOnlyTheListedSetDecidesAMembershipChange(t *testing.T) {
+	intake, _, _ := newTestIntake(t, nil, nil)
+	intake.opts.Membership = &flakyMembership{buckets: []int64{1, 2}}
+
+	assert.False(t, intake.adoptListing([]int64{1, 2}))
+	intake.noteBucket(9) // learned, never listed
+	assert.False(t, intake.adoptListing([]int64{1, 2}), "a learned bucket the listing omits is not a change")
+	assert.True(t, intake.adoptListing([]int64{1}), "a listed bucket dropping off is a change")
+	assert.True(t, intake.adoptListing([]int64{1, 2}), "and its return is a change")
 }

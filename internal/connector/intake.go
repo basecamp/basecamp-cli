@@ -124,13 +124,20 @@ type Intake struct {
 
 	mu sync.Mutex
 	// served is the current connection's wrapped poll source.
-	served   *servedPolls
-	snapshot map[int64]bool
+	served *servedPolls
+	// listed is what the project lister last said, and it is authoritative: a
+	// bucket it stops naming is revoked.
+	listed map[int64]bool
 	// membershipRetry is the first backoff after a failed membership read.
 	membershipRetry time.Duration
-	// learned holds buckets events proved visible that the lister did not
-	// name.
-	learned   map[int64]bool
+	// learned holds buckets an arriving event proved visible that the lister
+	// has not named. It is provisional — the next listing that omits one takes
+	// it back — so a bucket learned at runtime never becomes permanent truth.
+	learned map[int64]bool
+	// relearned is when each bucket was last learned. A revoked bucket is
+	// learned again at most once per membership interval, so revocation
+	// cannot become a reconnect per event.
+	relearned map[int64]time.Time
 	reconnect chan struct{}
 	// cancelRun ends the current connection; nil between connections.
 	cancelRun context.CancelFunc
@@ -692,7 +699,7 @@ func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
 		}
 		in.log.Warn("live buffer overflowed; reconciling",
 			"dropped", s.DroppedCount, "loss_id", loss.ID, "repair_since", loss.RepairSince)
-		in.startRepair(in.repairContext(), loss)
+		in.startRepair(loss)
 		return eventfeed.Accept
 	}
 	return eventfeed.Terminate
@@ -721,24 +728,16 @@ func entryClassOf(resumeURL string) EntryClass {
 // crash between the overflow and its repair is a delay, not a loss of the
 // record.
 func (in *Intake) resumeReconciliation(ctx context.Context) error {
+	in.startRepairWorkers(ctx)
 	losses, err := in.ledger.OpenLosses(ctx)
 	if err != nil {
 		return err
 	}
 	for _, loss := range losses {
 		in.log.Info("resuming reconciliation of an open loss", "loss_id", loss.ID, "repair_since", loss.RepairSince)
-		in.startRepair(ctx, loss)
+		in.startRepair(loss)
 	}
 	return nil
-}
-
-// repairContext is the lifetime a repair walk runs under. handleSignal is
-// invoked by the feed with no context of its own, so the walk takes Run's.
-func (in *Intake) repairContext() context.Context {
-	if in.lifetime != nil {
-		return in.lifetime
-	}
-	return context.Background()
 }
 
 // startRepair hands a loss to the repair workers.
@@ -747,40 +746,63 @@ func (in *Intake) repairContext() context.Context {
 // event, and a goroutine and a poll source per loss would answer an API that
 // is already struggling with a storm of walks. A loss that finds the queue
 // full is left open on disk, which the next start resumes.
-func (in *Intake) startRepair(ctx context.Context, loss Loss) {
+func (in *Intake) startRepair(loss Loss) {
 	if loss.ResolvedAt != nil {
 		return
 	}
-	in.repairOnce.Do(func() {
-		in.repairQueue = make(chan Loss, repairQueueDepth)
-		for range maxConcurrentRepairs {
-			go in.repairWorker(ctx)
-		}
-	})
+	in.mu.Lock()
+	queue := in.repairQueue
+	in.mu.Unlock()
+	if queue == nil {
+		// No pool: nobody would walk this loss. It stays open on disk, and
+		// the next start resumes it.
+		in.log.Warn("no repair workers are running; this loss stays open for the next start", "loss_id", loss.ID)
+		return
+	}
 	select {
-	case in.repairQueue <- loss:
+	case queue <- loss:
 	default:
 		in.log.Warn("the repair queue is full; this loss stays open for the next start", "loss_id", loss.ID)
 	}
 }
 
-// repairWorker walks one loss at a time until ctx ends. The wait group counts
-// walks in flight rather than idle workers, so a shutdown waits for the walk
-// it interrupts and not for a worker that is waiting for work.
-func (in *Intake) repairWorker(ctx context.Context) {
+// startRepairWorkers starts the fixed repair pool, once.
+//
+// Every Add happens here, on the goroutine that later waits, before anything
+// can wait: a worker that added itself as it picked work up would be adding to
+// a group a shutdown may already be waiting on, which Go refuses outright.
+func (in *Intake) startRepairWorkers(ctx context.Context) {
+	in.repairOnce.Do(func() {
+		queue := make(chan Loss, repairQueueDepth)
+		in.mu.Lock()
+		in.repairQueue = queue
+		in.mu.Unlock()
+		for range maxConcurrentRepairs {
+			in.repairs.Add(1)
+			go in.repairWorker(ctx, queue)
+		}
+	})
+}
+
+// repairWorker walks one loss at a time until ctx ends.
+//
+// A walk holds its worker for as long as it takes, the waits between its
+// passes included, so a loss can sit in the queue past its own window and get
+// the single catch-up pass a closed window allows. Recovery still happens; it
+// happens later.
+func (in *Intake) repairWorker(ctx context.Context, queue chan Loss) {
+	defer in.repairs.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case loss := <-in.repairQueue:
+		case loss := <-queue:
 			in.runRepair(ctx, loss)
 		}
 	}
 }
 
 func (in *Intake) runRepair(ctx context.Context, loss Loss) {
-	in.repairs.Add(1)
-	defer in.repairs.Done()
 	walker := &repairWalker{
 		ledger:   in.ledger,
 		polls:    in.opts.PollsFor(),
@@ -803,7 +825,7 @@ func (in *Intake) runRepair(ctx context.Context, loss Loss) {
 	}
 }
 
-// takeSnapshot records the buckets the agent can see at the moment this
+// takeSnapshot records the buckets the lister names at the moment this
 // connection subscribes — the same set the cable snapshots.
 func (in *Intake) takeSnapshot(ctx context.Context) {
 	if in.opts.Membership == nil {
@@ -811,46 +833,74 @@ func (in *Intake) takeSnapshot(ctx context.Context) {
 	}
 	buckets, err := in.opts.Membership.Buckets(ctx)
 	if err != nil {
-		in.log.Warn("could not read the agent's projects; keeping the previous snapshot", "error", err)
+		in.log.Warn("could not read the agent's projects; keeping the previous listing", "error", err)
 		return
 	}
+	in.adoptListing(buckets)
+}
+
+// adoptListing replaces the authoritative set and revokes every learned bucket
+// the listing does not name. It reports whether the listing changed; the first
+// listing is a baseline, not a change.
+func (in *Intake) adoptListing(buckets []int64) bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	in.snapshot = make(map[int64]bool, len(buckets)+len(in.learned))
+	listed := make(map[int64]bool, len(buckets))
 	for _, id := range buckets {
-		in.snapshot[id] = true
+		listed[id] = true
 	}
+	// A learned bucket is provisional, and the lister is the trust boundary:
+	// one it no longer names is revoked, however recently it was learned, and
+	// the next event from it is unknown again.
 	for id := range in.learned {
-		in.snapshot[id] = true
+		if !listed[id] {
+			delete(in.learned, id)
+			in.log.Info("a project the lister no longer names is no longer held", "bucket_id", id)
+		}
 	}
+	changed := in.listed != nil && !sameBuckets(in.listed, listed)
+	in.listed = listed
+	return changed
+}
+
+func sameBuckets(a, b map[int64]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if !b[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // noteBucket asks for a reconnect when an event arrives from a bucket the live
-// snapshot did not hold. The poll lane authorizes at read time, so it covers
-// the new project immediately; the live lane cannot until it re-subscribes.
+// subscription may not hold. The poll lane authorizes at read time, so it
+// covers the project immediately; the live lane cannot until it re-subscribes.
 func (in *Intake) noteBucket(bucketID int64) {
 	in.mu.Lock()
-	// With no snapshot — the read at subscribe failed — the live
-	// subscription's buckets are unknown, not "everything". An event from a
-	// bucket not yet learned asks for one reconnect.
-	known := (in.snapshot == nil && in.opts.Membership == nil) || in.snapshot[bucketID] || in.learned[bucketID]
+	known := in.opts.Membership == nil || in.listed[bucketID] || in.learned[bucketID]
+	if !known {
+		// A bucket revoked by a listing is unknown again, but relearning it
+		// is rate-limited: without that, a project the lister never names —
+		// archived, or past its page — would cost a reconnect per event.
+		if since, ok := in.relearned[bucketID]; ok && in.now().Sub(since) < in.opts.MembershipInterval {
+			known = true
+		} else {
+			if in.learned == nil {
+				in.learned = make(map[int64]bool)
+				in.relearned = make(map[int64]time.Time)
+			}
+			in.learned[bucketID] = true
+			in.relearned[bucketID] = in.now()
+		}
+	}
 	in.mu.Unlock()
 	if known {
 		return
 	}
 	in.log.Info("an event arrived from a project the live subscription does not hold", "bucket_id", bucketID)
-	// Learned for the life of the process, and merged into every later
-	// snapshot. A project the membership list never names — archived, or past
-	// the lister's page — would otherwise cost a reconnect per event, forever.
-	in.mu.Lock()
-	if in.learned == nil {
-		in.learned = make(map[int64]bool)
-	}
-	in.learned[bucketID] = true
-	if in.snapshot != nil {
-		in.snapshot[bucketID] = true
-	}
-	in.mu.Unlock()
 	in.requestReconnect()
 }
 
@@ -997,41 +1047,13 @@ const defaultMembershipRetry = 5 * time.Second
 func (in *Intake) hasSnapshot() bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	return in.snapshot != nil
+	return in.listed != nil
 }
 
-// membershipChanged compares a fresh read with the snapshot. With no snapshot
-// — the read at subscribe failed — the fresh read becomes the baseline;
-// otherwise a failed first read would disable change detection for good.
-//
-// Learned buckets (proved visible by an event, never named by the list) are
-// ignored on the way out, so the list omitting them is not a change. Once the
-// list names one, it is listed like any other, so its later revocation is.
+// membershipChanged adopts a fresh listing and reports whether the
+// authoritative set changed.
 func (in *Intake) membershipChanged(buckets []int64) bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.snapshot == nil {
-		in.snapshot = make(map[int64]bool, len(buckets))
-		for _, id := range buckets {
-			in.snapshot[id] = true
-		}
-		return false
-	}
-	for _, id := range buckets {
-		if !in.snapshot[id] {
-			return true
-		}
-	}
-	for _, id := range buckets {
-		delete(in.learned, id)
-	}
-	listed := 0
-	for id := range in.snapshot {
-		if !in.learned[id] {
-			listed++
-		}
-	}
-	return listed != len(buckets)
+	return in.adoptListing(buckets)
 }
 
 // requestReconnect marks a reconnect due and ends the current connection now,
