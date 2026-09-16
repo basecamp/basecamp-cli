@@ -46,6 +46,11 @@ type Loss struct {
 	// under one set and walked under another is repaired against a lane that
 	// never carried its events.
 	Filters eventfeed.Filters
+	// HasFilters distinguishes a loss recorded with no filters — the
+	// whole-account feed, the common case — from one written before losses
+	// carried them at all. The first is walked with no filters; the second
+	// with the connector's own, which is the best that row can say.
+	HasFilters bool
 }
 
 // GapClass distinguishes the feed's two 410s. They mean different things and
@@ -143,6 +148,7 @@ func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Ti
 
 	loss := Loss{
 		Filters:      filters,
+		HasFilters:   true,
 		DetectedAt:   now.UTC(),
 		DroppedCount: len(states),
 		// One below the lowest missing id, so the walk's first page can serve
@@ -206,6 +212,7 @@ FROM losses WHERE resolved_at IS NULL ORDER BY id`)
 			return nil, fmt.Errorf("connector: scan loss: %w", err)
 		}
 		if encodedFilters != "" {
+			loss.HasFilters = true
 			if err := json.Unmarshal([]byte(encodedFilters), &loss.Filters); err != nil {
 				return nil, fmt.Errorf("connector: decode loss filters: %w", err)
 			}

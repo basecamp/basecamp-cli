@@ -43,9 +43,10 @@ type repairWalker struct {
 // reconcileLoss walks a loss under its own recorded filter set.
 func (w *repairWalker) reconcileLoss(ctx context.Context, loss Loss) error {
 	walker := *w
-	if len(loss.Filters.Types) > 0 || len(loss.Filters.Buckets) > 0 || len(loss.Filters.Creators) > 0 ||
-		len(loss.Filters.Performers) > 0 || len(loss.Filters.ExcludePerformers) > 0 ||
-		len(loss.Filters.ActorTypes) > 0 || len(loss.Filters.Reasons) > 0 {
+	if loss.HasFilters {
+		// Recorded with the loss, empty set included: the whole-account feed
+		// is a filter set, and walking it narrowly would miss the very events
+		// the loss is about.
 		walker.filters = loss.Filters
 	}
 	return walker.reconcile(ctx, loss)
