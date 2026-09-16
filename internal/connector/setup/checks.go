@@ -171,35 +171,46 @@ func TicketCheck(ctx context.Context, r Reader, kind string) Check {
 	return c
 }
 
-// OperatorCheck verifies the operator as a person in the account. A known
-// operator is one resolved from their own profile's credential, which has
-// already proved who they are; a bare id is read as the agent.
-func OperatorCheck(ctx context.Context, r Reader, operatorID, agentID int64, knownFromProfile string) Check {
+// OperatorCheck verifies the operator as a person in the account: not the
+// agent, not an Agent, not a client. An operator named by their own profile
+// arrives already read through that profile's credential, which proved who
+// they are; a bare id is read as the agent, and an id that cannot be read
+// fails, because an unverified trust anchor is not one to record.
+func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, fromProfile string) Check {
 	c := Check{Name: "Operator"}
-	if operatorID == agentID {
+	if op.ID == agentID {
 		c.Status, c.Message = StatusFail, "The operator is the agent itself; the agent's own id never authorizes"
 		return c
 	}
-	if knownFromProfile != "" {
-		c.Status = StatusPass
-		c.Message = fmt.Sprintf("Person %d, the identity of profile %q", operatorID, knownFromProfile)
-		return c
+	source := ""
+	if fromProfile != "" {
+		source = fmt.Sprintf(", the identity of profile %q", fromProfile)
+	} else {
+		p, err := r.Person(ctx, op.ID)
+		switch {
+		case err != nil && (refused(err) || httpStatus(err) == http.StatusUnauthorized):
+			c.Status = StatusFail
+			c.Message = fmt.Sprintf("Person %d could not be read as the agent (HTTP %d), so the operator id cannot be verified", op.ID, httpStatus(err))
+			c.Hint = "Name the operator by their own profile instead: --operator-profile <profile>."
+			return c
+		case err != nil:
+			c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d could not be read: %s", op.ID, safeError(err))
+			c.Hint = "Run setup again, or name the operator by their own profile: --operator-profile <profile>."
+			return c
+		case p.ID != op.ID:
+			c.Status, c.Message = StatusFail, fmt.Sprintf("Reading person %d answered with person %d", op.ID, p.ID)
+			return c
+		}
+		op = p
 	}
-	p, err := r.Person(ctx, operatorID)
 	switch {
-	case err != nil && refused(err):
-		c.Status = StatusWarn
-		c.Message = fmt.Sprintf("Person %d could not be read as the agent (HTTP %d), so the operator id is unverified", operatorID, httpStatus(err))
-		c.Hint = "Name the operator by their own profile instead: --operator-profile <profile>."
-	case err != nil:
-		c.Status, c.Message = StatusWarn, fmt.Sprintf("Person %d could not be read: %s", operatorID, safeError(err))
-	case p.PersonableType == PersonableAgent:
-		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; an operator is a person", operatorID)
-	case p.Client:
-		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; an operator is a member", operatorID)
+	case op.PersonableType == PersonableAgent:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; an operator is a person", op.ID)
+	case op.Client:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; an operator is a member", op.ID)
 	default:
 		c.Status = StatusPass
-		c.Message = fmt.Sprintf("Person %d, %s", operatorID, richtext.SanitizeSingleLine(p.Name))
+		c.Message = fmt.Sprintf("Person %d, %s%s", op.ID, richtext.SanitizeSingleLine(op.Name), source)
 	}
 	return c
 }
@@ -210,7 +221,7 @@ func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 	if len(f.Projects) == 0 {
 		return []Check{{
 			Name:    "Routes",
-			Status:  StatusWarn,
+			Status:  StatusFail,
 			Message: "No project is routed: every mention would get a holding reply and no work",
 			Hint:    "Add one: basecamp connect setup -P " + f.Profile + " --route <project-id>=<dir>",
 		}}
@@ -255,7 +266,7 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 		return c
 	}
 	c.Status = StatusPass
-	c.Message = "Readable by the agent, routed to " + path
+	c.Message = "Readable by the agent, routed to " + richtext.SanitizeSingleLine(path)
 	return c
 }
 

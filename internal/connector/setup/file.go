@@ -193,6 +193,8 @@ func (f File) Validate() error {
 		return fmt.Errorf("connect.json account_id %q is not a numeric account id", f.AccountID)
 	case f.Agent.PersonID <= 0:
 		return errors.New("connect.json records no agent person id")
+	case f.Trust.Mode == "":
+		return errors.New("connect.json names no trust mode")
 	}
 	switch f.Agent.Kind {
 	case KindAgent:
@@ -276,10 +278,9 @@ func Save(path string, f File) error {
 	return writePrivate(path, append(data, '\n'))
 }
 
+// isAccountID accepts an account id only in its canonical spelling, the one
+// the connector's instance lock is keyed on.
 func isAccountID(s string) bool {
-	if s == "" {
-		return false
-	}
 	n, err := strconv.ParseUint(s, 10, 64)
-	return err == nil && n > 0
+	return err == nil && n > 0 && strconv.FormatUint(n, 10) == s
 }

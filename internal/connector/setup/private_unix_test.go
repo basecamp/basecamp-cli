@@ -22,11 +22,17 @@ func savedPath(t *testing.T) string {
 }
 
 func TestSaveIsOwnerOnly(t *testing.T) {
+	cfg := configDir(t)
+	path, err := Path(cfg, "agent")
+	require.NoError(t, err)
+	file := validFile(t)
+	require.NoError(t, os.Remove(cfg)) // Save creates the config directory too
+
 	old := syscall.Umask(0)
 	t.Cleanup(func() { syscall.Umask(old) })
+	require.NoError(t, Save(path, file))
 
-	path := savedPath(t)
-	for _, p := range []string{filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
+	for _, p := range []string{cfg, filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
 		info, err := os.Stat(p)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm(), p)
@@ -65,7 +71,7 @@ func TestLoadAcceptsAFileOthersCanOnlyRead(t *testing.T) {
 }
 
 func TestLoadRefusesADirectoryOthersCanWrite(t *testing.T) {
-	for _, level := range []int{1, 2} {
+	for _, level := range []int{1, 2, 3} {
 		path := savedPath(t)
 		dir := path
 		for range level {
@@ -111,4 +117,73 @@ func TestLoadRefusesANonRegularFile(t *testing.T) {
 
 	_, err := Load(path)
 	assert.True(t, errors.Is(err, ErrNotPrivate), "a FIFO is refused without blocking: %v", err)
+}
+
+// The trust anchor is only as private as the path to it: an ancestor
+// another user can write lets them rename the config directory away and put
+// their own in its place, whatever the modes inside say.
+func TestLoadRefusesAnAncestorOthersCanWrite(t *testing.T) {
+	shared := t.TempDir()
+	cfg := filepath.Join(shared, "home", "basecamp")
+	require.NoError(t, os.MkdirAll(cfg, 0o700))
+	path, err := Path(cfg, "agent")
+	require.NoError(t, err)
+	require.NoError(t, Save(path, validFile(t)))
+
+	require.NoError(t, os.Chmod(filepath.Join(shared, "home"), 0o777))
+	_, err = Load(path)
+	assert.True(t, errors.Is(err, ErrNotPrivate), "%v", err)
+	assert.True(t, errors.Is(Save(path, validFile(t)), ErrNotPrivate))
+
+	// A sticky shared directory, as /tmp is, lets nobody rename another's
+	// entry, so it is not a way in.
+	require.NoError(t, os.Chmod(filepath.Join(shared, "home"), 0o777|os.ModeSticky))
+	_, err = Load(path)
+	assert.NoError(t, err)
+}
+
+func TestLoadRefusesASymlinkedConfigDirectory(t *testing.T) {
+	path := savedPath(t)
+	cfg := filepath.Dir(filepath.Dir(filepath.Dir(path)))
+	moved := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.Rename(cfg, moved))
+	require.NoError(t, os.Symlink(moved, cfg))
+
+	_, err := Load(path)
+	assert.True(t, errors.Is(err, ErrNotPrivate), "%v", err)
+}
+
+// An ancestor symlink this user owns (a home directory reached through a
+// link, /var on macOS) is followed, and where it leads is checked too.
+func TestLoadFollowsAnOwnAncestorSymlinkAndChecksItsTarget(t *testing.T) {
+	target := t.TempDir()
+	cfg := filepath.Join(target, "basecamp")
+	require.NoError(t, os.MkdirAll(cfg, 0o700))
+	link := filepath.Join(t.TempDir(), "home")
+	require.NoError(t, os.Symlink(target, link))
+
+	path, err := Path(filepath.Join(link, "basecamp"), "agent")
+	require.NoError(t, err)
+	require.NoError(t, Save(path, validFile(t)))
+	_, err = Load(path)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chmod(target, 0o777))
+	_, err = Load(path)
+	assert.True(t, errors.Is(err, ErrNotPrivate), "the target's modes count: %v", err)
+}
+
+func TestLockRefusesASecondSetup(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := Lock(path)
+	require.NoError(t, err)
+
+	_, err = Lock(path)
+	assert.Error(t, err)
+
+	unlock()
+	unlockAgain, err := Lock(path)
+	require.NoError(t, err)
+	unlockAgain()
 }

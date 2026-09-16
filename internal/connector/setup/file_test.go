@@ -35,7 +35,11 @@ func validFile(t *testing.T) File {
 
 func configDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "basecamp")
+	root := t.TempDir()
+	// Where ownership cannot be read, connect.json must live under the
+	// user's profile directory; make the test's root that directory.
+	t.Setenv("USERPROFILE", root)
+	dir := filepath.Join(root, "basecamp")
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	return dir
 }
@@ -113,6 +117,8 @@ func TestValidateFailsClosed(t *testing.T) {
 		"no profile":                func(f *File) { f.Profile = "" },
 		"profile with a slash":      func(f *File) { f.Profile = "../agent" },
 		"non-numeric account":       func(f *File) { f.AccountID = "acme" },
+		"account not canonical":     func(f *File) { f.AccountID = "02914079" },
+		"empty trust mode":          func(f *File) { f.Trust.Mode = "" },
 		"no agent":                  func(f *File) { f.Agent.PersonID = 0 },
 		"unknown agent kind":        func(f *File) { f.Agent.Kind = "robot" },
 		"agent with an identity":    func(f *File) { f.Agent.IdentityID = 7 },

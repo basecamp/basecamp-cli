@@ -82,7 +82,7 @@ already connected is used as it is.
 Operator. The person whose instructions the agent follows, keyed on Person
 id. Name them by their own profile (--operator-profile, which proves who
 they are), or by id (--operator). With neither, setup keeps the operator
-connect.json already has, or takes the identity of your default profile.
+connect.json already has; on a first setup one of the two is required.
 
 Trust. operator (default): the operator alone. allowlist: the operator and
 the people passed with --allow. project: the operator and any non-client
@@ -93,6 +93,12 @@ Routes. connect.json is the only authority for which directory a project's
 work runs in: --route <project-id>=<dir>. A project with no route gets a
 holding reply and no work. --watch-completions <project-id> makes the agent
 hear every trusted completion in that project without being assigned.
+
+connect.json is written owner-only and refused when anyone else could have
+changed it or a directory above it. On Windows it must live under your user
+profile directory.
+
+Setup exits non-zero when a check fails, after writing connect.json.
 
 Run setup again to change any of it; what you do not pass is kept.
 
@@ -163,7 +169,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
 	}
 
-	changes, err := f.changes()
+	changes, err := f.changes(cmd)
 	if err != nil {
 		return err
 	}
@@ -184,6 +190,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
+	// One setup per profile at a time: load, change and save are one step.
+	unlock, err := setup.Lock(path)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+	defer unlock()
+
 	existing, err := setup.Load(path)
 	exists := err == nil
 	switch {
@@ -203,8 +216,25 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
+	if operatorID == 0 && f.operatorProfile == "" && existing.Trust.OperatorID == 0 {
+		return output.ErrUsageHint("Setup needs to know who the operator is",
+			"Pass --operator-profile <your profile> (or --operator <your person id>). The operator is the person the agent takes instructions from, and is never guessed.")
+	}
+	var operatorMgr *operatorProfile
+	if f.operatorProfile != "" {
+		if operatorMgr, err = operatorProfileManager(ctx, app, f.operatorProfile); err != nil {
+			return err
+		}
+	}
+	held, err := connectCredentialKind(ctx, app)
+	if err != nil {
+		return err
+	}
+	if err := refuseCredentialConflicts(app, name, path, held, expect, exists, existing); err != nil {
+		return err
+	}
 
-	kind, err := ensureConnectCredential(cmd, app, name, expect, exists, existing)
+	kind, err := ensureConnectCredential(cmd, app, name, held, expect)
 	if err != nil {
 		return err
 	}
@@ -223,8 +253,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			accountID = p.AccountID
 		}
 	}
-	if err := requireNumericAccount(accountID); err != nil {
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name), "Bind it: basecamp profile set "+name+" account_id <id>, or pass --account.")
+	accountID, err = canonicalAccount(accountID)
+	if err != nil {
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no usable account", name), "Bind it: basecamp profile set "+name+" account_id <id>, or pass --account.")
 	}
 	if exists && !accountIDsEqual(existing.AccountID, accountID) {
 		return output.ErrUsageHint(
@@ -239,7 +270,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if _, err := app.Auth.AccessToken(ctx); err != nil {
 		return output.ErrAuth(fmt.Sprintf("Profile %q holds a credential that does not produce a token: %v", name, err))
 	}
-	checks = append(checks, setup.Check{Name: "Token", Status: setup.StatusPass, Message: tokenMessage(kind)})
+	checks = append(checks, setup.Check{Name: "Token", Status: setup.StatusPass, Message: "The profile's credential yields a token"})
 
 	// Identity.
 	client := connectSDKClient(app, provider)
@@ -259,35 +290,36 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			"Nothing was changed. If this is a different agent on purpose, remove "+path+" and run setup again.")
 	}
 	if scope := profileScope(app, name); scope == "read" {
-		checks = append(checks, setup.Check{Name: "Scope", Status: setup.StatusWarn,
+		checks = append(checks, setup.Check{Name: "Scope", Status: setup.StatusFail,
 			Message: "The credential is read-only: the agent could not reply or acknowledge",
 			Hint:    "Reconnect with full access."})
 	}
 
-	// Operator.
-	fromProfile := ""
+	// Operator, verified before anything is written: connect.json is the
+	// trust anchor, and an operator that fails verification is not one to
+	// record.
+	var operatorCheck setup.Check
 	switch {
-	case operatorID != 0:
-	case f.operatorProfile != "":
-		fromProfile = f.operatorProfile
-	case existing.Trust.OperatorID != 0:
-		operatorID = existing.Trust.OperatorID
-	default:
-		fromProfile = app.Config.DefaultProfile
-		if fromProfile == "" || fromProfile == name {
-			return output.ErrUsageHint("Setup needs to know who the operator is",
-				"Pass --operator-profile <your profile> (or --operator <your person id>). The operator is the person the agent takes instructions from.")
-		}
-	}
-	if fromProfile != "" {
-		operatorID, err = resolveOperatorProfile(ctx, app, fromProfile, accountID)
+	case operatorMgr != nil:
+		op, err := resolveOperatorProfile(ctx, operatorMgr, f.operatorProfile, accountID)
 		if err != nil {
 			return err
 		}
+		operatorID = op.ID
+		operatorCheck = setup.OperatorCheck(ctx, reader, op, me.ID, f.operatorProfile)
+	default:
+		if operatorID == 0 {
+			operatorID = existing.Trust.OperatorID
+		}
+		operatorCheck = setup.OperatorCheck(ctx, reader, setup.Person{ID: operatorID}, me.ID, "")
 	}
 	if operatorID == me.ID {
 		return output.ErrUsage(fmt.Sprintf("The operator (person %d) is the agent itself; the agent's own id never authorizes", operatorID))
 	}
+	if operatorCheck.Status == setup.StatusFail {
+		return output.ErrUsageHint("The operator was refused, and nothing was written: "+operatorCheck.Message, operatorCheck.Hint)
+	}
+	checks = append(checks, operatorCheck)
 
 	next.AccountID = accountID
 	next.Agent = setup.Agent{PersonID: me.ID, Kind: kind}
@@ -302,7 +334,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
 
-	checks = append(checks, setup.OperatorCheck(ctx, reader, operatorID, me.ID, fromProfile))
 	checks = append(checks, setup.TicketCheck(ctx, reader, kind))
 	checks = append(checks, setup.RouteChecks(ctx, reader, next)...)
 
@@ -316,25 +347,66 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		TrustMode:     string(next.Trust.Mode),
 		Routes:        len(next.Projects),
 		Checks:        summarizeChecks(asDoctorChecks(checks)),
-		Written:       true,
 	}
 	result.Ready = result.Checks.Failed == 0
 
-	summary := "connect.json written; " + result.Checks.Summary()
-	if !result.Ready {
-		summary = "connect.json written, but the connector is not ready: " + result.Checks.Summary()
-	}
 	if app.Output.EffectiveFormat() == output.FormatStyled {
 		w := cmd.OutOrStdout()
 		renderChecksStyled(w, "Connector setup for profile "+strconv.Quote(name), result.Checks)
-		fmt.Fprintf(w, "  %s\n  %s\n\n", summary, path)
+		fmt.Fprintf(w, "  connect.json written: %s\n\n", path)
+	}
+	if !result.Ready {
+		return errConnectorNotReady(path, checks)
+	}
+	if app.Output.EffectiveFormat() == output.FormatStyled {
 		return nil
 	}
-	return app.OK(result, output.WithSummary(summary))
+	return app.OK(result, output.WithSummary("connect.json written; "+result.Checks.Summary()))
+}
+
+// codeNotReady is the error code for a setup that wrote connect.json but
+// whose checks failed: the connector would not run.
+const codeNotReady = "not_ready"
+
+// errConnectorNotReady reports failed checks as the command's error, so a
+// script or an agent reading the exit status sees what a person sees.
+func errConnectorNotReady(path string, checks []setup.Check) error {
+	var failed []string
+	hint := ""
+	for _, c := range checks {
+		if c.Status != setup.StatusFail {
+			continue
+		}
+		failed = append(failed, c.Name+": "+c.Message)
+		if hint == "" {
+			hint = c.Hint
+		}
+	}
+	if hint == "" {
+		hint = "Fix what failed and run setup again."
+	}
+	return &output.Error{
+		Code:    codeNotReady,
+		Message: fmt.Sprintf("connect.json was written to %s, but the connector is not ready. %s", path, strings.Join(failed, "; ")),
+		Hint:    hint,
+	}
+}
+
+// canonicalAccount is the account id as a number spells it, the spelling
+// the connector's instance lock uses.
+func canonicalAccount(raw string) (string, error) {
+	if err := requireNumericAccount(raw); err != nil {
+		return "", err
+	}
+	n, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || n == 0 {
+		return "", output.ErrUsage(fmt.Sprintf("Invalid account ID %q", raw))
+	}
+	return strconv.FormatUint(n, 10), nil
 }
 
 // changes turns setup's flags into the changes connect.json takes.
-func (f *connectSetupFlags) changes() (setup.Changes, error) {
+func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 	var ch setup.Changes
 	if f.trust != "" {
 		ch.Trust = admission.TrustMode(f.trust)
@@ -394,13 +466,15 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 	default:
 		return ch, output.ErrUsage(fmt.Sprintf("Invalid --driver %q: use spawn or acp", f.driver))
 	}
-	if f.parallel != 0 {
+	// A typed zero is out of range, not a request for the default: the flags
+	// are read as typed, not as their zero values.
+	if cmd.Flags().Changed("concurrency") {
 		if f.parallel < 1 || f.parallel > setup.MaxConcurrency {
 			return ch, output.ErrUsage(fmt.Sprintf("Invalid --concurrency %d: use 1 to %d", f.parallel, setup.MaxConcurrency))
 		}
 		ch.Concurrency = f.parallel
 	}
-	if f.deadline != 0 {
+	if cmd.Flags().Changed("deadline") {
 		if f.deadline < setup.MinDeadline || f.deadline > setup.MaxDeadline {
 			return ch, output.ErrUsage(fmt.Sprintf("Invalid --deadline %s: use %s to %s", f.deadline, setup.MinDeadline, setup.MaxDeadline))
 		}
@@ -449,46 +523,61 @@ func parsePositiveID(flag, raw string) (int64, error) {
 	return id, nil
 }
 
+// refuseCredentialConflicts refuses, before any credential step runs, the
+// combinations that step would only be refused after: a bot-user login for
+// a profile that does not exist, --expect-identity against an Agent's
+// connect.json or credential, and a person's login with nothing pinning it.
+func refuseCredentialConflicts(app *appctx.App, name, path, held string, expect int64, exists bool, existing setup.File) error {
+	switch {
+	case expect != 0 && held == setup.KindAgent:
+		return output.ErrUsage("--expect-identity is for the bot-user path, and profile " + strconv.Quote(name) + " holds an Agent's credential, which has no identity")
+	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
+		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
+			"Nothing was changed. Remove "+path+" to set this profile up afresh.")
+	case held == "" && expect != 0 && app.Config.Profiles[name] == nil:
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist, and the bot-user login needs it", name),
+			fmt.Sprintf("Create it with `basecamp profile create %s` (signing in as the bot), then run setup again.", name))
+	case held == "" && exists && existing.Agent.Kind == setup.KindBotUser && expect == 0:
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds no credential, and connect.json was set up for a bot user", name),
+			fmt.Sprintf("Log the bot in again: basecamp connect setup -P %s --expect-identity %d", name, existing.Agent.IdentityID))
+	case held == setup.KindBotUser && expect == 0 && existing.Agent.IdentityID == 0:
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds a person's login, not an Agent's credential", name),
+			"On the bot-user path pass --expect-identity <the bot's identity id>, so setup can prove this login is the bot and not you.")
+	}
+	return nil
+}
+
 // ensureConnectCredential makes sure the profile holds the agent's
 // credential, running the command that stores one when it does not, and
 // reports which kind it holds. Setup never handles a secret itself: the
 // ceremony is `basecamp auth agent connect`, the bot-user login is
 // `basecamp auth login --expect-identity`, run as they run on their own.
-func ensureConnectCredential(cmd *cobra.Command, app *appctx.App, name string, expect int64, exists bool, existing setup.File) (string, error) {
-	kind := connectCredentialKind(app)
-	switch {
-	case kind == "" && expect != 0:
-		login := buildLoginCmd("login")
-		flags := map[string]string{"expect-identity": strconv.FormatInt(expect, 10)}
-		if noBrowser, _ := cmd.Flags().GetBool("no-browser"); noBrowser {
-			flags["no-browser"] = "true"
-		}
-		if err := runChildCommand(cmd, login, flags); err != nil {
+func ensureConnectCredential(cmd *cobra.Command, app *appctx.App, name, held string, expect int64) (string, error) {
+	if held != "" {
+		return held, nil
+	}
+	flags := map[string]string{}
+	if noBrowser, _ := cmd.Flags().GetBool("no-browser"); noBrowser {
+		flags["no-browser"] = "true"
+	}
+	if expect != 0 {
+		flags["expect-identity"] = strconv.FormatInt(expect, 10)
+		if err := runChildCommand(cmd, buildLoginCmd("login"), flags); err != nil {
 			return "", err
 		}
-	case kind == "" && exists && existing.Agent.Kind == setup.KindBotUser:
-		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q holds no credential, and connect.json was set up for a bot user", name),
-			fmt.Sprintf("Log the bot in again: basecamp connect setup -P %s --expect-identity %d", name, existing.Agent.IdentityID))
-	case kind == "":
-		connect := newAuthAgentConnectCmd()
-		flags := map[string]string{}
-		if noBrowser, _ := cmd.Flags().GetBool("no-browser"); noBrowser {
-			flags["no-browser"] = "true"
-		}
+	} else {
 		if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" {
 			flags["device-name"] = deviceName
 		}
-		if err := runChildCommand(cmd, connect, flags); err != nil {
+		if err := runChildCommand(cmd, newAuthAgentConnectCmd(), flags); err != nil {
 			return "", err
 		}
-	case kind == setup.KindAgent && expect != 0:
-		return "", output.ErrUsage("--expect-identity is for the bot-user path, and profile " + strconv.Quote(name) + " holds an Agent's credential, which has no identity")
-	case kind == setup.KindBotUser && expect == 0 && existing.Agent.IdentityID == 0:
-		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q holds a person's login, not an Agent's credential", name),
-			"On the bot-user path pass --expect-identity <the bot's identity id>, so setup can prove this login is the bot and not you.")
 	}
 
-	kind = connectCredentialKind(app)
+	kind, err := connectCredentialKind(cmd.Context(), app)
+	if err != nil {
+		return "", err
+	}
 	if kind == "" {
 		return "", output.ErrAuth(fmt.Sprintf("Profile %q still holds no credential", name))
 	}
@@ -496,15 +585,24 @@ func ensureConnectCredential(cmd *cobra.Command, app *appctx.App, name string, e
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,
-// "" for none.
-func connectCredentialKind(app *appctx.App) string {
-	switch app.Auth.GetOAuthType() {
-	case "":
-		return ""
-	case "agent":
-		return setup.KindAgent
+// "" for none. A store that cannot be read is an error, not "none": setup
+// would otherwise run a new connection over a credential it merely failed
+// to load.
+func connectCredentialKind(ctx context.Context, app *appctx.App) (string, error) {
+	return credentialKindOf(ctx, app.Auth)
+}
+
+func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
+	creds, err := mgr.GetStore().LoadContext(ctx, mgr.CredentialKey())
+	switch {
+	case errors.Is(err, auth.ErrNoCredential):
+		return "", nil
+	case err != nil:
+		return "", output.ErrAuth(fmt.Sprintf("The stored credential could not be read: %v", err))
+	case creds.OAuthType == "agent":
+		return setup.KindAgent, nil
 	default:
-		return setup.KindBotUser
+		return setup.KindBotUser, nil
 	}
 }
 
@@ -554,44 +652,57 @@ func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp
 	return c, nil
 }
 
-// resolveOperatorProfile reads the operator's Person id in the agent's
-// account through the operator's own profile. That credential proves who
-// they are, which a typed id cannot.
-func resolveOperatorProfile(ctx context.Context, app *appctx.App, profile, accountID string) (int64, error) {
+// operatorProfileManager checks, without the network, that the operator's
+// profile can name the operator: it exists, is on the agent's Basecamp, and
+// holds a person's credential.
+func operatorProfileManager(ctx context.Context, app *appctx.App, profile string) (*operatorProfile, error) {
 	cfg, err := config.Load(config.FlagOverrides{})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if _, ok := cfg.Profiles[profile]; !ok {
-		return 0, output.ErrUsage(fmt.Sprintf("Operator profile %q does not exist", profile))
+		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q does not exist", profile))
 	}
 	if err := cfg.ApplyProfile(profile); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if config.NormalizeBaseURL(cfg.BaseURL) != config.NormalizeBaseURL(app.Config.BaseURL) {
-		return 0, output.ErrUsage(fmt.Sprintf("Operator profile %q is on %s, and the agent is on %s", profile, cfg.BaseURL, app.Config.BaseURL))
+		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q is on %s, and the agent is on %s", profile, cfg.BaseURL, app.Config.BaseURL))
 	}
 	mgr := auth.NewManager(cfg, nil)
 	if store := app.Auth.GetStore(); store != nil {
 		mgr.SetStore(store)
 	}
-	if mgr.GetOAuthType() == "agent" {
-		return 0, output.ErrUsage(fmt.Sprintf("Operator profile %q holds an Agent's credential; an operator is a person", profile))
+	switch kind, err := credentialKindOf(ctx, mgr); {
+	case err != nil:
+		return nil, err
+	case kind == "":
+		return nil, output.ErrUsageHint(fmt.Sprintf("Operator profile %q holds no credential", profile), "Log in: basecamp auth login -P "+profile)
+	case kind == setup.KindAgent:
+		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q holds an Agent's credential; an operator is a person", profile))
 	}
-	client := connectSDKClientFor(cfg.BaseURL, &managerTokens{mgr: mgr})
+	return &operatorProfile{mgr: mgr, baseURL: cfg.BaseURL}, nil
+}
+
+// operatorProfile is the operator's own credential, checked and ready to read.
+type operatorProfile struct {
+	mgr     *auth.Manager
+	baseURL string
+}
+
+// resolveOperatorProfile reads the operator's person in the agent's account
+// through the operator's own credential, which proves who they are in a way
+// a typed id cannot.
+func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, accountID string) (setup.Person, error) {
+	client := connectSDKClientFor(op.baseURL, &managerTokens{mgr: op.mgr})
 	me, err := setup.SDKReader{Client: client.ForAccount(accountID)}.Me(ctx)
 	if err != nil {
-		return 0, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %v", profile, accountID, err))
+		return setup.Person{}, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %v", profile, accountID, err))
 	}
-	switch {
-	case me.ID <= 0:
-		return 0, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
-	case me.PersonableType == setup.PersonableAgent:
-		return 0, output.ErrUsage(fmt.Sprintf("Operator profile %q is an Agent; an operator is a person", profile))
-	case me.Client:
-		return 0, output.ErrUsage(fmt.Sprintf("Operator profile %q is a client of account %s; an operator is a member", profile, accountID))
+	if me.ID <= 0 {
+		return setup.Person{}, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
 	}
-	return me.ID, nil
+	return me, nil
 }
 
 func profileScope(app *appctx.App, name string) string {
@@ -599,13 +710,6 @@ func profileScope(app *appctx.App, name string) string {
 		return p.Scope
 	}
 	return app.Config.Scope
-}
-
-func tokenMessage(kind string) string {
-	if kind == setup.KindAgent {
-		return "The agent's client mints a token"
-	}
-	return "The bot user's login yields a token"
 }
 
 func asDoctorChecks(in []setup.Check) []Check {

@@ -102,7 +102,7 @@ func TestRouteChecksWarnWithNoRoutes(t *testing.T) {
 	f.Projects = map[int64]admission.Route{}
 	checks := RouteChecks(context.Background(), &fakeReader{}, f)
 	require.Len(t, checks, 1)
-	assert.Equal(t, StatusWarn, checks[0].Status)
+	assert.Equal(t, StatusFail, checks[0].Status, "a connector with no route does no work, so it is not ready")
 }
 
 func TestTicketCheck(t *testing.T) {
@@ -124,16 +124,21 @@ func TestOperatorCheck(t *testing.T) {
 		8:          {ID: 8, Client: true},
 	}
 	r := &fakeReader{people: people}
+	forbidden := &fakeReader{personErr: status(http.StatusForbidden)}
 
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, r, operatorID, agentID, "").Status)
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, &fakeReader{personErr: status(http.StatusForbidden)}, operatorID, agentID, "me").Status,
-		"an operator proved by their own profile needs no read")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, agentID, agentID, "me").Status, "the agent is never the operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, 7, agentID, "").Status, "an Agent is not an operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, 8, agentID, "").Status, "a client is not an operator")
+	assert.Equal(t, StatusPass, OperatorCheck(ctx, r, Person{ID: operatorID}, agentID, "").Status)
+	assert.Equal(t, StatusPass, OperatorCheck(ctx, forbidden, people[operatorID], agentID, "me").Status,
+		"an operator proved by their own profile needs no read as the agent")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: agentID}, agentID, "").Status, "the agent is never the operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 7}, agentID, "").Status, "an Agent is not an operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "").Status, "a client is not an operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[7], agentID, "me").Status,
+		"a profile that reads back as an Agent is refused too")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[8], agentID, "me").Status,
+		"a profile that reads back as a client is refused too")
 
-	c := OperatorCheck(ctx, &fakeReader{personErr: status(http.StatusForbidden)}, operatorID, agentID, "")
-	assert.Equal(t, StatusWarn, c.Status, "an id that cannot be read is unverified, not refused")
+	c := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "")
+	assert.Equal(t, StatusFail, c.Status, "an id that cannot be verified is not recorded as the trust anchor")
 	assert.Contains(t, c.Hint, "--operator-profile")
 }
 
@@ -167,4 +172,15 @@ func TestSDKReaderMintsAndDiscardsTheTicket(t *testing.T) {
 	err = SDKReader{Client: client}.MintStreamTicket(context.Background())
 	require.ErrorIs(t, err, ErrMalformedTicket)
 	assert.False(t, strings.Contains(err.Error(), ticket))
+}
+
+// A route directory's name reaches a one-line terminal sink; control
+// characters in it must not restyle or break that line.
+func TestRouteChecksSanitizeThePath(t *testing.T) {
+	f := validFile(t)
+	f.Projects = map[int64]admission.Route{projectID: {Path: "/work/evil\x1b[31m\nFAKE ✓ line"}}
+	checks := RouteChecks(context.Background(), &fakeReader{}, f)
+	require.Len(t, checks, 1)
+	assert.NotContains(t, checks[0].Message, "\x1b")
+	assert.NotContains(t, checks[0].Message, "\n")
 }

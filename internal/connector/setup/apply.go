@@ -58,10 +58,7 @@ func Apply(f File, ch Changes) (File, error) {
 		if _, routed := ch.Routes[id]; routed {
 			return File{}, fmt.Errorf("project %d is both routed and removed in one run", id)
 		}
-		if _, ok := out.Projects[id]; !ok {
-			return File{}, fmt.Errorf("project %d has no route to remove", id)
-		}
-		delete(out.Projects, id)
+		delete(out.Projects, id) // removing a route that is not there is already done
 	}
 	for id, raw := range ch.Routes {
 		if id <= 0 {

@@ -122,8 +122,9 @@ func TestApplyRoutes(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotContains(t, out.Projects, projectID)
 
-		_, err = Apply(base, Changes{Remove: []int64{777}})
-		assert.Error(t, err, "removing a route that is not there")
+		again, err := Apply(out, Changes{Remove: []int64{projectID}})
+		require.NoError(t, err, "removing a route that is already gone is idempotent")
+		assert.Equal(t, out.Projects, again.Projects)
 		_, err = Apply(base, Changes{Remove: []int64{projectID}, Routes: map[int64]string{projectID: t.TempDir()}})
 		assert.Error(t, err, "routing and removing one project in one run")
 	})

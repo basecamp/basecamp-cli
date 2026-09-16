@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/gofrs/flock"
 )
 
 // maxFileBytes bounds a connect.json read. A real one is a few kilobytes.
@@ -15,16 +17,63 @@ const maxFileBytes = 1 << 20
 // someone other than this user could have written.
 var ErrNotPrivate = errors.New("connect.json is not private to this user")
 
-// privateDirs are the directories between the CLI's config directory and
-// connect.json: connect/ and connect/<profile>/. The config directory above
-// them is hardened by the CLI on every run.
+// privateDirs are the directories setup owns on the way to connect.json: the
+// CLI's config directory, connect/ and connect/<profile>/. Each must be this
+// user's alone. Everything above them is checked by checkAncestors.
 func privateDirs(path string) []string {
 	profileDir := filepath.Dir(path)
-	return []string{filepath.Dir(profileDir), profileDir}
+	connectDir := filepath.Dir(profileDir)
+	return []string{filepath.Dir(connectDir), connectDir, profileDir}
+}
+
+// ensurePrivateDirs creates what is missing of privateDirs, owner-only, and
+// refuses when any of them, or anything above them, could be changed by
+// someone else.
+func ensurePrivateDirs(path string) error {
+	dirs := privateDirs(path)
+	if err := checkAncestors(filepath.Dir(dirs[0])); err != nil {
+		return err
+	}
+	for _, dir := range dirs {
+		switch _, err := os.Lstat(dir); {
+		case errors.Is(err, os.ErrNotExist):
+			if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("create %s: %w", dir, err)
+			}
+		case err != nil:
+			return fmt.Errorf("inspect %s: %w", dir, err)
+		}
+		if err := checkPrivateDir(dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Lock takes the per-profile setup lock beside connect.json, so two setups
+// cannot interleave a load, a change and a save. It refuses rather than
+// waits: a second setup on one profile is a mistake to report, not a queue.
+func Lock(path string) (unlock func(), err error) {
+	if err := ensurePrivateDirs(path); err != nil {
+		return nil, err
+	}
+	lock := flock.New(filepath.Join(filepath.Dir(path), ".connect.lock"), flock.SetPermissions(0o600))
+	held, err := lock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("take the setup lock: %w", err)
+	}
+	if !held {
+		return nil, errors.New("another connect setup is running for this profile")
+	}
+	return func() { _ = lock.Unlock() }, nil
 }
 
 func readPrivate(path string) ([]byte, error) {
-	for _, dir := range privateDirs(path) {
+	dirs := privateDirs(path)
+	if err := checkAncestors(filepath.Dir(dirs[0])); err != nil {
+		return nil, err
+	}
+	for _, dir := range dirs {
 		if err := checkPrivateDir(dir); err != nil {
 			return nil, err
 		}
@@ -48,18 +97,8 @@ func readPrivate(path string) ([]byte, error) {
 }
 
 func writePrivate(path string, data []byte) error {
-	for _, dir := range privateDirs(path) {
-		switch _, err := os.Lstat(dir); {
-		case errors.Is(err, os.ErrNotExist):
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				return fmt.Errorf("create %s: %w", dir, err)
-			}
-		case err != nil:
-			return fmt.Errorf("inspect %s: %w", dir, err)
-		}
-		if err := checkPrivateDir(dir); err != nil {
-			return err
-		}
+	if err := ensurePrivateDirs(path); err != nil {
+		return err
 	}
 	// An existing connect.json that is not ours is refused rather than
 	// replaced: the rename would succeed, and whoever planted it would learn
