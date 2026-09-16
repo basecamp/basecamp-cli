@@ -542,9 +542,25 @@ func TestRedactTicketURLWithholdsATicketEchoedOutsideItsParameter(t *testing.T) 
 		"wss://chat.example.test/tkt-secret?ticket=tkt-secret",
 		"wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret",
 		"wss://tkt-secret@chat.example.test/195539477?ticket=tkt-secret",
+		"wss://chat.example.test/195539477%2Ftkt-secret?ticket=tkt-secret",
 	} {
 		assert.NotContains(t, redactTicketURL(raw, "tkt-secret"), "tkt-secret", raw)
 	}
+}
+
+// A copy of the ticket in another parameter used to survive whenever the
+// rendering escaped it into a spelling a search for the raw ticket does not
+// match — "abc/def" carried as "abc%2Fdef". The query is rebuilt from a
+// constant rather than carried through, so there is no second parameter to
+// hide in and no encoding to reason about.
+func TestRedactTicketURLKeepsNoneOfTheServersOtherParameters(t *testing.T) {
+	assert.Equal(t,
+		"wss://chat.example.test/cable?ticket="+url.QueryEscape(redactedTicket),
+		redactTicketURL("wss://chat.example.test/cable?ticket=abc/def&retry=abc/def", "abc/def"))
+
+	assert.NotContains(t,
+		redactTicketURL("wss://chat.example.test/cable?ticket=abc%2Fdef&retry=abc%2Fdef", "abc/def"),
+		"abc")
 }
 
 // An empty ticket must not make every URL look like it carries one.

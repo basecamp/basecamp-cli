@@ -754,34 +754,36 @@ attempt; an open socket does not refresh one.
 // credential invites a consumer to present it.
 const redactedTicket = "[REDACTED]"
 
-// redactTicketURL renders a cable URL without its credential. The ticket is
-// opaque and the response is not ours to trust, so the display URL is built
-// from the components a cable URL needs rather than by editing the one that
-// arrived: userinfo and fragment are dropped outright, and a URL that cannot
-// be parsed, carries no ticket parameter, or still contains the ticket after
-// all that — echoed in the path, or in a second parameter — is withheld
-// whole. Any component can be carrying it, so a rendering that still holds
-// it is worth nothing.
+// redactTicketURL renders a cable URL without its credential: enough of the
+// endpoint to see where a stream would open, and none of the response's own
+// text.
+//
+// The ticket is opaque and the body is not ours to trust, so the display URL
+// is built rather than edited. Only scheme, host and path survive; the query
+// is rebuilt from a constant, which is what makes this answerable at all —
+// carrying the server's other parameters through means asking whether a copy
+// of the ticket is hiding in one, and the answer depends on the encoding the
+// rendering happens to choose (a ticket "abc/def" echoed as "abc%2Fdef"
+// reads as neither). Userinfo and the fragment are dropped the same way.
+//
+// What is left is compared decoded: url.Parse unescapes the path, so a copy
+// escaped into it is still caught, and a URL carrying the ticket in its host
+// or path is withheld whole. An unparseable URL, or one with no ticket
+// parameter, is withheld too — it is not the shape this was promised.
 func redactTicketURL(raw, ticket string) string {
 	parsed, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || !parsed.Query().Has("ticket") {
 		return redactedTicket
 	}
-	query := parsed.Query()
-	if !query.Has("ticket") {
+	if ticket != "" && (strings.Contains(parsed.Host, ticket) || strings.Contains(parsed.Path, ticket)) {
 		return redactedTicket
 	}
-	query.Set("ticket", redactedTicket)
 
 	display := url.URL{
 		Scheme:   parsed.Scheme,
 		Host:     parsed.Host,
 		Path:     parsed.Path,
-		RawQuery: query.Encode(),
+		RawQuery: url.Values{"ticket": {redactedTicket}}.Encode(),
 	}
-	rendered := display.String()
-	if ticket != "" && strings.Contains(rendered, ticket) {
-		return redactedTicket
-	}
-	return rendered
+	return display.String()
 }
