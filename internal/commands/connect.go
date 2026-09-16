@@ -362,7 +362,8 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// the connector re-checks at start-up, so a credential replaced later
 	// stops it rather than making it act as the wrong agent.
 	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(held auth.HeldCredential) error {
-		if !sameCredential(creds, held.Credentials()) {
+		stored, _, ok := auth.Held(held)
+		if !ok || !sameCredential(creds, stored) {
 			return errCredentialChanged(name)
 		}
 		if err := next.VerifyAgent(kind, me.ID, expect); err != nil {

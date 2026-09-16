@@ -164,24 +164,13 @@ func (s *Store) WithCredential(ctx context.Context, key string, fn func(HeldCred
 
 // HeldCredential is a credential read while its key's lock is held, and the
 // proof a write can ask for: a function that must not run without the lock
-// takes one. Only WithCredential makes one, and it stops being valid when
-// the lock is released.
-//
-// A caller reads the proof with Held, never through this interface's
-// methods: an unexported method cannot be declared elsewhere, but it can be
-// PROMOTED by embedding the interface, and such a wrapper can answer
-// anything it likes. Held asks the auth package instead, which knows its own
-// value.
+// takes one. Only WithCredential makes one, it stops counting when the lock
+// is released, and Held is the only way to read it — the interface carries
+// nothing a wrapper could answer for.
 type HeldCredential interface {
-	// Credentials is the credential as it was stored when the lock was
-	// taken, or nil once the lock has been released.
-	Credentials() *Credentials
-	// Key is the credential key the lock was taken on, "" once released.
-	Key() string
-	// Valid reports whether the lock is still held.
-	Valid() bool
-	// heldUnderLock cannot be implemented outside this package, so no other
-	// package can fabricate the proof.
+	// heldUnderLock cannot be implemented outside this package. It can be
+	// promoted by embedding the interface, which is why nothing reads a
+	// proof through methods: Held is the only reader.
 	heldUnderLock()
 }
 
@@ -191,21 +180,7 @@ type heldCredential struct {
 	released atomic.Bool
 }
 
-func (h *heldCredential) Credentials() *Credentials {
-	if !h.Valid() {
-		return nil
-	}
-	return h.creds
-}
-
-func (h *heldCredential) Key() string {
-	if !h.Valid() {
-		return ""
-	}
-	return h.key
-}
-
-func (h *heldCredential) Valid() bool { return !h.released.Load() }
+func (h *heldCredential) valid() bool { return !h.released.Load() }
 
 func (h *heldCredential) heldUnderLock() {}
 
@@ -215,7 +190,7 @@ func (h *heldCredential) heldUnderLock() {}
 // its own methods say.
 func Held(h HeldCredential) (creds *Credentials, key string, held bool) {
 	own, ok := h.(*heldCredential)
-	if !ok || own == nil || !own.Valid() || own.creds == nil || own.key == "" {
+	if !ok || own == nil || !own.valid() || own.creds == nil || own.key == "" {
 		return nil, "", false
 	}
 	return own.creds, own.key, true

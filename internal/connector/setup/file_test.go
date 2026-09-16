@@ -231,6 +231,8 @@ func TestSaveRefusesWithoutAHeldCredential(t *testing.T) {
 // anything, and Save refuses it.
 type forgedHold struct{ auth.HeldCredential }
 
+// It answers everything a reader might ask, and is still not a proof auth
+// made.
 func (forgedHold) Valid() bool                    { return true }
 func (forgedHold) Key() string                    { return "profile:agent" }
 func (forgedHold) Credentials() *auth.Credentials { return &auth.Credentials{AccessToken: "forged"} }

@@ -1110,8 +1110,10 @@ func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
 	inside := make(chan struct{})
 	replaced := make(chan error, 1)
 	err := store.WithCredential(context.Background(), key, func(held HeldCredential) error {
-		assert.Equal(t, "first", held.Credentials().AccessToken)
-		assert.Equal(t, key, held.Key())
+		creds, heldKey, ok := Held(held)
+		require.True(t, ok)
+		assert.Equal(t, "first", creds.AccessToken)
+		assert.Equal(t, key, heldKey)
 		go func() {
 			close(inside)
 			replaced <- NewStore(dir).withKeyLock(context.Background(), key, func() error {
@@ -1172,13 +1174,15 @@ func TestHeldCredentialIsInvalidAfterTheLockIsReleased(t *testing.T) {
 	var kept HeldCredential
 	require.NoError(t, store.WithCredential(context.Background(), key, func(held HeldCredential) error {
 		kept = held
-		assert.True(t, held.Valid())
-		assert.Equal(t, key, held.Key())
-		require.NotNil(t, held.Credentials())
+		creds, heldKey, ok := Held(held)
+		require.True(t, ok)
+		require.NotNil(t, creds)
+		assert.Equal(t, key, heldKey)
 		return nil
 	}))
 
-	assert.False(t, kept.Valid(), "the lock is gone")
-	assert.Nil(t, kept.Credentials())
-	assert.Empty(t, kept.Key())
+	creds, heldKey, ok := Held(kept)
+	assert.False(t, ok, "the lock is gone")
+	assert.Nil(t, creds)
+	assert.Empty(t, heldKey)
 }
