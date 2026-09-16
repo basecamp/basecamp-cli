@@ -255,7 +255,14 @@ func summarizeFailure(ref basecamp.RecordingRef, err error) *mcp.CallToolResult 
 	switch {
 	case errors.As(err, &unresolved):
 		payload["type"] = "recording_unresolved"
-		payload["campfire_ids"] = unresolved.CampfireIDs
+		// Never null: "we could see no Campfire at all" is an empty list,
+		// something the caller reads, not a missing answer. basecamp-mcp
+		// says it the same way, so one verdict has one shape.
+		tried := unresolved.CampfireIDs
+		if tried == nil {
+			tried = []int64{}
+		}
+		payload["campfire_ids"] = tried
 		payload["refreshed"] = unresolved.Refreshed
 		if len(unresolved.StaleCampfireIDs) > 0 {
 			payload["stale_campfire_ids"] = unresolved.StaleCampfireIDs
