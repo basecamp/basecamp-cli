@@ -62,6 +62,9 @@ type connectSetupServer struct {
 	agentAsUser bool
 	// grantScope is the scope the connection hands over; "" means full.
 	grantScope string
+	// duringMint runs when the stream ticket is minted, between setup's
+	// identity read and its write, as another process's change would land.
+	duringMint func()
 	// mintFailure, when set, answers the stream ticket mint.
 	mintFailure func(w http.ResponseWriter)
 }
@@ -151,6 +154,9 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
+		}
+		if s.duringMint != nil {
+			s.duringMint()
 		}
 		if s.mintFailure != nil {
 			s.mintFailure(w)
@@ -917,4 +923,29 @@ func TestConnectSetupRechecksRetainedRoutes(t *testing.T) {
 	after, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
+}
+
+// Setup checks one credential: when another process stores a different one
+// under the profile while the checks run, nothing is written for either.
+func TestConnectSetupRefusesACredentialReplacedDuringTheChecks(t *testing.T) {
+	s := startConnectSetupServer(t)
+	bareSetupApp(t, s, "bot")
+	storeConnectProfile(t, s, "bot", setupBotToken)
+	s.duringMint = func() {
+		cfg := config.Default()
+		cfg.BaseURL = s.srv.URL
+		cfg.ActiveProfile = "bot"
+		mgr := auth.NewManager(cfg, s.srv.Client())
+		mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
+		require.NoError(t, mgr.ImportToken(context.Background(), setupOperatorToken, "full", "", "", time.Now().Add(24*time.Hour)))
+	}
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	assert.Contains(t, apiErr.Message, "changed while setup was checking it")
+	assertNotWritten(t, "bot")
 }

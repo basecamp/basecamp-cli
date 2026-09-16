@@ -28,13 +28,15 @@ import (
 func NewConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect",
-		Short: "Run a local agent connector for a Basecamp agent",
+		Short: "Set up a local agent connector for a Basecamp agent",
 		Long: `Run a local agent connector: it listens to the account event feed as a
 Basecamp agent, admits what a trusted person asks of that agent, and hands
 the work to a local coding agent that replies in Basecamp as the agent.
 
-Start with setup, which connects the agent, records who may drive it, and
-maps projects to the directories their work runs in.`,
+Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
+then run setup on that profile: it records who may drive the agent, maps
+projects to the directories their work runs in, and checks the connector is
+ready.`,
 	}
 	cmd.AddCommand(newConnectSetupCmd())
 	return cmd
@@ -240,11 +242,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 
 	var checks []setup.Check
 
-	// Token.
-	provider := &managerTokens{mgr: app.Auth}
-	if _, err := app.Auth.AccessToken(ctx); err != nil {
+	// Token: one snapshot of the credential and the token it yields, which
+	// every read below spends. A credential another process stores under
+	// the profile while setup runs is not what setup checked, so it is
+	// compared again before anything is written.
+	token, err := app.Auth.AccessToken(ctx)
+	if err != nil {
 		return output.ErrAuth(fmt.Sprintf("Profile %q holds a credential that does not produce a token: %s", name, setup.ErrorText(err)))
 	}
+	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil {
+		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
+	}
+	if creds.AccessToken != token {
+		return errCredentialChanged(name)
+	}
+	provider := &basecamp.StaticTokenProvider{Token: token}
 	checks = append(checks, setup.Check{Name: "Token", Status: setup.StatusPass, Message: "The profile's credential yields a token"})
 
 	// Identity.
@@ -262,10 +275,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if exists && existing.Agent.PersonID != me.ID {
 		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, remove %s and run setup again",
 			existing.Agent.PersonID, name, me.ID, richtext.SanitizeSingleLine(path)))
-	}
-	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil {
-		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
 	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
 
@@ -338,6 +347,10 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return errConnectorNotReady(report)
 	}
 
+	current, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil || !sameCredential(creds, current) {
+		return errCredentialChanged(name)
+	}
 	if err := setup.Save(path, next); err != nil {
 		if errors.Is(err, setup.ErrNotPrivate) {
 			return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
@@ -356,6 +369,20 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
+}
+
+// sameCredential reports whether two loads of a profile's credential are the
+// same credential with the same token: what setup checked is what is stored.
+func sameCredential(a, b *auth.Credentials) bool {
+	return a != nil && b != nil &&
+		a.OAuthType == b.OAuthType && a.ClientID == b.ClientID && a.Scope == b.Scope &&
+		a.AccessToken == b.AccessToken && a.RefreshToken == b.RefreshToken
+}
+
+func errCredentialChanged(name string) error {
+	return &output.Error{Code: output.CodeAuth,
+		Message: fmt.Sprintf("Profile %q's credential changed while setup was checking it, so nothing was written", name),
+		Hint:    "Another command stored a credential under the profile. Run setup again to check the one it holds now."}
 }
 
 // codeNotReady is the error code for a setup whose checks failed: the

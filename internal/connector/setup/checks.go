@@ -109,8 +109,10 @@ func (r SDKReader) MintStreamTicket(ctx context.Context) error {
 // dial: a credential, a URL, and a lifetime above zero and at most
 // MaxTicketLifetime.
 func UsableTicket(t *basecamp.StreamTicket) bool {
+	// Compared in whole seconds: converting to a Duration first would
+	// overflow for a huge value and could wrap back under the bound.
 	return t != nil && t.Ticket != "" && t.URL != "" &&
-		t.ExpiresIn > 0 && time.Duration(t.ExpiresIn)*time.Second <= MaxTicketLifetime
+		t.ExpiresIn > 0 && int64(t.ExpiresIn) <= int64(MaxTicketLifetime/time.Second)
 }
 
 // Project implements Reader.

@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
@@ -319,4 +321,22 @@ func TestRouteChecksCheckEveryRoutesDirectory(t *testing.T) {
 	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", projectID)].Status)
 	assert.Equal(t, StatusFail, byName[fmt.Sprintf("Project %d", otherProj)].Status, "a directory that is gone")
 	assert.Equal(t, StatusFail, byName["Project 777"].Status, "a file where the directory was")
+}
+
+// The lifetime bound is compared in whole seconds, so no value wraps past
+// it: the largest int, and the first value whose conversion to a Duration
+// overflows, are refused like any other absurd lifetime.
+func TestUsableTicketBoundsTheLifetimeWithoutOverflow(t *testing.T) {
+	ticket := func(seconds int) *basecamp.StreamTicket {
+		return &basecamp.StreamTicket{Ticket: "t", URL: "wss://example.test", ExpiresIn: seconds}
+	}
+	maxSeconds := int(MaxTicketLifetime / time.Second)
+	assert.True(t, UsableTicket(ticket(120)))
+	assert.True(t, UsableTicket(ticket(maxSeconds)))
+	assert.False(t, UsableTicket(ticket(maxSeconds+1)))
+	assert.False(t, UsableTicket(ticket(0)))
+	assert.False(t, UsableTicket(ticket(-1)))
+	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second))), "MaxInt64/1e9: the last value a Duration holds")
+	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second)+1)), "just past it, where the conversion overflows")
+	assert.False(t, UsableTicket(ticket(math.MaxInt64)), "wraps to -1s when converted first")
 }
