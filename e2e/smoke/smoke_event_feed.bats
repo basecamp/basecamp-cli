@@ -5,6 +5,11 @@
 # signed resume token and the other two are bearers, and a smoke trace is a
 # file somebody keeps. Entering at the present (--since now) also keeps these
 # reads bounded — a since=0 replay would walk the account's served history.
+#
+# This sits in Level 0 alongside the other read-only suites even though the
+# ticket mint is a POST: it writes no record, mints a stateless signed token
+# that expires in about two minutes, and leaves nothing behind for a parallel
+# suite to trip over.
 
 load smoke_helper
 
