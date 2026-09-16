@@ -2,13 +2,13 @@ package admission
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -179,32 +179,19 @@ func LineFor(v Verdict) Line {
 }
 
 type lineWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	w io.Writer
+
+	once sync.Once
+	out  *ndjson.Writer
 }
 
 func (l *lineWriter) write(v Verdict) error {
 	if l.w == nil {
 		return nil
 	}
-	b, err := json.Marshal(LineFor(v))
-	if err != nil {
-		return fmt.Errorf("admission: encode line: %w", err)
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	// One line, whole: a writer that takes part of it is written the rest,
-	// and one that takes none without an error has failed. A torn line is
-	// worse than no line to whoever parses the stream.
-	for rest := append(b, '\n'); len(rest) > 0; {
-		n, err := l.w.Write(rest)
-		if err != nil {
-			return fmt.Errorf("admission: write line: %w", err)
-		}
-		if n <= 0 {
-			return fmt.Errorf("admission: write line: %w", io.ErrShortWrite)
-		}
-		rest = rest[n:]
+	l.once.Do(func() { l.out = ndjson.NewWriter(l.w) })
+	if err := l.out.WriteLine(LineFor(v)); err != nil {
+		return fmt.Errorf("admission: %w", err)
 	}
 	return nil
 }

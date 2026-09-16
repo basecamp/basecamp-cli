@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,9 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Defaults for the recovery timers.
@@ -947,15 +949,13 @@ func (in *Intake) reconnectRequested() bool {
 	}
 }
 
-// pointerWriter serializes the NDJSON pointer lines. One line is one write:
-// two goroutines interleaving inside a line tear it, and the reader on the
-// other end has no way to recover a torn line.
+// pointerWriter writes the NDJSON pointer lines through the connector's shared
+// line writer: whole lines, never interleaved.
 type pointerWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	out *ndjson.Writer
 }
 
-func newPointerWriter(w io.Writer) *pointerWriter { return &pointerWriter{w: w} }
+func newPointerWriter(w io.Writer) *pointerWriter { return &pointerWriter{out: ndjson.NewWriter(w)} }
 
 // Pointer is the line intake writes to stdout for each newly seen event. It
 // carries what the feed carried and nothing more: no title, no body, no URL,
@@ -975,14 +975,17 @@ type Pointer struct {
 }
 
 func (p *pointerWriter) write(event eventfeed.Event, lane Lane) error {
-	if p.w == nil {
-		return nil
-	}
-	line, err := json.Marshal(Pointer{
+	// Every string from Basecamp is stripped of terminal controls. The line is
+	// a wire, but it is also what a person watching the connector sees: JSON
+	// escapes C0 controls but passes C1 controls such as U+009B (CSI) through
+	// as raw UTF-8, which a terminal executes. Admission's lines apply the
+	// same rule.
+	clean := richtext.SanitizeTerminal
+	err := p.out.WriteLine(Pointer{
 		EventID:       event.ID,
-		EventType:     event.EventType,
-		Kind:          event.Kind,
-		Action:        event.Action,
+		EventType:     clean(event.EventType),
+		Kind:          clean(event.Kind),
+		Action:        clean(event.Action),
 		BucketID:      event.BucketID,
 		CreatorID:     event.CreatorID,
 		PerformedByID: event.PerformedByID,
@@ -992,12 +995,7 @@ func (p *pointerWriter) write(event eventfeed.Event, lane Lane) error {
 		State:         string(StateSeen),
 	})
 	if err != nil {
-		return fmt.Errorf("connector: encode pointer line: %w", err)
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, err := p.w.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("connector: write pointer line: %w", err)
+		return fmt.Errorf("connector: pointer line: %w", err)
 	}
 	return nil
 }
