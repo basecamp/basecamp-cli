@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -259,6 +260,11 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 	conn, err := m.awaitAgentConnection(ctx, &opts, client, intake)
 	wait.Stop()
 	if err != nil {
+		var spent spentHandoverError
+		if errors.As(err, &spent) {
+			warnHandoverLost(log)
+			return nil, spent.error
+		}
 		return nil, err
 	}
 
@@ -299,21 +305,44 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 func (m *Manager) adoptAgentGrantOrSayWhatWasLost(ctx context.Context, disc *discovery, conn *AgentConnection, log func(string), opts ClientCredentialsOptions) (*LoginResult, error) {
 	result, err := m.adoptAgentGrant(ctx, disc, opts, conn.Scope)
 	if err != nil {
-		log("warning: the connection was approved and the agent's client secret was handed over once, but keeping it failed. Disconnect the agent in Basecamp and connect again.")
+		warnHandoverLost(log)
 		return nil, err
 	}
 	return result, nil
 }
 
+// warnHandoverLost says what a failure after the handover costs, in the
+// one line an operator has to act on.
+func warnHandoverLost(log func(string)) {
+	log("warning: the connection was approved and the agent's client secret was handed over once, but keeping it failed. Disconnect the agent in Basecamp and connect again.")
+}
+
+// spentHandoverError marks an error raised once the poll had already been
+// answered with the credential: the one-time code is consumed and the
+// agent's secret minted or rotated, so there is nothing to retry against
+// this grant and no second copy to fetch.
+type spentHandoverError struct{ error }
+
+func (h spentHandoverError) Unwrap() error { return h.error }
+
 // agentIntake is the intake's answer, validated: what to show the
 // operator, where to poll, and how to pace it.
 type agentIntake struct {
-	deviceCode      string
-	userCode        string
+	deviceCode string
+	userCode   string
+
+	// verificationURI is the validated URL the browser is launched at, and
+	// shownURI is the copy printed to the terminal. They differ because
+	// validation is not sanitization: url.Parse accepts Unicode controls a
+	// terminal would act on, so what is displayed is stripped of them and
+	// what is launched is the value the server actually named — the
+	// device login's own split.
 	verificationURI string
-	tokenURI        string
-	lifetime        time.Duration
-	interval        time.Duration
+	shownURI        string
+
+	tokenURI string
+	lifetime time.Duration
+	interval time.Duration
 }
 
 // openAgentConnection makes the anonymous intake request and validates
@@ -363,7 +392,11 @@ func (m *Manager) openAgentConnection(ctx context.Context, client *http.Client, 
 		target = validVerificationURL(intake.VerificationURI)
 	}
 	userCode := strings.TrimSpace(richtext.SanitizeSingleLine(intake.UserCode))
-	if target == "" || userCode == "" || strings.TrimSpace(intake.DeviceCode) == "" {
+	shownURI := strings.TrimSpace(richtext.SanitizeSingleLine(target))
+	// A code or a link that reduces to nothing once the control sequences
+	// are stripped is as unusable as an empty one, and would otherwise be
+	// displayed and polled until it expired.
+	if target == "" || userCode == "" || shownURI == "" || strings.TrimSpace(intake.DeviceCode) == "" {
 		return nil, output.ErrAPI(answer.status, agentConnectIntakeOp+": the server returned a malformed agent connection")
 	}
 
@@ -376,6 +409,7 @@ func (m *Manager) openAgentConnection(ctx context.Context, client *http.Client, 
 		deviceCode:      intake.DeviceCode,
 		userCode:        userCode,
 		verificationURI: target,
+		shownURI:        shownURI,
 		tokenURI:        tokenURI,
 		lifetime:        agentConnectLifetime(intake.ExpiresIn),
 		interval:        agentConnectInterval(intake.Interval),
@@ -391,7 +425,7 @@ func announceAgentConnection(view *LoginOptions, intake *agentIntake, now time.T
 	// a code someone else handed over connects THEIR computer.
 	view.log("\nConnect this computer to a Basecamp agent\n")
 	view.log("  1. Open this link on any device")
-	view.log("     " + intake.verificationURI)
+	view.log("     " + intake.shownURI)
 	view.log("  2. Check that the code shown there matches (expires in " + expiresIn(intake.lifetime) + ")")
 	view.log("     " + intake.userCode)
 	view.log("  3. Pick the agent this computer acts as, and approve it")
@@ -446,7 +480,23 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 	}
 	if answer.status == http.StatusOK {
 		conn, parseErr := parseAgentConnection(answer)
-		return conn, 0, parseErr
+		if parseErr != nil {
+			// The code is burned and the secret minted whatever this
+			// process makes of the answer, so this refusal costs what a
+			// failed mint costs and has to say so.
+			return nil, 0, spentHandoverError{parseErr}
+		}
+		return conn, 0, nil
+	}
+
+	// The STATUS decides first, whatever code the body carries — the rule
+	// the mint's own refusal follows. Throttling and the server's trouble
+	// are not verdicts on this connection: back off and keep polling, which
+	// the code's lifetime bounds anyway. A body naming a verdict alongside
+	// either is a server saying two things at once, of which the status is
+	// the one that says what to do next.
+	if answer.status == http.StatusTooManyRequests || answer.status >= 500 {
+		return nil, agentConnectBackoff(answer, interval), nil
 	}
 
 	switch oauthErrorCode(answer.body) {
@@ -468,12 +518,6 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 			"The code may already have been used, or the agent's account is no longer active. Run the connect command again.")
 	}
 
-	// Throttling and the server's own trouble are not verdicts on this
-	// connection: back off and keep polling, which the code's lifetime
-	// bounds anyway. Everything else is final.
-	if answer.status == http.StatusTooManyRequests || answer.status >= 500 {
-		return nil, agentConnectBackoff(answer, interval), nil
-	}
 	return nil, 0, agentConnectRefusal(agentConnectPollOp, answer)
 }
 
@@ -627,7 +671,7 @@ func agentConnectBackoff(answer *agentConnectAnswer, interval time.Duration) tim
 // was never approved in the ten minutes it was good for.
 func agentConnectExpired() error {
 	return agentConnectFailure("The agent connection code expired before it was approved",
-		"Run the connect command again; the code it prints is good for ten minutes.")
+		"Run the connect command again for a new code, and approve it before it expires.")
 }
 
 // agentConnectFailure is an auth-class refusal carrying a remedy of its

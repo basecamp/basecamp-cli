@@ -167,12 +167,26 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	if token.Resource != "" {
 		creds.Resource = token.Resource
 	}
-	if token.Scope != "" {
+	// A reported scope narrows the credential; it never widens it. The
+	// stored scope is what the grant was approved with — in a connection,
+	// the operator's own downgrade on the approval page — and it is what
+	// every later mint asks for. A response reporting more than that does
+	// not make it so: recording it would claim access the approval did not
+	// give, and would make the next mint ask for more than the client is
+	// allowed and be refused.
+	if token.Scope != "" && !widensScope(creds.Scope, token.Scope) {
 		creds.Scope = token.Scope
 	}
 	expiry := agentTokenExpiry(token)
 	creds.ExpiresAt = expiry.Unix()
 	creds.RenewAfter = agentRenewAfter(time.Now(), expiry).Unix()
+}
+
+// widensScope reports whether a reported scope is more permissive than the
+// approved one. The CLI represents two scopes, so there is one pair that
+// widens.
+func widensScope(approved, reported string) bool {
+	return approved == scopeRead && reported == scopeFull
 }
 
 // agentRenewAfter is when a self-token minted now and expiring at expiry

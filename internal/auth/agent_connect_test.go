@@ -350,6 +350,79 @@ func TestConnectAgentKeepsTheApprovedScope(t *testing.T) {
 	assert.Equal(t, scopeRead, stored.Scope)
 }
 
+// TestConnectAgentNeverStoresMoreThanWasApproved: the mint reports the
+// scope of the token it issued, and the credential takes it — but never
+// upward. A server answering full for a grant the operator approved as
+// read would otherwise leave this profile claiming access the approval did
+// not give, and asking for it on every later mint.
+func TestConnectAgentNeverStoresMoreThanWasApproved(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) { return http.StatusOK, connectionJSON(scopeRead) }
+	as.token = func() (int, string) {
+		return http.StatusOK, `{"access_token":"minted","token_type":"bearer","expires_in":3600,"scope":"full"}`
+	}
+	m := connectManager(t, as)
+
+	result, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.NoError(t, err)
+	assert.Equal(t, scopeRead, result.Scope)
+
+	stored, err := m.store.Load("profile:agent")
+	require.NoError(t, err)
+	assert.Equal(t, scopeRead, stored.Scope)
+}
+
+// TestConnectAgentSanitizesTheLinkItPrints: the link is server-controlled
+// text on its way to a terminal, and url.Parse accepts Unicode C1 controls
+// that a terminal acts on. What is printed is stripped of them; what is
+// launched is the value the server actually named.
+func TestConnectAgentSanitizesTheLinkItPrints(t *testing.T) {
+	as := startConnectAS(t)
+	hostile := as.srv.URL + "/connect\u009b31m?user_code=WDJB-MJHT"
+	as.intake = func() (int, string) {
+		return http.StatusOK, fmt.Sprintf(
+			`{"device_code":"dev-code-1","user_code":"WDJB-MJHT","verification_uri_complete":%q,"token_uri":%q,"expires_in":600,"interval":1}`,
+			hostile, as.tokenURI())
+	}
+	m := connectManager(t, as)
+
+	cl := &collectLogger{}
+	var launched []string
+	opts := connectOptions(cl, newTestClock())
+	opts.NoBrowser = false
+	opts.Local = true
+	opts.BrowserLauncher = func(target string) error {
+		launched = append(launched, target)
+		return nil
+	}
+	_, err := m.ConnectAgent(context.Background(), opts)
+	require.NoError(t, err)
+
+	assert.NotContains(t, cl.joined(), "\u009b", "a C1 control must not reach the terminal")
+	assert.Contains(t, cl.joined(), "/connect31m?user_code=WDJB-MJHT")
+	assert.Equal(t, []string{hostile}, launched, "the browser is sent the URL the server named")
+}
+
+// TestConnectAgentLetsTheStatusDecideBeforeTheBody: a 429 is a rate limit
+// with a Retry-After to honor whatever code the body carries alongside it.
+// Reading the body first would poll straight through the throttle.
+func TestConnectAgentLetsTheStatusDecideBeforeTheBody(t *testing.T) {
+	as := startConnectAS(t)
+	as.pollHeader.Set("Retry-After", "30")
+	as.poll = func(call int) (int, string) {
+		if call == 0 {
+			return http.StatusTooManyRequests, `{"error":"authorization_pending"}`
+		}
+		return http.StatusOK, connectionJSON(scopeFull)
+	}
+	m := connectManager(t, as)
+	clock := newTestClock()
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, clock))
+	require.NoError(t, err)
+	assert.Equal(t, []time.Duration{time.Second, 30 * time.Second}, clock.waits())
+}
+
 // TestConnectAgentRefusesAScopeItCannotStore: the CLI can represent read
 // and full. Anything else is refused before a credential is written, not
 // persisted and then found unusable.
@@ -358,11 +431,17 @@ func TestConnectAgentRefusesAScopeItCannotStore(t *testing.T) {
 	as.poll = func(int) (int, string) { return http.StatusOK, connectionJSON("mcp") }
 	m := connectManager(t, as)
 
-	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	cl := &collectLogger{}
+	_, err := m.ConnectAgent(context.Background(), connectOptions(cl, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "scope other than read or full")
 	assert.Empty(t, as.calls(&as.tokenForms), "nothing was minted with a scope that cannot be stored")
 	assertNoAgentCredential(t, m)
+	// The poll was answered, so the code is burned and the secret minted
+	// whatever this process made of the answer.
+	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	var e *output.Error
+	assert.ErrorAs(t, err, &e, "the refusal keeps its own class through the spent-handover marker")
 }
 
 // TestConnectAgentReportsADecline: the operator can say no, and a refusal
@@ -388,6 +467,11 @@ func TestConnectAgentReportsAnExpiredCode(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
+	// The lifetime is the server's to choose, so the remedy must not
+	// promise one this code may not have had.
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.NotContains(t, e.Hint, "ten minutes")
 	assertNoAgentCredential(t, m)
 }
 
