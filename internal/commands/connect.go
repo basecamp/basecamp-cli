@@ -184,6 +184,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// One setup per profile at a time: load, change and save are one step.
 	unlock, err := setup.Lock(path)
 	if err != nil {
+		if isLockBusy(err) {
+			return errBusy(name, err)
+		}
 		return output.ErrUsage(err.Error())
 	}
 	defer unlock()
@@ -366,14 +369,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return setup.Save(path, next)
 	})
 	if saveErr != nil {
-		var apiErr *output.Error
-		if errors.As(saveErr, &apiErr) {
-			return saveErr
-		}
-		if errors.Is(saveErr, setup.ErrNotPrivate) {
-			return output.ErrUsageHint("connect.json was not written: "+saveErr.Error(), "Setup writes connect.json only where nobody else can change it.")
-		}
-		return output.ErrUsage("connect.json was not written: " + saveErr.Error())
+		return classifyWriteError(name, saveErr)
 	}
 	report.Written = true
 
@@ -387,6 +383,51 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
+}
+
+// codeBusy is the error code for work another process is doing right now:
+// nothing is wrong, and the same command run again will do it.
+const codeBusy = "busy"
+
+// classifyWriteError puts the last step's failures in the command's exit
+// contract: a credential that is gone or unreadable is auth, another
+// process holding the profile's credential or setup lock is busy, a
+// connect.json nobody else may change is usage.
+func classifyWriteError(name string, err error) error {
+	var apiErr *output.Error
+	profile := shellQuote(name)
+	switch {
+	case errors.Is(err, setup.ErrSetupRunning):
+		return errBusy(name, err)
+	case errors.As(err, &apiErr):
+		// Already in the contract: the credential store reports contention
+		// as a retryable rate_limit, and setup's own refusals are typed.
+		return err
+	case errors.Is(err, auth.ErrNoCredential):
+		return &output.Error{Code: output.CodeAuth,
+			Message: fmt.Sprintf("Profile %q's credential was removed while setup was checking it, so nothing was written", name),
+			Hint:    "Connect the agent again: basecamp auth agent connect -P " + profile}
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		return &output.Error{Code: output.CodeAuth,
+			Message: fmt.Sprintf("Profile %q's stored credential could not be read, so nothing was written", name),
+			Hint:    "Connect the agent again: basecamp auth agent connect -P " + profile}
+	case errors.Is(err, setup.ErrNotPrivate):
+		return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
+	}
+	return output.ErrUsage("connect.json was not written: " + err.Error())
+}
+
+// isLockBusy reports a failure that is another process holding a lock.
+// The credential store reports its own contention as a retryable
+// rate_limit error, which classifyWriteError passes through untouched.
+func isLockBusy(err error) bool {
+	return errors.Is(err, setup.ErrSetupRunning)
+}
+
+func errBusy(name string, err error) error {
+	return &output.Error{Code: codeBusy,
+		Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was changed: %s", name, setup.ErrorText(err)),
+		Hint:    "Nothing is wrong with the profile. Run setup again when it has finished."}
 }
 
 // sameCredential reports whether two loads of a profile's credential are the
@@ -578,6 +619,12 @@ func parsePositiveID(flag, raw string) (int64, error) {
 func refuseCredentialConflicts(name, path, held string, expect int64, exists bool, existing setup.File) error {
 	profile := shellQuote(name)
 	switch {
+	// What connect.json already says comes first: a remediation that the
+	// existing file would refuse anyway is no remediation.
+	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
+		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
+			fmt.Sprintf("Connect the agent again (basecamp auth agent connect -P %s) and drop --expect-identity, or remove %s to set this profile up as a bot user.",
+				profile, richtext.SanitizeSingleLine(path)))
 	case held == "" && (expect != 0 || (exists && existing.Agent.Kind == setup.KindBotUser)):
 		identity := expect
 		if identity == 0 {
@@ -591,10 +638,8 @@ func refuseCredentialConflicts(name, path, held string, expect int64, exists boo
 			Message: fmt.Sprintf("Profile %q holds no credential", name),
 			Hint:    fmt.Sprintf("Connect the agent first: basecamp auth agent connect -P %s, then run setup again.", profile)}
 	case expect != 0 && held == setup.KindAgent:
-		return output.ErrUsage("--expect-identity is for the bot-user path, and profile " + strconv.Quote(name) + " holds an Agent's credential, which has no identity")
-	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
-		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
-			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
+		return output.ErrUsageHint("--expect-identity is for the bot-user path, and profile "+strconv.Quote(name)+" holds an Agent's credential, which has no identity",
+			fmt.Sprintf("Drop --expect-identity, or log a bot in under another profile: basecamp auth login -P <bot-profile> --expect-identity %d.", expect))
 	case held == setup.KindBotUser && expect == 0 && existing.Agent.IdentityID == 0:
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds a person's login, not an Agent's credential", name),
 			"On the bot-user path pass --expect-identity <the bot's identity id>, so setup can prove this login is the bot and not you.")
@@ -679,10 +724,12 @@ func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp
 	return c, nil
 }
 
-// operatorProfileManager checks, without the network, that the operator's
-// profile can name the operator: it exists, is on the agent's Basecamp, and
-// holds a person's credential.
-func operatorProfileManager(ctx context.Context, app *appctx.App, profile string) (*operatorProfile, error) {
+// profileConfig is the configuration a named profile runs under, in the
+// CLI's own precedence: environment over profile over file over defaults.
+// It is root's chain for the active profile (ApplyProfile, then LoadFromEnv
+// re-applied over it), minus this invocation's flags, which name the agent's
+// run and not the operator's profile.
+func profileConfig(profile string) (*config.Config, error) {
 	cfg, err := config.Load(config.FlagOverrides{})
 	if err != nil {
 		return nil, err
@@ -691,6 +738,20 @@ func operatorProfileManager(ctx context.Context, app *appctx.App, profile string
 		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q does not exist", profile))
 	}
 	if err := cfg.ApplyProfile(profile); err != nil {
+		return nil, err
+	}
+	if err := config.LoadFromEnv(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// operatorProfileManager checks, without the network, that the operator's
+// profile can name the operator: it exists, is on the agent's Basecamp, and
+// holds a person's credential.
+func operatorProfileManager(ctx context.Context, app *appctx.App, profile string) (*operatorProfile, error) {
+	cfg, err := profileConfig(profile)
+	if err != nil {
 		return nil, err
 	}
 	if config.NormalizeBaseURL(cfg.BaseURL) != config.NormalizeBaseURL(app.Config.BaseURL) {

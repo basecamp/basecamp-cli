@@ -50,6 +50,9 @@ func ensurePrivateDirs(path string) error {
 	return nil
 }
 
+// ErrSetupRunning reports another setup already running for this profile.
+var ErrSetupRunning = errors.New("another connect setup is running for this profile")
+
 // Lock takes the per-profile setup lock beside connect.json, so two setups
 // cannot interleave a load, a change and a save. It refuses rather than
 // waits: a second setup on one profile is a mistake to report, not a queue.
@@ -63,7 +66,7 @@ func Lock(path string) (unlock func(), err error) {
 		return nil, fmt.Errorf("take the setup lock: %w", err)
 	}
 	if !held {
-		return nil, errors.New("another connect setup is running for this profile")
+		return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
 	}
 	return func() { _ = lock.Unlock() }, nil
 }

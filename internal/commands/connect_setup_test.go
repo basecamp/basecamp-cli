@@ -682,16 +682,151 @@ func TestConnectSetupReadOnlyCredentialIsNotReady(t *testing.T) {
 
 func TestConnectSetupRefusesExpectIdentityForAnAgent(t *testing.T) {
 	s := startConnectSetupServer(t)
-	firstSetup(t, s)
+	app := connectSetupApp(t, s, "agent")
+
+	// The credential alone says it: an Agent has no identity to pin.
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", routeArg(t))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "holds an Agent's credential")
+	assert.Contains(t, err.Error(), "Drop --expect-identity")
+	assertNotWritten(t, "agent")
+
+	// And once connect.json says it, the file is what the remediation
+	// talks about, since a bot login would not satisfy it either.
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.NoError(t, err, out)
 	before, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--expect-identity", "4242")
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--expect-identity", "4242")
 	require.Error(t, err, out)
-	assert.Contains(t, err.Error(), "holds an Agent's credential")
+	assert.Contains(t, err.Error(), "connect.json was set up for an Agent")
+	assert.Contains(t, err.Error(), "basecamp auth agent connect -P agent")
 	after, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
+}
+
+// Every credential conflict names a command that fixes it.
+func TestConnectSetupConflictsNameACommandToRun(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prepare func(t *testing.T, s *connectSetupServer)
+		args    []string
+		want    string
+	}{
+		"no credential": {
+			prepare: func(t *testing.T, s *connectSetupServer) {
+				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+				require.NoError(t, err)
+			},
+			want: "basecamp auth agent connect -P agent",
+		},
+		"no credential, bot path": {
+			prepare: func(t *testing.T, s *connectSetupServer) {
+				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+				require.NoError(t, err)
+			},
+			args: []string{"--expect-identity", "4242"},
+			want: "basecamp auth login -P agent --expect-identity 4242",
+		},
+		"a person's login with nothing pinning it": {
+			prepare: func(t *testing.T, s *connectSetupServer) { storeConnectProfile(t, s, "agent", setupBotToken) },
+			want:    "--expect-identity",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			bareSetupApp(t, s, "agent")
+			tc.prepare(t, s)
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))...)
+			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), tc.want)
+			assertNotWritten(t, "agent")
+		})
+	}
+}
+
+// The operator profile is read under the CLI's own precedence: the
+// environment wins over what the profile's entry stores, as it does for the
+// agent's own profile.
+func TestConnectSetupOperatorProfileFollowsEnvironmentPrecedence(t *testing.T) {
+	for name, tc := range map[string]struct {
+		stored  string // the operator profile entry's base_url
+		env     string // BASECAMP_BASE_URL
+		refused bool
+	}{
+		"stored matches, no environment":     {stored: "server"},
+		"environment supplies the match":     {stored: "https://elsewhere.example", env: "server"},
+		"environment moves both to the same": {stored: "server", env: "server"},
+		"stored differs, no environment":     {stored: "https://elsewhere.example", refused: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			connectSetupApp(t, s, "agent")
+			stored := tc.stored
+			if stored == "server" {
+				stored = s.srv.URL
+			}
+			_, err := registerProfile("me", &config.ProfileConfig{BaseURL: stored, AccountID: "999", Scope: "full"})
+			require.NoError(t, err)
+			cfg := config.Default()
+			cfg.BaseURL = s.srv.URL
+			cfg.ActiveProfile = "me"
+			mgr := auth.NewManager(cfg, s.srv.Client())
+			mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
+			require.NoError(t, mgr.ImportToken(context.Background(), setupOperatorToken, "full", "", "", time.Now().Add(24*time.Hour)))
+			if tc.env != "" {
+				t.Setenv("BASECAMP_BASE_URL", s.srv.URL)
+			}
+
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+			if tc.refused {
+				require.Error(t, err, out)
+				assert.Contains(t, err.Error(), "is on")
+				return
+			}
+			require.NoError(t, err, out)
+			f, err := setup.Load(connectSetupPath(t, "agent"))
+			require.NoError(t, err)
+			assert.Equal(t, setupOperatorPerson, f.Trust.OperatorID)
+		})
+	}
+}
+
+// A profile another setup is working on is busy, not broken.
+func TestConnectSetupReportsAnotherSetupAsBusy(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	unlock, err := setup.Lock(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, "busy", apiErr.Code)
+	assert.Contains(t, apiErr.Hint, "Run setup again")
+}
+
+// A credential removed while the checks run is an auth failure, not a
+// usage error, and nothing is written.
+func TestConnectSetupReportsACredentialRemovedMidRunAsAuth(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	s.duringMint = func() {
+		cfg := config.Default()
+		cfg.ActiveProfile = "agent"
+		require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
+	}
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	assert.Contains(t, apiErr.Hint, "basecamp auth agent connect -P agent")
+	assertNotWritten(t, "agent")
 }
 
 // Machine output carries the result, and neither the client secret nor the
