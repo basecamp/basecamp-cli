@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -207,12 +208,12 @@ func TestReportIsReadyOnlyWhenEveryCheckPassed(t *testing.T) {
 
 // The ticket is a bearer credential. The mint check posts to the account
 // feed's ticket endpoint and keeps nothing: not in its result, not in an
-// error.
+// error. It accepts exactly the tickets the connector could dial.
 func TestSDKReaderMintsAndDiscardsTheTicket(t *testing.T) {
 	const ticket = "not-a-real-ticket"
 	var mu sync.Mutex
 	var seen []string
-	answer := fmt.Sprintf(`{"ticket":%q,"expires_in":120,"url":"wss://example.test/cable?ticket=%s"}`, ticket, ticket)
+	answer := ""
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -222,19 +223,35 @@ func TestSDKReaderMintsAndDiscardsTheTicket(t *testing.T) {
 		fmt.Fprint(w, answer)
 	}))
 	t.Cleanup(srv.Close)
-
 	client := basecamp.NewClient(&basecamp.Config{BaseURL: srv.URL}, &basecamp.StaticTokenProvider{Token: "t"}).ForAccount("999")
-	require.NoError(t, SDKReader{Client: client}.MintStreamTicket(context.Background()))
-	assert.Equal(t, []string{"POST /999/events/stream_ticket.json"}, seen)
+	mint := func(body string) error {
+		answer = body
+		return SDKReader{Client: client}.MintStreamTicket(context.Background())
+	}
+	url := "wss://example.test/cable?ticket=" + ticket
 
-	answer = `{"expires_in":120}`
-	err := SDKReader{Client: client}.MintStreamTicket(context.Background())
-	assert.ErrorIs(t, err, ErrMalformedTicket)
+	require.NoError(t, mint(fmt.Sprintf(`{"ticket":%q,"expires_in":120,"url":%q}`, ticket, url)))
+	assert.Equal(t, "POST /999/events/stream_ticket.json", seen[0])
 
-	answer = fmt.Sprintf(`{"ticket":%q}`, ticket)
-	err = SDKReader{Client: client}.MintStreamTicket(context.Background())
-	require.ErrorIs(t, err, ErrMalformedTicket)
-	assert.False(t, strings.Contains(err.Error(), ticket))
+	for name, body := range map[string]string{
+		"no ticket":               fmt.Sprintf(`{"expires_in":120,"url":%q}`, url),
+		"no url":                  fmt.Sprintf(`{"ticket":%q,"expires_in":120}`, ticket),
+		"no lifetime":             fmt.Sprintf(`{"ticket":%q,"url":%q}`, ticket, url),
+		"zero lifetime":           fmt.Sprintf(`{"ticket":%q,"expires_in":0,"url":%q}`, ticket, url),
+		"negative lifetime":       fmt.Sprintf(`{"ticket":%q,"expires_in":-5,"url":%q}`, ticket, url),
+		"absurd lifetime":         fmt.Sprintf(`{"ticket":%q,"expires_in":86400,"url":%q}`, ticket, url),
+		"unparseable lifetime":    fmt.Sprintf(`{"ticket":%q,"expires_in":"soon","url":%q}`, ticket, url),
+		"fractional lifetime":     fmt.Sprintf(`{"ticket":%q,"expires_in":1.5,"url":%q}`, ticket, url),
+		"lifetime past int range": fmt.Sprintf(`{"ticket":%q,"expires_in":99999999999999999999,"url":%q}`, ticket, url),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := mint(body)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), ticket)
+			assert.NotContains(t, ErrorText(err), ticket)
+			assert.Equal(t, StatusFail, TicketCheck(context.Background(), SDKReader{Client: client}, KindAgent).Status)
+		})
+	}
 }
 
 // A route directory's name reaches a one-line terminal sink; control
@@ -256,7 +273,7 @@ func TestErrorTextKeepsNothingTheServerWrote(t *testing.T) {
 	assert.Equal(t, "HTTP 422", ErrorText(httpErr))
 	assert.Equal(t, "HTTP 422", ErrorText(fmt.Errorf("wrapped: %w", httpErr)))
 	assert.NotContains(t, ErrorText(&basecamp.Error{Code: "network", Message: canary}), canary)
-	assert.Equal(t, "the stream ticket response carries no ticket or no URL", ErrorText(ErrMalformedTicket))
+	assert.Equal(t, ErrMalformedTicket.Error(), ErrorText(ErrMalformedTicket))
 }
 
 func TestScopeCheck(t *testing.T) {
@@ -283,4 +300,23 @@ func TestScopeCheck(t *testing.T) {
 			assert.Equal(t, tc.want, ScopeCheck(tc.oauthType, tc.granted).Status, "unknown scopes are never full")
 		})
 	}
+}
+
+// A route kept from connect.json is checked as a new one is: a directory
+// that has since gone is not ready.
+func TestRouteChecksCheckEveryRoutesDirectory(t *testing.T) {
+	f := validFile(t)
+	gone := f.Projects[otherProj].Path
+	require.NoError(t, os.Remove(gone))
+	file := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	f.Projects[777] = admission.Route{Path: file}
+
+	byName := map[string]Check{}
+	for _, c := range RouteChecks(context.Background(), &fakeReader{}, f) {
+		byName[c.Name] = c
+	}
+	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", projectID)].Status)
+	assert.Equal(t, StatusFail, byName[fmt.Sprintf("Project %d", otherProj)].Status, "a directory that is gone")
+	assert.Equal(t, StatusFail, byName["Project 777"].Status, "a file where the directory was")
 }

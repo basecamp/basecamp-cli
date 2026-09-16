@@ -19,11 +19,12 @@
 //
 // # What is not here
 //
-// The agent's credential. Setup runs `basecamp auth agent connect` (or, on
-// the bot-user path, `basecamp auth login --expect-identity`) and the CLI's
-// credential store keeps what they are handed; connect.json records only
-// the identity that credential proved, so a later run can refuse a profile
-// that has since been pointed at someone else.
+// The agent's credential. Setup runs on a profile that already holds it
+// (connected with `basecamp auth agent connect`, or a bot user logged in
+// with `basecamp auth login --expect-identity`), and never stores, replaces
+// or removes one. connect.json records only the identity that credential
+// proved, so a later run can refuse a profile that has since been pointed at
+// someone else.
 package setup
 
 import (

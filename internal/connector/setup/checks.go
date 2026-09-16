@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -57,7 +58,7 @@ type Reader interface {
 }
 
 // ErrMalformedTicket reports a mint that answered without a ticket or URL.
-var ErrMalformedTicket = errors.New("the stream ticket response carries no ticket or no URL")
+var ErrMalformedTicket = errors.New("the stream ticket response carries no ticket, no URL, or no lifetime within bounds")
 
 // SDKReader is Reader over an SDK account client. Build the client without
 // request hooks or a debug logger: they log request URLs, and a feed URL can
@@ -65,6 +66,10 @@ var ErrMalformedTicket = errors.New("the stream ticket response carries no ticke
 type SDKReader struct {
 	Client *basecamp.AccountClient
 }
+
+// MaxTicketLifetime bounds a ticket's reported lifetime. The server issues
+// about two minutes; a lifetime past an hour is not one the contract allows.
+const MaxTicketLifetime = time.Hour
 
 // Me implements Reader.
 func (r SDKReader) Me(ctx context.Context) (Person, error) {
@@ -84,17 +89,28 @@ func (r SDKReader) Person(ctx context.Context, id int64) (Person, error) {
 	return fromSDK(p), nil
 }
 
-// MintStreamTicket implements Reader, through the SDK's own stream-ticket
-// operation. The ticket is checked for shape and dropped here.
+// MintStreamTicket implements Reader through the SDK's stream-ticket
+// operation, and accepts exactly what the connector runtime's minter
+// accepts (eventfeed's liveMinter refuses a ticket with no credential, no
+// URL or no positive lifetime), with the lifetime also bounded above. The
+// ticket is dropped on return.
 func (r SDKReader) MintStreamTicket(ctx context.Context) error {
 	ticket, err := r.Client.EventFeed().CreateStreamTicket(ctx)
 	if err != nil {
 		return err
 	}
-	if ticket == nil || ticket.Ticket == "" || ticket.URL == "" {
+	if !UsableTicket(ticket) {
 		return ErrMalformedTicket
 	}
 	return nil
+}
+
+// UsableTicket reports whether a minted ticket is one the connector could
+// dial: a credential, a URL, and a lifetime above zero and at most
+// MaxTicketLifetime.
+func UsableTicket(t *basecamp.StreamTicket) bool {
+	return t != nil && t.Ticket != "" && t.URL != "" &&
+		t.ExpiresIn > 0 && time.Duration(t.ExpiresIn)*time.Second <= MaxTicketLifetime
 }
 
 // Project implements Reader.
@@ -304,6 +320,15 @@ func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 
 func routeCheck(ctx context.Context, r Reader, kind string, id int64, path string) Check {
 	c := Check{Name: fmt.Sprintf("Project %d", id)}
+	// The directory is checked as a new route's is, whether the route was
+	// passed now or kept from connect.json: it must still resolve to itself,
+	// an existing directory.
+	if resolved, err := ResolveDir(path); err != nil || resolved != path {
+		c.Status = StatusFail
+		c.Message = "The route's directory is no longer usable: " + richtext.SanitizeSingleLine(path)
+		c.Hint = fmt.Sprintf("Route the project again: --route %d=<dir>, or remove it: --remove-route %d.", id, id)
+		return c
+	}
 	for _, read := range []struct {
 		what string
 		run  func(context.Context, int64) error
@@ -344,7 +369,8 @@ func ErrorText(err error) string {
 		return ""
 	}
 	var apiErr *basecamp.Error
-	if errors.As(err, &apiErr) {
+	errors.As(err, &apiErr)
+	if apiErr != nil {
 		if apiErr.HTTPStatus != 0 {
 			return fmt.Sprintf("HTTP %d", apiErr.HTTPStatus)
 		}

@@ -101,8 +101,10 @@ changed it or a directory above it. Where this CLI cannot verify that
 
 Every check runs before connect.json is written, and it is written only
 when all of them pass. Exit status: usage for refused input, auth when the
-profile's credential is missing, unreadable or not the agent it should be,
-not_ready when a readiness check failed. The credential is never changed.
+profile's credential is missing, unreadable, cannot be proven, or is not the
+agent it should be, not_ready when a readiness check failed. Setup never
+stores, replaces or removes a credential; a token due for renewal is renewed
+as by any command.
 
 Run setup again to change any of it; what you do not pass is kept.
 
@@ -710,8 +712,14 @@ func connectSDKClient(app *appctx.App, tokens basecamp.TokenProvider) *basecamp.
 }
 
 func connectSDKClientFor(baseURL string, tokens basecamp.TokenProvider) *basecamp.Client {
-	return basecamp.NewClient(&basecamp.Config{BaseURL: baseURL}, tokens,
+	return basecamp.NewClient(&basecamp.Config{BaseURL: baseURL}, tokens, connectSDKOptions()...)
+}
+
+// connectSDKOptions are the only options setup's clients get: a transport
+// and a user agent, never hooks or a logger.
+func connectSDKOptions() []basecamp.ClientOption {
+	return []basecamp.ClientOption{
 		basecamp.WithTransport(http.DefaultTransport),
-		basecamp.WithUserAgent(version.UserAgent()+" "+basecamp.DefaultUserAgent),
-	)
+		basecamp.WithUserAgent(version.UserAgent() + " " + basecamp.DefaultUserAgent),
+	}
 }

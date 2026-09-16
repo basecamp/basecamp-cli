@@ -62,9 +62,6 @@ type connectSetupServer struct {
 	agentAsUser bool
 	// grantScope is the scope the connection hands over; "" means full.
 	grantScope string
-	// duringApproval runs while the operator is approving, as another
-	// process's change would land.
-	duringApproval func()
 	// mintFailure, when set, answers the stream ticket mint.
 	mintFailure func(w http.ResponseWriter)
 }
@@ -91,9 +88,6 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		})
 	})
 	mux.HandleFunc("/oauth/agent_connection_tokens", func(w http.ResponseWriter, _ *http.Request) {
-		if s.duringApproval != nil {
-			s.duringApproval()
-		}
 		scope := s.grantScope
 		if scope == "" {
 			scope = "full"
@@ -564,6 +558,9 @@ func TestConnectSetupRefusesADifferentAgentUnderTheSameProfile(t *testing.T) {
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "person 777")
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code, "a different agent is a wrong credential")
 	after, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
@@ -870,4 +867,54 @@ func TestConnectSetupSanitizesThePathItPrints(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "connect.json written")
 	assert.NotContains(t, out, "evil\nFAKE")
+}
+
+// A profile whose credential changed kind since connect.json was written is
+// a wrong credential, refused as auth with connect.json untouched.
+func TestConnectSetupRefusesACredentialOfAnotherKind(t *testing.T) {
+	s := startConnectSetupServer(t)
+	bareSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "agent", setupBotToken)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"),
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+	require.NoError(t, err, out)
+	before, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+
+	// The profile is now connected to an Agent instead.
+	app := newConnectSetupApp(t, s, "agent")
+	out, err = runAgentConnect(t, app)
+	require.NoError(t, err, out)
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	after, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+// A route kept from connect.json whose directory has gone makes a rerun not
+// ready, and connect.json is left as it was.
+func TestConnectSetupRechecksRetainedRoutes(t *testing.T) {
+	s := startConnectSetupServer(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.Mkdir(repo, 0o700))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), fmt.Sprintf("--route=%d=%s", setupProject, repo))
+	require.NoError(t, err, out)
+	before, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(repo))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--concurrency", "3")
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, codeNotReady, apiErr.Code)
+	assert.Contains(t, apiErr.Message, "no longer usable")
+	after, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
 }
