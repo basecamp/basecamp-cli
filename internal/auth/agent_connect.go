@@ -277,11 +277,18 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 		ClientSecret: conn.ClientSecret,
 		Scope:        conn.Scope,
 		Logger:       opts.Logger,
-		BeforeStore: func(*LoginResult) error {
+		BeforeStore: func(result *LoginResult) error {
 			if opts.BeforeStore == nil {
 				return nil
 			}
-			return opts.BeforeStore(conn)
+			// The mint can narrow what the handover reported, and the
+			// caller writes this into a profile entry — so it is handed
+			// the effective scope, not the one the poll named, which
+			// would leave the entry claiming access the credential
+			// beside it does not have.
+			effective := *conn
+			effective.Scope = result.Scope
+			return opts.BeforeStore(&effective)
 		},
 	})
 	if err != nil {
@@ -453,7 +460,15 @@ func (m *Manager) awaitAgentConnection(ctx context.Context, opts *AgentConnectOp
 	deadline := opts.now().Add(intake.lifetime)
 	interval := intake.interval
 	for {
-		if err := opts.sleep(ctx, interval); err != nil {
+		// Never wait past the code's own life: an interval longer than
+		// what is left of it — the server's own choice, or one a
+		// Retry-After raised — would hold the terminal open on a code
+		// that is already dead and can only be refused.
+		remaining := deadline.Sub(opts.now())
+		if remaining <= 0 {
+			return nil, agentConnectExpired()
+		}
+		if err := opts.sleep(ctx, min(interval, remaining)); err != nil {
 			return nil, err
 		}
 		if !opts.now().Before(deadline) {

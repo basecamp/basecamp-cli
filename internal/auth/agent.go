@@ -167,14 +167,10 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	if token.Resource != "" {
 		creds.Resource = token.Resource
 	}
-	// A reported scope narrows the credential; it never widens it. The
-	// stored scope is what the grant was approved with — in a connection,
-	// the operator's own downgrade on the approval page — and it is what
-	// every later mint asks for. A response reporting more than that does
-	// not make it so: recording it would claim access the approval did not
-	// give, and would make the next mint ask for more than the client is
-	// allowed and be refused.
-	if token.Scope != "" && !widensScope(creds.Scope, token.Scope) {
+	// A reported scope narrows the credential. It cannot widen it: a token
+	// wider than the credential asked for never reaches here, because the
+	// mint refuses it.
+	if token.Scope != "" {
 		creds.Scope = token.Scope
 	}
 	expiry := agentTokenExpiry(token)
@@ -183,10 +179,10 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 }
 
 // widensScope reports whether a reported scope is more permissive than the
-// approved one. The CLI represents two scopes, so there is one pair that
-// widens.
-func widensScope(approved, reported string) bool {
-	return approved == scopeRead && reported == scopeFull
+// one that was asked for. The CLI represents two scopes, so there is one
+// pair that widens.
+func widensScope(requested, reported string) bool {
+	return requested == scopeRead && reported == scopeFull
 }
 
 // agentRenewAfter is when a self-token minted now and expiring at expiry
@@ -341,6 +337,17 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	// that would be stored and then fail every command. An omitted type is
 	// Bearer by RFC 6750 convention; the value itself is not repeated,
 	// for the reason oauthErrorCodes gives.
+	// A token wider than what was asked for is refused rather than kept.
+	// Relabelling it would not help: the access token itself is what
+	// requests carry, so a full-scope bearer stored under a read-only
+	// agent would let this CLI write wherever the operator approved
+	// reading — with `auth status` reporting read the whole time. The
+	// approved scope is the operator's decision on a connection, and a
+	// server contradicting it is not a token to spend.
+	if widensScope(mint.scope, token.Scope) {
+		return nil, output.ErrAPI(resp.StatusCode,
+			"minting an agent token: the server issued a token wider than the scope the credential was approved for, and a credential is not widened past what was approved")
+	}
 	if token.TokenType != "" && !strings.EqualFold(token.TokenType, "bearer") {
 		return nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server issued a token of a type this CLI cannot send; it only sends Bearer credentials")

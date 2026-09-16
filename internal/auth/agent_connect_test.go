@@ -350,12 +350,13 @@ func TestConnectAgentKeepsTheApprovedScope(t *testing.T) {
 	assert.Equal(t, scopeRead, stored.Scope)
 }
 
-// TestConnectAgentNeverStoresMoreThanWasApproved: the mint reports the
-// scope of the token it issued, and the credential takes it — but never
-// upward. A server answering full for a grant the operator approved as
-// read would otherwise leave this profile claiming access the approval did
-// not give, and asking for it on every later mint.
-func TestConnectAgentNeverStoresMoreThanWasApproved(t *testing.T) {
+// TestConnectAgentRefusesATokenWiderThanTheApproval: the operator's
+// downgrade on the approval page is a decision about what this computer
+// may do. A token reported as full for a connection approved as read is
+// refused outright — relabelling it read would not help, since the access
+// token is what requests actually carry, and this CLI would then write
+// wherever the operator approved reading.
+func TestConnectAgentRefusesATokenWiderThanTheApproval(t *testing.T) {
 	as := startConnectAS(t)
 	as.poll = func(int) (int, string) { return http.StatusOK, connectionJSON(scopeRead) }
 	as.token = func() (int, string) {
@@ -363,13 +364,60 @@ func TestConnectAgentNeverStoresMoreThanWasApproved(t *testing.T) {
 	}
 	m := connectManager(t, as)
 
-	result, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	cl := &collectLogger{}
+	_, err := m.ConnectAgent(context.Background(), connectOptions(cl, newTestClock()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "wider than the scope")
+	assertNoAgentCredential(t, m)
+	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.NotContains(t, cl.joined(), "minted", "no token from a refused mint is kept")
+}
+
+// TestConnectAgentCommitsTheEffectiveScope: the mint may narrow what the
+// handover reported, and the profile entry the caller writes has to carry
+// what the credential beside it actually has.
+func TestConnectAgentCommitsTheEffectiveScope(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) { return http.StatusOK, connectionJSON(scopeFull) }
+	as.token = func() (int, string) {
+		return http.StatusOK, `{"access_token":"minted","token_type":"bearer","expires_in":3600,"scope":"read"}`
+	}
+	m := connectManager(t, as)
+
+	var committed string
+	opts := connectOptions(&collectLogger{}, newTestClock())
+	opts.BeforeStore = func(conn *AgentConnection) error {
+		committed = conn.Scope
+		return nil
+	}
+	result, err := m.ConnectAgent(context.Background(), opts)
 	require.NoError(t, err)
 	assert.Equal(t, scopeRead, result.Scope)
+	assert.Equal(t, scopeRead, committed, "the entry records what the credential has, not what the poll named")
 
 	stored, err := m.store.Load("profile:agent")
 	require.NoError(t, err)
 	assert.Equal(t, scopeRead, stored.Scope)
+}
+
+// TestConnectAgentWaitsNoLongerThanTheCodeLives: an interval longer than
+// what is left of the code — the server's own choice, or one a Retry-After
+// raised — must not hold the terminal open on a code that can only be
+// refused from here on.
+func TestConnectAgentWaitsNoLongerThanTheCodeLives(t *testing.T) {
+	as := startConnectAS(t)
+	as.intake = func() (int, string) {
+		return http.StatusOK, fmt.Sprintf(
+			`{"device_code":"dev-code-1","user_code":"WDJB-MJHT","verification_uri_complete":%q,"token_uri":%q,"expires_in":10,"interval":60}`,
+			as.srv.URL+"/connect?user_code=WDJB-MJHT", as.tokenURI())
+	}
+	m := connectManager(t, as)
+	clock := newTestClock()
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, clock))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expired")
+	assert.Equal(t, []time.Duration{10 * time.Second}, clock.waits(), "waited out the code, not the interval")
 }
 
 // TestConnectAgentSanitizesTheLinkItPrints: the link is server-controlled
