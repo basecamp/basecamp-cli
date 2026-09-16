@@ -1396,6 +1396,7 @@ basecamp auth login --device-code                 # Print a link and one-time co
 BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth login that runs under BASECAMP_NONINTERACTIVE, and only where the server offers the device flow (Launchpad does not); browser and pasted-callback flows refuse — prefer --with-token
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
+basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
 ```
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
@@ -1407,6 +1408,14 @@ recovery is `--with-client-credentials` with the client secret piped in. The
 CLI's own `hint` on a failing agent credential already names that command with
 the client id filled in — prefer it verbatim, and follow it rather than
 choosing for yourself whenever `oauth_type` is absent.
+
+A profile with no agent credential yet gets one from `basecamp auth agent
+connect -P <profile>`: it prints a link and a one-time code, and the person
+who opens it picks which Basecamp agent this computer acts as. The account
+comes from the agent they approve, so `--account` is only an assertion — a
+connection to an agent in another account is refused. It waits on a person
+at a browser, so it is not the headless path; `--with-client-credentials`
+still is.
 
 ```bash
 basecamp auth login --expect-identity <id>        # Discard the login unless it authenticated as this identity

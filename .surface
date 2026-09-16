@@ -520,6 +520,8 @@ CMD basecamp attachments
 CMD basecamp attachments download
 CMD basecamp attachments list
 CMD basecamp auth
+CMD basecamp auth agent
+CMD basecamp auth agent connect
 CMD basecamp auth login
 CMD basecamp auth logout
 CMD basecamp auth refresh
@@ -1952,6 +1954,53 @@ FLAG basecamp auth --stats type=bool
 FLAG basecamp auth --styled type=bool
 FLAG basecamp auth --todolist type=string
 FLAG basecamp auth --verbose type=count
+FLAG basecamp auth agent --account type=string
+FLAG basecamp auth agent --agent type=bool
+FLAG basecamp auth agent --cache-dir type=string
+FLAG basecamp auth agent --count type=bool
+FLAG basecamp auth agent --help type=bool
+FLAG basecamp auth agent --hints type=bool
+FLAG basecamp auth agent --ids-only type=bool
+FLAG basecamp auth agent --in type=string
+FLAG basecamp auth agent --jq type=string
+FLAG basecamp auth agent --json type=bool
+FLAG basecamp auth agent --markdown type=bool
+FLAG basecamp auth agent --md type=bool
+FLAG basecamp auth agent --no-hints type=bool
+FLAG basecamp auth agent --no-stats type=bool
+FLAG basecamp auth agent --profile type=string
+FLAG basecamp auth agent --project type=string
+FLAG basecamp auth agent --quiet type=bool
+FLAG basecamp auth agent --stats type=bool
+FLAG basecamp auth agent --styled type=bool
+FLAG basecamp auth agent --todolist type=string
+FLAG basecamp auth agent --verbose type=count
+FLAG basecamp auth agent connect --account type=string
+FLAG basecamp auth agent connect --agent type=bool
+FLAG basecamp auth agent connect --cache-dir type=string
+FLAG basecamp auth agent connect --count type=bool
+FLAG basecamp auth agent connect --device-name type=string
+FLAG basecamp auth agent connect --help type=bool
+FLAG basecamp auth agent connect --hints type=bool
+FLAG basecamp auth agent connect --ids-only type=bool
+FLAG basecamp auth agent connect --in type=string
+FLAG basecamp auth agent connect --jq type=string
+FLAG basecamp auth agent connect --json type=bool
+FLAG basecamp auth agent connect --local type=bool
+FLAG basecamp auth agent connect --markdown type=bool
+FLAG basecamp auth agent connect --md type=bool
+FLAG basecamp auth agent connect --no-browser type=bool
+FLAG basecamp auth agent connect --no-hints type=bool
+FLAG basecamp auth agent connect --no-stats type=bool
+FLAG basecamp auth agent connect --profile type=string
+FLAG basecamp auth agent connect --project type=string
+FLAG basecamp auth agent connect --quiet type=bool
+FLAG basecamp auth agent connect --scope type=string
+FLAG basecamp auth agent connect --software-name type=string
+FLAG basecamp auth agent connect --stats type=bool
+FLAG basecamp auth agent connect --styled type=bool
+FLAG basecamp auth agent connect --todolist type=string
+FLAG basecamp auth agent connect --verbose type=count
 FLAG basecamp auth login --account type=string
 FLAG basecamp auth login --agent type=bool
 FLAG basecamp auth login --cache-dir type=string
@@ -18236,6 +18285,8 @@ SUB basecamp attachments
 SUB basecamp attachments download
 SUB basecamp attachments list
 SUB basecamp auth
+SUB basecamp auth agent
+SUB basecamp auth agent connect
 SUB basecamp auth login
 SUB basecamp auth logout
 SUB basecamp auth refresh

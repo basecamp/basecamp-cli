@@ -167,12 +167,22 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	if token.Resource != "" {
 		creds.Resource = token.Resource
 	}
+	// A reported scope narrows the credential. It cannot widen it: a token
+	// wider than the credential asked for never reaches here, because the
+	// mint refuses it.
 	if token.Scope != "" {
 		creds.Scope = token.Scope
 	}
 	expiry := agentTokenExpiry(token)
 	creds.ExpiresAt = expiry.Unix()
 	creds.RenewAfter = agentRenewAfter(time.Now(), expiry).Unix()
+}
+
+// widensScope reports whether a reported scope is more permissive than the
+// one that was asked for. The CLI represents two scopes, so there is one
+// pair that widens.
+func widensScope(requested, reported string) bool {
+	return requested == scopeRead && reported == scopeFull
 }
 
 // agentRenewAfter is when a self-token minted now and expiring at expiry
@@ -327,6 +337,17 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	// that would be stored and then fail every command. An omitted type is
 	// Bearer by RFC 6750 convention; the value itself is not repeated,
 	// for the reason oauthErrorCodes gives.
+	// A token wider than what was asked for is refused rather than kept.
+	// Relabelling it would not help: the access token itself is what
+	// requests carry, so a full-scope bearer stored under a read-only
+	// agent would let this CLI write wherever the operator approved
+	// reading — with `auth status` reporting read the whole time. The
+	// approved scope is the operator's decision on a connection, and a
+	// server contradicting it is not a token to spend.
+	if widensScope(mint.scope, token.Scope) {
+		return nil, output.ErrAPI(resp.StatusCode,
+			"minting an agent token: the server issued a token wider than the scope the credential was approved for, and a credential is not widened past what was approved")
+	}
 	if token.TokenType != "" && !strings.EqualFold(token.TokenType, "bearer") {
 		return nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server issued a token of a type this CLI cannot send; it only sends Bearer credentials")
@@ -579,16 +600,26 @@ func (m *Manager) LoginClientCredentials(ctx context.Context, opts ClientCredent
 		log = func(string) {}
 	}
 
-	credKey := m.credentialKey()
-
 	disc, err := m.discoverOAuth(ctx, log)
 	if err != nil {
 		return nil, err
 	}
-	if disc.oauthType != oauthTypeBC5 {
-		return nil, output.ErrUsageHint(
-			"This server has no agent grant: OAuth discovery selected the Launchpad fallback",
-			"Agent logins need Basecamp's own authorization server. Check BASECAMP_BASE_URL, or sign in as a bot user instead: basecamp auth login --device-code.")
+	return m.adoptAgentGrant(ctx, disc, opts, scope)
+}
+
+// adoptAgentGrant proves a client id and secret by minting one self-token
+// with them, and stores both under the active credential key.
+//
+// It is the half of an agent login that is the same however the credential
+// was obtained — piped in by an operator, or handed over by the connection
+// ceremony — so the scope is passed in already resolved and the discovery
+// already made. Nothing is written unless the mint succeeded: the mint is
+// the only proof there is that the client is good.
+func (m *Manager) adoptAgentGrant(ctx context.Context, disc *discovery, opts ClientCredentialsOptions, scope string) (*LoginResult, error) {
+	credKey := m.credentialKey()
+
+	if err := requireAgentAuthorizationServer(disc); err != nil {
+		return nil, err
 	}
 	if err := requireSecureOAuthEndpoint("token endpoint", disc.config.TokenEndpoint); err != nil {
 		return nil, err

@@ -12,6 +12,10 @@ load smoke_helper
   mark_out_of_scope "Interactive OAuth flow"
 }
 
+@test "auth agent connect is out of scope" {
+  mark_out_of_scope "Waits on a person approving the connection in a browser"
+}
+
 @test "auth refresh is out of scope" {
   mark_out_of_scope "Requires OAuth credentials"
 }
