@@ -43,8 +43,6 @@ maps projects to the directories their work runs in.`,
 // connectSetupFlags are setup's flags, as typed.
 type connectSetupFlags struct {
 	expectIdentity string
-	noBrowser      bool
-	deviceName     string
 
 	operator        string
 	operatorProfile string
@@ -68,17 +66,17 @@ func newConnectSetupCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Connect an agent, choose who may drive it, and route projects",
-		Long: `Set up the connector for the agent held by a profile: connect the agent,
-record the trusted operator, write connect.json, and check what can be
-checked before the connector runs.
+		Short: "Choose who may drive a connected agent, route projects, and check readiness",
+		Long: `Set up the connector for the agent a profile holds: record the trusted
+operator, write connect.json, and check what can be checked before the
+connector runs.
 
-Credential. With no credential under the profile, setup runs the agent
-connection (` + "`basecamp auth agent connect`" + `): approve it in your browser and
-the agent's own OAuth client is stored under the profile. On the bot-user
-path, pass --expect-identity with the bot's identity id instead, and setup
-runs the device login and refuses any other identity. A profile that is
-already connected is used as it is.
+Credential. Setup does not obtain one; connect the profile first, then run
+setup against it:
+  basecamp auth agent connect -P agent                  # an Agent person
+  basecamp auth login -P bot --expect-identity <id>     # a bot user (v1)
+On the bot-user path pass --expect-identity to setup as well, so it can prove
+the login is the bot and not you; later runs remember it.
 
 Operator. The person whose instructions the agent follows, keyed on Person
 id. Name them by their own profile (--operator-profile, which proves who
@@ -102,21 +100,19 @@ changed it or a directory above it. Where this CLI cannot verify that
 (Windows), setup refuses rather than write a trust file it cannot vouch for.
 
 Every check runs before connect.json is written, and it is written only
-when all of them pass; otherwise setup exits non-zero. When setup returns an
-error before the credential its own connection stored has proved to be the
-right one (token, identity, account, scope), it removes that credential and
-the profile entry it added. A proven credential is kept, so a rerun needs no
-new approval.
+when all of them pass. Exit status: usage for refused input, auth when the
+profile's credential is missing, unreadable or not the agent it should be,
+not_ready when a readiness check failed. The credential is never changed.
 
 Run setup again to change any of it; what you do not pass is kept.
 
 Examples:
+  basecamp auth agent connect -P agent
   basecamp connect setup -P agent --operator-profile me --route 12345=~/Work/app
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P bot --expect-identity 4242 --route 12345=~/Work/app --watch-completions 12345
   basecamp connect setup -P agent --class 12345=internal --deadline 90m --worktrees`,
-		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
-		Args:        cobra.NoArgs,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if app == nil {
@@ -128,15 +124,13 @@ Examples:
 
 	fl := cmd.Flags()
 	fl.StringVar(&f.expectIdentity, "expect-identity", "", "Bot-user path: the identity id the profile's login must authenticate as")
-	fl.BoolVar(&f.noBrowser, "no-browser", false, "Print the approval link instead of opening a browser")
-	fl.StringVar(&f.deviceName, "device-name", "", "Name this computer on the agent approval page (default: this host's name)")
 	fl.StringVar(&f.operator, "operator", "", "Person id of the operator the agent follows")
 	fl.StringVar(&f.operatorProfile, "operator-profile", "", "Profile whose identity is the operator")
 	fl.StringVar(&f.trust, "trust", "", "Who may drive the agent: operator, allowlist or project")
 	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust besides the operator (repeatable; implies --trust allowlist)")
 	fl.StringArrayVar(&f.routes, "route", nil, "Route a project to a directory: <project-id>=<dir> (repeatable)")
 	fl.StringArrayVar(&f.unroute, "remove-route", nil, "Remove a project's route (repeatable)")
-	fl.StringArrayVar(&f.classes, "class", nil, "Classify a routed project: <project-id>=<class> (repeatable)")
+	fl.StringArrayVar(&f.classes, "class", nil, "Classify a routed project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a routed project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
 	fl.StringVar(&f.driver, "driver", "", "How workers are run: spawn or acp (default spawn)")
@@ -148,161 +142,12 @@ Examples:
 	return cmd
 }
 
-// setupTransaction is what a setup run changed outside connect.json while
-// it was obtaining a credential. Its invariants:
-//
-//  1. It undoes only what this run did: the credential its own connection or
-//     login stored, the profile entry that step registered, and the account
-//     that step bound to an entry that had none. Nothing else in the global
-//     config is rewritten, so a concurrent change to another profile or
-//     setting survives a rollback.
-//  2. It undoes them only while the credential is unproven: until the token,
-//     identity, kind, person, account and scope checks have passed. After
-//     that the credential is the right one, and a later failure (trust, the
-//     ticket, a route, the write) keeps it, so setup can be run again
-//     without another approval. A correct credential with no connect.json
-//     runs nothing.
-//  3. A config change is undone even when no credential was stored (the
-//     connection commits the profile entry before it writes the credential,
-//     and that write can fail).
-//  4. connect.json is never part of it: Save is one atomic rename after
-//     every check has passed, and its temporary file is removed on every
-//     path.
-type setupTransaction struct {
-	profile string
-	flow    string // "agent" or "login": which credential step ran
-
-	// stored is set when the run's own credential step stored a credential.
-	stored bool
-	// verified is set once the credential has passed every check that says
-	// it is the right one; from then on nothing is undone.
-	verified bool
-
-	credentialKey string
-	entryExisted  bool
-	accountBefore string
-}
-
-// snapshot records the profile's global config entry before a credential
-// step can register or bind it.
-func (tx *setupTransaction) snapshot(app *appctx.App, profile, flow string) error {
-	tx.profile, tx.flow = profile, flow
-	tx.credentialKey = app.Auth.CredentialKey()
-	configData, _, err := loadGlobalConfigFile()
-	if err != nil {
-		return err
-	}
-	if entry := globalProfileEntry(configData, profile); entry != nil {
-		tx.entryExisted = true
-		tx.accountBefore = entryAccount(entry)
-	}
-	return nil
-}
-
-// configChanged reports whether the credential step changed the profile's
-// entry: registered it, or bound an account to it.
-func (tx *setupTransaction) configChanged() bool {
-	configData, _, err := loadGlobalConfigFile()
-	if err != nil {
-		return true // cannot tell; rollback checks again
-	}
-	entry := globalProfileEntry(configData, tx.profile)
-	switch {
-	case !tx.entryExisted:
-		return entry != nil
-	case entry == nil:
-		return false
-	default:
-		return entryAccount(entry) != tx.accountBefore
-	}
-}
-
-// entryAccount is a profile entry's account_id, as a string or a number.
-func entryAccount(entry map[string]any) string {
-	switch v := entry["account_id"].(type) {
-	case string:
-		return v
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	}
-	return ""
-}
-
-// needsRollback reports whether a failed run must undo its credential step.
-func (tx *setupTransaction) needsRollback() bool {
-	return tx.credentialKey != "" && !tx.verified && (tx.stored || tx.configChanged())
-}
-
-// rollback undoes the credential step, per the invariants above, and reports
-// what it could not undo.
-func (tx *setupTransaction) rollback(app *appctx.App) error {
-	var errs []error
-	if tx.stored {
-		if err := app.Auth.GetStore().Delete(tx.credentialKey); err != nil && !errors.Is(err, auth.ErrNoCredential) {
-			errs = append(errs, fmt.Errorf("remove the stored credential: %w", err))
-		}
-	}
-	configData, configPath, err := loadGlobalConfigFile()
-	if err != nil {
-		return errors.Join(append(errs, err)...)
-	}
-	entry := globalProfileEntry(configData, tx.profile)
-	switch {
-	case entry == nil:
-	case !tx.entryExisted:
-		if err := unregisterProfile(tx.profile); err != nil {
-			errs = append(errs, fmt.Errorf("remove the profile entry: %w", err))
-		}
-	case entryAccount(entry) != tx.accountBefore && tx.accountBefore == "":
-		delete(entry, "account_id")
-		if err := atomicWriteJSON(configPath, configData); err != nil {
-			errs = append(errs, fmt.Errorf("unbind the profile's account: %w", err))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// note is what the operator is told about the undone credential step.
-func (tx *setupTransaction) note(rbErr error) string {
-	profile := shellQuote(tx.profile)
-	if rbErr != nil {
-		return "Undoing this run's credential step failed (" + rbErr.Error() + "): run `basecamp auth logout -P " + profile + "` and check the profile in `basecamp profile show " + profile + "`."
-	}
-	if tx.flow == "agent" && tx.stored {
-		return "The agent connection this run made was removed from this computer; disconnect it in Basecamp too, since its secret was issued."
-	}
-	if tx.stored {
-		return "The login this run stored was removed from this computer."
-	}
-	return "The profile entry this run added was removed."
-}
-
 func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) error {
-	tx := &setupTransaction{}
-	err := runConnectSetupTx(cmd, app, f, tx)
-	if err == nil || !tx.needsRollback() {
-		return err
-	}
-	return withHint(err, tx.note(tx.rollback(app)))
-}
-
-// withHint appends a sentence to an error's hint.
-func withHint(err error, note string) error {
-	var apiErr *output.Error
-	if errors.As(err, &apiErr) {
-		amended := *apiErr
-		amended.Hint = strings.TrimSpace(apiErr.Hint + " " + note)
-		return &amended
-	}
-	return fmt.Errorf("%w (%s)", err, note)
-}
-
-func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags, tx *setupTransaction) error {
 	ctx := cmd.Context()
 
 	name := app.Config.ActiveProfile
 	if name == "" {
-		return output.ErrUsageHint("Setup needs the agent's profile", "Pass -P/--profile <name>; setup connects the agent under it if it holds no credential yet.")
+		return output.ErrUsageHint("Setup needs the agent's profile", "Pass -P/--profile <name>, a profile connected with `basecamp auth agent connect`.")
 	}
 	if !isValidProfileName(name) {
 		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
@@ -352,8 +197,7 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
 	}
 
-	// Everything refusable without the network is refused before anyone is
-	// sent to a browser.
+	// Everything refusable without the network is refused first.
 	next, err := setup.Apply(existing, changes)
 	if err != nil {
 		return output.ErrUsage(err.Error())
@@ -368,55 +212,28 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 			return err
 		}
 	}
-	held, err := connectCredentialKind(ctx, app)
+	accountID, err := connectAccount(app, name)
 	if err != nil {
 		return err
-	}
-	if err := refuseCredentialConflicts(app, name, path, held, expect, exists, existing); err != nil {
-		return err
-	}
-
-	if held == "" {
-		flow := "agent"
-		if expect != 0 {
-			flow = "login"
-		}
-		if err := tx.snapshot(app, name, flow); err != nil {
-			return output.ErrUsage(err.Error())
-		}
-	} else {
-		tx.verified = true // a credential this run did not store is never undone
-	}
-	kind, err := ensureConnectCredential(cmd, app, name, held, expect)
-	if held == "" && connectCredentialStored(cmd.Context(), app) {
-		tx.stored = true
-	}
-	if err != nil {
-		return err
-	}
-	if exists && existing.Agent.Kind != kind {
-		return output.ErrUsageHint(
-			fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one", existing.Agent.Kind, name, kind),
-			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
-	}
-	if kind == setup.KindBotUser && expect == 0 {
-		expect = existing.Agent.IdentityID
-	}
-
-	accountID := app.Config.AccountID
-	if accountID == "" {
-		if p := app.Config.Profiles[name]; p != nil {
-			accountID = p.AccountID
-		}
-	}
-	accountID, err = canonicalAccount(accountID)
-	if err != nil {
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no usable account", name), "Bind it: basecamp profile set "+shellQuote(name)+" account_id <id>, or pass --account.")
 	}
 	if exists && !accountIDsEqual(existing.AccountID, accountID) {
 		return output.ErrUsageHint(
-			fmt.Sprintf("connect.json was set up in account %s, and profile %q now addresses account %s", existing.AccountID, name, accountID),
+			fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", existing.AccountID, name, accountID),
 			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
+	}
+	kind, err := connectCredentialKind(ctx, app)
+	if err != nil {
+		return err
+	}
+	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
+		return err
+	}
+	if exists && existing.Agent.Kind != kind {
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; remove %s to set this profile up afresh",
+			existing.Agent.Kind, name, kind, richtext.SanitizeSingleLine(path)))
+	}
+	if kind == setup.KindBotUser && expect == 0 {
+		expect = existing.Agent.IdentityID
 	}
 
 	var checks []setup.Check
@@ -441,23 +258,14 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 	}
 	checks = append(checks, identityCheck)
 	if exists && existing.Agent.PersonID != me.ID {
-		return output.ErrUsageHint(
-			fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d", existing.Agent.PersonID, name, me.ID),
-			"Nothing was changed. If this is a different agent on purpose, remove "+richtext.SanitizeSingleLine(path)+" and run setup again.")
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, remove %s and run setup again",
+			existing.Agent.PersonID, name, me.ID, richtext.SanitizeSingleLine(path)))
 	}
 	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
 	if err != nil {
 		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
-	scopeCheck := setup.ScopeCheck(creds.OAuthType, creds.Scope)
-	if scopeCheck.Status == setup.StatusFail && !tx.verified {
-		// A credential this run just stored with too little scope is the
-		// wrong credential, not a check to report on.
-		return output.ErrUsageHint(scopeCheck.Message, scopeCheck.Hint)
-	}
-	checks = append(checks, scopeCheck)
-	// From here the credential is proven: whatever fails next keeps it.
-	tx.verified = true
+	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
 
 	// Trust, verified before anything is written: connect.json is the trust
 	// anchor, and nobody in it is recorded unverified. People are read
@@ -613,7 +421,7 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 	if ch.Routes, err = parseProjectPairs("--route", f.routes); err != nil {
 		return ch, err
 	}
-	if ch.Classes, err = parseProjectPairs("--class", f.classes); err != nil {
+	if ch.Classes, err = parseProjectPairsAllowEmpty("--class", f.classes); err != nil {
 		return ch, err
 	}
 	for _, list := range []struct {
@@ -676,6 +484,16 @@ func worktreesChanged(cmd *cobra.Command, f *connectSetupFlags, ch *setup.Change
 
 // parseProjectPairs parses repeatable <project-id>=<value> flags.
 func parseProjectPairs(flag string, raw []string) (map[int64]string, error) {
+	return parseProjectPairsWith(flag, raw, false)
+}
+
+// parseProjectPairsAllowEmpty is parseProjectPairs where <project-id>= (an
+// empty value) is meaningful: it clears the setting.
+func parseProjectPairsAllowEmpty(flag string, raw []string) (map[int64]string, error) {
+	return parseProjectPairsWith(flag, raw, true)
+}
+
+func parseProjectPairsWith(flag string, raw []string, allowEmpty bool) (map[int64]string, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -683,7 +501,7 @@ func parseProjectPairs(flag string, raw []string) (map[int64]string, error) {
 	for _, pair := range raw {
 		idText, value, ok := strings.Cut(pair, "=")
 		id, err := parsePositiveID(flag, strings.TrimSpace(idText))
-		if !ok || err != nil || id == 0 || value == "" {
+		if !ok || err != nil || id == 0 || (value == "" && !allowEmpty) {
 			return nil, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <project-id>=<value>", flag, pair))
 		}
 		if _, dup := out[id]; dup {
@@ -706,23 +524,30 @@ func parsePositiveID(flag, raw string) (int64, error) {
 	return id, nil
 }
 
-// refuseCredentialConflicts refuses, before any credential step runs, the
-// combinations that step would only be refused after: a bot-user login for
-// a profile that does not exist, --expect-identity against an Agent's
-// connect.json or credential, and a person's login with nothing pinning it.
-func refuseCredentialConflicts(app *appctx.App, name, path, held string, expect int64, exists bool, existing setup.File) error {
+// refuseCredentialConflicts refuses a profile setup cannot use as it is:
+// one with no credential (setup does not obtain one), --expect-identity
+// against an Agent's credential or connect.json, and a person's login with
+// nothing pinning it to the bot.
+func refuseCredentialConflicts(name, path, held string, expect int64, exists bool, existing setup.File) error {
+	profile := shellQuote(name)
 	switch {
+	case held == "" && (expect != 0 || (exists && existing.Agent.Kind == setup.KindBotUser)):
+		identity := expect
+		if identity == 0 {
+			identity = existing.Agent.IdentityID
+		}
+		return &output.Error{Code: output.CodeAuth,
+			Message: fmt.Sprintf("Profile %q holds no credential", name),
+			Hint:    fmt.Sprintf("Log the bot in first: basecamp auth login -P %s --expect-identity %d, then run setup again.", profile, identity)}
+	case held == "":
+		return &output.Error{Code: output.CodeAuth,
+			Message: fmt.Sprintf("Profile %q holds no credential", name),
+			Hint:    fmt.Sprintf("Connect the agent first: basecamp auth agent connect -P %s, then run setup again.", profile)}
 	case expect != 0 && held == setup.KindAgent:
 		return output.ErrUsage("--expect-identity is for the bot-user path, and profile " + strconv.Quote(name) + " holds an Agent's credential, which has no identity")
 	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
 		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
 			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
-	case held == "" && expect != 0 && app.Config.Profiles[name] == nil:
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist, and the bot-user login needs it", name),
-			fmt.Sprintf("Create it with `basecamp profile create %s` (signing in as the bot), then run setup again.", name))
-	case held == "" && exists && existing.Agent.Kind == setup.KindBotUser && expect == 0:
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds no credential, and connect.json was set up for a bot user", name),
-			fmt.Sprintf("Log the bot in again: basecamp connect setup -P %s --expect-identity %d", shellQuote(name), existing.Agent.IdentityID))
 	case held == setup.KindBotUser && expect == 0 && existing.Agent.IdentityID == 0:
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds a person's login, not an Agent's credential", name),
 			"On the bot-user path pass --expect-identity <the bot's identity id>, so setup can prove this login is the bot and not you.")
@@ -730,47 +555,31 @@ func refuseCredentialConflicts(app *appctx.App, name, path, held string, expect 
 	return nil
 }
 
-// ensureConnectCredential makes sure the profile holds the agent's
-// credential, running the command that stores one when it does not, and
-// reports which kind it holds. Setup never handles a secret itself: the
-// ceremony is `basecamp auth agent connect`, the bot-user login is
-// `basecamp auth login --expect-identity`, run as they run on their own.
-func ensureConnectCredential(cmd *cobra.Command, app *appctx.App, name, held string, expect int64) (string, error) {
-	if held != "" {
-		return held, nil
+// connectAccount is the account setup works in: the one the agent's
+// profile is bound to, which is where its credential was connected. It is
+// never a config-wide default, and an --account or BASECAMP_ACCOUNT_ID that
+// names another account is refused rather than preferred.
+func connectAccount(app *appctx.App, name string) (string, error) {
+	p := app.Config.Profiles[name]
+	if p == nil {
+		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
+			"Connect the agent first: basecamp auth agent connect -P "+shellQuote(name))
 	}
-	flags := map[string]string{}
-	if noBrowser, _ := cmd.Flags().GetBool("no-browser"); noBrowser {
-		flags["no-browser"] = "true"
-	}
-	if expect != 0 {
-		flags["expect-identity"] = strconv.FormatInt(expect, 10)
-		if err := runChildCommand(cmd, buildLoginCmd("login"), flags); err != nil {
-			return "", err
-		}
-	} else {
-		if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" {
-			flags["device-name"] = deviceName
-		}
-		if err := runChildCommand(cmd, newAuthAgentConnectCmd(), flags); err != nil {
-			return "", err
-		}
-	}
-
-	kind, err := connectCredentialKind(cmd.Context(), app)
+	bound, err := canonicalAccount(p.AccountID)
 	if err != nil {
-		return "", err
+		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q is not bound to an account", name),
+			"Bind it: basecamp profile set "+shellQuote(name)+" account_id <id>")
 	}
-	if kind == "" {
-		return "", output.ErrAuth(fmt.Sprintf("Profile %q still holds no credential", name))
+	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
+		return "", output.ErrUsageHint(
+			fmt.Sprintf("Profile %q is bound to account %s, and this command named account %s", name, bound, app.Config.AccountID),
+			"Setup works in the profile's own account. Drop --account (or BASECAMP_ACCOUNT_ID).")
 	}
-	return kind, nil
+	return bound, nil
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,
-// "" for none. A store that cannot be read is an error, not "none": setup
-// would otherwise run a new connection over a credential it merely failed
-// to load.
+// "" for none. A store that cannot be read is an error, not "none".
 func connectCredentialKind(ctx context.Context, app *appctx.App) (string, error) {
 	return credentialKindOf(ctx, app.Auth)
 }
@@ -789,26 +598,14 @@ func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
 	}
 }
 
-// runChildCommand runs another command's RunE in this command's context and
-// output, with the given flags set, so setup reuses a command whole instead
-// of reimplementing it.
-func runChildCommand(parent, child *cobra.Command, flags map[string]string) error {
-	for flag, value := range flags {
-		if err := child.Flags().Set(flag, value); err != nil {
-			return err
-		}
-	}
-	child.SetContext(parent.Context())
-	child.SetOut(parent.OutOrStdout())
-	child.SetErr(parent.ErrOrStderr())
-	return child.RunE(child, nil)
-}
-
 // checkConnectIdentity proves the profile is the agent it is meant to be.
 // An Agent credential must read back as an Agent person. A bot user's login
 // must be the identity --expect-identity pinned, and must not be an Agent.
 func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp.Client, kind string, me setup.Person, expect int64) (setup.Check, error) {
 	c := setup.Check{Name: "Identity", Status: setup.StatusPass}
+	if me.ID <= 0 {
+		return c, output.ErrAuth(fmt.Sprintf("The profile's credential read back no person id (%d); it cannot be the agent", me.ID))
+	}
 	switch kind {
 	case setup.KindAgent:
 		if me.PersonableType != setup.PersonableAgent {
@@ -887,13 +684,6 @@ func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, a
 		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
 	}
 	return me, reader, nil
-}
-
-// connectCredentialStored reports whether the active profile now holds a
-// credential, whatever its state.
-func connectCredentialStored(ctx context.Context, app *appctx.App) bool {
-	_, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	return !errors.Is(err, auth.ErrNoCredential)
 }
 
 func asDoctorChecks(in []setup.Check) []Check {

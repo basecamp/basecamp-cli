@@ -17,7 +17,7 @@ load smoke_helper
 }
 
 @test "connect setup is out of scope" {
-  mark_out_of_scope "Connects an agent through a browser approval and writes local connector policy — covered by Go tests in internal/commands and internal/connector/setup"
+  mark_out_of_scope "Needs a connected agent profile and writes local connector policy — covered by Go tests in internal/commands and internal/connector/setup"
 }
 
 @test "auth refresh is out of scope" {

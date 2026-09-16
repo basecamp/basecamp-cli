@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -196,18 +195,32 @@ func (s *connectSetupServer) intakeCount() int {
 	return s.intakes
 }
 
-// connectSetupApp is an App for connect setup: a file credential store and the
-// global config under a temp XDG_CONFIG_HOME, and the issuer pinned to the
-// mock server.
-func connectSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
+// bareSetupApp is an App for connect setup with nothing connected yet: a
+// file credential store and the global config under a temp XDG_CONFIG_HOME,
+// and the issuer pinned to the mock server.
+func bareSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("BASECAMP_TOKEN", "")
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
 	t.Setenv("BASECAMP_OAUTH_ISSUER", s.srv.URL)
 	home := t.TempDir()
-	t.Setenv("USERPROFILE", home) // where modes cannot be read, connect.json must be under it
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
+	return newConnectSetupApp(t, s, profile)
+}
+
+// connectSetupApp is bareSetupApp with the profile already holding the
+// agent's credential when it is "agent": connected the way an operator
+// connects it, with `basecamp auth agent connect`.
+func connectSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
+	t.Helper()
+	app := bareSetupApp(t, s, profile)
+	if profile != "agent" {
+		return app
+	}
+	out, err := runAgentConnect(t, app)
+	require.NoError(t, err, out)
 	return newConnectSetupApp(t, s, profile)
 }
 
@@ -235,7 +248,7 @@ func newConnectSetupApp(t *testing.T, s *connectSetupServer, profile string) *ap
 func runConnectSetupCmd(t *testing.T, app *appctx.App, args ...string) (string, error) {
 	t.Helper()
 	cmd := NewConnectCmd()
-	cmd.SetArgs(append([]string{"setup", "--no-browser"}, args...))
+	cmd.SetArgs(append([]string{"setup"}, args...))
 	cmd.SetContext(appctx.WithApp(context.Background(), app))
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -291,11 +304,10 @@ func connectSetupPath(t *testing.T, profile string) string {
 	return path
 }
 
-// The card's done-when on the ceremony path, on a clean machine: setup
-// connects the agent, and leaves a profile that authenticates as it, a
-// connect.json with a routed project that admission reads, and passing
-// token, identity and mint checks.
-func TestConnectSetupFromACleanMachine(t *testing.T) {
+// On a profile connected to the agent, setup leaves a connect.json with a
+// routed project that admission reads, and passing token, identity and mint
+// checks.
+func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 	s := startConnectSetupServer(t)
 	app := connectSetupApp(t, s, "agent")
 	repo := t.TempDir()
@@ -307,7 +319,6 @@ func TestConnectSetupFromACleanMachine(t *testing.T) {
 		"--class", fmt.Sprintf("%d=internal", setupProject))
 	require.NoError(t, err, out)
 
-	assert.Contains(t, out, "WDJB-MJHT", "the ceremony ran: the operator compares the code")
 	assert.NotContains(t, out, fakeConnectSecret, "the client secret is never echoed")
 	assert.NotContains(t, out, setupTicket, "the stream ticket is never echoed")
 	assert.NotContains(t, out, "not ready")
@@ -337,7 +348,6 @@ func TestConnectSetupFromACleanMachine(t *testing.T) {
 	app = newConnectSetupApp(t, s, "agent")
 	out, err = runConnectSetupCmd(t, app, "--concurrency", "4")
 	require.NoError(t, err, out)
-	assert.Equal(t, 1, s.intakeCount(), "no second ceremony")
 	again, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, 4, again.Concurrency)
@@ -374,15 +384,14 @@ func TestConnectSetupWithNoRouteIsNotReady(t *testing.T) {
 	assert.Equal(t, "not_ready", apiErr.Code)
 }
 
-// Everything refusable without Basecamp is refused before an operator is
-// sent to approve anything.
-func TestConnectSetupRefusesBeforeTheCeremony(t *testing.T) {
+// Bad input is refused before anything is read or written.
+func TestConnectSetupRefusesBadInput(t *testing.T) {
 	op := fmt.Sprint(setupOperatorPerson)
 	wantMessage := map[string]string{
-		"bot login without profile": "the bot-user login needs it",
 		"operator profile unlogged": "holds no credential",
 		"missing operator profile":  "does not exist",
 		"no operator":               "who the operator is",
+		"expect-identity on agent":  "holds an Agent's credential",
 	}
 	for name, args := range map[string][]string{
 		"missing route directory":   {"--operator", op, "--route", fmt.Sprintf("%d=/does/not/exist", setupProject)},
@@ -398,21 +407,130 @@ func TestConnectSetupRefusesBeforeTheCeremony(t *testing.T) {
 		"no operator":               {"--route", fmt.Sprintf("%d=%s", setupProject, os.TempDir())},
 		"missing operator profile":  {"--operator-profile", "nobody"},
 		"operator profile unlogged": {"--operator-profile", "unlogged"},
-		"bot login without profile": {"--operator", op, "--expect-identity", "4242"},
+		"expect-identity on agent":  {"--operator", op, "--expect-identity", "4242"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := startConnectSetupServer(t)
 			connectSetupApp(t, s, "agent")
 			_, err := registerProfile("unlogged", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
 			require.NoError(t, err)
-			app := newConnectSetupApp(t, s, "agent")
-			out, err := runConnectSetupCmd(t, app, args...)
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), args...)
 			require.Error(t, err, out)
-			assert.Zero(t, s.intakeCount(), "no connection was requested")
 			assertNotWritten(t, "agent")
 			if want, ok := wantMessage[name]; ok {
-				assert.Contains(t, err.Error(), want, "refused by setup's own preflight")
+				assert.Contains(t, err.Error(), want)
 			}
+		})
+	}
+}
+
+// Setup does not obtain a credential: a profile without one is refused
+// with the command that connects it, and nothing is requested or written.
+func TestConnectSetupRefusesAProfileWithNoCredential(t *testing.T) {
+	s := startConnectSetupServer(t)
+	bareSetupApp(t, s, "agent")
+	_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+	require.NoError(t, err)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	assert.Contains(t, apiErr.Hint, "basecamp auth agent connect -P agent")
+	assert.Zero(t, s.intakeCount(), "setup never starts a connection")
+	assertNotWritten(t, "agent")
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", routeArg(t))
+	require.Error(t, err, out)
+	require.ErrorAs(t, err, &apiErr)
+	assert.Contains(t, apiErr.Hint, "basecamp auth login -P agent --expect-identity 4242")
+}
+
+// Setup works in the account the agent's profile is bound to: never a
+// config-wide default, and an explicit --account naming another account is
+// refused rather than preferred.
+func TestConnectSetupWorksInTheProfilesOwnAccount(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+
+	app := newConnectSetupApp(t, s, "agent")
+	app.Config.AccountID = "1000" // a config-wide default, not the profile's
+	app.Config.Sources["account_id"] = string(config.SourceGlobal)
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, "999", f.AccountID)
+
+	app = newConnectSetupApp(t, s, "agent")
+	app.Config.AccountID = "1000"
+	app.Config.Sources["account_id"] = string(config.SourceFlag)
+	out, err = runConnectSetupCmd(t, app, "--concurrency", "3")
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "bound to account 999")
+}
+
+// A credential that reads back no person id is not the agent.
+func TestConnectSetupRefusesAZeroPersonID(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	s.agentID = 0
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	assert.Contains(t, apiErr.Message, "no person id")
+	assertNotWritten(t, "agent")
+}
+
+// Every setting setup writes can be reversed by setup: a class is cleared
+// with <project-id>=.
+func TestConnectSetupClearsAClass(t *testing.T) {
+	s := startConnectSetupServer(t)
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t),
+		"--class", fmt.Sprintf("%d=internal", setupProject))
+	require.NoError(t, err, out)
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--class", fmt.Sprintf("%d=", setupProject))
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Empty(t, f.Projects[setupProject].Class)
+}
+
+// Setup never changes the credential: a readiness failure, a wrong agent
+// or a scope that is too narrow leaves it as it was, and each reports its
+// own code.
+func TestConnectSetupNeverChangesTheCredential(t *testing.T) {
+	credential := func(t *testing.T) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(config.GlobalConfigDir(), "credentials.json"))
+		require.NoError(t, err)
+		return string(data)
+	}
+	for name, tc := range map[string]struct {
+		prepare func(s *connectSetupServer)
+		code    string
+	}{
+		"a readiness check fails": {prepare: func(s *connectSetupServer) { s.refuseAgentReads = true }, code: codeNotReady},
+		"not an Agent":            {prepare: func(s *connectSetupServer) { s.agentAsUser = true }, code: output.CodeAuth},
+		"granted read only":       {prepare: func(s *connectSetupServer) { s.grantScope = "read" }, code: codeNotReady},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			tc.prepare(s)
+			connectSetupApp(t, s, "agent")
+			before := credential(t)
+
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+			require.Error(t, err, out)
+			var apiErr *output.Error
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.code, apiErr.Code)
+			assert.Equal(t, before, credential(t))
+			assertNotWritten(t, "agent")
 		})
 	}
 }
@@ -457,9 +575,12 @@ func TestConnectSetupRefusesAnotherAccountUnderTheSameProfile(t *testing.T) {
 	before, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 
-	app := newConnectSetupApp(t, s, "agent")
-	app.Config.AccountID = "1000"
-	out, err := runConnectSetupCmd(t, app)
+	configData, configPath, err := loadGlobalConfigFile()
+	require.NoError(t, err)
+	globalProfileEntry(configData, "agent")["account_id"] = "1000" // the profile rebound elsewhere
+	require.NoError(t, atomicWriteJSON(configPath, configData))
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "set up in account 999")
 	after, err := os.ReadFile(connectSetupPath(t, "agent"))
@@ -611,7 +732,6 @@ func TestConnectSetupRefusesAnUnreadableCredentialStore(t *testing.T) {
 
 	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
 	require.Error(t, err, out)
-	assert.Zero(t, s.intakeCount(), "no connection was requested over the unreadable store")
 	assertNotWritten(t, "agent")
 }
 
@@ -734,177 +854,20 @@ func TestConnectSetupQuotesProfileNamesInSuggestedCommands(t *testing.T) {
 // terminal sinks: control characters in it must not break those lines.
 func TestConnectSetupSanitizesThePathItPrints(t *testing.T) {
 	s := startConnectSetupServer(t)
-	connectSetupApp(t, s, "agent")
+	bareSetupApp(t, s, "bot")
 	home := filepath.Join(t.TempDir(), "evil\nFAKE ✓ line")
 	require.NoError(t, os.Mkdir(home, 0o700))
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("USERPROFILE", home)
-	storeConnectProfile(t, s, "me", setupOperatorToken)
+	storeConnectProfile(t, s, "bot", setupBotToken)
 
-	s.refuseAgentReads = true // so the not_ready error names the path too
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+	args := []string{"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity)}
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), args...) // no route: not ready, and the error names the path
 	require.Error(t, err, out)
-	assert.NotContains(t, out, "evil\nFAKE")
 	assert.NotContains(t, err.Error(), "evil\nFAKE")
-}
 
-// setupState is everything a setup run can change: the profile's stored
-// credential, the global config (as parsed, a missing file being empty),
-// and connect.json.
-type setupState struct {
-	credential bool
-	config     string
-	connect    string
-}
-
-func captureSetupState(t *testing.T, profile string, store *auth.Store) setupState {
-	t.Helper()
-	var st setupState
-	cfg := config.Default()
-	cfg.ActiveProfile = profile
-	_, err := store.Load(auth.NewManager(cfg, nil).CredentialKey())
-	st.credential = !errors.Is(err, auth.ErrNoCredential)
-	parsed := map[string]any{}
-	if data, err := os.ReadFile(filepath.Join(config.GlobalConfigDir(), "config.json")); err == nil {
-		require.NoError(t, json.Unmarshal(data, &parsed))
-	}
-	if profiles, ok := parsed["profiles"].(map[string]any); ok && len(profiles) == 0 {
-		delete(parsed, "profiles")
-	}
-	normalized, err := json.Marshal(parsed)
-	require.NoError(t, err)
-	st.config = string(normalized)
-	if data, err := os.ReadFile(connectSetupPath(t, profile)); err == nil {
-		st.connect = string(data)
-	}
-	return st
-}
-
-// A setup that fails while the credential its own connection stored is
-// unproven undoes that step: no credential connect.json does not describe,
-// no profile entry the run added, connect.json untouched. Each case fails
-// at a different step.
-func TestConnectSetupUndoesAnUnprovenCredential(t *testing.T) {
-	for name, tc := range map[string]struct {
-		prepare func(t *testing.T, s *connectSetupServer)
-		args    []string
-		note    string
-	}{
-		"identity is not an Agent": {
-			prepare: func(t *testing.T, s *connectSetupServer) { s.agentAsUser = true },
-			args:    []string{"--operator", fmt.Sprint(setupOperatorPerson)},
-			note:    "disconnect it in Basecamp",
-		},
-		"granted read only": {
-			prepare: func(t *testing.T, s *connectSetupServer) { s.grantScope = "read" },
-			args:    []string{"--operator", fmt.Sprint(setupOperatorPerson)},
-			note:    "disconnect it in Basecamp",
-		},
-		"a different agent than connect.json records": {
-			prepare: func(t *testing.T, s *connectSetupServer) {
-				firstSetup(t, s)
-				cfg := config.Default()
-				cfg.ActiveProfile = "agent"
-				require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
-				s.agentID = 777
-			},
-			note: "disconnect it in Basecamp",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			s := startConnectSetupServer(t)
-			connectSetupApp(t, s, "agent")
-			if tc.prepare != nil {
-				tc.prepare(t, s)
-			}
-			store := auth.NewStore(config.GlobalConfigDir())
-			before := captureSetupState(t, "agent", store)
-			require.False(t, before.credential, "the run starts with no credential, so its ceremony stores one")
-			intakes := s.intakeCount()
-
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, routeArg(t))...)
-			require.Error(t, err, out)
-			assert.Equal(t, intakes+1, s.intakeCount(), "the ceremony ran")
-			assert.Equal(t, before, captureSetupState(t, "agent", store), "everything is as it was")
-			assert.Contains(t, err.Error(), tc.note)
-		})
-	}
-}
-
-// The connection commits the profile entry before it stores the credential.
-// When that store fails, no credential exists, and the entry is still
-// undone.
-func TestConnectSetupUndoesTheProfileEntryWhenTheCredentialCannotBeStored(t *testing.T) {
-	s := startConnectSetupServer(t)
-	connectSetupApp(t, s, "agent")
-	storeDir := filepath.Join(t.TempDir(), "store")
-	require.NoError(t, os.Mkdir(storeDir, 0o700))
-	store := auth.NewStore(storeDir)
-	before := captureSetupState(t, "agent", store)
-
-	app := newConnectSetupApp(t, s, "agent")
-	app.Auth.SetStore(store)
-	require.NoError(t, os.Chmod(storeDir, 0o500)) // reads find nothing; the write fails
-	t.Cleanup(func() { _ = os.Chmod(storeDir, 0o700) })
-
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
-	require.Error(t, err, out)
-	require.Equal(t, 1, s.intakeCount(), "the ceremony ran, and its store failed")
-	require.NoError(t, os.Chmod(storeDir, 0o700))
-	assert.Equal(t, before, captureSetupState(t, "agent", store), "the profile entry the connection committed is gone")
-	assert.Contains(t, err.Error(), "profile entry this run added was removed")
-}
-
-// A credential that proved to be the right one is kept when a later step
-// fails, so running setup again needs no second approval — and nothing else
-// in the global config is rewritten.
-func TestConnectSetupKeepsAProvenCredentialWhenALaterStepFails(t *testing.T) {
-	for name, tc := range map[string]struct {
-		prepare func(s *connectSetupServer)
-		args    []string
-	}{
-		"trust refused": {args: []string{"--operator", fmt.Sprint(setupClientPerson)}},
-		"a check fails": {
-			prepare: func(s *connectSetupServer) { s.refuseAgentReads = true },
-			args:    []string{"--operator", fmt.Sprint(setupOperatorPerson)},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			s := startConnectSetupServer(t)
-			connectSetupApp(t, s, "agent")
-			if tc.prepare != nil {
-				tc.prepare(s)
-			}
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, routeArg(t))...)
-			require.Error(t, err, out)
-			assert.NotContains(t, err.Error(), "disconnect it in Basecamp")
-			assertNotWritten(t, "agent")
-			assert.True(t, captureSetupState(t, "agent", auth.NewStore(config.GlobalConfigDir())).credential, "the proven credential is kept")
-
-			s.refuseAgentReads = false
-			out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
-			require.NoError(t, err, out)
-			assert.Equal(t, 1, s.intakeCount(), "the rerun needed no second approval")
-		})
-	}
-}
-
-// Undoing the credential step touches only what that step did: a profile
-// another process registered while the operator was approving survives.
-func TestConnectSetupUndoKeepsConcurrentConfigChanges(t *testing.T) {
-	s := startConnectSetupServer(t)
-	connectSetupApp(t, s, "agent")
-	s.agentAsUser = true
-	s.duringApproval = func() {
-		_, err := registerProfile("elsewhere", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
-		require.NoError(t, err)
-	}
-
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
-	require.Error(t, err, out)
-
-	cfg, err := config.Load(config.FlagOverrides{})
-	require.NoError(t, err)
-	assert.Contains(t, cfg.Profiles, "elsewhere", "a concurrent change survives the undo")
-	assert.NotContains(t, cfg.Profiles, "agent", "the run's own entry is undone")
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, routeArg(t))...)
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "connect.json written")
+	assert.NotContains(t, out, "evil\nFAKE")
 }

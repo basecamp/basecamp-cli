@@ -24,7 +24,7 @@ type Changes struct {
 	// Routes maps a project (bucket) id to the directory its work runs in,
 	// as the operator typed it; ResolveDir makes it the approved entry.
 	Routes map[int64]string
-	// Classes sets a routed project's class.
+	// Classes sets a routed project's class; an empty class clears it.
 	Classes map[int64]string
 	// WatchCompletions turns watch_completions on (true) or off (false) for
 	// a routed project.
@@ -77,7 +77,7 @@ func Apply(f File, ch Changes) (File, error) {
 		if !ok {
 			return File{}, fmt.Errorf("class for project %d: the project has no route; add one with --route %d=<dir>", id, id)
 		}
-		if !ValidClass(class) {
+		if class != "" && !ValidClass(class) {
 			return File{}, fmt.Errorf("class %q for project %d: use lowercase letters, digits, - or _, at most 40", class, id)
 		}
 		r.Class = class
