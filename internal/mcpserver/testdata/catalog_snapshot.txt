@@ -80,7 +80,7 @@ Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
-- create_comment: Create a new comment on a recording Accepts a synthetic mentions parameter.
+- create_comment: Create a new comment on a recording. Accepts a synthetic mentions parameter, expanded client-side.
 - create_message: Create a new message on a message board
 - create_message_type: Create a new message type in a project
 - delete_message_type: Delete a message type

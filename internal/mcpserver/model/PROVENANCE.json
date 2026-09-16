@@ -4,5 +4,5 @@
   "ref": "go/v0.18.0-44-g5acb2f9a",
   "files": ["behavior-model.json", "openapi.json"],
   "synced_by": "scripts/sync-mcp-model.sh",
-  "patches": "tags assigned to operations the export leaves untagged (PATCHED_TAGS); binary-upload operations dropped (EXCLUDED_OPERATIONS) — see the sync script"
+  "patches": "binary-upload operations dropped (EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
 }

@@ -326,14 +326,17 @@ Sixteen domain tools (`basecamp_projects`, `basecamp_todos`, `basecamp_cards`,
 account. Each tool takes `{"action": "...", "params": {...}}` and serves
 per-action schemas through its `describe` action.
 
-Two actions are composites rather than single Basecamp endpoints, shared
-with basecamp-mcp-server through basecamp-sdk and marked synthetic in the
-catalogue (no method, no path, and a summary that says so):
+Two composite helpers ride on that surface, shared with basecamp-mcp-server
+through basecamp-sdk so both servers answer the same way.
 `basecamp_recordings summarize` resolves the pointer an account event feed
 row carries — bucket id, recording id, and the event or recording type —
-into one compact projection, discovering a chat line's Campfire on the way;
-and `basecamp_messages create_comment` takes a `mentions` list of person
-ids, expanded into the attachment markup Basecamp reads as a mention.
+into one compact projection, discovering a chat line's Campfire on the way.
+It is not backed by any single Basecamp endpoint, and the catalogue says so:
+it carries no method and no path, where every model operation carries both,
+and its summary opens with "Synthetic:". `basecamp_messages create_comment`
+is an ordinary endpoint with a synthetic parameter: `mentions`, a list of
+person ids expanded client-side into the attachment markup Basecamp reads as
+a mention.
 
 ```bash
 basecamp mcp --read-only                 # serve only read-only actions

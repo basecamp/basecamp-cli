@@ -59,8 +59,26 @@ const (
 // silently rounded into a different recording or a different person.
 const maxExactJSONInteger = 1<<53 - 1
 
-// compositeHandler serves one composite action from the SDK client.
-type compositeHandler func(ctx context.Context, api API, params map[string]any) (*mcp.CallToolResult, error)
+// idSchema declares an id the way the handler actually reads one: a JSON
+// number up to the last integer JSON carries exactly, or the same id
+// written as a string, which carries any id exactly. The ceiling is where a
+// number stops being the id that was written; the floor is 1, because an id
+// of zero or below names no record and is a mistake worth catching here
+// rather than one request later.
+func idSchema(description string) map[string]any {
+	return map[string]any{
+		"description": description,
+		"anyOf": []any{
+			map[string]any{"type": "integer", "minimum": 1, "maximum": maxExactJSONInteger},
+			map[string]any{"type": "string", "pattern": "^[0-9]+$"},
+		},
+	}
+}
+
+// compositeHandler serves one composite action from the SDK client. It is
+// handed the catalog operation as well as the call's parameters, so what it
+// accepts can be read off what it advertises rather than restated.
+type compositeHandler func(ctx context.Context, api API, op *catalog.Operation, params map[string]any) (*mcp.CallToolResult, error)
 
 // compositeHandlers is keyed "<domain>.<action>", the same pair the
 // dispatcher holds when a call arrives.
@@ -95,14 +113,8 @@ func recordingsDomain() *catalog.Domain {
 					"additionalProperties": false,
 					"required":             []any{"bucket_id", "recording_id"},
 					"properties": map[string]any{
-						"bucket_id": map[string]any{
-							"type":        "integer",
-							"description": "The project the recording lives in. The read is checked against it, so a pointer from one project can never resolve to a recording in another.",
-						},
-						"recording_id": map[string]any{
-							"type":        "integer",
-							"description": "The recording's id.",
-						},
+						"bucket_id":    idSchema("The project the recording lives in. The read is checked against it, so a pointer from one project can never resolve to a recording in another."),
+						"recording_id": idSchema("The recording's id."),
 						"event_type": map[string]any{
 							"type":        "string",
 							"description": "The account event feed type that named the recording, e.g. \"comment.created\". The segment before the action names the recording type. Used when recording_type is absent.",
@@ -133,10 +145,11 @@ func installComposites(cat *catalog.Catalog) error {
 }
 
 // installMentionsParam declares the mentions parameter on
-// messages.create_comment. The body schema is stamped strict by the
-// toolkit, and the dispatcher refuses parameters an operation does not
-// declare, so without this the parameter would be unreachable — and with it
-// the parameter is advertised by describe like any other.
+// messages.create_comment. Declaring it is what makes it reachable: a body
+// schema with properties is default-deny in bodyAllows, so an undeclared
+// parameter is refused for every operation — which is also what keeps
+// mentions from being accepted anywhere it has no meaning, update_comment
+// included.
 //
 // The parameter never reaches Basecamp: the dispatcher consumes it, reads
 // each person for the attachable_sgid only Basecamp can vouch for, and
@@ -155,10 +168,10 @@ func installMentionsParam(cat *catalog.Catalog) error {
 	}
 	properties[mentionsParam] = map[string]any{
 		"type":        "array",
-		"items":       map[string]any{"type": "integer"},
+		"items":       idSchema("A person id."),
 		"description": syntheticSummaryTag + "person ids to mention. Expanded client-side into the bc-attachment markup Basecamp reads as a mention, and prepended to content. Every id is read for its attachable_sgid before anything is posted, so an id that is not a person in this account fails the call and posts nothing.",
 	}
-	op.Summary += " Accepts a synthetic mentions parameter."
+	op.Summary = strings.TrimSuffix(strings.TrimSpace(op.Summary), ".") + ". Accepts a synthetic mentions parameter, expanded client-side."
 	return nil
 }
 
@@ -178,8 +191,8 @@ func findOperation(cat *catalog.Catalog, domainKey, action string) (*catalog.Ope
 }
 
 // handleSummarize serves recordings.summarize.
-func handleSummarize(ctx context.Context, api API, params map[string]any) (*mcp.CallToolResult, error) {
-	ref, err := summarizeRef(params)
+func handleSummarize(ctx context.Context, api API, op *catalog.Operation, params map[string]any) (*mcp.CallToolResult, error) {
+	ref, err := summarizeRef(op, params)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
 	}
@@ -190,12 +203,17 @@ func handleSummarize(ctx context.Context, api API, params map[string]any) (*mcp.
 	return gateway.JSONResult(summary)
 }
 
-func summarizeRef(params map[string]any) (basecamp.RecordingRef, error) {
+func summarizeRef(op *catalog.Operation, params map[string]any) (basecamp.RecordingRef, error) {
 	var ref basecamp.RecordingRef
-	known := map[string]bool{"bucket_id": true, "recording_id": true, "event_type": true, "recording_type": true}
+	// What is accepted is what is advertised: the same body schema describe
+	// serves, read here rather than restated, so the two cannot drift.
+	known, _ := op.Body["properties"].(map[string]any)
+	if len(known) == 0 {
+		return ref, fmt.Errorf("internal error: action %q declares no parameters", op.Action)
+	}
 	for name := range params {
-		if !known[name] {
-			return ref, fmt.Errorf("unknown parameter %q for action %q (describe the action for its schema)", name, summarizeAction)
+		if _, ok := known[name]; !ok {
+			return ref, fmt.Errorf("unknown parameter %q for action %q (describe the action for its schema)", name, op.Action)
 		}
 	}
 
@@ -262,10 +280,10 @@ func summarizeFailure(ref basecamp.RecordingRef, err error) *mcp.CallToolResult 
 	payload["bucket_id"] = ref.BucketID
 	payload["recording_id"] = ref.RecordingID
 
-	result, marshalErr := gateway.JSONResult(map[string]any{"error": payload})
-	if marshalErr != nil || result == nil {
-		return gateway.ErrorResult("%v", err)
-	}
+	// JSONResult only ever fails by returning its own error result, which
+	// already carries IsError; marking it again is harmless and keeps this
+	// from depending on that.
+	result, _ := gateway.JSONResult(map[string]any{"error": payload})
 	result.IsError = true
 	return result
 }
@@ -279,7 +297,10 @@ func expandMentions(ctx context.Context, api API, domainKey, action string, para
 		return nil
 	}
 	raw, present := params[mentionsParam]
-	if !present {
+	if !present || raw == nil {
+		// An explicit null is how many clients spell an unset optional
+		// array, and it asks for nothing.
+		delete(params, mentionsParam)
 		return nil
 	}
 	delete(params, mentionsParam)
@@ -295,6 +316,13 @@ func expandMentions(ctx context.Context, api API, domainKey, action string, para
 	content, err := optionalString(params, "content")
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(content) == "" {
+		// Without this, mentions would turn a call Basecamp would have
+		// refused for want of content into a comment whose entire body is
+		// the mention markup — a notification nobody wrote. The SDK's own
+		// CreateWithMentions refuses the same way.
+		return fmt.Errorf("parameter %q needs content: a comment that is only a mention notifies someone about nothing", mentionsParam)
 	}
 	expanded, err := api.Comments().ExpandMentions(ctx, content, ids)
 	if err != nil {
@@ -329,13 +357,23 @@ func requiredID(params map[string]any, name string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("parameter %q: %w", name, err)
 	}
+	if id <= 0 {
+		// Caught here rather than one request later, so a permanently
+		// invalid pointer reads as the caller's mistake and not as
+		// something worth retrying.
+		return 0, fmt.Errorf("parameter %q: must name a record, got %d", name, id)
+	}
 	return id, nil
 }
 
-// exactID reads an id off a JSON value without rounding it. A JSON number
-// arrives as float64: a value with a fraction, or past the exact-integer
-// range, would name a different record than the caller wrote, so it is
-// refused rather than truncated.
+// exactID reads an id off a JSON value without rounding it.
+//
+// A JSON number arrives as float64: a value with a fraction, or past the
+// last integer a float64 carries exactly, would name a different record
+// than the caller wrote, so it is refused rather than truncated. A quoted
+// id has no such ambiguity — the string is the digits the caller wrote — so
+// it is accepted at any size, which is the escape hatch for an id past the
+// ceiling. Both spellings are declared in idSchema.
 func exactID(raw any) (int64, error) {
 	switch v := raw.(type) {
 	case float64:

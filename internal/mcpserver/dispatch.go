@@ -63,7 +63,7 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	// have no method and no path to assemble, so they are served before
 	// buildRequest ever looks for one.
 	if composite, ok := compositeHandlers[dom.Name()+"."+op.Action]; ok {
-		return composite(ctx, d.api, params)
+		return composite(ctx, d.api, full, params)
 	}
 	// A model operation may still carry a composite parameter, consumed
 	// here rather than sent: mentions on messages.create_comment.

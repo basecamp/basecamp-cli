@@ -126,7 +126,9 @@ func TestCatalogDeclaresMentionsOnCreateComment(t *testing.T) {
 	mentions, ok := properties["mentions"].(map[string]any)
 	require.True(t, ok, "create_comment must declare a mentions property")
 	assert.Equal(t, "array", mentions["type"])
-	assert.Equal(t, map[string]any{"type": "integer"}, mentions["items"])
+	items, ok := mentions["items"].(map[string]any)
+	require.True(t, ok, "mentions must declare its item schema")
+	assert.NotEmpty(t, items["anyOf"], "a person id is a number or a quoted number, and the schema must say so")
 }
 
 // TestCatalogIsAccountScoped pins the rescope: the CLI's account-scoped SDK
@@ -221,6 +223,12 @@ func TestCatalogModelProvenance(t *testing.T) {
 	// 12-character prefix of that commit, which is the stronger thing to
 	// pin: the snapshot must have been taken from the very commit go.mod
 	// links in, not merely from a matching version string.
+	// Either way the ref must not be a dirty describe: the sync script
+	// marks a checkout with uncommitted model edits, and a snapshot taken
+	// from one corresponds to no commit at all.
+	assert.False(t, strings.HasSuffix(provenance.Ref, "-dirty"),
+		"vendored model was synced from a dirty basecamp-sdk checkout (%s) — sync from a clean one", provenance.Ref)
+
 	if commit, ok := pseudoVersionCommit(version); ok {
 		assert.True(t, strings.HasPrefix(provenance.Commit, commit),
 			"vendored model was synced from commit %s, but go.mod links in %s — run scripts/sync-mcp-model.sh against that checkout",

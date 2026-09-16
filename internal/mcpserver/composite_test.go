@@ -426,3 +426,209 @@ func TestReadOnlyModeKeepsSummarizeAndDropsCreateComment(t *testing.T) {
 	text, isError := createComment(t, session, map[string]any{"recordingId": 2001, "content": "<div>no</div>"})
 	assert.True(t, isError, text)
 }
+
+// --- the third way discovery can end -------------------------------------
+
+// A listing that overflowed its cap leaves candidates unsearched, so the
+// line cannot be reported absent. This is the verdict that must never be
+// confused with "every Campfire you can see said 404", and the two arrive
+// through the same code path, so both are pinned.
+func TestSummarizeReportsIncompleteDiscoveryRatherThanAbsence(t *testing.T) {
+	var campfires strings.Builder
+	campfires.WriteString("[")
+	for id := 1; id <= 1000; id++ {
+		if id > 1 {
+			campfires.WriteString(",")
+		}
+		fmt.Fprintf(&campfires, `{"id": %d, "title": "Room", "bucket": {"id": 12, "name": "Other", "type": "Project"}}`, 7000+id)
+	}
+	campfires.WriteString("]")
+
+	session, _ := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/projects/": serveJSON(t, http.StatusOK, `{"id": 77, "status": "active", "name": "Connector", "dock": []}`),
+		"/999/chats.json": func(w http.ResponseWriter, _ *http.Request) {
+			// A full page plus a next link is what an overflowing listing
+			// looks like to the SDK.
+			w.Header().Set("Link", `<https://example.com/999/chats.json?page=2>; rel="next"`)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(campfires.String()))
+		},
+	})
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": 5005,
+		"event_type":   "chat.line.created",
+	})
+	require.True(t, isError, text)
+
+	failure := jsonBody(t, text)["error"].(map[string]any)
+	assert.Equal(t, "campfire_discovery_incomplete", failure["type"],
+		"candidates left unsearched is not the same answer as none of them having it")
+	assert.NotEmpty(t, failure["reason"], "the caller is told why the search stopped short")
+}
+
+// Unresolved carries the evidence a consumer needs to tell lost visibility
+// from a line that was never there.
+func TestSummarizeUnresolvedCarriesWhatItSearched(t *testing.T) {
+	session, _ := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/projects/": serveJSON(t, http.StatusOK, `{
+		  "id": 77, "status": "active", "name": "Connector",
+		  "dock": [{"id": 900, "title": "Campfire", "name": "chat", "enabled": true}]
+		}`),
+		"/999/chats.json":           serveJSON(t, http.StatusOK, `[]`),
+		"/999/chats/900/lines/5005": serveJSON(t, http.StatusNotFound, `{"error":"not found"}`),
+	})
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": 5005,
+		"event_type":   "chat.line.created",
+	})
+	require.True(t, isError, text)
+
+	failure := jsonBody(t, text)["error"].(map[string]any)
+	assert.Equal(t, []any{float64(900)}, failure["campfire_ids"], "the candidates it tried, in order")
+	assert.Contains(t, failure, "refreshed",
+		"whether the sources were re-read before concluding decides whether a retry can see anything new")
+}
+
+func TestSummarizeRefusesATypeItCannotRoute(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":      77,
+		"recording_id":   3001,
+		"recording_type": "Timesheet::Entry",
+	})
+	require.True(t, isError, text)
+	assert.Equal(t, "unknown_recording_type", jsonBody(t, text)["error"].(map[string]any)["type"])
+	assert.Empty(t, log.seen(), "a type with no read costs no request")
+}
+
+func TestSummarizeRefusesAnUnknownParameter(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": 3001,
+		"event_type":   "comment.created",
+		"campfire_id":  900,
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "campfire_id")
+	assert.Empty(t, log.seen())
+}
+
+func TestSummarizeRefusesAPointerThatNamesNoRecord(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": 0,
+		"event_type":   "comment.created",
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "recording_id")
+	assert.Empty(t, log.seen(), "an id that names no record is the caller's mistake, not a read to retry")
+}
+
+func TestSummarizeAcceptsAQuotedID(t *testing.T) {
+	session, log := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/comments/": serveJSON(t, http.StatusOK, `{
+		  "id": 3001, "status": "active", "type": "Comment", "title": "Re: Kickoff",
+		  "content": "<div>hi</div>", "updated_at": "2026-09-16T09:00:00Z",
+		  "bucket": {"id": 77, "name": "Connector", "type": "Project"}
+		}`),
+	})
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    "77",
+		"recording_id": "3001",
+		"event_type":   "comment.created",
+	})
+	require.False(t, isError, text)
+	assert.Equal(t, []string{"/999/comments/3001"}, log.seen(),
+		"a quoted id is the escape hatch for one past the range a JSON number carries exactly")
+}
+
+// --- mentions, the rest of it --------------------------------------------
+
+func TestCreateCommentRefusesMentionsWithoutContent(t *testing.T) {
+	session, log := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/people/": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("nobody should be read for a comment that cannot be posted")
+			w.WriteHeader(http.StatusOK)
+		},
+		"/999/recordings/2001/comments.json": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("a comment whose whole body is a mention notifies someone about nothing")
+			w.WriteHeader(http.StatusCreated)
+		},
+	})
+
+	text, isError := createComment(t, session, map[string]any{
+		"recordingId": 2001,
+		"mentions":    []any{float64(1049715915)},
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "content")
+	assert.Empty(t, log.seen())
+}
+
+func TestCreateCommentTreatsANullMentionsListAsAbsent(t *testing.T) {
+	var posted map[string]any
+
+	session, log := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/recordings/2001/comments.json": func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &posted))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 3002, "type": "Comment", "status": "active"}`))
+		},
+	})
+
+	text, isError := createComment(t, session, map[string]any{
+		"recordingId": 2001,
+		"content":     "<div>plain</div>",
+		"mentions":    nil,
+	})
+	require.False(t, isError, text)
+	assert.Equal(t, "<div>plain</div>", posted["content"])
+	assert.NotContains(t, posted, "mentions", "a null list is still consumed, never forwarded")
+	assert.Len(t, log.seen(), 1)
+}
+
+func TestCreateCommentRefusesAMentionIDThatCannotBeCarriedExactly(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := createComment(t, session, map[string]any{
+		"recordingId": 2001,
+		"content":     "<div>hi</div>",
+		"mentions":    []any{1e17},
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "mentions")
+	assert.Empty(t, log.seen(), "mentioning the wrong person is worse than refusing an id nobody can have")
+}
+
+// mentions has meaning on create_comment and nowhere else. Nothing declares
+// it elsewhere, and an undeclared body parameter is refused, so the
+// parameter cannot leak into an operation that would forward it to
+// Basecamp.
+func TestMentionsIsRefusedOnEveryOtherAction(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := mcptest.CallText(t, session, "basecamp_messages", map[string]any{
+		"action": "update_comment",
+		"params": map[string]any{
+			"commentId": 3001,
+			"content":   "<div>edited</div>",
+			"mentions":  []any{float64(1049715915)},
+		},
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "unknown parameter")
+	assert.Empty(t, log.seen())
+}
