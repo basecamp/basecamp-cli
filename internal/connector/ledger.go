@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -75,10 +76,8 @@ func OpenLedger(path string) (*Ledger, error) {
 		// query, fragment or an escape, and open some other file.
 		return nil, fmt.Errorf("connector: ledger path %q contains a character the SQLite URI cannot carry (?, # or %%)", path)
 	}
-	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("connector: create ledger directory: %w", err)
-		}
+	if err := securePath(path); err != nil {
+		return nil, err
 	}
 
 	// _txlock=immediate takes the write lock when a transaction opens rather
@@ -99,7 +98,70 @@ func OpenLedger(path string) (*Ledger, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	// The WAL and shared-memory sidecars exist now and were created under the
+	// process umask. The private directory already keeps other users out;
+	// tightening them too costs nothing.
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		if err := os.Chmod(sidecar, 0o600); err != nil && !os.IsNotExist(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("connector: secure ledger sidecar: %w", err)
+		}
+	}
 	return l, nil
+}
+
+// securePath makes the ledger private or refuses it.
+//
+// The ledger holds feed positions — signed tokens that resume the account's
+// feed — and every event's metadata. Its directory must be 0700 and the file
+// 0600. A directory or file that already exists with looser permissions is
+// refused rather than tightened: something else chose those permissions, and
+// silently changing them could break it or hide that the ledger was exposed.
+func securePath(path string) error {
+	dir := filepath.Dir(path)
+	switch info, err := os.Stat(dir); {
+	case os.IsNotExist(err):
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("connector: create ledger directory: %w", err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs its search bit; 0700 is owner-only
+			return fmt.Errorf("connector: secure ledger directory: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("connector: inspect ledger directory: %w", err)
+	case !info.IsDir():
+		return fmt.Errorf("connector: ledger directory %s is not a directory", dir)
+	case looserThan(info.Mode(), 0o700):
+		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", dir, info.Mode().Perm())
+	}
+
+	switch info, err := os.Stat(path); {
+	case os.IsNotExist(err):
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("connector: create ledger: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("connector: create ledger: %w", err)
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("connector: secure ledger: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("connector: inspect ledger: %w", err)
+	case looserThan(info.Mode(), 0o600):
+		return fmt.Errorf("connector: ledger %s is readable by other users (mode %04o); it must be 0600", path, info.Mode().Perm())
+	}
+	return nil
+}
+
+// looserThan reports permission bits beyond limit. Windows has no POSIX bits
+// to speak of; access there is the ACL of the user's profile directory.
+func looserThan(mode os.FileMode, limit os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	return mode.Perm()&^limit != 0
 }
 
 // Close releases the ledger's handle.

@@ -30,7 +30,10 @@ type Queue struct {
 	warnAt int
 
 	warned atomic.Bool
-	paused atomic.Bool
+	// waiting counts offers blocked for room. Intake and every open repair
+	// walk offer concurrently, so a single flag would be cleared by the first
+	// waiter to resume while another — perhaps the feed — still waits.
+	waiting atomic.Int32
 
 	// OnWarn fires when the depth first crosses the warning threshold, and
 	// OnRecover when it falls back below. Both are optional.
@@ -67,13 +70,11 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	default:
 	}
 
-	q.paused.Store(true)
-	if q.OnPause != nil {
+	if q.waiting.Add(1) == 1 && q.OnPause != nil {
 		q.OnPause(q.Depth())
 	}
 	defer func() {
-		q.paused.Store(false)
-		if q.OnResume != nil {
+		if q.waiting.Add(-1) == 0 && q.OnResume != nil {
 			q.OnResume(q.Depth())
 		}
 	}()
@@ -107,7 +108,7 @@ func (q *Queue) Depth() int { return len(q.ids) }
 
 // Paused reports whether an offer is currently waiting for room — which is to
 // say whether the feed is being consumed.
-func (q *Queue) Paused() bool { return q.paused.Load() }
+func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
 
 // noteDepth fires the warning edges. It is edge-triggered, not level: a
 // backlog that sits above the threshold for an hour is one warning, and the

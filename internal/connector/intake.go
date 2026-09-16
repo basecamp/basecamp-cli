@@ -23,8 +23,8 @@ const (
 	// delay would call a still-committing event missing.
 	DefaultRepairInterval = 60 * time.Second
 	// DefaultRepairWindow is how long a loss stays open before the ids still
-	// missing are called unrecovered. Ten minutes is twenty repair polls past
-	// the safety delay.
+	// missing are called unrecovered. At the sixty-second cadence that is
+	// about ten repair polls, each well past the safety delay.
 	DefaultRepairWindow = 10 * time.Minute
 	// DefaultMembershipInterval is how often the agent's project list is
 	// re-read. The cable snapshots the agent's buckets when it subscribes, so
@@ -101,7 +101,10 @@ type Intake struct {
 	// only when a page boundary confirms a poll page actually landed.
 	pollCandidates []int64
 	snapshot       map[int64]bool
-	reconnect      chan struct{}
+	// learned holds buckets events proved visible that the lister did not
+	// name.
+	learned   map[int64]bool
+	reconnect chan struct{}
 	// cancelRun ends the current connection; nil between connections.
 	cancelRun context.CancelFunc
 	// promotedThisRun is whether this connection has recorded a poll-served
@@ -229,6 +232,11 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// This connection IS the reconnect any request made between connections
+	// asked for; a latch left standing would turn its first terminal error
+	// into a silent reconnect.
+	in.reconnectRequested()
+
 	in.mu.Lock()
 	in.cancelRun = cancel
 	in.promotedThisRun = false
@@ -310,7 +318,12 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 			feedErr = err
 			break
 		}
-		if err := in.ingest(runCtx, event, LaneOf(event)); err != nil {
+		// Run's context, not the connection's: a reconnect canceling the
+		// connection while this hand-off waits for queue room would leave the
+		// event seen in the ledger and never queued, since the re-served page
+		// no longer reports it new. The reconnect waits for the hand-off; the
+		// feed stays paused either way.
+		if err := in.ingest(ctx, event, LaneOf(event)); err != nil {
 			if in.reconnectRequested() {
 				return errReconnect
 			}
@@ -604,8 +617,11 @@ func (in *Intake) takeSnapshot(ctx context.Context) {
 	}
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	in.snapshot = make(map[int64]bool, len(buckets))
+	in.snapshot = make(map[int64]bool, len(buckets)+len(in.learned))
 	for _, id := range buckets {
+		in.snapshot[id] = true
+	}
+	for id := range in.learned {
 		in.snapshot[id] = true
 	}
 }
@@ -621,6 +637,16 @@ func (in *Intake) noteBucket(bucketID int64) {
 		return
 	}
 	in.log.Info("an event arrived from a project the live subscription does not hold", "bucket_id", bucketID)
+	// Learned for the life of the process, and merged into every later
+	// snapshot. A project the membership list never names — archived, or past
+	// the lister's page — would otherwise cost a reconnect per event, forever.
+	in.mu.Lock()
+	if in.learned == nil {
+		in.learned = make(map[int64]bool)
+	}
+	in.learned[bucketID] = true
+	in.snapshot[bucketID] = true
+	in.mu.Unlock()
 	in.requestReconnect()
 }
 
@@ -640,9 +666,16 @@ func (in *Intake) onPositionRejected(ctx context.Context) {
 		// is at least what the ledger holds.
 		return
 	}
-	served, err := in.ledger.LineagePollServedID(ctx, in.key)
-	if err != nil || served == 0 {
+	// This filter set's own id first. Another set's may be past events this
+	// one never served, and re-entering there would skip them.
+	served, err := in.ledger.LastPollServedID(ctx, in.key)
+	if err != nil {
 		return
+	}
+	if served == 0 {
+		if served, err = in.ledger.LineagePollServedID(ctx, in.key); err != nil || served == 0 {
+			return
+		}
 	}
 	in.mu.Lock()
 	in.reentryAfter = served
@@ -661,6 +694,7 @@ func (in *Intake) watchMembership(ctx context.Context) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer stop()
 		ticker := time.NewTicker(in.opts.MembershipInterval)
 		defer ticker.Stop()
 		for {
@@ -702,15 +736,24 @@ func (in *Intake) membershipChanged(buckets []int64) bool {
 		}
 		return false
 	}
-	if len(buckets) != len(in.snapshot) {
-		return true
+	listed := 0
+	for id := range in.snapshot {
+		if !in.learned[id] {
+			listed++
+		}
 	}
+	fresh := 0
 	for _, id := range buckets {
 		if !in.snapshot[id] {
 			return true
 		}
+		if !in.learned[id] {
+			fresh++
+		}
 	}
-	return false
+	// A bucket that dropped off the list is a change; a learned one showing
+	// up in the list is not.
+	return fresh != listed
 }
 
 // requestReconnect marks a reconnect due and ends the current connection now,

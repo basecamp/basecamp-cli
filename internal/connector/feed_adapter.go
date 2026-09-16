@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -85,6 +86,48 @@ type FeedClient interface {
 	CreateStreamTicket(ctx context.Context) (*basecamp.StreamTicket, error)
 }
 
+// NewLiveFeedAdapter builds the adapter over its own SDK client, whose
+// transport refuses to follow redirects.
+//
+// It owns its client for that reason alone. The SDK's default client follows
+// a 3xx — to a foreign host too, with the Authorization header stripped but
+// the request still sent — and the seam's zero-egress obligation is broken
+// before any continuation check here could run. Client options cannot fix
+// that from outside (a custom *http.Client is replaced at construction), but
+// the transport is honored, and a transport sees each redirect hop before it
+// leaves the machine.
+func NewLiveFeedAdapter(cfg *basecamp.Config, tokens basecamp.TokenProvider, accountID string, inner http.RoundTripper, opts ...basecamp.ClientOption) (*FeedAdapter, error) {
+	if cfg == nil || tokens == nil || accountID == "" {
+		return nil, errors.New("connector: the live feed adapter needs a config, a token provider and an account id")
+	}
+	if inner == nil {
+		inner = http.DefaultTransport
+	}
+	opts = append(opts, basecamp.WithTransport(RefuseRedirects(inner)))
+	client := basecamp.NewClient(cfg, tokens, opts...)
+	return NewFeedAdapter(client.ForAccount(accountID).EventFeed(), cfg.BaseURL)
+}
+
+// ErrRedirectRefused is a redirect hop the feed's transport would not send.
+var ErrRedirectRefused = errors.New("connector: the event feed does not follow redirects")
+
+// RefuseRedirects wraps a transport so that no redirect hop is ever sent. The
+// client then reports the refusal as the request's failure.
+func RefuseRedirects(inner http.RoundTripper) http.RoundTripper {
+	return refuseRedirects{inner: inner}
+}
+
+type refuseRedirects struct{ inner http.RoundTripper }
+
+func (t refuseRedirects) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Response is set exactly when the client created this request to follow
+	// a redirect.
+	if req.Response != nil {
+		return nil, ErrRedirectRefused
+	}
+	return t.inner.RoundTrip(req)
+}
+
 // FeedAdapter backs the TicketMinter and PollSource seams.
 type FeedAdapter struct {
 	client FeedClient
@@ -119,7 +162,7 @@ func NewFeedAdapter(client FeedClient, origin string) (*FeedAdapter, error) {
 func (a *FeedAdapter) MintStreamTicket(ctx context.Context) (eventfeed.StreamTicket, error) {
 	ticket, err := a.client.CreateStreamTicket(ctx)
 	if err != nil {
-		return eventfeed.StreamTicket{}, mintError(err)
+		return eventfeed.StreamTicket{}, mintError(ctx, err)
 	}
 	return eventfeed.StreamTicket{
 		Ticket:    ticket.Ticket,
@@ -137,7 +180,7 @@ func (a *FeedAdapter) Poll(ctx context.Context, cursor eventfeed.Cursor, filters
 
 	page, err := a.client.PollEvents(ctx, opts)
 	if err != nil {
-		return eventfeed.PollPage{}, pollError(err)
+		return eventfeed.PollPage{}, pollError(ctx, err)
 	}
 
 	events := make([]eventfeed.Event, 0, len(page.Events))
@@ -235,10 +278,19 @@ func idStrings(ids []int64) []string {
 // seam's taxonomy, and it is the one place the two 410s are told apart.
 // ---------------------------------------------------------------------------
 
+// callerCanceled reports a failure that is the caller's own cancellation. The
+// seam requires it to pass through unchanged: classified as transient, a
+// shutdown or a reconnect would enter transport-retry handling. A deadline the
+// client imposed on itself, with the caller's context still live, is not this
+// and stays transient.
+func callerCanceled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, ctx.Err())
+}
+
 // pollError classifies a failed PollEvents call.
-func pollError(err error) error {
-	if err == nil {
-		return nil
+func pollError(ctx context.Context, err error) error {
+	if err == nil || callerCanceled(ctx, err) {
+		return err
 	}
 
 	// The inbox's 410 first, so it can never fall through to the feed's arm.
@@ -263,6 +315,10 @@ func pollError(err error) error {
 			ResumeURL:    gone.Resume,
 			Err:          &FeedEpochGoneError{EpochAfterID: *gone.EpochAfterID, Resume: gone.Resume, Err: err},
 		}
+	}
+
+	if errors.Is(err, ErrRedirectRefused) {
+		return &eventfeed.PollError{Kind: eventfeed.PollRedirectRefused, Err: err}
 	}
 
 	var mismatch *basecamp.FeedFilterMismatchError
@@ -303,9 +359,12 @@ func pollError(err error) error {
 }
 
 // mintError classifies a failed CreateStreamTicket call.
-func mintError(err error) error {
-	if err == nil {
-		return nil
+func mintError(ctx context.Context, err error) error {
+	if err == nil || callerCanceled(ctx, err) {
+		return err
+	}
+	if errors.Is(err, ErrRedirectRefused) {
+		return &eventfeed.MintError{Kind: eventfeed.MintUnrecoverable, Err: err}
 	}
 	var apiErr *basecamp.Error
 	if !errors.As(err, &apiErr) {

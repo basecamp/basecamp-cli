@@ -15,7 +15,7 @@ import (
 
 func newTestLedger(t *testing.T) *Ledger {
 	t.Helper()
-	ledger, err := OpenLedger(filepath.Join(t.TempDir(), "connector.db"))
+	ledger, err := OpenLedger(filepath.Join(t.TempDir(), "state", "connector.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ledger.Close() })
 	return ledger

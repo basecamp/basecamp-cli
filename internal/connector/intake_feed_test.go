@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -191,7 +192,7 @@ func TestIntakeRunsTheFeedThroughCatchUpAndStreaming(t *testing.T) {
 // position rather than the present.
 func TestIntakeSurvivesARestartWithoutDuplicating(t *testing.T) {
 	dir := t.TempDir()
-	path := dir + "/connector.db"
+	path := filepath.Join(dir, "state", "connector.db")
 
 	firstLedger, err := OpenLedger(path)
 	require.NoError(t, err)
