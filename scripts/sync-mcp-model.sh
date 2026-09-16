@@ -13,7 +13,8 @@
 # Tag patch: the toolkit catalog joins operations to domains by tag (exactly
 # one per operation, refused otherwise), and the SDK export used to leave a
 # handful of operations untagged. It no longer does, so PATCHED_TAGS is empty
-# and the only divergence from the upstream export is EXCLUDED_OPERATIONS.
+# and the only divergences from the upstream export are EXCLUDED_OPERATIONS
+# and POLICY_EXCLUDED_OPERATIONS.
 # The table stays as a seam: an operation that grew an upstream tag is a
 # sync-time conflict rather than a silent double-tag, and an operation that
 # arrives untagged stops the sync rather than failing later at Load.
@@ -141,7 +142,7 @@ cat > "$dest/PROVENANCE.json" <<JSON
   "ref": "$ref",
   "files": ["behavior-model.json", "openapi.json"],
   "synced_by": "scripts/sync-mcp-model.sh",
-  "patches": "binary-upload operations and the stream-ticket mint dropped (EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
+  "patches": "binary-upload operations dropped because the toolkit refuses their non-JSON bodies (EXCLUDED_OPERATIONS) and the stream-ticket mint dropped by policy (POLICY_EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
 }
 JSON
 
