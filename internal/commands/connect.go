@@ -114,7 +114,7 @@ Examples:
   basecamp auth agent connect -P agent
   basecamp connect setup -P agent --operator-profile me --route 12345=~/Work/app
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
-  basecamp connect setup -P bot --expect-identity 4242 --route 12345=~/Work/app --watch-completions 12345
+  basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --route 12345=~/Work/app
   basecamp connect setup -P agent --class 12345=internal --deadline 90m --worktrees`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -229,12 +229,14 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err != nil {
 		return err
 	}
-	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
-		return err
-	}
-	if exists && existing.Agent.Kind != kind {
+	// The credential's own disagreement with connect.json comes first: it is
+	// the wrong credential whatever the flags say.
+	if exists && kind != "" && existing.Agent.Kind != kind {
 		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; remove %s to set this profile up afresh",
 			existing.Agent.Kind, name, kind, richtext.SanitizeSingleLine(path)))
+	}
+	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
+		return err
 	}
 	if kind == setup.KindBotUser && expect == 0 {
 		expect = existing.Agent.IdentityID
@@ -267,7 +269,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err != nil {
 		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is in account %s: %s", name, accountID, setup.ErrorText(err)))
 	}
-	identityCheck, err := checkConnectIdentity(ctx, app, client, kind, me, expect)
+	identityCheck, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, expect)
 	if err != nil {
 		return err
 	}
@@ -347,15 +349,31 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return errConnectorNotReady(report)
 	}
 
-	current, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil || !sameCredential(creds, current) {
-		return errCredentialChanged(name)
-	}
-	if err := setup.Save(path, next); err != nil {
-		if errors.Is(err, setup.ErrNotPrivate) {
-			return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
+	// The write and the last look at the credential are one step under the
+	// credential key's own lock, which every login, refresh and import
+	// takes: no other command can replace the profile's credential between
+	// the check and the write. What is written names the identity that
+	// credential authenticates as, and connect.json's VerifyAgent is what
+	// the connector re-checks at start-up, so a credential replaced later
+	// stops it rather than making it act as the wrong agent.
+	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(stored *auth.Credentials) error {
+		if !sameCredential(creds, stored) {
+			return errCredentialChanged(name)
 		}
-		return output.ErrUsage("connect.json was not written: " + err.Error())
+		if err := next.VerifyAgent(kind, me.ID, expect); err != nil {
+			return output.ErrAuth(err.Error())
+		}
+		return setup.Save(path, next)
+	})
+	if saveErr != nil {
+		var apiErr *output.Error
+		if errors.As(saveErr, &apiErr) {
+			return saveErr
+		}
+		if errors.Is(saveErr, setup.ErrNotPrivate) {
+			return output.ErrUsageHint("connect.json was not written: "+saveErr.Error(), "Setup writes connect.json only where nobody else can change it.")
+		}
+		return output.ErrUsage("connect.json was not written: " + saveErr.Error())
 	}
 	report.Written = true
 
@@ -630,7 +648,7 @@ func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
 // checkConnectIdentity proves the profile is the agent it is meant to be.
 // An Agent credential must read back as an Agent person. A bot user's login
 // must be the identity --expect-identity pinned, and must not be an Agent.
-func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp.Client, kind string, me setup.Person, expect int64) (setup.Check, error) {
+func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp.Client, kind, oauthType string, me setup.Person, expect int64) (setup.Check, error) {
 	c := setup.Check{Name: "Identity", Status: setup.StatusPass}
 	if me.ID <= 0 {
 		return c, output.ErrAuth(fmt.Sprintf("The profile's credential read back no person id (%d); it cannot be the agent", me.ID))
@@ -645,7 +663,7 @@ func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp
 		if me.PersonableType == setup.PersonableAgent {
 			return c, output.ErrAuth(fmt.Sprintf("Person %d is an Agent, but the profile holds a person's login", me.ID))
 		}
-		endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
+		endpoint, err := app.Auth.AuthorizationEndpointFor(oauthType)
 		if err != nil {
 			return c, output.ErrAuth("Could not locate the login's identity endpoint: " + setup.ErrorText(err))
 		}

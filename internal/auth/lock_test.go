@@ -1097,3 +1097,39 @@ func TestStoreSaveKeepsOtherKeys(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &all))
 	assert.Len(t, all, 8)
 }
+
+// WithCredential holds the key's lock while fn runs: a caller that decides
+// on a credential and writes inside fn cannot have it replaced underneath.
+func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	dir := t.TempDir()
+	store := NewStore(dir)
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+
+	inside := make(chan struct{})
+	replaced := make(chan error, 1)
+	err := store.WithCredential(context.Background(), key, func(creds *Credentials) error {
+		assert.Equal(t, "first", creds.AccessToken)
+		go func() {
+			close(inside)
+			replaced <- NewStore(dir).withKeyLock(context.Background(), key, func() error {
+				return NewStore(dir).Save(key, &Credentials{AccessToken: "second", OAuthType: "agent"})
+			})
+		}()
+		<-inside
+		time.Sleep(200 * time.Millisecond) // let the other writer reach the lock
+		// The other writer is waiting on the key lock, so what was read is
+		// still what is stored.
+		again, err := store.Load(key)
+		require.NoError(t, err)
+		assert.Equal(t, "first", again.AccessToken)
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, <-replaced)
+
+	after, err := store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "second", after.AccessToken, "the waiting writer lands once the section ends")
+}

@@ -195,3 +195,21 @@ func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
 		})
 	}
 }
+
+// VerifyAgent is what makes a credential swapped behind setup's back
+// harmless: whoever acts on connect.json proves the file and the credential
+// name one agent.
+func TestVerifyAgent(t *testing.T) {
+	f := validFile(t)
+	require.NoError(t, f.VerifyAgent(KindAgent, agentID, 0))
+
+	assert.Error(t, f.VerifyAgent(KindAgent, agentID+1, 0), "another person")
+	assert.Error(t, f.VerifyAgent(KindAgent, 0, 0), "no person")
+	assert.Error(t, f.VerifyAgent(KindBotUser, agentID, 4242), "another kind")
+
+	bot := validFile(t)
+	bot.Agent = Agent{PersonID: agentID, Kind: KindBotUser, IdentityID: 4242}
+	require.NoError(t, bot.VerifyAgent(KindBotUser, agentID, 4242))
+	assert.Error(t, bot.VerifyAgent(KindBotUser, agentID, 99), "another identity")
+	assert.Error(t, bot.VerifyAgent(KindAgent, agentID, 4242), "another kind")
+}

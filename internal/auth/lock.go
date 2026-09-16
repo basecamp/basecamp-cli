@@ -128,6 +128,28 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 	return fn()
 }
 
+// WithCredential runs fn with one key's credential, while holding that
+// key's cross-process lock: no other process's login, refresh, import or
+// logout for the same key can land while fn runs. A caller that must act on
+// a credential being what it just read — writing a file that names the
+// identity it authenticates as, say — does its read, its decision and its
+// write inside fn.
+//
+// fn must not make a network request: every other process's work on the key
+// queues behind it.
+//
+// A key with nothing stored is reported as ErrNoCredential, never as a nil
+// credential.
+func (s *Store) WithCredential(ctx context.Context, key string, fn func(*Credentials) error) error {
+	return s.withKeyLock(ctx, key, func() error {
+		creds, err := s.load(key, lockRequest{done: ctx.Done(), cause: ctx.Err})
+		if err != nil {
+			return err
+		}
+		return fn(creds)
+	})
+}
+
 // withStoreLock runs fn while holding the whole-store lock. fn must be one
 // store operation and must not make a network request: every process's
 // Save and Delete queue behind it.

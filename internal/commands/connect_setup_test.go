@@ -949,3 +949,29 @@ func TestConnectSetupRefusesACredentialReplacedDuringTheChecks(t *testing.T) {
 	assert.Contains(t, apiErr.Message, "changed while setup was checking it")
 	assertNotWritten(t, "bot")
 }
+
+// What setup writes names the identity the profile's credential
+// authenticates as, and connect.json's own check refuses any other. That is
+// what makes a credential replaced after setup harmless: the connector
+// stops instead of acting as the wrong agent.
+func TestConnectSetupWritesAPolicyBoundToTheCredential(t *testing.T) {
+	s := startConnectSetupServer(t)
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.NoError(t, err, out)
+
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	require.NoError(t, f.VerifyAgent(setup.KindAgent, setupAgentPerson, 0))
+
+	// The profile is pointed at someone else afterwards.
+	assert.Error(t, f.VerifyAgent(setup.KindBotUser, setupBotPerson, setupBotIdentity))
+	assert.Error(t, f.VerifyAgent(setup.KindAgent, 777, 0))
+
+	// And setup itself refuses the next run for the same reason.
+	storeConnectProfile(t, s, "agent", setupBotToken)
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--expect-identity", fmt.Sprint(setupBotIdentity))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+}

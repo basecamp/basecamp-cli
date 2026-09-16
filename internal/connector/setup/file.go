@@ -331,6 +331,25 @@ func refuseDuplicateKeys(data []byte) error {
 	return walk()
 }
 
+// VerifyAgent refuses a connect.json that does not describe the identity a
+// profile's credential authenticates as. It is the check that makes a
+// credential replaced behind setup's back harmless: whoever acts on
+// connect.json — setup before it writes, the connector before it runs —
+// proves the file and the credential name one agent, and refuses otherwise.
+func (f File) VerifyAgent(kind string, personID, identityID int64) error {
+	switch {
+	case personID <= 0:
+		return fmt.Errorf("connect.json names agent person %d, and the credential authenticates as no person", f.Agent.PersonID)
+	case f.Agent.PersonID != personID:
+		return fmt.Errorf("connect.json names agent person %d, and the credential authenticates as person %d", f.Agent.PersonID, personID)
+	case f.Agent.Kind != kind:
+		return fmt.Errorf("connect.json names a %s credential, and the profile holds a %s one", f.Agent.Kind, kind)
+	case f.Agent.Kind == KindBotUser && f.Agent.IdentityID != identityID:
+		return fmt.Errorf("connect.json names identity %d, and the login is identity %d", f.Agent.IdentityID, identityID)
+	}
+	return nil
+}
+
 // Load reads and validates the connect.json at path. A file that does not
 // exist is reported as os.ErrNotExist (use errors.Is). A file this user does
 // not solely control is refused before a byte of it is believed.
