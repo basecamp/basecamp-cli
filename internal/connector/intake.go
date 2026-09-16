@@ -144,6 +144,9 @@ type Intake struct {
 	replaying bool
 	// reentryReplays is whether the pending re-entry is a replay.
 	reentryReplays bool
+	// checkpointed is whether any connection in this run has saved a
+	// position.
+	checkpointed bool
 	// enteredByReentry is whether this connection is itself the safe
 	// re-entry after a refused position.
 	enteredByReentry bool
@@ -258,9 +261,14 @@ func (in *Intake) Run(ctx context.Context) error {
 	since := in.opts.SinceEventID
 	for {
 		err := in.runOnce(ctx, since)
-		// --since is an entry, not a standing instruction: a reconnect
-		// resumes from what this run stored.
-		since = 0
+		// --since is an entry, not a standing instruction: once a checkpoint
+		// has been saved, a reconnect resumes from it. Until then the explicit
+		// entry is the only position this run has, and a connection that ends
+		// before its first save must not leave the next one entering at the
+		// present.
+		if in.checkpointSaved() {
+			since = 0
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -582,6 +590,11 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 			// nothing, so a quiet feed is never proof of a quiet project.
 			in.log.Info("feed walk reached its head and the buffer drained")
 		},
+		Checkpoint: func(string) {
+			in.mu.Lock()
+			in.checkpointed = true
+			in.mu.Unlock()
+		},
 		CheckpointSaveFailed: func(err error) {
 			in.log.Error("could not save the feed position", "error", err)
 		},
@@ -841,6 +854,12 @@ func (in *Intake) setReplaying(replaying bool) {
 	in.mu.Lock()
 	in.replaying = replaying
 	in.mu.Unlock()
+}
+
+func (in *Intake) checkpointSaved() bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.checkpointed
 }
 
 // abort ends the current connection and the run with err.
