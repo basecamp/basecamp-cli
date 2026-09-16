@@ -36,6 +36,10 @@ type Queue struct {
 	// warning that no later event will clear.
 	edges  sync.Mutex
 	warned bool
+	// pending holds edges decided but not yet delivered, in the order they
+	// were decided; delivering says a goroutine is already draining them.
+	pending    []queueEdge
+	delivering bool
 	// waiting counts offers blocked for room. Intake and every open repair
 	// walk offer concurrently, so a single flag would be cleared by the first
 	// waiter to resume while another — perhaps the feed — still waits.
@@ -121,23 +125,41 @@ func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
 // recovery is the other half of the pair, so a warning is never left standing
 // after the thing it warned about went away.
 func (q *Queue) noteDepth() {
-	// The transition is decided under the lock; the callback runs after it,
-	// so a callback may observe or use the queue without deadlocking against
-	// the operation that raised it. Callbacks can therefore arrive out of
-	// order across goroutines, but the state they report on never is.
+	// The transition is decided under the lock, and appended to one ordered
+	// list of edges. Exactly one goroutine at a time delivers that list, in
+	// order, with the lock released around each callback: an operator sees the
+	// edges in the order the state took them, and a callback may use the queue
+	// — its own edge is queued behind, and delivered by, the drain already
+	// running.
 	q.edges.Lock()
 	depth := q.Depth()
-	var fire func(int)
 	switch {
 	case depth >= q.warnAt && !q.warned:
 		q.warned = true
-		fire = q.OnWarn
+		q.pending = append(q.pending, queueEdge{fire: q.OnWarn, depth: depth})
 	case depth < q.warnAt && q.warned:
 		q.warned = false
-		fire = q.OnRecover
+		q.pending = append(q.pending, queueEdge{fire: q.OnRecover, depth: depth})
 	}
+	if q.delivering {
+		q.edges.Unlock()
+		return
+	}
+	q.delivering = true
+	for len(q.pending) > 0 {
+		edge := q.pending[0]
+		q.pending = q.pending[1:]
+		q.edges.Unlock()
+		if edge.fire != nil {
+			edge.fire(edge.depth)
+		}
+		q.edges.Lock()
+	}
+	q.delivering = false
 	q.edges.Unlock()
-	if fire != nil {
-		fire(depth)
-	}
+}
+
+type queueEdge struct {
+	fire  func(int)
+	depth int
 }

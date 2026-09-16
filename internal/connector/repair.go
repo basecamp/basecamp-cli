@@ -95,7 +95,17 @@ func (w *repairWalker) settled(ctx context.Context, loss Loss) (bool, error) {
 	if _, err := w.ledger.CloseLoss(ctx, loss.ID, w.now()); err != nil {
 		return false, err
 	}
-	w.log.Info("a buffer overflow was fully reconciled", "loss_id", loss.ID)
+	// "Nothing missing" is not "everything recovered": an epoch can have
+	// fenced some ids off as unrecovered already. Say which it was.
+	unrecovered, err := w.ledger.MissingIDs(ctx, loss.ID, LossUnrecovered)
+	if err != nil {
+		return false, err
+	}
+	if len(unrecovered) > 0 {
+		w.log.Warn("a buffer overflow's reconciliation ended with events unrecovered", "loss_id", loss.ID, "unrecovered", len(unrecovered))
+	} else {
+		w.log.Info("a buffer overflow was fully reconciled", "loss_id", loss.ID)
+	}
 	return true, nil
 }
 

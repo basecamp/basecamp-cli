@@ -955,7 +955,7 @@ func (p *pointerWriter) write(event eventfeed.Event, lane Lane) error {
 		CreatorID:     event.CreatorID,
 		PerformedByID: event.PerformedByID,
 		RecordingID:   event.RecordingID,
-		CreatedAt:     event.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:     event.CreatedAt.UTC().Format(time.RFC3339Nano),
 		Lane:          lane,
 		State:         string(StateSeen),
 	})
