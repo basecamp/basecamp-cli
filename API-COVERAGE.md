@@ -232,7 +232,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
 | events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |
 | **Event Feed** |
-| event_feed | 3 | `events poll`, `events ticket`, `inbox` | ✅ | BC5 | - | The account-wide event feed: `GET /events.json` (`events poll`), `GET /inbox.json` (`inbox`, agent principals only), `POST /events/stream_ticket.json` (`events ticket`). Pagination is the body envelope — a durable `position` and a `next` continuation URL — not the Link-header page walk, so `--all` walks `next` rather than page numbers. The live WebSocket lane the ticket opens is out of scope for the CLI: the SDK's cable client carries a WebSocket dependency the CLI does not take |
+| event_feed | 3 | `events poll`, `events ticket`, `inbox` | ✅ | BC5 | - | The account-wide event feed: `GET /events.json` (`events poll`), `GET /inbox.json` (`inbox`, agent principals only), `POST /events/stream_ticket.json` (`events ticket`). Pagination is the body envelope — a durable `position` and a `next` continuation URL — not the Link-header page walk, so `--all` walks `next` rather than page numbers. The live WebSocket lane the ticket opens is out of scope for the CLI: the SDK's cable client carries a WebSocket dependency the CLI does not take. The mint is a CLI command only — it is excluded from the MCP surface, whose dispatcher would return the bearer verbatim into a model transcript and which could not open the socket anyway |
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |

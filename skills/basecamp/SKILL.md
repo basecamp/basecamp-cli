@@ -983,8 +983,9 @@ The two lanes have different filter sets, and they are not interchangeable:
 - `inbox`: `--reasons`, `--types`, `--buckets`. The other four are not flags
   here.
 
-Each takes a comma-separated list. These are the only narrowing available —
-neither command takes `--in <project>`; narrow to a project with `--buckets`.
+Each takes a comma-separated list. These are the only narrowing available:
+both commands accept the global `--in <project>` flag but ignore it, because
+these are account endpoints. Narrow to a project with `--buckets`.
 
 A position is bound to the filter set it was minted for, so a resume has to
 carry the same filters. Changing them exits `1` naming both filter digests,

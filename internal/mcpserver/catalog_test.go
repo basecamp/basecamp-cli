@@ -45,15 +45,20 @@ func TestCatalogClaimsEveryTag(t *testing.T) {
 	assert.Empty(t, cat.Unmapped, "every SDK tag must be claimed by a DomainSpec")
 }
 
-// TestCatalogExcludesBinaryUploads pins the operations the sync script drops
-// from the vendored model: raw-binary uploads can't ride the JSON tool-call
-// convention. Uploads stay a CLI affair (basecamp attach / upload).
-func TestCatalogExcludesBinaryUploads(t *testing.T) {
+// TestCatalogExcludesUnservedOperations pins the operations the sync script
+// drops from the vendored model. Raw-binary uploads can't ride the JSON
+// tool-call convention, so uploads stay a CLI affair (basecamp attach /
+// upload). The stream-ticket mint could ride it and is dropped anyway: its
+// result is a replayable bearer and a URL embedding it, the dispatcher
+// returns a result verbatim into a model transcript with no reveal opt-in,
+// and nothing on this surface could open the WebSocket it is for.
+func TestCatalogExcludesUnservedOperations(t *testing.T) {
 	cat := loadForTest(t)
 	excluded := map[string]bool{
 		"CreateAttachment":     true,
 		"CreateCampfireUpload": true,
 		"UpdateAccountLogo":    true,
+		"CreateStreamTicket":   true,
 	}
 	model, composite := 0, 0
 	for _, d := range cat.Domains {
@@ -66,7 +71,7 @@ func TestCatalogExcludesBinaryUploads(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 262, model, "served model operation count")
+	assert.Equal(t, 261, model, "served model operation count")
 	assert.Equal(t, 1, composite, "served composite operation count")
 }
 

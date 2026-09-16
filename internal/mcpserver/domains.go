@@ -82,7 +82,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "eventfeed",
 		Tags:  []string{"EventFeed"},
-		Blurb: "The account event feed: poll events from a resumable position, poll the agent inbox of addressed items, and mint a ticket for the live stream. Pages carry a position and a continuation URL rather than page numbers; deduplicate events by id and inbox items by addressing_id, and refetch the referenced recording before acting on it.",
+		Blurb: "The account event feed: poll events from a resumable position, and poll the agent inbox of addressed items. Pages carry a position and a continuation URL rather than page numbers; deduplicate events by id and inbox items by addressing_id, and refetch the referenced recording before acting on it. Minting a live-stream ticket is not served here — the ticket is a bearer this surface cannot use, and 'basecamp events ticket' is where it lives.",
 	},
 	{
 		Key:   "clientside",
