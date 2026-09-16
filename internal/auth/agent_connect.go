@@ -66,11 +66,12 @@ const (
 	// a Duration.
 	maxAgentConnectLifetime = 30 * time.Minute
 
-	// minAgentConnectInterval and maxAgentConnectInterval bound the poll
-	// pace: never faster than the server's rate limit tolerates, never so
-	// slow that an approval sits uncollected for minutes.
+	// minAgentConnectInterval is the floor under the poll's pace. There is
+	// no ceiling: a server asking to be polled slowly is asking for
+	// something it is entitled to, and the wait is bounded already by the
+	// code's own life — shortening a mandated delay only earns more 429s
+	// and may lose an approval that was already given.
 	minAgentConnectInterval = time.Second
-	maxAgentConnectInterval = time.Minute
 
 	// agentConnectSlowDownStep is RFC 8628 §3.5's answer to slow_down:
 	// five seconds onto the interval, every time it is said.
@@ -326,9 +327,26 @@ func (m *Manager) adoptAgentGrantOrSayWhatWasLost(ctx context.Context, disc *dis
 	result, err := m.adoptAgentGrant(ctx, disc, opts, conn.Scope)
 	if err != nil {
 		warnHandoverLost(log)
-		return nil, err
+		return nil, reconnectRemedy(err)
 	}
 	return result, nil
+}
+
+// reconnectRemedy replaces a remedy that cannot be followed here.
+//
+// An auth error out of the mint carries the agent login's own advice —
+// pipe the client secret in — which is right when an operator has the
+// secret in a vault. After a handover they do not: the poll revealed it
+// once, to this process, which has just failed to keep it. The only thing
+// that can be done is to disconnect and connect again.
+func reconnectRemedy(err error) error {
+	var e *output.Error
+	if !errors.As(err, &e) || e.Code != output.CodeAuth {
+		return err
+	}
+	hinted := *e
+	hinted.Hint = "Disconnect the agent in Basecamp and run the connect command again; the secret this connection was handed is gone."
+	return &hinted
 }
 
 // warnHandoverLost says what a failure after the handover costs, in the
@@ -531,7 +549,7 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 	case "authorization_pending":
 		return nil, interval, nil
 	case "slow_down":
-		return nil, clampAgentConnectInterval(interval + agentConnectSlowDownStep), nil
+		return nil, interval + agentConnectSlowDownStep, nil
 	case "access_denied":
 		return nil, 0, agentConnectFailure("The agent connection was declined",
 			"Run the connect command again and approve it in the browser.")
@@ -684,15 +702,16 @@ func oauthErrorCode(body []byte) string {
 // agentConnectBackoff is how long to wait after a throttled or failed
 // poll: what the server asked for, or one slow_down step. It never
 // shortens the interval — a server under pressure asking for less is not a
-// reason to poll it faster.
+// reason to poll it faster — and never caps what it asked for, which the
+// code's remaining life bounds anyway.
 func agentConnectBackoff(answer *agentConnectAnswer, interval time.Duration) time.Duration {
 	next := interval + agentConnectSlowDownStep
 	if seconds, err := strconv.Atoi(strings.TrimSpace(answer.header.Get("Retry-After"))); err == nil && seconds > 0 {
-		if asked := reportedSeconds(seconds, maxAgentConnectInterval); asked > next {
+		if asked := reportedSeconds(seconds, maxAgentConnectLifetime); asked > next {
 			next = asked
 		}
 	}
-	return clampAgentConnectInterval(next)
+	return atLeastMinimumInterval(next)
 }
 
 // agentConnectExpired is the one ending that is nobody's fault: the code
@@ -813,7 +832,7 @@ func agentConnectInterval(interval int) time.Duration {
 	if interval <= 0 {
 		return defaultAgentConnectInterval
 	}
-	return clampAgentConnectInterval(reportedSeconds(interval, maxAgentConnectInterval))
+	return atLeastMinimumInterval(reportedSeconds(interval, maxAgentConnectLifetime))
 }
 
 // reportedSeconds is a count of seconds a server reported, as a duration,
@@ -827,8 +846,10 @@ func reportedSeconds(seconds int, ceiling time.Duration) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func clampAgentConnectInterval(d time.Duration) time.Duration {
-	return min(max(d, minAgentConnectInterval), maxAgentConnectInterval)
+// atLeastMinimumInterval keeps a reported pace off the floor. What it
+// does NOT do is cap it: see minAgentConnectInterval.
+func atLeastMinimumInterval(d time.Duration) time.Duration {
+	return max(d, minAgentConnectInterval)
 }
 
 // agentConnectName checks one of the two self-asserted names against the

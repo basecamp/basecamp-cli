@@ -740,8 +740,11 @@ func TestAgentConnectIntervalIsBounded(t *testing.T) {
 	assert.Equal(t, defaultAgentConnectInterval, agentConnectInterval(0))
 	assert.Equal(t, defaultAgentConnectInterval, agentConnectInterval(-30))
 	assert.Equal(t, 7*time.Second, agentConnectInterval(7))
-	assert.Equal(t, maxAgentConnectInterval, agentConnectInterval(3600))
-	assert.Equal(t, minAgentConnectInterval, clampAgentConnectInterval(0))
+	// A slow pace the server asked for is honored rather than shortened;
+	// what bounds the wait is the code's own life, not a ceiling here.
+	assert.Equal(t, 5*time.Minute, agentConnectInterval(300))
+	assert.Equal(t, maxAgentConnectLifetime, agentConnectInterval(1<<40))
+	assert.Equal(t, minAgentConnectInterval, atLeastMinimumInterval(0))
 }
 
 // TestAgentConnectLifetimeIsBounded: the printed code's life, and the
@@ -792,4 +795,43 @@ func TestConnectAgentRefusesAHandoverWiderThanTheRequest(t *testing.T) {
 	assert.Empty(t, as.calls(&as.tokenForms), "a handover wider than the request is never minted with")
 	assertNoAgentCredential(t, m)
 	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+}
+
+// TestConnectAgentHonorsASlowRetryAfter: a Retry-After longer than a
+// minute is a delay the server is entitled to ask for. Polling sooner
+// earns another 429 and can leave an approval uncollected.
+func TestConnectAgentHonorsASlowRetryAfter(t *testing.T) {
+	as := startConnectAS(t)
+	as.pollHeader.Set("Retry-After", "120")
+	as.poll = func(call int) (int, string) {
+		if call == 0 {
+			return http.StatusTooManyRequests, `{"error":"slow_down"}`
+		}
+		return http.StatusOK, connectionJSON(scopeFull)
+	}
+	m := connectManager(t, as)
+	clock := newTestClock()
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, clock))
+	require.NoError(t, err)
+	assert.Equal(t, []time.Duration{time.Second, 2 * time.Minute}, clock.waits())
+}
+
+// TestConnectAgentHandsBackARemedyTheOperatorCanFollow: the mint's own
+// advice is to pipe the client secret in, which after a handover names a
+// value nobody has — the poll revealed it once, to the process that just
+// failed to keep it.
+func TestConnectAgentHandsBackARemedyTheOperatorCanFollow(t *testing.T) {
+	as := startConnectAS(t)
+	as.token = func() (int, string) {
+		return http.StatusUnauthorized, `{"error":"invalid_client"}`
+	}
+	m := connectManager(t, as)
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.Error(t, err)
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Contains(t, e.Hint, "Disconnect the agent in Basecamp")
+	assert.NotContains(t, e.Hint, "--with-client-credentials")
 }
