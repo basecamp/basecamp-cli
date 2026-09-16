@@ -124,8 +124,17 @@ func TestCommitLockHonoursCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = k.lock(ctx, "k")
-	require.ErrorIs(t, err, context.Canceled)
+	result := make(chan error, 1)
+	go func() {
+		_, err := k.lock(ctx, "k")
+		result <- err
+	}()
+	select {
+	case err = <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a canceled wait for a held lock did not return")
+	}
 
 	unlock()
 	k.mu.Lock()
@@ -208,12 +217,14 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
+		// One worker, and the record no longer seen first: were it decided,
+		// its line would be one of the two this test waits for.
 		done <- Run(ctx, RunOptions{
-			Source:    &sliceSource{ids: []int64{1, 2, 3}},
+			Source:    &sliceSource{ids: []int64{3, 1, 2}},
 			Records:   records,
 			Admitter:  newAdmitter(t, basePolicy(), f),
 			Committer: NewCommitter(ledger),
-			Workers:   2,
+			Workers:   1,
 			Lines:     out,
 		})
 	}()
@@ -235,7 +246,10 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 	}, lines[1])
 	assert.Equal(t, "discarded", lines[2]["state"])
 	assert.Equal(t, "not_in_matrix", lines[2]["reason"])
+	assert.NotContains(t, lines, int64(3))
+	ledger.mu.Lock()
 	assert.Len(t, ledger.commits, 2)
+	ledger.mu.Unlock()
 }
 
 type failingRecords struct{}
@@ -245,7 +259,11 @@ func (failingRecords) LoadSeen(context.Context, int64) (Event, bool, error) {
 }
 
 func TestRunStopsOnALedgerFailure(t *testing.T) {
-	err := Run(context.Background(), RunOptions{
+	// Bounded, so a Run that swallowed the failure fails this test by name
+	// rather than hanging the suite.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := Run(ctx, RunOptions{
 		Source:    &sliceSource{ids: []int64{1}},
 		Records:   failingRecords{},
 		Admitter:  newAdmitter(t, basePolicy(), newFakeReads()),

@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -427,6 +428,7 @@ func TestTheAgentNeverAuthorizesItself(t *testing.T) {
 		reason Reason
 	}{
 		{"created by the agent", Event{CreatorID: agentID}, ReasonAgentAuthored},
+		{"created by the agent, performed by another agent", Event{CreatorID: agentID, PerformedByID: ptr(otherAgent)}, ReasonAgentAuthored},
 		{"performed by the agent for the operator", Event{CreatorID: operatorID, PerformedByID: ptr(agentID)}, ReasonAgentAuthored},
 		{"an agent actor on the push lane", Event{CreatorID: operatorID, ActorType: ActorTypeAgent}, ReasonAgentAuthored},
 		{"another agent acting for the operator", Event{CreatorID: operatorID, PerformedByID: ptr(otherAgent)}, ReasonDelegated},
@@ -606,6 +608,8 @@ func TestSubscribedComments(t *testing.T) {
 		v := decide(t, newAdmitter(t, basePolicy(), f), comment)
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonNotAddressed, v.Reason)
+		assert.Nil(t, v.Snapshot, "a discarded record keeps no content")
+		assert.Empty(t, v.Trigger)
 	})
 
 	t.Run("in an unmapped project only the mention is considered", func(t *testing.T) {
@@ -670,4 +674,100 @@ func TestMatrixIsACopy(t *testing.T) {
 	m["card.moved"] = []Rule{{Trigger: "queued"}}
 	_, widened := V1Matrix()["card.moved"]
 	assert.False(t, widened)
+}
+
+func TestAllowlistMode(t *testing.T) {
+	p := basePolicy()
+	p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
+	card := func(performer int64) Event {
+		return Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: performer}
+	}
+
+	t.Run("an allowlisted person is trusted", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", allowedID, mentionOf(t, agentID))
+		v := decide(t, newAdmitter(t, p, f), card(allowedID))
+		assert.Equal(t, StateAdmitted, v.State)
+		assert.Zero(t, f.memberCalls)
+	})
+
+	t.Run("anyone else is not, without a read", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", memberID, mentionOf(t, agentID))
+		f.members[routedProj] = map[int64]bool{memberID: true}
+		v := decide(t, newAdmitter(t, p, f), card(memberID))
+		assert.Equal(t, StateDiscarded, v.State)
+		assert.Equal(t, ReasonUntrustedPerformer, v.Reason)
+		assert.Zero(t, f.totalReads())
+	})
+}
+
+func TestProjectModeContentAuthor(t *testing.T) {
+	p := basePolicy()
+	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
+	movedIn := Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+
+	for _, tc := range []struct {
+		author int64
+		state  State
+		reason Reason
+	}{
+		{memberID, StateAdmitted, ""},
+		{clientID, StateDiscarded, ReasonUntrustedAuthor},
+	} {
+		t.Run(strconv.FormatInt(tc.author, 10), func(t *testing.T) {
+			f := newFakeReads()
+			f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", tc.author, mentionOf(t, agentID))
+			f.members[routedProj] = map[int64]bool{memberID: true}
+
+			v := decide(t, newAdmitter(t, p, f), movedIn)
+			assert.Equal(t, tc.state, v.State)
+			assert.Equal(t, tc.reason, v.Reason)
+			assert.Equal(t, 1, f.memberCalls, "the author's membership is read; the operator's is not")
+		})
+	}
+}
+
+func TestSubscribedNeverStandsInForARefusedMention(t *testing.T) {
+	// With a matrix where subscription is the only rule, a comment that
+	// mentions the agent is still not a subscription trigger.
+	f := newFakeReads()
+	s := summaryWith(recordingID, routedProj, "Comment", operatorID, mentionOf(t, agentID))
+	s.Parent = &basecamp.Parent{ID: parentID}
+	f.summaries[recordingID] = s
+	f.subscriptions[parentID] = true
+
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithMatrix(Matrix{"comment.created": {ruleSubscribed}}))
+	require.NoError(t, err)
+	v := decide(t, a, Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateDiscarded, v.State)
+	assert.Equal(t, ReasonNotAddressed, v.Reason)
+	assert.Empty(t, f.subCalls)
+}
+
+func TestACommentWithoutItsRecordingCannotBeAnswered(t *testing.T) {
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Comment", operatorID, mentionOf(t, agentID))
+
+	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonReadFailed, v.Reason)
+}
+
+type nilSummaries struct{ *fakeReads }
+
+func (*nilSummaries) Summarize(context.Context, basecamp.RecordingRef) (*basecamp.RecordingSummary, error) {
+	return nil, nil //nolint:nilnil // the shape under test
+}
+
+func TestAnEmptySummaryIsAFailedRead(t *testing.T) {
+	f := &nilSummaries{fakeReads: newFakeReads()}
+	reads := f.reads()
+	reads.Summaries = f
+	a, err := NewAdmitter(basePolicy(), reads, WithSleep(func(context.Context, time.Duration) error { return nil }))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonReadFailed, v.Reason)
 }

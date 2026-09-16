@@ -209,7 +209,10 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		return Verdict{}, err
 	}
 	if state != "" {
-		v.Snapshot = nil
+		if state == StateBlocked {
+			// A blocked record re-runs its reads; it keeps no content meanwhile.
+			v.Snapshot = nil
+		}
 		return v.end(state, reason), nil
 	}
 
@@ -223,7 +226,6 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		// than dropped: the record keeps its snapshot and waits for a route.
 		// Any other trigger was already discarded at the gate.
 		if rule.RequiresRoute {
-			v.Snapshot = nil
 			return v.end(StateDiscarded, ReasonNoRoute), nil
 		}
 		return v.end(StateBlocked, ReasonNoRoute), nil
@@ -394,9 +396,6 @@ func (a *Admitter) subscribed(ctx context.Context, recordingID int64) (bool, Rea
 }
 
 func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64) (bool, Reason, error) {
-	if personID == a.policy.AgentID {
-		return false, "", nil
-	}
 	var member bool
 	err := a.retry(ctx, func() error {
 		var err error
@@ -460,6 +459,8 @@ func classifySummaryError(ctx context.Context, err error) (State, Reason, error)
 	}
 }
 
+// end sets the final state. A discarded record keeps no content, trigger or
+// destination: it is a tombstone in the making.
 func (v Verdict) end(state State, reason Reason) Verdict {
 	v.State, v.Reason = state, reason
 	if state == StateDiscarded {

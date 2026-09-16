@@ -48,7 +48,8 @@ var (
 func V1Matrix() Matrix {
 	return Matrix{
 		// A comment can both mention the agent and land on a recording it is
-		// subscribed to; the mention wins.
+		// subscribed to. The mention wins, and not by this order: the
+		// subscribed rule never applies to a comment that mentions the agent.
 		"comment.created":   {ruleMentioned, ruleSubscribed},
 		"message.created":   {ruleMentioned},
 		"todo.created":      {ruleMentioned},
