@@ -735,6 +735,38 @@ func TestACappedInboxWalkWarnsTheEnumeratingOutputModesToo(t *testing.T) {
 		stderr.String())
 }
 
+// A position is bound to the filter set it was minted for, and the walk's
+// last page is minted under the continuation's filters, not the first call's.
+// A resume command built from the original flags is a different set, and the
+// server answers 409.
+func TestTheResumeCommandCarriesTheContinuationsOwnFilters(t *testing.T) {
+	next := feedBaseURL + feedEventsPath + "?position=pos-1&types=message.created"
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK,
+		feedPageJSON("pos-1", next, 11),
+		feedPageJSON("pos-2", "", 12),
+	))
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "0", "--all"))
+
+	assert.Equal(t,
+		"Resume from here with: basecamp events poll --position pos-2 --types message.created",
+		decodeFeedEnvelope(t, out).Notice)
+}
+
+func TestTheInboxResumeCommandCarriesTheContinuationsOwnFilters(t *testing.T) {
+	next := feedBaseURL + feedInboxPath + "?position=inbox-pos-1&reasons=mentioned"
+	app, _, out := setupFeedApp(t, inboxRoute(http.StatusOK,
+		inboxPageJSON("inbox-pos-1", next, 991),
+		inboxPageJSON("inbox-pos-2", "", 992),
+	))
+
+	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app, "--since", "0", "--all"))
+
+	assert.Equal(t,
+		"Resume from here with: basecamp inbox --position inbox-pos-2 --reasons mentioned",
+		decodeFeedEnvelope(t, out).Notice)
+}
+
 func TestContinuationOriginComparisonNormalizesDefaultPortsAndCase(t *testing.T) {
 	require.NoError(t, checkContinuation("https://3.basecampapi.com:443", feedBaseURL+feedEventsPath+"?position=p"))
 	require.NoError(t, checkContinuation(feedBaseURL, "HTTPS://3.BasecampAPI.com"+feedEventsPath+"?position=p"))

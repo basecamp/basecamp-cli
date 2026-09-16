@@ -629,6 +629,10 @@ event id and refetch the referenced recording before acting on it.`,
 				if opts, err = basecamp.PollEventsOptionsFromURL(next); err != nil {
 					return convertSDKError(err)
 				}
+				// A position is bound to the filter set it was minted for, and
+				// the continuation carries its own. Re-entering with the first
+				// call's flags would be a different set, and a 409.
+				request.filters = requestFilters(eventsFilterFlags(opts))
 			}
 
 			summary := fmt.Sprintf("%d event(s)", len(events))

@@ -111,6 +111,7 @@ deduplicate by addressing_id, never by the event's id.`,
 				if opts, err = basecamp.PollInboxOptionsFromURL(next); err != nil {
 					return convertSDKError(err)
 				}
+				request.filters = requestFilters(inboxFilterFlags(opts))
 			}
 
 			summary := fmt.Sprintf("%d addressed item(s)", len(items))
