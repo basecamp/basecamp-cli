@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,11 +20,12 @@ var testNow = time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 // fakeLedger holds the ledger's contract as the intake adapter must: one
 // verdict per event, and admitted-or-queued decided in the commit itself.
 type fakeLedger struct {
-	mu      sync.Mutex
-	live    map[string]bool
-	decided map[int64]State
-	commits []Verdict
-	failure error
+	mu        sync.Mutex
+	live      map[string]bool
+	decided   map[int64]State
+	revisions map[int64]int64
+	commits   []Verdict
+	failure   error
 
 	// inFlight counts commits running per key, to catch two at once.
 	inFlight map[string]*atomic.Int32
@@ -32,7 +34,7 @@ type fakeLedger struct {
 }
 
 func newFakeLedger() *fakeLedger {
-	return &fakeLedger{live: map[string]bool{}, decided: map[int64]State{}, inFlight: map[string]*atomic.Int32{}}
+	return &fakeLedger{live: map[string]bool{}, decided: map[int64]State{}, revisions: map[int64]int64{}, inFlight: map[string]*atomic.Int32{}}
 }
 
 func (l *fakeLedger) Commit(_ context.Context, v Verdict) (State, error) {
@@ -55,7 +57,7 @@ func (l *fakeLedger) Commit(_ context.Context, v Verdict) (State, error) {
 	if l.failure != nil {
 		return "", l.failure
 	}
-	if prior, ok := l.decided[v.EventID]; ok && prior != StateBlocked {
+	if l.revisions[v.EventID] != v.Revision {
 		return "", ErrAlreadyDecided
 	}
 	state := v.State
@@ -71,6 +73,7 @@ func (l *fakeLedger) Commit(_ context.Context, v Verdict) (State, error) {
 		return "", errors.New("content on a verdict that is not admitted")
 	}
 	l.decided[v.EventID] = state
+	l.revisions[v.EventID]++
 	v.State = state
 	l.commits = append(l.commits, v)
 	return state, nil
@@ -111,14 +114,35 @@ func TestOneVerdictPerEvent(t *testing.T) {
 	_, err := c.Commit(context.Background(), v)
 	require.NoError(t, err)
 	_, err = c.Commit(context.Background(), v)
-	require.ErrorIs(t, err, ErrAlreadyDecided)
+	require.ErrorIs(t, err, ErrAlreadyDecided, "a second decision from the same load")
 
-	// A blocked record is decided again on recovery.
-	b := Verdict{EventID: 8, State: StateBlocked, Reason: ReasonReadFailed}
-	_, err = c.Commit(context.Background(), b)
+	// A blocked record is decided again from its new revision.
+	_, err = c.Commit(context.Background(), Verdict{EventID: 8, State: StateBlocked, Reason: ReasonNoRoute})
 	require.NoError(t, err)
-	_, err = c.Commit(context.Background(), Verdict{EventID: 8, State: StateAdmitted, ConversationKey: "recording:2"})
+	_, err = c.Commit(context.Background(), Verdict{EventID: 8, Revision: 1, State: StateAdmitted, ConversationKey: "recording:2"})
 	require.NoError(t, err)
+}
+
+func TestAnOlderDecisionNeverOverwritesANewerBlockedOne(t *testing.T) {
+	ledger := newFakeLedger()
+	c := NewCommitter(ledger)
+
+	// Two decisions loaded the record at the same revision; the one that
+	// finished second decided on an older read.
+	_, err := c.Commit(context.Background(), Verdict{EventID: 9, State: StateBlocked, Reason: ReasonNoRoute})
+	require.NoError(t, err)
+	_, err = c.Commit(context.Background(), Verdict{EventID: 9, State: StateDiscarded, Reason: ReasonNotAddressed})
+	require.ErrorIs(t, err, ErrAlreadyDecided)
+	assert.Equal(t, StateBlocked, ledger.decided[9])
+}
+
+func TestAnInterruptedDecisionIsNotWritten(t *testing.T) {
+	ledger := newFakeLedger()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := NewCommitter(ledger).Commit(ctx, Verdict{EventID: 1, State: StateAdmitted})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, ledger.decided)
 }
 
 func TestCommitsAreSerialisedPerConversation(t *testing.T) {
@@ -158,6 +182,17 @@ func TestCommitsAreSerialisedPerConversation(t *testing.T) {
 
 func TestCommitLockHonoursCancellation(t *testing.T) {
 	var k keyedMutex
+	// A free lock is not taken by a caller already canceled, however select
+	// picks between its ready cases.
+	ctx0, cancel0 := context.WithCancel(context.Background())
+	cancel0()
+	for range 100 {
+		if release, err := k.lock(ctx0, "free"); err == nil {
+			release()
+			t.Fatal("a canceled caller took a free lock")
+		}
+	}
+
 	unlock, err := k.lock(context.Background(), "k")
 	require.NoError(t, err)
 
@@ -188,7 +223,7 @@ func TestNextBlockedRetry(t *testing.T) {
 	require.True(t, ok)
 
 	_, ok = NextBlockedRetry(ReasonBucketMismatch, blockedAt, blockedAt)
-	assert.True(t, ok, "a recording that moved is looked at again")
+	assert.False(t, ok, "the pointer's bucket never changes; only a redispatch re-runs it")
 	_, ok = NextBlockedRetry(ReasonUnroutable, blockedAt, blockedAt)
 	assert.False(t, ok, "no timer can give a type a read")
 	assert.Equal(t, blockedAt.Add(10*time.Minute), next)
@@ -234,7 +269,7 @@ func (s *sliceSource) Take(ctx context.Context) (int64, error) {
 
 type mapRecords map[int64]Event
 
-func (m mapRecords) LoadSeen(_ context.Context, id int64) (Event, bool, error) {
+func (m mapRecords) LoadUndecided(_ context.Context, id int64) (Event, bool, error) {
 	ev, ok := m[id]
 	return ev, ok, nil
 }
@@ -315,8 +350,71 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 
 type failingRecords struct{}
 
-func (failingRecords) LoadSeen(context.Context, int64) (Event, bool, error) {
+func (failingRecords) LoadUndecided(context.Context, int64) (Event, bool, error) {
 	return Event{}, false, errors.New("database is locked")
+}
+
+func TestRunDistinguishesShutdownFromADeadline(t *testing.T) {
+	opts := func() RunOptions {
+		return RunOptions{
+			Source:    &sliceSource{},
+			Records:   mapRecords{},
+			Admitter:  newAdmitter(t, basePolicy(), newFakeReads()),
+			Committer: NewCommitter(newFakeLedger()),
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	require.NoError(t, Run(ctx, opts()), "a shutdown is not an error")
+
+	dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer dcancel()
+	require.ErrorIs(t, Run(dctx, opts()), context.DeadlineExceeded)
+}
+
+type chunkWriter struct {
+	b     strings.Builder
+	chunk int
+}
+
+func (w *chunkWriter) Write(p []byte) (int, error) {
+	n := min(w.chunk, len(p))
+	w.b.Write(p[:n])
+	return n, nil
+}
+
+type stuckWriter struct{}
+
+func (stuckWriter) Write([]byte) (int, error) { return 0, nil }
+
+func TestALineIsWrittenWholeOrNotAtAll(t *testing.T) {
+	w := &chunkWriter{chunk: 7}
+	require.NoError(t, (&lineWriter{w: w}).write(Verdict{EventID: 1, EventType: "card.created", State: StateDiscarded, Reason: ReasonNotInMatrix}))
+	var m map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSuffix(w.b.String(), "\n")), &m), "a writer that takes a line in pieces still gets all of it")
+	assert.True(t, strings.HasSuffix(w.b.String(), "}\n"))
+
+	err := (&lineWriter{w: stuckWriter{}}).write(Verdict{EventID: 1, State: StateDiscarded})
+	require.ErrorIs(t, err, io.ErrShortWrite)
+}
+
+func TestLinesCannotCarryTerminalControls(t *testing.T) {
+	esc, csi, bel := string(rune(0x1b)), string(rune(0x9b)), string(rune(0x07))
+	var b strings.Builder
+	require.NoError(t, (&lineWriter{w: &b}).write(Verdict{
+		EventID:      1,
+		EventType:    "card.created" + esc + "]0;owned" + bel,
+		RecordingURL: "https://app.basecamp.com/x" + csi + "31m" + esc + "[2J",
+		Route:        "/work" + esc + "[1m",
+		State:        StateDiscarded,
+		Reason:       ReasonNotInMatrix,
+	}))
+	for _, control := range []string{esc, csi, bel} {
+		assert.NotContains(t, b.String(), control)
+	}
+	var m map[string]any
+	require.NoError(t, json.Unmarshal([]byte(b.String()), &m))
+	assert.Equal(t, "card.created", m["event_type"], "the whole OSC sequence goes, payload included")
 }
 
 func TestRunStopsOnACommitFailure(t *testing.T) {

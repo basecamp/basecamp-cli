@@ -41,17 +41,23 @@
 //
 // Every rule below is held by a test that fails without it.
 //
-//  1. No agent authorizes. The agent itself, any Agent principal, and any
-//     delegated action are refused wherever they appear: as the event's
-//     creator or performer, as its actor type, as a project member, or as
-//     the author of the recording carrying the instruction.
+//  1. No agent authorizes. The agent itself is refused as the event's creator
+//     or performer and as the author of the recording carrying the
+//     instruction. Any other agent is refused as a delegate, as the push
+//     lane's actor type, as a project member, and as that author. One case
+//     the pointer cannot show: on the poll lane, an Agent person the operator
+//     put in the allowlist, performing an event whose content it did not
+//     write (a completion). Allowlisting an agent is an operator error that
+//     Validate cannot detect; the feed's actor_types=person filter excludes
+//     agents at source.
 //  2. An assignment is admitted only when the operator performed it, the
 //     recording's events show this event added the agent, and the agent is
 //     still assigned. Missing, unfound or partial assignment data blocks as
 //     delta_unverified; it never admits and never discards.
 //  3. Discarded means verified. A discard rests on the pointer and the policy,
-//     or on a read that answered with what the verdict needs, read fresh when
-//     the answer is negative. A read that failed, was refused, or answered
+//     or on a read that answered with what the verdict needs. A negative
+//     subscription answer is always read fresh; a membership refusal is either
+//     named by the listing or read fresh. A read that failed, was refused, or answered
 //     without an author, a parent or a Campfire blocks; blocked records are
 //     retained and recovered.
 //  4. Only an admitted verdict carries the recording's content. A blocked or
@@ -59,9 +65,10 @@
 //     one what its holding reply needs. Nothing written to stdout carries
 //     content.
 //  5. One verdict per event, chosen and written in one ledger transaction.
-//     The ledger refuses a verdict for a record already decided, and it
-//     decides admitted or queued against the conversation as it stands in
-//     that transaction. The committer reports what the ledger wrote.
+//     The ledger refuses a verdict whose record changed after the decision
+//     loaded it, and decides admitted or queued against the conversation as
+//     it stands in that transaction. The committer reports what the ledger
+//     wrote. A decision the context interrupted is not written.
 //
 // # The seam with intake
 //

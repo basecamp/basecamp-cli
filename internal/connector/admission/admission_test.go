@@ -349,6 +349,20 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 		assert.Equal(t, 1, f.summaryCalls)
 	})
 
+	for _, code := range []string{basecamp.CodeAuth, basecamp.CodeForbidden} {
+		t.Run("a "+code+" is blocked at once", func(t *testing.T) {
+			f := newFakeReads()
+			for range DefaultReadAttempts {
+				f.summaryErrs = append(f.summaryErrs, &basecamp.Error{Code: code, Message: code})
+			}
+
+			v := decide(t, newAdmitter(t, basePolicy(), f), ev)
+			assert.Equal(t, StateBlocked, v.State)
+			assert.Equal(t, ReasonReadFailed, v.Reason)
+			assert.Equal(t, 1, f.summaryCalls)
+		})
+	}
+
 	t.Run("a canceled context during a subscription read is not a verdict", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
@@ -860,6 +874,22 @@ func TestSubscribedNeverStandsInForARefusedMention(t *testing.T) {
 	assert.Empty(t, f.subCalls)
 }
 
+func TestASubscriptionRuleWithoutAParentBlocks(t *testing.T) {
+	// A later matrix row may put the subscribed rule on a type the
+	// completeness check does not key on; the rule guards itself.
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Message", operatorID, "<div>news</div>")
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithMatrix(Matrix{"message.created": {ruleSubscribed}}))
+	require.NoError(t, err)
+
+	var v Verdict
+	require.NotPanics(t, func() {
+		v = decide(t, a, Event{ID: eventID, EventType: "message.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonReadFailed, v.Reason)
+}
+
 func TestACommentWithoutItsRecordingCannotBeAnswered(t *testing.T) {
 	for name, content := range map[string]string{
 		"with a mention":    mentionOf(t, agentID),
@@ -894,4 +924,10 @@ func TestAnEmptySummaryIsAFailedRead(t *testing.T) {
 	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonReadFailed, v.Reason)
+}
+
+func TestAVerdictCarriesTheRevisionItWasDecidedFrom(t *testing.T) {
+	f := newFakeReads()
+	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID, Revision: 4})
+	assert.EqualValues(t, 4, v.Revision)
 }

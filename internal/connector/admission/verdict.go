@@ -57,6 +57,8 @@ type Verdict struct {
 	EventType   string
 	BucketID    int64
 	RecordingID int64
+	// Revision is the record revision the decision started from.
+	Revision int64
 	// RequesterID is the performer whose trust admitted the event.
 	RequesterID int64
 
@@ -157,6 +159,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		BucketID:    ev.BucketID,
 		RecordingID: ev.RecordingID,
 		RequesterID: ev.Performer(),
+		Revision:    ev.Revision,
 	}
 
 	gate := Gate(ev, a.policy, a.matrix)
@@ -267,6 +270,11 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			// refused.
 			if mentioned {
 				continue
+			}
+			if summary.Parent == nil || summary.Parent.ID <= 0 {
+				// The subscription asked is the parent's; without one there is
+				// nothing to ask, and nothing verified.
+				return Rule{}, StateBlocked, ReasonReadFailed, nil
 			}
 			subscribed, reason, err := a.subscribed(ctx, summary.Parent.ID)
 			if err != nil {

@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// ErrAlreadyDecided is the ledger's answer to a verdict for a record that has
-// already moved past deciding.
+// ErrAlreadyDecided is the ledger's answer to a verdict whose record changed
+// after the decision loaded it: another decision was written first.
 var ErrAlreadyDecided = errors.New("admission: event already decided")
 
 // Ledger is the durable half of a verdict. Intake's SQLite ledger implements
@@ -18,16 +18,19 @@ type Ledger interface {
 	// Commit writes v onto its event's record in one transaction and returns
 	// the state it wrote. Within that transaction it must:
 	//
-	//   - apply only to a record still being decided — seen, or blocked (a
-	//     blocked record is decided again on recovery) — and return
-	//     ErrAlreadyDecided for any other, so an event is admitted at most
-	//     once however many fetches or restarts decide it;
+	//   - apply only when the record's revision is still v.Revision, the one
+	//     the decision was loaded at, and bump it; otherwise return
+	//     ErrAlreadyDecided. So an event is admitted at most once however many
+	//     fetches, restarts or redispatches decide it, and a decision made on
+	//     an older load never overwrites a newer verdict, blocked ones
+	//     included;
 	//   - for an admitted verdict, read the conversation in the same
 	//     transaction and write queued when it is live — a task running, or
 	//     an admitted record not yet dispatched, since that record becomes the
 	//     task — so an event queued before the task closes joins it and one
 	//     after starts a new task;
-	//   - write no content for a verdict that is not admitted.
+	//   - write content only for an admitted verdict, which it may write as
+	//     queued.
 	Commit(ctx context.Context, v Verdict) (State, error)
 }
 
@@ -53,6 +56,10 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 			return v, err
 		}
 		defer unlock()
+	}
+	// A shutdown that arrived while this waited is not a verdict to write.
+	if err := ctx.Err(); err != nil {
+		return v, err
 	}
 	written, err := c.ledger.Commit(ctx, v)
 	if err != nil {
@@ -105,6 +112,13 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 
 	select {
 	case l.ch <- struct{}{}:
+		// With the lock free and ctx already done, select may pick either
+		// case; a canceled caller never holds the lock.
+		if err := ctx.Err(); err != nil {
+			<-l.ch
+			release()
+			return nil, err
+		}
 		return func() {
 			<-l.ch
 			release()
@@ -118,7 +132,8 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 // Blocked-record recovery. A record blocked on a read (read_failed,
 // read_unresolved) or on an unverified assignment delta is retried every ten
 // minutes for a day after it was first blocked, and on redispatch at any time
-// after that. It is never discarded for having failed: the checkpoint may
+// after that. bucket_mismatch and unroutable are not timed: the pointer's
+// bucket and type never change, so only a person's redispatch re-runs them. It is never discarded for having failed: the checkpoint may
 // already be past the event, and a tombstone would turn an outage into a
 // permanent loss.
 const (
@@ -131,7 +146,7 @@ const (
 // a person's redispatch once the window has passed.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt time.Time) (time.Time, bool) {
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonBucketMismatch:
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified:
 	default:
 		return time.Time{}, false
 	}

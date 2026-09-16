@@ -29,6 +29,11 @@ type Event struct {
 	// Details is the type-specific detail object, verbatim; nil for the v1
 	// trigger types, which publish none.
 	Details json.RawMessage
+
+	// Revision is the ledger record's revision when it was loaded. It is not
+	// part of the feed's pointer: the ledger's Commit compares it, so a
+	// decision made on an older load never overwrites a newer one.
+	Revision int64
 }
 
 // Performer is the effective performer: the delegating agent when the action

@@ -193,6 +193,41 @@ func TestNotSubscribedIsAlwaysReadFresh(t *testing.T) {
 	assert.True(t, got, "a subscription made after a negative answer is seen")
 }
 
+func TestAssignmentEventWithDetailsButNoAddedIDsIsUnverified(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"action":"assignment_changed","details":{}}]`, eventID)
+	}))
+	_, found, err := (&Assignments{client: client}).AddedPersonIDs(context.Background(), 9001, eventID)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func TestAssignmentEventThatAddedNobodyIsEvidence(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"action":"assignment_changed","details":{"added_person_ids":[],"removed_person_ids":[5]}}]`, eventID)
+	}))
+	added, found, err := (&Assignments{client: client}).AddedPersonIDs(context.Background(), 9001, eventID)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Empty(t, added)
+}
+
+func TestSDKReadsOwnOneRetryBudget(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	// An ordinary client would retry three times underneath the admitter's
+	// five attempts.
+	reads := NewSDKReads(&basecamp.Config{BaseURL: srv.URL}, staticToken{}, "999")
+
+	_, err := reads.Subscriptions.Subscribed(context.Background(), 1)
+	require.Error(t, err)
+	assert.EqualValues(t, 1, calls.Load(), "one HTTP request per admission attempt")
+}
+
 func TestMembershipSeesSomeoneAddedAfterTheListingWasCached(t *testing.T) {
 	var calls atomic.Int32
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -202,11 +237,13 @@ func TestMembershipSeesSomeoneAddedAfterTheListingWasCached(t *testing.T) {
 		}
 		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false},{"id":%d,"client":false}]`, operatorID, memberID)
 	}))
-	members := NewMembers(client, time.Now)
+	c := &clock{now: testNow}
+	members := NewMembers(client, c.Now)
 
 	got, err := members.NonClientMember(context.Background(), routedProj, operatorID)
 	require.NoError(t, err)
 	assert.True(t, got)
+	c.advance(MembershipRefreshFloor)
 	got, err = members.NonClientMember(context.Background(), routedProj, memberID)
 	require.NoError(t, err)
 	assert.True(t, got)
@@ -268,7 +305,49 @@ func TestMembershipExcludesClientsAndIsCached(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, got, "person %d", tc.id)
 	}
-	assert.EqualValues(t, 1+3, calls.Load(), "the member from the cache; each of the three refusals from a fresh listing")
+	assert.EqualValues(t, 1, calls.Load(), "a client or an agent the listing names is a cached refusal; someone it does not name, within the refresh floor, too")
+}
+
+func TestARefusalTheListingNamesNeedsNoFreshListing(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":true},{"id":%d,"personable_type":"Agent","client":false}]`, clientID, otherAgent)
+	}))
+	c := &clock{now: testNow}
+	members := NewMembers(client, c.Now)
+
+	_, err := members.NonClientMember(context.Background(), routedProj, clientID)
+	require.NoError(t, err)
+	c.advance(MembershipRefreshFloor)
+	for range 20 {
+		for _, id := range []int64{clientID, otherAgent} {
+			got, err := members.NonClientMember(context.Background(), routedProj, id)
+			require.NoError(t, err)
+			assert.False(t, got)
+		}
+	}
+	assert.EqualValues(t, 1, calls.Load(), "a client or agent the listing names is refused from the cache, past the floor")
+}
+
+func TestUnnamedPeopleCostOneListingPerFloor(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
+	}))
+	c := &clock{now: testNow}
+	members := NewMembers(client, c.Now)
+
+	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	require.NoError(t, err)
+	c.advance(MembershipRefreshFloor)
+	for i := range int64(50) {
+		got, err := members.NonClientMember(context.Background(), routedProj, 5000+i)
+		require.NoError(t, err)
+		assert.False(t, got)
+	}
+	assert.EqualValues(t, 2, calls.Load(), "fifty strangers after the floor: one fresh listing")
 }
 
 func TestCacheIsBounded(t *testing.T) {

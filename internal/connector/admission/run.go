@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // DefaultWorkers is the admission fetcher pool size.
@@ -19,14 +21,16 @@ type IDSource interface {
 	Take(ctx context.Context) (int64, error)
 }
 
-// Records loads a record for admission. ok is false when the id is unknown or
-// the record is no longer seen — already decided by an earlier run — so it is
+// Records loads a record for admission. It returns a record still being
+// decided — seen, or blocked (recovery and redispatch decide a blocked record
+// again) — with Event.Revision set to the record's revision as loaded. ok is
+// false when the id is unknown or the record is past deciding, so it is
 // skipped rather than decided twice.
 //
 // This is the seam where intake hands admission an event: the adapter over
 // intake's Ledger.Get lands once PR 729 merges.
 type Records interface {
-	LoadSeen(ctx context.Context, id int64) (ev Event, ok bool, err error)
+	LoadUndecided(ctx context.Context, id int64) (ev Event, ok bool, err error)
 }
 
 // RunOptions configures the admission loop.
@@ -43,8 +47,10 @@ type RunOptions struct {
 }
 
 // Run takes ids until ctx ends, deciding and committing each. It returns nil
-// when ctx ends, and the first error that is not ctx's otherwise: a ledger
-// that cannot load or commit is not something to skip past.
+// when ctx is canceled (a shutdown), ctx's error when its deadline passed, and
+// the first other error otherwise: a ledger that cannot load or commit, or a
+// line that cannot be written, is not something to skip past. An event whose
+// decision ctx interrupted is not committed; it stays as it was loaded.
 func Run(ctx context.Context, opts RunOptions) error {
 	if opts.Source == nil || opts.Records == nil || opts.Admitter == nil || opts.Committer == nil {
 		return errors.New("admission: run needs a source, records, an admitter and a committer")
@@ -93,11 +99,14 @@ func Run(ctx context.Context, opts RunOptions) error {
 		})
 	}
 	wg.Wait()
+	if firstErr == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return ctx.Err()
+	}
 	return firstErr
 }
 
 func admitOne(ctx context.Context, opts RunOptions, lines *lineWriter, log *slog.Logger, id int64) error {
-	ev, ok, err := opts.Records.LoadSeen(ctx, id)
+	ev, ok, err := opts.Records.LoadUndecided(ctx, id)
 	if err != nil {
 		return fmt.Errorf("admission: load event %d: %w", id, err)
 	}
@@ -141,21 +150,25 @@ type Line struct {
 
 // LineFor builds the stdout line for a verdict.
 func LineFor(v Verdict) Line {
-	line := Line{
-		Type:        "event",
-		EventID:     v.EventID,
-		EventType:   v.EventType,
-		Trigger:     v.Trigger,
-		Class:       v.Class,
-		Route:       v.Route,
-		BucketID:    v.BucketID,
-		RecordingID: v.RecordingID,
-		RequesterID: v.RequesterID,
-		State:       v.State,
-		Reason:      v.Reason,
+	// Every string is sanitized for a terminal. The line is a wire, but it is
+	// also what a person watching the connector sees, and the event type and
+	// URL come from Basecamp: JSON escapes C0 controls but passes C1 controls
+	// such as U+009B (CSI) through as raw UTF-8.
+	clean := richtext.SanitizeSingleLine
+	return Line{
+		Type:         "event",
+		EventID:      v.EventID,
+		EventType:    clean(v.EventType),
+		Trigger:      Trigger(clean(string(v.Trigger))),
+		Class:        clean(v.Class),
+		Route:        clean(v.Route),
+		BucketID:     v.BucketID,
+		RecordingID:  v.RecordingID,
+		RecordingURL: clean(v.RecordingURL),
+		RequesterID:  v.RequesterID,
+		State:        State(clean(string(v.State))),
+		Reason:       Reason(clean(string(v.Reason))),
 	}
-	line.RecordingURL = v.RecordingURL
-	return line
 }
 
 type lineWriter struct {
@@ -173,8 +186,18 @@ func (l *lineWriter) write(v Verdict) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, err := l.w.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("admission: write line: %w", err)
+	// One line, whole: a writer that takes part of it is written the rest,
+	// and one that takes none without an error has failed. A torn line is
+	// worse than no line to whoever parses the stream.
+	for rest := append(b, '\n'); len(rest) > 0; {
+		n, err := l.w.Write(rest)
+		if err != nil {
+			return fmt.Errorf("admission: write line: %w", err)
+		}
+		if n <= 0 {
+			return fmt.Errorf("admission: write line: %w", io.ErrShortWrite)
+		}
+		rest = rest[n:]
 	}
 	return nil
 }
