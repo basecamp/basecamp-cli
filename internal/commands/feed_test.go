@@ -589,6 +589,18 @@ func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
 // response is not ours to trust, and a URL that carries the credential
 // anywhere else is withheld whole rather than echoed with one parameter
 // blanked.
+// url.URL.String picks its own encoding per component, so a search for the
+// raw secret misses whichever component it re-spelled — the scheme, then the
+// host. The rendering is decoded before it is checked, which normalizes that
+// for every component at once rather than one more at a time.
+func TestRedactTicketURLWithholdsATicketTheRenderingRespells(t *testing.T) {
+	assert.Equal(t, redactedTicket,
+		redactTicketURL("wss://\u79d8\u5bc6.example/cable?ticket=\u79d8\u5bc6", "\u79d8\u5bc6"))
+
+	assert.Equal(t, redactedTicket,
+		redactTicketURL("wss://chat.example.test/a\u79d8\u5bc6b?ticket=\u79d8\u5bc6", "\u79d8\u5bc6"))
+}
+
 // The secret is every ticket the response presents. When the URL's own
 // ticket parameter disagrees with the body's field, the URL's is the one that
 // would open the stream — so checking only the body's would clear a display
@@ -620,6 +632,7 @@ func TestRedactTicketURLWithholdsATicketEchoedOutsideItsParameter(t *testing.T) 
 		{"port", "wss://chat.example.test:8443/tkt-secret?ticket=tkt-secret"},
 		{"path", "wss://chat.example.test/tkt-secret?ticket=tkt-secret"},
 		{"escaped path", "wss://chat.example.test/195539477%2Ftkt-secret?ticket=tkt-secret"},
+		{"escaped host", "wss://tkt-secret%2Eexample.test/cable?ticket=tkt-secret"},
 		{"second query parameter", "wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret"},
 		{"repeated ticket parameter", "wss://chat.example.test/195539477?ticket=tkt-secret&ticket=tkt-secret"},
 		{"fragment", "wss://chat.example.test/195539477?ticket=tkt-secret#tkt-secret"},

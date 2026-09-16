@@ -791,17 +791,23 @@ const redactedTicket = "[REDACTED]"
 // rendering happens to choose (a ticket "abc/def" echoed as "abc%2Fdef"
 // reads as neither). Userinfo and the fragment are dropped the same way.
 //
-// What survives is then vetted as the finished string rather than component
-// by component, because a list of components to check is a list to be caught
-// out by — the scheme was missed exactly that way. Both spellings are tested:
-// the rendering, which escapes, and the decoded path, which is where an
-// escaped copy would hide from it.
+// What survives is then vetted at the exit point, against two axes that each
+// cost a round of this to find.
 //
-// Every ticket the response presents counts as the secret, not just the
+// Which string is secret: every ticket the response presents, not just the
 // body's field. If the URL's own ticket parameter disagrees with the body,
-// the URL's is the one that would open the stream, so it is the one that
-// must not survive. Anything still holding any of them is withheld whole, as
-// is a URL that will not parse or carries no ticket parameter — that is not
+// the URL's is the one that would open the stream.
+//
+// Which spelling to look for: the rendering and its percent-decoding, not the
+// components one at a time. url.URL.String escapes per component and picks
+// the encoding itself — an escaped path, a non-ASCII host — so a search for
+// the raw secret against a list of components misses whichever one it
+// happened to re-spell, which is how the scheme and then the host got
+// through. Decoding the finished string normalizes that away for every
+// component at once, including the ones nobody has named.
+//
+// Anything still holding any ticket is withheld whole, as is a URL that will
+// not parse, will not decode, or carries no ticket parameter — that is not
 // the shape this was promised.
 func redactTicketURL(raw, ticket string) string {
 	parsed, err := url.Parse(raw)
@@ -820,9 +826,13 @@ func redactTicketURL(raw, ticket string) string {
 		RawQuery: url.Values{"ticket": {redactedTicket}}.Encode(),
 	}
 	rendered := display.String()
+	decoded, err := url.PathUnescape(rendered)
+	if err != nil {
+		return redactedTicket
+	}
 
 	for _, secret := range append([]string{ticket}, query["ticket"]...) {
-		if secret != "" && (strings.Contains(rendered, secret) || strings.Contains(parsed.Path, secret)) {
+		if secret != "" && (strings.Contains(rendered, secret) || strings.Contains(decoded, secret)) {
 			return redactedTicket
 		}
 	}
