@@ -14,6 +14,7 @@ package mcpserver
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -42,7 +43,13 @@ func loadCatalog() (*catalog.Catalog, error) {
 	if err := rescopeToAccount(cat); err != nil {
 		return nil, err
 	}
-	synthesizePageParams(cat)
+	styles, err := paginationStyles(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := synthesizePageParams(cat, styles); err != nil {
+		return nil, err
+	}
 	if err := installComposites(cat); err != nil {
 		return nil, err
 	}
@@ -82,7 +89,44 @@ func rescopeToAccount(cat *catalog.Catalog) error {
 	return nil
 }
 
-// synthesizePageParams gives every paginated operation a page query
+// Pagination styles the behavior model declares, as basecamp-sdk spells them.
+const (
+	// paginationLink pages by number, through a Link rel="next" header the
+	// dispatcher reads back into next_page.
+	paginationLink = "link"
+	// paginationCursor pages by an opaque position the response body
+	// carries (basecamp-sdk#914): the event feed's poll lanes.
+	paginationCursor = "cursor"
+)
+
+// paginationStyles reads each paginated operation's declared style from the
+// behavior model. The toolkit's catalog keeps only whether an operation is
+// paginated, not how, and the page parameter depends on how.
+func paginationStyles(model fs.FS) (map[string]string, error) {
+	raw, err := fs.ReadFile(model, "behavior-model.json")
+	if err != nil {
+		return nil, fmt.Errorf("embedded behavior model: %w", err)
+	}
+	var doc struct {
+		Operations map[string]struct {
+			Pagination *struct {
+				Style string `json:"style"`
+			} `json:"pagination"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("embedded behavior model: %w", err)
+	}
+	styles := make(map[string]string, len(doc.Operations))
+	for id, op := range doc.Operations {
+		if op.Pagination != nil {
+			styles[id] = op.Pagination.Style
+		}
+	}
+	return styles, nil
+}
+
+// synthesizePageParams gives every Link-style paginated operation a page query
 // parameter. The SDK export marks a handful of operations paginated without
 // declaring one (ListWebhooks, ListChatbots, ...); left alone, that makes
 // every page after the first unreachable over MCP — the dispatcher rejects
@@ -90,10 +134,32 @@ func rescopeToAccount(cat *catalog.Catalog) error {
 // returns could never be passed back. Synthesizing from the paginated trait
 // covers whatever the model marks, and no-ops once the export declares the
 // parameter itself.
-func synthesizePageParams(cat *catalog.Catalog) {
+//
+// Only Link style, keyed off the style the model declares rather than any
+// operation's name. A cursor-style operation pages by a position its own
+// response carries, and a page number means nothing to it: BC3 ignores the
+// parameter, so a caller passing page=2 would be served the first page again
+// with nothing in the answer to say so. Those operations keep the entry-point
+// parameters the model gives them (since, position) and nothing else.
+//
+// A paginated operation with a style this function does not recognize stops
+// the load. Defaulting it either way is a silent guess — a page parameter that
+// does nothing, or a listing whose later pages cannot be reached — so a new
+// style has to be decided about here before the server will start.
+func synthesizePageParams(cat *catalog.Catalog, styles map[string]string) error {
 	for _, d := range cat.Domains {
 		for _, op := range d.Operations {
-			if !op.Paginated || declaresPage(op) {
+			if !op.Paginated {
+				continue
+			}
+			switch style := styles[op.ID]; style {
+			case paginationCursor:
+				continue
+			case paginationLink:
+			default:
+				return fmt.Errorf("operation %q declares pagination style %q, which the page parameter has not been decided for", op.ID, style)
+			}
+			if declaresPage(op) {
 				continue
 			}
 			op.Params = append(op.Params, catalog.Param{
@@ -104,6 +170,7 @@ func synthesizePageParams(cat *catalog.Catalog) {
 			})
 		}
 	}
+	return nil
 }
 
 func declaresPage(op *catalog.Operation) bool {
