@@ -94,7 +94,7 @@ func OpenLedger(path string) (*Ledger, error) {
 	db.SetMaxOpenConns(1)
 
 	l := &Ledger{db: db, now: time.Now}
-	if err := l.migrate(context.Background()); err != nil {
+	if err := retryBusy(func() error { return l.migrate(context.Background()) }); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -108,6 +108,30 @@ func OpenLedger(path string) (*Ledger, error) {
 		}
 	}
 	return l, nil
+}
+
+// retryBusy retries fn while SQLite reports the database busy, for up to five
+// seconds.
+//
+// The busy timeout covers ordinary contention, but not all of it: switching a
+// fresh database into WAL mode takes a lock the busy handler is not consulted
+// for, so two processes opening one new ledger at once — `status` beside a
+// starting connector — can get SQLITE_BUSY immediately. The migration is
+// idempotent, so trying again is safe.
+func retryBusy(fn func() error) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := fn()
+		if err == nil || !isBusy(err) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func isBusy(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
 }
 
 // securePath makes the ledger private or refuses it.

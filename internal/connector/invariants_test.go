@@ -268,8 +268,8 @@ func TestInvariantE3MembershipComparison(t *testing.T) {
 func TestInvariantH2ConcurrentFreshOpensAllSucceed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "connector.db")
 	var wg sync.WaitGroup
-	errs := make(chan error, 8)
-	for range 8 {
+	errs := make(chan error, 32)
+	for range 32 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
