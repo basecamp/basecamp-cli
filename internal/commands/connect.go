@@ -97,15 +97,15 @@ holding reply and no work. --watch-completions <project-id> makes the agent
 hear every trusted completion in that project without being assigned.
 
 connect.json is written owner-only and refused when anyone else could have
-changed it or a directory above it. On Windows it must live under your user
-profile directory.
+changed it or a directory above it. Where this CLI cannot verify that
+(Windows), setup refuses rather than write a trust file it cannot vouch for.
 
 Setup exits non-zero when a check fails, after writing connect.json.
 
 Run setup again to change any of it; what you do not pass is kept.
 
 Examples:
-  basecamp connect setup -P agent --route 12345=~/Work/app
+  basecamp connect setup -P agent --operator-profile me --route 12345=~/Work/app
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P bot --expect-identity 4242 --route 12345=~/Work/app --watch-completions 12345
   basecamp connect setup -P agent --class 12345=internal --deadline 90m --worktrees`,
@@ -140,21 +140,6 @@ Examples:
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 
 	return cmd
-}
-
-// connectSetupResult is what setup reports.
-type connectSetupResult struct {
-	Path          string        `json:"path"`
-	Profile       string        `json:"profile"`
-	AccountID     string        `json:"account_id"`
-	AgentPersonID int64         `json:"agent_person_id"`
-	AgentKind     string        `json:"agent_kind"`
-	OperatorID    int64         `json:"operator_id"`
-	TrustMode     string        `json:"trust_mode"`
-	Routes        int           `json:"routes"`
-	Ready         bool          `json:"ready"`
-	Checks        *DoctorResult `json:"checks"`
-	Written       bool          `json:"written"`
 }
 
 func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) error {
@@ -297,39 +282,45 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			Hint:    "Reconnect with full access."})
 	}
 
-	// Operator, verified before anything is written: connect.json is the
-	// trust anchor, and an operator that fails verification is not one to
-	// record.
-	var operatorCheck setup.Check
-	switch {
-	case operatorMgr != nil:
-		op, err := resolveOperatorProfile(ctx, operatorMgr, f.operatorProfile, accountID)
+	// Trust, verified before anything is written: connect.json is the trust
+	// anchor, and nobody in it is recorded unverified. People are read
+	// through the operator's own credential when there is one, since
+	// Basecamp refuses person reads to an Agent identity today.
+	trust := setup.Trust{
+		Allowlist:       next.Trust.AllowlistIDs,
+		OperatorProfile: f.operatorProfile,
+	}
+	if exists {
+		trust.Recorded = existing.Trust
+	}
+	people := setup.Reader(reader)
+	if operatorMgr != nil {
+		op, opReader, err := resolveOperatorProfile(ctx, operatorMgr, f.operatorProfile, accountID)
 		if err != nil {
 			return err
 		}
-		operatorID = op.ID
-		operatorCheck = setup.OperatorCheck(ctx, reader, op, me.ID, f.operatorProfile, false)
-	default:
+		trust.Operator = op
+		people = opReader
+	} else {
 		if operatorID == 0 {
 			operatorID = existing.Trust.OperatorID
 		}
-		recorded := exists && operatorID == existing.Trust.OperatorID
-		operatorCheck = setup.OperatorCheck(ctx, reader, setup.Person{ID: operatorID}, me.ID, "", recorded)
+		trust.Operator = setup.Person{ID: operatorID}
 	}
-	if operatorID == me.ID {
-		return output.ErrUsage(fmt.Sprintf("The operator (person %d) is the agent itself; the agent's own id never authorizes", operatorID))
+	trustChecks := setup.VerifyTrust(ctx, people, trust, me.ID)
+	for _, c := range trustChecks {
+		if c.Status == setup.StatusFail {
+			return output.ErrUsageHint("Trust was refused, and nothing was written: "+c.Name+": "+c.Message, c.Hint)
+		}
 	}
-	if operatorCheck.Status == setup.StatusFail {
-		return output.ErrUsageHint("The operator was refused, and nothing was written: "+operatorCheck.Message, operatorCheck.Hint)
-	}
-	checks = append(checks, operatorCheck)
+	checks = append(checks, trustChecks...)
 
 	next.AccountID = accountID
 	next.Agent = setup.Agent{PersonID: me.ID, Kind: kind}
 	if kind == setup.KindBotUser {
 		next.Agent.IdentityID = expect
 	}
-	next.Trust.OperatorID = operatorID
+	next.Trust.OperatorID = trust.Operator.ID
 	if err := setup.Save(path, next); err != nil {
 		if errors.Is(err, setup.ErrNotPrivate) {
 			return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
@@ -337,49 +328,48 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
 
-	checks = append(checks, setup.TicketCheck(ctx, reader, kind))
-	checks = append(checks, setup.RouteChecks(ctx, reader, next)...)
-
-	result := &connectSetupResult{
+	report := &setup.Report{
 		Path:          path,
 		Profile:       name,
 		AccountID:     accountID,
 		AgentPersonID: me.ID,
 		AgentKind:     kind,
-		OperatorID:    operatorID,
+		OperatorID:    next.Trust.OperatorID,
 		TrustMode:     string(next.Trust.Mode),
 		Routes:        len(next.Projects),
-		Checks:        summarizeChecks(asDoctorChecks(checks)),
+		Written:       true,
 	}
-	result.Ready = result.Checks.Failed == 0
+	report.Add(checks...)
+	report.Add(setup.TicketCheck(ctx, reader, kind))
+	report.Add(setup.RouteChecks(ctx, reader, next)...)
 
+	summary := summarizeChecks(asDoctorChecks(report.Checks()))
 	if app.Output.EffectiveFormat() == output.FormatStyled {
 		w := cmd.OutOrStdout()
-		renderChecksStyled(w, "Connector setup for profile "+strconv.Quote(name), result.Checks)
+		renderChecksStyled(w, "Connector setup for profile "+strconv.Quote(name), summary)
 		fmt.Fprintf(w, "  connect.json written: %s\n\n", path)
 	}
-	if !result.Ready {
-		return errConnectorNotReady(path, checks)
+	if !report.Ready() {
+		return errConnectorNotReady(report)
 	}
 	if app.Output.EffectiveFormat() == output.FormatStyled {
 		return nil
 	}
-	return app.OK(result, output.WithSummary("connect.json written; "+result.Checks.Summary()))
+	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
 
 // codeNotReady is the error code for a setup that wrote connect.json but
 // whose checks failed: the connector would not run.
 const codeNotReady = "not_ready"
 
-// errConnectorNotReady reports failed checks as the command's error, so a
-// script or an agent reading the exit status sees what a person sees.
-func errConnectorNotReady(path string, checks []setup.Check) error {
-	var failed []string
+// errConnectorNotReady reports a report that is not ready as the command's
+// error, so a script or an agent reading the exit status sees what a person
+// sees: every check that failed, by name.
+func errConnectorNotReady(report *setup.Report) error {
+	failures := report.Failed()
+	failed := make([]string, 0, len(failures))
 	hint := ""
-	for _, c := range checks {
-		if c.Status != setup.StatusFail {
-			continue
-		}
+	for _, c := range failures {
 		failed = append(failed, c.Name+": "+c.Message)
 		if hint == "" {
 			hint = c.Hint
@@ -390,7 +380,7 @@ func errConnectorNotReady(path string, checks []setup.Check) error {
 	}
 	return &output.Error{
 		Code:    codeNotReady,
-		Message: fmt.Sprintf("connect.json was written to %s, but the connector is not ready. %s", path, strings.Join(failed, "; ")),
+		Message: fmt.Sprintf("connect.json was written to %s, but the connector is not ready. %s", report.Path, strings.Join(failed, "; ")),
 		Hint:    hint,
 	}
 }
@@ -696,16 +686,17 @@ type operatorProfile struct {
 // resolveOperatorProfile reads the operator's person in the agent's account
 // through the operator's own credential, which proves who they are in a way
 // a typed id cannot.
-func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, accountID string) (setup.Person, error) {
+func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, accountID string) (setup.Person, setup.Reader, error) {
 	client := connectSDKClientFor(op.baseURL, &managerTokens{mgr: op.mgr})
-	me, err := setup.SDKReader{Client: client.ForAccount(accountID)}.Me(ctx)
+	reader := setup.SDKReader{Client: client.ForAccount(accountID)}
+	me, err := reader.Me(ctx)
 	if err != nil {
-		return setup.Person{}, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %v", profile, accountID, err))
+		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %v", profile, accountID, err))
 	}
 	if me.ID <= 0 {
-		return setup.Person{}, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
+		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
 	}
-	return me, nil
+	return me, reader, nil
 }
 
 func profileScope(app *appctx.App, name string) string {

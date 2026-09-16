@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,4 +166,26 @@ func TestPathRefusesAProfileThatIsNotAName(t *testing.T) {
 	path, err := Path("/cfg", "agent_1")
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join("/cfg", "connect", "agent_1", "connect.json"), path)
+}
+
+func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
+	data, err := json.Marshal(validFile(t))
+	require.NoError(t, err)
+	_, err = Parse(data)
+	require.NoError(t, err)
+
+	for name, doc := range map[string]string{
+		"trailing ]":             string(data) + "]",
+		"trailing }":             string(data) + "}",
+		"trailing object":        string(data) + "{}",
+		"duplicate top-level":    `{"driver":"acp",` + string(data[1:]),
+		"duplicate operator_id":  strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
+		"duplicate nested route": strings.Replace(string(data), `"48699913":{`, `"48699913":{"path":"/elsewhere",`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NotEqual(t, string(data), doc, "the fixture changed the document")
+			_, err := Parse([]byte(doc))
+			assert.Error(t, err)
+		})
+	}
 }

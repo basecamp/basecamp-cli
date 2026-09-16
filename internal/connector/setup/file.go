@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -233,17 +234,22 @@ func (f File) Validate() error {
 	return nil
 }
 
-// Parse decodes connect.json strictly: an unknown key is refused, because a
-// misspelled "watch_completion" silently ignored is a project the operator
-// believes is driven and is not.
+// Parse decodes connect.json strictly. It refuses what encoding/json would
+// quietly accept: an unknown key (a misspelled "watch_completion" ignored is
+// a project the operator believes is driven and is not), a key given twice
+// (only the last would count, so the file would not say what it reads as),
+// and anything after the object.
 func Parse(data []byte) (File, error) {
+	if err := refuseDuplicateKeys(data); err != nil {
+		return File{}, fmt.Errorf("parse connect.json: %w", err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var f File
 	if err := dec.Decode(&f); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
-	if dec.More() {
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return File{}, errors.New("parse connect.json: trailing data after the object")
 	}
 	if f.Projects == nil {
@@ -253,6 +259,51 @@ func Parse(data []byte) (File, error) {
 		return File{}, err
 	}
 	return f, nil
+}
+
+// refuseDuplicateKeys walks the JSON document and refuses any object that
+// names a key twice.
+func refuseDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var walk func() error
+	walk = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := tok.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := map[string]bool{}
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, _ := keyTok.(string)
+				if seen[key] {
+					return fmt.Errorf("key %q appears twice in one object", key)
+				}
+				seen[key] = true
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+		}
+		_, err = dec.Token() // the closing delimiter
+		return err
+	}
+	return walk()
 }
 
 // Load reads and validates the connect.json at path. A file that does not

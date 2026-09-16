@@ -114,6 +114,16 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		}
 		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
 	})
+	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupOperatorPerson+1), func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != setupOperatorToken {
+			w.WriteHeader(http.StatusForbidden) // as bc3 refuses an Agent today
+			return
+		}
+		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User"})
+	})
+	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupAgentPerson), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"id": setupAgentPerson, "name": "Marie Chef", "personable_type": "Agent"})
+	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupClientPerson), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true})
 	})
@@ -547,6 +557,7 @@ func TestConnectSetupJSONOutput(t *testing.T) {
 		OK   bool `json:"ok"`
 		Data struct {
 			Ready         bool  `json:"ready"`
+			Written       bool  `json:"written"`
 			AgentPersonID int64 `json:"agent_person_id"`
 			OperatorID    int64 `json:"operator_id"`
 		} `json:"data"`
@@ -554,6 +565,7 @@ func TestConnectSetupJSONOutput(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
 	assert.True(t, envelope.OK)
 	assert.True(t, envelope.Data.Ready)
+	assert.True(t, envelope.Data.Written)
 	assert.Equal(t, setupAgentPerson, envelope.Data.AgentPersonID)
 	assert.Equal(t, setupOperatorPerson, envelope.Data.OperatorID)
 	assert.NotContains(t, buf.String(), setupTicket)
@@ -598,4 +610,31 @@ func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson))
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "client")
+}
+
+// Everyone connect.json trusts is verified before it is written, the
+// allowlist included: an id nobody can read, or one that is a client, is
+// refused and nothing is written.
+func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
+	for name, id := range map[string]int64{"unknown person": 424242, "client": setupClientPerson, "the agent": setupAgentPerson} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			connectSetupApp(t, s, "agent")
+			storeConnectProfile(t, s, "me", setupOperatorToken)
+
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(id), routeArg(t))
+			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), fmt.Sprintf("Allowlist %d", id))
+			assertNotWritten(t, "agent")
+		})
+	}
+
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(setupOperatorPerson+1), routeArg(t))
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
 }

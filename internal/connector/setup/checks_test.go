@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -116,35 +117,90 @@ func TestTicketCheck(t *testing.T) {
 	assert.Equal(t, StatusFail, c.Status)
 }
 
-func TestOperatorCheck(t *testing.T) {
+func TestVerifyTrust(t *testing.T) {
 	ctx := context.Background()
 	people := map[int64]Person{
 		operatorID: {ID: operatorID, Name: "Operator"},
 		7:          {ID: 7, PersonableType: PersonableAgent},
 		8:          {ID: 8, Client: true},
+		9:          {ID: 9, Name: "Member"},
 	}
 	r := &fakeReader{people: people}
 	forbidden := &fakeReader{personErr: status(http.StatusForbidden)}
+	statuses := func(checks []Check) []string {
+		out := make([]string, 0, len(checks))
+		for _, c := range checks {
+			out = append(out, c.Name+"="+c.Status)
+		}
+		return out
+	}
+	verify := func(r Reader, trust Trust) []string { return statuses(VerifyTrust(ctx, r, trust, agentID)) }
 
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, r, Person{ID: operatorID}, agentID, "", false).Status)
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, forbidden, people[operatorID], agentID, "me", false).Status,
-		"an operator proved by their own profile needs no read as the agent")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: agentID}, agentID, "", false).Status, "the agent is never the operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 7}, agentID, "", false).Status, "an Agent is not an operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "", false).Status, "a client is not an operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[7], agentID, "me", false).Status,
-		"a profile that reads back as an Agent is refused too")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[8], agentID, "me", false).Status,
-		"a profile that reads back as a client is refused too")
+	assert.Equal(t, []string{"Operator=pass"}, verify(r, Trust{Operator: Person{ID: operatorID}}))
+	assert.Equal(t, []string{"Operator=pass"}, verify(forbidden, Trust{Operator: people[operatorID], OperatorProfile: "me"}),
+		"an operator proved by their own profile needs no read")
 
-	recorded := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "", true)
-	assert.Equal(t, StatusWarn, recorded.Status, "the operator connect.json already holds was verified when recorded")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "", true).Status,
-		"a recorded operator that now reads back as a client still fails")
+	t.Run("property 1: a Person id", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{}))
+	})
+	t.Run("property 2: never the agent", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: agentID}}))
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: agentID}, OperatorProfile: "me"}))
+		assert.Equal(t, []string{"Operator=pass", fmt.Sprintf("Allowlist %d=fail", agentID)},
+			verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{agentID}}))
+	})
+	t.Run("property 3: verified, unless already recorded", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(forbidden, Trust{Operator: Person{ID: operatorID}}))
+		assert.Equal(t, []string{"Operator=warn"}, verify(forbidden, Trust{Operator: Person{ID: operatorID}, Recorded: admission.Trust{OperatorID: operatorID}}))
+		assert.Equal(t, []string{"Operator=fail"}, verify(forbidden, Trust{Operator: Person{ID: 9}, Recorded: admission.Trust{OperatorID: operatorID}}),
+			"a different operator is a new trust anchor")
 
-	c := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "", false)
-	assert.Equal(t, StatusFail, c.Status, "an id that cannot be verified is not recorded as the trust anchor")
-	assert.Contains(t, c.Hint, "--operator-profile")
+		trust := Trust{Operator: people[operatorID], OperatorProfile: "me", Allowlist: []int64{9, 10}}
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 9=fail", "Allowlist 10=fail"}, verify(forbidden, trust), "allowlisted ids are verified too")
+		trust.Recorded = admission.Trust{AllowlistIDs: []int64{9}}
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 9=warn", "Allowlist 10=fail"}, verify(forbidden, trust))
+	})
+	t.Run("property 4: not an Agent", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: 7}}))
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: people[7], OperatorProfile: "me"}))
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: 7}, Recorded: admission.Trust{OperatorID: 7}}),
+			"recorded is no excuse when the read answers")
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 7=fail"}, verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{7}}))
+	})
+	t.Run("property 5: not a client", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: 8}}))
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 8=fail"}, verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{8}}))
+	})
+	t.Run("property 6: the read answers for the id asked", func(t *testing.T) {
+		liar := &fakeReader{people: map[int64]Person{operatorID: {ID: 9, Name: "Someone else"}}}
+		assert.Equal(t, []string{"Operator=fail"}, verify(liar, Trust{Operator: Person{ID: operatorID}}))
+	})
+}
+
+func TestReportIsReadyOnlyWhenEveryCheckPassed(t *testing.T) {
+	r := &Report{Written: true}
+	assert.False(t, r.Ready(), "no check ran")
+
+	r.Add(Check{Name: "a", Status: StatusPass}, Check{Name: "b", Status: StatusWarn})
+	assert.True(t, r.Ready())
+
+	r.Add(Check{Name: "c", Status: ""})
+	assert.False(t, r.Ready(), "a check with no status has not passed")
+
+	r = &Report{Written: true}
+	r.Add(Check{Name: "a", Status: StatusFail})
+	assert.False(t, r.Ready())
+
+	r = &Report{}
+	r.Add(Check{Name: "a", Status: StatusPass})
+	assert.False(t, r.Ready(), "nothing written is not ready")
+
+	r = &Report{Written: true}
+	r.Add(Check{Name: "a", Status: StatusFail})
+	data, err := json.Marshal(r)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"ready":false`)
+	assert.Contains(t, string(data), `"written":true`)
 }
 
 // The ticket is a bearer credential. The mint check posts to the account

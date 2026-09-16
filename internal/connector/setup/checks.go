@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -171,54 +172,92 @@ func TicketCheck(ctx context.Context, r Reader, kind string) Check {
 	return c
 }
 
-// OperatorCheck verifies the operator as a person in the account: not the
-// agent, not an Agent, not a client. An operator named by their own profile
-// arrives already read through that profile's credential, which proved who
-// they are; a bare id is read as the agent, and an id that cannot be read
-// fails, because an unverified trust anchor is not one to record — unless it
-// is the operator connect.json already holds (recorded), which was verified
-// when it was written: a read that cannot answer is then a warning, while a
-// read that answers Agent or client still fails.
-func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, fromProfile string, recorded bool) Check {
-	c := Check{Name: "Operator"}
-	if op.ID == agentID {
-		c.Status, c.Message = StatusFail, "The operator is the agent itself; the agent's own id never authorizes"
+// Trust is who connect.json says may drive the agent, as setup is about to
+// write it, and how each person in it came to be named.
+type Trust struct {
+	// Operator is the operator. When OperatorProfile is set, it is the person
+	// that profile's own credential read back, which proves who they are.
+	Operator        Person
+	OperatorProfile string
+	// Allowlist is every allowlisted Person id the file will hold.
+	Allowlist []int64
+	// Recorded is the trust connect.json already holds, verified when it was
+	// written: a person in it who cannot be re-read now is a warning, not a
+	// refusal. The zero value records nobody.
+	Recorded admission.Trust
+}
+
+// VerifyTrust is the one check of the trust anchor every setup goes
+// through before connect.json is written. A failed result means nothing may
+// be written. The properties, each checked here:
+//
+//  1. The operator and every allowlisted id are Person ids (positive).
+//  2. None of them is the agent itself: the agent's own id never authorizes.
+//  3. Each was verified as a person in the agent's account: the operator
+//     by their own profile's credential, or else by reading them; every
+//     allowlisted id by reading it. A read that is refused or fails refuses
+//     the id, unless connect.json already records that same person in that
+//     same role, which was verified when it was written.
+//  4. None of them reads back as an Agent person: agents never authorize.
+//  5. None of them reads back as a client of the account.
+//  6. A read answers for the id that was asked for.
+//
+// people reads persons in the account; pass a reader built on the operator's
+// own credential when there is one, since Basecamp refuses person reads to
+// an Agent identity today.
+func VerifyTrust(ctx context.Context, people Reader, t Trust, agentID int64) []Check {
+	ids := slices.Clone(t.Allowlist)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	checks := make([]Check, 0, 1+len(ids))
+	checks = append(checks, verifyPerson(ctx, people, "Operator", t.Operator, agentID, t.OperatorProfile, t.Recorded.OperatorID == t.Operator.ID && t.Operator.ID > 0))
+	for _, id := range ids {
+		name := fmt.Sprintf("Allowlist %d", id)
+		checks = append(checks, verifyPerson(ctx, people, name, Person{ID: id}, agentID, "", slices.Contains(t.Recorded.AllowlistIDs, id)))
+	}
+	return checks
+}
+
+func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID int64, fromProfile string, recorded bool) Check {
+	c := Check{Name: name}
+	switch {
+	case p.ID <= 0:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("%d is not a Person id", p.ID)
+		return c
+	case p.ID == agentID:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is the agent itself; the agent's own id never authorizes", p.ID)
 		return c
 	}
 	source := ""
 	if fromProfile != "" {
 		source = fmt.Sprintf(", the identity of profile %q", fromProfile)
 	} else {
-		p, err := r.Person(ctx, op.ID)
+		read, err := r.Person(ctx, p.ID)
 		switch {
 		case err != nil && recorded:
 			c.Status = StatusWarn
-			c.Message = fmt.Sprintf("Person %d, the operator connect.json already records, could not be re-read as the agent: %s", op.ID, unreadReason(err))
-			c.Hint = "It was verified when it was recorded. To verify it again, pass --operator-profile <profile>."
-			return c
-		case err != nil && (refused(err) || httpStatus(err) == http.StatusUnauthorized):
-			c.Status = StatusFail
-			c.Message = fmt.Sprintf("Person %d could not be read as the agent (HTTP %d), so the operator id cannot be verified", op.ID, httpStatus(err))
-			c.Hint = "Name the operator by their own profile instead: --operator-profile <profile>."
+			c.Message = fmt.Sprintf("Person %d, already recorded in connect.json, could not be re-read: %s", p.ID, unreadReason(err))
+			c.Hint = "It was verified when it was recorded. To verify the operator again, pass --operator-profile <profile>."
 			return c
 		case err != nil:
-			c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d could not be read: %s", op.ID, safeError(err))
-			c.Hint = "Run setup again, or name the operator by their own profile: --operator-profile <profile>."
+			c.Status = StatusFail
+			c.Message = fmt.Sprintf("Person %d could not be read (%s), so it cannot be verified", p.ID, unreadReason(err))
+			c.Hint = "Pass --operator-profile <profile>: people are read through the operator's own credential, which Basecamp does not refuse."
 			return c
-		case p.ID != op.ID:
-			c.Status, c.Message = StatusFail, fmt.Sprintf("Reading person %d answered with person %d", op.ID, p.ID)
+		case read.ID != p.ID:
+			c.Status, c.Message = StatusFail, fmt.Sprintf("Reading person %d answered with person %d", p.ID, read.ID)
 			return c
 		}
-		op = p
+		p = read
 	}
 	switch {
-	case op.PersonableType == PersonableAgent:
-		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; an operator is a person", op.ID)
-	case op.Client:
-		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; an operator is a member", op.ID)
+	case p.PersonableType == PersonableAgent:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; agents never authorize", p.ID)
+	case p.Client:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", p.ID)
 	default:
 		c.Status = StatusPass
-		c.Message = fmt.Sprintf("Person %d, %s%s", op.ID, richtext.SanitizeSingleLine(op.Name), source)
+		c.Message = fmt.Sprintf("Person %d, %s%s", p.ID, richtext.SanitizeSingleLine(p.Name), source)
 	}
 	return c
 }
