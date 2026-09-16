@@ -30,7 +30,8 @@ type Ledger interface {
 	//     task — so an event queued before the task closes joins it and one
 	//     after starts a new task;
 	//   - write content only for an admitted verdict, which it may write as
-	//     queued.
+	//     queued;
+	//   - keep a throttled verdict's RetryAt, which NextBlockedRetry needs.
 	Commit(ctx context.Context, v Verdict) (State, error)
 }
 
@@ -147,7 +148,8 @@ const (
 // NextBlockedRetry returns when a blocked record should next be re-run, and
 // false when it waits for something other than time: a route (no_route), or
 // a person's redispatch once the window has passed. notBefore is a throttled
-// record's Verdict.RetryAt; no retry is scheduled before it.
+// record's Verdict.RetryAt; no retry is scheduled before it, and a deadline
+// past the window hands the record to redispatch rather than asking early.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
 	switch reason {
 	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:

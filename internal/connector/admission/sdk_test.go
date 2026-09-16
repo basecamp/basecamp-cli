@@ -447,3 +447,18 @@ func TestACallerCannotRaiseTheReadRetryCap(t *testing.T) {
 	require.Error(t, err)
 	assert.EqualValues(t, 1, calls.Load(), "the admitter owns the retry budget, whatever the caller passes")
 }
+
+func TestNotSubscribedTakesNoCacheSlot(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"subscribed":false}`))
+	}))
+	subs := NewSubscriptions(client, time.Now)
+	for id := range int64(20) {
+		got, err := subs.Subscribed(context.Background(), id+1)
+		require.NoError(t, err)
+		assert.False(t, got)
+	}
+	subs.cache.mu.Lock()
+	defer subs.cache.mu.Unlock()
+	assert.Empty(t, subs.cache.entries, "a stream of unsubscribed recordings must not evict the subscribed ones")
+}

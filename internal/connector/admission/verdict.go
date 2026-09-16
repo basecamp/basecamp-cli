@@ -491,6 +491,7 @@ func (a *decision) retry(ctx context.Context, read func() error) error {
 		}
 		pause := wait
 		if asked := retryAfter(err); asked > 0 {
+			// The latest deadline any read of this decision was given.
 			if until := a.now().Add(asked); until.After(a.retryAt) {
 				a.retryAt = until
 			}

@@ -62,7 +62,11 @@ func (s *Subscriptions) Subscribed(ctx context.Context, recordingID int64) (bool
 	if err != nil {
 		return false, err
 	}
-	s.cache.put(recordingID, sub.Subscribed)
+	// Only "subscribed" is ever served, so only it takes a slot: a stream of
+	// recordings the agent is not on must not evict the ones it is.
+	if sub.Subscribed {
+		s.cache.put(recordingID, true)
+	}
 	return sub.Subscribed, nil
 }
 

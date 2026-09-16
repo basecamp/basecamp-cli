@@ -39,7 +39,8 @@ type Event struct {
 	Revision int64
 	// SeenAt is when intake wrote the pointer, on this machine's clock — the
 	// clock membership listings are stamped with, which is why intake and
-	// admission must run on one machine. A membership refusal counts as
+	// admission must run on one machine. A backward step of that clock by Δ
+	// lets a listing up to Δ older than the event pass as newer. A membership refusal counts as
 	// verified only from a project listing asked for after it. The Records
 	// adapter must set it; zero falls back to the time admission started
 	// deciding, which a busy project can keep from ever verifying a refusal.
