@@ -108,11 +108,11 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 	}
 
 	last := loss.RepairCursor
-	reentered := false
+	pass := &repairPass{followed: map[string]bool{}}
 	for {
 		page, err := w.polls.Poll(ctx, cursor, w.filters)
 		if err != nil {
-			next, err := w.pollFailure(ctx, loss, cursor, err, &reentered)
+			next, err := w.pollFailure(ctx, loss, cursor, err, pass)
 			if err != nil || next == nil {
 				return last, err
 			}
@@ -158,10 +158,35 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 // full recovery.
 var errReconciliationEnded = errors.New("connector: reconciliation ended inside the repair walk")
 
+// repairPass is what one pass has already done, stated rather than inferred
+// from the shape of the cursor.
+type repairPass struct {
+	// followed holds the resume URLs this pass has already followed. A 410 on
+	// one of them is the same 410 again.
+	followed map[string]bool
+	// reentered is whether this pass has already dropped a refused cursor
+	// for the explicit id.
+	reentered bool
+}
+
+// failureKind is the only rendering of a failed poll the walk logs. A poll's
+// error text can carry its request URL — a position token or a
+// server-supplied continuation — and the walk logs at the operator's terminal.
+func failureKind(err error) string {
+	var pollErr *eventfeed.PollError
+	if errors.As(err, &pollErr) {
+		return pollErr.Kind.String()
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "canceled"
+	}
+	return "unclassified"
+}
+
 // pollFailure decides what one failed repair poll means. It returns the cursor
 // to continue this pass at, nil with no error to end the pass and wait for the
 // next repair poll, or an error.
-func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor eventfeed.Cursor, err error, reentered *bool) (*eventfeed.Cursor, error) {
+func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor eventfeed.Cursor, err error, pass *repairPass) (*eventfeed.Cursor, error) {
 	var retention *InboxRetentionGoneError
 	if errors.As(err, &retention) {
 		// The inbox lane's 410 on the account lane: the same foreign loss the
@@ -186,68 +211,68 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 
 	var pollErr *eventfeed.PollError
 	if !errors.As(err, &pollErr) {
-		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "error", err)
+		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
 		return nil, nil
 	}
 
 	switch pollErr.Kind {
 	case eventfeed.PollGone:
-		if (cursor.PageURL != "" && cursor.PageURL == pollErr.ResumeURL) || pollErr.EpochAfterID == loss.RepairSince {
-			// The resume itself answered with the same 410. The gap is
-			// already recorded; following it again would loop. Leave it to the
-			// repair cadence.
+		epoch := pollErr.EpochAfterID
+		if pass.followed[pollErr.ResumeURL] {
+			// This pass already followed this resume, and it answered 410
+			// again. Following it again would loop; the next pass tries.
 			w.log.Warn("the repair walk's resume answered 410 again; retrying on the repair cadence", "loss_id", loss.ID)
 			return nil, nil
 		}
-		// History up to the epoch is gone, and the ids there with it. Ids
-		// above the epoch are still servable, so the resume is followed as
-		// served rather than condemning them too.
-		epoch := pollErr.EpochAfterID
-		if _, recordErr := w.ledger.RecordGap(ctx, Gap{
-			DetectedAt:   w.now(),
-			Class:        GapEpoch,
-			EpochAfterID: &epoch,
-			EntryClass:   entryClassOf(pollErr.ResumeURL),
-			Note:         "the repair walk was seeded below the feed's epoch",
-		}); recordErr != nil {
-			return nil, recordErr
+		if epoch != loss.RepairSince {
+			// A fence this loss has not seen: history up to the epoch is
+			// gone, and the ids there with it.
+			if _, recordErr := w.ledger.RecordGap(ctx, Gap{
+				DetectedAt:   w.now(),
+				Class:        GapEpoch,
+				EpochAfterID: &epoch,
+				EntryClass:   entryClassOf(pollErr.ResumeURL),
+				Note:         "the repair walk was seeded below the feed's epoch",
+			}); recordErr != nil {
+				return nil, recordErr
+			}
+			behind, markErr := w.ledger.MarkUnrecoveredThrough(ctx, loss.ID, epoch)
+			if markErr != nil {
+				return nil, markErr
+			}
+			w.log.Error("the repair walk fell below the feed's epoch; the dropped events behind it are gone",
+				"loss_id", loss.ID, "epoch_after_id", epoch, "unrecovered", behind)
+			// Later passes start at the fence.
+			loss.RepairSince = epoch
+			loss.RepairCursor = ""
+			if setErr := w.ledger.SetRepairEntry(ctx, loss.ID, epoch); setErr != nil {
+				return nil, setErr
+			}
 		}
-		behind, markErr := w.ledger.MarkUnrecoveredThrough(ctx, loss.ID, epoch)
-		if markErr != nil {
-			return nil, markErr
-		}
-		w.log.Error("the repair walk fell below the feed's epoch; the dropped events behind it are gone",
-			"loss_id", loss.ID, "epoch_after_id", epoch, "unrecovered", behind)
 		stillMissing, missErr := w.ledger.MissingIDs(ctx, loss.ID, LossMissing)
 		if missErr != nil {
 			return nil, missErr
 		}
-		// Everything at or below the epoch is settled, so later passes start
-		// at the fence rather than walking into the same 410 again.
-		loss.RepairSince = epoch
-		loss.RepairCursor = ""
-		if setErr := w.ledger.SetRepairEntry(ctx, loss.ID, epoch); setErr != nil {
-			return nil, setErr
-		}
 		if len(stillMissing) == 0 || pollErr.ResumeURL == "" {
-			// Every id was behind the fence, or there is no resume to follow:
-			// no repeat will serve anything more.
 			if _, closeErr := w.ledger.CloseLoss(ctx, loss.ID, w.now()); closeErr != nil {
 				return nil, closeErr
 			}
 			return nil, errReconciliationEnded
 		}
+		// Ids above the epoch are still servable: the resume is followed as
+		// served, whether or not this loss had met the fence before.
+		pass.followed[pollErr.ResumeURL] = true
 		return &eventfeed.Cursor{PageURL: pollErr.ResumeURL}, nil
 
 	case eventfeed.PollFilterChanged, eventfeed.PollPositionInvalid:
 		// The walk's own cursor was refused — minted under another filter
 		// set, or no longer honored. Its explicit id is still good. Once per
 		// pass: a refusal of the explicit id too is left to the cadence.
-		if *reentered || (cursor.Position == "" && cursor.PageURL == "") {
-			w.log.Warn("a repair poll was refused; retrying on the repair cadence", "loss_id", loss.ID, "error", err)
+		if pass.reentered || (cursor.Position == "" && cursor.PageURL == "") {
+			w.log.Warn("a repair poll was refused; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
 			return nil, nil
 		}
-		*reentered = true
+		pass.reentered = true
 		loss.RepairCursor = ""
 		if saveErr := w.ledger.SaveRepairCursor(ctx, loss.ID, ""); saveErr != nil {
 			return nil, saveErr
@@ -257,7 +282,7 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 	case eventfeed.PollTransient, eventfeed.PollThrottled, eventfeed.PollUnauthorized:
 		// A reason to try again on the next repair poll, not a reason to call
 		// the ids unrecovered. A slow or throttled walk delays nothing else.
-		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "error", err)
+		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
 		return nil, nil
 
 	case eventfeed.PollFilterInvalid, eventfeed.PollRedirectRefused, eventfeed.PollUnrecoverable:
@@ -268,7 +293,7 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 	// The loss stays open, so the next start — perhaps after the cause is
 	// fixed — tries again instead of finding the ids already condemned.
 	w.log.Error("a repair poll failed in a way retrying will not fix; the loss stays open for the next start",
-		"loss_id", loss.ID, "error", err)
+		"loss_id", loss.ID, "failure", failureKind(err))
 	return nil, errReconciliationEnded
 }
 

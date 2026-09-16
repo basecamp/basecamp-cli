@@ -94,6 +94,9 @@ type Intake struct {
 	pointer *pointerWriter
 
 	key eventfeed.CheckpointKey
+	// positions reads the safe re-entry ids; the ledger, except in tests that
+	// need the read to fail.
+	positions pollServedReader
 
 	mu sync.Mutex
 	// pollCandidates holds the ids delivered since the last page boundary that
@@ -114,6 +117,9 @@ type Intake struct {
 	// reentryAfter is the safe re-entry the next connection takes after a
 	// refused stored position.
 	reentryAfter int64
+	// abortErr ends the run: set when continuing could only mean entering
+	// the feed somewhere unsafe.
+	abortErr error
 
 	repairs sync.WaitGroup
 	// lifetime is Run's context. Repair walks are bound to it rather than to
@@ -181,7 +187,14 @@ func New(opts Options) (*Intake, error) {
 		},
 	}
 	in.ledger.now = opts.Clock
+	in.positions = opts.Ledger
 	return in, nil
+}
+
+// pollServedReader is the slice of the ledger re-entry reads.
+type pollServedReader interface {
+	LastPollServedID(ctx context.Context, key eventfeed.CheckpointKey) (int64, error)
+	LineagePollServedID(ctx context.Context, key eventfeed.CheckpointKey) (int64, error)
 }
 
 // CheckpointKey is the identity this intake's position is stored under.
@@ -308,8 +321,15 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		_ = feed.Close()
 		feed.Wait()
 	}()
-	stopMembership := in.watchMembership(runCtx)
-	defer stopMembership()
+	// The watcher's context is created and canceled here, in its owner, so
+	// the cancel is provably reached on every path out of this connection.
+	watchCtx, stopWatch := context.WithCancel(runCtx)
+	defer stopWatch()
+	awaitMembership := in.watchMembership(watchCtx)
+	defer func() {
+		stopWatch()
+		awaitMembership()
+	}()
 	defer cancel()
 
 	var feedErr error
@@ -331,6 +351,12 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		}
 	}
 
+	in.mu.Lock()
+	aborted := in.abortErr
+	in.mu.Unlock()
+	if aborted != nil {
+		return aborted
+	}
 	if in.reconnectRequested() {
 		return errReconnect
 	}
@@ -668,14 +694,21 @@ func (in *Intake) onPositionRejected(ctx context.Context) {
 	}
 	// This filter set's own id first. Another set's may be past events this
 	// one never served, and re-entering there would skip them.
-	served, err := in.ledger.LastPollServedID(ctx, in.key)
+	served, err := in.positions.LastPollServedID(ctx, in.key)
+	if err == nil && served == 0 {
+		served, err = in.positions.LineagePollServedID(ctx, in.key)
+	}
 	if err != nil {
+		// Returning here would let the package take its own reset cursor,
+		// which is the present. Not knowing where it is safe to re-enter is
+		// a reason to stop, not to guess.
+		in.abort(fmt.Errorf("connector: a position was refused and the safe re-entry could not be read: %w", err))
 		return
 	}
 	if served == 0 {
-		if served, err = in.ledger.LineagePollServedID(ctx, in.key); err != nil || served == 0 {
-			return
-		}
+		// The poll lane has never served this consumer anything: the present
+		// is all there is.
+		return
 	}
 	in.mu.Lock()
 	in.reentryAfter = served
@@ -683,18 +716,29 @@ func (in *Intake) onPositionRejected(ctx context.Context) {
 	in.requestReconnect()
 }
 
+// abort ends the current connection and the run with err.
+func (in *Intake) abort(err error) {
+	in.mu.Lock()
+	if in.abortErr == nil {
+		in.abortErr = err
+	}
+	cancel := in.cancelRun
+	in.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 // watchMembership re-reads the agent's projects on a timer and asks for a
-// reconnect when the set changes. The returned stop function ends the watcher
-// and waits for it, and is safe to call whatever state ctx is in.
+// reconnect when the set changes. It runs until ctx ends; the returned
+// function waits for it to have stopped.
 func (in *Intake) watchMembership(ctx context.Context) func() {
 	if in.opts.Membership == nil {
 		return func() {}
 	}
-	ctx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer stop()
 		ticker := time.NewTicker(in.opts.MembershipInterval)
 		defer ticker.Stop()
 		for {
@@ -717,15 +761,16 @@ func (in *Intake) watchMembership(ctx context.Context) func() {
 			}
 		}
 	}()
-	return func() {
-		stop()
-		<-done
-	}
+	return func() { <-done }
 }
 
 // membershipChanged compares a fresh read with the snapshot. With no snapshot
 // — the read at subscribe failed — the fresh read becomes the baseline;
 // otherwise a failed first read would disable change detection for good.
+//
+// Learned buckets (proved visible by an event, never named by the list) are
+// ignored on the way out, so the list omitting them is not a change. Once the
+// list names one, it is listed like any other, so its later revocation is.
 func (in *Intake) membershipChanged(buckets []int64) bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -736,24 +781,21 @@ func (in *Intake) membershipChanged(buckets []int64) bool {
 		}
 		return false
 	}
+	for _, id := range buckets {
+		if !in.snapshot[id] {
+			return true
+		}
+	}
+	for _, id := range buckets {
+		delete(in.learned, id)
+	}
 	listed := 0
 	for id := range in.snapshot {
 		if !in.learned[id] {
 			listed++
 		}
 	}
-	fresh := 0
-	for _, id := range buckets {
-		if !in.snapshot[id] {
-			return true
-		}
-		if !in.learned[id] {
-			fresh++
-		}
-	}
-	// A bucket that dropped off the list is a change; a learned one showing
-	// up in the list is not.
-	return fresh != listed
+	return listed != len(buckets)
 }
 
 // requestReconnect marks a reconnect due and ends the current connection now,

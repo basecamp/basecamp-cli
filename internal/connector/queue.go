@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 )
 
@@ -29,7 +30,12 @@ type Queue struct {
 	ids    chan int64
 	warnAt int
 
-	warned atomic.Bool
+	// edges serializes the depth sample with the warning transition and its
+	// callback. Unserialized, an offer can sample a warning depth, a take can
+	// drain and find nothing to recover from, and the offer then raises a
+	// warning that no later event will clear.
+	edges  sync.Mutex
+	warned bool
 	// waiting counts offers blocked for room. Intake and every open repair
 	// walk offer concurrently, so a single flag would be cleared by the first
 	// waiter to resume while another — perhaps the feed — still waits.
@@ -115,13 +121,17 @@ func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
 // recovery is the other half of the pair, so a warning is never left standing
 // after the thing it warned about went away.
 func (q *Queue) noteDepth() {
+	q.edges.Lock()
+	defer q.edges.Unlock()
 	depth := q.Depth()
 	switch {
-	case depth >= q.warnAt && q.warned.CompareAndSwap(false, true):
+	case depth >= q.warnAt && !q.warned:
+		q.warned = true
 		if q.OnWarn != nil {
 			q.OnWarn(depth)
 		}
-	case depth < q.warnAt && q.warned.CompareAndSwap(true, false):
+	case depth < q.warnAt && q.warned:
+		q.warned = false
 		if q.OnRecover != nil {
 			q.OnRecover(depth)
 		}

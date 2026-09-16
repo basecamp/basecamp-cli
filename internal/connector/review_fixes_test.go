@@ -376,7 +376,9 @@ func TestARepeated410OnTheResumeEndsTheWalk(t *testing.T) {
 	walker, _ := newTestWalker(t, ledger, polls, clock)
 	require.NoError(t, walker.reconcile(ctx, loss))
 
-	assert.LessOrEqual(t, polls.calls, 12, "a 410 on the resume is retried on the cadence, not in a tight loop")
+	// Eleven passes over the ten-minute window, each at most its entry and
+	// that entry's resume: bounded by the cadence, not a tight loop.
+	assert.LessOrEqual(t, polls.calls, 24, "a 410 on the resume is retried on the cadence, not in a tight loop")
 	gaps, err := ledger.Gaps(ctx)
 	require.NoError(t, err)
 	assert.Len(t, gaps, 1, "one 410, one gap")

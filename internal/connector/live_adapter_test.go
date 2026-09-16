@@ -28,7 +28,10 @@ func TestTheLiveAdapterRefusesRedirectsBeforeAnyEgress(t *testing.T) {
 	}))
 	defer origin.Close()
 
-	adapter, err := NewLiveFeedAdapter(&basecamp.Config{BaseURL: origin.URL}, &basecamp.StaticTokenProvider{Token: "token"}, "2914079", nil)
+	adapter, err := NewLiveFeedAdapter(&basecamp.Config{BaseURL: origin.URL}, &basecamp.StaticTokenProvider{Token: "token"}, "2914079", nil,
+		// One attempt: the SDK retries a refused hop as a network error, which
+		// only repeats the same-origin request and slows the test down.
+		basecamp.WithMaxRetries(0))
 	require.NoError(t, err)
 
 	_, err = adapter.Poll(context.Background(), eventfeed.Cursor{Since: "1"}, eventfeed.Filters{})

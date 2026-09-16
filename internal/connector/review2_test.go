@@ -202,9 +202,12 @@ func TestMembershipWatcherStopsWhenStopped(t *testing.T) {
 	intake.opts.Membership = countingMembership{&reads}
 	intake.opts.MembershipInterval = time.Millisecond
 
-	stop := intake.watchMembership(context.Background())
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	await := intake.watchMembership(ctx)
 	require.Eventually(t, func() bool { return reads.Load() > 0 }, time.Second, time.Millisecond)
 	stop()
+	await()
 	after := reads.Load()
 	time.Sleep(20 * time.Millisecond)
 	assert.Equal(t, after, reads.Load(), "a stopped watcher reads nothing more")

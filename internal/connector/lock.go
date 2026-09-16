@@ -43,11 +43,14 @@ type instanceHolder struct {
 
 // AcquireInstanceLock takes the lock for one account and agent, or refuses.
 func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Time) (*InstanceLock, error) {
-	if _, err := strconv.ParseUint(accountID, 10, 64); err != nil || agentPersonID <= 0 {
-		// The account id becomes part of a file name, so it is held to what an
-		// account id is: digits.
+	account, err := strconv.ParseUint(accountID, 10, 64)
+	if err != nil || account == 0 || agentPersonID <= 0 {
 		return nil, errors.New("connector: the instance lock needs a numeric account id and an agent person id")
 	}
+	// The file is named from the NUMBER, not the spelling: "02914079" and
+	// "2914079" are one account and must meet one lock, or the refusal of a
+	// second connector is a matter of how the id was typed.
+	accountID = strconv.FormatUint(account, 10)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("connector: create state directory: %w", err)
 	}

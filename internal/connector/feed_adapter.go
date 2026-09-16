@@ -112,7 +112,10 @@ func NewLiveFeedAdapter(cfg *basecamp.Config, tokens basecamp.TokenProvider, acc
 var ErrRedirectRefused = errors.New("connector: the event feed does not follow redirects")
 
 // RefuseRedirects wraps a transport so that no redirect hop is ever sent. The
-// client then reports the refusal as the request's failure.
+// client then reports the refusal as the request's failure. The SDK sees that
+// failure as a network error and spends its retry budget re-sending the
+// ORIGINAL, same-origin request before giving up; nothing reaches the target
+// on any attempt.
 func RefuseRedirects(inner http.RoundTripper) http.RoundTripper {
 	return refuseRedirects{inner: inner}
 }
@@ -219,7 +222,14 @@ func (a *FeedAdapter) optionsFor(cursor eventfeed.Cursor, filters eventfeed.Filt
 		}
 		opts, err := basecamp.PollEventsOptionsFromURL(cursor.PageURL)
 		if err != nil {
-			return nil, &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Err: err}
+			return nil, &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Err: errMalformedContinuation}
+		}
+		if (opts.Since == "") == (opts.Position == "") {
+			// A followed URL carries exactly one cursor. With neither, the
+			// generated operation enters at the present — a silent skip of
+			// everything unserved, on the path whose whole purpose was to
+			// continue. With both, the server decides which one wins.
+			return nil, &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Err: errCursorlessContinuation}
 		}
 		// The URL carries the server's own canonical filter set. It is used
 		// as served: re-imposing the local filters on a resume is how a
@@ -278,19 +288,45 @@ func idStrings(ids []int64) []string {
 // seam's taxonomy, and it is the one place the two 410s are told apart.
 // ---------------------------------------------------------------------------
 
+// Everything below builds errors that are safe to render. The rule, for every
+// walker this adapter serves: no Err carries the generated error. A generated
+// network error renders its request URL — a position token, a server-supplied
+// continuation — and a refused redirect renders the server-chosen Location. An
+// error leaves this file as a fixed sentinel or a status and a code, never as
+// text the server or the request chose.
+
+var (
+	errMalformedContinuation  = errors.New("connector: continuation URL could not be read")
+	errCursorlessContinuation = errors.New("connector: continuation URL carries no single cursor")
+	errNetwork                = errors.New("connector: event feed request failed before a response")
+)
+
+// sanitized reduces a generated error to what is safe to render.
+func sanitized(err error) error {
+	var apiErr *basecamp.Error
+	if errors.As(err, &apiErr) {
+		return fmt.Errorf("connector: event feed answered HTTP %d (%s)", apiErr.HTTPStatus, apiErr.Code)
+	}
+	return errNetwork
+}
+
 // callerCanceled reports a failure that is the caller's own cancellation. The
 // seam requires it to pass through unchanged: classified as transient, a
 // shutdown or a reconnect would enter transport-retry handling. A deadline the
 // client imposed on itself, with the caller's context still live, is not this
-// and stays transient.
+// and stays transient. The context's own error is returned, not the failure
+// that wraps it, which may render the request URL.
 func callerCanceled(ctx context.Context, err error) bool {
 	return ctx.Err() != nil && errors.Is(err, ctx.Err())
 }
 
 // pollError classifies a failed PollEvents call.
 func pollError(ctx context.Context, err error) error {
-	if err == nil || callerCanceled(ctx, err) {
-		return err
+	if err == nil {
+		return nil
+	}
+	if callerCanceled(ctx, err) {
+		return ctx.Err()
 	}
 
 	// The inbox's 410 first, so it can never fall through to the feed's arm.
@@ -306,19 +342,19 @@ func pollError(ctx context.Context, err error) error {
 		if gone.EpochAfterID == nil {
 			return &eventfeed.PollError{
 				Kind: eventfeed.PollUnrecoverable,
-				Err:  &InboxRetentionGoneError{Resume: gone.Resume, Err: err},
+				Err:  &InboxRetentionGoneError{Resume: gone.Resume, Err: sanitized(err)},
 			}
 		}
 		return &eventfeed.PollError{
 			Kind:         eventfeed.PollGone,
 			EpochAfterID: *gone.EpochAfterID,
 			ResumeURL:    gone.Resume,
-			Err:          &FeedEpochGoneError{EpochAfterID: *gone.EpochAfterID, Resume: gone.Resume, Err: err},
+			Err:          &FeedEpochGoneError{EpochAfterID: *gone.EpochAfterID, Resume: gone.Resume, Err: sanitized(err)},
 		}
 	}
 
 	if errors.Is(err, ErrRedirectRefused) {
-		return &eventfeed.PollError{Kind: eventfeed.PollRedirectRefused, Err: err}
+		return &eventfeed.PollError{Kind: eventfeed.PollRedirectRefused, Err: ErrRedirectRefused}
 	}
 
 	var mismatch *basecamp.FeedFilterMismatchError
@@ -327,58 +363,61 @@ func pollError(ctx context.Context, err error) error {
 			Kind:           eventfeed.PollFilterChanged,
 			PositionDigest: mismatch.PositionDigest,
 			FiltersDigest:  mismatch.FiltersDigest,
-			Err:            err,
+			Err:            sanitized(err),
 		}
 	}
 
 	var apiErr *basecamp.Error
 	if !errors.As(err, &apiErr) {
-		return &eventfeed.PollError{Kind: eventfeed.PollTransient, Err: err}
+		return &eventfeed.PollError{Kind: eventfeed.PollTransient, Err: errNetwork}
 	}
 
 	switch {
 	case apiErr.HTTPStatus == 400:
 		// SWAP POINT for basecamp-sdk PR 912's *FeedRequestError: when it
 		// carries reason=invalid_position this becomes PollPositionInvalid,
-		// and reason=invalid_filter becomes PollFilterInvalid. Until the
+		// and reason=invalid_filter becomes PollFilterInvalid (with the
+		// server's message in Msg, as the seam requires there). Until the
 		// server names the reason, a 400 is undifferentiated and is surfaced
 		// rather than guessed — see UndifferentiatedRequestError.
 		return &eventfeed.PollError{
 			Kind: eventfeed.PollUnrecoverable,
-			Msg:  apiErr.Message,
-			Err:  &UndifferentiatedRequestError{Err: err},
+			Err:  &UndifferentiatedRequestError{Err: sanitized(err)},
 		}
 	case apiErr.HTTPStatus == 401 || apiErr.HTTPStatus == 403:
-		return &eventfeed.PollError{Kind: eventfeed.PollUnauthorized, Err: err}
+		return &eventfeed.PollError{Kind: eventfeed.PollUnauthorized, Err: sanitized(err)}
 	case apiErr.RetryAfter > 0:
-		return &eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: retryAfter(apiErr), Err: err}
+		return &eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: retryAfter(apiErr), Err: sanitized(err)}
 	case apiErr.Retryable:
-		return &eventfeed.PollError{Kind: eventfeed.PollTransient, Err: err}
+		return &eventfeed.PollError{Kind: eventfeed.PollTransient, Err: sanitized(err)}
 	}
-	return &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Msg: apiErr.Message, Err: err}
+	return &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Err: sanitized(err)}
 }
 
 // mintError classifies a failed CreateStreamTicket call.
 func mintError(ctx context.Context, err error) error {
-	if err == nil || callerCanceled(ctx, err) {
-		return err
+	if err == nil {
+		return nil
+	}
+	if callerCanceled(ctx, err) {
+		return ctx.Err()
 	}
 	if errors.Is(err, ErrRedirectRefused) {
-		return &eventfeed.MintError{Kind: eventfeed.MintUnrecoverable, Err: err}
+		return &eventfeed.MintError{Kind: eventfeed.MintUnrecoverable, Err: ErrRedirectRefused}
 	}
 	var apiErr *basecamp.Error
 	if !errors.As(err, &apiErr) {
-		return &eventfeed.MintError{Kind: eventfeed.MintTransient, Err: err}
+		return &eventfeed.MintError{Kind: eventfeed.MintTransient, Err: errNetwork}
 	}
 	switch {
 	case apiErr.HTTPStatus == 401 || apiErr.HTTPStatus == 403:
-		return &eventfeed.MintError{Kind: eventfeed.MintUnauthorized, Err: err}
+		return &eventfeed.MintError{Kind: eventfeed.MintUnauthorized, Err: sanitized(err)}
 	case apiErr.RetryAfter > 0:
-		return &eventfeed.MintError{Kind: eventfeed.MintThrottled, RetryAfter: retryAfter(apiErr), Err: err}
+		return &eventfeed.MintError{Kind: eventfeed.MintThrottled, RetryAfter: retryAfter(apiErr), Err: sanitized(err)}
 	case apiErr.Retryable:
-		return &eventfeed.MintError{Kind: eventfeed.MintTransient, Err: err}
+		return &eventfeed.MintError{Kind: eventfeed.MintTransient, Err: sanitized(err)}
 	}
-	return &eventfeed.MintError{Kind: eventfeed.MintUnrecoverable, Err: err}
+	return &eventfeed.MintError{Kind: eventfeed.MintUnrecoverable, Err: sanitized(err)}
 }
 
 func retryAfter(apiErr *basecamp.Error) time.Duration {

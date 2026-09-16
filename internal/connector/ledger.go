@@ -135,18 +135,21 @@ func securePath(path string) error {
 		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", dir, info.Mode().Perm())
 	}
 
-	switch info, err := os.Stat(path); {
-	case os.IsNotExist(err):
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err != nil {
-			return fmt.Errorf("connector: create ledger: %w", err)
-		}
+	switch f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600); {
+	case err == nil:
 		if err := f.Close(); err != nil {
 			return fmt.Errorf("connector: create ledger: %w", err)
 		}
 		if err := os.Chmod(path, 0o600); err != nil {
 			return fmt.Errorf("connector: secure ledger: %w", err)
 		}
+		return nil
+	case !os.IsExist(err):
+		return fmt.Errorf("connector: create ledger: %w", err)
+	}
+	// It exists — perhaps created a moment ago by another process opening the
+	// same fresh ledger. Its permissions decide, not who created it.
+	switch info, err := os.Stat(path); {
 	case err != nil:
 		return fmt.Errorf("connector: inspect ledger: %w", err)
 	case looserThan(info.Mode(), 0o600):
