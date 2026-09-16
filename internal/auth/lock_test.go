@@ -1109,7 +1109,7 @@ func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
 
 	inside := make(chan struct{})
 	replaced := make(chan error, 1)
-	err := store.WithCredential(context.Background(), key, func(held *HeldCredential) error {
+	err := store.WithCredential(context.Background(), key, func(held HeldCredential) error {
 		assert.Equal(t, "first", held.Credentials().AccessToken)
 		assert.Equal(t, key, held.Key())
 		go func() {
@@ -1150,7 +1150,7 @@ func TestWithCredentialRefusesWhenTheHostCannotLock(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(locks, 0o700) })
 
 	ran := false
-	err := store.WithCredential(context.Background(), key, func(*HeldCredential) error {
+	err := store.WithCredential(context.Background(), key, func(HeldCredential) error {
 		ran = true
 		return nil
 	})
@@ -1159,4 +1159,26 @@ func TestWithCredentialRefusesWhenTheHostCannotLock(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+}
+
+// The proof stops being valid when the lock is released, so a callback that
+// keeps it cannot write with it afterwards.
+func TestHeldCredentialIsInvalidAfterTheLockIsReleased(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	store := NewStore(t.TempDir())
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+
+	var kept HeldCredential
+	require.NoError(t, store.WithCredential(context.Background(), key, func(held HeldCredential) error {
+		kept = held
+		assert.True(t, held.Valid())
+		assert.Equal(t, key, held.Key())
+		require.NotNil(t, held.Credentials())
+		return nil
+	}))
+
+	assert.False(t, kept.Valid(), "the lock is gone")
+	assert.Nil(t, kept.Credentials())
+	assert.Empty(t, kept.Key())
 }

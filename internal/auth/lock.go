@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -128,28 +129,25 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 	return fn()
 }
 
-// WithCredential runs fn with one key's credential, while holding that
-// key's cross-process lock. A host that cannot lock at all is an error
-// here, not a warning: the callers that reach for this are the ones whose
-// guarantee is the lock.
+// WithCredential runs fn with one key's credential while holding that key's
+// cross-process lock, so no other process's login, refresh, import or
+// logout for the key can land while fn runs. A caller that must act on a
+// credential being what it just read — writing a file that names the
+// identity it authenticates as, say — does its read, its decision and its
+// write inside fn.
+//
+// A host that cannot lock at all is an error here, not a warning: the
+// callers that reach for this are the ones whose guarantee is the lock.
 //
 // fn must not take the same key's lock again — no AccessToken, no
 // StoredAccessToken, no SetUserIdentity, no nested WithCredential. Locks
 // are per open file description, so a second acquire in this process waits
-// on itself until the wait bound expires.
-//
-// It holds that key's cross-process lock: no other process's login, refresh, import or
-// logout for the same key can land while fn runs. A caller that must act on
-// a credential being what it just read — writing a file that names the
-// identity it authenticates as, say — does its read, its decision and its
-// write inside fn.
-//
-// fn must not make a network request: every other process's work on the key
-// queues behind it.
+// on itself until the wait bound expires. fn must not make a network
+// request either: every other process's work on the key queues behind it.
 //
 // A key with nothing stored is reported as ErrNoCredential, never as a nil
 // credential.
-func (s *Store) WithCredential(ctx context.Context, key string, fn func(*HeldCredential) error) error {
+func (s *Store) WithCredential(ctx context.Context, key string, fn func(HeldCredential) error) error {
 	release, err := s.lockFile(lockRequest{name: keyLockName(key), what: "credential", done: ctx.Done(), cause: ctx.Err, require: true})
 	if err != nil {
 		return err
@@ -159,22 +157,52 @@ func (s *Store) WithCredential(ctx context.Context, key string, fn func(*HeldCre
 	if err != nil {
 		return err
 	}
-	return fn(&HeldCredential{creds: creds, key: key})
+	held := &heldCredential{creds: creds, key: key}
+	defer held.released.Store(true)
+	return fn(held)
 }
 
-// HeldCredential is a credential read while its key's lock is held. It is
-// the proof a write can ask for: a function that must not run without the
-// lock takes one, and only WithCredential can make one.
-type HeldCredential struct {
-	creds *Credentials
-	key   string
+// HeldCredential is a credential read while its key's lock is held, and the
+// proof a write can ask for: a function that must not run without the lock
+// takes one. Only WithCredential can make a value that satisfies it — the
+// interface has a method no other package can implement — and the value
+// stops being valid when the lock is released.
+type HeldCredential interface {
+	// Credentials is the credential as it was stored when the lock was
+	// taken, or nil once the lock has been released.
+	Credentials() *Credentials
+	// Key is the credential key the lock was taken on, "" once released.
+	Key() string
+	// Valid reports whether the lock is still held.
+	Valid() bool
+	// heldUnderLock cannot be implemented outside this package, so no other
+	// package can fabricate the proof.
+	heldUnderLock()
 }
 
-// Credentials is the credential as it was stored when the lock was taken.
-func (h *HeldCredential) Credentials() *Credentials { return h.creds }
+type heldCredential struct {
+	creds    *Credentials
+	key      string
+	released atomic.Bool
+}
 
-// Key is the credential key the lock is held on.
-func (h *HeldCredential) Key() string { return h.key }
+func (h *heldCredential) Credentials() *Credentials {
+	if !h.Valid() {
+		return nil
+	}
+	return h.creds
+}
+
+func (h *heldCredential) Key() string {
+	if !h.Valid() {
+		return ""
+	}
+	return h.key
+}
+
+func (h *heldCredential) Valid() bool { return !h.released.Load() }
+
+func (h *heldCredential) heldUnderLock() {}
 
 // withStoreLock runs fn while holding the whole-store lock. fn must be one
 // store operation and must not make a network request: every process's
@@ -406,10 +434,13 @@ func (s *Store) unlocked(req lockRequest, reason string) (func(), error) {
 		return noop, err
 	}
 	if req.require {
+		// The caller asked for the lock itself, not for best effort: there
+		// is nothing to fall through to.
 		return noop, &output.Error{
 			Code:    output.CodeLockUnavailable,
 			Message: fmt.Sprintf("This host cannot lock the %s: %s", req.what, richtext.SanitizeSingleLine(reason)),
-			Hint:    "Nothing was changed. Use a configuration directory on a filesystem that supports locking (its path comes from XDG_CONFIG_HOME).",
+			Hint: "Nothing was changed. Other commands still work; connector setup is what needs the lock, so point XDG_CONFIG_HOME at a filesystem that supports locking " +
+				"(some network and FUSE mounts do not).",
 		}
 	}
 	s.warnUnlockable(req.what, reason)

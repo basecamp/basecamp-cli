@@ -213,3 +213,14 @@ func TestVerifyAgent(t *testing.T) {
 	assert.Error(t, bot.VerifyAgent(KindBotUser, agentID, 99), "another identity")
 	assert.Error(t, bot.VerifyAgent(KindAgent, agentID, 4242), "another kind")
 }
+
+// connect.json is written only under the credential's lock. The proof is
+// auth's to make: no other package can implement it, and Save refuses
+// anything that is not a live one.
+func TestSaveRefusesWithoutAHeldCredential(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	require.Error(t, Save(nil, path, validFile(t)))
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "nothing is written")
+}

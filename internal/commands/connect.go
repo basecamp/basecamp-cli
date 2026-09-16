@@ -361,7 +361,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// credential authenticates as, and connect.json's VerifyAgent is what
 	// the connector re-checks at start-up, so a credential replaced later
 	// stops it rather than making it act as the wrong agent.
-	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(held *auth.HeldCredential) error {
+	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(held auth.HeldCredential) error {
 		if !sameCredential(creds, held.Credentials()) {
 			return errCredentialChanged(name)
 		}

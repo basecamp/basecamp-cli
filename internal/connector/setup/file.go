@@ -363,14 +363,15 @@ func Load(path string) (File, error) {
 }
 
 // Save validates f and writes it to path atomically, owner-only, while the
-// caller holds the lock on the credential the file is about to name. Only
-// auth.Store.WithCredential hands out that proof, so connect.json cannot be
-// written from a path that has not taken the lock — the compiler says so.
+// caller holds the lock on the credential the file is about to name. The
+// proof is auth.HeldCredential, an interface with a method only the auth
+// package can implement, so no other package can fabricate one; it stops
+// being valid when the lock is released, and Save refuses it then.
 //
 // held is only proof; what is written comes from f, which the caller has
 // already checked against the credential (see File.VerifyAgent).
-func Save(held *auth.HeldCredential, path string, f File) error {
-	if held == nil {
+func Save(held auth.HeldCredential, path string, f File) error {
+	if held == nil || !held.Valid() || held.Credentials() == nil || held.Key() == "" {
 		return errors.New("connect.json is written only while the profile's credential is locked")
 	}
 	return save(path, f)
