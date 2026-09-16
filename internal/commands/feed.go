@@ -758,6 +758,14 @@ const redactedTicket = "[REDACTED]"
 // endpoint to see where a stream would open, and none of the response's own
 // text.
 //
+// The result is a diagnostic, never a paste target — it carries
+// ticket=[REDACTED], so it cannot open a stream whatever else it keeps. The
+// connectable URL is the one --show-secret returns, which is the server's
+// verbatim and passes through this function not at all. That is what makes
+// dropping the server's other parameters here free: no artifact anyone
+// connects with loses them, including a protocol or region parameter the
+// mint might start sending.
+//
 // The ticket is opaque and the body is not ours to trust, so the display URL
 // is built rather than edited. Only scheme, host and path survive; the query
 // is rebuilt from a constant, which is what makes this answerable at all —

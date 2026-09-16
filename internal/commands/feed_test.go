@@ -523,6 +523,28 @@ func TestEventsTicketShowSecretPrintsItVerbatim(t *testing.T) {
 	assert.Empty(t, decodeFeedEnvelope(t, out).Notice)
 }
 
+// Dropping the server's other parameters from the redacted rendering is only
+// free because nothing connectable goes through it: --show-secret hands back
+// the mint's URL verbatim. A protocol, version or region parameter the server
+// starts sending must survive that path even though the diagnostic drops it.
+func TestShowSecretKeepsEveryParameterTheMintSent(t *testing.T) {
+	const minted = "wss://chat.example.test/195539477?protocol=v2&region=iad&ticket=tkt-secret"
+	app, _, out := setupFeedApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   feedTicketPath,
+		status: http.StatusOK,
+		body:   `{"ticket":"tkt-secret","expires_in":120,"url":"` + minted + `"}`,
+	})
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "ticket", "--show-secret"))
+
+	var data struct {
+		URL string `json:"url"`
+	}
+	require.NoError(t, json.Unmarshal(decodeFeedEnvelope(t, out).Data, &data))
+	assert.Equal(t, minted, data.URL)
+}
+
 func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
 	assert.Equal(t, redactedTicket, redactTicketURL("wss://chat.example.test/195539477", "tkt-secret"))
 	assert.Equal(t, redactedTicket, redactTicketURL("://", "tkt-secret"))
