@@ -589,16 +589,31 @@ func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
 // response is not ours to trust, and a URL that carries the credential
 // anywhere else is withheld whole rather than echoed with one parameter
 // blanked.
+// One case per component the URL has, so the exit-point assertion's coverage
+// is stated rather than assumed. The point of asserting on the finished
+// string is that it also covers components nobody enumerated — the scheme was
+// missed by a hand-written list — but a list of what is known to be covered
+// is still what a reader needs.
 func TestRedactTicketURLWithholdsATicketEchoedOutsideItsParameter(t *testing.T) {
-	for _, raw := range []string{
-		"wss://chat.example.test/195539477?ticket=tkt-secret#tkt-secret",
-		"wss://chat.example.test/tkt-secret?ticket=tkt-secret",
-		"wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret",
-		"wss://tkt-secret@chat.example.test/195539477?ticket=tkt-secret",
-		"wss://chat.example.test/195539477%2Ftkt-secret?ticket=tkt-secret",
-		"tkt-secret://chat.example.test/195539477?ticket=tkt-secret",
+	for _, tc := range []struct{ component, raw string }{
+		{"scheme", "tkt-secret://chat.example.test/195539477?ticket=tkt-secret"},
+		{"userinfo", "wss://tkt-secret@chat.example.test/195539477?ticket=tkt-secret"},
+		{"host", "wss://tkt-secret.example.test/195539477?ticket=tkt-secret"},
+		{"port", "wss://chat.example.test:8443/tkt-secret?ticket=tkt-secret"},
+		{"path", "wss://chat.example.test/tkt-secret?ticket=tkt-secret"},
+		{"escaped path", "wss://chat.example.test/195539477%2Ftkt-secret?ticket=tkt-secret"},
+		{"second query parameter", "wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret"},
+		{"repeated ticket parameter", "wss://chat.example.test/195539477?ticket=tkt-secret&ticket=tkt-secret"},
+		{"fragment", "wss://chat.example.test/195539477?ticket=tkt-secret#tkt-secret"},
 	} {
-		assert.NotContains(t, redactTicketURL(raw, "tkt-secret"), "tkt-secret", raw)
+		t.Run(tc.component, func(t *testing.T) {
+			rendered := redactTicketURL(tc.raw, "tkt-secret")
+			assert.NotContains(t, rendered, "tkt-secret")
+			// Withheld whole, never a partially scrubbed URL.
+			if rendered != redactedTicket {
+				assert.NotContains(t, rendered, "tkt-")
+			}
+		})
 	}
 }
 
