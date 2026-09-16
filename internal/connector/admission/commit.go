@@ -2,27 +2,39 @@ package admission
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
 
+// ErrAlreadyDecided is the ledger's answer to a verdict for a record that has
+// already moved past deciding.
+var ErrAlreadyDecided = errors.New("admission: event already decided")
+
 // Ledger is the durable half of a verdict. Intake's SQLite ledger implements
 // it once basecamp-cli PR 729 merges; until then only tests do.
 type Ledger interface {
-	// LiveTask reports whether a task is live on the conversation.
-	LiveTask(ctx context.Context, conversationKey string) (bool, error)
-	// Commit writes the verdict onto the event's record. LiveTask is read
-	// before Commit and a task can close in between, so queued is the
-	// committer's best knowledge, not a guarantee: the ledger re-reads the
-	// conversation in the same transaction as the write, so an event queued
-	// before the task closes joins it and one committed after starts a new
-	// task, and neither is lost (spec, "6. Admission").
-	Commit(ctx context.Context, v Verdict) error
+	// Commit writes v onto its event's record in one transaction and returns
+	// the state it wrote. Within that transaction it must:
+	//
+	//   - apply only to a record still being decided — seen, or blocked (a
+	//     blocked record is decided again on recovery) — and return
+	//     ErrAlreadyDecided for any other, so an event is admitted at most
+	//     once however many fetches or restarts decide it;
+	//   - for an admitted verdict, read the conversation in the same
+	//     transaction and write queued when it is live — a task running, or
+	//     an admitted record not yet dispatched, since that record becomes the
+	//     task — so an event queued before the task closes joins it and one
+	//     after starts a new task;
+	//   - write no content for a verdict that is not admitted.
+	Commit(ctx context.Context, v Verdict) (State, error)
 }
 
-// Committer serializes commits per conversation key, so two fetches for one
-// conversation that finish in either order commit one after the other, each
-// seeing what the other wrote.
+// Committer serializes commits per conversation key, so the verdicts for one
+// conversation reach the ledger one at a time, in the order they finished.
+// Which state is written is the ledger's decision, taken in its own
+// transaction; the committer reports that state rather than guessing it.
 type Committer struct {
 	ledger Ledger
 	locks  keyedMutex
@@ -33,29 +45,27 @@ func NewCommitter(ledger Ledger) *Committer {
 	return &Committer{ledger: ledger}
 }
 
-// Commit turns an admitted verdict into queued when its conversation has a
-// live task, and writes it. The decision and the write happen under the
-// conversation's lock. It returns the verdict as committed.
+// Commit writes the verdict and returns it with the state the ledger wrote.
 func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
-	if v.ConversationKey == "" {
-		return v, c.ledger.Commit(ctx, v)
-	}
-	unlock, err := c.locks.lock(ctx, v.ConversationKey)
-	if err != nil {
-		return v, err
-	}
-	defer unlock()
-
-	if v.State == StateAdmitted {
-		live, err := c.ledger.LiveTask(ctx, v.ConversationKey)
+	if v.ConversationKey != "" {
+		unlock, err := c.locks.lock(ctx, v.ConversationKey)
 		if err != nil {
 			return v, err
 		}
-		if live {
-			v.State = StateQueued
-		}
+		defer unlock()
 	}
-	return v, c.ledger.Commit(ctx, v)
+	written, err := c.ledger.Commit(ctx, v)
+	if err != nil {
+		return v, err
+	}
+	switch {
+	case written == v.State:
+	case v.State == StateAdmitted && written == StateQueued:
+		v.State = written
+	default:
+		return v, fmt.Errorf("admission: ledger wrote %s for a %s verdict on event %d", written, v.State, v.EventID)
+	}
+	return v, nil
 }
 
 // keyedMutex is a set of mutexes created on demand and dropped when nobody
@@ -121,7 +131,7 @@ const (
 // a person's redispatch once the window has passed.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt time.Time) (time.Time, bool) {
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified:
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonBucketMismatch:
 	default:
 		return time.Time{}, false
 	}

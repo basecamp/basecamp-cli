@@ -11,6 +11,9 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
+// personableAgent is the personable_type of an Agent person.
+const personableAgent = "Agent"
+
 // Read retry defaults. A read that fails is retried with backoff and, after
 // DefaultReadAttempts failures, the record is blocked(read_failed) — retained
 // and recovered on the blocked schedule, never discarded.
@@ -72,9 +75,12 @@ type Verdict struct {
 	Reply           *ReplyDestination
 	// Route and Class come from connect.json; Routed is false when the
 	// project has none.
-	Routed   bool
-	Route    string
-	Class    string
+	Routed bool
+	Route  string
+	Class  string
+	// RecordingURL is the recording's app URL, once read. A URL, not content.
+	RecordingURL string
+	// Snapshot is set on an admitted verdict only.
 	Snapshot *Snapshot
 }
 
@@ -193,13 +199,16 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		return v.end(StateDiscarded, ReasonStale), nil
 	}
 
-	v.Snapshot = &Snapshot{
-		Type:      summary.Type,
-		Title:     summary.Title,
-		AppURL:    summary.AppURL,
-		Content:   summary.Content,
-		UpdatedAt: summary.UpdatedAt,
+	// A read that answered without what admission decides from is a read
+	// that failed: an author to trust, the recording a comment hangs off, the
+	// Campfire a line was found in. None of them is evidence of anything.
+	if summary.Creator == nil || summary.Creator.ID <= 0 ||
+		(ev.EventType == "comment.created" && (summary.Parent == nil || summary.Parent.ID <= 0)) ||
+		(ev.EventType == "chat.line.created" && summary.CampfireID <= 0) {
+		return v.end(StateBlocked, ReasonReadFailed), nil
 	}
+
+	v.RecordingURL = summary.AppURL
 	if route, ok := a.policy.route(ev.BucketID); ok {
 		v.Routed, v.Route, v.Class = true, route.Path, route.Class
 	}
@@ -209,28 +218,27 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		return Verdict{}, err
 	}
 	if state != "" {
-		if state == StateBlocked {
-			// A blocked record re-runs its reads; it keeps no content meanwhile.
-			v.Snapshot = nil
-		}
 		return v.end(state, reason), nil
 	}
 
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
-	if state, reason := v.address(summary); state != "" {
-		return v.end(state, reason), nil
-	}
+	v.address(summary)
 
 	if !v.Routed {
 		// Mentioned and assigned are answered in an unmapped project rather
-		// than dropped: the record keeps its snapshot and waits for a route.
-		// Any other trigger was already discarded at the gate.
-		if rule.RequiresRoute {
-			return v.end(StateDiscarded, ReasonNoRoute), nil
-		}
+		// than dropped: the record keeps its trigger and reply destination
+		// for the holding reply, and is read again when a route appears. The
+		// gate already discarded every trigger that requires a route.
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted
+	v.Snapshot = &Snapshot{
+		Type:      summary.Type,
+		Title:     summary.Title,
+		AppURL:    summary.AppURL,
+		Content:   summary.Content,
+		UpdatedAt: summary.UpdatedAt,
+	}
 	return v, nil
 }
 
@@ -257,7 +265,7 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			// A mention is its own trigger; a comment that mentions the agent
 			// never falls through to subscription, even when the mention was
 			// refused.
-			if mentioned || summary.Parent == nil || summary.Parent.ID <= 0 {
+			if mentioned {
 				continue
 			}
 			subscribed, reason, err := a.subscribed(ctx, summary.Parent.ID)
@@ -297,7 +305,10 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 				endState, endReason = StateBlocked, ReasonDeltaUnverified
 				continue
 			}
-			if slices.Contains(added, agent) {
+			// Added by this event, and still assigned now. The first is the
+			// instruction; the second refuses one withdrawn before admission
+			// got to it. Neither alone admits.
+			if slices.Contains(added, agent) && assigned(summary, agent) {
 				return rule, "", "", nil
 			}
 
@@ -306,7 +317,7 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			if routed && route.WatchCompletions {
 				return rule, "", "", nil
 			}
-			if slices.ContainsFunc(summary.Assignees, func(p basecamp.Person) bool { return p.ID == agent }) {
+			if assigned(summary, agent) {
 				return rule, "", "", nil
 			}
 			subscribed, reason, err := a.subscribed(ctx, ev.RecordingID)
@@ -324,16 +335,19 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 	return Rule{}, endState, endReason, nil
 }
 
+func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
+	return slices.ContainsFunc(summary.Assignees, func(p basecamp.Person) bool { return p.ID == personID })
+}
+
 // authorTrusted checks the person who wrote the recording, for the triggers
 // whose instruction is that recording's content. The performer was trusted
 // at the gate; the author is usually the same person, but not always.
 func (a *Admitter) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (State, Reason, error) {
-	if summary.Creator == nil || summary.Creator.ID <= 0 {
-		return StateDiscarded, ReasonUntrustedAuthor, nil
-	}
 	author := summary.Creator.ID
 	switch {
-	case author == a.policy.AgentID:
+	case author == a.policy.AgentID, summary.Creator.PersonableType == personableAgent:
+		// The agent itself, or any Agent principal. The poll lane carries no
+		// actor type, so this read is where another agent's content shows.
 		return StateDiscarded, ReasonAgentAuthored, nil
 	case author == ev.Performer():
 		return "", "", nil
@@ -355,28 +369,21 @@ func (a *Admitter) authorTrusted(ctx context.Context, ev Event, summary *basecam
 	return StateDiscarded, ReasonUntrustedAuthor, nil
 }
 
-// address sets the conversation key and reply destination. A comment without
-// the recording it hangs off, or a chat line without its Campfire, cannot be
-// answered; that is a read that did not give admission what it needs.
-func (v *Verdict) address(summary *basecamp.RecordingSummary) (State, Reason) {
+// address sets the conversation key and reply destination. Decide has
+// already refused a comment without its recording and a line without its
+// Campfire.
+func (v *Verdict) address(summary *basecamp.RecordingSummary) {
 	switch v.EventType {
 	case "chat.line.created":
-		if summary.CampfireID <= 0 {
-			return StateBlocked, ReasonReadFailed
-		}
 		v.ConversationKey = "campfire:" + strconv.FormatInt(summary.CampfireID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyChatLine, RecordingID: summary.CampfireID}
 	case "comment.created":
-		if summary.Parent == nil || summary.Parent.ID <= 0 {
-			return StateBlocked, ReasonReadFailed
-		}
 		v.ConversationKey = "recording:" + strconv.FormatInt(summary.Parent.ID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyComment, RecordingID: summary.Parent.ID}
 	default:
 		v.ConversationKey = "recording:" + strconv.FormatInt(v.RecordingID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyComment, RecordingID: v.RecordingID}
 	}
-	return "", ""
 }
 
 func (a *Admitter) subscribed(ctx context.Context, recordingID int64) (bool, Reason, error) {
@@ -412,9 +419,10 @@ func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64) (bool
 }
 
 // retry runs read up to the configured attempts, backing off between them.
-// Verdict-bearing errors from the summary read end it at once: retrying a
-// chat line found under no Campfire, or a pointer with no typed read, cannot
-// change the answer within one admission.
+// An answer that another attempt seconds later cannot change ends it at once:
+// a chat line found under no Campfire, a pointer with no typed read, a
+// recording in another bucket, and a 401, 403 or 404. The record is still
+// blocked, and recovered on the blocked schedule rather than in place.
 func (a *Admitter) retry(ctx context.Context, read func() error) error {
 	wait := a.backoff
 	var err error
@@ -434,6 +442,12 @@ func (a *Admitter) retry(ctx context.Context, read func() error) error {
 
 // final reports errors that are answers rather than failures.
 func final(err error) bool {
+	if apiErr, ok := errors.AsType[*basecamp.Error](err); ok {
+		switch apiErr.Code {
+		case basecamp.CodeNotFound, basecamp.CodeForbidden, basecamp.CodeAuth:
+			return true
+		}
+	}
 	return errors.Is(err, basecamp.ErrRecordingUnresolved) ||
 		errors.Is(err, basecamp.ErrNoRecordingType) ||
 		errors.Is(err, basecamp.ErrUnknownRecordingType) ||
@@ -451,21 +465,21 @@ func classifySummaryError(ctx context.Context, err error) (State, Reason, error)
 	case errors.Is(err, basecamp.ErrRecordingUnresolved):
 		return StateBlocked, ReasonReadUnresolved, nil
 	case errors.Is(err, basecamp.ErrBucketMismatch):
-		return StateDiscarded, ReasonBucketMismatch, nil
+		// The recording moved since the event; it is not evidence the event
+		// was never the agent's business.
+		return StateBlocked, ReasonBucketMismatch, nil
 	case errors.Is(err, basecamp.ErrNoRecordingType), errors.Is(err, basecamp.ErrUnknownRecordingType):
-		return StateDiscarded, ReasonUnroutable, nil
+		return StateBlocked, ReasonUnroutable, nil
 	default:
 		return StateBlocked, ReasonReadFailed, nil
 	}
 }
 
-// end sets the final state. A discarded record keeps no content, trigger or
-// destination: it is a tombstone in the making.
+// end sets a state that is not admitted. The snapshot is only ever built on
+// the admitted path, so neither state carries content: a blocked record reads
+// the recording again when it is re-run, and a discarded one never needs it.
 func (v Verdict) end(state State, reason Reason) Verdict {
 	v.State, v.Reason = state, reason
-	if state == StateDiscarded {
-		v.Snapshot, v.Trigger, v.Acknowledge, v.Reply, v.ConversationKey = nil, "", false, nil, ""
-	}
 	return v
 }
 

@@ -212,12 +212,23 @@ func TestAssignments(t *testing.T) {
 		f := newFakeReads()
 		card(f)
 		f.assignments[eventID] = []int64{strangerID, agentID}
+		f.summaries[recordingID].Assignees = []basecamp.Person{{ID: strangerID}, {ID: agentID}}
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev(operatorID))
 		assert.Equal(t, StateAdmitted, v.State)
 		assert.Equal(t, TriggerAssigned, v.Trigger)
 		assert.True(t, v.Acknowledge)
 		assert.Equal(t, &ReplyDestination{Kind: ReplyComment, RecordingID: recordingID}, v.Reply)
+	})
+
+	t.Run("added by the event but unassigned since is not admitted", func(t *testing.T) {
+		f := newFakeReads()
+		card(f)
+		f.assignments[eventID] = []int64{agentID}
+
+		v := decide(t, newAdmitter(t, basePolicy(), f), ev(operatorID))
+		assert.Equal(t, StateDiscarded, v.State)
+		assert.Equal(t, ReasonNotAddressed, v.Reason)
 	})
 
 	t.Run("an event not found within the bound is blocked, not judged from current assignees", func(t *testing.T) {
@@ -309,14 +320,61 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 		assert.Equal(t, DefaultReadAttempts, f.assignCalls)
 	})
 
-	t.Run("a recording in another bucket is discarded without retrying", func(t *testing.T) {
+	t.Run("a recording in another bucket is blocked, without retrying in place", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaryErrs = []error{&basecamp.BucketMismatchError{BucketID: 1}}
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
-		assert.Equal(t, StateDiscarded, v.State)
+		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonBucketMismatch, v.Reason)
 		assert.Equal(t, 1, f.summaryCalls)
+	})
+
+	t.Run("a pointer with no typed read is blocked, without retrying in place", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaryErrs = []error{&basecamp.RecordingRoutingError{Err: basecamp.ErrUnknownRecordingType}}
+
+		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonUnroutable, v.Reason)
+		assert.Equal(t, 1, f.summaryCalls)
+	})
+
+	t.Run("a 404 is blocked at once, not after five backoffs", func(t *testing.T) {
+		f := newFakeReads() // no summary: the fake answers 404
+
+		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonReadFailed, v.Reason)
+		assert.Equal(t, 1, f.summaryCalls)
+	})
+
+	t.Run("a canceled context during a subscription read is not a verdict", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
+		f.subErr = errTransport
+		ctx, cancel := context.WithCancel(context.Background())
+		a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error {
+			cancel()
+			return ctx.Err()
+		}))
+		require.NoError(t, err)
+		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.completed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("a canceled context during an assignment read is not a verdict", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>card</div>")
+		f.assignErr = errTransport
+		ctx, cancel := context.WithCancel(context.Background())
+		a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error {
+			cancel()
+			return ctx.Err()
+		}))
+		require.NoError(t, err)
+		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.assignment_changed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		require.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("a canceled context is not a verdict", func(t *testing.T) {
@@ -492,15 +550,41 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 		assert.Equal(t, ReasonUntrustedAuthor, v.Reason)
 	})
 
-	t.Run("an unknown author", func(t *testing.T) {
+	t.Run("an author the read did not name is a failed read, not an untrusted one", func(t *testing.T) {
 		f := newFakeReads()
 		s := summaryWith(recordingID, routedProj, "Todo", strangerID, mentionOf(t, agentID))
 		s.Creator = nil
 		f.summaries[recordingID] = s
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonReadFailed, v.Reason)
+		assert.Nil(t, v.Snapshot)
+	})
+
+	t.Run("operator-written content moved in by an allowlisted person", func(t *testing.T) {
+		f := newFakeReads()
+		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", operatorID, mentionOf(t, agentID))
+		p := basePolicy()
+		p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
+		moved := ev
+		moved.CreatorID = allowedID
+
+		v := decide(t, newAdmitter(t, p, f), moved)
+		assert.Equal(t, StateAdmitted, v.State)
+	})
+
+	t.Run("content written by another Agent principal", func(t *testing.T) {
+		f := newFakeReads()
+		s := summaryWith(recordingID, routedProj, "Todo", otherAgent, mentionOf(t, agentID))
+		s.Creator.PersonableType = "Agent"
+		f.summaries[recordingID] = s
+		p := basePolicy()
+		p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{otherAgent}}
+
+		v := decide(t, newAdmitter(t, p, f), ev)
 		assert.Equal(t, StateDiscarded, v.State)
-		assert.Equal(t, ReasonUntrustedAuthor, v.Reason)
+		assert.Equal(t, ReasonAgentAuthored, v.Reason)
 	})
 
 	t.Run("an allowlisted author moved in by the operator", func(t *testing.T) {
@@ -548,12 +632,40 @@ func TestProjectTrustMode(t *testing.T) {
 		assert.Equal(t, 1, f.memberCalls)
 	})
 
-	t.Run("a client is not, and costs no recording read", func(t *testing.T) {
+	t.Run("someone membership does not confirm is not, and costs no recording read", func(t *testing.T) {
 		f := setup(t, clientID)
 		v := decide(t, newAdmitter(t, p, f), comment(clientID))
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonUntrustedPerformer, v.Reason)
 		assert.Zero(t, f.summaryCalls)
+	})
+
+	t.Run("another agent on the poll lane, as the recording's author", func(t *testing.T) {
+		// No actor type on the poll lane; the membership read below says yes
+		// for the performer, and only the author's type gives it away.
+		f := setup(t, otherAgent)
+		f.summaries[recordingID].Creator.PersonableType = "Agent"
+		f.members[routedProj][otherAgent] = true
+		v := decide(t, newAdmitter(t, p, f), comment(otherAgent))
+		assert.Equal(t, StateDiscarded, v.State)
+		assert.Equal(t, ReasonAgentAuthored, v.Reason)
+	})
+
+	t.Run("a membership read that fails blocks rather than discards", func(t *testing.T) {
+		f := setup(t, memberID)
+		f.memberErr = errTransport
+		v := decide(t, newAdmitter(t, p, f), comment(memberID))
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonReadFailed, v.Reason)
+	})
+
+	t.Run("an author membership read that fails blocks rather than discards", func(t *testing.T) {
+		f := setup(t, memberID)
+		f.memberErr = errTransport
+		v := decide(t, newAdmitter(t, p, f), comment(operatorID))
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonReadFailed, v.Reason)
+		assert.Equal(t, 1, f.summaryCalls, "the operator's own trust needed no read; the author's did")
 	})
 
 	t.Run("the operator needs no membership read", func(t *testing.T) {
@@ -627,7 +739,7 @@ func TestSubscribedComments(t *testing.T) {
 }
 
 func TestNoRoute(t *testing.T) {
-	t.Run("a mention in an unmapped project is blocked and keeps its snapshot", func(t *testing.T) {
+	t.Run("a mention in an unmapped project is blocked and keeps no content", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaries[recordingID] = summaryWith(recordingID, unmapped, "Kanban::Card", operatorID, mentionOf(t, agentID))
 
@@ -635,13 +747,16 @@ func TestNoRoute(t *testing.T) {
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonNoRoute, v.Reason)
 		assert.False(t, v.Routed)
-		assert.NotNil(t, v.Snapshot)
+		assert.Nil(t, v.Snapshot, "only an admitted record carries content; this one is read again when a route appears")
 		assert.NotNil(t, v.Reply, "the holding reply needs a destination")
+		assert.Equal(t, TriggerMentioned, v.Trigger)
+		assert.NotEmpty(t, v.RecordingURL)
 	})
 
 	t.Run("an assignment in an unmapped project is blocked", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaries[recordingID] = summaryWith(recordingID, unmapped, "Todo", strangerID, "<div>todo</div>")
+		f.summaries[recordingID].Assignees = []basecamp.Person{{ID: agentID}}
 		f.assignments[eventID] = []int64{agentID}
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "todo.assignment_changed", BucketID: unmapped, RecordingID: recordingID, CreatorID: operatorID})
@@ -746,12 +861,21 @@ func TestSubscribedNeverStandsInForARefusedMention(t *testing.T) {
 }
 
 func TestACommentWithoutItsRecordingCannotBeAnswered(t *testing.T) {
-	f := newFakeReads()
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Comment", operatorID, mentionOf(t, agentID))
+	for name, content := range map[string]string{
+		"with a mention":    mentionOf(t, agentID),
+		"without a mention": "<div>next?</div>",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeReads()
+			f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Comment", operatorID, content)
 
-	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
-	assert.Equal(t, StateBlocked, v.State)
-	assert.Equal(t, ReasonReadFailed, v.Reason)
+			v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+			assert.Equal(t, StateBlocked, v.State)
+			assert.Equal(t, ReasonReadFailed, v.Reason)
+			assert.Nil(t, v.Snapshot, "a blocked record keeps no content")
+			assert.Empty(t, f.subCalls)
+		})
+	}
 }
 
 type nilSummaries struct{ *fakeReads }

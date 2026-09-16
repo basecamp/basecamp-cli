@@ -109,6 +109,12 @@ func admitOne(ctx context.Context, opts RunOptions, lines *lineWriter, log *slog
 		return err
 	}
 	v, err = opts.Committer.Commit(ctx, v)
+	if errors.Is(err, ErrAlreadyDecided) {
+		// Another fetch, or an earlier run, decided it first. Its verdict
+		// stands and was reported when it was written.
+		log.Debug("admission verdict already written", "event_id", id)
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("admission: commit event %d: %w", id, err)
 	}
@@ -148,9 +154,7 @@ func LineFor(v Verdict) Line {
 		State:       v.State,
 		Reason:      v.Reason,
 	}
-	if v.Snapshot != nil {
-		line.RecordingURL = v.Snapshot.AppURL
-	}
+	line.RecordingURL = v.RecordingURL
 	return line
 }
 

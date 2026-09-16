@@ -43,10 +43,13 @@ func NewSubscriptions(client *basecamp.AccountClient, now func() time.Time) *Sub
 	return &Subscriptions{client: client, cache: newTTLCache[int64, bool](now, SubscriptionTTL)}
 }
 
-// Subscribed implements SubscriptionReader.
+// Subscribed implements SubscriptionReader. Only "subscribed" is served from
+// the cache. "Not subscribed" is always read fresh, because it discards the
+// event: a subscription made a minute ago must not be answered by a snapshot
+// from before it.
 func (s *Subscriptions) Subscribed(ctx context.Context, recordingID int64) (bool, error) {
-	if v, ok := s.cache.get(recordingID); ok {
-		return v, nil
+	if v, ok := s.cache.get(recordingID); ok && v {
+		return true, nil
 	}
 	sub, err := s.client.Subscriptions().Get(ctx, recordingID)
 	if err != nil {
@@ -74,7 +77,9 @@ func (a *Assignments) AddedPersonIDs(ctx context.Context, recordingID, eventID i
 				continue
 			}
 			if ev.Details == nil {
-				return nil, true, nil
+				// Found, but without the delta it exists to report: that is
+				// not evidence of who was added, any more than a miss is.
+				return nil, false, nil
 			}
 			return ev.Details.AddedPersonIDs, true, nil
 		}
@@ -97,18 +102,21 @@ func NewMembers(client *basecamp.AccountClient, now func() time.Time) *Members {
 	return &Members{client: client, cache: newTTLCache[int64, map[int64]bool](now, MembershipTTL)}
 }
 
-// NonClientMember implements MemberReader. A person listed as a client is not
-// a member for trust, and neither is anyone the listing does not name.
+// NonClientMember implements MemberReader. A member for trust is a person
+// the project's listing names who is neither a client nor an Agent principal
+// (the listing serves agents, with client false). Only "member" is served
+// from the cache; "not a member" discards the event, so it is always answered
+// from a fresh listing, and someone added a minute ago is seen.
 func (m *Members) NonClientMember(ctx context.Context, bucketID, personID int64) (bool, error) {
 	members, ok := m.cache.get(bucketID)
-	if !ok {
+	if !ok || !members[personID] {
 		res, err := m.client.People().ListProjectPeople(ctx, bucketID, nil)
 		if err != nil {
 			return false, err
 		}
 		members = make(map[int64]bool, len(res.People))
 		for _, p := range res.People {
-			if p.ID > 0 && !p.Client {
+			if p.ID > 0 && !p.Client && p.PersonableType != personableAgent {
 				members[p.ID] = true
 			}
 		}

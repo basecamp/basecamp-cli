@@ -164,24 +164,111 @@ func TestAssignmentReadStopsAtTheEndOfHistory(t *testing.T) {
 	assert.EqualValues(t, 2, requests.Load())
 }
 
+func TestAssignmentEventWithoutDetailsIsUnverified(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"action":"assignment_changed"}]`, eventID)
+	}))
+	added, found, err := (&Assignments{client: client}).AddedPersonIDs(context.Background(), 9001, eventID)
+	require.NoError(t, err)
+	assert.False(t, found, "found without details says nothing about who was added")
+	assert.Nil(t, added)
+}
+
+func TestNotSubscribedIsAlwaysReadFresh(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"subscribed":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"subscribed":true}`))
+	}))
+	subs := NewSubscriptions(client, time.Now)
+
+	got, err := subs.Subscribed(context.Background(), 9000)
+	require.NoError(t, err)
+	assert.False(t, got)
+	got, err = subs.Subscribed(context.Background(), 9000)
+	require.NoError(t, err)
+	assert.True(t, got, "a subscription made after a negative answer is seen")
+}
+
+func TestMembershipSeesSomeoneAddedAfterTheListingWasCached(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, operatorID)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false},{"id":%d,"client":false}]`, operatorID, memberID)
+	}))
+	members := NewMembers(client, time.Now)
+
+	got, err := members.NonClientMember(context.Background(), routedProj, operatorID)
+	require.NoError(t, err)
+	assert.True(t, got)
+	got, err = members.NonClientMember(context.Background(), routedProj, memberID)
+	require.NoError(t, err)
+	assert.True(t, got)
+	assert.EqualValues(t, 2, calls.Load())
+}
+
+func TestMembershipFailureIsNotCached(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
+	}))
+	members := NewMembers(client, time.Now)
+
+	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	require.Error(t, err)
+	got, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	require.NoError(t, err)
+	assert.True(t, got)
+}
+
+func TestMembershipListingExpires(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
+	}))
+	c := &clock{now: testNow}
+	members := NewMembers(client, c.Now)
+
+	for range 2 {
+		_, err := members.NonClientMember(context.Background(), routedProj, memberID)
+		require.NoError(t, err)
+	}
+	assert.EqualValues(t, 1, calls.Load())
+	c.advance(MembershipTTL)
+	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, calls.Load(), "someone removed from the project stops being trusted within the TTL")
+}
+
 func TestMembershipExcludesClientsAndIsCached(t *testing.T) {
 	var calls atomic.Int32
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, fmt.Sprintf("/999/projects/%d/people.json", routedProj), r.URL.Path)
 		calls.Add(1)
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"name":"Member","client":false},{"id":%d,"name":"Client","client":true}]`, memberID, clientID)
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"name":"Member","personable_type":"User","client":false},{"id":%d,"name":"Client","personable_type":"Client","client":true},{"id":%d,"name":"Other agent","personable_type":"Agent","client":false}]`, memberID, clientID, otherAgent)
 	}))
 	members := NewMembers(client, time.Now)
 
 	for _, tc := range []struct {
 		id   int64
 		want bool
-	}{{memberID, true}, {clientID, false}, {strangerID, false}} {
+	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}} {
 		got, err := members.NonClientMember(context.Background(), routedProj, tc.id)
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, got, "person %d", tc.id)
 	}
-	assert.EqualValues(t, 1, calls.Load())
+	assert.EqualValues(t, 1+3, calls.Load(), "the member from the cache; each of the three refusals from a fresh listing")
 }
 
 func TestCacheIsBounded(t *testing.T) {

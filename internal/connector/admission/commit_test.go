@@ -16,10 +16,14 @@ import (
 
 var testNow = time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 
+// fakeLedger holds the ledger's contract as the intake adapter must: one
+// verdict per event, and admitted-or-queued decided in the commit itself.
 type fakeLedger struct {
 	mu      sync.Mutex
 	live    map[string]bool
+	decided map[int64]State
 	commits []Verdict
+	failure error
 
 	// inFlight counts commits running per key, to catch two at once.
 	inFlight map[string]*atomic.Int32
@@ -28,16 +32,10 @@ type fakeLedger struct {
 }
 
 func newFakeLedger() *fakeLedger {
-	return &fakeLedger{live: map[string]bool{}, inFlight: map[string]*atomic.Int32{}}
+	return &fakeLedger{live: map[string]bool{}, decided: map[int64]State{}, inFlight: map[string]*atomic.Int32{}}
 }
 
-func (l *fakeLedger) LiveTask(_ context.Context, key string) (bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.live[key], nil
-}
-
-func (l *fakeLedger) Commit(_ context.Context, v Verdict) error {
+func (l *fakeLedger) Commit(_ context.Context, v Verdict) (State, error) {
 	l.mu.Lock()
 	counter := l.inFlight[v.ConversationKey]
 	if counter == nil {
@@ -54,16 +52,31 @@ func (l *fakeLedger) Commit(_ context.Context, v Verdict) error {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.commits = append(l.commits, v)
-	// Committing an admitted record starts the conversation's task, as
-	// dispatch will; a later event on the key must see it.
-	if v.State == StateAdmitted {
+	if l.failure != nil {
+		return "", l.failure
+	}
+	if prior, ok := l.decided[v.EventID]; ok && prior != StateBlocked {
+		return "", ErrAlreadyDecided
+	}
+	state := v.State
+	if state == StateAdmitted {
+		if l.live[v.ConversationKey] {
+			state = StateQueued
+		}
+		// An admitted record not yet dispatched already makes the
+		// conversation live: it is about to become its task.
 		l.live[v.ConversationKey] = true
 	}
-	return nil
+	if state != StateAdmitted && state != StateQueued && v.Snapshot != nil {
+		return "", errors.New("content on a verdict that is not admitted")
+	}
+	l.decided[v.EventID] = state
+	v.State = state
+	l.commits = append(l.commits, v)
+	return state, nil
 }
 
-func TestCommitQueuesBehindALiveTask(t *testing.T) {
+func TestCommitReportsTheStateTheLedgerWrote(t *testing.T) {
 	ledger := newFakeLedger()
 	ledger.live["recording:9000"] = true
 	c := NewCommitter(ledger)
@@ -71,15 +84,41 @@ func TestCommitQueuesBehindALiveTask(t *testing.T) {
 	got, err := c.Commit(context.Background(), Verdict{EventID: 1, State: StateAdmitted, ConversationKey: "recording:9000"})
 	require.NoError(t, err)
 	assert.Equal(t, StateQueued, got.State)
-	assert.Equal(t, StateQueued, ledger.commits[0].State)
 
 	got, err = c.Commit(context.Background(), Verdict{EventID: 2, State: StateAdmitted, ConversationKey: "recording:1"})
 	require.NoError(t, err)
 	assert.Equal(t, StateAdmitted, got.State)
+}
 
-	got, err = c.Commit(context.Background(), Verdict{EventID: 3, State: StateBlocked, Reason: ReasonReadFailed, ConversationKey: "recording:9000"})
+type contraryLedger struct{ write State }
+
+func (l contraryLedger) Commit(context.Context, Verdict) (State, error) { return l.write, nil }
+
+func TestCommitRefusesALedgerThatWroteSomethingElse(t *testing.T) {
+	// Queued for admitted is the one substitution the ledger may make.
+	_, err := NewCommitter(contraryLedger{write: StateAdmitted}).Commit(context.Background(), Verdict{EventID: 1, State: StateBlocked, Reason: ReasonReadFailed})
+	require.ErrorContains(t, err, "ledger wrote admitted for a blocked verdict")
+
+	_, err = NewCommitter(contraryLedger{write: StateQueued}).Commit(context.Background(), Verdict{EventID: 1, State: StateDiscarded, Reason: ReasonStale})
+	require.Error(t, err)
+}
+
+func TestOneVerdictPerEvent(t *testing.T) {
+	ledger := newFakeLedger()
+	c := NewCommitter(ledger)
+	v := Verdict{EventID: 7, State: StateAdmitted, ConversationKey: "recording:1"}
+
+	_, err := c.Commit(context.Background(), v)
 	require.NoError(t, err)
-	assert.Equal(t, StateBlocked, got.State, "only an admitted verdict joins a live task")
+	_, err = c.Commit(context.Background(), v)
+	require.ErrorIs(t, err, ErrAlreadyDecided)
+
+	// A blocked record is decided again on recovery.
+	b := Verdict{EventID: 8, State: StateBlocked, Reason: ReasonReadFailed}
+	_, err = c.Commit(context.Background(), b)
+	require.NoError(t, err)
+	_, err = c.Commit(context.Background(), Verdict{EventID: 8, State: StateAdmitted, ConversationKey: "recording:2"})
+	require.NoError(t, err)
 }
 
 func TestCommitsAreSerialisedPerConversation(t *testing.T) {
@@ -147,6 +186,11 @@ func TestNextBlockedRetry(t *testing.T) {
 
 	next, ok := NextBlockedRetry(ReasonReadFailed, blockedAt, blockedAt)
 	require.True(t, ok)
+
+	_, ok = NextBlockedRetry(ReasonBucketMismatch, blockedAt, blockedAt)
+	assert.True(t, ok, "a recording that moved is looked at again")
+	_, ok = NextBlockedRetry(ReasonUnroutable, blockedAt, blockedAt)
+	assert.False(t, ok, "no timer can give a type a read")
 	assert.Equal(t, blockedAt.Add(10*time.Minute), next)
 
 	next, ok = NextBlockedRetry(ReasonDeltaUnverified, blockedAt, blockedAt.Add(23*time.Hour+50*time.Minute))
@@ -161,8 +205,17 @@ func TestNextBlockedRetry(t *testing.T) {
 }
 
 type sliceSource struct {
-	mu  sync.Mutex
-	ids []int64
+	mu      sync.Mutex
+	ids     []int64
+	waiting bool
+}
+
+// drained reports whether every id was taken and the taker came back for more,
+// so the last id's work is done.
+func (s *sliceSource) drained() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.ids) == 0 && s.waiting
 }
 
 func (s *sliceSource) Take(ctx context.Context) (int64, error) {
@@ -173,6 +226,7 @@ func (s *sliceSource) Take(ctx context.Context) (int64, error) {
 		s.mu.Unlock()
 		return id, nil
 	}
+	s.waiting = true
 	s.mu.Unlock()
 	<-ctx.Done()
 	return 0, ctx.Err()
@@ -208,6 +262,7 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>"+secret+" "+mentionOf(t, agentID)+"</div>")
 	ledger := newFakeLedger()
 	out := &syncBuffer{}
+	source := &sliceSource{ids: []int64{3, 1, 2, 1}}
 
 	records := mapRecords{
 		1: {ID: 1, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID},
@@ -220,7 +275,8 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 		// One worker, and the record no longer seen first: were it decided,
 		// its line would be one of the two this test waits for.
 		done <- Run(ctx, RunOptions{
-			Source:    &sliceSource{ids: []int64{3, 1, 2}},
+			// 1 again at the end: decided once, reported once.
+			Source:    source,
 			Records:   records,
 			Admitter:  newAdmitter(t, basePolicy(), f),
 			Committer: NewCommitter(ledger),
@@ -228,10 +284,15 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 			Lines:     out,
 		})
 	}()
-	require.Eventually(t, func() bool { return strings.Count(out.String(), "\n") == 2 }, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool {
+		ledger.mu.Lock()
+		defer ledger.mu.Unlock()
+		return len(ledger.decided) == 2 && source.drained()
+	}, 2*time.Second, 5*time.Millisecond)
 	cancel()
 	require.NoError(t, <-done)
 
+	assert.Equal(t, 2, strings.Count(out.String(), "\n"), "one line per decided event")
 	assert.NotContains(t, out.String(), secret, "no line may carry content")
 	lines := map[int64]map[string]any{}
 	for raw := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
@@ -258,7 +319,21 @@ func (failingRecords) LoadSeen(context.Context, int64) (Event, bool, error) {
 	return Event{}, false, errors.New("database is locked")
 }
 
-func TestRunStopsOnALedgerFailure(t *testing.T) {
+func TestRunStopsOnACommitFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ledger := newFakeLedger()
+	ledger.failure = errors.New("disk I/O error")
+	err := Run(ctx, RunOptions{
+		Source:    &sliceSource{ids: []int64{1}},
+		Records:   mapRecords{1: {ID: 1, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}},
+		Admitter:  newAdmitter(t, basePolicy(), newFakeReads()),
+		Committer: NewCommitter(ledger),
+	})
+	require.ErrorContains(t, err, "disk I/O error")
+}
+
+func TestRunStopsOnALoadFailure(t *testing.T) {
 	// Bounded, so a Run that swallowed the failure fails this test by name
 	// rather than hanging the suite.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

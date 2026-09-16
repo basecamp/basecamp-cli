@@ -78,7 +78,8 @@ const (
 type Reason string
 
 // Discard reasons. Each is a verified verdict — the gate's reading of the
-// pointer and policy, or a read that answered — never a transport failure.
+// pointer and policy, or a read that answered with what the verdict needs —
+// never a failed or incomplete read.
 const (
 	// ReasonInvalidPointer: an id the pointer must carry is missing.
 	ReasonInvalidPointer Reason = "invalid_pointer"
@@ -103,11 +104,6 @@ const (
 	ReasonStale Reason = "stale"
 	// ReasonNotAddressed: nothing about the recording targets the agent.
 	ReasonNotAddressed Reason = "not_addressed"
-	// ReasonBucketMismatch: the recording is not in the bucket the pointer
-	// named.
-	ReasonBucketMismatch Reason = "bucket_mismatch"
-	// ReasonUnroutable: the SDK has no typed read for the pointer's type.
-	ReasonUnroutable Reason = "unroutable"
 )
 
 // Blocked reasons. A blocked record is retained and recovered; it is never a
@@ -118,8 +114,15 @@ const (
 	// ReasonReadUnresolved: a chat line found under no visible Campfire.
 	ReasonReadUnresolved Reason = "read_unresolved"
 	// ReasonDeltaUnverified: the assignment event was not found within the
-	// events read's bound, so who was added is unknown.
+	// events read's bound, or was found without its details, so who was added
+	// is unknown.
 	ReasonDeltaUnverified Reason = "delta_unverified"
+	// ReasonBucketMismatch: the recording is not in the bucket the pointer
+	// named — moved since the event, most likely.
+	ReasonBucketMismatch Reason = "bucket_mismatch"
+	// ReasonUnroutable: the SDK has no typed read for the pointer's type. Not
+	// retried on a timer; only a redispatch re-runs it.
+	ReasonUnroutable Reason = "unroutable"
 	// ReasonNoRoute: shared by both states — a mentioned or assigned record in
 	// a project with no route is blocked (and answered with a holding reply);
 	// any other trigger there is discarded.

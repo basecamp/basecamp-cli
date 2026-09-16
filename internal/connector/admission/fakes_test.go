@@ -49,6 +49,7 @@ type fakeReads struct {
 	assignments   map[int64][]int64 // event id → added person ids
 	assignErr     error
 	members       map[int64]map[int64]bool
+	memberErr     error
 
 	summaryCalls int
 	subCalls     []int64
@@ -113,6 +114,9 @@ func (f *fakeReads) NonClientMember(_ context.Context, bucketID, personID int64)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.memberCalls++
+	if f.memberErr != nil {
+		return false, f.memberErr
+	}
 	return f.members[bucketID][personID], nil
 }
 

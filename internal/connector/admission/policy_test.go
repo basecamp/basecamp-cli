@@ -44,7 +44,7 @@ func TestValidateFailsClosed(t *testing.T) {
 		"agent in a longer allowlist": func(p *Policy) {
 			p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID, agentID}}
 		},
-		"allowlist mode, project list": func(p *Policy) {
+		"allowlist ids in project mode": func(p *Policy) {
 			p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
 		},
 	} {
