@@ -53,7 +53,7 @@ deduplicate by addressing_id, never by the event's id.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := entry.validate(); err != nil {
+			if err := entry.validate(inboxLane); err != nil {
 				return err
 			}
 			if maxPages < 1 {

@@ -45,6 +45,7 @@ const feedDefaultMaxPages = 50
 type feedLane struct {
 	name          string
 	pollCmd       string
+	sinceHint     string
 	resumeSince   string
 	forbiddenMsg  string
 	forbiddenHint string
@@ -52,12 +53,14 @@ type feedLane struct {
 
 var (
 	eventsLane = feedLane{
-		name:    "event",
-		pollCmd: "basecamp events poll",
+		name:      "event",
+		pollCmd:   "basecamp events poll",
+		sinceHint: "Pass an event id to start after, 'now' to enter at the present, or 0 to replay served history",
 	}
 	inboxLane = feedLane{
 		name:          "inbox item",
 		pollCmd:       "basecamp inbox",
+		sinceHint:     "Pass an inbox item id to start after, 'now' to enter at the present, or 0 for the earliest retained items",
 		resumeSince:   basecamp.SinceEpoch,
 		forbiddenMsg:  "The inbox is served to agent principals only",
 		forbiddenHint: "Authenticate as an agent, or use 'basecamp events poll' for the account-wide feed",
@@ -72,10 +75,12 @@ type feedEntry struct {
 }
 
 // validate rejects the two entry points the server would reject anyway, with
-// a message that names the fix. The shape of --since is checked, never its
-// value: an event id the feed has never served is the server's verdict to
+// a message that names the fix. The remedy comes from the lane, because the
+// two lanes number different things: --since takes an event id on the feed
+// and an addressed-item id on the inbox. The shape of --since is checked,
+// never its value: an id the lane has never served is the server's verdict to
 // give, not ours.
-func (e feedEntry) validate() error {
+func (e feedEntry) validate(lane feedLane) error {
 	switch {
 	case e.since != "" && e.position != "":
 		return output.ErrUsage("--since and --position are mutually exclusive")
@@ -83,10 +88,7 @@ func (e feedEntry) validate() error {
 		return nil
 	}
 	if _, err := strconv.ParseInt(e.since, 10, 64); err != nil {
-		return output.ErrUsageHint(
-			fmt.Sprintf("Invalid --since: %s", e.since),
-			"Pass an event id to start after, 'now' to enter at the present, or 0 to replay served history",
-		)
+		return output.ErrUsageHint(fmt.Sprintf("Invalid --since: %s", e.since), lane.sinceHint)
 	}
 	return nil
 }
@@ -319,7 +321,7 @@ event id and refetch the referenced recording before acting on it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := entry.validate(); err != nil {
+			if err := entry.validate(eventsLane); err != nil {
 				return err
 			}
 			if maxPages < 1 {

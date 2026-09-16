@@ -427,6 +427,18 @@ func TestInboxPositionGoneReEntersAtTheEarliestRetainedItem(t *testing.T) {
 	assert.Equal(t, "Re-enter with: basecamp inbox --since 0", cliErr.Hint)
 }
 
+// The two lanes number different things, so the remedy an invalid --since
+// offers has to name the lane's own identifier rather than the feed's.
+func TestInvalidSinceNamesTheLanesOwnIdentifier(t *testing.T) {
+	app, _, _ := setupFeedApp(t)
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "yesterday")
+	assert.Contains(t, requireFeedError(t, err).Hint, "event id")
+
+	app, _, _ = setupFeedApp(t)
+	err = executeRecordingCommand(NewInboxCmd(), app, "--since", "yesterday")
+	assert.Contains(t, requireFeedError(t, err).Hint, "inbox item id")
+}
+
 func TestInboxRejectsUnservableFlagsBeforeAnyRequest(t *testing.T) {
 	app, transport, _ := setupFeedApp(t, inboxRoute(http.StatusOK, inboxPageJSON("inbox-pos-1", "")))
 
