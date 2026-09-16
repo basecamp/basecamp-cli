@@ -277,7 +277,8 @@ func TestEventsPollFilterMismatchNamesBothDigests(t *testing.T) {
 	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusConflict,
 		`{"error":"position was minted for a different filter set","position_digest":"44136fa355b3678a","filters_digest":"38b223c13c89dc89"}`))
 
-	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "stale")
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "stale",
+		"--types", "message.created", "--exclude-performers", "self")
 
 	cliErr := requireFeedError(t, err)
 	assert.Equal(t, output.CodeUsage, cliErr.Code)
@@ -285,7 +286,10 @@ func TestEventsPollFilterMismatchNamesBothDigests(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, cliErr.HTTPStatus)
 	assert.Contains(t, cliErr.Message, "44136fa355b3678a")
 	assert.Contains(t, cliErr.Message, "38b223c13c89dc89")
-	assert.Contains(t, cliErr.Hint, "--since")
+	// The filters the caller presented survive the recovery command: a
+	// re-entry without them is a different filter set again.
+	assert.Contains(t, cliErr.Hint,
+		"basecamp events poll --since now --types message.created --exclude-performers self")
 }
 
 func TestEventsPollPositionGoneCarriesTheResumeURLAndTheEpoch(t *testing.T) {
@@ -553,6 +557,68 @@ func TestContinuationOriginComparisonNormalizesDefaultPortsAndCase(t *testing.T)
 	require.NoError(t, checkContinuation("https://3.basecampapi.com:443", feedBaseURL+feedEventsPath+"?position=p"))
 	require.NoError(t, checkContinuation(feedBaseURL, "HTTPS://3.BasecampAPI.com"+feedEventsPath+"?position=p"))
 	require.Error(t, checkContinuation(feedBaseURL, "https://3.basecampapi.com:8443"+feedEventsPath))
+}
+
+// A position is bound to its filter set, so a resume breadcrumb that dropped
+// the filters would hand back a command that 409s.
+func TestResumeBreadcrumbCarriesTheFilters(t *testing.T) {
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK, feedPageJSON("pos-1", "", 11)))
+	app.Flags.Hints = true
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "now",
+		"--types", "message.created", "--buckets", "1,2", "--exclude-performers", "self"))
+
+	assert.Equal(t,
+		"basecamp events poll --position <position> --types message.created"+
+			" --buckets 1,2 --exclude-performers self",
+		resumeBreadcrumb(t, out))
+}
+
+func TestInboxResumeBreadcrumbCarriesItsOwnFilters(t *testing.T) {
+	app, _, out := setupFeedApp(t, inboxRoute(http.StatusOK, inboxPageJSON("inbox-pos-1", "", 991)))
+	app.Flags.Hints = true
+
+	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app, "--since", "now", "--reasons", "mentioned"))
+
+	assert.Equal(t, "basecamp inbox --position <position> --reasons mentioned", resumeBreadcrumb(t, out))
+}
+
+// resumeBreadcrumb returns the command the response's resume breadcrumb
+// offers, failing the test when there is none.
+func resumeBreadcrumb(t *testing.T, out *bytes.Buffer) string {
+	t.Helper()
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	for _, crumb := range envelope.Breadcrumbs {
+		if crumb.Action == "resume" {
+			return crumb.Cmd
+		}
+	}
+	t.Fatal("no resume breadcrumb in the response")
+	return ""
+}
+
+// A 410 body is server text. Its resume URL is displayed as authoritative and
+// read for filters, which is acting on it, so it faces the same origin check
+// the walk applies to a continuation — and the re-entry falls back to the
+// filters this request was invoked with.
+func TestPositionGoneRefusesAForeignResumeURL(t *testing.T) {
+	resume := "https://evil.example/99999/events.json?since=900&types=attacker.controlled"
+	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusGone,
+		fmt.Sprintf(`{"error":"position predates the feed epoch","epoch_after_id":900,"resume":%q}`, resume)))
+
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "ancient",
+		"--types", "message.created")
+
+	cliErr := requireFeedError(t, err)
+	assert.NotContains(t, cliErr.Message, "evil.example")
+	assert.NotContains(t, cliErr.Hint, "attacker.controlled")
+	assert.Equal(t, "Re-enter with: basecamp events poll --since 900 --types message.created", cliErr.Hint)
 }
 
 func TestCheckContinuationFallsBackToTheDefaultHost(t *testing.T) {

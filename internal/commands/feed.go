@@ -78,14 +78,7 @@ func eventsContinuationFilters(raw string) ([]flagValues, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []flagValues{
-		{"--types", opts.Types},
-		{"--buckets", int64Strings(opts.Buckets)},
-		{"--creators", int64Strings(opts.Creators)},
-		{"--performers", opts.Performers},
-		{"--exclude-performers", opts.ExcludePerformers},
-		{"--actor-types", opts.ActorTypes},
-	}, nil
+	return eventsFilterFlags(opts), nil
 }
 
 func inboxContinuationFilters(raw string) ([]flagValues, error) {
@@ -93,11 +86,7 @@ func inboxContinuationFilters(raw string) ([]flagValues, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []flagValues{
-		{"--reasons", opts.Reasons},
-		{"--types", opts.Types},
-		{"--buckets", int64Strings(opts.Buckets)},
-	}, nil
+	return inboxFilterFlags(opts), nil
 }
 
 // feedEntry is the entry point a poll presents: an explicit since, a held
@@ -201,45 +190,67 @@ func trimFilter(values []string) []string {
 	return trimmed
 }
 
+// feedRequest is what a poll knows about itself when it has to tell a caller
+// how to come back: which lane it is, the configured API base a
+// server-supplied URL has to match, and the filter flags it was invoked with.
+//
+// Every re-entry carries the filters, because a position is bound to its
+// filter set: a resume command that dropped them would 409 on the spot, and
+// dropping --exclude-performers self turns an agent's recovery into a run on
+// its own activity.
+type feedRequest struct {
+	lane    feedLane
+	baseURL string
+	filters string
+}
+
 // resumeCommand renders the invocation that re-enters this lane after a 410.
 //
-// The server's resume URL preserves the request's canonical filters, and a
-// bare --since would drop every one of them — including the
-// --exclude-performers self loop guard, whose absence turns an agent's
-// recovery into a run on its own activity. So the filters come back out of
-// the resume URL rather than being left behind in it.
-//
-// A resume URL the SDK cannot parse, or one carrying a filter value outside
-// the contract's alphabet, falls back to the lane's bare re-entry: a hint is
-// meant to be pasted, and half-rendered server text is not.
-func (l feedLane) resumeCommand(gone *basecamp.FeedPositionGoneError) string {
-	since := l.resumeSince
+// The server's resume URL preserves the request's canonical filters, so they
+// come back out of it when it is one this client would follow. A resume URL
+// that fails the origin check, that the SDK cannot parse, or that carries a
+// filter value outside the contract's alphabet falls back to the filters this
+// request was invoked with: a hint is meant to be pasted, and half-rendered
+// server text is not.
+func (r feedRequest) resumeCommand(gone *basecamp.FeedPositionGoneError) string {
+	since := r.lane.resumeSince
 	if gone.EpochAfterID != nil {
 		since = strconv.FormatInt(*gone.EpochAfterID, 10)
 	}
 	if since == "" {
 		since = basecamp.SinceNow
 	}
-	command := fmt.Sprintf("%s --since %s", l.pollCmd, since)
+	command := fmt.Sprintf("%s --since %s", r.lane.pollCmd, since)
 
-	filters, ok := l.resumeFilters(gone.Resume)
-	if !ok {
-		return command
+	if filters, ok := r.resumeFilters(gone.Resume); ok {
+		return command + filters
 	}
-	return command + filters
+	return command + r.filters
 }
 
 // resumeFilters renders the filter flags a resume URL carries, or reports
-// that it carries none it can render.
-func (l feedLane) resumeFilters(resume string) (string, bool) {
-	if resume == "" {
+// that it carries none this client would act on.
+func (r feedRequest) resumeFilters(resume string) (string, bool) {
+	if resume == "" || !r.followable(resume) {
 		return "", false
 	}
-	flags, err := l.continuationFilters(resume)
+	flags, err := r.lane.continuationFilters(resume)
 	if err != nil {
 		return "", false
 	}
+	return renderFilterFlags(flags)
+}
 
+// followable reports whether a server-supplied URL passes the same origin
+// check the walk applies to a continuation. A 410's resume URL is displayed
+// as authoritative and read for filters, which is acting on it.
+func (r feedRequest) followable(raw string) bool {
+	return checkContinuation(r.baseURL, raw) == nil
+}
+
+// renderFilterFlags renders flags as a pasteable suffix, reporting false when
+// nothing was present or a value fell outside the alphabet below.
+func renderFilterFlags(flags []flagValues) (string, bool) {
 	rendered := ""
 	for _, flag := range flags {
 		if len(flag.values) == 0 {
@@ -253,6 +264,34 @@ func (l feedLane) resumeFilters(resume string) (string, bool) {
 		rendered += fmt.Sprintf(" %s %s", flag.name, strings.Join(flag.values, ","))
 	}
 	return rendered, rendered != ""
+}
+
+// requestFilters renders the filter flags an invocation carried, for the
+// resume breadcrumb and the re-entry hints. Unrenderable values yield an
+// empty suffix; the surrounding description says to keep the same filters in
+// words, which is true whether or not they can be pasted.
+func requestFilters(flags []flagValues) string {
+	rendered, _ := renderFilterFlags(flags)
+	return rendered
+}
+
+func eventsFilterFlags(opts *basecamp.PollEventsOptions) []flagValues {
+	return []flagValues{
+		{"--types", opts.Types},
+		{"--buckets", int64Strings(opts.Buckets)},
+		{"--creators", int64Strings(opts.Creators)},
+		{"--performers", opts.Performers},
+		{"--exclude-performers", opts.ExcludePerformers},
+		{"--actor-types", opts.ActorTypes},
+	}
+}
+
+func inboxFilterFlags(opts *basecamp.PollInboxOptions) []flagValues {
+	return []flagValues{
+		{"--reasons", opts.Reasons},
+		{"--types", opts.Types},
+		{"--buckets", int64Strings(opts.Buckets)},
+	}
 }
 
 // flagValues pairs a flag with the comma-joined list it carries.
@@ -308,7 +347,7 @@ func renderableFilterValue(value string) bool {
 //	400 → whatever the server said. A malformed position and a malformed
 //	      filter have different fixes and the body says which; guessing
 //	      between them would send the caller to the wrong one.
-func feedError(lane feedLane, err error) error {
+func feedError(req feedRequest, err error) error {
 	var mismatch *basecamp.FeedFilterMismatchError
 	if errors.As(err, &mismatch) {
 		return &output.Error{
@@ -316,7 +355,8 @@ func feedError(lane feedLane, err error) error {
 			Message: fmt.Sprintf(
 				"Position was minted for a different filter set (position digest %s, this request's filters digest %s)",
 				mismatch.PositionDigest, mismatch.FiltersDigest),
-			Hint:       fmt.Sprintf("Re-enter with --since to acknowledge the filter change: %s --since now", lane.pollCmd),
+			Hint: fmt.Sprintf("Re-enter with --since to acknowledge the filter change, keeping these filters: %s --since now%s",
+				req.lane.pollCmd, req.filters),
 			HTTPStatus: http.StatusConflict,
 			Cause:      err,
 		}
@@ -324,25 +364,25 @@ func feedError(lane feedLane, err error) error {
 
 	var gone *basecamp.FeedPositionGoneError
 	if errors.As(err, &gone) {
-		message := fmt.Sprintf("Position is no longer servable for the %s feed", lane.name)
-		if gone.Resume != "" {
+		message := fmt.Sprintf("Position is no longer servable for the %s feed", req.lane.name)
+		if gone.Resume != "" && req.followable(gone.Resume) {
 			message = fmt.Sprintf("%s. Resume URL: %s", message, gone.Resume)
 		}
 		return &output.Error{
 			Code:       output.CodeNotFound,
 			Message:    message,
-			Hint:       "Re-enter with: " + lane.resumeCommand(gone),
+			Hint:       "Re-enter with: " + req.resumeCommand(gone),
 			HTTPStatus: http.StatusGone,
 			Cause:      err,
 		}
 	}
 
 	var sdkErr *basecamp.Error
-	if errors.As(err, &sdkErr) && sdkErr.HTTPStatus == http.StatusForbidden && lane.forbiddenMsg != "" {
+	if errors.As(err, &sdkErr) && sdkErr.HTTPStatus == http.StatusForbidden && req.lane.forbiddenMsg != "" {
 		return &output.Error{
 			Code:       output.CodeForbidden,
-			Message:    lane.forbiddenMsg,
-			Hint:       lane.forbiddenHint,
+			Message:    req.lane.forbiddenMsg,
+			Hint:       req.lane.forbiddenHint,
 			HTTPStatus: http.StatusForbidden,
 			Cause:      err,
 		}
@@ -480,6 +520,12 @@ event id and refetch the referenced recording before acting on it.`,
 				ActorTypes:        kinds,
 			}
 
+			request := feedRequest{
+				lane:    eventsLane,
+				baseURL: app.Config.BaseURL,
+				filters: requestFilters(eventsFilterFlags(opts)),
+			}
+
 			events := make([]basecamp.FeedEvent, 0)
 			var position, next string
 			pages, capped := 0, false
@@ -488,7 +534,7 @@ event id and refetch the referenced recording before acting on it.`,
 			for {
 				page, err := service.PollEvents(cmd.Context(), opts)
 				if err != nil {
-					return feedError(eventsLane, err)
+					return feedError(request, err)
 				}
 				pages++
 				events = append(events, page.Events...)
@@ -526,9 +572,12 @@ event id and refetch the referenced recording before acting on it.`,
 				output.WithDisplayData(events),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
-						Action:      "resume",
-						Cmd:         "basecamp events poll --position <position>",
-						Description: "Poll again from this page's position",
+						Action: "resume",
+						// A position is bound to its filter set, so the
+						// resume command carries the filters this poll used;
+						// without them the server answers 409.
+						Cmd:         "basecamp events poll --position <position>" + request.filters,
+						Description: "Poll again from this page's position, with the same filters",
 					},
 					output.Breadcrumb{
 						Action:      "show",

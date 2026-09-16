@@ -78,6 +78,12 @@ deduplicate by addressing_id, never by the event's id.`,
 				Buckets:  bucketIDs,
 			}
 
+			request := feedRequest{
+				lane:    inboxLane,
+				baseURL: app.Config.BaseURL,
+				filters: requestFilters(inboxFilterFlags(opts)),
+			}
+
 			items := make([]basecamp.InboxItem, 0)
 			var position, next string
 			pages, capped := 0, false
@@ -86,7 +92,7 @@ deduplicate by addressing_id, never by the event's id.`,
 			for {
 				page, err := service.PollInbox(cmd.Context(), opts)
 				if err != nil {
-					return feedError(inboxLane, err)
+					return feedError(request, err)
 				}
 				pages++
 				items = append(items, page.Items...)
@@ -127,8 +133,8 @@ deduplicate by addressing_id, never by the event's id.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "resume",
-						Cmd:         "basecamp inbox --position <position>",
-						Description: "Poll again from this page's position",
+						Cmd:         "basecamp inbox --position <position>" + request.filters,
+						Description: "Poll again from this page's position, with the same filters",
 					},
 					output.Breadcrumb{
 						Action:      "show",

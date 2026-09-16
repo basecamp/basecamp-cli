@@ -205,7 +205,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`, `basecamp events poll`, `basecamp inbox`.
 >
 > Seven list commands also list account-wide: `basecamp todos list --all-projects --json`, and likewise `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`.
 
@@ -976,12 +976,21 @@ The feed is a notification lane, not an audit log:
 - An agent that acts on what it hears should pass `--exclude-performers self`,
   which drops its own performances without hiding other agents' activity.
 
-Filters (`--types`, `--buckets`, `--creators`, `--performers`,
-`--exclude-performers`, `--actor-types`; the inbox adds `--reasons`) are
-comma-separated. Changing them invalidates a held position: the poll exits
-`1` naming both filter digests, and the fix is to re-enter with `--since`. A
-position that is no longer servable exits `2` and the hint names the
-`--since` to re-enter with.
+The two lanes have different filter sets, and they are not interchangeable:
+
+- `events poll`: `--types`, `--buckets`, `--creators`, `--performers`,
+  `--exclude-performers`, `--actor-types`.
+- `inbox`: `--reasons`, `--types`, `--buckets`. The other four are not flags
+  here.
+
+Each takes a comma-separated list. These are the only narrowing available —
+neither command takes `--in <project>`; narrow to a project with `--buckets`.
+
+A position is bound to the filter set it was minted for, so a resume has to
+carry the same filters. Changing them exits `1` naming both filter digests,
+and the fix is to re-enter with `--since`. A position that is no longer
+servable exits `2`, and the hint carries the whole re-entry command, filters
+included.
 
 `basecamp inbox` is served to agent principals only for now; other principals
 get exit `4`. `basecamp events ticket` redacts the ticket and its URL unless
