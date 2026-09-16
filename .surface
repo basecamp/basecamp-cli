@@ -668,6 +668,8 @@ CMD basecamp config show
 CMD basecamp config trust
 CMD basecamp config unset
 CMD basecamp config untrust
+CMD basecamp connect
+CMD basecamp connect setup
 CMD basecamp docs
 CMD basecamp docs archive
 CMD basecamp docs doc
@@ -5341,6 +5343,64 @@ FLAG basecamp config untrust --stats type=bool
 FLAG basecamp config untrust --styled type=bool
 FLAG basecamp config untrust --todolist type=string
 FLAG basecamp config untrust --verbose type=count
+FLAG basecamp connect --account type=string
+FLAG basecamp connect --agent type=bool
+FLAG basecamp connect --cache-dir type=string
+FLAG basecamp connect --count type=bool
+FLAG basecamp connect --help type=bool
+FLAG basecamp connect --hints type=bool
+FLAG basecamp connect --ids-only type=bool
+FLAG basecamp connect --in type=string
+FLAG basecamp connect --jq type=string
+FLAG basecamp connect --json type=bool
+FLAG basecamp connect --markdown type=bool
+FLAG basecamp connect --md type=bool
+FLAG basecamp connect --no-hints type=bool
+FLAG basecamp connect --no-stats type=bool
+FLAG basecamp connect --profile type=string
+FLAG basecamp connect --project type=string
+FLAG basecamp connect --quiet type=bool
+FLAG basecamp connect --stats type=bool
+FLAG basecamp connect --styled type=bool
+FLAG basecamp connect --todolist type=string
+FLAG basecamp connect --verbose type=count
+FLAG basecamp connect setup --account type=string
+FLAG basecamp connect setup --agent type=bool
+FLAG basecamp connect setup --allow type=stringArray
+FLAG basecamp connect setup --cache-dir type=string
+FLAG basecamp connect setup --class type=stringArray
+FLAG basecamp connect setup --concurrency type=int
+FLAG basecamp connect setup --count type=bool
+FLAG basecamp connect setup --deadline type=duration
+FLAG basecamp connect setup --device-name type=string
+FLAG basecamp connect setup --driver type=string
+FLAG basecamp connect setup --expect-identity type=string
+FLAG basecamp connect setup --help type=bool
+FLAG basecamp connect setup --hints type=bool
+FLAG basecamp connect setup --ids-only type=bool
+FLAG basecamp connect setup --in type=string
+FLAG basecamp connect setup --jq type=string
+FLAG basecamp connect setup --json type=bool
+FLAG basecamp connect setup --markdown type=bool
+FLAG basecamp connect setup --md type=bool
+FLAG basecamp connect setup --no-browser type=bool
+FLAG basecamp connect setup --no-hints type=bool
+FLAG basecamp connect setup --no-stats type=bool
+FLAG basecamp connect setup --no-watch-completions type=stringArray
+FLAG basecamp connect setup --operator type=string
+FLAG basecamp connect setup --operator-profile type=string
+FLAG basecamp connect setup --profile type=string
+FLAG basecamp connect setup --project type=string
+FLAG basecamp connect setup --quiet type=bool
+FLAG basecamp connect setup --remove-route type=stringArray
+FLAG basecamp connect setup --route type=stringArray
+FLAG basecamp connect setup --stats type=bool
+FLAG basecamp connect setup --styled type=bool
+FLAG basecamp connect setup --todolist type=string
+FLAG basecamp connect setup --trust type=string
+FLAG basecamp connect setup --verbose type=count
+FLAG basecamp connect setup --watch-completions type=stringArray
+FLAG basecamp connect setup --worktrees type=bool
 FLAG basecamp docs --account type=string
 FLAG basecamp docs --agent type=bool
 FLAG basecamp docs --cache-dir type=string
@@ -18517,6 +18577,8 @@ SUB basecamp config show
 SUB basecamp config trust
 SUB basecamp config unset
 SUB basecamp config untrust
+SUB basecamp connect
+SUB basecamp connect setup
 SUB basecamp docs
 SUB basecamp docs archive
 SUB basecamp docs doc

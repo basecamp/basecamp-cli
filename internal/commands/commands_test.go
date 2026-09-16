@@ -122,6 +122,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewProfileCmd())
 	root.AddCommand(commands.NewBonfireCmd())
 	root.AddCommand(commands.NewMCPCmd())
+	root.AddCommand(commands.NewConnectCmd())
 	commands.InstallDashGuard(root)
 	root.InitDefaultHelpCmd()
 	return root
