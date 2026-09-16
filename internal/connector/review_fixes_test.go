@@ -360,3 +360,24 @@ func retentionGone() error {
 		Resume: "https://3.basecampapi.com/2914079/my/inbox.json?since=0",
 	}
 }
+
+// A resume that answers with the same 410 again must not become an endless
+// loop that writes a gap per turn.
+func TestARepeated410OnTheResumeEndsTheWalk(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute)
+	require.NoError(t, err)
+
+	gone := &eventfeed.PollError{Kind: eventfeed.PollGone, EpochAfterID: 150,
+		ResumeURL: "https://3.basecampapi.com/2914079/events.json?since=150"}
+	polls := &scriptedPolls{errs: []error{gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone, gone}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	assert.LessOrEqual(t, polls.calls, 12, "a 410 on the resume is retried on the cadence, not in a tight loop")
+	gaps, err := ledger.Gaps(ctx)
+	require.NoError(t, err)
+	assert.Len(t, gaps, 1, "one 410, one gap")
+}

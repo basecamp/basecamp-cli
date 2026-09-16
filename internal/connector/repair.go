@@ -192,6 +192,13 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 
 	switch pollErr.Kind {
 	case eventfeed.PollGone:
+		if (cursor.PageURL != "" && cursor.PageURL == pollErr.ResumeURL) || pollErr.EpochAfterID == loss.RepairSince {
+			// The resume itself answered with the same 410. The gap is
+			// already recorded; following it again would loop. Leave it to the
+			// repair cadence.
+			w.log.Warn("the repair walk's resume answered 410 again; retrying on the repair cadence", "loss_id", loss.ID)
+			return nil, nil
+		}
 		// History up to the epoch is gone, and the ids there with it. Ids
 		// above the epoch are still servable, so the resume is followed as
 		// served rather than condemning them too.
@@ -214,6 +221,13 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 		stillMissing, missErr := w.ledger.MissingIDs(ctx, loss.ID, LossMissing)
 		if missErr != nil {
 			return nil, missErr
+		}
+		// Everything at or below the epoch is settled, so later passes start
+		// at the fence rather than walking into the same 410 again.
+		loss.RepairSince = epoch
+		loss.RepairCursor = ""
+		if setErr := w.ledger.SetRepairEntry(ctx, loss.ID, epoch); setErr != nil {
+			return nil, setErr
 		}
 		if len(stillMissing) == 0 || pollErr.ResumeURL == "" {
 			// Every id was behind the fence, or there is no resume to follow:

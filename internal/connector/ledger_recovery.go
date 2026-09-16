@@ -278,6 +278,17 @@ func (l *Ledger) CloseLoss(ctx context.Context, lossID int64, now time.Time) (in
 	return int(unrecovered), nil
 }
 
+// SetRepairEntry moves a loss's walk entry to since and drops its cursor —
+// after a 410 has fenced off everything at or below since.
+func (l *Ledger) SetRepairEntry(ctx context.Context, lossID, since int64) error {
+	_, err := l.db.ExecContext(ctx,
+		`UPDATE losses SET repair_since = ?, repair_cursor = '' WHERE id = ?`, since, lossID)
+	if err != nil {
+		return fmt.Errorf("connector: set repair entry: %w", err)
+	}
+	return nil
+}
+
 // MarkUnrecoveredThrough gives up on a loss's missing ids at or below id — the
 // ones a 410's epoch has fenced off — and leaves the rest missing.
 func (l *Ledger) MarkUnrecoveredThrough(ctx context.Context, lossID, id int64) (int, error) {
