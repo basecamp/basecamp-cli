@@ -186,10 +186,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// One setup per profile at a time: load, change and save are one step.
 	unlock, err := setup.Lock(path)
 	if err != nil {
-		if isLockBusy(err) {
-			return errBusy(name, err)
-		}
-		return output.ErrUsage(err.Error())
+		return classifyLockError(name, err)
 	}
 	defer unlock()
 
@@ -243,8 +240,17 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
 		return err
 	}
-	if kind == setup.KindBotUser && expect == 0 {
-		expect = existing.Agent.IdentityID
+	if kind == setup.KindBotUser {
+		switch {
+		case expect == 0:
+			expect = existing.Agent.IdentityID
+		case exists && existing.Agent.IdentityID != 0 && expect != existing.Agent.IdentityID:
+			// Rebinding the file to another bot is a deliberate act, not a
+			// flag: connect.json's trust was recorded for the agent it names.
+			return output.ErrAuth(fmt.Sprintf(
+				"connect.json is set up for identity %d, and --expect-identity names %d; remove %s to set this profile up for another bot",
+				existing.Agent.IdentityID, expect, richtext.SanitizeSingleLine(path)))
+		}
 	}
 
 	var checks []setup.Check
@@ -343,6 +349,11 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
 	report.Add(setup.RouteChecks(ctx, reader, next)...)
+	// A command the person stopped did not find the connector unready: it
+	// found nothing, and says so as an interruption.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	w := cmd.OutOrStdout()
 	styled := app.Output.EffectiveFormat() == output.FormatStyled
@@ -398,6 +409,12 @@ func classifyWriteError(name string, err error) error {
 	switch {
 	case errors.Is(err, setup.ErrSetupRunning):
 		return errBusy(name, err)
+	case errors.As(err, &apiErr) && apiErr.Code == output.CodeRateLimit:
+		// The credential store reports contention on its own key as a
+		// retryable rate limit; in this command that is the profile being
+		// busy, which is the code its contract names.
+		busy := errBusy(name, err)
+		return busy
 	case errors.As(err, &apiErr):
 		// Already in the contract: the credential store reports contention
 		// as a retryable rate_limit, and setup's own refusals are typed.
@@ -416,15 +433,26 @@ func classifyWriteError(name string, err error) error {
 	return output.ErrUsage("connect.json was not written: " + err.Error())
 }
 
-// isLockBusy reports a failure that is another process holding a lock.
-// The credential store reports its own contention as a retryable
-// rate_limit error, which classifyWriteError passes through untouched.
-func isLockBusy(err error) bool {
-	return errors.Is(err, setup.ErrSetupRunning)
+// classifyLockError puts a refused lock in the command's exit contract:
+// another setup on the profile is busy, a host that cannot lock at all is
+// lock_unavailable, and a connect.json nobody else may change stays usage.
+func classifyLockError(name string, err error) error {
+	switch {
+	case errors.Is(err, setup.ErrSetupRunning):
+		return errBusy(name, err)
+	case errors.Is(err, setup.ErrLockUnavailable):
+		return &output.Error{Code: output.CodeLockUnavailable,
+			Message: fmt.Sprintf("This host cannot lock profile %q's connector policy: %s", name, setup.ErrorText(err)),
+			Hint: "Nothing was changed. Other commands still work; connector setup is what needs the lock, so point XDG_CONFIG_HOME at a filesystem that supports locking " +
+				"(some network and FUSE mounts do not)."}
+	case errors.Is(err, setup.ErrNotPrivate):
+		return output.ErrUsageHint(err.Error(), "Setup locks and writes connect.json only where nobody else can change it.")
+	}
+	return output.ErrUsage(err.Error())
 }
 
 func errBusy(name string, err error) error {
-	return &output.Error{Code: output.CodeBusy,
+	return &output.Error{Code: output.CodeBusy, Retryable: true,
 		Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was changed: %s", name, setup.ErrorText(err)),
 		Hint:    "Nothing is wrong with the profile. Run setup again when it has finished."}
 }

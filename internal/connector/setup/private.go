@@ -53,6 +53,11 @@ func ensurePrivateDirs(path string) error {
 // ErrSetupRunning reports another setup already running for this profile.
 var ErrSetupRunning = errors.New("another connect setup is running for this profile")
 
+// ErrLockUnavailable reports a host that cannot take the setup lock at all:
+// a filesystem without flock, a lock file this user does not own. Setup's
+// guarantee is the lock, so it refuses rather than run without one.
+var ErrLockUnavailable = errors.New("this host cannot lock the connector's policy")
+
 // Lock takes the per-profile setup lock beside connect.json, so two setups
 // cannot interleave a load, a change and a save. It refuses rather than
 // waits: a second setup on one profile is a mistake to report, not a queue.
@@ -60,15 +65,42 @@ func Lock(path string) (unlock func(), err error) {
 	if err := ensurePrivateDirs(path); err != nil {
 		return nil, err
 	}
-	lock := flock.New(filepath.Join(filepath.Dir(path), ".connect.lock"), flock.SetPermissions(0o600))
+	lockPath := filepath.Join(filepath.Dir(path), ".connect.lock")
+	// The lock is only a lock if it is this user's own file: a symlink or a
+	// foreign file left in the directory could point two setups at
+	// different inodes, and they would not exclude each other.
+	if err := checkPrivateLockFile(lockPath); err != nil {
+		if errors.Is(err, ErrNotPrivate) {
+			return nil, err
+		}
+		// The lock file is there and cannot even be inspected: this host
+		// cannot lock, which is not the same as bad input.
+		return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
+	}
+	lock := flock.New(lockPath, flock.SetPermissions(0o600))
 	held, err := lock.TryLock()
 	if err != nil {
-		return nil, fmt.Errorf("take the setup lock: %w", err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
 	}
 	if !held {
 		return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
 	}
 	return func() { _ = lock.Unlock() }, nil
+}
+
+// checkPrivateLockFile refuses a lock file this user does not solely own. A
+// file that does not exist yet is fine: flock creates it in a directory
+// ensurePrivateDirs has already vetted.
+func checkPrivateLockFile(path string) error {
+	f, err := openNoFollow(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	}
+	defer f.Close()
+	return checkPrivateFile(f, path)
 }
 
 func readPrivate(path string) ([]byte, error) {

@@ -368,15 +368,22 @@ func Load(path string) (File, error) {
 // this package could fabricate — a struct embedding the interface — is not
 // one auth made, and is refused.
 //
-// The proof says the lock was held when Save checked it. What happens after
+// The proof must name this file's own profile: a lock held on another
+// profile's credential is not a lock on this one. The proof says the lock
+// was held when Save checked it. What happens after
 // that is the write's own: one atomic rename, so a connect.json exists
 // whole or not at all.
 //
 // held is only proof; what is written comes from f, which the caller has
 // already checked against the credential (see File.VerifyAgent).
 func Save(held auth.HeldCredential, path string, f File) error {
-	if _, _, ok := auth.Held(held); !ok {
+	_, key, ok := auth.Held(held)
+	if !ok {
 		return errors.New("connect.json is written only while the profile's credential is locked")
+	}
+	if want := auth.ProfileCredentialKey(f.Profile); key != want {
+		// A lock on somebody else's credential is not a lock on this one.
+		return fmt.Errorf("connect.json for profile %q is written only under that profile's credential lock, and %q is held", f.Profile, key)
 	}
 	return save(path, f)
 }

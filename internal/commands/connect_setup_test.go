@@ -247,9 +247,18 @@ func newConnectSetupApp(t *testing.T, s *connectSetupServer, profile string) *ap
 
 func runConnectSetupCmd(t *testing.T, app *appctx.App, args ...string) (string, error) {
 	t.Helper()
+	return runConnectSetupCmdIn(context.Background(), t, app, args...)
+}
+
+// runConnectSetupCmdIn runs the command under ctx, which the command tree
+// carries itself (cobra's SetContext), so there is no context to pass on.
+//
+//nolint:contextcheck // the context is handed to the command, not to a call
+func runConnectSetupCmdIn(ctx context.Context, t *testing.T, app *appctx.App, args ...string) (string, error) {
+	t.Helper()
 	cmd := NewConnectCmd()
 	cmd.SetArgs(append([]string{"setup"}, args...))
-	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetContext(appctx.WithApp(ctx, app))
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -1132,5 +1141,77 @@ func TestConnectSetupRefusesWhenTheHostCannotLock(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+	assertNotWritten(t, "agent")
+}
+
+// A rerun does not rebind connect.json to another bot because a flag says
+// so: that is a deliberate act, and setup says how to make it.
+func TestConnectSetupRefusesToRebindToAnotherIdentity(t *testing.T) {
+	s := startConnectSetupServer(t)
+	bareSetupApp(t, s, "bot")
+	storeConnectProfile(t, s, "bot", setupBotToken)
+	args := []string{"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity)}
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, routeArg(t))...)
+	require.NoError(t, err, out)
+	before, err := os.ReadFile(connectSetupPath(t, "bot"))
+	require.NoError(t, err)
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--expect-identity", "999999")
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeAuth, apiErr.Code)
+	assert.Contains(t, apiErr.Message, "remove")
+	after, err := os.ReadFile(connectSetupPath(t, "bot"))
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+// Contention is retryable, and named as busy wherever it comes from.
+func TestConnectSetupBusyIsRetryable(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	unlock, err := setup.Lock(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeBusy, apiErr.Code)
+	assert.True(t, apiErr.Retryable, "machine consumers read retryable, not the code")
+}
+
+// A host that cannot take the setup lock is lock_unavailable, not usage.
+func TestConnectSetupClassifiesAnUnlockableHost(t *testing.T) {
+	s := startConnectSetupServer(t)
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.NoError(t, err, out)
+	// A lock file this user cannot open at all: setup must not fall back to
+	// running without it.
+	lockPath := filepath.Join(filepath.Dir(connectSetupPath(t, "agent")), ".connect.lock")
+	require.NoError(t, os.WriteFile(lockPath, nil, 0o600))
+	require.NoError(t, os.Chmod(lockPath, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(lockPath, 0o600) })
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--concurrency", "3")
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+}
+
+// A person who stops setup gets the interruption, not a verdict on the
+// connector's readiness.
+func TestConnectSetupPropagatesCancellation(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	ctx, cancel := context.WithCancel(context.Background())
+	s.duringMint = cancel
+
+	out, err := runConnectSetupCmdIn(ctx, t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	assert.ErrorIs(t, err, context.Canceled)
 	assertNotWritten(t, "agent")
 }

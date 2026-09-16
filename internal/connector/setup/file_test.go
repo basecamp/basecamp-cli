@@ -3,6 +3,7 @@
 package setup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -241,6 +242,25 @@ func TestSaveRefusesAForgedHold(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
 	require.Error(t, Save(forgedHold{}, path, validFile(t)))
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr), "nothing is written")
+}
+
+// A lock on another profile's credential is not a lock on this one.
+func TestSaveRefusesAHoldOnAnotherProfile(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	store := auth.NewStore(t.TempDir())
+	const otherKey = "profile:other"
+	require.NoError(t, store.Save(otherKey, &auth.Credentials{AccessToken: "t", OAuthType: "agent"}))
+
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	f := validFile(t) // profile "agent"
+	err = store.WithCredential(context.Background(), otherKey, func(held auth.HeldCredential) error {
+		return Save(held, path, f)
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "profile \"agent\"")
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "nothing is written")
 }
