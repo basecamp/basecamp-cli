@@ -80,6 +80,11 @@ var DomainSpecs = []catalog.DomainSpec{
 		Blurb: "Account-wide feeds: every checkin, comment, file, forward, and message, and cards and todos filtered by state (open, completed, overdue, unassigned, no due date, not now).",
 	},
 	{
+		Key:   "eventfeed",
+		Tags:  []string{"EventFeed"},
+		Blurb: "The account event feed: poll events from a resumable position, poll the agent inbox of addressed items, and mint a ticket for the live stream. Pages carry a position and a continuation URL rather than page numbers; deduplicate events by id and inbox items by addressing_id, and refetch the referenced recording before acting on it.",
+	},
+	{
 		Key:   "clientside",
 		Tags:  []string{"ClientFeatures"},
 		Blurb: "The Clientside: client approvals, correspondences, replies, and client visibility of recordings.",

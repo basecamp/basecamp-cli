@@ -33,7 +33,7 @@ func TestCatalogServesCuratedDomains(t *testing.T) {
 		"basecamp_projects", "basecamp_todos", "basecamp_cards", "basecamp_messages",
 		"basecamp_campfires", "basecamp_boosts", "basecamp_schedules", "basecamp_files",
 		"basecamp_people", "basecamp_automation", "basecamp_reports", "basecamp_everything",
-		"basecamp_clientside", "basecamp_forwards", "basecamp_account",
+		"basecamp_eventfeed", "basecamp_clientside", "basecamp_forwards", "basecamp_account",
 		"basecamp_recordings",
 	}, tools)
 }
@@ -66,7 +66,7 @@ func TestCatalogExcludesBinaryUploads(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 259, model, "served model operation count")
+	assert.Equal(t, 262, model, "served model operation count")
 	assert.Equal(t, 1, composite, "served composite operation count")
 }
 
