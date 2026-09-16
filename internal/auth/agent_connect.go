@@ -733,8 +733,13 @@ func agentConnectTokenURI(raw, endpoint string) (string, error) {
 	return raw, nil
 }
 
-// sameOrigin reports whether two URLs share a scheme and host. Both have
+// sameOrigin reports whether two URLs share a web origin. Both have
 // already parsed and passed the endpoint policy.
+//
+// The port is compared as an origin comparison compares it — an explicit
+// 443 and an implicit one are the same origin — because the two URLs are
+// generated independently by the server and either may spell it. Comparing
+// the raw hosts would refuse an otherwise good server over a spelling.
 func sameOrigin(first, second string) bool {
 	a, err := url.Parse(first)
 	if err != nil {
@@ -744,7 +749,24 @@ func sameOrigin(first, second string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		effectivePort(a) == effectivePort(b)
+}
+
+// effectivePort is a URL's port, explicit or the scheme's default.
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
 }
 
 // agentConnectLifetime is how long the printed code is good for: what the

@@ -710,3 +710,17 @@ func assertNoAgentCredential(t *testing.T, m *Manager) {
 	_, err := m.store.Load("profile:agent")
 	assert.ErrorIs(t, err, ErrNoCredential, "a connection that did not complete stores nothing")
 }
+
+// TestAgentConnectOriginComparisonIgnoresDefaultPortSpelling: the intake
+// URL and the token endpoint are generated independently by the server,
+// and either may spell the default port. They are the same origin, and
+// refusing one over a spelling would refuse every connection from that
+// server.
+func TestAgentConnectOriginComparisonIgnoresDefaultPortSpelling(t *testing.T) {
+	assert.True(t, sameOrigin("https://auth.example:443/oauth/agent_connection_tokens", "https://auth.example/oauth/agent_connections"))
+	assert.True(t, sameOrigin("http://auth.example/a", "http://auth.example:80/b"))
+	assert.True(t, sameOrigin("https://AUTH.example/a", "https://auth.EXAMPLE/b"))
+	assert.False(t, sameOrigin("https://auth.example:8443/a", "https://auth.example/b"))
+	assert.False(t, sameOrigin("https://elsewhere.example/a", "https://auth.example/b"))
+	assert.False(t, sameOrigin("http://auth.example/a", "https://auth.example/b"))
+}
