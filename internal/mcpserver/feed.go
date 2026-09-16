@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -113,6 +114,22 @@ type feedErrorPayload struct {
 	Error feedError `json:"error"`
 }
 
+// feedLaneParams are the query parameters each lane hands to the SDK, which is
+// every one this file knows how to pass on.
+//
+// The request is assembled by buildRequest from the vendored model, and the
+// SDK's options are typed, so the two can drift: a model sync can declare a
+// filter before this file learns to copy it across. A parameter the model
+// accepts and this file drops is the widest fail-open on the lane — the caller
+// asks to narrow and is served the unfiltered feed, and describe even told them
+// the filter existed. So a parameter outside this table is refused, and
+// TestFeedLaneParamsMatchTheModel fails the build the day the model and this
+// table disagree.
+var feedLaneParams = map[string][]string{
+	opPollEvents: {"since", "position", "types", "buckets", "creators", "performers", "exclude_performers", "actor_types"},
+	opPollInbox:  {"since", "position", "reasons", "types", "buckets"},
+}
+
 // isFeedOperation reports whether the operation runs through EventFeedService.
 func isFeedOperation(id string) bool {
 	switch id {
@@ -146,6 +163,24 @@ func (d dispatcher) dispatchFeed(ctx context.Context, op *catalog.Operation, par
 	// asked. A malformed filter must narrow to a refusal, never widen to
 	// everything.
 	filters := feedFilters{params: params, query: query}
+
+	for name := range query {
+		if !slices.Contains(feedLaneParams[op.ID], name) {
+			return feedUsageResult("%s is not yet passed to the event feed by this server; it is refused rather than dropped, "+
+				"because a dropped filter would serve the lane unfiltered", name)
+		}
+	}
+
+	// An entry point that is named and empty is refused for the same reason a
+	// filter is. The SDK reads an empty since or position as no entry point,
+	// and no entry point means the present: a consumer whose stored position
+	// came back empty would silently skip every event it had not yet read.
+	for _, name := range []string{"since", "position"} {
+		if _, named := params[name]; named && query.Get(name) == "" {
+			return feedUsageResult("%s was passed empty, which the feed reads as entering at the present and skipping history; "+
+				"omit it to enter at the present on purpose", name)
+		}
+	}
 
 	if since, position := query.Get("since"), query.Get("position"); since != "" && position != "" {
 		return feedUsageResult("since and position are two ways to enter the lane; pass one, not both")
@@ -424,9 +459,12 @@ func feedRemedyErrorType(message string) string {
 func feedErrorType(operation string, err *basecamp.Error) string {
 	switch err.HTTPStatus {
 	case 400:
-		// A 400 whose body the SDK could not read as the feed's own — no
-		// error member at all. Still the feed refusing the request.
-		return feedRemedyErrorType(err.Message)
+		// A 400 whose body the SDK could not read as the feed's own: no error
+		// member at all. The message here is the SDK's placeholder or some
+		// other member it fell back to, not BC3's feed refusal, so no remedy
+		// is read out of it — that would be claiming a recovery from text the
+		// feed did not write.
+		return feedErrBadRequest
 	case 403:
 		// The inbox is agents-only for now and refuses everyone else with a
 		// bodyless 403. Naming it keeps a caller from retrying a principal

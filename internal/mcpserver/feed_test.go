@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -487,16 +488,14 @@ func TestFeedFilterMismatchNeedsBothDigests(t *testing.T) {
 	}
 }
 
-// The inbox has no epoch. It fences on a 30-day retention window, and the
-// lane is what says so — not whether the SDK's shared 410 type happened to
-// carry one. A consumer handed an epoch_after_id on this lane would re-enter
-// at a fence the inbox does not have.
-//
-// basecamp-sdk#912 splits the type in two for this reason; keyed on the lane,
-// this already writes the two payloads that split produces.
+// The inbox has no epoch. It fences on a 30-day retention window, and its 410
+// is its own type in the SDK, with no field an epoch could ride in. An epoch
+// that turns up on the wire anyway must not reach the caller: a consumer
+// handed epoch_after_id on this lane would re-enter at a fence the inbox does
+// not have. The SDK drops it today; this pins that nothing between the SDK
+// and the payload puts one back.
 func TestFeedInbox410NeverCarriesAnEpoch(t *testing.T) {
-	// An epoch on the wire the inbox lane must not pass on, even though the
-	// shared type has somewhere to put it.
+	// An epoch on the wire the inbox lane must not pass on.
 	const body = `{"error":"position expired","resume":"https://3.basecampapi.com/999/inbox.json?since=0","epoch_after_id":991}`
 	session := feedSession(t, http.StatusGone, body, nil)
 
@@ -562,4 +561,190 @@ func TestFeedGoneWithoutAnEpochIsNotAStalePosition(t *testing.T) {
 	assert.Equal(t, "request_failed", detail["type"])
 	assert.Equal(t, float64(http.StatusGone), detail["http_status"])
 	assert.NotContains(t, detail, "data", "no epoch, so no recovery is claimed")
+}
+
+// The lane tables name every parameter this server hands to the feed, and the
+// model names every parameter describe advertises and buildRequest accepts.
+// Where the two disagree, a filter a caller was told exists would be refused
+// at call time — or, before the refusal existed, silently dropped. This fails
+// the day a model sync gives a lane a parameter the dispatcher does not pass.
+func TestFeedLaneParamsMatchTheModel(t *testing.T) {
+	cat := loadForTest(t)
+	seen := map[string]bool{}
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if !isFeedOperation(op.ID) {
+				continue
+			}
+			seen[op.ID] = true
+			var model []string
+			for _, p := range op.Params {
+				if p.In == "query" {
+					model = append(model, p.Name)
+				}
+			}
+			assert.ElementsMatch(t, model, feedLaneParams[op.ID],
+				"%s: the model's query parameters and the ones handed to the SDK must be the same set", op.ID)
+		}
+	}
+	assert.True(t, seen[opPollEvents] && seen[opPollInbox], "both poll lanes must be in the catalog")
+}
+
+// A parameter the model accepts and this server does not pass to the SDK is
+// refused, not dropped. Dropped, the caller who asked to narrow is served the
+// unfiltered lane. The table is shrunk here to stand in for a model sync that
+// got ahead of the dispatcher.
+func TestFeedRefusesAParameterItWouldDrop(t *testing.T) {
+	original := feedLaneParams[opPollEvents]
+	feedLaneParams[opPollEvents] = slices.DeleteFunc(slices.Clone(original), func(name string) bool { return name == "creators" })
+	t.Cleanup(func() { feedLaneParams[opPollEvents] = original })
+
+	var reached bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"position":"aBcD"}`))
+	}))
+	t.Cleanup(upstream.Close)
+	srv, err := New(newTestAPI(upstream), Config{})
+	require.NoError(t, err)
+	session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
+
+	text, isError := callFeed(t, session, "poll_events", map[string]any{"creators": "1049715914"})
+	require.True(t, isError, "a filter this server cannot pass on must be refused, got: %s", text)
+	detail := feedErrorOf(t, text)
+	assert.Equal(t, "invalid_arguments", detail["type"])
+	assert.Contains(t, detail["message"], "creators")
+	assert.False(t, reached, "a dropped filter must not reach Basecamp as an unfiltered read")
+}
+
+// An entry point passed empty is refused. The SDK reads it as no entry point,
+// which is the present, so a consumer whose stored position came back empty
+// would skip everything it had not yet read and be told nothing.
+func TestFeedRefusesAnEmptyEntryPoint(t *testing.T) {
+	for _, tc := range []struct{ action, name string }{
+		{"poll_events", "position"},
+		{"poll_events", "since"},
+		{"poll_inbox", "position"},
+		{"poll_inbox", "since"},
+	} {
+		t.Run(tc.action+" "+tc.name, func(t *testing.T) {
+			var reached bool
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"events":[],"items":[],"position":"aBcD"}`))
+			}))
+			t.Cleanup(upstream.Close)
+			srv, err := New(newTestAPI(upstream), Config{})
+			require.NoError(t, err)
+			session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
+
+			text, isError := callFeed(t, session, tc.action, map[string]any{tc.name: ""})
+			require.True(t, isError, "an empty %s must be refused, got: %s", tc.name, text)
+			assert.Equal(t, "invalid_arguments", feedErrorOf(t, text)["type"])
+			assert.False(t, reached, "an empty entry point must not reach Basecamp as a read from the present")
+		})
+	}
+}
+
+// A 400 whose body is not the feed's own is not given the feed's recovery.
+// The SDK falls back to a `message` member when there is no `error`, so text
+// that happens to read like BC3's remedy can arrive here from a body BC3's
+// feed did not write; reading a recovery out of it would be a guess.
+func TestFeedDoesNotReadARemedyOutOfAForeign400(t *testing.T) {
+	session := feedSession(t, http.StatusBadRequest, `{"message":"Unrecognized position. Resume with since=now."}`, nil)
+
+	text, isError := callFeed(t, session, "poll_events", map[string]any{"position": "aBcD"})
+	require.True(t, isError, text)
+	assert.Equal(t, "bad_request", feedErrorOf(t, text)["type"])
+}
+
+// The refusals the SDK leaves untyped land somewhere honest: their status, no
+// recovery claimed, and no recovery data invented.
+func TestFeedUntypedRefusalsClaimNoRecovery(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		status int
+		body   string
+	}{
+		{"a 409 on the inbox with one digest", "poll_inbox", http.StatusConflict, `{"error":"filters changed","filters_digest":"def456"}`},
+		{"a feed 410 with an epoch and no resume", "poll_events", http.StatusGone, `{"error":"gone","epoch_after_id":1071900000}`},
+		{"an inbox 410 with no resume", "poll_inbox", http.StatusGone, `{"error":"gone"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			session := feedSession(t, tc.status, tc.body, nil)
+
+			text, isError := callFeed(t, session, tc.action, map[string]any{"position": "aBcD"})
+			require.True(t, isError, text)
+
+			detail := feedErrorOf(t, text)
+			assert.Equal(t, "request_failed", detail["type"])
+			assert.Equal(t, float64(tc.status), detail["http_status"])
+			assert.NotContains(t, detail, "data", "no recovery was offered, so none is claimed")
+		})
+	}
+	t.Run("a 409 on the inbox with both digests is a filter mismatch there too", func(t *testing.T) {
+		session := feedSession(t, http.StatusConflict,
+			`{"error":"filters changed","position_digest":"abc123","filters_digest":"def456"}`, nil)
+
+		text, isError := callFeed(t, session, "poll_inbox", map[string]any{"position": "aBcD"})
+		require.True(t, isError, text)
+		detail := feedErrorOf(t, text)
+		assert.Equal(t, "filter_mismatch", detail["type"])
+		assert.Equal(t, map[string]any{"position_digest": "abc123", "filters_digest": "def456"}, detail["data"])
+	})
+}
+
+// A page comes back with what it carried: the rows, the durable position, and
+// the continuation. The request-side tests would pass against an encoder that
+// returned {}, so the answer is read here.
+func TestFeedServesThePageItFetched(t *testing.T) {
+	t.Run("feed", func(t *testing.T) {
+		session := feedSession(t, http.StatusOK, `{
+			"events":[{"id":11,"kind":"message_created","action":"created","event_type":"message.created",
+				"bucket_id":2085958499,"creator_id":1049715914,"performed_by_id":52007412,
+				"recording_id":9007199254,"created_at":"2026-09-16T09:00:00Z","details":{"column_id":7}}],
+			"position":"cG9zOjEx",
+			"next":"https://3.basecampapi.com/999/events.json?position=cG9zOjEx"}`, nil)
+
+		text, isError := callFeed(t, session, "poll_events", map[string]any{"since": "0"})
+		require.False(t, isError, text)
+
+		var page map[string]any
+		require.NoError(t, json.Unmarshal([]byte(text), &page), text)
+		assert.Equal(t, "cG9zOjEx", page["position"])
+		assert.Equal(t, "https://3.basecampapi.com/999/events.json?position=cG9zOjEx", page["next"])
+		events, ok := page["events"].([]any)
+		require.True(t, ok && len(events) == 1, "the page's events must travel: %s", text)
+		event := events[0].(map[string]any)
+		assert.Equal(t, float64(11), event["id"])
+		assert.Equal(t, "message.created", event["event_type"])
+		assert.Equal(t, float64(52007412), event["performed_by_id"])
+		assert.Equal(t, float64(9007199254), event["recording_id"])
+		assert.Equal(t, map[string]any{"column_id": float64(7)}, event["details"])
+	})
+
+	t.Run("inbox", func(t *testing.T) {
+		session := feedSession(t, http.StatusOK, `{
+			"items":[{"addressing_id":801,"reason":"mentioned","addressed_at":"2026-09-16T09:00:00Z",
+				"event":{"id":11,"event_type":"comment.created","bucket_id":2085958499,"creator_id":1049715914,
+				"performed_by_id":null,"recording_id":9007199254,"created_at":"2026-09-16T09:00:00Z"}}],
+			"position":"aW5ib3g6ODAx"}`, nil)
+
+		text, isError := callFeed(t, session, "poll_inbox", map[string]any{"since": "0"})
+		require.False(t, isError, text)
+
+		var page map[string]any
+		require.NoError(t, json.Unmarshal([]byte(text), &page), text)
+		assert.Equal(t, "aW5ib3g6ODAx", page["position"])
+		items, ok := page["items"].([]any)
+		require.True(t, ok && len(items) == 1, "the page's items must travel: %s", text)
+		item := items[0].(map[string]any)
+		assert.Equal(t, float64(801), item["addressing_id"])
+		assert.Equal(t, "mentioned", item["reason"])
+		assert.Equal(t, float64(11), item["event"].(map[string]any)["id"])
+	})
 }
