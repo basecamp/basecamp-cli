@@ -488,6 +488,73 @@ func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
 	assert.Contains(t, redacted, "chat.example.test/195539477")
 }
 
+// A 410 on a filtered poll must hand back a re-entry that still carries the
+// filters — the loop guard above all, since an agent that re-enters without
+// it recovers straight into its own activity.
+func TestPositionGoneRebuildsTheFiltersFromTheResumeURL(t *testing.T) {
+	resume := feedBaseURL + feedEventsPath +
+		"?since=900&types=message.created,comment.created&buckets=1,2&exclude_performers=51177542&actor_types=agent"
+	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusGone,
+		fmt.Sprintf(`{"error":"position predates the feed epoch","epoch_after_id":900,"resume":%q}`, resume)))
+
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "ancient",
+		"--types", "message.created,comment.created")
+
+	assert.Equal(t,
+		"Re-enter with: basecamp events poll --since 900 --types message.created,comment.created"+
+			" --buckets 1,2 --exclude-performers 51177542 --actor-types agent",
+		requireFeedError(t, err).Hint)
+}
+
+func TestInboxPositionGoneRebuildsItsOwnFilters(t *testing.T) {
+	resume := feedBaseURL + feedInboxPath + "?since=0&reasons=mentioned,assigned"
+	app, _, _ := setupFeedApp(t, inboxRoute(http.StatusGone,
+		fmt.Sprintf(`{"error":"position fell behind the retention window","resume":%q}`, resume)))
+
+	err := executeRecordingCommand(NewInboxCmd(), app, "--position", "ancient")
+
+	assert.Equal(t, "Re-enter with: basecamp inbox --since 0 --reasons mentioned,assigned",
+		requireFeedError(t, err).Hint)
+}
+
+// A resume URL carrying anything outside srv2's alphabet is not what the
+// contract describes, so the hint falls back to the bare re-entry rather than
+// pasting server text into a command line.
+func TestPositionGoneFallsBackWhenTheResumeURLIsNotRenderable(t *testing.T) {
+	resume := feedBaseURL + feedEventsPath + "?since=900&types=" + url.QueryEscape("message.created; rm -rf /")
+	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusGone,
+		fmt.Sprintf(`{"error":"position predates the feed epoch","epoch_after_id":900,"resume":%q}`, resume)))
+
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "ancient")
+
+	assert.Equal(t, "Re-enter with: basecamp events poll --since 900", requireFeedError(t, err).Hint)
+}
+
+// --count counts the page's rows and --ids-only prints their identities; for
+// the inbox that identity is the addressing id, never the event id.
+func TestEnumeratingOutputModesSeeTheRows(t *testing.T) {
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK, feedPageJSON("pos-1", "", 11, 12)))
+	app.Output = output.New(output.Options{Format: output.FormatCount, Writer: out})
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "now"))
+	assert.Equal(t, "2\n", out.String())
+
+	app, _, out = setupFeedApp(t, eventsRoute(http.StatusOK, feedPageJSON("pos-1", "", 11, 12)))
+	app.Output = output.New(output.Options{Format: output.FormatIDs, Writer: out})
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "now"))
+	assert.Equal(t, "11\n12\n", out.String())
+
+	app, _, out = setupFeedApp(t, inboxRoute(http.StatusOK, inboxPageJSON("inbox-pos-1", "", 991, 992)))
+	app.Output = output.New(output.Options{Format: output.FormatIDs, Writer: out})
+	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app, "--since", "now"))
+	assert.Equal(t, "991\n992\n", out.String())
+}
+
+func TestContinuationOriginComparisonNormalizesDefaultPortsAndCase(t *testing.T) {
+	require.NoError(t, checkContinuation("https://3.basecampapi.com:443", feedBaseURL+feedEventsPath+"?position=p"))
+	require.NoError(t, checkContinuation(feedBaseURL, "HTTPS://3.BasecampAPI.com"+feedEventsPath+"?position=p"))
+	require.Error(t, checkContinuation(feedBaseURL, "https://3.basecampapi.com:8443"+feedEventsPath))
+}
+
 func TestCheckContinuationFallsBackToTheDefaultHost(t *testing.T) {
 	require.NoError(t, checkContinuation("", feedBaseURL+feedEventsPath+"?position=p"))
 	require.Error(t, checkContinuation("", "http://3.basecampapi.com/99999/events.json"))

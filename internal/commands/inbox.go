@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -116,6 +117,13 @@ deduplicate by addressing_id, never by the event's id.`,
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(summary),
+				// Rows for the enumerating output modes, as in events poll —
+				// and an item's identity here is its addressing id, so that is
+				// what the row's id is. The machine envelope keeps
+				// addressing_id under its own name, because applying the
+				// feed's dedupe-by-event-id rule to the inbox would discard
+				// every reason but one.
+				output.WithDisplayData(inboxRows(items)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "resume",
@@ -150,4 +158,33 @@ deduplicate by addressing_id, never by the event's id.`,
 	cmd.Flags().IntVar(&maxPages, "max-pages", feedDefaultMaxPages, "Maximum pages to fetch with --all")
 
 	return cmd
+}
+
+// inboxRow is one addressed item flattened for display and for the
+// enumerating output modes: the item's own identity as id, the reason it
+// addressed you, and the pointers you need to fetch what it points at.
+type inboxRow struct {
+	ID          int64     `json:"id"`
+	Reason      string    `json:"reason"`
+	AddressedAt time.Time `json:"addressed_at"`
+	EventID     int64     `json:"event_id"`
+	EventType   string    `json:"event_type"`
+	BucketID    int64     `json:"bucket_id"`
+	RecordingID int64     `json:"recording_id"`
+}
+
+func inboxRows(items []basecamp.InboxItem) []inboxRow {
+	rows := make([]inboxRow, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, inboxRow{
+			ID:          item.AddressingID,
+			Reason:      item.Reason,
+			AddressedAt: item.AddressedAt,
+			EventID:     item.Event.ID,
+			EventType:   item.Event.EventType,
+			BucketID:    item.Event.BucketID,
+			RecordingID: item.Event.RecordingID,
+		})
+	}
+	return rows
 }
