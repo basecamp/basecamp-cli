@@ -15,6 +15,13 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
+// isInMemory reports a path SQLite would read as its in-memory database
+// rather than a file.
+func isInMemory(path string) bool {
+	trimmed := strings.TrimPrefix(path, "file:")
+	return trimmed == ":memory:" || strings.HasPrefix(trimmed, ":memory:?") || trimmed == ""
+}
+
 // RecordState is where an event sits in the ledger's lifecycle.
 //
 // Intake only ever writes StateSeen. The rest of the vocabulary is declared
@@ -71,6 +78,11 @@ type Ledger struct {
 func OpenLedger(path string) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
+	}
+	if isInMemory(path) {
+		// SQLite's in-memory URI accepts every write and loses it on close.
+		// The ledger's whole promise is that a crash is a delay.
+		return nil, fmt.Errorf("connector: ledger path %q names SQLite's in-memory database, which is not durable", path)
 	}
 	if strings.ContainsAny(path, "?#%") {
 		// The driver reads the path as a URI; these would be taken as its

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -157,7 +158,9 @@ type Intake struct {
 	// the feed somewhere unsafe.
 	abortErr error
 
-	repairs sync.WaitGroup
+	repairs     sync.WaitGroup
+	repairOnce  sync.Once
+	repairQueue chan Loss
 	// lifetime is Run's context. Repair walks are bound to it rather than to
 	// a connection, so a reconnect does not abandon a walk and a shutdown does
 	// not strand Run waiting on one — an unfinished walk simply resumes on the
@@ -194,6 +197,20 @@ func New(opts Options) (*Intake, error) {
 	}
 	if err := opts.Filters.Validate(); err != nil {
 		return nil, fmt.Errorf("connector: intake filters: %w", err)
+	}
+	// The filter set is the checkpoint's identity, and it is also what every
+	// subscription, recorded loss and repair walk runs under. A caller that
+	// kept its slices could change all of those while the key stays frozen on
+	// what it was built from, so they are copied here as the SDK's WithFilters
+	// copies its own.
+	opts.Filters = eventfeed.Filters{
+		Types:             slices.Clone(opts.Filters.Types),
+		Buckets:           slices.Clone(opts.Filters.Buckets),
+		Creators:          slices.Clone(opts.Filters.Creators),
+		Performers:        slices.Clone(opts.Filters.Performers),
+		ExcludePerformers: slices.Clone(opts.Filters.ExcludePerformers),
+		ActorTypes:        slices.Clone(opts.Filters.ActorTypes),
+		Reasons:           slices.Clone(opts.Filters.Reasons),
 	}
 
 	if opts.Clock == nil {
@@ -574,7 +591,9 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 		Connected: func() { in.log.Info("feed socket connected") },
 		Confirmed: func() { in.log.Info("feed subscription confirmed") },
 		Disconnected: func(reason string, err error) {
-			in.log.Warn("feed socket disconnected", "reason", reason, "error", err)
+			// The reason is the peer's own text, and a log is read in a
+			// terminal like everything else the connector writes.
+			in.log.Warn("feed socket disconnected", "reason", richtext.SanitizeSingleLine(reason), "error", err)
 		},
 		CatchUpStarted: func(eventfeed.Cursor) { in.log.Info("feed catch-up walk started") },
 		PageDelivered: func(_ int, position string) {
@@ -595,6 +614,10 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 		Checkpoint: func(string) {
 			in.mu.Lock()
 			in.checkpointed = true
+			// A saved position is progress, whether or not its page carried
+			// an event: this connection is no longer a re-entry waiting to
+			// prove itself, and a later refusal is an ordinary one.
+			in.enteredByReentry = false
 			in.mu.Unlock()
 		},
 		CheckpointSaveFailed: func(err error) {
@@ -718,35 +741,66 @@ func (in *Intake) repairContext() context.Context {
 	return context.Background()
 }
 
+// startRepair hands a loss to the repair workers.
+//
+// Repairs are bounded: an overloaded feed can raise an overflow per dropped
+// event, and a goroutine and a poll source per loss would answer an API that
+// is already struggling with a storm of walks. A loss that finds the queue
+// full is left open on disk, which the next start resumes.
 func (in *Intake) startRepair(ctx context.Context, loss Loss) {
 	if loss.ResolvedAt != nil {
 		return
 	}
+	in.repairOnce.Do(func() {
+		in.repairQueue = make(chan Loss, repairQueueDepth)
+		for range maxConcurrentRepairs {
+			go in.repairWorker(ctx)
+		}
+	})
+	select {
+	case in.repairQueue <- loss:
+	default:
+		in.log.Warn("the repair queue is full; this loss stays open for the next start", "loss_id", loss.ID)
+	}
+}
+
+// repairWorker walks one loss at a time until ctx ends. The wait group counts
+// walks in flight rather than idle workers, so a shutdown waits for the walk
+// it interrupts and not for a worker that is waiting for work.
+func (in *Intake) repairWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case loss := <-in.repairQueue:
+			in.runRepair(ctx, loss)
+		}
+	}
+}
+
+func (in *Intake) runRepair(ctx context.Context, loss Loss) {
 	in.repairs.Add(1)
-	go func() {
-		defer in.repairs.Done()
-		// Off the delivery path: nothing about live intake waits for this.
-		walker := &repairWalker{
-			ledger:   in.ledger,
-			polls:    in.opts.PollsFor(),
-			origin:   in.key.Origin,
-			filters:  in.opts.Filters,
-			ingest:   in.ingest,
-			now:      in.now,
-			interval: in.opts.RepairInterval,
-			log:      in.log,
-			sleep:    in.repairSleep,
-		}
-		switch err := walker.reconcileLoss(ctx, loss); {
-		case err == nil:
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			// A shutdown mid-walk is a delay: the loss is still open on disk
-			// and the next start picks it up where this one left off.
-			in.log.Info("reconciliation paused by shutdown; it resumes on the next start", "loss_id", loss.ID)
-		default:
-			in.log.Error("reconciliation of a loss ended early", "loss_id", loss.ID, "error", err)
-		}
-	}()
+	defer in.repairs.Done()
+	walker := &repairWalker{
+		ledger:   in.ledger,
+		polls:    in.opts.PollsFor(),
+		origin:   in.key.Origin,
+		filters:  in.opts.Filters,
+		ingest:   in.ingest,
+		now:      in.now,
+		interval: in.opts.RepairInterval,
+		log:      in.log,
+		sleep:    in.repairSleep,
+	}
+	switch err := walker.reconcileLoss(ctx, loss); {
+	case err == nil:
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// A shutdown mid-walk is a delay: the loss is still open on disk
+		// and the next start picks it up where this one left off.
+		in.log.Info("reconciliation paused by shutdown; it resumes on the next start", "loss_id", loss.ID)
+	default:
+		in.log.Error("reconciliation of a loss ended early", "loss_id", loss.ID, "error", err)
+	}
 }
 
 // takeSnapshot records the buckets the agent can see at the moment this
@@ -928,6 +982,13 @@ func (in *Intake) watchMembership(ctx context.Context) func() {
 	}()
 	return func() { <-done }
 }
+
+// maxConcurrentRepairs bounds repair walks in flight, and repairQueueDepth
+// the losses waiting for one.
+const (
+	maxConcurrentRepairs = 2
+	repairQueueDepth     = 1024
+)
 
 // defaultMembershipRetry is the first wait before re-reading a membership
 // listing that failed; it doubles up to the membership interval.

@@ -290,11 +290,11 @@ func TestReconciliationResumesOnStart(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, intake.resumeReconciliation(ctx))
-	intake.repairs.Wait()
-
-	open, err := ledger.OpenLosses(ctx)
-	require.NoError(t, err)
-	assert.Empty(t, open, "a crash between the overflow and its repair is a delay, not a lost record")
+	require.Eventually(t, func() bool {
+		open, err := ledger.OpenLosses(ctx)
+		return err == nil && len(open) == 0
+	}, 5*time.Second, 5*time.Millisecond,
+		"a crash between the overflow and its repair is a delay, not a lost record")
 
 	_, ok, err := ledger.Get(ctx, 17099838501)
 	require.NoError(t, err)
