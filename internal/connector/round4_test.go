@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-
 	"strconv"
 	"sync"
 	"testing"

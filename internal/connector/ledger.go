@@ -316,4 +316,11 @@ func (l *Ledger) SchemaVersion(ctx context.Context) (int, error) {
 	return version, err
 }
 
-func (l *Ledger) timestamp() string { return l.now().UTC().Format(time.RFC3339Nano) }
+func (l *Ledger) timestamp() string { return stamp(l.now()) }
+
+// ledgerTime is the one format every ledger timestamp is stored in: UTC, with
+// all nine fractional digits. Fixed width is what makes SQLite's text
+// comparison agree with time order. time.RFC3339Nano trims trailing zeros, so
+// "12:00:00Z" would sort after the later "12:00:00.5Z" and retention would
+// keep a record past its window.
+const ledgerTime = "2006-01-02T15:04:05.000000000Z07:00"

@@ -75,7 +75,7 @@ ON CONFLICT (id) DO NOTHING`,
 		ev.ID, string(StateSeen), string(lane), ev.EventType, ev.Kind, ev.Action,
 		ev.BucketID, ev.CreatorID, ev.PerformedByID, ev.RecordingID,
 		detailsArg(ev.Details), ev.ActorType, ev.VisibleToClients,
-		ev.CreatedAt.UTC().Format(time.RFC3339Nano), now, now)
+		stamp(ev.CreatedAt), now, now)
 	if err != nil {
 		return false, fmt.Errorf("connector: record seen %d: %w", ev.ID, err)
 	}
@@ -192,8 +192,8 @@ SET details = NULL, event_type = '', kind = '', action = '', bucket_id = 0,
     visible_to_clients = NULL, content_dropped = 1, updated_at = updated_at
 WHERE content_dropped = 0
   AND ((state = ? AND updated_at < ?) OR (state = ? AND updated_at < ?))`,
-		string(StateDiscarded), discardedBefore.UTC().Format(time.RFC3339Nano),
-		string(StateCompleted), completedBefore.UTC().Format(time.RFC3339Nano))
+		string(StateDiscarded), stamp(discardedBefore),
+		string(StateCompleted), stamp(completedBefore))
 	if err != nil {
 		return 0, fmt.Errorf("connector: drop content: %w", err)
 	}

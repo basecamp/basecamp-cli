@@ -389,7 +389,7 @@ func (l *Ledger) Gaps(ctx context.Context) ([]Gap, error) {
 	return gaps, rows.Err()
 }
 
-func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+func stamp(t time.Time) string { return t.UTC().Format(ledgerTime) }
 
 func nullableStamp(t *time.Time) any {
 	if t == nil {
