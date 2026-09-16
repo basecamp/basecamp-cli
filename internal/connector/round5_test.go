@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -90,4 +91,23 @@ func TestAGapMetByARecoveryReplayIsLabeledAsOne(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, gaps, 1)
 	assert.Contains(t, gaps[0].Note, "replay")
+}
+
+// The replay label covers the replay's own entry, not the life of the
+// connection: a later, genuine epoch move must not be recorded as expected.
+func TestTheReplayLabelCoversOnlyTheReplaysOwnGap(t *testing.T) {
+	intake, ledger, _ := newTestIntake(t, nil, nil)
+	intake.replaying = true
+
+	for _, epoch := range []int64{100, 17099838000} {
+		assert.Equal(t, eventfeed.Accept, intake.handleSignal(eventfeed.FeedGap{
+			EpochAfterID: epoch,
+			ResumeURL:    "https://3.basecampapi.com/2914079/events.json?since=" + strconv.FormatInt(epoch, 10),
+		}))
+	}
+	gaps, err := ledger.Gaps(context.Background())
+	require.NoError(t, err)
+	require.Len(t, gaps, 2)
+	assert.Contains(t, gaps[0].Note, "replay")
+	assert.NotContains(t, gaps[1].Note, "not a loss", "a later epoch move is a real gap")
 }

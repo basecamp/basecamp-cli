@@ -526,6 +526,9 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 			in.confirmPollServed(context.WithoutCancel(ctx), position) //nolint:contextcheck // detached on purpose, see above
 		},
 		CaughtUp: func() {
+			// A replay that reached the head without meeting the epoch is
+			// over; nothing after this is part of it.
+			in.setReplaying(false)
 			// "Caught up with the walk", not "caught up with the account":
 			// delivery has write-time brakes that write no addressing and say
 			// nothing, so a quiet feed is never proof of a quiet project.
@@ -594,8 +597,11 @@ func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
 		in.mu.Lock()
 		if in.replaying {
 			// Expected, not a loss: this connection chose to replay from the
-			// beginning to recover, and the beginning is below the epoch.
+			// beginning to recover, and the beginning is below the epoch. The
+			// label covers that one entry; any later 410 on this connection is
+			// a real gap and is recorded as one.
 			note = "a recovery replay from the beginning of served history met the epoch, as expected; not a loss"
+			in.replaying = false
 		}
 		in.mu.Unlock()
 		if _, err := in.ledger.RecordGap(ctx, Gap{
