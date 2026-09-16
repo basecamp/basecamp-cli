@@ -70,7 +70,7 @@ func idSchema(description string) map[string]any {
 		"description": description,
 		"anyOf": []any{
 			map[string]any{"type": "integer", "minimum": 1, "maximum": maxExactJSONInteger},
-			map[string]any{"type": "string", "pattern": "^[0-9]+$"},
+			map[string]any{"type": "string", "pattern": "^[1-9][0-9]*$"},
 		},
 	}
 }

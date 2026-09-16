@@ -632,3 +632,16 @@ func TestMentionsIsRefusedOnEveryOtherAction(t *testing.T) {
 	assert.Contains(t, text, "unknown parameter")
 	assert.Empty(t, log.seen())
 }
+
+func TestSummarizeRefusesAQuotedIDThatNamesNoRecord(t *testing.T) {
+	session, log := compositeSession(t, nil)
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": "0",
+		"event_type":   "comment.created",
+	})
+	require.True(t, isError, text)
+	assert.Contains(t, text, "recording_id")
+	assert.Empty(t, log.seen(), "quoting an id does not make zero name a record, and the schema says so too")
+}
