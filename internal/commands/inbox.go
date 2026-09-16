@@ -60,6 +60,9 @@ deduplicate by addressing_id, never by the event's id.`,
 			if maxPages < 1 {
 				return output.ErrUsage("--max-pages must be at least 1")
 			}
+			if err := refuseEmptyFilterFlags(cmd); err != nil {
+				return err
+			}
 
 			bucketIDs, err := feedIDs(trimFilter(buckets), "--buckets")
 			if err != nil {

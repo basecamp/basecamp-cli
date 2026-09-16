@@ -547,6 +547,37 @@ func TestShowSecretKeepsEveryParameterTheMintSent(t *testing.T) {
 	assert.Equal(t, minted, data.URL)
 }
 
+// An unset variable in a list filter marks the flag provided but leaves it
+// carrying nothing. Dropping it silently widens the request — and on
+// --exclude-performers it drops the guard that keeps an agent from reacting
+// to its own activity, which is the one filter whose absence is a loop.
+func TestAnEmptyFilterFlagIsRefusedRatherThanWidenTheRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"exclude-performers", NewEventsCmd, []string{"poll", "--since", "now", "--exclude-performers", ""}},
+		{"buckets", NewEventsCmd, []string{"poll", "--since", "now", "--buckets", ""}},
+		{"types", NewEventsCmd, []string{"poll", "--since", "now", "--types", ""}},
+		{"actor-types blank", NewEventsCmd, []string{"poll", "--since", "now", "--actor-types", " "}},
+		{"bare comma", NewEventsCmd, []string{"poll", "--since", "now", "--creators", ","}},
+		{"inbox reasons", NewInboxCmd, []string{"--since", "now", "--reasons", ""}},
+		{"inbox buckets", NewInboxCmd, []string{"--since", "now", "--buckets", ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport, _ := setupFeedApp(t)
+
+			err := executeRecordingCommand(tc.cmd(), app, tc.args...)
+
+			cliErr := requireFeedError(t, err)
+			assert.Equal(t, output.CodeUsage, cliErr.Code)
+			assert.Contains(t, cliErr.Message, "empty value")
+			assert.Empty(t, transport.recorded(), "nothing should reach the server")
+		})
+	}
+}
+
 // The documented resume form is --position "$POSITION". An unset variable
 // makes that an empty string, which used to read as "no entry point given"
 // and enter at the present — skipping exactly the backlog the caller was

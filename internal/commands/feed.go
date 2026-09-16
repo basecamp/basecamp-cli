@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -217,6 +218,33 @@ func feedActorTypes(values []string) ([]string, error) {
 // trimFilter drops empty entries a trailing comma leaves behind, so
 // --types "message.created," is the one-type filter it reads as rather than a
 // filter carrying an empty type the server rejects.
+// refuseEmptyFilterFlags rejects a list filter that was given but carries
+// nothing. A trailing comma leaving an empty entry is fine — trimFilter drops
+// it — but a flag whose every entry normalizes away came from an unset
+// variable, and silently dropping it widens the request instead of failing.
+// On --exclude-performers that means losing the loop guard that keeps an
+// agent from reacting to its own activity.
+//
+// It reads the flags the caller actually set rather than a list of names to
+// keep in step, so a filter added later is covered without being enrolled.
+func refuseEmptyFilterFlags(cmd *cobra.Command) error {
+	empty := ""
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if empty != "" || f.Value.Type() != "stringSlice" {
+			return
+		}
+		if values, err := cmd.Flags().GetStringSlice(f.Name); err == nil && len(trimFilter(values)) == 0 {
+			empty = f.Name
+		}
+	})
+	if empty != "" {
+		return output.ErrUsageHint(
+			fmt.Sprintf("--%s was given an empty value", empty),
+			"An empty value reads the same as omitting the filter, which widens the request; pass a value or drop the flag")
+	}
+	return nil
+}
+
 func trimFilter(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -575,6 +603,9 @@ event id and refetch the referenced recording before acting on it.`,
 			}
 			if maxPages < 1 {
 				return output.ErrUsage("--max-pages must be at least 1")
+			}
+			if err := refuseEmptyFilterFlags(cmd); err != nil {
+				return err
 			}
 
 			bucketIDs, err := feedIDs(trimFilter(buckets), "--buckets")
