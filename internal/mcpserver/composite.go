@@ -194,6 +194,9 @@ func findOperation(cat *catalog.Catalog, domainKey, action string) (*catalog.Ope
 func handleSummarize(ctx context.Context, api API, op *catalog.Operation, params map[string]any) (*mcp.CallToolResult, error) {
 	ref, err := summarizeRef(op, params)
 	if err != nil {
+		if errors.Is(err, basecamp.ErrUnknownRecordingType) {
+			return summarizeFailure(ref, err), nil
+		}
 		return gateway.ErrorResult("%v", err), nil
 	}
 	summary, err := api.Recordings().Summarize(ctx, ref)
@@ -231,10 +234,18 @@ func summarizeRef(op *catalog.Operation, params map[string]any) (basecamp.Record
 		return ref, err
 	}
 	if strings.TrimSpace(ref.EventType) == "" && strings.TrimSpace(ref.RecordingType) == "" {
-		return ref, fmt.Errorf("action %q needs event_type or recording_type: the recording's type is what names the read", summarizeAction)
+		return ref, errNoTypeGiven
 	}
 	return ref, nil
 }
+
+// errNoTypeGiven is a pointer with neither type. The SDK reaches the same
+// verdict for a pointer it cannot route, so this wraps that sentinel and is
+// reported under the same identity: a caller branching on the error's type
+// sees one answer for "I cannot tell what this recording is", however it
+// was reached. Only the message is better than the SDK's, which can only
+// report the empty type it was given.
+var errNoTypeGiven = fmt.Errorf("%w: summarize needs event_type or recording_type, the recording's type is what names the read", basecamp.ErrUnknownRecordingType)
 
 // summarizeFailure renders the composite's own verdicts as in-band errors
 // that name the identity, not a coarse code.

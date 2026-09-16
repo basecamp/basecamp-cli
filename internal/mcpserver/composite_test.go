@@ -144,8 +144,11 @@ func TestSummarizeRefusesAPointerThatNamesNoType(t *testing.T) {
 	session, log := compositeSession(t, nil)
 
 	text, isError := summarize(t, session, map[string]any{"bucket_id": 77, "recording_id": 3001})
-	assert.True(t, isError)
-	assert.Contains(t, text, "event_type or recording_type")
+	require.True(t, isError, text)
+	failure := jsonBody(t, text)["error"].(map[string]any)
+	assert.Equal(t, "unknown_recording_type", failure["type"],
+		"a pointer with no type is the same verdict the SDK reaches for one it cannot route, so a caller branching on the identity sees one answer")
+	assert.Contains(t, failure["message"], "event_type or recording_type")
 	assert.Empty(t, log.seen(), "a pointer that cannot be routed costs no request")
 }
 
