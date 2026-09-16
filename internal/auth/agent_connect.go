@@ -522,6 +522,11 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 	answer, err := m.postAgentConnect(ctx, client, agentConnectPollOp, intake.tokenURI,
 		url.Values{"device_code": {intake.deviceCode}})
 	if err != nil {
+		// A poll the server answered 200 to has handed the credential
+		// over, whatever became of the body on the way here.
+		if answer != nil && answer.status == http.StatusOK {
+			return nil, 0, spentHandoverError{err}
+		}
 		return nil, 0, err
 	}
 	if answer.status == http.StatusOK {
@@ -541,7 +546,7 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 	// the code's lifetime bounds anyway. A body naming a verdict alongside
 	// either is a server saying two things at once, of which the status is
 	// the one that says what to do next.
-	if answer.status == http.StatusTooManyRequests || answer.status >= 500 {
+	if answer.retryable() {
 		return nil, agentConnectBackoff(answer, interval), nil
 	}
 
@@ -621,6 +626,22 @@ type agentConnectAnswer struct {
 	body   []byte
 }
 
+// retryable reports whether this answer is the server asking for time
+// rather than deciding anything: a rate limit, or its own trouble. The one
+// 5xx that is a verdict is 507, which the shared classifier reads as an
+// account limit — backing off through it would hand the operator an
+// expired code instead of the thing they have to act on.
+func (a *agentConnectAnswer) retryable() bool {
+	switch {
+	case a.status == http.StatusInsufficientStorage:
+		return false
+	case a.status == http.StatusTooManyRequests, a.status >= 500:
+		return true
+	default:
+		return false
+	}
+}
+
 // failure classifies the answer the way the SDK classifies any other
 // response — 429 a rate limit with its Retry-After, 5xx retryable, the
 // rest final. statusFailure reads only the status and that header, both of
@@ -652,22 +673,30 @@ func (m *Manager) postAgentConnect(ctx context.Context, client *http.Client, op,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Once the response line has arrived, what the server did is decided —
+	// a poll it answered 200 to has burned the code and minted the secret
+	// whether or not the body reaches this process. So the status travels
+	// with every failure from here on, and the caller can say what was
+	// lost instead of reporting a bare transport error.
+	answered := &agentConnectAnswer{status: resp.StatusCode, header: resp.Header}
+
 	// The lane client hands a 3xx back rather than following it on a POST
 	// like this one. Classify it before the body read, as the mint does.
 	if isRedirect(resp.StatusCode) {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return answered, output.ErrAPI(resp.StatusCode,
 			fmt.Sprintf("%s: redirect %d on the agent connection endpoint is not followed", op, resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAgentConnectBytes+1))
 	if err != nil {
-		return nil, wrapOAuthError(op, err)
+		return answered, wrapOAuthError(op, err)
 	}
 	if int64(len(body)) > maxAgentConnectBytes {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return answered, output.ErrAPI(resp.StatusCode,
 			fmt.Sprintf("%s: response body exceeds %d bytes", op, maxAgentConnectBytes))
 	}
-	return &agentConnectAnswer{status: resp.StatusCode, header: resp.Header, body: body}, nil
+	answered.body = body
+	return answered, nil
 }
 
 // agentConnectRefusal renders a refused request: the RFC 6749 §5.2 error
@@ -706,12 +735,34 @@ func oauthErrorCode(body []byte) string {
 // code's remaining life bounds anyway.
 func agentConnectBackoff(answer *agentConnectAnswer, interval time.Duration) time.Duration {
 	next := interval + agentConnectSlowDownStep
-	if seconds, err := strconv.Atoi(strings.TrimSpace(answer.header.Get("Retry-After"))); err == nil && seconds > 0 {
-		if asked := reportedSeconds(seconds, maxAgentConnectLifetime); asked > next {
-			next = asked
-		}
+	if asked := retryAfter(answer.header, time.Now()); asked > next {
+		next = asked
 	}
 	return atLeastMinimumInterval(next)
+}
+
+// retryAfter is the delay a Retry-After header asks for, in either RFC
+// 7231 form — a count of seconds, or an HTTP date — and zero when it asks
+// for nothing this can read. The date form is what a proxy in front of the
+// server is as likely to send as the server itself, and reading only the
+// seconds form would answer a mandated wait with the five-second step and
+// earn the next refusal.
+func retryAfter(header http.Header, now time.Time) time.Duration {
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return reportedSeconds(seconds, maxAgentConnectLifetime)
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	return min(max(when.Sub(now), 0), maxAgentConnectLifetime)
 }
 
 // agentConnectExpired is the one ending that is nobody's fault: the code

@@ -35,6 +35,11 @@ type connectAS struct {
 	pollHeader   http.Header
 	tokenURIHost string
 
+	// pollHijack answers the poll with 200 and then drops the connection
+	// mid-body, which is what a reset or a cancellation after the headers
+	// looks like to the caller.
+	pollHijack bool
+
 	// intake renders the intake response. The default approves a
 	// ten-minute code polled once a second.
 	intake func() (status int, body string)
@@ -86,6 +91,18 @@ func startConnectAS(t *testing.T) *connectAS {
 		call := len(as.pollForms)
 		as.mu.Unlock()
 		record(&as.pollForms, r)
+		if as.pollHijack {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", "200")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"client_id":"agent-client"`))
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, hjErr := hj.Hijack(); hjErr == nil {
+					_ = conn.Close()
+				}
+			}
+			return
+		}
 		status, body := as.poll(call)
 		answer(w, status, body, as.pollHeader)
 	})
@@ -834,4 +851,60 @@ func TestConnectAgentHandsBackARemedyTheOperatorCanFollow(t *testing.T) {
 	require.ErrorAs(t, err, &e)
 	assert.Contains(t, e.Hint, "Disconnect the agent in Basecamp")
 	assert.NotContains(t, e.Hint, "--with-client-credentials")
+}
+
+// TestRetryAfterReadsBothFormsRFC7231Allows: a proxy in front of the
+// server is as likely to send the date form as the server is to send
+// seconds, and reading only one of them answers a mandated wait with the
+// five-second step — which earns the next refusal.
+func TestRetryAfterReadsBothFormsRFC7231Allows(t *testing.T) {
+	now := time.Date(2026, 9, 16, 13, 30, 0, 0, time.UTC)
+	header := func(value string) http.Header {
+		h := http.Header{}
+		h.Set("Retry-After", value)
+		return h
+	}
+
+	assert.Equal(t, 90*time.Second, retryAfter(header("90"), now))
+	assert.Equal(t, 2*time.Minute, retryAfter(header("Wed, 16 Sep 2026 13:32:00 GMT"), now))
+	// A date already past asks for nothing, as does a value neither form.
+	assert.Zero(t, retryAfter(header("Wed, 16 Sep 2026 13:00:00 GMT"), now))
+	assert.Zero(t, retryAfter(header("soon"), now))
+	assert.Zero(t, retryAfter(header("0"), now))
+	assert.Zero(t, retryAfter(http.Header{}, now))
+	// Neither form may ask for longer than a code can live.
+	assert.Equal(t, maxAgentConnectLifetime, retryAfter(header("Thu, 17 Sep 2026 13:30:00 GMT"), now))
+}
+
+// TestConnectAgentReportsAnAccountLimitFromThePoll: 507 is the one 5xx
+// that is a verdict rather than a wait. Backing off through it would hand
+// the operator an expired code instead of the thing they have to act on.
+func TestConnectAgentReportsAnAccountLimitFromThePoll(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) { return http.StatusInsufficientStorage, `{}` }
+	m := connectManager(t, as)
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.Error(t, err)
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, output.CodeLimitExceeded, e.Code)
+	assert.Len(t, as.calls(&as.pollForms), 1, "a verdict is not polled through")
+}
+
+// TestConnectAgentTreatsAnInterruptedHandoverAsSpent: the server decided
+// what it was going to do when it answered 200 — the code is burned and
+// the secret minted — so a body that never arrives costs exactly what a
+// refused mint costs and has to say the same thing.
+func TestConnectAgentTreatsAnInterruptedHandoverAsSpent(t *testing.T) {
+	as := startConnectAS(t)
+	as.pollHijack = true
+	m := connectManager(t, as)
+
+	cl := &collectLogger{}
+	_, err := m.ConnectAgent(context.Background(), connectOptions(cl, newTestClock()))
+	require.Error(t, err)
+	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assertNoAgentCredential(t, m)
+	assert.Empty(t, as.calls(&as.tokenForms), "nothing was minted with a credential that never arrived")
 }
