@@ -881,7 +881,11 @@ func TestRetryAfterReadsBothFormsRFC7231Allows(t *testing.T) {
 // the operator an expired code instead of the thing they have to act on.
 func TestConnectAgentReportsAnAccountLimitFromThePoll(t *testing.T) {
 	as := startConnectAS(t)
-	as.poll = func(int) (int, string) { return http.StatusInsufficientStorage, `{}` }
+	// With an OAuth code in the body beside it, which must not talk the
+	// status out of its verdict.
+	as.poll = func(int) (int, string) {
+		return http.StatusInsufficientStorage, `{"error":"authorization_pending"}`
+	}
 	m := connectManager(t, as)
 
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))

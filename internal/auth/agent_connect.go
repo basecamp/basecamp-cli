@@ -540,14 +540,16 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 		return conn, 0, nil
 	}
 
-	// The STATUS decides first, whatever code the body carries — the rule
-	// the mint's own refusal follows. Throttling and the server's trouble
-	// are not verdicts on this connection: back off and keep polling, which
-	// the code's lifetime bounds anyway. A body naming a verdict alongside
-	// either is a server saying two things at once, of which the status is
-	// the one that says what to do next.
-	if answer.retryable() {
+	// A body naming a verdict alongside a status that has already decided
+	// is a server saying two things at once, of which the status is the
+	// one that says what to do next.
+	switch answer.verdict() {
+	case statusAsksForTime:
 		return nil, agentConnectBackoff(answer, interval), nil
+	case statusDecides:
+		return nil, 0, agentConnectRefusal(agentConnectPollOp, answer)
+	case statusSaysNothing:
+		// The body speaks below.
 	}
 
 	switch oauthErrorCode(answer.body) {
@@ -626,19 +628,33 @@ type agentConnectAnswer struct {
 	body   []byte
 }
 
-// retryable reports whether this answer is the server asking for time
-// rather than deciding anything: a rate limit, or its own trouble. The one
-// 5xx that is a verdict is 507, which the shared classifier reads as an
-// account limit — backing off through it would hand the operator an
-// expired code instead of the thing they have to act on.
-func (a *agentConnectAnswer) retryable() bool {
+// statusVerdict is what an answer's STATUS settles on its own, before a
+// byte of the body is read.
+type statusVerdict int
+
+const (
+	// statusSaysNothing: the body's RFC 6749 error code decides.
+	statusSaysNothing statusVerdict = iota
+	// statusAsksForTime: a rate limit, or the server's own trouble.
+	statusAsksForTime
+	// statusDecides: a verdict no body can talk out of.
+	statusDecides
+)
+
+// verdict classifies an answer by status, which decides before the body
+// does — the rule the mint's own refusal follows. A 429 or a transient 5xx
+// asks for time; 507 is the account limit, which the shared classifier
+// reads as a verdict and which backing off through would answer with an
+// expired code instead of the thing to act on. Every other status says
+// nothing on its own and leaves the body to speak.
+func (a *agentConnectAnswer) verdict() statusVerdict {
 	switch {
 	case a.status == http.StatusInsufficientStorage:
-		return false
+		return statusDecides
 	case a.status == http.StatusTooManyRequests, a.status >= 500:
-		return true
+		return statusAsksForTime
 	default:
-		return false
+		return statusSaysNothing
 	}
 }
 
