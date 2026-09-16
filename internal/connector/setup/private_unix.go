@@ -103,13 +103,13 @@ func checkChain(abs string) error {
 			return fmt.Errorf("%w: cannot read the owner of %s", ErrNotPrivate, p)
 		}
 		if st.Uid != 0 && int(st.Uid) != os.Geteuid() {
-			return fmt.Errorf("%w: %s belongs to uid %d", ErrNotPrivate, p, st.Uid)
+			return fmt.Errorf("%w: %s belongs to uid %d, neither root nor you (in a user-namespace sandbox, run setup outside it)", ErrNotPrivate, p, st.Uid)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		if info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0 {
-			return fmt.Errorf("%w: %s is writable by other users (mode %04o)", ErrNotPrivate, p, info.Mode().Perm())
+			return fmt.Errorf("%w: %s is writable by other users (mode %04o); anyone who can write it could replace connect.json below it. Run chmod go-w %s", ErrNotPrivate, p, info.Mode().Perm(), p)
 		}
 	}
 	return nil

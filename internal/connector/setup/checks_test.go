@@ -126,18 +126,23 @@ func TestOperatorCheck(t *testing.T) {
 	r := &fakeReader{people: people}
 	forbidden := &fakeReader{personErr: status(http.StatusForbidden)}
 
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, r, Person{ID: operatorID}, agentID, "").Status)
-	assert.Equal(t, StatusPass, OperatorCheck(ctx, forbidden, people[operatorID], agentID, "me").Status,
+	assert.Equal(t, StatusPass, OperatorCheck(ctx, r, Person{ID: operatorID}, agentID, "", false).Status)
+	assert.Equal(t, StatusPass, OperatorCheck(ctx, forbidden, people[operatorID], agentID, "me", false).Status,
 		"an operator proved by their own profile needs no read as the agent")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: agentID}, agentID, "").Status, "the agent is never the operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 7}, agentID, "").Status, "an Agent is not an operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "").Status, "a client is not an operator")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[7], agentID, "me").Status,
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: agentID}, agentID, "", false).Status, "the agent is never the operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 7}, agentID, "", false).Status, "an Agent is not an operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "", false).Status, "a client is not an operator")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[7], agentID, "me", false).Status,
 		"a profile that reads back as an Agent is refused too")
-	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[8], agentID, "me").Status,
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, forbidden, people[8], agentID, "me", false).Status,
 		"a profile that reads back as a client is refused too")
 
-	c := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "")
+	recorded := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "", true)
+	assert.Equal(t, StatusWarn, recorded.Status, "the operator connect.json already holds was verified when recorded")
+	assert.Equal(t, StatusFail, OperatorCheck(ctx, r, Person{ID: 8}, agentID, "", true).Status,
+		"a recorded operator that now reads back as a client still fails")
+
+	c := OperatorCheck(ctx, forbidden, Person{ID: operatorID}, agentID, "", false)
 	assert.Equal(t, StatusFail, c.Status, "an id that cannot be verified is not recorded as the trust anchor")
 	assert.Contains(t, c.Hint, "--operator-profile")
 }

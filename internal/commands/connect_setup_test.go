@@ -573,3 +573,29 @@ func TestConnectSetupRefusesAnUnreadableCredentialStore(t *testing.T) {
 	assert.Zero(t, s.intakeCount(), "no connection was requested over the unreadable store")
 	assertNotWritten(t, "agent")
 }
+
+// An operator proven by their own profile stays proven: a later run that
+// changes only a route keeps it, even though the agent cannot read people.
+func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
+	s := startConnectSetupServer(t)
+	s.refusePeople = true
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+	require.NoError(t, err, out)
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), routeArg(t))
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "could not be re-read")
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, setupOperatorPerson, f.Trust.OperatorID)
+
+	// A different id is a new trust anchor, verified as one: unreadable, it
+	// is refused.
+	s.refusePeople = false
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "client")
+}

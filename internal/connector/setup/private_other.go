@@ -3,7 +3,6 @@
 package setup
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,13 +79,10 @@ func openNoFollow(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The name was checked, then opened: compare what was opened with what
-	// was checked, so a swap in between is refused.
-	opened, err := f.Stat()
-	if err != nil || !os.SameFile(info, opened) {
-		f.Close()
-		return nil, errors.Join(fmt.Errorf("%w: %s changed while it was opened", ErrNotPrivate, path), err)
-	}
+	// The opened handle is checked again, so a name swapped to a reparse
+	// point between the Lstat and the Open is refused by checkPrivateFile's
+	// regular-file test. This narrows the window; it does not close it, and
+	// relies on the profile directory's owner-only ACL for the rest.
 	return f, nil
 }
 

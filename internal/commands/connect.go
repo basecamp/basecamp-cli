@@ -81,7 +81,9 @@ already connected is used as it is.
 
 Operator. The person whose instructions the agent follows, keyed on Person
 id. Name them by their own profile (--operator-profile, which proves who
-they are), or by id (--operator). With neither, setup keeps the operator
+they are), or by id (--operator), which the agent must be able to read —
+Basecamp refuses that read to an Agent identity today, so on the agent
+connection path use --operator-profile. With neither, setup keeps the operator
 connect.json already has; on a first setup one of the two is required.
 
 Trust. operator (default): the operator alone. allowlist: the operator and
@@ -306,12 +308,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			return err
 		}
 		operatorID = op.ID
-		operatorCheck = setup.OperatorCheck(ctx, reader, op, me.ID, f.operatorProfile)
+		operatorCheck = setup.OperatorCheck(ctx, reader, op, me.ID, f.operatorProfile, false)
 	default:
 		if operatorID == 0 {
 			operatorID = existing.Trust.OperatorID
 		}
-		operatorCheck = setup.OperatorCheck(ctx, reader, setup.Person{ID: operatorID}, me.ID, "")
+		recorded := exists && operatorID == existing.Trust.OperatorID
+		operatorCheck = setup.OperatorCheck(ctx, reader, setup.Person{ID: operatorID}, me.ID, "", recorded)
 	}
 	if operatorID == me.ID {
 		return output.ErrUsage(fmt.Sprintf("The operator (person %d) is the agent itself; the agent's own id never authorizes", operatorID))

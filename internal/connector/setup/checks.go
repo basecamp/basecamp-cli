@@ -175,8 +175,11 @@ func TicketCheck(ctx context.Context, r Reader, kind string) Check {
 // agent, not an Agent, not a client. An operator named by their own profile
 // arrives already read through that profile's credential, which proved who
 // they are; a bare id is read as the agent, and an id that cannot be read
-// fails, because an unverified trust anchor is not one to record.
-func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, fromProfile string) Check {
+// fails, because an unverified trust anchor is not one to record — unless it
+// is the operator connect.json already holds (recorded), which was verified
+// when it was written: a read that cannot answer is then a warning, while a
+// read that answers Agent or client still fails.
+func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, fromProfile string, recorded bool) Check {
 	c := Check{Name: "Operator"}
 	if op.ID == agentID {
 		c.Status, c.Message = StatusFail, "The operator is the agent itself; the agent's own id never authorizes"
@@ -188,6 +191,11 @@ func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, from
 	} else {
 		p, err := r.Person(ctx, op.ID)
 		switch {
+		case err != nil && recorded:
+			c.Status = StatusWarn
+			c.Message = fmt.Sprintf("Person %d, the operator connect.json already records, could not be re-read as the agent: %s", op.ID, unreadReason(err))
+			c.Hint = "It was verified when it was recorded. To verify it again, pass --operator-profile <profile>."
+			return c
 		case err != nil && (refused(err) || httpStatus(err) == http.StatusUnauthorized):
 			c.Status = StatusFail
 			c.Message = fmt.Sprintf("Person %d could not be read as the agent (HTTP %d), so the operator id cannot be verified", op.ID, httpStatus(err))
@@ -213,6 +221,13 @@ func OperatorCheck(ctx context.Context, r Reader, op Person, agentID int64, from
 		c.Message = fmt.Sprintf("Person %d, %s%s", op.ID, richtext.SanitizeSingleLine(op.Name), source)
 	}
 	return c
+}
+
+func unreadReason(err error) string {
+	if status := httpStatus(err); status != 0 {
+		return fmt.Sprintf("HTTP %d", status)
+	}
+	return safeError(err)
 }
 
 // RouteChecks reads each routed project the way admission will, as the
