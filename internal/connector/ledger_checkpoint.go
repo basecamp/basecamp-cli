@@ -42,9 +42,9 @@ func (l *Ledger) Load(ctx context.Context, key eventfeed.CheckpointKey) (string,
 // position taken from one would skip everything inside that window.
 func (l *Ledger) Save(ctx context.Context, key eventfeed.CheckpointKey, position string) error {
 	_, err := l.db.ExecContext(ctx, `
-INSERT INTO checkpoints (flat_key, position, updated_at) VALUES (?, ?, ?)
+INSERT INTO checkpoints (flat_key, lineage, position, updated_at) VALUES (?, ?, ?, ?)
 ON CONFLICT (flat_key) DO UPDATE SET position = excluded.position, updated_at = excluded.updated_at`,
-		key.FlatKey(), position, l.timestamp())
+		key.FlatKey(), lineageOf(key), position, l.timestamp())
 	if err != nil {
 		return fmt.Errorf("connector: save checkpoint: %w", err)
 	}
@@ -64,11 +64,11 @@ ON CONFLICT (flat_key) DO UPDATE SET position = excluded.position, updated_at = 
 // It only ever moves forward.
 func (l *Ledger) NotePollServed(ctx context.Context, key eventfeed.CheckpointKey, eventID int64) error {
 	_, err := l.db.ExecContext(ctx, `
-INSERT INTO checkpoints (flat_key, position, last_poll_served_id, updated_at) VALUES (?, '', ?, ?)
+INSERT INTO checkpoints (flat_key, lineage, position, last_poll_served_id, updated_at) VALUES (?, ?, '', ?, ?)
 ON CONFLICT (flat_key) DO UPDATE SET
   last_poll_served_id = MAX(checkpoints.last_poll_served_id, excluded.last_poll_served_id),
   updated_at = excluded.updated_at`,
-		key.FlatKey(), eventID, l.timestamp())
+		key.FlatKey(), lineageOf(key), eventID, l.timestamp())
 	if err != nil {
 		return fmt.Errorf("connector: note poll-served id: %w", err)
 	}
@@ -88,6 +88,30 @@ func (l *Ledger) LastPollServedID(ctx context.Context, key eventfeed.CheckpointK
 		return 0, fmt.Errorf("connector: read last poll-served id: %w", err)
 	}
 	return id, nil
+}
+
+// LineagePollServedID returns the highest id the poll lane has served to this
+// consumer under ANY filter set: same origin, account and namespace.
+//
+// It is the re-entry for a filter change. The new digest holds no position of
+// its own, and entering it at the present would skip everything committed
+// since the old digest's walk stopped. Events a narrower old filter excluded
+// before this id are not recovered by widening — the spec says so, and so does
+// this comment — but nothing after it is skipped.
+func (l *Ledger) LineagePollServedID(ctx context.Context, key eventfeed.CheckpointKey) (int64, error) {
+	var id int64
+	err := l.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(last_poll_served_id), 0) FROM checkpoints WHERE lineage = ?`, lineageOf(key)).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("connector: read lineage poll-served id: %w", err)
+	}
+	return id, nil
+}
+
+// lineageOf is the checkpoint identity without its filter digest.
+func lineageOf(key eventfeed.CheckpointKey) string {
+	key.FilterKey = ""
+	return key.FlatKey()
 }
 
 // ForgetPosition drops the held position for key while keeping the last

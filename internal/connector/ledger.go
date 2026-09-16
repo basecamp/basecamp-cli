@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
@@ -69,6 +70,11 @@ func OpenLedger(path string) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
 	}
+	if strings.ContainsAny(path, "?#%") {
+		// The driver reads the path as a URI; these would be taken as its
+		// query, fragment or an escape, and open some other file.
+		return nil, fmt.Errorf("connector: ledger path %q contains a character the SQLite URI cannot carry (?, # or %%)", path)
+	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("connector: create ledger directory: %w", err)
@@ -127,10 +133,12 @@ CREATE INDEX events_state_id ON events (state, id);
 
 CREATE TABLE checkpoints (
   flat_key            TEXT PRIMARY KEY,
+  lineage             TEXT NOT NULL,
   position            TEXT NOT NULL,
   last_poll_served_id INTEGER NOT NULL DEFAULT 0,
   updated_at          TEXT NOT NULL
 );
+CREATE INDEX checkpoints_lineage ON checkpoints (lineage);
 
 CREATE TABLE losses (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,16 +177,24 @@ func (l *Ledger) migrate(ctx context.Context) error {
 		return fmt.Errorf("connector: create migration table: %w", err)
 	}
 
-	var applied int
-	if err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {
-		return fmt.Errorf("connector: read schema version: %w", err)
-	}
-
-	for i := applied; i < len(migrations); i++ {
+	for i := range migrations {
 		version := i + 1
+		// The version is read inside the migration's own transaction, which
+		// takes the write lock as it opens: two processes opening a fresh
+		// ledger at once — `status` beside a starting connector — must not
+		// both decide migration 1 is theirs to apply.
 		tx, err := l.db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("connector: begin migration %d: %w", version, err)
+		}
+		var applied int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&applied); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("connector: read schema version: %w", err)
+		}
+		if applied >= version {
+			_ = tx.Rollback()
+			continue
 		}
 		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
 			_ = tx.Rollback()

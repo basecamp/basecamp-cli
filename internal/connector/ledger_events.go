@@ -55,7 +55,7 @@ func (r Record) EffectivePerformer() int64 {
 // its pointer payload is dropped, so an explicit replay of old history can
 // never turn a finished event back into a new task.
 //
-// It also resolves the id against any open loss: an event the repair walk — or
+// It also resolves the id against any loss, open or closed: an event the repair walk — or
 // the ordinary poll lane, later — serves is one the overflow did not cost us.
 func (l *Ledger) RecordSeen(ctx context.Context, ev eventfeed.Event, lane Lane) (bool, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
@@ -84,9 +84,11 @@ ON CONFLICT (id) DO NOTHING`,
 		return false, fmt.Errorf("connector: record seen %d: %w", ev.ID, err)
 	}
 
+	// Missing or already given up on: an id intake has received is recovered,
+	// however late it came, and status must stop reporting it.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE loss_ids SET state = ? WHERE event_id = ? AND state = ?`,
-		string(LossRecovered), ev.ID, string(LossMissing)); err != nil {
+		`UPDATE loss_ids SET state = ? WHERE event_id = ? AND state IN (?, ?)`,
+		string(LossRecovered), ev.ID, string(LossMissing), string(LossUnrecovered)); err != nil {
 		return false, fmt.Errorf("connector: resolve loss for %d: %w", ev.ID, err)
 	}
 

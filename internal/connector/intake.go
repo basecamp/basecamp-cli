@@ -102,6 +102,15 @@ type Intake struct {
 	pollCandidates []int64
 	snapshot       map[int64]bool
 	reconnect      chan struct{}
+	// cancelRun ends the current connection; nil between connections.
+	cancelRun context.CancelFunc
+	// promotedThisRun is whether this connection has recorded a poll-served
+	// id. Until it has, the package's own reset cursor is zero, and a refused
+	// position would send it to the present.
+	promotedThisRun bool
+	// reentryAfter is the safe re-entry the next connection takes after a
+	// refused stored position.
+	reentryAfter int64
 
 	repairs sync.WaitGroup
 	// lifetime is Run's context. Repair walks are bound to it rather than to
@@ -177,51 +186,89 @@ func (in *Intake) CheckpointKey() eventfeed.CheckpointKey { return in.key }
 
 // Run consumes the feed until ctx is canceled or the feed terminates.
 //
-// It reconnects on its own only for membership: everything else the feed can
-// recover from, it recovers from inside the package.
+// It reconnects on its own for two reasons only — membership, and a stored
+// position refused before this run had a safe re-entry of its own. Everything
+// else the feed can recover from, it recovers from inside the package.
 func (in *Intake) Run(ctx context.Context) error {
-	in.lifetime = ctx
-	if err := in.resumeReconciliation(ctx); err != nil {
+	// Repairs get a child lifetime that ends when Run does, whatever the
+	// reason. A repair is off the delivery path: a terminal feed must not wait
+	// out its sixty-second cadence, and an unfinished repair resumes on the
+	// next start from the loss record.
+	repairCtx, stopRepairs := context.WithCancel(ctx)
+	defer in.repairs.Wait()
+	defer stopRepairs()
+	in.lifetime = repairCtx
+
+	if err := in.resumeReconciliation(repairCtx); err != nil {
 		return err
 	}
-	defer in.repairs.Wait()
 
+	since := in.opts.SinceEventID
 	for {
-		err := in.runOnce(ctx)
+		err := in.runOnce(ctx, since)
+		// --since is an entry, not a standing instruction: a reconnect
+		// resumes from what this run stored.
+		since = 0
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if !errors.Is(err, errReconnect) {
+		switch {
+		case errors.Is(err, errReconnect):
+			in.log.Info("reconnecting the feed")
+		default:
 			return err
 		}
-		in.log.Info("reconnecting the feed", "reason", "membership changed")
 	}
 }
 
 // errReconnect asks the supervisor for a fresh connection. It is not a
-// failure: the cable's bucket snapshot is taken at subscribe, so a project
-// granted afterwards needs a new connection to be heard on the live lane.
+// failure.
 var errReconnect = errors.New("connector: reconnect the feed")
 
-func (in *Intake) runOnce(ctx context.Context) error {
+func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	in.mu.Lock()
+	in.cancelRun = cancel
+	in.promotedThisRun = false
+	reentry := in.reentryAfter
+	in.reentryAfter = 0
+	in.mu.Unlock()
+	defer func() {
+		in.mu.Lock()
+		in.cancelRun = nil
+		in.mu.Unlock()
+	}()
+
 	in.takeSnapshot(runCtx)
 
-	position, hadPosition, err := in.ledger.Load(runCtx, in.key)
+	_, hadPosition, err := in.ledger.Load(runCtx, in.key)
 	if err != nil {
 		return err
 	}
-	_ = position
+	lineageServed, err := in.ledger.LineagePollServedID(runCtx, in.key)
+	if err != nil {
+		return err
+	}
 
 	start := eventfeed.StartResume()
 	switch {
-	case in.opts.SinceEventID > 0:
-		start = eventfeed.StartAfter(in.opts.SinceEventID)
-		in.log.Info("entering the feed after an explicit event id", "since", in.opts.SinceEventID)
+	case since > 0:
+		start = eventfeed.StartAfter(since)
+		in.log.Info("entering the feed after an explicit event id", "since", since)
+	case reentry > 0:
+		start = eventfeed.StartAfter(reentry)
+		in.log.Warn("the stored position was refused; re-entering after the last poll-served id", "since", reentry)
 	case hadPosition:
 		in.log.Info("resuming the feed from the stored position", "filter_key", in.key.FilterKey)
+	case lineageServed > 0:
+		// A filter change: this digest has no position, but the consumer's
+		// poll lane had reached this id under another. Entering at the
+		// present would skip everything since.
+		start = eventfeed.StartAfter(lineageServed)
+		in.log.Warn("no position for this filter set; re-entering after the last poll-served id under the previous one",
+			"since", lineageServed, "filter_key", in.key.FilterKey)
 	default:
 		// Said out loud because it is a real loss of history, not a neutral
 		// default: everything committed before this moment is never served.
@@ -246,13 +293,16 @@ func (in *Intake) runOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connector: build feed: %w", err)
 	}
+	// Deferred in this order so they run in the reverse: the connection is
+	// canceled first, which is what lets the membership watcher and the feed
+	// return, and only then are they waited on.
 	defer func() {
 		_ = feed.Close()
 		feed.Wait()
 	}()
-
-	stopMembership := in.watchMembership(runCtx, cancel)
+	stopMembership := in.watchMembership(runCtx)
 	defer stopMembership()
+	defer cancel()
 
 	var feedErr error
 	for event, err := range feed.Events(runCtx) {
@@ -261,6 +311,9 @@ func (in *Intake) runOnce(ctx context.Context) error {
 			break
 		}
 		if err := in.ingest(runCtx, event, LaneOf(event)); err != nil {
+			if in.reconnectRequested() {
+				return errReconnect
+			}
 			return err
 		}
 	}
@@ -289,11 +342,17 @@ func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) 
 		return nil
 	}
 
-	in.noteBucket(event.BucketID)
-	if err := in.pointer.write(event); err != nil {
+	if err := in.pointer.write(event, lane); err != nil {
 		return err
 	}
-	return in.queue.Offer(ctx, event.ID)
+	if err := in.queue.Offer(ctx, event.ID); err != nil {
+		return err
+	}
+	// Only once the id is handed over: the reconnect cancels the connection
+	// this event arrived on, and the event must not be stranded between the
+	// ledger and the queue by it.
+	in.noteBucket(event.BucketID)
+	return nil
 }
 
 // LaneOf says which lane served an event.
@@ -342,7 +401,11 @@ func (in *Intake) confirmPollServed(ctx context.Context) {
 	}
 	if err := in.ledger.NotePollServed(ctx, in.key, highest); err != nil {
 		in.log.Error("could not record the last poll-served id", "error", err)
+		return
 	}
+	in.mu.Lock()
+	in.promotedThisRun = true
+	in.mu.Unlock()
 }
 
 func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
@@ -373,6 +436,7 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 		},
 		PositionRejected: func(kind eventfeed.PollErrorKind) {
 			in.log.Warn("feed rejected the held position", "kind", kind.String())
+			in.onPositionRejected(ctx)
 		},
 		FilterConflict: func(positionDigest, filtersDigest string) {
 			in.log.Warn("feed position was minted for a different filter set",
@@ -560,12 +624,40 @@ func (in *Intake) noteBucket(bucketID int64) {
 	in.requestReconnect()
 }
 
+// onPositionRejected handles a refused position on a connection that has not
+// yet recorded a poll-served id of its own.
+//
+// The package re-enters from an in-memory id that starts at zero each run, so
+// right after a restart it would take the present and skip everything since
+// the refused position. The ledger holds the id the poll lane had reached, so
+// the connection is ended before that re-entry polls and remade after it.
+func (in *Intake) onPositionRejected(ctx context.Context) {
+	in.mu.Lock()
+	promoted := in.promotedThisRun
+	in.mu.Unlock()
+	if promoted {
+		// The package's own reset cursor is this run's poll-served id, which
+		// is at least what the ledger holds.
+		return
+	}
+	served, err := in.ledger.LineagePollServedID(ctx, in.key)
+	if err != nil || served == 0 {
+		return
+	}
+	in.mu.Lock()
+	in.reentryAfter = served
+	in.mu.Unlock()
+	in.requestReconnect()
+}
+
 // watchMembership re-reads the agent's projects on a timer and asks for a
-// reconnect when the set changes. It returns a stop function.
-func (in *Intake) watchMembership(ctx context.Context, cancel context.CancelFunc) func() {
+// reconnect when the set changes. The returned stop function ends the watcher
+// and waits for it, and is safe to call whatever state ctx is in.
+func (in *Intake) watchMembership(ctx context.Context) func() {
 	if in.opts.Membership == nil {
 		return func() {}
 	}
+	ctx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -586,19 +678,28 @@ func (in *Intake) watchMembership(ctx context.Context, cancel context.CancelFunc
 				}
 				if in.membershipChanged(buckets) {
 					in.requestReconnect()
-					cancel()
 					return
 				}
 			}
 		}
 	}()
-	return func() { <-done }
+	return func() {
+		stop()
+		<-done
+	}
 }
 
+// membershipChanged compares a fresh read with the snapshot. With no snapshot
+// — the read at subscribe failed — the fresh read becomes the baseline;
+// otherwise a failed first read would disable change detection for good.
 func (in *Intake) membershipChanged(buckets []int64) bool {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	if in.snapshot == nil {
+		in.snapshot = make(map[int64]bool, len(buckets))
+		for _, id := range buckets {
+			in.snapshot[id] = true
+		}
 		return false
 	}
 	if len(buckets) != len(in.snapshot) {
@@ -612,10 +713,18 @@ func (in *Intake) membershipChanged(buckets []int64) bool {
 	return false
 }
 
+// requestReconnect marks a reconnect due and ends the current connection now,
+// rather than whenever the feed next yields.
 func (in *Intake) requestReconnect() {
 	select {
 	case in.reconnect <- struct{}{}:
 	default:
+	}
+	in.mu.Lock()
+	cancel := in.cancelRun
+	in.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -655,7 +764,7 @@ type Pointer struct {
 	State         string `json:"state"`
 }
 
-func (p *pointerWriter) write(event eventfeed.Event) error {
+func (p *pointerWriter) write(event eventfeed.Event, lane Lane) error {
 	if p.w == nil {
 		return nil
 	}
@@ -669,7 +778,7 @@ func (p *pointerWriter) write(event eventfeed.Event) error {
 		PerformedByID: event.PerformedByID,
 		RecordingID:   event.RecordingID,
 		CreatedAt:     event.CreatedAt.UTC().Format(time.RFC3339),
-		Lane:          LaneOf(event),
+		Lane:          lane,
 		State:         string(StateSeen),
 	})
 	if err != nil {

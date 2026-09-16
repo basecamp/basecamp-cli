@@ -130,7 +130,7 @@ func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Ti
 
 	loss := Loss{
 		DetectedAt:   now.UTC(),
-		DroppedCount: len(droppedIDs),
+		DroppedCount: len(states),
 		// One below the lowest missing id, so the walk's first page can serve
 		// it: the feed's since is exclusive.
 		RepairSince: lowestMissing - 1,
@@ -276,6 +276,22 @@ func (l *Ledger) CloseLoss(ctx context.Context, lossID int64, now time.Time) (in
 		return 0, fmt.Errorf("connector: commit close loss: %w", err)
 	}
 	return int(unrecovered), nil
+}
+
+// MarkUnrecoveredThrough gives up on a loss's missing ids at or below id — the
+// ones a 410's epoch has fenced off — and leaves the rest missing.
+func (l *Ledger) MarkUnrecoveredThrough(ctx context.Context, lossID, id int64) (int, error) {
+	res, err := l.db.ExecContext(ctx,
+		`UPDATE loss_ids SET state = ? WHERE loss_id = ? AND state = ? AND event_id <= ?`,
+		string(LossUnrecovered), lossID, string(LossMissing), id)
+	if err != nil {
+		return 0, fmt.Errorf("connector: mark unrecovered below the epoch: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("connector: mark unrecovered below the epoch: %w", err)
+	}
+	return int(n), nil
 }
 
 // UnrecoveredIDs returns every id the connector has given up on, across all

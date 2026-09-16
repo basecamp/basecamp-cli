@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 )
 
@@ -21,18 +20,14 @@ const (
 	DefaultBacklogPause = 10_000
 )
 
-// ErrQueueClosed reports work offered to, or taken from, a closed queue.
-var ErrQueueClosed = errors.New("connector: intake queue is closed")
-
 // Queue is the seam between intake and admission: intake writes a pointer and
 // hands over an id, admission reads it when it gets there. Two queues with
 // visible depth rather than one pipeline, so a busy dispatcher can never stall
 // the socket — and so the place where work is piling up is the place the depth
 // is showing.
 type Queue struct {
-	ids      chan int64
-	warnAt   int
-	closeOne sync.Once
+	ids    chan int64
+	warnAt int
 
 	warned atomic.Bool
 	paused atomic.Bool
@@ -92,14 +87,14 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	}
 }
 
-// Take returns the next id, waiting for one. It reports ErrQueueClosed once
-// the queue is closed and drained.
+// Take returns the next id, waiting for one until ctx ends.
+//
+// There is deliberately no Close. Shutdown is the context: a closed channel
+// would turn every offer racing the close into a panic, and nothing here needs
+// a drained-and-done signal that cancellation does not already give.
 func (q *Queue) Take(ctx context.Context) (int64, error) {
 	select {
-	case id, ok := <-q.ids:
-		if !ok {
-			return 0, ErrQueueClosed
-		}
+	case id := <-q.ids:
 		q.noteDepth()
 		return id, nil
 	case <-ctx.Done():
@@ -113,10 +108,6 @@ func (q *Queue) Depth() int { return len(q.ids) }
 // Paused reports whether an offer is currently waiting for room — which is to
 // say whether the feed is being consumed.
 func (q *Queue) Paused() bool { return q.paused.Load() }
-
-// Close stops the queue. Takers drain what is already queued and then see
-// ErrQueueClosed.
-func (q *Queue) Close() { q.closeOne.Do(func() { close(q.ids) }) }
 
 // noteDepth fires the warning edges. It is edge-triggered, not level: a
 // backlog that sits above the threshold for an hour is one warning, and the
