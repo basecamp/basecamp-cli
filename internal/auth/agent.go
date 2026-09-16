@@ -579,16 +579,26 @@ func (m *Manager) LoginClientCredentials(ctx context.Context, opts ClientCredent
 		log = func(string) {}
 	}
 
-	credKey := m.credentialKey()
-
 	disc, err := m.discoverOAuth(ctx, log)
 	if err != nil {
 		return nil, err
 	}
-	if disc.oauthType != oauthTypeBC5 {
-		return nil, output.ErrUsageHint(
-			"This server has no agent grant: OAuth discovery selected the Launchpad fallback",
-			"Agent logins need Basecamp's own authorization server. Check BASECAMP_BASE_URL, or sign in as a bot user instead: basecamp auth login --device-code.")
+	return m.adoptAgentGrant(ctx, disc, opts, scope)
+}
+
+// adoptAgentGrant proves a client id and secret by minting one self-token
+// with them, and stores both under the active credential key.
+//
+// It is the half of an agent login that is the same however the credential
+// was obtained — piped in by an operator, or handed over by the connection
+// ceremony — so the scope is passed in already resolved and the discovery
+// already made. Nothing is written unless the mint succeeded: the mint is
+// the only proof there is that the client is good.
+func (m *Manager) adoptAgentGrant(ctx context.Context, disc *discovery, opts ClientCredentialsOptions, scope string) (*LoginResult, error) {
+	credKey := m.credentialKey()
+
+	if err := requireAgentAuthorizationServer(disc); err != nil {
+		return nil, err
 	}
 	if err := requireSecureOAuthEndpoint("token endpoint", disc.config.TokenEndpoint); err != nil {
 		return nil, err
