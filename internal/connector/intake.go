@@ -114,9 +114,11 @@ type Intake struct {
 	// id. Until it has, the package's own reset cursor is zero, and a refused
 	// position would send it to the present.
 	promotedThisRun bool
-	// reentryAfter is the safe re-entry the next connection takes after a
-	// refused stored position.
-	reentryAfter int64
+	// reentry is the safe entry the next connection takes after a refused
+	// stored position; hasReentry says whether one is pending.
+	reentry    eventfeed.Start
+	hasReentry bool
+	reentryLog string
 	// abortErr ends the run: set when continuing could only mean entering
 	// the feed somewhere unsafe.
 	abortErr error
@@ -253,8 +255,8 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	in.mu.Lock()
 	in.cancelRun = cancel
 	in.promotedThisRun = false
-	reentry := in.reentryAfter
-	in.reentryAfter = 0
+	reentry, hasReentry, reentryLog := in.reentry, in.hasReentry, in.reentryLog
+	in.hasReentry = false
 	in.mu.Unlock()
 	defer func() {
 		in.mu.Lock()
@@ -278,9 +280,9 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	case since > 0:
 		start = eventfeed.StartAfter(since)
 		in.log.Info("entering the feed after an explicit event id", "since", since)
-	case reentry > 0:
-		start = eventfeed.StartAfter(reentry)
-		in.log.Warn("the stored position was refused; re-entering after the last poll-served id", "since", reentry)
+	case hasReentry:
+		start = reentry
+		in.log.Warn("the stored position was refused; " + reentryLog)
 	case hadPosition:
 		in.log.Info("resuming the feed from the stored position", "filter_key", in.key.FilterKey)
 	case lineageServed > 0:
@@ -681,8 +683,14 @@ func (in *Intake) noteBucket(bucketID int64) {
 //
 // The package re-enters from an in-memory id that starts at zero each run, so
 // right after a restart it would take the present and skip everything since
-// the refused position. The ledger holds the id the poll lane had reached, so
-// the connection is ended before that re-entry polls and remade after it.
+// the refused position. The connection is ended before that re-entry polls,
+// and remade at a safe entry:
+//
+//   - this filter set's own last poll-served id, when it has one;
+//   - otherwise the beginning of served history. A position can be saved
+//     from empty pages alone, so "no poll-served id" does not mean "nothing
+//     to skip". Replaying costs reads the ledger's dedupe absorbs; entering at
+//     the present, or at another filter set's id, costs events.
 func (in *Intake) onPositionRejected(ctx context.Context) {
 	in.mu.Lock()
 	promoted := in.promotedThisRun
@@ -692,26 +700,28 @@ func (in *Intake) onPositionRejected(ctx context.Context) {
 		// is at least what the ledger holds.
 		return
 	}
-	// This filter set's own id first. Another set's may be past events this
-	// one never served, and re-entering there would skip them.
 	served, err := in.positions.LastPollServedID(ctx, in.key)
-	if err == nil && served == 0 {
-		served, err = in.positions.LineagePollServedID(ctx, in.key)
-	}
 	if err != nil {
-		// Returning here would let the package take its own reset cursor,
-		// which is the present. Not knowing where it is safe to re-enter is
-		// a reason to stop, not to guess.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// The connection is already ending — a reconnect or a shutdown —
+			// so the package's re-entry will not poll. Nothing to decide.
+			return
+		}
+		// Not knowing where it is safe to re-enter is a reason to stop, not
+		// to guess.
 		in.abort(fmt.Errorf("connector: a position was refused and the safe re-entry could not be read: %w", err))
 		return
 	}
-	if served == 0 {
-		// The poll lane has never served this consumer anything: the present
-		// is all there is.
-		return
-	}
+
 	in.mu.Lock()
-	in.reentryAfter = served
+	if served > 0 {
+		in.reentry = eventfeed.StartAfter(served)
+		in.reentryLog = "re-entering after this filter set's last poll-served id " + strconv.FormatInt(served, 10)
+	} else {
+		in.reentry = eventfeed.StartBeginning()
+		in.reentryLog = "no poll-served id for this filter set; re-entering at the beginning of served history"
+	}
+	in.hasReentry = true
 	in.mu.Unlock()
 	in.requestReconnect()
 }

@@ -41,7 +41,7 @@ func TestServerListsDomainTools(t *testing.T) {
 	session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
 
 	tools := mcptest.ListTools(t, session)
-	assert.Len(t, tools, 17)
+	assert.Len(t, tools, 16)
 	require.Contains(t, tools, "basecamp_projects")
 	projects := tools["basecamp_projects"]
 	assert.Contains(t, projects.Description, "list_projects")

@@ -121,19 +121,23 @@ func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
 // recovery is the other half of the pair, so a warning is never left standing
 // after the thing it warned about went away.
 func (q *Queue) noteDepth() {
+	// The transition is decided under the lock; the callback runs after it,
+	// so a callback may observe or use the queue without deadlocking against
+	// the operation that raised it. Callbacks can therefore arrive out of
+	// order across goroutines, but the state they report on never is.
 	q.edges.Lock()
-	defer q.edges.Unlock()
 	depth := q.Depth()
+	var fire func(int)
 	switch {
 	case depth >= q.warnAt && !q.warned:
 		q.warned = true
-		if q.OnWarn != nil {
-			q.OnWarn(depth)
-		}
+		fire = q.OnWarn
 	case depth < q.warnAt && q.warned:
 		q.warned = false
-		if q.OnRecover != nil {
-			q.OnRecover(depth)
-		}
+		fire = q.OnRecover
+	}
+	q.edges.Unlock()
+	if fire != nil {
+		fire(depth)
 	}
 }

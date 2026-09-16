@@ -228,7 +228,9 @@ func (a *FeedAdapter) optionsFor(cursor eventfeed.Cursor, filters eventfeed.Filt
 			// A followed URL carries exactly one cursor. With neither, the
 			// generated operation enters at the present — a silent skip of
 			// everything unserved, on the path whose whole purpose was to
-			// continue. With both, the server decides which one wins.
+			// continue. With both, which one the server honors is not ours to
+			// know. Both refusals are deliberate: a server that starts sending
+			// either shape ends the feed loudly rather than moving it silently.
 			return nil, &eventfeed.PollError{Kind: eventfeed.PollUnrecoverable, Err: errCursorlessContinuation}
 		}
 		// The URL carries the server's own canonical filter set. It is used

@@ -158,6 +158,11 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 // full recovery.
 var errReconciliationEnded = errors.New("connector: reconciliation ended inside the repair walk")
 
+// maxResumesPerPass bounds the 410 resumes one pass follows. Keyed by URL
+// alone, a server that signs or nonces its resume URLs would make every answer
+// look new; the bound does not depend on the server choosing stable URLs.
+const maxResumesPerPass = 2
+
 // repairPass is what one pass has already done, stated rather than inferred
 // from the shape of the cursor.
 type repairPass struct {
@@ -218,7 +223,7 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 	switch pollErr.Kind {
 	case eventfeed.PollGone:
 		epoch := pollErr.EpochAfterID
-		if pass.followed[pollErr.ResumeURL] {
+		if pass.followed[pollErr.ResumeURL] || len(pass.followed) >= maxResumesPerPass {
 			// This pass already followed this resume, and it answered 410
 			// again. Following it again would loop; the next pass tries.
 			w.log.Warn("the repair walk's resume answered 410 again; retrying on the repair cadence", "loss_id", loss.ID)

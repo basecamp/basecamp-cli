@@ -145,6 +145,19 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // every state but blocked and discarded — those two are the only ones a reason
 // explains.
 func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reason string) error {
+	switch state {
+	case StateBlocked, StateDiscarded:
+		if reason == "" {
+			return fmt.Errorf("connector: set state of %d: a %s record needs a reason", id, state)
+		}
+	case StateSeen, StateAdmitted, StateQueued, StateDispatched, StateCompleted:
+		if reason != "" {
+			return fmt.Errorf("connector: set state of %d: a %s record takes no reason", id, state)
+		}
+	default:
+		// A state outside the lifecycle is a row no recovery scan looks for.
+		return fmt.Errorf("connector: set state of %d: %q is not a ledger state", id, state)
+	}
 	res, err := l.db.ExecContext(ctx,
 		`UPDATE events SET state = ?, reason = ?, updated_at = ? WHERE id = ?`,
 		string(state), reason, l.timestamp(), id)
