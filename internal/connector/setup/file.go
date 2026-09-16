@@ -261,11 +261,9 @@ func Parse(data []byte) (File, error) {
 	return f, nil
 }
 
-// refuseDuplicateKeys walks the JSON document and refuses any object that
-// names a key twice. encoding/json matches field names case-insensitively
-// and parses project ids as numbers, so "Trust" is "trust" and "048699913"
-// is 48699913 to it; every key must therefore be in its one canonical
-// spelling, which makes an exact comparison a complete one.
+// canonicalKey reports whether a key is in its one canonical spelling:
+// lowercase letters, digits and underscores for names, plain decimal for
+// project ids.
 func canonicalKey(key string) bool {
 	if n, err := strconv.ParseInt(key, 10, 64); err == nil {
 		return strconv.FormatInt(n, 10) == key
@@ -281,6 +279,11 @@ func canonicalKey(key string) bool {
 	return true
 }
 
+// refuseDuplicateKeys walks the JSON document and refuses any object that
+// names a key twice. encoding/json matches field names case-insensitively
+// and parses project ids as numbers, so "Trust" is "trust" and "048699913"
+// is 48699913 to it; every key must therefore be in its one canonical
+// spelling, which makes an exact comparison a complete one.
 func refuseDuplicateKeys(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()

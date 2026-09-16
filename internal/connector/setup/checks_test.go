@@ -247,3 +247,40 @@ func TestRouteChecksSanitizeThePath(t *testing.T) {
 	assert.NotContains(t, checks[0].Message, "\x1b")
 	assert.NotContains(t, checks[0].Message, "\n")
 }
+
+// ErrorText is the one formatter for read errors: an HTTP answer is its
+// status and nothing the server wrote.
+func TestErrorTextKeepsNothingTheServerWrote(t *testing.T) {
+	const canary = "CANARY-bearer"
+	httpErr := &basecamp.Error{Code: "validation", Message: "ticket " + canary, Hint: canary, HTTPStatus: 422}
+	assert.Equal(t, "HTTP 422", ErrorText(httpErr))
+	assert.Equal(t, "HTTP 422", ErrorText(fmt.Errorf("wrapped: %w", httpErr)))
+	assert.NotContains(t, ErrorText(&basecamp.Error{Code: "network", Message: canary}), canary)
+	assert.Equal(t, "the stream ticket response carries no ticket or no URL", ErrorText(ErrMalformedTicket))
+}
+
+func TestScopeCheck(t *testing.T) {
+	for _, tc := range []struct {
+		oauthType, granted, want string
+	}{
+		{"agent", "full", StatusPass},
+		{"bc5", "full", StatusPass},
+		{"launchpad", "", StatusPass},
+		{"agent", "read", StatusFail},
+		{"bc5", "read", StatusFail},
+		{"agent", "", StatusFail},
+		{"bc5", "", StatusFail},
+		{"launchpad", "read", StatusFail},
+		{"agent", "Full", StatusFail},
+		{"agent", "full read", StatusFail},
+		{"agent", "write", StatusFail},
+		{"agent", "admin", StatusFail},
+		{"agent", " full", StatusFail},
+		{"", "", StatusFail},
+		{"unknown", "", StatusFail},
+	} {
+		t.Run(tc.oauthType+"/"+tc.granted, func(t *testing.T) {
+			assert.Equal(t, tc.want, ScopeCheck(tc.oauthType, tc.granted).Status, "unknown scopes are never full")
+		})
+	}
+}

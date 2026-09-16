@@ -151,6 +151,27 @@ const agentReadsRefused = "Basecamp refuses this read to an Agent identity today
 const agentReadsRefusedHint = "Until Basecamp allows Agent identities these reads, run the connector as a bot user: " +
 	"basecamp connect setup -P <bot-profile> --expect-identity <identity-id>"
 
+// ScopeCheck classifies the scope a credential was granted, as stored from
+// the server's answer. Only "full" lets the agent reply and acknowledge.
+// Launchpad grants carry no scope and are full access. Anything else —
+// read, empty on a credential that should carry one, or a value this CLI
+// does not know — is insufficient, never assumed full.
+func ScopeCheck(oauthType, granted string) Check {
+	c := Check{Name: "Scope"}
+	switch {
+	case granted == "full", granted == "" && oauthType == "launchpad":
+		c.Status, c.Message = StatusPass, "Full access: the agent can reply and acknowledge"
+	case granted == "":
+		c.Status, c.Message = StatusFail, "The credential records no granted scope, so it is not known to allow replies"
+		c.Hint = "Reconnect with full access."
+	default:
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("The credential was granted %q, not full access: the agent could not reply or acknowledge", richtext.SanitizeSingleLine(granted))
+		c.Hint = "Reconnect with full access."
+	}
+	return c
+}
+
 // TicketCheck mints a stream ticket as the agent.
 func TicketCheck(ctx context.Context, r Reader, kind string) Check {
 	c := Check{Name: "Stream ticket"}
@@ -167,7 +188,7 @@ func TicketCheck(ctx context.Context, r Reader, kind string) Check {
 			c.Hint = "The account event feed has to be enabled for this account."
 		}
 	default:
-		c.Status, c.Message = StatusFail, "The ticket mint failed: "+safeError(err)
+		c.Status, c.Message = StatusFail, "The ticket mint failed: "+ErrorText(err)
 	}
 	return c
 }
@@ -238,12 +259,12 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 		switch {
 		case err != nil && recorded:
 			c.Status = StatusWarn
-			c.Message = fmt.Sprintf("Person %d, already recorded in connect.json, could not be re-read: %s", p.ID, unreadReason(err))
+			c.Message = fmt.Sprintf("Person %d, already recorded in connect.json, could not be re-read: %s", p.ID, ErrorText(err))
 			c.Hint = "It was verified when it was recorded. To verify the operator again, pass --operator-profile <profile>."
 			return c
 		case err != nil:
 			c.Status = StatusFail
-			c.Message = fmt.Sprintf("Person %d could not be read (%s), so it cannot be verified", p.ID, unreadReason(err))
+			c.Message = fmt.Sprintf("Person %d could not be read (%s), so it cannot be verified", p.ID, ErrorText(err))
 			c.Hint = "Pass --operator-profile <profile>: people are read through the operator's own credential, which Basecamp does not refuse."
 			return c
 		case read.ID != p.ID:
@@ -262,13 +283,6 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 		c.Message = fmt.Sprintf("Person %d, %s%s", p.ID, richtext.SanitizeSingleLine(p.Name), source)
 	}
 	return c
-}
-
-func unreadReason(err error) string {
-	if status := httpStatus(err); status != 0 {
-		return fmt.Sprintf("HTTP %d", status)
-	}
-	return safeError(err)
 }
 
 // RouteChecks reads each routed project the way admission will, as the
@@ -317,7 +331,7 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 			c.Message = fmt.Sprintf("Reading %s was refused (HTTP %d): the agent cannot see project %d", read.what, httpStatus(err), id)
 			c.Hint = "Add the agent to the project in Basecamp, then run setup again."
 		default:
-			c.Message = fmt.Sprintf("Reading %s failed: %s", read.what, safeError(err))
+			c.Message = fmt.Sprintf("Reading %s failed: %s", read.what, ErrorText(err))
 		}
 		return c
 	}
@@ -326,9 +340,25 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 	return c
 }
 
-// safeError is an error's text for a one-line terminal sink. Server-supplied
-// text is reduced to one line; the checks never put a response body in an
-// error, so no ticket can reach it.
-func safeError(err error) string {
+// ErrorText is the one way setup turns a read's error into text, for every
+// check and every refusal. An HTTP answer is reduced to its status: the SDK
+// builds an error's message from the response body, which the server
+// controls, and a ticket mint's body can carry the ticket and the feed URL.
+// Only an error that never reached a server keeps its text, reduced to one
+// line.
+func ErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	var apiErr *basecamp.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.HTTPStatus != 0 {
+			return fmt.Sprintf("HTTP %d", apiErr.HTTPStatus)
+		}
+		if apiErr.Code != "" {
+			return "request failed (" + richtext.SanitizeSingleLine(apiErr.Code) + ")"
+		}
+		return "request failed"
+	}
 	return richtext.SanitizeSingleLine(err.Error())
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -100,7 +102,9 @@ connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
 (Windows), setup refuses rather than write a trust file it cannot vouch for.
 
-Setup exits non-zero when a check fails, after writing connect.json.
+Every check runs before anything is kept. When one fails, setup exits
+non-zero, does not write connect.json, and removes a credential its own
+connection stored in that run.
 
 Run setup again to change any of it; what you do not pass is kept.
 
@@ -142,7 +146,96 @@ Examples:
 	return cmd
 }
 
+// setupTransaction is what a setup run changed outside connect.json before
+// it knew it would succeed: a credential stored by the connection or login
+// it ran, and the global config entry that credential needed. A run that
+// fails puts both back exactly as they were, so a failed setup never
+// leaves a profile holding a credential connect.json does not describe.
+type setupTransaction struct {
+	// connected is set once the run's own connection or login stored a
+	// credential; before that there is nothing to undo.
+	connected bool
+	committed bool
+
+	credentialKey string
+	configPath    string
+	configBefore  []byte
+	configExisted bool
+}
+
+// snapshot records the global config file as it is, before a credential
+// step can register or bind a profile in it.
+func (tx *setupTransaction) snapshot(app *appctx.App) error {
+	tx.credentialKey = app.Auth.CredentialKey()
+	tx.configPath = filepath.Join(config.GlobalConfigDir(), "config.json")
+	data, err := os.ReadFile(tx.configPath)
+	switch {
+	case err == nil:
+		tx.configBefore, tx.configExisted = data, true
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return fmt.Errorf("read %s: %w", tx.configPath, err)
+	}
+	return nil
+}
+
+// rollback removes the credential the run stored and restores the global
+// config file byte for byte. It reports what it could not undo.
+func (tx *setupTransaction) rollback(app *appctx.App) error {
+	var errs []error
+	if err := app.Auth.GetStore().Delete(tx.credentialKey); err != nil && !errors.Is(err, auth.ErrNoCredential) {
+		errs = append(errs, fmt.Errorf("remove the stored credential: %w", err))
+	}
+	if tx.configExisted {
+		if err := writeFileAtomically(tx.configPath, tx.configBefore); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", tx.configPath, err))
+		}
+	} else if err := os.Remove(tx.configPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		errs = append(errs, fmt.Errorf("remove %s: %w", tx.configPath, err))
+	}
+	return errors.Join(errs...)
+}
+
+func writeFileAtomically(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
 func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) error {
+	tx := &setupTransaction{}
+	err := runConnectSetupTx(cmd, app, f, tx)
+	if err == nil || !tx.connected || tx.committed {
+		return err
+	}
+	note := "The connection this run made was removed from this computer; disconnect it in Basecamp too, since its secret was issued."
+	if rbErr := tx.rollback(app); rbErr != nil {
+		note = "Undoing the connection this run made failed (" + rbErr.Error() + "): run `basecamp auth logout -P " + shellQuote(app.Config.ActiveProfile) + "`, and disconnect it in Basecamp."
+	}
+	var apiErr *output.Error
+	if errors.As(err, &apiErr) {
+		undone := *apiErr
+		undone.Hint = strings.TrimSpace(apiErr.Hint + " " + note)
+		return &undone
+	}
+	return fmt.Errorf("%w (%s)", err, note)
+}
+
+func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags, tx *setupTransaction) error {
 	ctx := cmd.Context()
 
 	name := app.Config.ActiveProfile
@@ -191,7 +284,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		existing = setup.New(name)
 	case err != nil:
 		return output.ErrUsageHint("connect.json cannot be used: "+err.Error(),
-			"Nothing was changed. Fix or remove "+path+", then run setup again.")
+			"Nothing was changed. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
 	}
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
@@ -221,14 +314,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return err
 	}
 
+	if held == "" {
+		if err := tx.snapshot(app); err != nil {
+			return output.ErrUsage(err.Error())
+		}
+	}
 	kind, err := ensureConnectCredential(cmd, app, name, held, expect)
+	if held == "" && connectCredentialStored(cmd.Context(), app) {
+		tx.connected = true
+	}
 	if err != nil {
 		return err
 	}
 	if exists && existing.Agent.Kind != kind {
 		return output.ErrUsageHint(
 			fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one", existing.Agent.Kind, name, kind),
-			"Nothing was changed. Remove "+path+" to set this profile up afresh.")
+			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
 	}
 	if kind == setup.KindBotUser && expect == 0 {
 		expect = existing.Agent.IdentityID
@@ -242,12 +343,12 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	accountID, err = canonicalAccount(accountID)
 	if err != nil {
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no usable account", name), "Bind it: basecamp profile set "+name+" account_id <id>, or pass --account.")
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q has no usable account", name), "Bind it: basecamp profile set "+shellQuote(name)+" account_id <id>, or pass --account.")
 	}
 	if exists && !accountIDsEqual(existing.AccountID, accountID) {
 		return output.ErrUsageHint(
 			fmt.Sprintf("connect.json was set up in account %s, and profile %q now addresses account %s", existing.AccountID, name, accountID),
-			"Nothing was changed. Remove "+path+" to set this profile up afresh.")
+			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
 	}
 
 	var checks []setup.Check
@@ -264,7 +365,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	reader := setup.SDKReader{Client: client.ForAccount(accountID)}
 	me, err := reader.Me(ctx)
 	if err != nil {
-		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is in account %s: %v", name, accountID, err))
+		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is in account %s: %s", name, accountID, setup.ErrorText(err)))
 	}
 	identityCheck, err := checkConnectIdentity(ctx, app, client, kind, me, expect)
 	if err != nil {
@@ -274,13 +375,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if exists && existing.Agent.PersonID != me.ID {
 		return output.ErrUsageHint(
 			fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d", existing.Agent.PersonID, name, me.ID),
-			"Nothing was changed. If this is a different agent on purpose, remove "+path+" and run setup again.")
+			"Nothing was changed. If this is a different agent on purpose, remove "+richtext.SanitizeSingleLine(path)+" and run setup again.")
 	}
-	if scope := profileScope(app, name); scope == "read" {
-		checks = append(checks, setup.Check{Name: "Scope", Status: setup.StatusFail,
-			Message: "The credential is read-only: the agent could not reply or acknowledge",
-			Hint:    "Reconnect with full access."})
+	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil {
+		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
+	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
 
 	// Trust, verified before anything is written: connect.json is the trust
 	// anchor, and nobody in it is recorded unverified. People are read
@@ -321,13 +422,12 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		next.Agent.IdentityID = expect
 	}
 	next.Trust.OperatorID = trust.Operator.ID
-	if err := setup.Save(path, next); err != nil {
-		if errors.Is(err, setup.ErrNotPrivate) {
-			return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
-		}
+	if err := next.Validate(); err != nil {
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
 
+	// Every check runs before connect.json is written, and it is written
+	// only when all of them pass: a setup that is not ready changes nothing.
 	report := &setup.Report{
 		Path:          path,
 		Profile:       name,
@@ -337,29 +437,44 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		OperatorID:    next.Trust.OperatorID,
 		TrustMode:     string(next.Trust.Mode),
 		Routes:        len(next.Projects),
-		Written:       true,
 	}
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
 	report.Add(setup.RouteChecks(ctx, reader, next)...)
 
-	summary := summarizeChecks(asDoctorChecks(report.Checks()))
-	if app.Output.EffectiveFormat() == output.FormatStyled {
-		w := cmd.OutOrStdout()
-		renderChecksStyled(w, "Connector setup for profile "+strconv.Quote(name), summary)
-		fmt.Fprintf(w, "  connect.json written: %s\n\n", path)
+	w := cmd.OutOrStdout()
+	styled := app.Output.EffectiveFormat() == output.FormatStyled
+	title := "Connector setup for profile " + strconv.Quote(name)
+	if len(report.Failed()) > 0 {
+		if styled {
+			renderChecksStyled(w, title, summarizeChecks(asDoctorChecks(report.Checks())))
+		}
+		return errConnectorNotReady(report)
 	}
+
+	if err := setup.Save(path, next); err != nil {
+		if errors.Is(err, setup.ErrNotPrivate) {
+			return output.ErrUsageHint("connect.json was not written: "+err.Error(), "Setup writes connect.json only where nobody else can change it.")
+		}
+		return output.ErrUsage("connect.json was not written: " + err.Error())
+	}
+	report.Written = true
+	tx.committed = true
+
+	summary := summarizeChecks(asDoctorChecks(report.Checks()))
 	if !report.Ready() {
 		return errConnectorNotReady(report)
 	}
-	if app.Output.EffectiveFormat() == output.FormatStyled {
+	if styled {
+		renderChecksStyled(w, title, summary)
+		fmt.Fprintf(w, "  connect.json written: %s\n\n", richtext.SanitizeSingleLine(path))
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
 
-// codeNotReady is the error code for a setup that wrote connect.json but
-// whose checks failed: the connector would not run.
+// codeNotReady is the error code for a setup whose checks failed: the
+// connector would not run, and connect.json was not written.
 const codeNotReady = "not_ready"
 
 // errConnectorNotReady reports a report that is not ready as the command's
@@ -380,7 +495,7 @@ func errConnectorNotReady(report *setup.Report) error {
 	}
 	return &output.Error{
 		Code:    codeNotReady,
-		Message: fmt.Sprintf("connect.json was written to %s, but the connector is not ready. %s", report.Path, strings.Join(failed, "; ")),
+		Message: fmt.Sprintf("The connector is not ready, so %s was not written. %s", richtext.SanitizeSingleLine(report.Path), strings.Join(failed, "; ")),
 		Hint:    hint,
 	}
 }
@@ -526,13 +641,13 @@ func refuseCredentialConflicts(app *appctx.App, name, path, held string, expect 
 		return output.ErrUsage("--expect-identity is for the bot-user path, and profile " + strconv.Quote(name) + " holds an Agent's credential, which has no identity")
 	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
 		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
-			"Nothing was changed. Remove "+path+" to set this profile up afresh.")
+			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
 	case held == "" && expect != 0 && app.Config.Profiles[name] == nil:
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist, and the bot-user login needs it", name),
 			fmt.Sprintf("Create it with `basecamp profile create %s` (signing in as the bot), then run setup again.", name))
 	case held == "" && exists && existing.Agent.Kind == setup.KindBotUser && expect == 0:
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds no credential, and connect.json was set up for a bot user", name),
-			fmt.Sprintf("Log the bot in again: basecamp connect setup -P %s --expect-identity %d", name, existing.Agent.IdentityID))
+			fmt.Sprintf("Log the bot in again: basecamp connect setup -P %s --expect-identity %d", shellQuote(name), existing.Agent.IdentityID))
 	case held == setup.KindBotUser && expect == 0 && existing.Agent.IdentityID == 0:
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q holds a person's login, not an Agent's credential", name),
 			"On the bot-user path pass --expect-identity <the bot's identity id>, so setup can prove this login is the bot and not you.")
@@ -591,7 +706,7 @@ func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
 	case errors.Is(err, auth.ErrNoCredential):
 		return "", nil
 	case err != nil:
-		return "", output.ErrAuth(fmt.Sprintf("The stored credential could not be read: %v", err))
+		return "", output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	case creds.OAuthType == "agent":
 		return setup.KindAgent, nil
 	default:
@@ -635,7 +750,7 @@ func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp
 		}
 		info, err := client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
 		if err != nil {
-			return c, output.ErrAuth(fmt.Sprintf("Could not read the login's identity: %v", err))
+			return c, output.ErrAuth(fmt.Sprintf("Could not read the login's identity: %s", setup.ErrorText(err)))
 		}
 		if info.Identity.ID != expect {
 			return c, output.ErrAuth(fmt.Sprintf("The profile's login is identity %d, not the %d --expect-identity names; nothing was written", info.Identity.ID, expect))
@@ -670,7 +785,7 @@ func operatorProfileManager(ctx context.Context, app *appctx.App, profile string
 	case err != nil:
 		return nil, err
 	case kind == "":
-		return nil, output.ErrUsageHint(fmt.Sprintf("Operator profile %q holds no credential", profile), "Log in: basecamp auth login -P "+profile)
+		return nil, output.ErrUsageHint(fmt.Sprintf("Operator profile %q holds no credential", profile), "Log in: basecamp auth login -P "+shellQuote(profile))
 	case kind == setup.KindAgent:
 		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q holds an Agent's credential; an operator is a person", profile))
 	}
@@ -691,7 +806,7 @@ func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, a
 	reader := setup.SDKReader{Client: client.ForAccount(accountID)}
 	me, err := reader.Me(ctx)
 	if err != nil {
-		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %v", profile, accountID, err))
+		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Could not read who operator profile %q is in account %s: %s", profile, accountID, setup.ErrorText(err)))
 	}
 	if me.ID <= 0 {
 		return setup.Person{}, nil, output.ErrAuth(fmt.Sprintf("Operator profile %q reported no person id", profile))
@@ -699,11 +814,11 @@ func resolveOperatorProfile(ctx context.Context, op *operatorProfile, profile, a
 	return me, reader, nil
 }
 
-func profileScope(app *appctx.App, name string) string {
-	if p := app.Config.Profiles[name]; p != nil && p.Scope != "" {
-		return p.Scope
-	}
-	return app.Config.Scope
+// connectCredentialStored reports whether the active profile now holds a
+// credential, whatever its state.
+func connectCredentialStored(ctx context.Context, app *appctx.App) bool {
+	_, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	return !errors.Is(err, auth.ErrNoCredential)
 }
 
 func asDoctorChecks(in []setup.Check) []Check {

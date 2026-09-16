@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -58,6 +59,10 @@ type connectSetupServer struct {
 	refuseAgentReads bool
 	// refusePeople answers the people read with 403.
 	refusePeople bool
+	// agentAsUser answers the agent's identity read as a person, not an Agent.
+	agentAsUser bool
+	// mintFailure, when set, answers the stream ticket mint.
+	mintFailure func(w http.ResponseWriter)
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -100,7 +105,11 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 	mux.HandleFunc("/999/my/profile.json", func(w http.ResponseWriter, r *http.Request) {
 		switch bearer(r) {
 		case setupAgentToken:
-			writeJSON(w, map[string]any{"id": s.agentID, "name": "Marie Chef", "personable_type": "Agent"})
+			personable := "Agent"
+			if s.agentAsUser {
+				personable = "User"
+			}
+			writeJSON(w, map[string]any{"id": s.agentID, "name": "Marie Chef", "personable_type": personable})
 		case setupOperatorToken:
 			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
 		case setupBotToken:
@@ -132,6 +141,10 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 	mux.HandleFunc("/999/events/stream_ticket.json", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if s.mintFailure != nil {
+			s.mintFailure(w)
 			return
 		}
 		writeJSON(w, map[string]any{"ticket": setupTicket, "expires_in": 120, "url": "wss://example.test/cable?ticket=" + setupTicket})
@@ -333,9 +346,7 @@ func TestConnectSetupNamesTheAgentReadRefusal(t *testing.T) {
 	assert.Contains(t, apiErr.Message, "Agent identity")
 	assert.Contains(t, apiErr.Hint, "--expect-identity")
 	assert.Contains(t, out, "Agent identity", "the checks are still shown")
-
-	_, statErr := os.Stat(connectSetupPath(t, "agent"))
-	assert.NoError(t, statErr, "connect.json is written; the checks after it failed")
+	assertNotWritten(t, "agent")
 }
 
 func TestConnectSetupWithNoRouteIsNotReady(t *testing.T) {
@@ -526,7 +537,7 @@ func TestConnectSetupReadOnlyCredentialIsNotReady(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, "not_ready", apiErr.Code)
-	assert.Contains(t, apiErr.Message, "read-only")
+	assert.Contains(t, apiErr.Message, `granted "read"`)
 }
 
 func TestConnectSetupRefusesExpectIdentityForAnAgent(t *testing.T) {
@@ -639,4 +650,160 @@ func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
+}
+
+// The scope that decides readiness is the one the credential was granted,
+// not the one the profile's configuration names.
+func TestConnectSetupReadsTheGrantedScopeNotTheProfiles(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "bot")
+	storeConnectProfile(t, s, "bot", setupBotToken) // configured full
+	cfg := config.Default()
+	cfg.BaseURL = s.srv.URL
+	cfg.ActiveProfile = "bot"
+	mgr := auth.NewManager(cfg, s.srv.Client())
+	mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
+	require.NoError(t, mgr.ImportToken(context.Background(), setupBotToken, "read", "", "", time.Now().Add(24*time.Hour))) // granted read
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, "not_ready", apiErr.Code)
+	assert.Contains(t, apiErr.Message, `"read"`)
+}
+
+// The stream ticket is a bearer credential. When the mint fails with a body
+// that carries one, as a malformed error response can, that body reaches no
+// output: not the checks, not the error, not connect.json.
+func TestConnectSetupNeverPrintsATicketFromAFailedMint(t *testing.T) {
+	const canary = "CANARY-bearer-ticket-7f3a"
+	s := startConnectSetupServer(t)
+	s.mintFailure = func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprintf(w, `{"error":%q,"message":%q,"ticket":%q,"url":"wss://example.test/cable?ticket=%s"}`, canary, "ticket "+canary, canary, canary)
+	}
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+
+	app := newConnectSetupApp(t, s, "agent")
+	var envelope bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &envelope})
+	out, err := runConnectSetupCmd(t, app, "--operator-profile", "me", routeArg(t))
+	require.Error(t, err, out)
+
+	assert.NotContains(t, out, canary, "command output")
+	assert.NotContains(t, err.Error(), canary, "the error")
+	assert.NotContains(t, envelope.String(), canary, "the app's output")
+	assertNotWritten(t, "agent")
+	assert.Contains(t, err.Error(), "HTTP 422", "the failure is still reported, by status")
+}
+
+// A command setup suggests is meant to be pasted, so a config-derived
+// profile name in it is shell-quoted.
+func TestConnectSetupQuotesProfileNamesInSuggestedCommands(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	_, err := registerProfile("my profile;rm", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+	require.NoError(t, err)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "my profile;rm")
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), `basecamp auth login -P 'my profile;rm'`)
+}
+
+// connect.json's path comes from the environment, and reaches one-line
+// terminal sinks: control characters in it must not break those lines.
+func TestConnectSetupSanitizesThePathItPrints(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	home := filepath.Join(t.TempDir(), "evil\nFAKE ✓ line")
+	require.NoError(t, os.Mkdir(home, 0o700))
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("USERPROFILE", home)
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+
+	s.refuseAgentReads = true // so the not_ready error names the path too
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+	require.Error(t, err, out)
+	assert.NotContains(t, out, "evil\nFAKE")
+	assert.NotContains(t, err.Error(), "evil\nFAKE")
+}
+
+// setupState is everything a setup run can change: the profile's stored
+// credential, the global config file, and connect.json.
+type setupState struct {
+	credential bool
+	config     string
+	connect    string
+}
+
+func captureSetupState(t *testing.T, profile string) setupState {
+	t.Helper()
+	var st setupState
+	cfg := config.Default()
+	cfg.ActiveProfile = profile
+	mgr := auth.NewManager(cfg, nil)
+	_, err := auth.NewStore(config.GlobalConfigDir()).Load(mgr.CredentialKey())
+	st.credential = !errors.Is(err, auth.ErrNoCredential)
+	if data, err := os.ReadFile(filepath.Join(config.GlobalConfigDir(), "config.json")); err == nil {
+		st.config = string(data)
+	}
+	if data, err := os.ReadFile(connectSetupPath(t, profile)); err == nil {
+		st.connect = string(data)
+	}
+	return st
+}
+
+// A setup that fails after its own connection stored a credential puts
+// everything back as it was: no credential connect.json does not describe,
+// no profile entry the run added, and connect.json untouched. Each case
+// fails at a different step after the ceremony.
+func TestConnectSetupFailureLeavesThePreviousState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prepare func(t *testing.T, s *connectSetupServer)
+		args    []string
+	}{
+		"identity is not an Agent": {
+			prepare: func(t *testing.T, s *connectSetupServer) { s.agentAsUser = true },
+			args:    []string{"--operator", fmt.Sprint(setupOperatorPerson)},
+		},
+		"trust refused": {
+			args: []string{"--operator", fmt.Sprint(setupClientPerson)},
+		},
+		"a check fails": {
+			prepare: func(t *testing.T, s *connectSetupServer) { s.refuseAgentReads = true },
+			args:    []string{"--operator", fmt.Sprint(setupOperatorPerson)},
+		},
+		"a different agent than connect.json records": {
+			prepare: func(t *testing.T, s *connectSetupServer) {
+				firstSetup(t, s)
+				// The credential is lost, and the operator reconnects a
+				// different agent under the same profile.
+				cfg := config.Default()
+				cfg.ActiveProfile = "agent"
+				require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
+				s.agentID = 777
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			connectSetupApp(t, s, "agent")
+			if tc.prepare != nil {
+				tc.prepare(t, s)
+			}
+			before := captureSetupState(t, "agent")
+			require.False(t, before.credential, "the run starts with no credential, so its ceremony stores one")
+			intakes := s.intakeCount()
+
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, routeArg(t))...)
+			require.Error(t, err, out)
+			assert.Equal(t, intakes+1, s.intakeCount(), "the ceremony ran")
+			assert.Equal(t, before, captureSetupState(t, "agent"), "everything is as it was")
+			assert.Contains(t, err.Error(), "disconnect it in Basecamp")
+		})
+	}
 }
