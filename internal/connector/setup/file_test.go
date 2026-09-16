@@ -54,7 +54,7 @@ func TestAdmissionReadsWhatSetupWrites(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
 	f := validFile(t)
-	require.NoError(t, Save(path, f))
+	require.NoError(t, save(path, f))
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestAdmissionReadsWhatSetupWrites(t *testing.T) {
 func TestSaveWritesTheSpecDefaults(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	require.NoError(t, Save(path, validFile(t)))
+	require.NoError(t, save(path, validFile(t)))
 
 	var raw map[string]any
 	data, err := os.ReadFile(path)
@@ -152,7 +152,7 @@ func TestValidateFailsClosed(t *testing.T) {
 
 			path, err := Path(configDir(t), "agent")
 			require.NoError(t, err)
-			assert.Error(t, Save(path, f), "Save must refuse what Validate refuses")
+			assert.Error(t, save(path, f), "Save must refuse what Validate refuses")
 			_, statErr := os.Stat(path)
 			assert.True(t, os.IsNotExist(statErr), "nothing is written")
 		})

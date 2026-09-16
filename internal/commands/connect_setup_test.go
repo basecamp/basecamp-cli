@@ -805,7 +805,7 @@ func TestConnectSetupReportsAnotherSetupAsBusy(t *testing.T) {
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, "busy", apiErr.Code)
+	assert.Equal(t, output.CodeBusy, apiErr.Code)
 	assert.Contains(t, apiErr.Hint, "Run setup again")
 }
 
@@ -1109,4 +1109,28 @@ func TestConnectSetupWritesAPolicyBoundToTheCredential(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code)
+}
+
+// A host that cannot lock the credential at all is refused: setup never
+// runs its last check and its write unsynchronized, and changes nothing.
+func TestConnectSetupRefusesWhenTheHostCannotLock(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	locks := filepath.Join(config.GlobalConfigDir(), "locks")
+	require.NoError(t, os.MkdirAll(locks, 0o700))
+	entries, err := os.ReadDir(locks)
+	require.NoError(t, err)
+	for _, e := range entries {
+		require.NoError(t, os.Remove(filepath.Join(locks, e.Name())))
+	}
+	require.NoError(t, os.Chmod(locks, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(locks, 0o700) })
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "cannot lock")
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+	assertNotWritten(t, "agent")
 }

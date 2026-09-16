@@ -17,7 +17,7 @@ func savedPath(t *testing.T) string {
 	t.Helper()
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	require.NoError(t, Save(path, validFile(t)))
+	require.NoError(t, save(path, validFile(t)))
 	return path
 }
 
@@ -30,7 +30,7 @@ func TestSaveIsOwnerOnly(t *testing.T) {
 
 	old := syscall.Umask(0)
 	t.Cleanup(func() { syscall.Umask(old) })
-	require.NoError(t, Save(path, file))
+	require.NoError(t, save(path, file))
 
 	for _, p := range []string{cfg, filepath.Dir(filepath.Dir(path)), filepath.Dir(path)} {
 		info, err := os.Stat(p)
@@ -58,7 +58,7 @@ func TestLoadRefusesAFileOthersCanWrite(t *testing.T) {
 		require.Error(t, err, "mode %04o", mode)
 		assert.True(t, errors.Is(err, ErrNotPrivate), "mode %04o: %v", mode, err)
 
-		err = Save(path, validFile(t))
+		err = save(path, validFile(t))
 		assert.True(t, errors.Is(err, ErrNotPrivate), "Save over mode %04o: %v", mode, err)
 	}
 }
@@ -81,7 +81,7 @@ func TestLoadRefusesADirectoryOthersCanWrite(t *testing.T) {
 
 		_, err := Load(path)
 		assert.True(t, errors.Is(err, ErrNotPrivate), "%s: %v", dir, err)
-		assert.True(t, errors.Is(Save(path, validFile(t)), ErrNotPrivate), dir)
+		assert.True(t, errors.Is(save(path, validFile(t)), ErrNotPrivate), dir)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestLoadRefusesASymlink(t *testing.T) {
 
 	_, err = Load(path)
 	assert.True(t, errors.Is(err, ErrNotPrivate), "%v", err)
-	assert.True(t, errors.Is(Save(path, validFile(t)), ErrNotPrivate))
+	assert.True(t, errors.Is(save(path, validFile(t)), ErrNotPrivate))
 }
 
 func TestLoadRefusesASymlinkedProfileDirectory(t *testing.T) {
@@ -128,12 +128,12 @@ func TestLoadRefusesAnAncestorOthersCanWrite(t *testing.T) {
 	require.NoError(t, os.MkdirAll(cfg, 0o700))
 	path, err := Path(cfg, "agent")
 	require.NoError(t, err)
-	require.NoError(t, Save(path, validFile(t)))
+	require.NoError(t, save(path, validFile(t)))
 
 	require.NoError(t, os.Chmod(filepath.Join(shared, "home"), 0o777))
 	_, err = Load(path)
 	assert.True(t, errors.Is(err, ErrNotPrivate), "%v", err)
-	assert.True(t, errors.Is(Save(path, validFile(t)), ErrNotPrivate))
+	assert.True(t, errors.Is(save(path, validFile(t)), ErrNotPrivate))
 
 	// A sticky shared directory, as /tmp is, lets nobody rename another's
 	// entry, so it is not a way in.
@@ -164,7 +164,7 @@ func TestLoadFollowsAnOwnAncestorSymlinkAndChecksItsTarget(t *testing.T) {
 
 	path, err := Path(filepath.Join(link, "basecamp"), "agent")
 	require.NoError(t, err)
-	require.NoError(t, Save(path, validFile(t)))
+	require.NoError(t, save(path, validFile(t)))
 	_, err = Load(path)
 	require.NoError(t, err)
 

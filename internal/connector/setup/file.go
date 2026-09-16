@@ -38,6 +38,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
@@ -361,8 +362,22 @@ func Load(path string) (File, error) {
 	return Parse(data)
 }
 
-// Save validates f and writes it to path atomically, owner-only.
-func Save(path string, f File) error {
+// Save validates f and writes it to path atomically, owner-only, while the
+// caller holds the lock on the credential the file is about to name. Only
+// auth.Store.WithCredential hands out that proof, so connect.json cannot be
+// written from a path that has not taken the lock — the compiler says so.
+//
+// held is only proof; what is written comes from f, which the caller has
+// already checked against the credential (see File.VerifyAgent).
+func Save(held *auth.HeldCredential, path string, f File) error {
+	if held == nil {
+		return errors.New("connect.json is written only while the profile's credential is locked")
+	}
+	return save(path, f)
+}
+
+// save is Save without the proof, for this package's own tests.
+func save(path string, f File) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}

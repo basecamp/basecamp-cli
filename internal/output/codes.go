@@ -53,6 +53,17 @@ const (
 	ExitTerminated  = 143
 )
 
+// CodeBusy marks work another process is doing right now — a profile's
+// credential or connector policy locked by another command — and
+// CodeLockUnavailable a host that cannot lock at all, so a command whose
+// guarantee is the lock refuses to run. Both are the caller's cue to try
+// again (the first shortly, the second after fixing the host), which is
+// what the rate-limit status says in this table.
+const (
+	CodeBusy            = "busy"
+	CodeLockUnavailable = "lock_unavailable"
+)
+
 // ExitCodeFor returns the exit code for a given error code.
 func ExitCodeFor(code string) int {
 	switch code {
@@ -64,6 +75,8 @@ func ExitCodeFor(code string) int {
 		return ExitInterrupted
 	case CodeTerminated:
 		return ExitTerminated
+	case CodeBusy, CodeLockUnavailable:
+		return ExitRateLimit
 	}
 	return clioutput.ExitCodeFor(code)
 }

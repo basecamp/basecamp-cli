@@ -1109,8 +1109,9 @@ func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
 
 	inside := make(chan struct{})
 	replaced := make(chan error, 1)
-	err := store.WithCredential(context.Background(), key, func(creds *Credentials) error {
-		assert.Equal(t, "first", creds.AccessToken)
+	err := store.WithCredential(context.Background(), key, func(held *HeldCredential) error {
+		assert.Equal(t, "first", held.Credentials().AccessToken)
+		assert.Equal(t, key, held.Key())
 		go func() {
 			close(inside)
 			replaced <- NewStore(dir).withKeyLock(context.Background(), key, func() error {
@@ -1132,4 +1133,30 @@ func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
 	after, err := store.Load(key)
 	require.NoError(t, err)
 	assert.Equal(t, "second", after.AccessToken, "the waiting writer lands once the section ends")
+}
+
+// A host that cannot lock at all is an error for WithCredential, never a
+// warning and an unsynchronized run: its callers' guarantee is the lock.
+func TestWithCredentialRefusesWhenTheHostCannotLock(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	dir := t.TempDir()
+	store := NewStore(dir)
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+	// No lock file can be created where nothing may be written.
+	locks := store.lockDir()
+	require.NoError(t, os.MkdirAll(locks, 0o700))
+	require.NoError(t, os.Chmod(locks, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(locks, 0o700) })
+
+	ran := false
+	err := store.WithCredential(context.Background(), key, func(*HeldCredential) error {
+		ran = true
+		return nil
+	})
+	require.Error(t, err)
+	assert.False(t, ran, "the section never runs unlocked")
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
 }

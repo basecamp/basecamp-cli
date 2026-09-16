@@ -129,7 +129,16 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 }
 
 // WithCredential runs fn with one key's credential, while holding that
-// key's cross-process lock: no other process's login, refresh, import or
+// key's cross-process lock. A host that cannot lock at all is an error
+// here, not a warning: the callers that reach for this are the ones whose
+// guarantee is the lock.
+//
+// fn must not take the same key's lock again — no AccessToken, no
+// StoredAccessToken, no SetUserIdentity, no nested WithCredential. Locks
+// are per open file description, so a second acquire in this process waits
+// on itself until the wait bound expires.
+//
+// It holds that key's cross-process lock: no other process's login, refresh, import or
 // logout for the same key can land while fn runs. A caller that must act on
 // a credential being what it just read — writing a file that names the
 // identity it authenticates as, say — does its read, its decision and its
@@ -140,15 +149,32 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 //
 // A key with nothing stored is reported as ErrNoCredential, never as a nil
 // credential.
-func (s *Store) WithCredential(ctx context.Context, key string, fn func(*Credentials) error) error {
-	return s.withKeyLock(ctx, key, func() error {
-		creds, err := s.load(key, lockRequest{done: ctx.Done(), cause: ctx.Err})
-		if err != nil {
-			return err
-		}
-		return fn(creds)
-	})
+func (s *Store) WithCredential(ctx context.Context, key string, fn func(*HeldCredential) error) error {
+	release, err := s.lockFile(lockRequest{name: keyLockName(key), what: "credential", done: ctx.Done(), cause: ctx.Err, require: true})
+	if err != nil {
+		return err
+	}
+	defer release()
+	creds, err := s.load(key, lockRequest{done: ctx.Done(), cause: ctx.Err})
+	if err != nil {
+		return err
+	}
+	return fn(&HeldCredential{creds: creds, key: key})
 }
+
+// HeldCredential is a credential read while its key's lock is held. It is
+// the proof a write can ask for: a function that must not run without the
+// lock takes one, and only WithCredential can make one.
+type HeldCredential struct {
+	creds *Credentials
+	key   string
+}
+
+// Credentials is the credential as it was stored when the lock was taken.
+func (h *HeldCredential) Credentials() *Credentials { return h.creds }
+
+// Key is the credential key the lock is held on.
+func (h *HeldCredential) Key() string { return h.key }
 
 // withStoreLock runs fn while holding the whole-store lock. fn must be one
 // store operation and must not make a network request: every process's
@@ -259,6 +285,11 @@ type lockRequest struct {
 	wait  time.Duration
 	done  <-chan struct{}
 	cause func() error
+	// require refuses the unlocked fall-through: a caller whose guarantee
+	// IS the lock (it decides on a credential and writes a file naming what
+	// that credential authenticates as) gets an error where an ordinary
+	// caller would get a warning and an unsynchronized run.
+	require bool
 }
 
 // lockFile takes the lock named name — exclusive, or shared when the
@@ -373,6 +404,13 @@ func (s *Store) unlocked(req lockRequest, reason string) (func(), error) {
 	noop := func() {}
 	if err := lockCause(req.cause); err != nil {
 		return noop, err
+	}
+	if req.require {
+		return noop, &output.Error{
+			Code:    output.CodeLockUnavailable,
+			Message: fmt.Sprintf("This host cannot lock the %s: %s", req.what, richtext.SanitizeSingleLine(reason)),
+			Hint:    "Nothing was changed. Use a configuration directory on a filesystem that supports locking (its path comes from XDG_CONFIG_HOME).",
+		}
 	}
 	s.warnUnlockable(req.what, reason)
 	return noop, nil

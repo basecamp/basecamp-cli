@@ -99,7 +99,9 @@ hear every trusted completion in that project without being assigned.
 
 connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
-(Windows), setup refuses rather than write a trust file it cannot vouch for.
+(Windows), or where the filesystem holding the configuration directory
+cannot lock, setup refuses rather than write a trust file it cannot vouch
+for.
 
 Every check runs before connect.json is written, and it is written only
 when all of them pass. Exit status: usage for refused input, auth when the
@@ -359,14 +361,14 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// credential authenticates as, and connect.json's VerifyAgent is what
 	// the connector re-checks at start-up, so a credential replaced later
 	// stops it rather than making it act as the wrong agent.
-	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(stored *auth.Credentials) error {
-		if !sameCredential(creds, stored) {
+	saveErr := app.Auth.GetStore().WithCredential(ctx, app.Auth.CredentialKey(), func(held *auth.HeldCredential) error {
+		if !sameCredential(creds, held.Credentials()) {
 			return errCredentialChanged(name)
 		}
 		if err := next.VerifyAgent(kind, me.ID, expect); err != nil {
 			return output.ErrAuth(err.Error())
 		}
-		return setup.Save(path, next)
+		return setup.Save(held, path, next)
 	})
 	if saveErr != nil {
 		return classifyWriteError(name, saveErr)
@@ -384,10 +386,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
-
-// codeBusy is the error code for work another process is doing right now:
-// nothing is wrong, and the same command run again will do it.
-const codeBusy = "busy"
 
 // classifyWriteError puts the last step's failures in the command's exit
 // contract: a credential that is gone or unreadable is auth, another
@@ -425,7 +423,7 @@ func isLockBusy(err error) bool {
 }
 
 func errBusy(name string, err error) error {
-	return &output.Error{Code: codeBusy,
+	return &output.Error{Code: output.CodeBusy,
 		Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was changed: %s", name, setup.ErrorText(err)),
 		Hint:    "Nothing is wrong with the profile. Run setup again when it has finished."}
 }
@@ -441,7 +439,7 @@ func sameCredential(a, b *auth.Credentials) bool {
 func errCredentialChanged(name string) error {
 	return &output.Error{Code: output.CodeAuth,
 		Message: fmt.Sprintf("Profile %q's credential changed while setup was checking it, so nothing was written", name),
-		Hint:    "Another command stored a credential under the profile. Run setup again to check the one it holds now."}
+		Hint:    "Another command stored or renewed a credential under the profile. Run setup again to check the one it holds now."}
 }
 
 // codeNotReady is the error code for a setup whose checks failed: the
