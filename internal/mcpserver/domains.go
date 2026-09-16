@@ -62,16 +62,16 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "people",
 		Tags:  []string{"People"},
-		Blurb: "People and access: profiles, pingable people, project access, out-of-office, preferences, and notification subscriptions.",
+		Blurb: "People and access: profiles, pingable and assignable people, project access, out-of-office, preferences, and notification subscriptions.",
 	},
 	{
 		Key:   "automation",
-		Tags:  []string{"Automation"},
+		Tags:  []string{"Automation", "Checkins"},
 		Blurb: "Automatic check-ins (questionnaires, questions, answers, reminders), project templates, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.",
 	},
 	{
 		Key:   "reports",
-		Tags:  []string{"Reports"},
+		Tags:  []string{"Reports", "Timeline"},
 		Blurb: "Reports and timelines: progress, assigned and overdue todos, upcoming schedule, per-person progress, and project timelines.",
 	},
 	{

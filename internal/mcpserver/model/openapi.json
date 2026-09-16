@@ -4665,6 +4665,9 @@
             }
           }
         },
+        "tags": [
+          "Card Tables"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -4676,10 +4679,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Card Tables"
-        ]
+        }
       },
       "post": {
         "description": "Subscribe to a card column (watch for changes)",
@@ -4761,6 +4761,9 @@
             }
           }
         },
+        "tags": [
+          "Card Tables"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -4772,10 +4775,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Card Tables"
-        ]
+        }
       }
     },
     "/{accountId}/card_tables/steps/{stepId}": {
@@ -8792,7 +8792,8 @@
                 "$ref": "#/components/schemas/UpdateGaugeNeedleRequestContent"
               }
             }
-          }
+          },
+          "required": true
         },
         "parameters": [
           {
@@ -11982,6 +11983,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "maxPageSize": 50
@@ -11994,10 +11998,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       }
     },
     "/{accountId}/my/readings.json": {
@@ -13903,6 +13904,16 @@
               }
             }
           },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
           "429": {
             "description": "RateLimitError 429 response",
             "content": {
@@ -15095,6 +15106,9 @@
             }
           }
         },
+        "tags": [
+          "Timeline"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "totalCountHeader": "X-Total-Count",
@@ -15108,10 +15122,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/projects/{projectId}/timesheet.json": {
@@ -16259,6 +16270,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "maxPageSize": 50
@@ -16271,10 +16285,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       }
     },
     "/{accountId}/questions/{questionId}/answers/by/{personId}": {
@@ -16384,6 +16395,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "maxPageSize": 50
@@ -16396,10 +16410,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       }
     },
     "/{accountId}/questions/{questionId}/notification_settings.json": {
@@ -16499,6 +16510,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -16510,10 +16524,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       }
     },
     "/{accountId}/questions/{questionId}/pause.json": {
@@ -16594,6 +16605,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -16605,10 +16619,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       },
       "post": {
         "description": "Pause a check-in question (stops sending reminders)",
@@ -16697,6 +16708,9 @@
             }
           }
         },
+        "tags": [
+          "Checkins"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -16708,10 +16722,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Automation"
-        ]
+        }
       }
     },
     "/{accountId}/recordings/{messageId}/pin.json": {
@@ -19992,6 +20003,9 @@
             }
           }
         },
+        "tags": [
+          "Reports"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "totalCountHeader": "X-Total-Count",
@@ -20005,10 +20019,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/reports/schedules/upcoming.json": {
@@ -20110,6 +20121,9 @@
             }
           }
         },
+        "tags": [
+          "Reports"
+        ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -20118,10 +20132,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/reports/timesheet.json": {
@@ -20298,6 +20309,9 @@
             }
           }
         },
+        "tags": [
+          "People"
+        ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -20306,10 +20320,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/reports/todos/assigned/{personId}": {
@@ -20409,6 +20420,9 @@
             }
           }
         },
+        "tags": [
+          "Reports"
+        ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -20417,10 +20431,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/reports/todos/overdue.json": {
@@ -20492,6 +20503,9 @@
             }
           }
         },
+        "tags": [
+          "Reports"
+        ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -20500,10 +20514,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/reports/users/progress/{personId}.json": {
@@ -20604,6 +20615,9 @@
             }
           }
         },
+        "tags": [
+          "Reports"
+        ],
         "x-basecamp-pagination": {
           "style": "link",
           "totalCountHeader": "X-Total-Count",
@@ -20618,10 +20632,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Reports"
-        ]
+        }
       }
     },
     "/{accountId}/schedule_entries/{entryId}": {
@@ -25433,6 +25444,9 @@
             }
           }
         },
+        "tags": [
+          "Todos"
+        ],
         "x-basecamp-idempotent": {
           "natural": true
         },
@@ -25444,10 +25458,7 @@
             429,
             503
           ]
-        },
-        "tags": [
-          "Todos"
-        ]
+        }
       }
     },
     "/{accountId}/todosets/todolists/{todolistId}/position.json": {
@@ -29696,7 +29707,7 @@
           },
           "notify": {
             "type": "string",
-            "description": "Who to notify: \"everyone\", \"working_on\", \"custom\", or omit for nobody"
+            "description": "Who to notify: \"everyone\", \"default\" (the project's existing\nsubscribers), or \"custom\" (the people in `subscriptions`). Omit for\nnobody: bc3 defaults `notify` to \"custom\", which with no `subscriptions`\nnotifies no one, and any unrecognized value (`Subscribers#find_subscribers`\naccepts exactly these three) falls through to nobody as well."
           },
           "subscriptions": {
             "type": "array",
@@ -31325,7 +31336,9 @@
           },
           "previous_needle_position": {
             "type": "integer",
-            "format": "int32"
+            "description": "Emitted alongside the other needle keys (so optional, like them), and\nJSON `null` for a gauge whose only needle is its first \u2014 there is no\nprevious position yet. The enhance pass layers `nullable: true` onto the\nOpenAPI so the static SDKs type the value as nullable rather than\nflattening the first needle's null into a real 0.",
+            "format": "int32",
+            "nullable": true
           }
         },
         "required": [
@@ -31420,9 +31433,15 @@
           "position": {
             "type": "integer",
             "format": "int32"
+          },
+          "comment_count": {
+            "type": "integer",
+            "description": "Comment count of the needle: the singular branch-partial key that\ngauges/needles/_needle.json.jbuilder emits unconditionally, distinct from\nthe envelope's plural `comments_count`, which a needle also carries. The\nsame pair SearchResult models.",
+            "format": "int32"
           }
         },
         "required": [
+          "comment_count",
           "created_at",
           "description_attachments",
           "id",
@@ -31455,9 +31474,12 @@
         "properties": {
           "description": {
             "type": "string",
-            "description": "Rich text (HTML) description"
+            "description": "Rich text (HTML) description. Required: it is the only member bc3's\nupdate accepts (`needle_params.except(:color, :position)`), and\n`params.require(:gauge_needle)` rejects an empty wrapper as missing, so a\npayload without it is the same 400 as no wrapper at all."
           }
-        }
+        },
+        "required": [
+          "description"
+        ]
       },
       "GaugeTogglePayload": {
         "type": "object",
@@ -36759,7 +36781,10 @@
           "gauge_needle": {
             "$ref": "#/components/schemas/GaugeNeedleUpdatePayload"
           }
-        }
+        },
+        "required": [
+          "gauge_needle"
+        ]
       },
       "UpdateGaugeNeedleResponseContent": {
         "$ref": "#/components/schemas/GaugeNeedle"

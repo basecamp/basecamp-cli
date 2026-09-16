@@ -317,14 +317,23 @@ server:
 claude mcp add basecamp -- basecamp mcp
 ```
 
-Fifteen domain tools (`basecamp_projects`, `basecamp_todos`, `basecamp_cards`,
+Sixteen domain tools (`basecamp_projects`, `basecamp_todos`, `basecamp_cards`,
 `basecamp_messages`, `basecamp_campfires`, `basecamp_boosts`,
 `basecamp_schedules`, `basecamp_files`, `basecamp_people`,
 `basecamp_automation`, `basecamp_reports`, `basecamp_everything`,
-`basecamp_clientside`, `basecamp_forwards`, `basecamp_account`) cover the
-Basecamp API, scoped to the configured account. Each tool takes
-`{"action": "...", "params": {...}}` and serves per-action schemas through
-its `describe` action.
+`basecamp_clientside`, `basecamp_forwards`, `basecamp_account`,
+`basecamp_recordings`) cover the Basecamp API, scoped to the configured
+account. Each tool takes `{"action": "...", "params": {...}}` and serves
+per-action schemas through its `describe` action.
+
+Two actions are composites rather than single Basecamp endpoints, shared
+with basecamp-mcp-server through basecamp-sdk and marked synthetic in the
+catalogue (no method, no path, and a summary that says so):
+`basecamp_recordings summarize` resolves the pointer an account event feed
+row carries — bucket id, recording id, and the event or recording type —
+into one compact projection, discovering a chat line's Campfire on the way;
+and `basecamp_messages create_comment` takes a `mentions` list of person
+ids, expanded into the attachment markup Basecamp reads as a mention.
 
 ```bash
 basecamp mcp --read-only                 # serve only read-only actions

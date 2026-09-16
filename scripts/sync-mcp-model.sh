@@ -54,23 +54,10 @@ EXCLUDED_OPERATIONS = {
     "UpdateAccountLogo",
 }
 
-PATCHED_TAGS = {
-    "GetAnswersByPerson": "Automation",
-    "GetQuestionReminders": "Automation",
-    "ListQuestionAnswerers": "Automation",
-    "PauseQuestion": "Automation",
-    "ResumeQuestion": "Automation",
-    "UpdateQuestionNotificationSettings": "Automation",
-    "RepositionTodo": "Todos",
-    "SubscribeToCardColumn": "Card Tables",
-    "UnsubscribeFromCardColumn": "Card Tables",
-    "GetAssignedTodos": "Reports",
-    "GetOverdueTodos": "Reports",
-    "GetPersonProgress": "Reports",
-    "GetProgressReport": "Reports",
-    "GetProjectTimeline": "Reports",
-    "GetUpcomingSchedule": "Reports",
-    "ListAssignablePeople": "Reports",
+PATCHED_TAGS: dict[str, str] = {
+    # Empty: basecamp-sdk now tags every exported operation itself
+    # (basecamp-sdk#878). Kept as a seam, because the export has left
+    # operations untagged before and the catalog join refuses them.
 }
 
 sdk, dest = sys.argv[1], sys.argv[2]
