@@ -219,23 +219,30 @@ func TestCommitLockHonoursCancellation(t *testing.T) {
 func TestNextBlockedRetry(t *testing.T) {
 	blockedAt := testNow
 
-	next, ok := NextBlockedRetry(ReasonReadFailed, blockedAt, blockedAt)
+	next, ok := NextBlockedRetry(ReasonReadFailed, blockedAt, blockedAt, time.Time{})
 	require.True(t, ok)
 
-	_, ok = NextBlockedRetry(ReasonBucketMismatch, blockedAt, blockedAt)
+	_, ok = NextBlockedRetry(ReasonBucketMismatch, blockedAt, blockedAt, time.Time{})
 	assert.False(t, ok, "the pointer's bucket never changes; only a redispatch re-runs it")
-	_, ok = NextBlockedRetry(ReasonUnroutable, blockedAt, blockedAt)
+	_, ok = NextBlockedRetry(ReasonUnroutable, blockedAt, blockedAt, time.Time{})
 	assert.False(t, ok, "no timer can give a type a read")
 	assert.Equal(t, blockedAt.Add(10*time.Minute), next)
 
-	next, ok = NextBlockedRetry(ReasonDeltaUnverified, blockedAt, blockedAt.Add(23*time.Hour+50*time.Minute))
+	next, ok = NextBlockedRetry(ReasonDeltaUnverified, blockedAt, blockedAt.Add(23*time.Hour+50*time.Minute), time.Time{})
 	require.True(t, ok, "the last retry inside the day")
 	assert.Equal(t, blockedAt.Add(24*time.Hour), next)
 
-	_, ok = NextBlockedRetry(ReasonReadUnresolved, blockedAt, blockedAt.Add(24*time.Hour))
+	_, ok = NextBlockedRetry(ReasonReadUnresolved, blockedAt, blockedAt.Add(24*time.Hour), time.Time{})
 	assert.False(t, ok, "after a day only a redispatch re-runs it")
 
-	_, ok = NextBlockedRetry(ReasonNoRoute, blockedAt, blockedAt)
+	next, ok = NextBlockedRetry(ReasonThrottled, blockedAt, blockedAt, blockedAt.Add(3*time.Minute))
+	require.True(t, ok)
+	assert.Equal(t, blockedAt.Add(10*time.Minute), next, "a short throttle keeps the ordinary interval")
+	next, ok = NextBlockedRetry(ReasonThrottled, blockedAt, blockedAt, blockedAt.Add(45*time.Minute))
+	require.True(t, ok)
+	assert.Equal(t, blockedAt.Add(45*time.Minute), next, "a long one is waited out")
+
+	_, ok = NextBlockedRetry(ReasonNoRoute, blockedAt, blockedAt, time.Time{})
 	assert.False(t, ok, "no_route waits for connect.json, not for time")
 }
 

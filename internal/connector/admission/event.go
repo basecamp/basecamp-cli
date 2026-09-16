@@ -37,10 +37,12 @@ type Event struct {
 	// part of the feed's pointer: the ledger's Commit compares it, so a
 	// decision made on an older load never overwrites a newer one.
 	Revision int64
-	// SeenAt is when intake wrote the pointer, on this machine's clock. A
-	// membership refusal counts as verified only from a project listing read
-	// after it. Zero means unknown, and admission uses the time it started
-	// deciding.
+	// SeenAt is when intake wrote the pointer, on this machine's clock — the
+	// clock membership listings are stamped with, which is why intake and
+	// admission must run on one machine. A membership refusal counts as
+	// verified only from a project listing asked for after it. The Records
+	// adapter must set it; zero falls back to the time admission started
+	// deciding, which a busy project can keep from ever verifying a refusal.
 	SeenAt time.Time
 }
 

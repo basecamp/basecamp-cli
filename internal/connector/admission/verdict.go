@@ -21,7 +21,8 @@ const (
 	DefaultReadAttempts = 5
 	DefaultReadBackoff  = 2 * time.Second
 	maxReadBackoff      = 30 * time.Second
-	// maxRetryAfter is the longest Retry-After waited for in place.
+	// maxRetryAfter is the most one decision waits in place, in total, on the
+	// server's Retry-After; beyond it the record is held until the deadline.
 	maxRetryAfter = 2 * time.Minute
 )
 
@@ -61,6 +62,9 @@ type Verdict struct {
 	RecordingID int64
 	// Revision is the record revision the decision started from.
 	Revision int64
+	// RetryAt is set on a blocked(throttled) verdict: the server's deadline,
+	// before which the record is not decided again.
+	RetryAt time.Time
 	// RequesterID is the performer whose trust admitted the event.
 	RequesterID int64
 
@@ -98,6 +102,33 @@ type Admitter struct {
 	attempts int
 	backoff  time.Duration
 	sleep    func(context.Context, time.Duration) error
+	now      func() time.Time
+}
+
+// decision is one Decide call: the admitter, plus what the call has spent
+// waiting on the server's throttle and the earliest time it may ask again.
+type decision struct {
+	*Admitter
+	throttleLeft time.Duration
+	retryAt      time.Time
+}
+
+// ThrottledError wraps a read the server throttled for longer than one
+// decision may wait. The record is held until RetryAt, never asked sooner.
+type ThrottledError struct {
+	RetryAt time.Time
+	Err     error
+}
+
+func (e *ThrottledError) Error() string {
+	return fmt.Sprintf("admission: throttled until %s: %v", e.RetryAt.Format(time.RFC3339), e.Err)
+}
+
+func (e *ThrottledError) Unwrap() error { return e.Err }
+
+// WithClock replaces the admitter's clock. Tests use it.
+func WithClock(now func() time.Time) Option {
+	return func(a *Admitter) { a.now = now }
 }
 
 // Option adjusts an Admitter.
@@ -140,6 +171,7 @@ func NewAdmitter(policy Policy, reads Reads, opts ...Option) (*Admitter, error) 
 		attempts: DefaultReadAttempts,
 		backoff:  DefaultReadBackoff,
 		sleep:    sleepContext,
+		now:      time.Now,
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -154,7 +186,13 @@ func NewAdmitter(policy Policy, reads Reads, opts ...Option) (*Admitter, error) 
 // trigger rules. The only error it returns is the context's: every other
 // failure is a verdict (blocked or discarded), because a read that failed is a
 // fact about the record, not about the caller.
-func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
+func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error) {
+	d := &decision{Admitter: a, throttleLeft: maxRetryAfter}
+	defer func() {
+		if out.State == StateBlocked && out.Reason == ReasonThrottled {
+			out.RetryAt = d.retryAt
+		}
+	}()
 	v := Verdict{
 		EventID:     ev.ID,
 		EventType:   ev.EventType,
@@ -165,7 +203,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 	}
 
 	if ev.SeenAt.IsZero() {
-		ev.SeenAt = time.Now()
+		ev.SeenAt = a.now()
 	}
 
 	gate := Gate(ev, a.policy, a.matrix)
@@ -174,7 +212,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 	}
 
 	if gate.ConfirmMembership {
-		member, reason, err := a.memberOf(ctx, ev.BucketID, ev.Performer(), ev.SeenAt)
+		member, reason, err := d.memberOf(ctx, ev.BucketID, ev.Performer(), ev.SeenAt)
 		if err != nil {
 			return Verdict{}, err
 		}
@@ -188,7 +226,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 
 	var summary *basecamp.RecordingSummary
 	ref := basecamp.RecordingRef{BucketID: ev.BucketID, RecordingID: ev.RecordingID, EventType: ev.EventType}
-	err := a.retry(ctx, func() error {
+	err = d.retry(ctx, func() error {
 		var err error
 		summary, err = a.reads.Summaries.Summarize(ctx, ref)
 		return err
@@ -222,7 +260,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		v.Routed, v.Route, v.Class = true, route.Path, route.Class
 	}
 
-	rule, state, reason, err := a.match(ctx, ev, gate.Rules, summary)
+	rule, state, reason, err := d.match(ctx, ev, gate.Rules, summary)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -253,7 +291,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 
 // match tries the gate's open rules in matrix order and returns the first
 // that admits, or the state and reason that end the event.
-func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
+func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
 	agent := a.policy.AgentID
 	mentioned := slices.Contains(summary.MentionedPersonIDs, agent)
 	endState, endReason := StateDiscarded, ReasonNotAddressed
@@ -309,10 +347,11 @@ func (a *Admitter) match(ctx context.Context, ev Event, rules []Rule, summary *b
 				return err
 			})
 			if err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
+				reason, ctxErr := failure(ctx, err)
+				if ctxErr != nil {
 					return Rule{}, "", "", ctxErr
 				}
-				return Rule{}, StateBlocked, ReasonReadFailed, nil
+				return Rule{}, StateBlocked, reason, nil
 			}
 			if !found {
 				// Current assignees are not evidence of who this event added.
@@ -356,7 +395,7 @@ func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
 // authorTrusted checks the person who wrote the recording, for the triggers
 // whose instruction is that recording's content. The performer was trusted
 // at the gate; the author is usually the same person, but not always.
-func (a *Admitter) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (State, Reason, error) {
+func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (State, Reason, error) {
 	author := summary.Creator.ID
 	switch {
 	case author == a.policy.AgentID, summary.Creator.PersonableType == personableAgent:
@@ -400,7 +439,7 @@ func (v *Verdict) address(summary *basecamp.RecordingSummary) {
 	}
 }
 
-func (a *Admitter) subscribed(ctx context.Context, recordingID int64) (bool, Reason, error) {
+func (a *decision) subscribed(ctx context.Context, recordingID int64) (bool, Reason, error) {
 	var subscribed bool
 	err := a.retry(ctx, func() error {
 		var err error
@@ -408,15 +447,13 @@ func (a *Admitter) subscribed(ctx context.Context, recordingID int64) (bool, Rea
 		return err
 	})
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return false, "", ctxErr
-		}
-		return false, ReasonReadFailed, nil
+		reason, ctxErr := failure(ctx, err)
+		return false, reason, ctxErr
 	}
 	return subscribed, "", nil
 }
 
-func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, Reason, error) {
+func (a *decision) memberOf(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, Reason, error) {
 	var member bool
 	err := a.retry(ctx, func() error {
 		var err error
@@ -424,13 +461,8 @@ func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64, asOf 
 		return err
 	})
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return false, "", ctxErr
-		}
-		if errors.Is(err, ErrMembershipUnverified) {
-			return false, ReasonTrustUnverified, nil
-		}
-		return false, ReasonReadFailed, nil
+		reason, ctxErr := failure(ctx, err)
+		return false, reason, ctxErr
 	}
 	return member, "", nil
 }
@@ -440,32 +472,63 @@ func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64, asOf 
 // a chat line found under no Campfire, a pointer with no typed read, a
 // recording in another bucket, and a 401, 403 or 404. The record is still
 // blocked, and recovered on the blocked schedule rather than in place.
-func (a *Admitter) retry(ctx context.Context, read func() error) error {
+//
+// A throttled read is never asked again before the server's Retry-After. The
+// wait is spent in place while the decision's throttle budget (maxRetryAfter,
+// across every read the decision makes) covers it; past that, or on the last
+// attempt, the read returns a ThrottledError carrying the deadline, and the
+// record is held until then. A fetcher is never parked on a long throttle,
+// and nothing retries early.
+func (a *decision) retry(ctx context.Context, read func() error) error {
 	wait := a.backoff
-	var err error
 	for attempt := 1; ; attempt++ {
-		if err = read(); err == nil {
+		err := read()
+		if err == nil {
 			return nil
 		}
-		if ctx.Err() != nil || final(err) || attempt >= a.attempts {
+		if ctx.Err() != nil || final(err) {
 			return err
 		}
-		// A throttled read waits as long as the server asked, never less:
-		// retrying inside the throttle only spends the attempts. A server
-		// asking for longer than maxRetryAfter is not waited for in place;
-		// the record blocks and the blocked schedule comes back to it.
 		pause := wait
-		if apiErr, ok := errors.AsType[*basecamp.Error](err); ok && apiErr.RetryAfter > 0 {
-			asked := time.Duration(apiErr.RetryAfter) * time.Second
-			if asked > maxRetryAfter {
-				return err
+		if asked := retryAfter(err); asked > 0 {
+			if until := a.now().Add(asked); until.After(a.retryAt) {
+				a.retryAt = until
 			}
+			if attempt >= a.attempts || asked > a.throttleLeft {
+				return &ThrottledError{RetryAt: a.retryAt, Err: err}
+			}
+			a.throttleLeft -= asked
 			pause = max(pause, asked)
+		} else if attempt >= a.attempts {
+			return err
 		}
 		if sleepErr := a.sleep(ctx, pause); sleepErr != nil {
 			return sleepErr
 		}
 		wait = min(wait*2, maxReadBackoff)
+	}
+}
+
+func retryAfter(err error) time.Duration {
+	if apiErr, ok := errors.AsType[*basecamp.Error](err); ok && apiErr.RetryAfter > 0 {
+		return time.Duration(apiErr.RetryAfter) * time.Second
+	}
+	return 0
+}
+
+// failure maps a read that failed to the reason its record blocks on. A
+// context error is returned as such: the caller stopped, the record did not
+// change.
+func failure(ctx context.Context, err error) (Reason, error) {
+	switch {
+	case ctx.Err() != nil:
+		return "", ctx.Err()
+	case errors.As(err, new(*ThrottledError)):
+		return ReasonThrottled, nil
+	case errors.Is(err, ErrMembershipUnverified):
+		return ReasonTrustUnverified, nil
+	default:
+		return ReasonReadFailed, nil
 	}
 }
 
@@ -492,6 +555,8 @@ func classifySummaryError(ctx context.Context, err error) (State, Reason, error)
 		return "", "", nil
 	case ctx.Err() != nil:
 		return "", "", ctx.Err()
+	case errors.As(err, new(*ThrottledError)):
+		return StateBlocked, ReasonThrottled, nil
 	case errors.Is(err, basecamp.ErrRecordingUnresolved):
 		return StateBlocked, ReasonReadUnresolved, nil
 	case errors.Is(err, basecamp.ErrBucketMismatch):

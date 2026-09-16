@@ -113,6 +113,9 @@ const (
 	ReasonReadFailed Reason = "read_failed"
 	// ReasonReadUnresolved: a chat line found under no visible Campfire.
 	ReasonReadUnresolved Reason = "read_unresolved"
+	// ReasonThrottled: the server throttled a read for longer than a decision
+	// waits in place. Retried at Verdict.RetryAt, never before.
+	ReasonThrottled Reason = "throttled"
 	// ReasonTrustUnverified: in project trust mode, the only project listing
 	// at hand predates the event and a fresh one was read too recently to read
 	// again; the person may have been added since.

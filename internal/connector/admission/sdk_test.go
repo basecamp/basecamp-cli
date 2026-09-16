@@ -347,6 +347,67 @@ func TestAMemberIsServedFromCacheForItsTTL(t *testing.T) {
 	assert.EqualValues(t, 2, l.calls.Load(), "someone removed from the project stops being trusted within the TTL")
 }
 
+func TestConcurrentRefreshesForAProjectAreOne(t *testing.T) {
+	var calls atomic.Int32
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
+	}))
+	members := NewMembers(client, time.Now)
+	seen := time.Now()
+
+	var wg sync.WaitGroup
+	results := make([]bool, 16)
+	for i := range results {
+		wg.Go(func() {
+			id := memberID
+			if i%2 == 1 {
+				id = strangerID
+			}
+			got, err := members.NonClientMember(context.Background(), routedProj, id, seen)
+			assert.NoError(t, err)
+			results[i] = got
+		})
+	}
+	wg.Wait()
+	assert.EqualValues(t, 1, calls.Load(), "the waiters read the refresh they waited on")
+	for i, got := range results {
+		assert.Equal(t, i%2 == 0, got, "worker %d", i)
+	}
+}
+
+func TestAListingIsDatedWhenItWasAskedFor(t *testing.T) {
+	c := &clock{now: testNow}
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		c.advance(5 * time.Second) // the listing takes five seconds to arrive
+		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, operatorID)
+	}))
+	members := NewMembers(client, c.Now)
+	_, err := members.NonClientMember(context.Background(), routedProj, operatorID, testNow)
+	require.NoError(t, err)
+
+	// Someone added and posting two seconds into that request is not known
+	// to be refused by it.
+	_, err = members.NonClientMember(context.Background(), routedProj, memberID, testNow.Add(2*time.Second))
+	require.ErrorIs(t, err, ErrMembershipUnverified)
+
+	// Seen exactly when it was asked for: covered.
+	got, err := members.NonClientMember(context.Background(), routedProj, strangerID, testNow)
+	require.NoError(t, err)
+	assert.False(t, got)
+}
+
+func TestASlowerAnswerNeverReplacesANewerOne(t *testing.T) {
+	c := newTTLCache[int64, string](func() time.Time { return testNow }, time.Hour)
+	c.putIfNewer(1, "newer", testNow)
+	c.putIfNewer(1, "older", testNow.Add(-time.Second))
+	got, fetched, ok := c.getWithAge(1)
+	require.True(t, ok)
+	assert.Equal(t, "newer", got)
+	assert.Equal(t, testNow, fetched)
+}
+
 func TestMembershipFailureIsNotCached(t *testing.T) {
 	var calls atomic.Int32
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

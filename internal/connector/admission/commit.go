@@ -132,7 +132,9 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 // Blocked-record recovery. A record blocked on a read (read_failed,
 // read_unresolved), on unverified trust (trust_unverified) or on an
 // unverified assignment delta is retried every ten minutes for a day after it
-// was first blocked, and on redispatch at any time after that. bucket_mismatch
+// was first blocked, and on redispatch at any time after that. A throttled
+// record (throttled) is on the same schedule, never before the server's
+// deadline. bucket_mismatch
 // and unroutable are not timed: the pointer's bucket and type never change, so
 // only a person's redispatch re-runs them. A blocked record is never
 // discarded for having failed: the checkpoint may already be past the event,
@@ -144,14 +146,18 @@ const (
 
 // NextBlockedRetry returns when a blocked record should next be re-run, and
 // false when it waits for something other than time: a route (no_route), or
-// a person's redispatch once the window has passed.
-func NextBlockedRetry(reason Reason, blockedAt, lastAttempt time.Time) (time.Time, bool) {
+// a person's redispatch once the window has passed. notBefore is a throttled
+// record's Verdict.RetryAt; no retry is scheduled before it.
+func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified:
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:
 	default:
 		return time.Time{}, false
 	}
 	next := lastAttempt.Add(BlockedRetryInterval)
+	if notBefore.After(next) {
+		next = notBefore
+	}
 	if next.After(blockedAt.Add(BlockedRetryWindow)) {
 		return time.Time{}, false
 	}

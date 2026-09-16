@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -100,9 +101,10 @@ func (a *Assignments) AddedPersonIDs(ctx context.Context, recordingID, eventID i
 
 // Members reads a project's people and answers membership from that listing.
 type Members struct {
-	client *basecamp.AccountClient
-	now    func() time.Time
-	cache  *ttlCache[int64, projectPeople]
+	client     *basecamp.AccountClient
+	now        func() time.Time
+	cache      *ttlCache[int64, projectPeople]
+	refreshing keyedMutex
 }
 
 // projectPeople is one listing: who is a member for trust.
@@ -131,25 +133,53 @@ func NewMembers(client *basecamp.AccountClient, now func() time.Time) *Members {
 // which then answers every event seen before it. Inside the floor the answer
 // is ErrMembershipUnverified: held, never refused.
 func (m *Members) NonClientMember(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, error) {
-	people, fetched, ok := m.cache.getWithAge(bucketID)
-	if ok && (people.members[personID] || !fetched.Before(asOf)) {
-		return people.members[personID], nil
+	if member, answered, err := m.fromCache(bucketID, personID, asOf); answered {
+		return member, err
 	}
-	if ok && m.now().Sub(fetched) < MembershipRefreshFloor {
-		return false, ErrMembershipUnverified
+	// One refresh per project at a time. Whoever waited here looks at the
+	// cache again first: the refresh it waited on may already answer it.
+	unlock, err := m.refreshing.lock(ctx, strconv.FormatInt(bucketID, 10))
+	if err != nil {
+		return false, err
 	}
+	defer unlock()
+	if member, answered, err := m.fromCache(bucketID, personID, asOf); answered {
+		return member, err
+	}
+
+	// Stamped when the request started, not when it landed: a listing
+	// describes the project as of some moment after it was asked for, so an
+	// event seen while it was in flight is not taken as covered by it.
+	started := m.now()
 	res, err := m.client.People().ListProjectPeople(ctx, bucketID, nil)
 	if err != nil {
 		return false, err
 	}
-	people = projectPeople{members: make(map[int64]bool, len(res.People))}
+	people := projectPeople{members: make(map[int64]bool, len(res.People))}
 	for _, p := range res.People {
 		if p.ID > 0 && !p.Client && p.PersonableType != personableAgent {
 			people.members[p.ID] = true
 		}
 	}
-	m.cache.put(bucketID, people)
+	m.cache.putIfNewer(bucketID, people, started)
 	return people.members[personID], nil
+}
+
+// fromCache answers from the cached listing when it can: a member for the
+// TTL, a refusal only from a listing asked for at or after asOf. Inside the
+// refresh floor it answers ErrMembershipUnverified. answered is false when
+// the listing must be read.
+func (m *Members) fromCache(bucketID, personID int64, asOf time.Time) (member, answered bool, err error) {
+	people, fetched, ok := m.cache.getWithAge(bucketID)
+	switch {
+	case !ok:
+		return false, false, nil
+	case people.members[personID] || !fetched.Before(asOf):
+		return people.members[personID], true, nil
+	case m.now().Sub(fetched) < MembershipRefreshFloor:
+		return false, true, ErrMembershipUnverified
+	}
+	return false, false, nil
 }
 
 type ttlCache[K comparable, V any] struct {
@@ -185,8 +215,18 @@ func (c *ttlCache[K, V]) getWithAge(key K) (V, time.Time, bool) {
 }
 
 func (c *ttlCache[K, V]) put(key K, value V) {
+	c.putIfNewer(key, value, c.now())
+}
+
+// putIfNewer stores value as fetched at the given time, unless the cache
+// already holds a value fetched later: an answer that was slower to arrive
+// never replaces a newer one.
+func (c *ttlCache[K, V]) putIfNewer(key K, value V, fetched time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if e, ok := c.entries[key]; ok && e.fetched.After(fetched) {
+		return
+	}
 	now := c.now()
 	if len(c.entries) >= maxCacheEntries {
 		for k, e := range c.entries {
@@ -198,5 +238,5 @@ func (c *ttlCache[K, V]) put(key K, value V) {
 			clear(c.entries)
 		}
 	}
-	c.entries[key] = ttlEntry[V]{value: value, fetched: now}
+	c.entries[key] = ttlEntry[V]{value: value, fetched: fetched}
 }

@@ -173,7 +173,7 @@ func TestChatLine(t *testing.T) {
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonReadUnresolved, v.Reason)
 		assert.Equal(t, 1, f.summaryCalls)
-		_, retried := NextBlockedRetry(v.Reason, testNow, testNow)
+		_, retried := NextBlockedRetry(v.Reason, testNow, testNow, time.Time{})
 		assert.True(t, retried, "read_unresolved is recovered like read_failed")
 	})
 
@@ -672,7 +672,7 @@ func TestProjectTrustMode(t *testing.T) {
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonTrustUnverified, v.Reason)
 		assert.Equal(t, 1, f.memberCalls, "an answer, not a failure: not retried in place")
-		_, timed := NextBlockedRetry(v.Reason, testNow, testNow)
+		_, timed := NextBlockedRetry(v.Reason, testNow, testNow, time.Time{})
 		assert.True(t, timed)
 	})
 
@@ -963,18 +963,75 @@ func TestAThrottledReadWaitsAsLongAsTheServerAsks(t *testing.T) {
 	}
 }
 
-func TestAThrottleLongerThanTheCapBlocksInsteadOfWaiting(t *testing.T) {
+func TestAThrottleLongerThanTheBudgetIsHeldUntilTheDeadline(t *testing.T) {
 	f := newFakeReads()
 	f.summaryErrs = []error{&basecamp.Error{Code: basecamp.CodeRateLimit, HTTPStatus: 429, Retryable: true, RetryAfter: 3600}}
 	var waited bool
-	a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error { waited = true; return nil }))
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithClock(func() time.Time { return testNow }),
+		WithSleep(func(context.Context, time.Duration) error { waited = true; return nil }))
 	require.NoError(t, err)
 
 	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateBlocked, v.State)
-	assert.Equal(t, ReasonReadFailed, v.Reason)
+	assert.Equal(t, ReasonThrottled, v.Reason)
+	assert.Equal(t, testNow.Add(time.Hour), v.RetryAt)
 	assert.False(t, waited, "an hour is the blocked schedule's to wait, not a fetcher's")
 	assert.Equal(t, 1, f.summaryCalls)
+
+	next, ok := NextBlockedRetry(v.Reason, testNow, testNow, v.RetryAt)
+	require.True(t, ok)
+	assert.Equal(t, testNow.Add(time.Hour), next, "never asked again before the server allows")
+}
+
+func TestTheThrottleBudgetIsSharedAcrossADecisionsReads(t *testing.T) {
+	// Two minutes in place, in total: the summary read spends ninety seconds,
+	// so the subscription read's ninety cannot be waited for.
+	throttle := func() error {
+		return &basecamp.Error{Code: basecamp.CodeRateLimit, HTTPStatus: 429, Retryable: true, RetryAfter: 90}
+	}
+	f := newFakeReads()
+	f.summaryErrs = []error{throttle()}
+	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
+	f.subErr = throttle()
+	var waits []time.Duration
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithClock(func() time.Time { return testNow }),
+		WithSleep(func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonThrottled, v.Reason)
+	assert.Equal(t, []time.Duration{90 * time.Second}, waits)
+	assert.Equal(t, testNow.Add(90*time.Second), v.RetryAt)
+}
+
+func TestAThrottleOnTheLastAttemptIsHeldNotFailed(t *testing.T) {
+	f := newFakeReads()
+	for range DefaultReadAttempts {
+		f.summaryErrs = append(f.summaryErrs, &basecamp.Error{Code: basecamp.CodeRateLimit, HTTPStatus: 429, Retryable: true, RetryAfter: 1})
+	}
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithClock(func() time.Time { return testNow }),
+		WithSleep(func(context.Context, time.Duration) error { return nil }))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, ReasonThrottled, v.Reason)
+	assert.Equal(t, testNow.Add(time.Second), v.RetryAt)
+	assert.Equal(t, DefaultReadAttempts, f.summaryCalls)
+}
+
+func TestAThrottledMembershipReadIsHeld(t *testing.T) {
+	p := basePolicy()
+	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
+	f := newFakeReads()
+	f.memberErr = &basecamp.Error{Code: basecamp.CodeRateLimit, HTTPStatus: 429, Retryable: true, RetryAfter: 600}
+	a, err := NewAdmitter(p, f.reads(), WithClock(func() time.Time { return testNow }))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: memberID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonThrottled, v.Reason)
+	assert.Equal(t, testNow.Add(10*time.Minute), v.RetryAt)
 }
 
 func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
