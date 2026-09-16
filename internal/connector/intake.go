@@ -738,6 +738,12 @@ func entryClassOf(resumeURL string) EntryClass {
 // offers every record nothing has judged yet. Offering one twice costs
 // nothing: the queue carries ids, and admission moves a record out of seen
 // before it acts.
+//
+// The pointer line is NOT written again here. A record that got no line when
+// it was recorded — the write that failed — never gets one, and the work still
+// happens through the queue. Re-emitting would put duplicate lines in front of
+// every watcher for the ordinary case, to close a gap in the stream rather
+// than in the work.
 func (in *Intake) requeueSeen(ctx context.Context) error {
 	var after int64
 	for {
