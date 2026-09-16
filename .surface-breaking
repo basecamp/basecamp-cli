@@ -13,6 +13,7 @@ ARG basecamp comment 00 <id|url>
 ARG basecamp comment 01 <content>
 ARG basecamp comments list 00 <id|url>
 ARG basecamp done 00 <id|url>...
+ARG basecamp events 00 <id|url>
 ARG basecamp message 00 <title>
 ARG basecamp message 01 [body]
 ARG basecamp react 00 <content>

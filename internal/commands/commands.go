@@ -105,6 +105,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "thread", "update", "trash", "archive", "restore"}},
 				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
 				{Name: "notifications", Category: "communication", Description: "View and manage notifications", Actions: []string{"list", "read", "bubbleups"}},
+				{Name: "inbox", Category: "communication", Description: "Poll addressed items from the account event feed (agents only)"},
 			},
 		},
 		{
@@ -113,7 +114,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "search", Category: "search", Description: "Search across projects"},
 				{Name: "recordings", Category: "search", Description: "Browse content by type across projects", Actions: []string{"list", "trash", "archive", "restore", "visibility"}},
 				{Name: "show", Category: "search", Description: "Show any item by ID"},
-				{Name: "events", Category: "search", Description: "View change history"},
+				{Name: "events", Category: "search", Description: "View change history and poll the account event feed", Actions: []string{"poll", "ticket"}},
 				{Name: "url", Category: "search", Description: "Parse Basecamp URLs"},
 			},
 		},

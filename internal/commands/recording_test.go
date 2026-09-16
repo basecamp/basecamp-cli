@@ -52,6 +52,13 @@ type stubRoute struct {
 	// empty page, so a route that served the same body for every page number
 	// would walk all the way to the cap and hide the behavior under test.
 	pages []string
+
+	// bodies, when set, serves bodies[i] to the i-th request this route
+	// matches and repeats the last entry past the end. Routes match on method
+	// and path alone, so a walk that re-requests one path with a different
+	// query — the event feed's position/next envelope, which carries no page
+	// number — needs the sequence to vary at all.
+	bodies []string
 }
 
 // pagedBody picks the response for a page-aware route.
@@ -74,6 +81,9 @@ type recordingTransport struct {
 	mu       sync.Mutex
 	requests []recordedCall
 	routes   []stubRoute
+	// matches counts, per route index, how many requests that route has
+	// served, so a route with a body sequence can advance through it.
+	matches map[int]int
 }
 
 func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -96,10 +106,13 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	})
 	t.mu.Unlock()
 
-	for _, route := range t.routes {
+	for index, route := range t.routes {
 		if route.method == req.Method && route.path == req.URL.Path {
 			responseBody := route.body
-			if route.pages != nil {
+			switch {
+			case route.bodies != nil:
+				responseBody = route.bodies[t.nextBody(index, len(route.bodies))]
+			case route.pages != nil:
 				responseBody = pagedBody(route, req.URL.Query().Get("page"))
 			}
 			return &http.Response{
@@ -118,6 +131,23 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			`{"error":"no stub route for %s %s"}`, req.Method, req.URL.Path))),
 		Request: req,
 	}, nil
+}
+
+// nextBody returns the index into a route's body sequence for this match,
+// clamped to the last entry so a walk that outruns the fixture keeps getting
+// the terminal page rather than panicking.
+func (t *recordingTransport) nextBody(route, length int) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.matches == nil {
+		t.matches = make(map[int]int)
+	}
+	index := t.matches[route]
+	t.matches[route]++
+	if index >= length {
+		return length - 1
+	}
+	return index
 }
 
 // recorded returns a snapshot of the requests seen so far.

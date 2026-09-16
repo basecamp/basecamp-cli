@@ -18,6 +18,7 @@ ALLOWLIST=(
   NewURLCmd             # shortcut: opens URL
   NewAssignmentsCmd     # shortcut: shows assignments
   NewNotificationsCmd   # shortcut: lists notifications
+  NewEventsCmd          # shortcut: one recording's history, plus the account feed's subcommands
 )
 
 is_allowed() {

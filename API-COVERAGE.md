@@ -6,12 +6,12 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 50 | 192 |
+| ✅ Implemented | 51 | 195 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **54** | **204** |
+| **Total tracked** | **55** | **207** |
 
-**192 of 192 tracked in-scope endpoints.** The client-admission endpoints
+**195 of 195 tracked in-scope endpoints.** The client-admission endpoints
 basecamp/bc3#13098 added — `PUT /projects/:id/people/client_users.json` and
 `POST`/`DELETE /projects/:id/client_enablement.json` — land as `people clients`.
 SDK v0.16.0 adds the three to-do
@@ -50,6 +50,8 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** v0.16.0 (adds the to-do list template library and asynchronous
 copy operations; `internal/version/sdk-provenance.json` is authoritative). The
+event-feed operations are unreleased, so the pin is a basecamp-sdk `main`
+pseudo-version until the next SDK release tag. The
 command surface below largely dates to the v0.12.0 bump, which added 20 exported
 Go methods over 13 new backend operations; the extra seven wrapped endpoints
 that already existed but were reachable only through the raw generated client,
@@ -229,6 +231,8 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |
 | schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
 | events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |
+| **Event Feed** |
+| event_feed | 3 | `events poll`, `events ticket`, `inbox` | ✅ | BC5 | - | The account-wide event feed: `GET /events.json` (`events poll`), `GET /inbox.json` (`inbox`, agent principals only), `POST /events/stream_ticket.json` (`events ticket`). Pagination is the body envelope — a durable `position` and a `next` continuation URL — not the Link-header page walk, so `--all` walks `next` rather than page numbers. The live WebSocket lane the ticket opens is out of scope for the CLI: the SDK's cable client carries a WebSocket dependency the CLI does not take |
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |

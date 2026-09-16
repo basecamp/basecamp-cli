@@ -333,6 +333,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewCheckinsCmd())
 	cmd.AddCommand(commands.NewWebhooksCmd())
 	cmd.AddCommand(commands.NewEventsCmd())
+	cmd.AddCommand(commands.NewInboxCmd())
 	cmd.AddCommand(commands.NewSubscriptionsCmd())
 	cmd.AddCommand(commands.NewForwardsCmd())
 	cmd.AddCommand(commands.NewMessageboardsCmd())

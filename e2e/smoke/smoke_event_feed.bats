@@ -1,0 +1,42 @@
+#!/usr/bin/env bats
+# smoke_event_feed.bats - Level 0: Account event feed operations
+#
+# Nothing here prints a position, a ticket or a cable URL: the first is a
+# signed resume token and the other two are bearers, and a smoke trace is a
+# file somebody keeps. Entering at the present (--since now) also keeps these
+# reads bounded — a since=0 replay would walk the account's served history.
+
+load smoke_helper
+
+setup_file() {
+  ensure_token || return 1
+}
+
+@test "events poll enters the feed at the present" {
+  run_smoke basecamp events poll --since now --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "events poll rejects a since that is not an entry point" {
+  run_smoke basecamp events poll --since yesterday --json
+  assert_failure
+  assert_output_contains "Invalid --since"
+}
+
+@test "events ticket mints a redacted ticket" {
+  run_smoke basecamp events ticket --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.ticket' '[REDACTED]'
+}
+
+@test "inbox polls addressed items" {
+  run_smoke basecamp inbox --since now --json
+  # The inbox is served to agent principals only; a person's token gets 403.
+  if [[ "$status" -ne 0 ]]; then
+    assert_output_contains "agent principals only"
+    mark_unverifiable "Inbox is agents-only and this token is not an agent's"
+  fi
+  assert_json_value '.ok' 'true'
+}
