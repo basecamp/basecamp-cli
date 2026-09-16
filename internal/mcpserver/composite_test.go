@@ -645,3 +645,50 @@ func TestSummarizeRefusesAQuotedIDThatNamesNoRecord(t *testing.T) {
 	assert.Contains(t, text, "recording_id")
 	assert.Empty(t, log.seen(), "quoting an id does not make zero name a record, and the schema says so too")
 }
+
+// "We could see no Campfire at all" is an answer, and not the same answer
+// as "we searched none". The empty list has to survive to the caller, and
+// both MCP servers have to say it the same way.
+func TestSummarizeUnresolvedWithNoVisibleCampfireCarriesAnEmptyList(t *testing.T) {
+	session, _ := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/projects/":  serveJSON(t, http.StatusOK, `{"id": 77, "status": "active", "name": "Connector", "dock": []}`),
+		"/999/chats.json": serveJSON(t, http.StatusOK, `[]`),
+	})
+
+	text, isError := summarize(t, session, map[string]any{
+		"bucket_id":    77,
+		"recording_id": 5005,
+		"event_type":   "chat.line.created",
+	})
+	require.True(t, isError, text)
+
+	failure := jsonBody(t, text)["error"].(map[string]any)
+	assert.Equal(t, "recording_unresolved", failure["type"])
+	require.Contains(t, failure, "campfire_ids", "an empty candidate set is reported, not omitted")
+	assert.Equal(t, []any{}, failure["campfire_ids"])
+}
+
+func TestCreateCommentAnEmptyMentionsListAsksForNothing(t *testing.T) {
+	var posted map[string]any
+
+	session, log := compositeSession(t, map[string]http.HandlerFunc{
+		"/999/recordings/2001/comments.json": func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &posted))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 3002, "type": "Comment", "status": "active"}`))
+		},
+	})
+
+	text, isError := createComment(t, session, map[string]any{
+		"recordingId": 2001,
+		"content":     "<div>plain</div>",
+		"mentions":    []any{},
+	})
+	require.False(t, isError, text)
+	assert.Equal(t, "<div>plain</div>", posted["content"])
+	assert.NotContains(t, posted, "mentions")
+	assert.Len(t, log.seen(), 1, "an empty list reads nobody and changes nothing")
+}
