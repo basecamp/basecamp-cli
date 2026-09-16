@@ -128,7 +128,24 @@ type feedEntry struct {
 // and an addressed-item id on the inbox. The shape of --since is checked,
 // never its value: an id the lane has never served is the server's verdict to
 // give, not ours.
-func (e feedEntry) validate(lane feedLane) error {
+//
+// A flag given an empty value is refused before any of that. The documented
+// way to resume is --position "$POSITION", so an unset variable arrives as an
+// empty string — indistinguishable here from not passing the flag, which
+// enters at the present. Silently skipping the backlog the caller meant to
+// resume is the worst available reading of that, so it is not offered.
+func (e feedEntry) validate(cmd *cobra.Command, lane feedLane) error {
+	for _, given := range []struct{ name, value string }{
+		{"since", e.since},
+		{"position", e.position},
+	} {
+		if cmd.Flags().Changed(given.name) && strings.TrimSpace(given.value) == "" {
+			return output.ErrUsageHint(
+				fmt.Sprintf("--%s was given an empty value", given.name),
+				"An empty value reads the same as omitting the flag, which enters at the present and skips what came before; pass a value or drop the flag")
+		}
+	}
+
 	switch {
 	case e.since != "" && e.position != "":
 		return output.ErrUsage("--since and --position are mutually exclusive")
@@ -553,7 +570,7 @@ event id and refetch the referenced recording before acting on it.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			if err := entry.validate(eventsLane); err != nil {
+			if err := entry.validate(cmd, eventsLane); err != nil {
 				return err
 			}
 			if maxPages < 1 {

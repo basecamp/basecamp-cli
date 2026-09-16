@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -543,6 +545,35 @@ func TestShowSecretKeepsEveryParameterTheMintSent(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(decodeFeedEnvelope(t, out).Data, &data))
 	assert.Equal(t, minted, data.URL)
+}
+
+// The documented resume form is --position "$POSITION". An unset variable
+// makes that an empty string, which used to read as "no entry point given"
+// and enter at the present — skipping exactly the backlog the caller was
+// trying to resume. Neither lane offers that reading any more.
+func TestAnEmptyEntryFlagIsRefusedRatherThanReadAsOmitted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"events position", NewEventsCmd, []string{"poll", "--position", ""}},
+		{"events since", NewEventsCmd, []string{"poll", "--since", ""}},
+		{"events position blank", NewEventsCmd, []string{"poll", "--position", "  "}},
+		{"inbox position", NewInboxCmd, []string{"--position", ""}},
+		{"inbox since", NewInboxCmd, []string{"--since", ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport, _ := setupFeedApp(t)
+
+			err := executeRecordingCommand(tc.cmd(), app, tc.args...)
+
+			cliErr := requireFeedError(t, err)
+			assert.Equal(t, output.CodeUsage, cliErr.Code)
+			assert.Contains(t, cliErr.Message, "empty value")
+			assert.Empty(t, transport.recorded(), "nothing should reach the server")
+		})
+	}
 }
 
 func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
