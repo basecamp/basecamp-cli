@@ -255,26 +255,6 @@ func TestFeedGapIsRefusedWhenItCannotBeRecorded(t *testing.T) {
 	}), "a gap nothing wrote down is a gap nothing will ever report")
 }
 
-// A retention 410 reaching the account lane means the server said something
-// this connector does not model. It is surfaced and recorded as its own class,
-// never resumed as if it had been the epoch's.
-func TestRetentionGoneOnTheAccountLaneIsRecordedAsItsOwnClass(t *testing.T) {
-	intake, ledger, _ := newTestIntake(t, nil, nil)
-	ctx := context.Background()
-
-	err := intake.classifyTerminal(ctx, &eventfeed.PollError{
-		Kind: eventfeed.PollUnrecoverable,
-		Err:  &InboxRetentionGoneError{Resume: "https://3.basecampapi.com/2914079/my/inbox.json?since=0"},
-	})
-	require.Error(t, err)
-
-	gaps, err := ledger.Gaps(ctx)
-	require.NoError(t, err)
-	require.Len(t, gaps, 1)
-	assert.Equal(t, GapRetention, gaps[0].Class)
-	assert.Nil(t, gaps[0].EpochAfterID, "there is no epoch here, and zero is not one")
-}
-
 func TestLedgerRefusesAGapWhoseClassAndEpochDisagree(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()

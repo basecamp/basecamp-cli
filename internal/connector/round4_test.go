@@ -46,7 +46,7 @@ func TestARefusedPositionWithNoPollServedIDReentersAtTheBeginningNotThePresent(t
 			queue, err := NewQueue(DefaultBacklogWarn, DefaultBacklogPause)
 			require.NoError(t, err)
 			intake, transport, minter, _ := newFeedIntake(t, ledger, Options{})
-			intake.opts.Polls = polls
+			intake.opts.PollsFor = func() eventfeed.PollSource { return polls }
 			intake.queue = queue
 			for range 4 {
 				minter.ScriptTicket(ticket())

@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -218,31 +217,6 @@ type countingMembership struct{ n *atomic.Int32 }
 func (c countingMembership) Buckets(context.Context) ([]int64, error) {
 	c.n.Add(1)
 	return nil, nil
-}
-
-// The seam requires connector cancellation to pass through unchanged, or a
-// shutdown enters transport-retry handling.
-func TestCallerCancellationPassesThroughTheAdapterUnchanged(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	adapter := newTestAdapter(t, &fakeFeedClient{err: context.Canceled})
-	_, err := adapter.Poll(ctx, eventfeed.Cursor{}, eventfeed.Filters{})
-	var pollErr *eventfeed.PollError
-	assert.False(t, errors.As(err, &pollErr), "a canceled poll is not a transport failure")
-	assert.ErrorIs(t, err, context.Canceled)
-
-	_, err = adapter.MintStreamTicket(ctx)
-	var mintErr *eventfeed.MintError
-	assert.False(t, errors.As(err, &mintErr), "a canceled mint is not a transport failure")
-	assert.ErrorIs(t, err, context.Canceled)
-
-	// A client-owned timeout with the caller's context still live stays
-	// transient.
-	adapter = newTestAdapter(t, &fakeFeedClient{err: context.DeadlineExceeded})
-	_, err = adapter.Poll(context.Background(), eventfeed.Cursor{}, eventfeed.Filters{})
-	require.ErrorAs(t, err, &pollErr)
-	assert.Equal(t, eventfeed.PollTransient, pollErr.Kind)
 }
 
 func TestQueuePauseTracksEveryBlockedOffer(t *testing.T) {

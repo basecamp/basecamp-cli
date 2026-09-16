@@ -28,6 +28,7 @@ func newTestWalker(t *testing.T, ledger *Ledger, polls eventfeed.PollSource, clo
 	walker := &repairWalker{
 		ledger: ledger,
 		polls:  polls,
+		origin: "https://3.basecampapi.com",
 		now:    clock.now,
 		log:    slog.New(slog.DiscardHandler),
 		sleep:  clock.advance(time.Minute),

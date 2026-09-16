@@ -21,45 +21,6 @@ import (
 // invariant names match the review's list (A positions, C repair, D
 // classification, E lifecycle, F queue, G lock, H confidentiality).
 
-// D2 / A3: a followed URL carries exactly its cursor. One with neither since
-// nor position would silently enter at the present.
-func TestInvariantD2ACursorlessContinuationIsRefused(t *testing.T) {
-	client := &fakeFeedClient{}
-	_, err := newTestAdapter(t, client).Poll(context.Background(),
-		eventfeed.Cursor{PageURL: "https://3.basecampapi.com/2914079/events.json?types=comment.created"},
-		eventfeed.Filters{})
-
-	var pollErr *eventfeed.PollError
-	require.ErrorAs(t, err, &pollErr)
-	assert.NotEqual(t, eventfeed.PollTransient, pollErr.Kind)
-	assert.Zero(t, client.calls, "a URL with no cursor is an entry at the present, and is never sent")
-}
-
-// H1: nothing server-chosen — a redirect target, a URL carrying a position —
-// is rendered into an error the adapter returns.
-func TestInvariantH1AdapterErrorsRenderNoServerChosenURL(t *testing.T) {
-	leaky := errors.New(`Get "https://3.basecampapi.com/2914079/events.json?position=SECRET-POSITION": connection reset`)
-
-	_, err := newTestAdapter(t, &fakeFeedClient{err: leaky}).Poll(context.Background(), eventfeed.Cursor{}, eventfeed.Filters{})
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "SECRET-POSITION")
-
-	_, err = newTestAdapter(t, &fakeFeedClient{err: leaky}).MintStreamTicket(context.Background())
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "SECRET-POSITION")
-
-	redirect := errors.Join(ErrRedirectRefused, errors.New(`Get "https://evil.example.com/steal?leak=SECRET-TARGET"`))
-	_, err = newTestAdapter(t, &fakeFeedClient{err: redirect}).Poll(context.Background(), eventfeed.Cursor{}, eventfeed.Filters{})
-	var pollErr *eventfeed.PollError
-	require.ErrorAs(t, err, &pollErr)
-	assert.Equal(t, eventfeed.PollRedirectRefused, pollErr.Kind)
-	assert.NotContains(t, err.Error(), "SECRET-TARGET")
-
-	_, err = newTestAdapter(t, &fakeFeedClient{err: redirect}).MintStreamTicket(context.Background())
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "SECRET-TARGET")
-}
-
 // H1, repair side: the walk's logs render a failure's kind, never its text.
 func TestInvariantH1RepairLogsRenderNoFailureText(t *testing.T) {
 	ledger := newTestLedger(t)

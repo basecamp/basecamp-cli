@@ -5,15 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed/feedtest"
 )
@@ -257,24 +258,65 @@ func answerSubscription(conn *feedtest.Conn) {
 	}
 }
 
-// A retention 410 reaching the repair walk is the same foreign loss it is on
-// the feed: recorded as its own class and not retried as if it were transient.
-func TestARetention410InTheRepairWalkIsRecordedNotRetried(t *testing.T) {
+// The inbox's 410 shape reaching the repair walk on the account lane is
+// refused at the seam, never taken as the epoch's: no epoch gap is recorded
+// for it, it is not retried for the window, and the loss stays open.
+func TestAnInboxShaped410InTheRepairWalkIsNotTheEpochsPath(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
 	require.NoError(t, err)
 
-	adapter := newTestAdapter(t, &fakeFeedClient{err: retentionGone()})
-	walker, _ := newTestWalker(t, ledger, adapter, clock)
+	var hits atomic.Int32
+	s := newFeedServer(t, func(w http.ResponseWriter, _ *http.Request, s *feedServer) {
+		hits.Add(1)
+		s.json(w, 410, `{"error":"gone","resume":"ORIGIN/2914079/events.json?since=0"}`)
+	})
+	polls, _ := livePolls(t, s)
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	walker.origin = mustOrigin(t, s.URL)
 	require.NoError(t, walker.reconcile(ctx, loss))
 
 	gaps, err := ledger.Gaps(ctx)
 	require.NoError(t, err)
-	require.Len(t, gaps, 1, "the retention 410 is a fact about the feed, recorded once")
-	assert.Equal(t, GapRetention, gaps[0].Class)
-	assert.Nil(t, gaps[0].EpochAfterID)
+	assert.Empty(t, gaps, "no epoch was served, so no epoch gap is recorded")
+	assert.Equal(t, int32(1), hits.Load(), "a refusal retrying will not fix is not retried for ten minutes")
+	open, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	assert.Len(t, open, 1)
+}
+
+// The repair walk follows next and resume URLs outside the SDK connector, so
+// it holds them to the API origin itself.
+func TestTheRepairWalkDoesNotFollowAForeignURL(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	require.NoError(t, err)
+
+	polls := &scriptedPolls{pages: []eventfeed.PollPage{
+		{Position: "p1", Next: "https://evil.example.com/2914079/events.json?position=p1"},
+	}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	require.NoError(t, walker.reconcile(ctx, loss))
+	assert.Equal(t, 1, polls.calls, "the foreign next is not followed")
+
+	loss2, err := ledger.RecordLoss(ctx, []int64{17099838600}, clock.at, 10*time.Minute)
+	require.NoError(t, err)
+	polls2 := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollGone, EpochAfterID: 17099838550,
+		ResumeURL: "http://3.basecampapi.com/2914079/events.json?since=17099838550"}}}
+	walker2, _ := newTestWalker(t, ledger, polls2, clock)
+	require.NoError(t, walker2.reconcile(ctx, loss2))
+	assert.Equal(t, 1, polls2.calls, "a downgraded resume is not followed")
+}
+
+func mustOrigin(t *testing.T, raw string) string {
+	t.Helper()
+	origin, err := eventfeed.CanonicalOrigin(raw)
+	require.NoError(t, err)
+	return origin
 }
 
 // A 410 in the walk fences off the ids below the epoch. Ids above it are still
@@ -352,13 +394,6 @@ func TestAnUnrecoverableRepairPollLeavesTheLossOpen(t *testing.T) {
 	open, err := ledger.OpenLosses(ctx)
 	require.NoError(t, err)
 	assert.Len(t, open, 1)
-}
-
-func retentionGone() error {
-	return &basecamp.FeedPositionGoneError{
-		Err:    &basecamp.Error{Code: basecamp.CodeAPI, HTTPStatus: 410, Message: "outside retention"},
-		Resume: "https://3.basecampapi.com/2914079/my/inbox.json?since=0",
-	}
 }
 
 // A resume that answers with the same 410 again must not become an endless

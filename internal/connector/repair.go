@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -21,8 +22,10 @@ import (
 //
 // It runs off the delivery path. Nothing about live intake waits for it.
 type repairWalker struct {
-	ledger   *Ledger
-	polls    eventfeed.PollSource
+	ledger *Ledger
+	polls  eventfeed.PollSource
+	// origin is the API origin every URL the walk follows must stay on.
+	origin   string
 	filters  eventfeed.Filters
 	ingest   func(ctx context.Context, event eventfeed.Event, lane Lane) error
 	now      func() time.Time
@@ -158,6 +161,10 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 		}
 		// An empty page with a `next` is ordinary — the walk crossed rows the
 		// filters excluded — so the loop never stops on len(Events) == 0.
+		if err := sameOrigin(w.origin, page.Next); err != nil {
+			w.log.Error("a repair page's next URL leaves the API origin; the loss stays open for the next start", "loss_id", loss.ID)
+			return last, errReconciliationEnded
+		}
 		cursor = eventfeed.Cursor{PageURL: page.Next}
 	}
 }
@@ -202,28 +209,6 @@ func failureKind(err error) string {
 // to continue this pass at, nil with no error to end the pass and wait for the
 // next repair poll, or an error.
 func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor eventfeed.Cursor, err error, pass *repairPass) (*eventfeed.Cursor, error) {
-	var retention *InboxRetentionGoneError
-	if errors.As(err, &retention) {
-		// The inbox lane's 410 on the account lane: the same foreign loss the
-		// feed surfaces, recorded as its own class and never resumed as if it
-		// were the epoch's. Nothing on this lane will serve the ids.
-		if _, recordErr := w.ledger.RecordGap(ctx, Gap{
-			DetectedAt: w.now(),
-			Class:      GapRetention,
-			EntryClass: EntryUnknown,
-			Note:       "a retention 410 was served to the repair walk on the account lane; not resumed",
-		}); recordErr != nil {
-			return nil, recordErr
-		}
-		unrecovered, closeErr := w.ledger.CloseLoss(ctx, loss.ID, w.now())
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		w.log.Error("the repair walk was answered with the inbox lane's 410; not resumed",
-			"loss_id", loss.ID, "unrecovered", unrecovered)
-		return nil, errReconciliationEnded
-	}
-
 	var pollErr *eventfeed.PollError
 	if !errors.As(err, &pollErr) {
 		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
@@ -276,6 +261,10 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 		}
 		// Ids above the epoch are still servable: the resume is followed as
 		// served, whether or not this loss had met the fence before.
+		if err := sameOrigin(w.origin, pollErr.ResumeURL); err != nil {
+			w.log.Error("a repair 410's resume URL leaves the API origin; the loss stays open for the next start", "loss_id", loss.ID)
+			return nil, errReconciliationEnded
+		}
 		pass.followed[pollErr.ResumeURL] = true
 		return &eventfeed.Cursor{PageURL: pollErr.ResumeURL}, nil
 
@@ -325,3 +314,26 @@ func (w *repairWalker) wait(ctx context.Context, d time.Duration) error {
 		return ctx.Err()
 	}
 }
+
+// sameOrigin holds a URL the repair walk is about to follow to the API origin,
+// with no scheme downgrade.
+//
+// This is the one check intake keeps from its temporary adapter. The SDK's
+// live poll source re-issues a followed URL's cursor against its own client
+// and never requests the URL itself, but it leaves origin validation to the
+// caller — its connector runs it before every followed URL, unexported. The
+// repair walk follows next and resume URLs outside that connector, so it
+// runs the check itself rather than following a foreign URL's cursor.
+func sameOrigin(origin, raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || parsed.User != nil {
+		return errForeignContinuation
+	}
+	canonical, err := eventfeed.CanonicalOrigin(parsed.Scheme + "://" + parsed.Host)
+	if err != nil || canonical != origin {
+		return errForeignContinuation
+	}
+	return nil
+}
+
+var errForeignContinuation = errors.New("connector: a followed URL leaves the API origin")

@@ -58,7 +58,12 @@ type Options struct {
 	Ledger *Ledger
 	Queue  *Queue
 	Minter eventfeed.TicketMinter
-	Polls  eventfeed.PollSource
+	// PollsFor returns a fresh poll source per walk. The SDK's live source
+	// holds walk state (the order a continuation must follow), so the feed's
+	// connection and each repair walk get their own. Polls, when set instead,
+	// is shared by all of them — for test fakes that hold no walk state.
+	PollsFor func() eventfeed.PollSource
+	Polls    eventfeed.PollSource
 
 	// Pointers receives one NDJSON line per newly seen event. Writes are
 	// serialized: an interleaved write tears a line and breaks the watcher
@@ -78,6 +83,18 @@ type Options struct {
 
 	Clock     func() time.Time
 	Transport eventfeed.CableTransport
+}
+
+// LiveOptions binds intake to the live feed: the SDK's own seams over the
+// generated operations, with their redirect guard, their two-410 mapping and
+// their continuation checks. The caller fills in the rest (account, namespace,
+// ledger, queue, filters).
+func LiveOptions(live *eventfeed.Live) Options {
+	return Options{
+		Origin:   live.Origin(),
+		Minter:   live.Minter(),
+		PollsFor: live.Polls,
+	}
 }
 
 // Intake is the feed's delivery path: write the pointer, hand over the id.
@@ -144,12 +161,17 @@ func New(opts Options) (*Intake, error) {
 		return nil, errors.New("connector: intake needs a ledger")
 	case opts.Queue == nil:
 		return nil, errors.New("connector: intake needs a queue")
-	case opts.Minter == nil || opts.Polls == nil:
+	case opts.Minter == nil || (opts.Polls == nil && opts.PollsFor == nil):
 		return nil, errors.New("connector: intake needs the feed's two seams")
 	case opts.AccountID == "":
 		return nil, errors.New("connector: intake needs an account id")
 	case opts.ConsumerNamespace == "":
 		return nil, errors.New("connector: intake needs a consumer namespace")
+	}
+
+	if opts.PollsFor == nil {
+		shared := opts.Polls
+		opts.PollsFor = func() eventfeed.PollSource { return shared }
 	}
 
 	origin, err := eventfeed.CanonicalOrigin(opts.Origin)
@@ -330,7 +352,7 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		options = append(options, eventfeed.WithTransport(in.opts.Transport))
 	}
 
-	served := &servedPolls{inner: in.opts.Polls}
+	served := &servedPolls{inner: in.opts.PollsFor()}
 	in.mu.Lock()
 	in.served = served
 	in.mu.Unlock()
@@ -385,7 +407,12 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	if in.reconnectRequested() {
 		return errReconnect
 	}
-	return in.classifyTerminal(ctx, feedErr)
+	// The two 410s are told apart below this package: the SDK's live seam
+	// maps the feed's FeedPositionGoneError (epoch required) to the gap
+	// signal, and refuses the inbox's InboxPositionGoneError shape on the
+	// account lane as unrecoverable, so it ends the feed here as a terminal
+	// rather than resuming as if it were the epoch's.
+	return feedErr
 }
 
 // ingest is the whole of intake: one pointer written, one id handed over.
@@ -557,29 +584,6 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 	}
 }
 
-// classifyTerminal turns the feed's terminal error into the connector's own
-// verdict. The one case that needs saying is the inbox's 410 arriving on the
-// account lane: it is a different loss with a different resume, and it is
-// surfaced rather than absorbed.
-func (in *Intake) classifyTerminal(ctx context.Context, err error) error {
-	if err == nil {
-		return nil
-	}
-	var retention *InboxRetentionGoneError
-	if errors.As(err, &retention) {
-		if _, recordErr := in.ledger.RecordGap(ctx, Gap{
-			DetectedAt: in.now(),
-			Class:      GapRetention,
-			EntryClass: EntryUnknown,
-			Note:       "a retention 410 was served on the account lane, which has an epoch instead; not resumed",
-		}); recordErr != nil {
-			in.log.Error("could not record the retention gap", "error", recordErr)
-		}
-		in.log.Error("the account feed answered the inbox lane's 410: its resume re-enters at the earliest retained item, not above an epoch, so it is not followed here")
-	}
-	return err
-}
-
 // handleSignal decides what a semantic signal means for this connector. It
 // runs synchronously on the delivery path, so it does only what must happen
 // before the disposition takes effect and starts the rest elsewhere.
@@ -688,7 +692,8 @@ func (in *Intake) startRepair(ctx context.Context, loss Loss) {
 		// Off the delivery path: nothing about live intake waits for this.
 		walker := &repairWalker{
 			ledger:   in.ledger,
-			polls:    in.opts.Polls,
+			polls:    in.opts.PollsFor(),
+			origin:   in.key.Origin,
 			filters:  in.opts.Filters,
 			ingest:   in.ingest,
 			now:      in.now,
