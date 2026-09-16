@@ -160,3 +160,33 @@ func TestAnInMemoryLedgerIsRefused(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ledger.Close())
 }
+
+// Each Run gets its own repair pool. A pool left over from a finished run has
+// no workers, so a second Run would queue losses nobody walks — silently.
+func TestASecondRunRepairsToo(t *testing.T) {
+	polls := &countingPolls{}
+	intake, ledger, _ := newTestIntake(t, polls, nil)
+	intake.opts.RepairInterval = time.Hour
+	intake.opts.Minter = stubMinter{}
+
+	record := func() {
+		_, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, intake.now().Add(-time.Hour), time.Minute, eventfeed.Filters{})
+		require.NoError(t, err)
+	}
+
+	first, cancelFirst := context.WithCancel(context.Background())
+	record()
+	require.NoError(t, intake.resumeReconciliation(first))
+	require.Eventually(t, func() bool { return polls.calls.Load() >= 1 }, 5*time.Second, 5*time.Millisecond)
+	cancelFirst()
+	intake.repairs.Wait()
+	intake.releaseRepairWorkers()
+	after := polls.calls.Load()
+
+	second, cancelSecond := context.WithCancel(context.Background())
+	defer cancelSecond()
+	record()
+	require.NoError(t, intake.resumeReconciliation(second))
+	require.Eventually(t, func() bool { return polls.calls.Load() > after }, 5*time.Second, 5*time.Millisecond,
+		"the second run's repairs are queued to a pool with no workers")
+}

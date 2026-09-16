@@ -166,7 +166,6 @@ type Intake struct {
 	abortErr error
 
 	repairs     sync.WaitGroup
-	repairOnce  sync.Once
 	repairQueue chan Loss
 	// lifetime is Run's context. Repair walks are bound to it rather than to
 	// a connection, so a reconnect does not abandon a walk and a shutdown does
@@ -276,6 +275,9 @@ func (in *Intake) Run(ctx context.Context) error {
 	// out its sixty-second cadence, and an unfinished repair resumes on the
 	// next start from the loss record.
 	repairCtx, stopRepairs := context.WithCancel(ctx)
+	// Deferred first, so it runs last: the pool is forgotten only once its
+	// workers have stopped, and the next Run starts its own.
+	defer in.releaseRepairWorkers()
 	defer in.repairs.Wait()
 	defer stopRepairs()
 	in.lifetime = repairCtx
@@ -772,16 +774,27 @@ func (in *Intake) startRepair(loss Loss) {
 // can wait: a worker that added itself as it picked work up would be adding to
 // a group a shutdown may already be waiting on, which Go refuses outright.
 func (in *Intake) startRepairWorkers(ctx context.Context) {
-	in.repairOnce.Do(func() {
-		queue := make(chan Loss, repairQueueDepth)
-		in.mu.Lock()
-		in.repairQueue = queue
+	in.mu.Lock()
+	if in.repairQueue != nil {
 		in.mu.Unlock()
-		for range maxConcurrentRepairs {
-			in.repairs.Add(1)
-			go in.repairWorker(ctx, queue)
-		}
-	})
+		return
+	}
+	queue := make(chan Loss, repairQueueDepth)
+	in.repairQueue = queue
+	in.mu.Unlock()
+	for range maxConcurrentRepairs {
+		in.repairs.Add(1)
+		go in.repairWorker(ctx, queue)
+	}
+}
+
+// releaseRepairWorkers forgets a pool whose workers have stopped, so the next
+// Run starts its own. A queue left in place would take losses nobody walks,
+// and say nothing.
+func (in *Intake) releaseRepairWorkers() {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.repairQueue = nil
 }
 
 // repairWorker walks one loss at a time until ctx ends.
