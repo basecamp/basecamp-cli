@@ -644,6 +644,60 @@ func TestEnumeratingOutputModesSeeTheRows(t *testing.T) {
 	assert.Equal(t, "991\n992\n", out.String())
 }
 
+// The enumerating modes print rows alone, so a capped walk would otherwise
+// hand back an id list or a count that reads as the complete answer. The
+// notice reaches them on stderr, where it cannot corrupt the stream a script
+// is reading.
+func TestACappedWalkWarnsTheEnumeratingOutputModesToo(t *testing.T) {
+	next := feedBaseURL + feedEventsPath + "?position=pos-1"
+	wanted := "Stopped at --max-pages 1; more remains. " +
+		"Resume from here with: basecamp events poll --position pos-1"
+
+	for _, mode := range []struct {
+		name   string
+		format output.Format
+		stdout string
+	}{
+		{"ids", output.FormatIDs, "11\n"},
+		{"count", output.FormatCount, "1\n"},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK,
+				feedPageJSON("pos-1", next, 11),
+				feedPageJSON("pos-2", next, 12),
+			))
+			var stderr bytes.Buffer
+			app.Output = output.New(output.Options{Format: mode.format, Writer: out, ErrWriter: &stderr})
+
+			require.NoError(t, executeRecordingCommand(NewEventsCmd(), app,
+				"poll", "--since", "0", "--all", "--max-pages", "1"))
+
+			assert.Equal(t, mode.stdout, out.String())
+			assert.Equal(t, "notice: "+wanted+"\n", stderr.String())
+		})
+	}
+}
+
+// The inbox lane caps the same way and owes the same warning.
+func TestACappedInboxWalkWarnsTheEnumeratingOutputModesToo(t *testing.T) {
+	next := feedBaseURL + feedInboxPath + "?position=inbox-pos-1"
+	app, _, out := setupFeedApp(t, inboxRoute(http.StatusOK,
+		inboxPageJSON("inbox-pos-1", next, 991),
+		inboxPageJSON("inbox-pos-2", next, 992),
+	))
+	var stderr bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatIDs, Writer: out, ErrWriter: &stderr})
+
+	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app,
+		"--since", "0", "--all", "--max-pages", "1"))
+
+	assert.Equal(t, "991\n", out.String())
+	assert.Equal(t,
+		"notice: Stopped at --max-pages 1; more remains. "+
+			"Resume from here with: basecamp inbox --position inbox-pos-1\n",
+		stderr.String())
+}
+
 func TestContinuationOriginComparisonNormalizesDefaultPortsAndCase(t *testing.T) {
 	require.NoError(t, checkContinuation("https://3.basecampapi.com:443", feedBaseURL+feedEventsPath+"?position=p"))
 	require.NoError(t, checkContinuation(feedBaseURL, "HTTPS://3.BasecampAPI.com"+feedEventsPath+"?position=p"))

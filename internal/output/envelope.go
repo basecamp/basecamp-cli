@@ -90,7 +90,7 @@ const (
 type Options struct {
 	Format    Format
 	Writer    io.Writer
-	ErrWriter io.Writer // Diagnostic output (notices in quiet mode); defaults to os.Stderr.
+	ErrWriter io.Writer // Notices stdout cannot carry (see write); defaults to os.Stderr.
 	Verbose   bool
 	JQFilter  string // jq expression to apply to JSON output (built-in via gojq)
 }
@@ -210,13 +210,21 @@ func WithErrorStats(metrics *observability.SessionMetrics) ErrorResponseOption {
 }
 
 func (w *Writer) write(v any) error {
-	// In quiet mode (--agent/--quiet), surface diagnostic notices on stderr so
-	// automation consumers can detect degraded operations (e.g. unresolved
-	// mentions). Only notices marked as diagnostic emit here — informational
-	// notices like truncation warnings stay silent. This runs before the --jq
-	// early-return so that --agent --jq still emits the diagnostic.
-	if w.opts.Format == FormatQuiet {
-		if resp, ok := v.(*Response); ok && resp.noticeDiagnostic && resp.Notice != "" {
+	// Notices that stdout cannot carry go to stderr, so a machine-readable
+	// stream stays uncorrupted and the caller still hears them.
+	//
+	// Quiet mode (--agent/--quiet) prints the whole Data object, so only a
+	// degraded-operation diagnostic (an unresolved mention, say) needs the
+	// second channel; informational notices like truncation warnings stay
+	// silent. --ids-only and --count print rows alone — no envelope field
+	// survives them at all — so for those every notice is otherwise
+	// destroyed rather than relocated, and all of them emit here.
+	//
+	// This runs before the --jq early-return so that --agent --jq still
+	// emits the diagnostic.
+	if w.opts.Format == FormatQuiet || w.opts.Format == FormatIDs || w.opts.Format == FormatCount {
+		if resp, ok := v.(*Response); ok && resp.Notice != "" &&
+			(resp.noticeDiagnostic || w.opts.Format != FormatQuiet) {
 			// The notice may interpolate API-controlled strings and stderr is
 			// a terminal sink; sanitize and keep the diagnostic to one line.
 			// Sanitize first, then gate: an all-escape notice collapses to ""
@@ -604,6 +612,10 @@ func WithSummary(s string) ResponseOption {
 // WithNotice adds an informational notice to the response.
 // Use this for non-error messages like truncation warnings.
 // Like WithSummary, the value is stored verbatim; terminal sinks sanitize.
+//
+// Every format renders it: the envelope formats carry it in the response,
+// and the rows-only ones (--ids-only, --count) print it on stderr, since
+// their stdout has no field to carry it in.
 func WithNotice(s string) ResponseOption {
 	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = false }
 }
@@ -611,7 +623,9 @@ func WithNotice(s string) ResponseOption {
 // WithDiagnostic sets a notice that is also emitted to stderr in quiet mode.
 // Use this for degraded-operation warnings (e.g. unresolved mentions) that
 // automation consumers need to detect. Truncation and other informational
-// notices should use WithNotice instead.
+// notices should use WithNotice instead — which still reaches stderr under
+// --ids-only and --count; the distinction is quiet mode, whose stdout
+// already carries the whole payload.
 func WithDiagnostic(s string) ResponseOption {
 	return func(r *Response) { r.Notice = s; r.noticeDiagnostic = true }
 }

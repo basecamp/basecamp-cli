@@ -478,9 +478,14 @@ func checkContinuation(baseURL, raw string) error {
 // The envelope carries it for machines, but the rendered output is the rows —
 // and the generic renderer drops a field named "position" from objects
 // anyway, since on a to-do or a card that name means an ordering integer. So
-// the notice, which every format prints verbatim, carries the whole resume
-// command. A walk that stopped at its page cap says so in the same sentence,
-// because "more remains" and "here is where to continue" are one thought.
+// the notice carries the whole resume command. A walk that stopped at its
+// page cap says so in the same sentence, because "more remains" and "here is
+// where to continue" are one thought.
+//
+// Every format reaches it: the envelope formats render it, and --ids-only
+// and --count — whose stdout is rows alone — get it on stderr. Without that
+// second channel a capped walk prints an id list or a count that reads as
+// the complete answer.
 func (r feedRequest) resumeNotice(position string, capped bool, maxPages int) string {
 	notice := ""
 	if capped {
