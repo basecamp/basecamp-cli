@@ -8377,7 +8377,7 @@
     },
     "/{accountId}/events.json": {
       "get": {
-        "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: the body envelope, not the Link header. `position` is the\ndurable cursor (persist it only after processing the page's events); `next`\nis an absolute continuation URL present only while this walk has more to\nserve. Not wired into the generic Link paginator \u2014 see the section note.\n\n**Errors.** 400 for a malformed position (resume with `since=`) or a malformed\nfilter (the body names the filter; a position reset will not help) \u2014 both the\nflat `{error}` body. 409 (FeedFilterMismatchError) when the position was\nminted for a different filter set. 410 (FeedPositionGoneError) when the\nposition predates the feed's epoch; follow its `resume` URL.",
+        "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: the body envelope, not the Link header. `position` is the\ndurable cursor (persist it only after processing the page's events); `next`\nis an absolute continuation URL present only while this walk has more to\nserve. Not wired into the generic Link paginator \u2014 see the section note.\n\n**Errors.** 400 (FeedRequestError) for a malformed position (resume with\n`since=`) or a malformed filter (fix the filters; a position reset will not\nhelp), told apart by its optional `reason` and undifferentiated when `reason`\nis absent. 409 (FeedFilterMismatchError) when the position was minted for a\ndifferent filter set. 410 (FeedPositionGoneError) when the position predates\nthe feed's epoch; its `resume` re-enters at the epoch.",
         "operationId": "PollEvents",
         "parameters": [
           {
@@ -8476,11 +8476,11 @@
             }
           },
           "400": {
-            "description": "BadRequestError 400 response",
+            "description": "FeedRequestError 400 response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                  "$ref": "#/components/schemas/FeedRequestErrorResponseContent"
                 }
               }
             }
@@ -9388,7 +9388,7 @@
     },
     "/{accountId}/inbox.json": {
       "get": {
-        "description": "Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403.\n\nThe inbox is the low-noise \"someone addressed you\" lane as its own resource\nrather than a filter over the account feed. **Agents only for now**: any\nother principal receives 403.\n\nAn item is a first-class delivery with its own identity: one event can\naddress the same principal for several reasons, and each reason is its own\nitem. Deduplicate by `addressing_id`, never by event id. Items are never\nself-addressed, are kept for 30 days, and are dropped at read time when the\nevent is no longer readable.\n\n**Entry**: `since=0` replays the earliest retained items, `since=now` enters\nat the present, `position` resumes. Inbox positions are bound to the\naccount, the principal, and the filter set, and are never interchangeable\nwith feed positions.\n\n**Pagination**: the body envelope (`items`, `position`, `next`), exactly as\nPollEvents \u2014 not the Link header, and not the generic paginator.\n\n**Errors** follow PollEvents, except that 403 carries no body \u2014 the agent\nguard's bare `head :forbidden` (BareForbiddenError) \u2014 and that 410\n(FeedPositionGoneError) here means the position fell behind the retention\nwindow: `epoch_after_id` is absent and `resume` re-enters at `since=0`,\nthe earliest retained item.",
+        "description": "Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403.\n\nThe inbox is the low-noise \"someone addressed you\" lane as its own resource\nrather than a filter over the account feed. **Agents only for now**: any\nother principal receives 403.\n\nAn item is a first-class delivery with its own identity: one event can\naddress the same principal for several reasons, and each reason is its own\nitem. Deduplicate by `addressing_id`, never by event id. Items are never\nself-addressed, are kept for 30 days, and are dropped at read time when the\nevent is no longer readable.\n\n**Entry**: `since=0` replays the earliest retained items, `since=now` enters\nat the present, `position` resumes. Inbox positions are bound to the\naccount, the principal, and the filter set, and are never interchangeable\nwith feed positions.\n\n**Pagination**: the body envelope (`items`, `position`, `next`), exactly as\nPollEvents \u2014 not the Link header, and not the generic paginator.\n\n**Errors** follow PollEvents (FeedRequestError 400, FeedFilterMismatchError\n409), except that 403 carries no body \u2014 the agent guard's bare\n`head :forbidden` (BareForbiddenError) \u2014 and that the 410 is the inbox's own\nInboxPositionGoneError: the position fell behind the retention window, there\nis no epoch, and `resume` re-enters at `since=0`, the earliest retained item\n\u2014 not the feed's recovery, and not interchangeable with it.",
         "operationId": "PollInbox",
         "parameters": [
           {
@@ -9460,11 +9460,11 @@
             }
           },
           "400": {
-            "description": "BadRequestError 400 response",
+            "description": "FeedRequestError 400 response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                  "$ref": "#/components/schemas/FeedRequestErrorResponseContent"
                 }
               }
             }
@@ -9493,11 +9493,11 @@
             }
           },
           "410": {
-            "description": "FeedPositionGoneError 410 response",
+            "description": "InboxPositionGoneError 410 response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeedPositionGoneErrorResponseContent"
+                  "$ref": "#/components/schemas/InboxPositionGoneErrorResponseContent"
                 }
               }
             }
@@ -31393,24 +31393,41 @@
       },
       "FeedPositionGoneErrorResponseContent": {
         "type": "object",
-        "description": "410 from the event feed's poll lanes: the held `position` predates what the\nlane can still serve. On PollEvents that is the feed's epoch \u2014 an operational\nfence that can be raised \u2014 and `epoch_after_id` names it; on PollInbox it is\nthe inbox's 30-day retention window, and `epoch_after_id` is absent. Either\nway `resume` is an absolute URL that re-enters the same lane with the\nrequest's canonical filters preserved: at the epoch (`since=<epoch_after_id>`)\nfor the feed, at the earliest retained item (`since=0`) for the inbox.\nConsumers validate the URL (same origin as the API base, no scheme downgrade)\nbefore following it \u2014 SPEC.md \u00a723 \"Continuation and Resume URL Validation\".",
+        "description": "410 from PollEvents: the held `position` predates the feed's epoch \u2014 an\noperational fence that can be raised. `epoch_after_id` names the epoch and\n`resume` is an absolute URL that re-enters the feed AT THE EPOCH\n(`since=<epoch_after_id>`) with the request's canonical filters preserved,\nso the servable history above the fence is not skipped. Not interchangeable\nwith the inbox's InboxPositionGoneError, whose recovery re-enters at\n`since=0`. Consumers validate the URL (same origin as the API base, no scheme\ndowngrade) before following it \u2014 SPEC.md \u00a723 \"Continuation and Resume URL\nValidation\".",
         "properties": {
           "error": {
             "type": "string"
           },
           "epoch_after_id": {
             "type": "integer",
-            "description": "The feed's epoch: the event id after which history is servable. Feed only.",
+            "description": "The feed's epoch: the event id after which history is servable.",
             "format": "int64"
           },
           "resume": {
             "type": "string",
-            "description": "Absolute re-entry URL for the same lane, filters preserved."
+            "description": "Absolute re-entry URL for the feed, at the epoch, filters preserved."
           }
         },
         "required": [
+          "epoch_after_id",
           "error",
           "resume"
+        ]
+      },
+      "FeedRequestErrorResponseContent": {
+        "type": "object",
+        "description": "400 from the event feed's poll lanes (PollEvents, PollInbox). Two distinct\ncases share the status: a malformed `position` (recover by re-entering with\n`since=`) and a malformed filter (fix the filters; a position reset will not\nhelp). `reason` tells them apart \u2014 `invalid_position` or `invalid_filter`\n(bc3 #13362) \u2014 and is OPTIONAL: a server that has not shipped it answers the\nflat `{error}` body, and a consumer that finds `reason` absent must treat the\n400 as undifferentiated and surface it rather than guess between recovering\nand stopping.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`invalid_position` (re-enter with `since=`) or `invalid_filter` (fix the\nfilters). Absent from servers that predate bc3 #13362: then the 400 is\nundifferentiated."
+          }
+        },
+        "required": [
+          "error"
         ]
       },
       "FieldErrorMap": {
@@ -32834,6 +32851,23 @@
           "addressing_id",
           "event",
           "reason"
+        ]
+      },
+      "InboxPositionGoneErrorResponseContent": {
+        "type": "object",
+        "description": "410 from PollInbox: the held `position` fell behind the inbox's 30-day\nretention window. There is no epoch; `resume` is an absolute URL that\nre-enters the inbox at `since=0`, the earliest retained item \u2014 exactly-once\ncontinuation, since a stale position has seen none of the retained backlog.\nA distinct shape from the feed's FeedPositionGoneError on purpose: the two\nrecoveries are not interchangeable, and a consumer must not handle one lane's\n410 with the other's arm. Validate the URL before following it, as for the\nfeed.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "resume": {
+            "type": "string",
+            "description": "Absolute re-entry URL for the inbox, at `since=0`, filters preserved."
+          }
+        },
+        "required": [
+          "error",
+          "resume"
         ]
       },
       "InternalServerErrorResponseContent": {

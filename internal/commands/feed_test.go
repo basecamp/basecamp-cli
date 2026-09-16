@@ -307,7 +307,10 @@ func TestEventsPollPositionGoneCarriesTheResumeURLAndTheEpoch(t *testing.T) {
 	assert.Equal(t, "Re-enter with: basecamp events poll --since 900", cliErr.Hint)
 }
 
-func TestEventsPollBadRequestKeepsTheServersMessage(t *testing.T) {
+// A 400 carrying no reason is undifferentiated: a malformed position and a
+// malformed filter have opposite remedies, so the server's message stands on
+// its own rather than being decorated with a guess.
+func TestEventsPollBadRequestWithoutAReasonKeepsTheServersMessageAndOffersNoRemedy(t *testing.T) {
 	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusBadRequest,
 		`{"error":"unknown type: message.exploded"}`))
 
@@ -316,6 +319,43 @@ func TestEventsPollBadRequestKeepsTheServersMessage(t *testing.T) {
 	cliErr := requireFeedError(t, err)
 	assert.Contains(t, cliErr.Error(), "message.exploded")
 	assert.Equal(t, http.StatusBadRequest, cliErr.HTTPStatus)
+	assert.Empty(t, cliErr.Hint)
+}
+
+func TestEventsPollBadRequestNamesTheRemedyItsReasonImplies(t *testing.T) {
+	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusBadRequest,
+		`{"error":"Unrecognized position.","reason":"invalid_position"}`))
+
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--position", "garbled",
+		"--types", "message.created")
+
+	cliErr := requireFeedError(t, err)
+	assert.Equal(t, http.StatusBadRequest, cliErr.HTTPStatus)
+	assert.Equal(t, "Re-enter with: basecamp events poll --since now --types message.created", cliErr.Hint)
+}
+
+func TestEventsPollBadFilterSaysAPositionResetWillNotHelp(t *testing.T) {
+	app, _, _ := setupFeedApp(t, eventsRoute(http.StatusBadRequest,
+		`{"error":"unknown type: message.exploded","reason":"invalid_filter"}`))
+
+	err := executeRecordingCommand(NewEventsCmd(), app, "poll", "--types", "message.exploded")
+
+	cliErr := requireFeedError(t, err)
+	assert.Contains(t, cliErr.Hint, "a position reset will not help")
+}
+
+// The two lanes' 410s are distinct SDK types on purpose. A feed 410 body
+// reaching the inbox lane must not be read as the inbox's, and the other way
+// round: the recoveries are not interchangeable.
+func TestInboxDoesNotReadTheFeeds410(t *testing.T) {
+	app, _, _ := setupFeedApp(t, inboxRoute(http.StatusGone,
+		`{"error":"position predates the feed epoch","epoch_after_id":900,"resume":"`+
+			feedBaseURL+feedEventsPath+`?since=900"}`))
+
+	err := executeRecordingCommand(NewInboxCmd(), app, "--position", "ancient")
+
+	cliErr := requireFeedError(t, err)
+	assert.NotContains(t, cliErr.Hint, "--since 900")
 }
 
 func TestEventsPollRejectsUnservableFlagsBeforeAnyRequest(t *testing.T) {

@@ -43,16 +43,21 @@ const feedDefaultMaxPages = 50
 // being servable. The feed re-enters at the epoch the 410 body names; the
 // inbox re-enters at since=0, the earliest item still retained.
 type feedLane struct {
-	name        string
-	pollCmd     string
-	sinceHint   string
-	resumeSince string
+	name      string
+	pollCmd   string
+	sinceHint string
 	// continuationFilters reads the filter flags a continuation or resume URL
 	// carries, through the lane's own parser: the two lanes have different
 	// filter dimensions and their URLs are never interchangeable.
 	continuationFilters func(string) ([]flagValues, error)
-	forbiddenMsg        string
-	forbiddenHint       string
+	// positionGone recognizes this lane's 410 and answers with the --since
+	// that re-enters it and the server's resume URL. The SDK gives the two
+	// lanes distinct types precisely so one arm cannot silently handle the
+	// other's: the feed re-enters at the epoch, the inbox at the earliest
+	// retained item, and those recoveries are not interchangeable.
+	positionGone  func(error) (since, resume string, ok bool)
+	forbiddenMsg  string
+	forbiddenHint string
 }
 
 var (
@@ -61,17 +66,38 @@ var (
 		pollCmd:             "basecamp events poll",
 		sinceHint:           "Pass an event id to start after, 'now' to enter at the present, or 0 to replay served history",
 		continuationFilters: eventsContinuationFilters,
+		positionGone:        eventsPositionGone,
 	}
 	inboxLane = feedLane{
 		name:                "inbox item",
 		pollCmd:             "basecamp inbox",
 		sinceHint:           "Pass an inbox item id to start after, 'now' to enter at the present, or 0 for the earliest retained items",
-		resumeSince:         basecamp.SinceEpoch,
 		continuationFilters: inboxContinuationFilters,
+		positionGone:        inboxPositionGone,
 		forbiddenMsg:        "The inbox is served to agent principals only",
 		forbiddenHint:       "Authenticate as an agent, or use 'basecamp events poll' for the account-wide feed",
 	}
 )
+
+// eventsPositionGone reads the feed's 410, which names the epoch the feed can
+// still serve from.
+func eventsPositionGone(err error) (string, string, bool) {
+	var gone *basecamp.FeedPositionGoneError
+	if !errors.As(err, &gone) {
+		return "", "", false
+	}
+	return strconv.FormatInt(gone.EpochAfterID, 10), gone.Resume, true
+}
+
+// inboxPositionGone reads the inbox's 410, which has no epoch: the position
+// fell behind the retention window, and since=0 is the earliest retained item.
+func inboxPositionGone(err error) (string, string, bool) {
+	var gone *basecamp.InboxPositionGoneError
+	if !errors.As(err, &gone) {
+		return "", "", false
+	}
+	return basecamp.SinceEpoch, gone.Resume, true
+}
 
 func eventsContinuationFilters(raw string) ([]flagValues, error) {
 	opts, err := basecamp.PollEventsOptionsFromURL(raw)
@@ -212,17 +238,13 @@ type feedRequest struct {
 // filter value outside the contract's alphabet falls back to the filters this
 // request was invoked with: a hint is meant to be pasted, and half-rendered
 // server text is not.
-func (r feedRequest) resumeCommand(gone *basecamp.FeedPositionGoneError) string {
-	since := r.lane.resumeSince
-	if gone.EpochAfterID != nil {
-		since = strconv.FormatInt(*gone.EpochAfterID, 10)
-	}
+func (r feedRequest) resumeCommand(since, resume string) string {
 	if since == "" {
 		since = basecamp.SinceNow
 	}
 	command := fmt.Sprintf("%s --since %s", r.lane.pollCmd, since)
 
-	if filters, ok := r.resumeFilters(gone.Resume); ok {
+	if filters, ok := r.resumeFilters(resume); ok {
 		return command + filters
 	}
 	return command + r.filters
@@ -341,12 +363,14 @@ func renderableFilterValue(value string) bool {
 //	409 → usage. The held position was minted for different filters; the fix
 //	      is the caller's, and both digests name which side is which.
 //	410 → not found. The position is no longer servable. Not the caller's
-//	      mistake, so the message carries the lane's own re-entry point.
+//	      mistake, so the message carries the lane's own re-entry point, read
+//	      through the lane's own 410 type.
 //	403 → forbidden, with the lane's documented reason (the inbox is
 //	      agents-only for now).
-//	400 → whatever the server said. A malformed position and a malformed
-//	      filter have different fixes and the body says which; guessing
-//	      between them would send the caller to the wrong one.
+//	400 → the server's message, plus the remedy its reason names: re-enter
+//	      for a malformed position, fix the filters for a malformed filter.
+//	      A 400 carrying no reason gets no hint — the two remedies are
+//	      opposite, and guessing sends the caller to the wrong one.
 func feedError(req feedRequest, err error) error {
 	var mismatch *basecamp.FeedFilterMismatchError
 	if errors.As(err, &mismatch) {
@@ -362,19 +386,33 @@ func feedError(req feedRequest, err error) error {
 		}
 	}
 
-	var gone *basecamp.FeedPositionGoneError
-	if errors.As(err, &gone) {
+	if since, resume, ok := req.lane.positionGone(err); ok {
 		message := fmt.Sprintf("Position is no longer servable for the %s feed", req.lane.name)
-		if gone.Resume != "" && req.followable(gone.Resume) {
-			message = fmt.Sprintf("%s. Resume URL: %s", message, gone.Resume)
+		if resume != "" && req.followable(resume) {
+			message = fmt.Sprintf("%s. Resume URL: %s", message, resume)
 		}
 		return &output.Error{
 			Code:       output.CodeNotFound,
 			Message:    message,
-			Hint:       "Re-enter with: " + req.resumeCommand(gone),
+			Hint:       "Re-enter with: " + req.resumeCommand(since, resume),
 			HTTPStatus: http.StatusGone,
 			Cause:      err,
 		}
+	}
+
+	var request *basecamp.FeedRequestError
+	if errors.As(err, &request) {
+		switch request.Reason {
+		case basecamp.FeedReasonInvalidPosition:
+			return feedRequestError(request, err,
+				fmt.Sprintf("Re-enter with: %s --since now%s", req.lane.pollCmd, req.filters))
+		case basecamp.FeedReasonInvalidFilter:
+			return feedRequestError(request, err,
+				"Fix the filters and re-run; a position reset will not help")
+		}
+		// No reason: the server did not say which case this is, and the two
+		// have opposite remedies. Surface its message with no hint rather
+		// than send the caller to the wrong one.
 	}
 
 	var sdkErr *basecamp.Error
@@ -389,6 +427,19 @@ func feedError(req feedRequest, err error) error {
 	}
 
 	return convertSDKError(err)
+}
+
+// feedRequestError renders a 400 with the remedy its reason names, keeping
+// the server's own message and the SDK's classification.
+func feedRequestError(request *basecamp.FeedRequestError, cause error, hint string) error {
+	return &output.Error{
+		Code:       request.Err.Code,
+		Message:    request.Err.Message,
+		Hint:       hint,
+		HTTPStatus: request.Err.HTTPStatus,
+		Retryable:  request.Err.Retryable,
+		Cause:      cause,
+	}
 }
 
 // checkContinuation is the caller-side obligation the SDK's
