@@ -792,6 +792,70 @@ func TestWriterCountFormatSingleItem(t *testing.T) {
 	assert.Equal(t, "1\n", output)
 }
 
+// TestWriterIDsFormatNoticeOnStderr and its --count twin verify the rows-only
+// formats still deliver a notice. Their stdout has no envelope field to carry
+// one, so without the stderr channel a capped walk prints an id list or a
+// count that reads as the complete answer.
+func TestWriterIDsFormatNoticeOnStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{
+		Format:    FormatIDs,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	data := []map[string]any{{"id": 1}, {"id": 2}}
+	err := w.OK(data, WithNotice("Stopped at --max-pages 2; more remains."))
+	require.NoError(t, err)
+
+	assert.Equal(t, "1\n2\n", stdout.String(), "notice must not corrupt the id stream")
+	assert.Contains(t, stderr.String(), "Stopped at --max-pages 2; more remains.")
+}
+
+func TestWriterCountFormatNoticeOnStderr(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{
+		Format:    FormatCount,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	data := []map[string]any{{"id": 1}, {"id": 2}}
+	err := w.OK(data, WithNotice("Stopped at --max-pages 2; more remains."))
+	require.NoError(t, err)
+
+	assert.Equal(t, "2\n", stdout.String(), "notice must not corrupt the count stream")
+	assert.Contains(t, stderr.String(), "Stopped at --max-pages 2; more remains.")
+}
+
+func TestWriterIDsFormatNoNoticeLeavesStderrEmpty(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{
+		Format:    FormatIDs,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	err := w.OK([]map[string]any{{"id": 1}}, WithSummary("all good"))
+	require.NoError(t, err)
+
+	assert.Empty(t, stderr.String())
+}
+
+func TestWriterIDsFormatNoticeIsSanitized(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := New(Options{
+		Format:    FormatIDs,
+		Writer:    &stdout,
+		ErrWriter: &stderr,
+	})
+
+	err := w.OK([]map[string]any{{"id": 1}}, WithNotice("\x1b]0;evil\x07more\nremains"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "notice: more remains\n", stderr.String())
+}
+
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
 

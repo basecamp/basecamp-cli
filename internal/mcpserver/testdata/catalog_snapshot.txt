@@ -313,6 +313,16 @@ ACTIONS (RO = read-only):
 - get_everything_unassigned_cards (RO, paginated): Open, unassigned cards across all accessible projects, grouped by project (paginated)
 - get_everything_unassigned_todos (RO, paginated): Open, unassigned to-dos across all accessible projects, grouped by project (paginated)
 
+== basecamp_eventfeed
+The account event feed: poll events from a resumable position, and poll the agent inbox of addressed items. Pages carry a position and a continuation URL rather than page numbers; deduplicate events by id and inbox items by addressing_id, and refetch the referenced recording before acting on it. Minting a live-stream ticket is not served here — the ticket is a bearer this surface cannot use, and 'basecamp events ticket' is where it lives.
+
+Gateway tool: call with {"action": "...", "params": {...}}.
+Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
+
+ACTIONS (RO = read-only):
+- poll_events (RO): Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page)
+- poll_inbox (RO): Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403
+
 == basecamp_clientside
 The Clientside: client approvals, correspondences, replies, and client visibility of recordings.
 

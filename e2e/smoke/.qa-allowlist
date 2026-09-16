@@ -42,3 +42,7 @@ test_cards_move_to_wormhole_needs_a_linked_wormhole_and_is_destructive # needs l
 
 # Bubble Ups — BC5-added endpoint, may not exist on all QA environments
 test_notifications_bubbleups_lists_bubble_ups # endpoint not available on some servers — smoke
+
+# Inbox — served to agent principals only; a person's smoke token gets 403,
+# which the test asserts before marking the gap.
+test_inbox_polls_addressed_items # agents-only lane, smoke token is a person — smoke

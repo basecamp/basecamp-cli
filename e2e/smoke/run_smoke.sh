@@ -76,6 +76,7 @@ level0=(
   "$SMOKE_DIR"/smoke_checkins.bats
   "$SMOKE_DIR"/smoke_schedule.bats
   "$SMOKE_DIR"/smoke_config_local.bats
+  "$SMOKE_DIR"/smoke_event_feed.bats
 )
 level0_exist=()
 for f in "${level0[@]}"; do

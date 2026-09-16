@@ -13,7 +13,8 @@
 # Tag patch: the toolkit catalog joins operations to domains by tag (exactly
 # one per operation, refused otherwise), and the SDK export used to leave a
 # handful of operations untagged. It no longer does, so PATCHED_TAGS is empty
-# and the only divergence from the upstream export is EXCLUDED_OPERATIONS.
+# and the only divergences from the upstream export are EXCLUDED_OPERATIONS
+# and POLICY_EXCLUDED_OPERATIONS.
 # The table stays as a seam: an operation that grew an upstream tag is a
 # sync-time conflict rather than a silent double-tag, and an operation that
 # arrives untagged stops the sync rather than failing later at Load.
@@ -22,6 +23,14 @@
 # can't ride the JSON tool-call convention, and the toolkit refuses non-JSON
 # bodies at load, so they are dropped from both model files here. Uploads
 # stay a CLI affair (basecamp attach / upload).
+#
+# CreateStreamTicket is excluded for the opposite reason (POLICY_EXCLUDED_
+# OPERATIONS, which is not held to the "still not JSON" check): it rides the
+# convention fine, but its result is a replayable bearer and a URL that embeds
+# it, and the dispatcher returns a result verbatim into a model transcript
+# with no reveal opt-in. Nothing on this surface could use the ticket anyway —
+# opening the stream needs a WebSocket, which a JSON tool call is not — so the
+# mint stays a CLI affair (basecamp events ticket --show-secret).
 #
 # Usage: scripts/sync-mcp-model.sh [path-to-basecamp-sdk-checkout]
 set -eu
@@ -54,6 +63,13 @@ EXCLUDED_OPERATIONS = {
     "UpdateAccountLogo",
 }
 
+# Excluded by policy rather than by body shape, so these are not held to the
+# "still not JSON" check above: they would ride the convention, we decline to
+# serve them.
+POLICY_EXCLUDED_OPERATIONS = {
+    "CreateStreamTicket",
+}
+
 PATCHED_TAGS: dict[str, str] = {
     # Empty: basecamp-sdk now tags every exported operation itself
     # (basecamp-sdk#878). Kept as a seam, because the export has left
@@ -80,6 +96,10 @@ for path in list(doc["paths"]):
             del methods[method]
             excluded.append(oid)
             continue
+        if oid in POLICY_EXCLUDED_OPERATIONS:
+            del methods[method]
+            excluded.append(oid)
+            continue
         tags = op.get("tags") or []
         if oid in PATCHED_TAGS:
             if tags:
@@ -94,9 +114,9 @@ for path in list(doc["paths"]):
 missing = sorted(set(PATCHED_TAGS) - set(patched))
 if missing:
     sys.exit(f"PATCHED_TAGS entries not found in the export: {missing}")
-missing = sorted(set(EXCLUDED_OPERATIONS) - set(excluded))
+missing = sorted((EXCLUDED_OPERATIONS | POLICY_EXCLUDED_OPERATIONS) - set(excluded))
 if missing:
-    sys.exit(f"EXCLUDED_OPERATIONS entries not found in the export: {missing}")
+    sys.exit(f"excluded operations not found in the export: {missing}")
 
 with open(f"{dest}/openapi.json", "w") as f:
     json.dump(doc, f, indent=2)
@@ -106,13 +126,13 @@ with open(f"{dest}/openapi.json", "w") as f:
 # behavior model too.
 with open(f"{sdk}/behavior-model.json") as f:
     bm = json.load(f)
-for oid in EXCLUDED_OPERATIONS:
+for oid in EXCLUDED_OPERATIONS | POLICY_EXCLUDED_OPERATIONS:
     bm["operations"].pop(oid, None)
 with open(f"{dest}/behavior-model.json", "w") as f:
     json.dump(bm, f, indent=2)
     f.write("\n")
 
-print(f"patched tags onto {len(patched)} untagged operations; excluded {len(excluded)} binary-upload operations")
+print(f"patched tags onto {len(patched)} untagged operations; excluded {len(excluded)} operations")
 PY
 
 cat > "$dest/PROVENANCE.json" <<JSON
@@ -122,7 +142,7 @@ cat > "$dest/PROVENANCE.json" <<JSON
   "ref": "$ref",
   "files": ["behavior-model.json", "openapi.json"],
   "synced_by": "scripts/sync-mcp-model.sh",
-  "patches": "binary-upload operations dropped (EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
+  "patches": "binary-upload operations dropped because the toolkit refuses their non-JSON bodies (EXCLUDED_OPERATIONS) and the stream-ticket mint dropped by policy (POLICY_EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
 }
 JSON
 

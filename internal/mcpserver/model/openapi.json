@@ -8375,6 +8375,191 @@
         }
       }
     },
+    "/{accountId}/events.json": {
+      "get": {
+        "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: the body envelope, not the Link header. `position` is the\ndurable cursor (persist it only after processing the page's events); `next`\nis an absolute continuation URL present only while this walk has more to\nserve. Not wired into the generic Link paginator \u2014 see the section note.\n\n**Errors.** 400 (FeedRequestError) for a malformed position (resume with\n`since=`) or a malformed filter (fix the filters; a position reset will not\nhelp), told apart by its optional `reason` and undifferentiated when `reason`\nis absent. 409 (FeedFilterMismatchError) when the position was minted for a\ndifferent filter set. 410 (FeedPositionGoneError) when the position predates\nthe feed's epoch; its `resume` re-enters at the epoch.",
+        "operationId": "PollEvents",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Entry point: a decimal event id (start after it; `0` replays served\nhistory back to the epoch), or the literal `now` (skip history). Mutually\nexclusive with `position` in practice; omit both to enter at the present.",
+            "schema": {
+              "type": "string",
+              "description": "Entry point: a decimal event id (start after it; `0` replays served\nhistory back to the epoch), or the literal `now` (skip history). Mutually\nexclusive with `position` in practice; omit both to enter at the present."
+            }
+          },
+          {
+            "name": "position",
+            "in": "query",
+            "description": "Resume token from a previous page's `position`. Opaque and signed; never\nconstructed or parsed client-side.",
+            "schema": {
+              "type": "string",
+              "description": "Resume token from a previous page's `position`. Opaque and signed; never\nconstructed or parsed client-side."
+            }
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "description": "Comma-separated event types from the catalog (e.g. `message.created,comment.created`).",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated event types from the catalog (e.g. `message.created,comment.created`)."
+            }
+          },
+          {
+            "name": "buckets",
+            "in": "query",
+            "description": "Comma-separated bucket (project) ids, at most 100.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated bucket (project) ids, at most 100."
+            }
+          },
+          {
+            "name": "creators",
+            "in": "query",
+            "description": "Comma-separated creator person ids, at most 100.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated creator person ids, at most 100."
+            }
+          },
+          {
+            "name": "performers",
+            "in": "query",
+            "description": "Comma-separated effective-performer ids (the agent on a delegated action,\nelse the creator), at most 100. The literal `self` means the request's own\neffective actor and is resolved server-side before filtering.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated effective-performer ids (the agent on a delegated action,\nelse the creator), at most 100. The literal `self` means the request's own\neffective actor and is resolved server-side before filtering."
+            }
+          },
+          {
+            "name": "exclude_performers",
+            "in": "query",
+            "description": "Comma-separated effective-performer ids to exclude, at most 100; `self`\nas on `performers`. `exclude_performers=self` is the loop guard for an\nagent that acts on what it hears.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated effective-performer ids to exclude, at most 100; `self`\nas on `performers`. `exclude_performers=self` is the loop guard for an\nagent that acts on what it hears."
+            }
+          },
+          {
+            "name": "actor_types",
+            "in": "query",
+            "description": "Comma-separated actor kinds: `agent`, `person`, or both. A filter, not a\ndefault \u2014 agent activity is real account activity.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated actor kinds: `agent`, `person`, or both. A filter, not a\ndefault \u2014 agent activity is real account activity."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PollEvents 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollEventsResponseContent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FeedRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "FeedFilterMismatchError 409 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedFilterMismatchErrorResponseContent"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "FeedPositionGoneError 410 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedPositionGoneErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "EventFeed"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/files.json": {
       "get": {
         "description": "Get every file recording across all accessible projects, newest-first (paginated).\nHeterogeneous: uploads and Basecamp documents carry their\nstandard recording shapes, while rich-text attachments are wrapped in a\nrecording envelope plus an `attachable_sgid` and blob metadata. Modeled as\nan optional-field superset (EverythingFile) so one element type decodes any\nvariant.",
@@ -9112,6 +9297,157 @@
         "x-basecamp-write-semantics": {
           "mode": "replace",
           "clearsOmitted": true
+        }
+      }
+    },
+    "/{accountId}/inbox.json": {
+      "get": {
+        "description": "Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403.\n\nThe inbox is the low-noise \"someone addressed you\" lane as its own resource\nrather than a filter over the account feed. **Agents only for now**: any\nother principal receives 403.\n\nAn item is a first-class delivery with its own identity: one event can\naddress the same principal for several reasons, and each reason is its own\nitem. Deduplicate by `addressing_id`, never by event id. Items are never\nself-addressed, are kept for 30 days, and are dropped at read time when the\nevent is no longer readable.\n\n**Entry**: `since=0` replays the earliest retained items, `since=now` enters\nat the present, `position` resumes. Inbox positions are bound to the\naccount, the principal, and the filter set, and are never interchangeable\nwith feed positions.\n\n**Pagination**: the body envelope (`items`, `position`, `next`), exactly as\nPollEvents \u2014 not the Link header, and not the generic paginator.\n\n**Errors** follow PollEvents (FeedRequestError 400, FeedFilterMismatchError\n409), except that 403 carries no body \u2014 the agent guard's bare\n`head :forbidden` (BareForbiddenError) \u2014 and that the 410 is the inbox's own\nInboxPositionGoneError: the position fell behind the retention window, there\nis no epoch, and `resume` re-enters at `since=0`, the earliest retained item\n\u2014 not the feed's recovery, and not interchangeable with it.",
+        "operationId": "PollInbox",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Entry point: `0` (earliest retained), `now` (present), or a decimal item\nid to start after.",
+            "schema": {
+              "type": "string",
+              "description": "Entry point: `0` (earliest retained), `now` (present), or a decimal item\nid to start after."
+            }
+          },
+          {
+            "name": "position",
+            "in": "query",
+            "description": "Resume token from a previous inbox page's `position`.",
+            "schema": {
+              "type": "string",
+              "description": "Resume token from a previous inbox page's `position`."
+            }
+          },
+          {
+            "name": "reasons",
+            "in": "query",
+            "description": "Comma-separated addressing reasons: `mentioned`, `assigned`, `subscribed`,\n`watched`, `pinged`, `boosted`.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated addressing reasons: `mentioned`, `assigned`, `subscribed`,\n`watched`, `pinged`, `boosted`."
+            }
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "description": "Comma-separated event types, as a narrowing filter.",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated event types, as a narrowing filter."
+            }
+          },
+          {
+            "name": "buckets",
+            "in": "query",
+            "description": "Comma-separated bucket ids, as a narrowing filter (at most 100).",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated bucket ids, as a narrowing filter (at most 100)."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PollInbox 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PollInboxResponseContent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "FeedRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "BareForbiddenError 403 response"
+          },
+          "409": {
+            "description": "FeedFilterMismatchError 409 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedFilterMismatchErrorResponseContent"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "InboxPositionGoneError 410 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxPositionGoneErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "EventFeed"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
         }
       }
     },
@@ -29987,6 +30323,40 @@
       "CreateScheduleEntryResponseContent": {
         "$ref": "#/components/schemas/ScheduleEntry"
       },
+      "CreateStreamTicketResponseContent": {
+        "type": "object",
+        "description": "A minted stream ticket. `url` already carries the ticket in its query\nstring; connect to it verbatim.",
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "The signed ticket \u2014 an opaque bearer credential, never parsed or logged.",
+            "format": "password",
+            "x-basecamp-sensitive": {
+              "category": "credential",
+              "redact": true
+            }
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Ticket lifetime in seconds (about 120). Server-owned: expiry is arbitrated\nby the server, so mint fresh per connection rather than scheduling on it.",
+            "format": "int32"
+          },
+          "url": {
+            "type": "string",
+            "description": "The exact WebSocket URL to connect to, ticket included. Sensitive because\nit embeds the ticket.",
+            "format": "password",
+            "x-basecamp-sensitive": {
+              "category": "credential",
+              "redact": true
+            }
+          }
+        },
+        "required": [
+          "expires_in",
+          "ticket",
+          "url"
+        ]
+      },
       "CreateTemplateLibraryCopyRequestContent": {
         "type": "object",
         "properties": {
@@ -30654,6 +31024,9 @@
           "creator": {
             "$ref": "#/components/schemas/Person"
           },
+          "performed_by": {
+            "$ref": "#/components/schemas/Person"
+          },
           "boosts_count": {
             "type": "integer",
             "format": "int32"
@@ -30841,6 +31214,135 @@
             "x-go-type-skip-optional-pointer": true
           }
         }
+      },
+      "FeedEvent": {
+        "type": "object",
+        "description": "One feed row: a thin pointer, not resource state. Refetch the referenced\nrecording through the canonical resource APIs before acting on it. The same\nshape rides the inbox (`InboxItem.event`) and, with two transport-only\nextras, the live stream.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Feed-global event id; the poll lane serves ids in strict ascending order.",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Event kind (e.g. `message_created`)."
+          },
+          "action": {
+            "type": "string",
+            "description": "The action that produced the event (e.g. `created`)."
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Cataloged event type (e.g. `message.created`). Only cataloged types are served."
+          },
+          "bucket_id": {
+            "type": "integer",
+            "description": "The bucket (project or circle) the recording lives in.",
+            "format": "int64"
+          },
+          "creator_id": {
+            "type": "integer",
+            "description": "The person the action is attributed to.",
+            "format": "int64"
+          },
+          "performed_by_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The agent that carried out a delegated action; `null` on the wire when the\naction was performed directly. The effective performer \u2014 used by the\n`performers`/`exclude_performers` filters \u2014 is this when present, else\n`creator_id`.",
+            "format": "int64",
+            "x-go-type": "int64"
+          },
+          "recording_id": {
+            "type": "integer",
+            "description": "The recording the event references.",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "details": {
+            "description": "Type-specific details, carried verbatim as a JSON document \u2014 present only\nfor the types that publish one, absent (not empty) for every other type.\n`boost.created` publishes `boost_id`, plus `boosted_event_id` and\n`boosted_event_type`, both `null` for a boost on the recording itself\n(`boosted_event_type` also `null` when the boosted event's kind is not\ncataloged); `card.moved` publishes `column_id` and `previous_column_id`,\nthe containing columns (going on hold within a column reports the same\ncolumn twice). Verbatim on purpose: the connector's push lane delivers\nthe same object, and a typed projection would drop explicit nulls and\nany member a newly cataloged type adds, making the two lanes disagree.\nGo carries it as `json.RawMessage`; TypeScript `unknown`; Python `Any`;\nRuby a Hash; Kotlin `JsonElement`; Rust `serde_json::Value`; Swift the\nSDK's `JSONValue` (numbers as `Double`).",
+            "x-go-type": "json.RawMessage"
+          }
+        },
+        "required": [
+          "action",
+          "bucket_id",
+          "created_at",
+          "creator_id",
+          "event_type",
+          "id",
+          "kind",
+          "recording_id"
+        ]
+      },
+      "FeedFilterMismatchErrorResponseContent": {
+        "type": "object",
+        "description": "409 from the event feed's poll lanes (PollEvents, PollInbox): the held\n`position` was minted for a different filter set than the request presented.\nPositions are bound to their filter set; re-enter with `since=<id>` or\n`since=now` to acknowledge the filter change. Both digests are the bare\n16-lowercase-hex `srv2` filter digest BC3 publishes in\ndoc/api/sections/event_feed.md (\"Filter digests\").",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "position_digest": {
+            "type": "string",
+            "description": "The digest of the filter set the position was minted for."
+          },
+          "filters_digest": {
+            "type": "string",
+            "description": "The digest of the filter set this request presented."
+          }
+        },
+        "required": [
+          "error",
+          "filters_digest",
+          "position_digest"
+        ]
+      },
+      "FeedPositionGoneErrorResponseContent": {
+        "type": "object",
+        "description": "410 from PollEvents: the held `position` predates the feed's epoch \u2014 an\noperational fence that can be raised. `epoch_after_id` names the epoch and\n`resume` is an absolute URL that re-enters the feed AT THE EPOCH\n(`since=<epoch_after_id>`) with the request's canonical filters preserved,\nso the servable history above the fence is not skipped. Not interchangeable\nwith the inbox's InboxPositionGoneError, whose recovery re-enters at\n`since=0`. Consumers validate the URL (same origin as the API base, no scheme\ndowngrade) before following it \u2014 SPEC.md \u00a723 \"Continuation and Resume URL\nValidation\".",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "epoch_after_id": {
+            "type": "integer",
+            "description": "The feed's epoch: the event id after which history is servable.",
+            "format": "int64"
+          },
+          "resume": {
+            "type": "string",
+            "description": "Absolute re-entry URL for the feed, at the epoch, filters preserved."
+          }
+        },
+        "required": [
+          "epoch_after_id",
+          "error",
+          "resume"
+        ]
+      },
+      "FeedRequestErrorResponseContent": {
+        "type": "object",
+        "description": "400 from the event feed's poll lanes (PollEvents, PollInbox). Two distinct\ncases share the status: a malformed `position` (recover by re-entering with\n`since=`) and a malformed filter (fix the filters; a position reset will not\nhelp). `reason` tells them apart \u2014 `invalid_position` or `invalid_filter`\n(bc3 #13362) \u2014 and is OPTIONAL: a server that has not shipped it answers the\nflat `{error}` body, and a consumer that finds `reason` absent must treat the\n400 as undifferentiated and surface it rather than guess between recovering\nand stopping.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`invalid_position` (re-enter with `since=`) or `invalid_filter` (fix the\nfilters). Absent from servers that predate bc3 #13362: then the 400 is\nundifferentiated."
+          }
+        },
+        "required": [
+          "error"
+        ]
       },
       "FieldErrorMap": {
         "type": "object",
@@ -32235,6 +32737,53 @@
           "visible_to_clients"
         ]
       },
+      "InboxItem": {
+        "type": "object",
+        "description": "One addressed delivery. `addressing_id` is the item's own identity \u2014 the\ndedupe key \u2014 since one event can address the same principal for several\nreasons.",
+        "properties": {
+          "addressing_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the principal was addressed: `mentioned`, `assigned`, `subscribed`,\n`watched`, `pinged`, or `boosted`."
+          },
+          "addressed_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "event": {
+            "$ref": "#/components/schemas/FeedEvent"
+          }
+        },
+        "required": [
+          "addressed_at",
+          "addressing_id",
+          "event",
+          "reason"
+        ]
+      },
+      "InboxPositionGoneErrorResponseContent": {
+        "type": "object",
+        "description": "410 from PollInbox: the held `position` fell behind the inbox's 30-day\nretention window. There is no epoch; `resume` is an absolute URL that\nre-enters the inbox at `since=0`, the earliest retained item \u2014 exactly-once\ncontinuation, since a stale position has seen none of the retained backlog.\nA distinct shape from the feed's FeedPositionGoneError on purpose: the two\nrecoveries are not interchangeable, and a consumer must not handle one lane's\n410 with the other's arm. Validate the URL before following it, as for the\nfeed.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "resume": {
+            "type": "string",
+            "description": "Absolute re-entry URL for the inbox, at `since=0`, filters preserved."
+          }
+        },
+        "required": [
+          "error",
+          "resume"
+        ]
+      },
       "InternalServerErrorResponseContent": {
         "type": "object",
         "properties": {
@@ -33267,48 +33816,68 @@
             }
           },
           "email_address": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "password",
             "x-basecamp-sensitive": {
               "category": "pii",
               "redact": true
-            }
+            },
+            "x-go-type": "string"
           },
           "personable_type": {
             "type": "string"
           },
           "title": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "password",
             "x-basecamp-sensitive": {
               "category": "pii",
               "redact": false
-            }
+            },
+            "x-go-type": "string"
           },
           "bio": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "password",
             "x-basecamp-sensitive": {
               "category": "pii",
               "redact": false
-            }
+            },
+            "x-go-type": "string"
           },
           "tagline": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Alias of `bio` introduced in BC5. BC3 emits both keys with identical content;\nolder BC4 responses may omit `tagline`. Prefer `bio` for cross-version reads.",
             "format": "password",
             "x-basecamp-sensitive": {
               "category": "pii",
               "redact": false
-            }
+            },
+            "x-go-type": "string"
           },
           "location": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "password",
             "x-basecamp-sensitive": {
               "category": "pii",
               "redact": false
-            }
+            },
+            "x-go-type": "string"
           },
           "created_at": {
             "type": "string",
@@ -33386,6 +33955,55 @@
         "required": [
           "id",
           "name"
+        ]
+      },
+      "PollEventsResponseContent": {
+        "type": "object",
+        "description": "The poll envelope. Every 200 carries `events` and `position`; `next` only\nwhile the walk continues.",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeedEvent"
+            },
+            "description": "Up to 100 events, oldest first, strict event-id order. A page may be empty\nwhile the walk crosses history the filters exclude \u2014 keep following `next`."
+          },
+          "position": {
+            "type": "string",
+            "description": "Durable position token for resuming later. Persist only after the page's\nevents have been processed."
+          },
+          "next": {
+            "type": "string",
+            "description": "Absolute continuation URL, present only while the current walk has more\nto serve; absent means the walk reached its (frozen) head \u2014 poll again\nlater from `position`."
+          }
+        },
+        "required": [
+          "events",
+          "position"
+        ]
+      },
+      "PollInboxResponseContent": {
+        "type": "object",
+        "description": "The inbox envelope: `items` and `position` on every 200, `next` while the\nwalk continues.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxItem"
+            }
+          },
+          "position": {
+            "type": "string",
+            "description": "Durable inbox position. Persist only after the page's items have been\nprocessed."
+          },
+          "next": {
+            "type": "string",
+            "description": "Absolute continuation URL, present only while the walk has more to serve."
+          }
+        },
+        "required": [
+          "items",
+          "position"
         ]
       },
       "Preferences": {
@@ -37724,6 +38342,9 @@
             "$ref": "#/components/schemas/Recording"
           },
           "creator": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "performed_by": {
             "$ref": "#/components/schemas/Person"
           },
           "copy": {

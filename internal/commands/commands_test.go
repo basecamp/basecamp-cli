@@ -81,6 +81,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewCheckinsCmd())
 	root.AddCommand(commands.NewWebhooksCmd())
 	root.AddCommand(commands.NewEventsCmd())
+	root.AddCommand(commands.NewInboxCmd())
 	root.AddCommand(commands.NewSubscriptionsCmd())
 	root.AddCommand(commands.NewForwardsCmd())
 	root.AddCommand(commands.NewMessageboardsCmd())

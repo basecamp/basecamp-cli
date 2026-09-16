@@ -19,7 +19,7 @@ func NewEventsCmd() *cobra.Command {
 	var all bool
 
 	cmd := &cobra.Command{
-		Use:   "events <id|url>",
+		Use:   "events [id|url]",
 		Short: "View change history",
 		Long: `View the event history (audit trail) for any item.
 
@@ -34,10 +34,24 @@ Events track all changes to an item. Common event actions:
 - assignment_changed - Assignees were added/removed
 - content_changed - Content was edited
 - archived/unarchived - Status changed
-- commented_on - A comment was added`,
-		Annotations: map[string]string{"agent_notes": "Events show change history for a specific item"},
-		Args:        cobra.ExactArgs(1),
+- commented_on - A comment was added
+
+The account-wide event feed is a different resource, reached through the
+subcommands: 'events poll' for the feed's catch-up poll lane and
+'events ticket' to mint a live-stream ticket. 'basecamp inbox' is the
+addressed-items lane of the same feed.`,
+		Annotations: map[string]string{
+			"agent_notes": "Events show change history for a specific item.\n" +
+				"For the account-wide event feed use 'basecamp events poll'; this command is one recording's history.",
+		},
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Bare 'events' is the group's help: the recording history needs
+			// an id, and the account feed lives under 'poll'.
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+
 			app := appctx.FromContext(cmd.Context())
 
 			// Validate flag combinations
@@ -103,6 +117,11 @@ Events track all changes to an item. Common event actions:
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of events to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all events (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+
+	cmd.AddCommand(
+		newEventsPollCmd(),
+		newEventsTicketCmd(),
+	)
 
 	return cmd
 }

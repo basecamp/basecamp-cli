@@ -176,7 +176,7 @@ ARG basecamp documents uploads create 00 <file>
 ARG basecamp documents vault create 00 <name>
 ARG basecamp documents vaults create 00 <name>
 ARG basecamp documents versions 00 <upload_id|url>
-ARG basecamp events 00 <id|url>
+ARG basecamp events 00 [id|url]
 ARG basecamp file archive 00 <id|url>
 ARG basecamp file doc create 00 <title>
 ARG basecamp file doc create 01 [content]
@@ -748,6 +748,8 @@ CMD basecamp documents versions
 CMD basecamp drafts
 CMD basecamp drafts list
 CMD basecamp events
+CMD basecamp events poll
+CMD basecamp events ticket
 CMD basecamp file
 CMD basecamp file archive
 CMD basecamp file doc
@@ -882,6 +884,7 @@ CMD basecamp hillcharts
 CMD basecamp hillcharts show
 CMD basecamp hillcharts track
 CMD basecamp hillcharts untrack
+CMD basecamp inbox
 CMD basecamp lineup
 CMD basecamp lineup create
 CMD basecamp lineup delete
@@ -7366,6 +7369,59 @@ FLAG basecamp events --stats type=bool
 FLAG basecamp events --styled type=bool
 FLAG basecamp events --todolist type=string
 FLAG basecamp events --verbose type=count
+FLAG basecamp events poll --account type=string
+FLAG basecamp events poll --actor-types type=stringSlice
+FLAG basecamp events poll --agent type=bool
+FLAG basecamp events poll --all type=bool
+FLAG basecamp events poll --buckets type=stringSlice
+FLAG basecamp events poll --cache-dir type=string
+FLAG basecamp events poll --count type=bool
+FLAG basecamp events poll --creators type=stringSlice
+FLAG basecamp events poll --exclude-performers type=stringSlice
+FLAG basecamp events poll --help type=bool
+FLAG basecamp events poll --hints type=bool
+FLAG basecamp events poll --ids-only type=bool
+FLAG basecamp events poll --in type=string
+FLAG basecamp events poll --jq type=string
+FLAG basecamp events poll --json type=bool
+FLAG basecamp events poll --markdown type=bool
+FLAG basecamp events poll --max-pages type=int
+FLAG basecamp events poll --md type=bool
+FLAG basecamp events poll --no-hints type=bool
+FLAG basecamp events poll --no-stats type=bool
+FLAG basecamp events poll --performers type=stringSlice
+FLAG basecamp events poll --position type=string
+FLAG basecamp events poll --profile type=string
+FLAG basecamp events poll --project type=string
+FLAG basecamp events poll --quiet type=bool
+FLAG basecamp events poll --since type=string
+FLAG basecamp events poll --stats type=bool
+FLAG basecamp events poll --styled type=bool
+FLAG basecamp events poll --todolist type=string
+FLAG basecamp events poll --types type=stringSlice
+FLAG basecamp events poll --verbose type=count
+FLAG basecamp events ticket --account type=string
+FLAG basecamp events ticket --agent type=bool
+FLAG basecamp events ticket --cache-dir type=string
+FLAG basecamp events ticket --count type=bool
+FLAG basecamp events ticket --help type=bool
+FLAG basecamp events ticket --hints type=bool
+FLAG basecamp events ticket --ids-only type=bool
+FLAG basecamp events ticket --in type=string
+FLAG basecamp events ticket --jq type=string
+FLAG basecamp events ticket --json type=bool
+FLAG basecamp events ticket --markdown type=bool
+FLAG basecamp events ticket --md type=bool
+FLAG basecamp events ticket --no-hints type=bool
+FLAG basecamp events ticket --no-stats type=bool
+FLAG basecamp events ticket --profile type=string
+FLAG basecamp events ticket --project type=string
+FLAG basecamp events ticket --quiet type=bool
+FLAG basecamp events ticket --show-secret type=bool
+FLAG basecamp events ticket --stats type=bool
+FLAG basecamp events ticket --styled type=bool
+FLAG basecamp events ticket --todolist type=string
+FLAG basecamp events ticket --verbose type=count
 FLAG basecamp file --account type=string
 FLAG basecamp file --agent type=bool
 FLAG basecamp file --cache-dir type=string
@@ -10718,6 +10774,34 @@ FLAG basecamp hillcharts untrack --styled type=bool
 FLAG basecamp hillcharts untrack --todolist type=string
 FLAG basecamp hillcharts untrack --todoset type=string
 FLAG basecamp hillcharts untrack --verbose type=count
+FLAG basecamp inbox --account type=string
+FLAG basecamp inbox --agent type=bool
+FLAG basecamp inbox --all type=bool
+FLAG basecamp inbox --buckets type=stringSlice
+FLAG basecamp inbox --cache-dir type=string
+FLAG basecamp inbox --count type=bool
+FLAG basecamp inbox --help type=bool
+FLAG basecamp inbox --hints type=bool
+FLAG basecamp inbox --ids-only type=bool
+FLAG basecamp inbox --in type=string
+FLAG basecamp inbox --jq type=string
+FLAG basecamp inbox --json type=bool
+FLAG basecamp inbox --markdown type=bool
+FLAG basecamp inbox --max-pages type=int
+FLAG basecamp inbox --md type=bool
+FLAG basecamp inbox --no-hints type=bool
+FLAG basecamp inbox --no-stats type=bool
+FLAG basecamp inbox --position type=string
+FLAG basecamp inbox --profile type=string
+FLAG basecamp inbox --project type=string
+FLAG basecamp inbox --quiet type=bool
+FLAG basecamp inbox --reasons type=stringSlice
+FLAG basecamp inbox --since type=string
+FLAG basecamp inbox --stats type=bool
+FLAG basecamp inbox --styled type=bool
+FLAG basecamp inbox --todolist type=string
+FLAG basecamp inbox --types type=stringSlice
+FLAG basecamp inbox --verbose type=count
 FLAG basecamp lineup --account type=string
 FLAG basecamp lineup --agent type=bool
 FLAG basecamp lineup --cache-dir type=string
@@ -18513,6 +18597,8 @@ SUB basecamp documents versions
 SUB basecamp drafts
 SUB basecamp drafts list
 SUB basecamp events
+SUB basecamp events poll
+SUB basecamp events ticket
 SUB basecamp file
 SUB basecamp file archive
 SUB basecamp file doc
@@ -18647,6 +18733,7 @@ SUB basecamp hillcharts
 SUB basecamp hillcharts show
 SUB basecamp hillcharts track
 SUB basecamp hillcharts untrack
+SUB basecamp inbox
 SUB basecamp lineup
 SUB basecamp lineup create
 SUB basecamp lineup delete

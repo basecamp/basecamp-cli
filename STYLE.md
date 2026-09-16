@@ -42,8 +42,16 @@ existing group noun is not allowed.
 
 Shortcut commands without a sibling plural group — `search`, `url`,
 `recordings`, `timesheet`, `assignments`, `notifications`, `setup`, `completion`
-— may have both `RunE` and subcommands. `scripts/check-bare-groups.sh` enforces
-this with an allowlist.
+— may have both `RunE` and subcommands.
+
+`events` is the one plural noun in that set. `events <id|url>` reads a single
+recording's change history and predates the account-wide event feed that
+`events poll` and `events ticket` now serve, so the bare form stays an action
+rather than becoming a group: turning it into one would break every existing
+`basecamp events <id>` invocation to gain nothing.
+
+`scripts/check-bare-groups.sh` enforces this with an allowlist; a command added
+there belongs in this section too, with the reason it is an exception.
 
 ## File Organization
 

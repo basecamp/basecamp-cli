@@ -81,7 +81,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, and accounts.
+Full CLI coverage: 195 tracked in-scope endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, the account event feed, and accounts.
 
 ## Agent Invariants
 
@@ -143,7 +143,7 @@ Full CLI coverage: 189 tracked in-scope endpoints across todos, cards, messages,
     renders as an empty bullet list. When the CLI version is unknown, check
     `basecamp --version` first, or pass the content portably as
     `"$(cat file.md)"` and verify the posted `content` when it matters.
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, and the seven list commands covered in item 7.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, `basecamp events poll` and `basecamp inbox` for the account event feed, and the seven list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
    Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected) or `--all` for everything. `--page N` fetches exactly one page, but only on the paginated listings.
    The two overdue variants — `basecamp todos list --all-projects --overdue` and `basecamp cards list --all-projects --overdue` — come from unpaginated endpoints. They accept `--limit` and `--all` but **reject `--page`**, so do not generate `--page` against them.
@@ -205,7 +205,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`, `basecamp events poll`, `basecamp inbox`.
 >
 > Seven list commands also list account-wide: `basecamp todos list --all-projects --json`, and likewise `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`.
 
@@ -262,6 +262,8 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Show + download | `basecamp todos show <id> --download-attachments --json` |
 | Stream attachment to stdout | `basecamp attachments download <id> --file <name> --out -` |
 | Change history for an item | `basecamp events <id\|url> --json` (when a card moved columns, when a todo was completed) |
+| Account-wide activity feed (resumable) | `basecamp events poll --since now --json` (then resume with `--position`) |
+| Items that addressed me (agents only) | `basecamp inbox --since now --json` |
 | Search | `basecamp search "query" --json` |
 | Parse URL | `basecamp url parse "<url>" --json` |
 | Upload file | `basecamp files uploads create <file> [--vault <folder_id>] --in <project> --json` |
@@ -942,6 +944,60 @@ card move?" or "when was this actually finished?", neither of which `updated_at`
 can tell you.
 
 `--page` accepts only `1`; use `--all` to walk every page.
+
+### Event feed (account-wide, resumable)
+
+`basecamp events <id>` is one recording's history. The account-wide **event
+feed** is a different resource, and the way an agent hears about activity it
+did not cause:
+
+```bash
+basecamp events poll --since now --json            # Enter at the present
+basecamp events poll --position "$POSITION" --json # Resume from a held position
+basecamp events poll --since 0 --all --json        # Replay served history
+basecamp inbox --since now --json                  # Addressed items (agents only)
+basecamp events ticket --json                      # Mint a live-stream ticket
+```
+
+Each page is an envelope: `events` (or `items`), a durable `position`, and a
+`next` continuation URL while the current walk has more to serve. Persist
+`position` only after processing the page, then pass it back with
+`--position`. The response's `notice` spells the whole resume command out,
+filters included. `--all` walks `next` to the end of the current walk — it is
+not a live tail.
+
+The feed is a notification lane, not an audit log:
+
+- Deduplicate by event id — polls repeat what the live stream delivered, and
+  an event can appear up to ~30 seconds after it happens.
+- Deduplicate inbox items by `addressing_id`, never by event id: one event
+  addresses you once per reason and each reason is its own item.
+- Events are thin pointers. Refetch the recording (`basecamp show
+  <recording_id>`) before acting on it.
+- An agent that acts on what it hears should pass `--exclude-performers self`,
+  which drops its own performances without hiding other agents' activity.
+
+The two lanes have different filter sets, and they are not interchangeable:
+
+- `events poll`: `--types`, `--buckets`, `--creators`, `--performers`,
+  `--exclude-performers`, `--actor-types`.
+- `inbox`: `--reasons`, `--types`, `--buckets`. The other four are not flags
+  here.
+
+Each takes a comma-separated list. These are the only narrowing available:
+both commands accept the global `--in <project>` flag but ignore it, because
+these are account endpoints. Narrow to a project with `--buckets`.
+
+A position is bound to the filter set it was minted for, so a resume has to
+carry the same filters. Changing them exits `1` naming both filter digests,
+and the fix is to re-enter with `--since`. A position that is no longer
+servable exits `2`, and the hint carries the whole re-entry command, filters
+included.
+
+`basecamp inbox` is served to agent principals only for now; other principals
+get exit `4`. `basecamp events ticket` redacts the ticket and its URL unless
+`--show-secret` is passed — both are bearers, so never log either, and mint a
+fresh one per connection attempt.
 
 ### Recordings (Cross-project)
 
