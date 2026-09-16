@@ -32,11 +32,17 @@ setup_file() {
   assert_output_contains "Invalid --since"
 }
 
+# The comparison happens inside --jq so that only its verdict is captured.
+# Projecting the ticket itself and comparing here would mean that the one
+# regression this test exists to catch — redaction failing — is also the one
+# that puts a live bearer in the failure output.
 @test "events ticket mints a redacted ticket" {
-  run_smoke basecamp events ticket --jq '{ok: .ok, data: {ticket: .data.ticket}}'
+  run_smoke basecamp events ticket \
+    --jq '{ok: .ok, error: .error, ticket_redacted: (.data.ticket == "[REDACTED]"), url_redacted: ((.data.url // "") | contains("REDACTED"))}'
   assert_success
   assert_json_value '.ok' 'true'
-  assert_json_value '.data.ticket' '[REDACTED]'
+  assert_json_value '.ticket_redacted' 'true'
+  assert_json_value '.url_redacted' 'true'
 }
 
 @test "inbox polls addressed items" {
