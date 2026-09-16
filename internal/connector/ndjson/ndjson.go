@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 )
 
@@ -22,8 +23,38 @@ type Writer struct {
 	w  io.Writer
 }
 
-// NewWriter returns a Writer over w. A nil w discards every line.
-func NewWriter(w io.Writer) *Writer { return &Writer{w: w} }
+// NewWriter returns the Writer for w. A nil w discards every line.
+//
+// There is one Writer, and so one lock, per sink for the life of the process.
+// Intake and admission each build their writer from the stdout they are
+// handed; if those were two Writers their locks would not coordinate, and a
+// pointer line and a verdict line could tear each other inside one write.
+// Keying on the sink makes that impossible whoever calls this, without every
+// caller having to agree to pass one instance around.
+//
+// A sink whose type is not comparable cannot be the same sink twice (it is
+// always a copy), so it gets a Writer of its own.
+func NewWriter(w io.Writer) *Writer {
+	if w == nil {
+		return &Writer{}
+	}
+	if !reflect.TypeOf(w).Comparable() {
+		return &Writer{w: w}
+	}
+	sinksMu.Lock()
+	defer sinksMu.Unlock()
+	if existing, ok := sinks[w]; ok {
+		return existing
+	}
+	writer := &Writer{w: w}
+	sinks[w] = writer
+	return writer
+}
+
+var (
+	sinksMu sync.Mutex
+	sinks   = map[io.Writer]*Writer{}
+)
 
 // WriteLine encodes v and writes it followed by a newline, whole.
 //

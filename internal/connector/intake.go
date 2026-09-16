@@ -125,6 +125,8 @@ type Intake struct {
 	// served is the current connection's wrapped poll source.
 	served   *servedPolls
 	snapshot map[int64]bool
+	// membershipRetry is the first backoff after a failed membership read.
+	membershipRetry time.Duration
 	// learned holds buckets events proved visible that the lister did not
 	// name.
 	learned   map[int64]bool
@@ -774,7 +776,10 @@ func (in *Intake) takeSnapshot(ctx context.Context) {
 // the new project immediately; the live lane cannot until it re-subscribes.
 func (in *Intake) noteBucket(bucketID int64) {
 	in.mu.Lock()
-	known := in.snapshot == nil || in.snapshot[bucketID]
+	// With no snapshot — the read at subscribe failed — the live
+	// subscription's buckets are unknown, not "everything". An event from a
+	// bucket not yet learned asks for one reconnect.
+	known := (in.snapshot == nil && in.opts.Membership == nil) || in.snapshot[bucketID]
 	in.mu.Unlock()
 	if known {
 		return
@@ -788,7 +793,9 @@ func (in *Intake) noteBucket(bucketID int64) {
 		in.learned = make(map[int64]bool)
 	}
 	in.learned[bucketID] = true
-	in.snapshot[bucketID] = true
+	if in.snapshot != nil {
+		in.snapshot[bucketID] = true
+	}
 	in.mu.Unlock()
 	in.requestReconnect()
 }
@@ -885,29 +892,51 @@ func (in *Intake) watchMembership(ctx context.Context) func() {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(in.opts.MembershipInterval)
-		defer ticker.Stop()
+		retry := in.membershipRetry
+		if retry <= 0 {
+			retry = defaultMembershipRetry
+		}
 		for {
+			// A snapshot the subscribe-time read never produced is retried on
+			// a backoff rather than left for a full interval: until one exists
+			// there is no baseline to notice a change against.
+			wait := in.opts.MembershipInterval
+			if !in.hasSnapshot() {
+				wait = min(retry, in.opts.MembershipInterval)
+				retry = min(retry*2, in.opts.MembershipInterval)
+			}
+			timer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
-				buckets, err := in.opts.Membership.Buckets(ctx)
-				if err != nil {
-					// A failed read leaves the snapshot alone. Treating it as
-					// a change would reconnect the feed every time the API
-					// hiccupped.
-					in.log.Warn("could not refresh the agent's projects", "error", err)
-					continue
-				}
-				if in.membershipChanged(buckets) {
-					in.requestReconnect()
-					return
-				}
+			case <-timer.C:
+			}
+			buckets, err := in.opts.Membership.Buckets(ctx)
+			if err != nil {
+				// A failed read leaves the snapshot alone. Treating it as a
+				// change would reconnect the feed every time the API
+				// hiccupped.
+				in.log.Warn("could not refresh the agent's projects", "error", err)
+				continue
+			}
+			if in.membershipChanged(buckets) {
+				in.requestReconnect()
+				return
 			}
 		}
 	}()
 	return func() { <-done }
+}
+
+// defaultMembershipRetry is the first wait before re-reading a membership
+// listing that failed; it doubles up to the membership interval.
+const defaultMembershipRetry = 5 * time.Second
+
+func (in *Intake) hasSnapshot() bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.snapshot != nil
 }
 
 // membershipChanged compares a fresh read with the snapshot. With no snapshot
