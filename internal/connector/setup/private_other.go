@@ -79,10 +79,10 @@ func openNoFollow(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The opened handle is checked again, so a name swapped to a reparse
-	// point between the Lstat and the Open is refused by checkPrivateFile's
-	// regular-file test. This narrows the window; it does not close it, and
-	// relies on the profile directory's owner-only ACL for the rest.
+	// Between the Lstat and the Open the name could be swapped for a reparse
+	// point, and os.Open would follow it. Nothing here closes that window;
+	// only the profile directory's owner-only ACL, which lets nobody else
+	// make the swap, does.
 	return f, nil
 }
 

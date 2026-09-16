@@ -592,8 +592,8 @@ func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, setupOperatorPerson, f.Trust.OperatorID)
 
-	// A different id is a new trust anchor, verified as one: unreadable, it
-	// is refused.
+	// A different id is a new trust anchor, verified as one: here it reads
+	// back as a client and is refused.
 	s.refusePeople = false
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson))
 	require.Error(t, err, out)
