@@ -181,9 +181,11 @@ type Trust struct {
 	OperatorProfile string
 	// Allowlist is every allowlisted Person id the file will hold.
 	Allowlist []int64
-	// Recorded is the trust connect.json already holds, verified when it was
-	// written: a person in it who cannot be re-read now is a warning, not a
-	// refusal. The zero value records nobody.
+	// Recorded is the trust connect.json already holds for this same agent
+	// and account. It is taken as the owner's own record — the file is
+	// private to them, and setup verified it if setup wrote it — so a person
+	// in it who cannot be re-read now is a warning, not a refusal. A read
+	// that answers still decides. The zero value records nobody.
 	Recorded admission.Trust
 }
 

@@ -1,3 +1,5 @@
+//go:build unix
+
 package setup
 
 import (
@@ -181,6 +183,10 @@ func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
 		"duplicate top-level":    `{"driver":"acp",` + string(data[1:]),
 		"duplicate operator_id":  strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
 		"duplicate nested route": strings.Replace(string(data), `"48699913":{`, `"48699913":{"path":"/elsewhere",`, 1),
+		"case variant key":       strings.Replace(string(data), `"trust":`, `"Trust":`, 1),
+		"long s variant key":     strings.Replace(string(data), `"worktrees"`, `"worktreeſ"`, 1),
+		"padded project id":      strings.Replace(string(data), `"48699913":{`, `"048699913":{`, 1),
+		"signed project id":      strings.Replace(string(data), `"48699913":{`, `"+48699913":{`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.NotEqual(t, string(data), doc, "the fixture changed the document")

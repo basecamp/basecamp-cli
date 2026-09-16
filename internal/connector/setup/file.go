@@ -262,7 +262,25 @@ func Parse(data []byte) (File, error) {
 }
 
 // refuseDuplicateKeys walks the JSON document and refuses any object that
-// names a key twice.
+// names a key twice. encoding/json matches field names case-insensitively
+// and parses project ids as numbers, so "Trust" is "trust" and "048699913"
+// is 48699913 to it; every key must therefore be in its one canonical
+// spelling, which makes an exact comparison a complete one.
+func canonicalKey(key string) bool {
+	if n, err := strconv.ParseInt(key, 10, 64); err == nil {
+		return strconv.FormatInt(n, 10) == key
+	}
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 func refuseDuplicateKeys(data []byte) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
@@ -285,6 +303,9 @@ func refuseDuplicateKeys(data []byte) error {
 					return err
 				}
 				key, _ := keyTok.(string)
+				if !canonicalKey(key) {
+					return fmt.Errorf("key %q is not spelled canonically: names are lowercase, project ids plain decimal", key)
+				}
 				if seen[key] {
 					return fmt.Errorf("key %q appears twice in one object", key)
 				}
