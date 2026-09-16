@@ -795,12 +795,21 @@ const redactedTicket = "[REDACTED]"
 // by component, because a list of components to check is a list to be caught
 // out by — the scheme was missed exactly that way. Both spellings are tested:
 // the rendering, which escapes, and the decoded path, which is where an
-// escaped copy would hide from it. Anything still holding the ticket is
-// withheld whole, as is a URL that will not parse or carries no ticket
-// parameter — that is not the shape this was promised.
+// escaped copy would hide from it.
+//
+// Every ticket the response presents counts as the secret, not just the
+// body's field. If the URL's own ticket parameter disagrees with the body,
+// the URL's is the one that would open the stream, so it is the one that
+// must not survive. Anything still holding any of them is withheld whole, as
+// is a URL that will not parse or carries no ticket parameter — that is not
+// the shape this was promised.
 func redactTicketURL(raw, ticket string) string {
 	parsed, err := url.Parse(raw)
-	if err != nil || !parsed.Query().Has("ticket") {
+	if err != nil {
+		return redactedTicket
+	}
+	query := parsed.Query()
+	if !query.Has("ticket") {
 		return redactedTicket
 	}
 
@@ -811,8 +820,11 @@ func redactTicketURL(raw, ticket string) string {
 		RawQuery: url.Values{"ticket": {redactedTicket}}.Encode(),
 	}
 	rendered := display.String()
-	if ticket != "" && (strings.Contains(rendered, ticket) || strings.Contains(parsed.Path, ticket)) {
-		return redactedTicket
+
+	for _, secret := range append([]string{ticket}, query["ticket"]...) {
+		if secret != "" && (strings.Contains(rendered, secret) || strings.Contains(parsed.Path, secret)) {
+			return redactedTicket
+		}
 	}
 	return rendered
 }

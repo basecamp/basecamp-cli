@@ -589,6 +589,24 @@ func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
 // response is not ours to trust, and a URL that carries the credential
 // anywhere else is withheld whole rather than echoed with one parameter
 // blanked.
+// The secret is every ticket the response presents. When the URL's own
+// ticket parameter disagrees with the body's field, the URL's is the one that
+// would open the stream — so checking only the body's would clear a display
+// URL that still carries the operative bearer.
+func TestRedactTicketURLTreatsTheURLsOwnTicketAsSecretToo(t *testing.T) {
+	assert.Equal(t, redactedTicket,
+		redactTicketURL("wss://chat.example.test/url-secret?ticket=url-secret", "body-secret"))
+
+	assert.Equal(t, redactedTicket,
+		redactTicketURL("wss://url-secret.example.test/cable?ticket=url-secret", "body-secret"))
+
+	// Agreeing values still render: this widens what counts as the secret,
+	// it does not withhold every URL.
+	assert.Equal(t,
+		"wss://chat.example.test/195539477?ticket="+url.QueryEscape(redactedTicket),
+		redactTicketURL("wss://chat.example.test/195539477?ticket=tkt-secret", "tkt-secret"))
+}
+
 // One case per component the URL has, so the exit-point assertion's coverage
 // is stated rather than assumed. The point of asserting on the finished
 // string is that it also covers components nobody enumerated — the scheme was
