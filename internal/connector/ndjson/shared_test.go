@@ -62,3 +62,20 @@ func TestWritersForDifferentSinksAreIndependent(t *testing.T) {
 	assert.NotSame(t, NewWriter(&a), NewWriter(&b))
 	assert.Same(t, NewWriter(&a), NewWriter(&a))
 }
+
+// A sink whose type is comparable but whose fields are not panics when hashed.
+// Only reference-like sinks are keyed, so such a sink never reaches the map.
+type wrapperSink struct {
+	inner any
+	buf   *bytes.Buffer
+}
+
+func (w wrapperSink) Write(p []byte) (int, error) { return w.buf.Write(p) }
+
+func TestAnUnhashableSinkIsNotKeyed(t *testing.T) {
+	sink := wrapperSink{inner: []int{1, 2, 3}, buf: &bytes.Buffer{}}
+	require.NotPanics(t, func() {
+		require.NoError(t, NewWriter(sink).WriteLine(map[string]int{"line": 1}))
+	})
+	assert.Equal(t, "{\"line\":1}\n", sink.buf.String())
+}

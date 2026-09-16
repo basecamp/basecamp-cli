@@ -23,7 +23,7 @@ func TestALateArrivalClearsAnUnrecoveredID(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	_, err = ledger.CloseLoss(ctx, loss.ID, time.Now())
 	require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestATerminalFeedIsNotHeldOpenByTheMembershipWatcher(t *testing.T) {
 
 func TestATerminalFeedIsNotHeldOpenByARepairWalk(t *testing.T) {
 	ledger := newTestLedger(t)
-	_, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, time.Now(), time.Hour)
+	_, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, time.Now(), time.Hour, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	intake, _, minter, _ := newFeedIntake(t, ledger, Options{RepairInterval: time.Hour})
@@ -265,7 +265,7 @@ func TestAnInboxShaped410InTheRepairWalkIsNotTheEpochsPath(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	var hits atomic.Int32
@@ -293,7 +293,7 @@ func TestTheRepairWalkDoesNotFollowAForeignURL(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{
@@ -303,7 +303,7 @@ func TestTheRepairWalkDoesNotFollowAForeignURL(t *testing.T) {
 	require.NoError(t, walker.reconcile(ctx, loss))
 	assert.Equal(t, 1, polls.calls, "the foreign next is not followed")
 
-	loss2, err := ledger.RecordLoss(ctx, []int64{17099838600}, clock.at, 10*time.Minute)
+	loss2, err := ledger.RecordLoss(ctx, []int64{17099838600}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	polls2 := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollGone, EpochAfterID: 17099838550,
 		ResumeURL: "http://3.basecampapi.com/2914079/events.json?since=17099838550"}}}
@@ -326,7 +326,7 @@ func TestAnEpoch410InTheRepairWalkOnlyCondemnsTheIDsBehindIt(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{
@@ -359,7 +359,7 @@ func TestARefusedRepairCursorReentersFromTheExplicitID(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	require.NoError(t, ledger.SaveRepairCursor(ctx, loss.ID, "cursor-under-old-filters"))
 	loss.RepairCursor = "cursor-under-old-filters"
@@ -383,7 +383,7 @@ func TestAnUnrecoverableRepairPollLeavesTheLossOpen(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollRedirectRefused}}}
@@ -402,7 +402,7 @@ func TestARepeated410OnTheResumeEndsTheWalk(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	gone := &eventfeed.PollError{Kind: eventfeed.PollGone, EpochAfterID: 150,

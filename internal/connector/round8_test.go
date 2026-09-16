@@ -81,7 +81,7 @@ func TestALossPastItsWindowClosesEvenWhenItsWalkCannotFinish(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-24*time.Hour), 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-24*time.Hour), 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollFilterInvalid, Err: errors.New("x")}}}

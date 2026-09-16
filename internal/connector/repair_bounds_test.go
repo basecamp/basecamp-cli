@@ -39,7 +39,7 @@ func onePassWalker(t *testing.T, polls eventfeed.PollSource) (*repairWalker, *Le
 	t.Helper()
 	ledger := newTestLedger(t)
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	walker, _ := newTestWalker(t, ledger, polls, clock)
 	return walker, ledger, loss
@@ -111,7 +111,7 @@ func TestACanceledRepairWalkLeavesTheLossOpenForTheNextStart(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ledger := newTestLedger(t)
 			clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-			loss, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, clock.at.Add(-age), 10*time.Minute)
+			loss, err := ledger.RecordLoss(context.Background(), []int64{17099838509}, clock.at.Add(-age), 10*time.Minute, eventfeed.Filters{})
 			require.NoError(t, err)
 
 			ctx, cancel := context.WithCancel(context.Background())

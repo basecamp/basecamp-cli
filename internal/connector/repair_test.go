@@ -47,7 +47,7 @@ func TestRepairWalkEntersOneBelowTheLowestMissingID(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838505, 17099838502}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838505, 17099838502}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{{
@@ -75,7 +75,7 @@ func TestRepairWalkFollowsNextThroughAnEmptyPage(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{
@@ -97,7 +97,7 @@ func TestRepairWalkRepeatsAfterAMissingNext(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{
@@ -123,7 +123,7 @@ func TestRepairCursorNeverReachesTheFeedCheckpoint(t *testing.T) {
 	key := testKey()
 	require.NoError(t, ledger.Save(ctx, key, "feed-position-before-the-overflow"))
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{{
@@ -145,7 +145,7 @@ func TestRepairWalkSavesItsOwnCursorOnTheLoss(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{pages: []eventfeed.PollPage{{Events: nil, Position: "repair-walk-position"}}}
@@ -171,7 +171,7 @@ func TestIdsStillMissingWhenTheWindowClosesAreUnrecovered(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509, 17099838510}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509, 17099838510}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	// The straggler arrives on the fourth repair poll; the other never does.
@@ -202,7 +202,7 @@ func TestAnUnrecoveredIDIsStillIngestedNormallyLater(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	_, err = ledger.CloseLoss(ctx, loss.ID, time.Now())
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestRepairWalkBelowTheEpochEndsWithAGap(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{100, 101}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{100, 101}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{
@@ -250,7 +250,7 @@ func TestATransientRepairPollIsRetriedNotGivenUpOn(t *testing.T) {
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	polls := &scriptedPolls{

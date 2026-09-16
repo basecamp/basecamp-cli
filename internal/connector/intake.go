@@ -658,7 +658,7 @@ func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
 		return eventfeed.Accept
 
 	case eventfeed.BufferOverflow:
-		loss, err := in.ledger.RecordLoss(ctx, s.DroppedIDs, in.now(), in.opts.RepairWindow)
+		loss, err := in.ledger.RecordLoss(ctx, s.DroppedIDs, in.now(), in.opts.RepairWindow, in.opts.Filters)
 		if err != nil {
 			// Accept means owning the incompleteness. Owning it begins with
 			// it being on disk: accepting after a failed write would leave a
@@ -737,7 +737,7 @@ func (in *Intake) startRepair(ctx context.Context, loss Loss) {
 			log:      in.log,
 			sleep:    in.repairSleep,
 		}
-		switch err := walker.reconcile(ctx, loss); {
+		switch err := walker.reconcileLoss(ctx, loss); {
 		case err == nil:
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			// A shutdown mid-walk is a delay: the loss is still open on disk
@@ -779,7 +779,7 @@ func (in *Intake) noteBucket(bucketID int64) {
 	// With no snapshot — the read at subscribe failed — the live
 	// subscription's buckets are unknown, not "everything". An event from a
 	// bucket not yet learned asks for one reconnect.
-	known := (in.snapshot == nil && in.opts.Membership == nil) || in.snapshot[bucketID]
+	known := (in.snapshot == nil && in.opts.Membership == nil) || in.snapshot[bucketID] || in.learned[bucketID]
 	in.mu.Unlock()
 	if known {
 		return

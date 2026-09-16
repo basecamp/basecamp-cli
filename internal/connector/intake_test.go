@@ -26,11 +26,13 @@ type scriptedPolls struct {
 	pages   []eventfeed.PollPage
 	errs    []error
 	cursors []eventfeed.Cursor
+	filters []eventfeed.Filters
 	calls   int
 }
 
-func (s *scriptedPolls) Poll(_ context.Context, cursor eventfeed.Cursor, _ eventfeed.Filters) (eventfeed.PollPage, error) {
+func (s *scriptedPolls) Poll(_ context.Context, cursor eventfeed.Cursor, filters eventfeed.Filters) (eventfeed.PollPage, error) {
 	s.cursors = append(s.cursors, cursor)
+	s.filters = append(s.filters, filters)
 	i := s.calls
 	s.calls++
 	if i < len(s.errs) && s.errs[i] != nil {
@@ -284,7 +286,7 @@ func TestReconciliationResumesOnStart(t *testing.T) {
 	intake, ledger, _ := newTestIntake(t, polls, nil)
 	ctx := context.Background()
 
-	_, err := ledger.RecordLoss(ctx, []int64{17099838501}, time.Now(), time.Minute)
+	_, err := ledger.RecordLoss(ctx, []int64{17099838501}, time.Now(), time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	require.NoError(t, intake.resumeReconciliation(ctx))

@@ -3,9 +3,12 @@ package connector
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 )
 
 // LossState is what became of one id the live buffer dropped.
@@ -38,6 +41,11 @@ type Loss struct {
 	RepairCursor string
 	DeadlineAt   time.Time
 	ResolvedAt   *time.Time
+	// Filters is the filter set this loss was recorded under. The repair walk
+	// uses it, whatever the connector's current filters are: a loss recorded
+	// under one set and walked under another is repaired against a lane that
+	// never carried its events.
+	Filters eventfeed.Filters
 }
 
 // GapClass distinguishes the feed's two 410s. They mean different things and
@@ -96,7 +104,7 @@ type Gap struct {
 // Dropped ids the ledger already holds were lost from the buffer, not from the
 // connector; they are recorded as never_lost so the repair walk does not go
 // looking for events it already has.
-func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Time, window time.Duration) (Loss, error) {
+func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Time, window time.Duration, filters eventfeed.Filters) (Loss, error) {
 	if len(droppedIDs) == 0 {
 		return Loss{}, errors.New("connector: buffer overflow with no dropped ids")
 	}
@@ -128,7 +136,13 @@ func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Ti
 		}
 	}
 
+	encodedFilters, err := json.Marshal(filters)
+	if err != nil {
+		return Loss{}, fmt.Errorf("connector: encode loss filters: %w", err)
+	}
+
 	loss := Loss{
+		Filters:      filters,
 		DetectedAt:   now.UTC(),
 		DroppedCount: len(states),
 		// One below the lowest missing id, so the walk's first page can serve
@@ -145,8 +159,8 @@ func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Ti
 	}
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO losses (detected_at, dropped_count, repair_since, deadline_at, resolved_at) VALUES (?, ?, ?, ?, ?)`,
-		stamp(loss.DetectedAt), loss.DroppedCount, loss.RepairSince, stamp(loss.DeadlineAt), nullableStamp(loss.ResolvedAt))
+		`INSERT INTO losses (detected_at, dropped_count, repair_since, deadline_at, resolved_at, filters) VALUES (?, ?, ?, ?, ?, ?)`,
+		stamp(loss.DetectedAt), loss.DroppedCount, loss.RepairSince, stamp(loss.DeadlineAt), nullableStamp(loss.ResolvedAt), string(encodedFilters))
 	if err != nil {
 		return Loss{}, fmt.Errorf("connector: insert loss: %w", err)
 	}
@@ -172,7 +186,7 @@ func (l *Ledger) RecordLoss(ctx context.Context, droppedIDs []int64, now time.Ti
 // first. Reconciliation resumes from this on every start.
 func (l *Ledger) OpenLosses(ctx context.Context) ([]Loss, error) {
 	rows, err := l.db.QueryContext(ctx, `
-SELECT id, detected_at, dropped_count, repair_since, repair_cursor, deadline_at, resolved_at
+SELECT id, detected_at, dropped_count, repair_since, repair_cursor, deadline_at, resolved_at, filters
 FROM losses WHERE resolved_at IS NULL ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("connector: list open losses: %w", err)
@@ -186,9 +200,15 @@ FROM losses WHERE resolved_at IS NULL ORDER BY id`)
 			detected, deadline string
 			resolved           sql.NullString
 		)
+		var encodedFilters string
 		if err := rows.Scan(&loss.ID, &detected, &loss.DroppedCount, &loss.RepairSince,
-			&loss.RepairCursor, &deadline, &resolved); err != nil {
+			&loss.RepairCursor, &deadline, &resolved, &encodedFilters); err != nil {
 			return nil, fmt.Errorf("connector: scan loss: %w", err)
+		}
+		if encodedFilters != "" {
+			if err := json.Unmarshal([]byte(encodedFilters), &loss.Filters); err != nil {
+				return nil, fmt.Errorf("connector: decode loss filters: %w", err)
+			}
 		}
 		var err error
 		if loss.DetectedAt, err = parseStamp(detected); err != nil {

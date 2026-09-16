@@ -265,6 +265,13 @@ CREATE TABLE gaps (
   note           TEXT    NOT NULL DEFAULT ''
 );
 `,
+	// Migration 2. A loss is repaired under the filter set it was recorded
+	// with: a connector restarted with different filters must not walk the
+	// wrong lane for it and condemn events the original filters would have
+	// served. Migrations only ever append, so an existing ledger takes this
+	// one and its open losses carry an empty set, which reads as "the
+	// connector's own".
+	`ALTER TABLE losses ADD COLUMN filters TEXT NOT NULL DEFAULT ''`,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

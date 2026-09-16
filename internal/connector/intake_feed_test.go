@@ -254,8 +254,12 @@ func TestIntakeSurvivesARestartWithoutDuplicating(t *testing.T) {
 	assert.Equal(t, "position-from-the-previous-run", calls[0].Cursor.Position,
 		"a restart resumes from the stored position, never at the head")
 
-	assert.Equal(t, 1, countLines(pointers.String()),
+	// The ledger row is written before the pointer line and the hand-off, so
+	// the counts are asserted on their own terms.
+	require.Eventually(t, func() bool { return countLines(pointers.String()) == 1 && queue.Depth() == 1 },
+		5*time.Second, 5*time.Millisecond,
 		"the event the previous run already saw is not a second unit of work")
+	assert.Equal(t, 1, countLines(pointers.String()))
 	assert.Equal(t, 1, queue.Depth())
 
 	cancel()
@@ -326,7 +330,7 @@ func TestShutdownDoesNotWaitOutAnOpenRepairWalk(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err = ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Hour)
+	_, err = ledger.RecordLoss(ctx, []int64{17099838509}, time.Now(), time.Hour, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	transport := feedtest.NewTransport()

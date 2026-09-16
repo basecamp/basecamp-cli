@@ -40,6 +40,17 @@ type repairWalker struct {
 	sleep func(ctx context.Context, d time.Duration) error
 }
 
+// reconcileLoss walks a loss under its own recorded filter set.
+func (w *repairWalker) reconcileLoss(ctx context.Context, loss Loss) error {
+	walker := *w
+	if len(loss.Filters.Types) > 0 || len(loss.Filters.Buckets) > 0 || len(loss.Filters.Creators) > 0 ||
+		len(loss.Filters.Performers) > 0 || len(loss.Filters.ExcludePerformers) > 0 ||
+		len(loss.Filters.ActorTypes) > 0 || len(loss.Filters.Reasons) > 0 {
+		walker.filters = loss.Filters
+	}
+	return walker.reconcile(ctx, loss)
+}
+
 func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 	for {
 		if !w.now().Before(loss.DeadlineAt) {

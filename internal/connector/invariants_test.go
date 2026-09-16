@@ -26,7 +26,7 @@ func TestInvariantH1RepairLogsRenderNoFailureText(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
 	var logs bytes.Buffer
@@ -95,7 +95,7 @@ func TestInvariantC2A410OnAStoredPositionIsFollowedEvenAtTheFence(t *testing.T) 
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute)
+	loss, err := ledger.RecordLoss(ctx, []int64{100, 200}, clock.at, 10*time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 	_, err = ledger.MarkUnrecoveredThrough(ctx, loss.ID, 150)
 	require.NoError(t, err)

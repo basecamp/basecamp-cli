@@ -98,3 +98,53 @@ func TestAFailedFirstMembershipReadIsRetriedSoon(t *testing.T) {
 	cancel()
 	awaitReturn(t, done, "Run should return on shutdown")
 }
+
+// E2/E3: while the project lister is failing, an unlisted project still costs
+// one reconnect, not one per event. The buckets learned from arriving events
+// are what the connector knows when it has no listing at all.
+func TestAFailingListerStillCostsOneReconnectPerProject(t *testing.T) {
+	ledger := newTestLedger(t)
+	always := &alwaysFailingMembership{}
+	intake, transport, minter, polls := newFeedIntake(t, ledger, Options{
+		Membership:         always,
+		MembershipInterval: time.Hour,
+	})
+	intake.membershipRetry = time.Hour
+	for range 10 {
+		minter.ScriptTicket(ticket())
+	}
+	var events []eventfeed.Event
+	for id := int64(600); id < 605; id++ {
+		e := testEvent(id)
+		e.BucketID = 777
+		events = append(events, e)
+	}
+	for range 10 {
+		polls.ScriptPage(eventfeed.PollPage{Events: events, Position: "p"})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runInBackground(ctx, t, intake)
+	subscribedConn(t, transport)
+
+	answered := 1
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if conns := transport.Conns(); len(conns) > answered {
+			answerSubscription(conns[len(conns)-1])
+			answered = len(conns)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.LessOrEqual(t, len(transport.Dials()), 2, "five events from one project are one reconnect, lister or no lister")
+
+	cancel()
+	awaitReturn(t, done, "Run should return on shutdown")
+}
+
+type alwaysFailingMembership struct{}
+
+func (alwaysFailingMembership) Buckets(context.Context) ([]int64, error) {
+	return nil, errors.New("projects listing unavailable")
+}
