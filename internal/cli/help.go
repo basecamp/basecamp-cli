@@ -415,11 +415,12 @@ func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
 // Rules:
 //   - Only root-level persistent flags (pointer identity vs root.PersistentFlags)
 //   - Only flags in salientRootFlags
-//   - Suppress --project for commands whose Use contains <id|url>
+//   - Suppress --project for commands that take an id-or-url positional,
+//     whether the spelling is required (<id|url>) or optional ([id|url])
 func curatedInheritedFlags(cmd *cobra.Command) *pflag.FlagSet {
 	root := cmd.Root()
 	filtered := pflag.NewFlagSet("inherited", pflag.ContinueOnError)
-	acceptsID := strings.Contains(cmd.Use, "<id|url>")
+	acceptsID := strings.Contains(cmd.Use, "id|url")
 
 	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
 		rootFlag := root.PersistentFlags().Lookup(f.Name)

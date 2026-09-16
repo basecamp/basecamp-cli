@@ -871,6 +871,30 @@ func TestAgentHelpSuppressesProjectForIDURLCommands(t *testing.T) {
 	assert.Contains(t, names, "json")
 }
 
+// A command whose id-or-url positional is optional is still an id-or-url
+// command: events grew subcommands and so spells it [id|url], and --project
+// is no more relevant to it than before.
+func TestAgentHelpSuppressesProjectWhenTheIDURLPositionalIsOptional(t *testing.T) {
+	isolateHelpTest(t)
+
+	var buf bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.AddCommand(commands.NewEventsCmd())
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"events", "--agent", "--help"})
+	require.NoError(t, cmd.Execute())
+
+	var info agentHelpInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+
+	names := make([]string, len(info.InheritedFlags))
+	for i, f := range info.InheritedFlags {
+		names[i] = f.Name
+	}
+	assert.NotContains(t, names, "project", "agent help should suppress --project for [id|url] commands too")
+	assert.Contains(t, names, "json")
+}
+
 func TestAgentHelpPromotesParentScopedFlags(t *testing.T) {
 	isolateHelpTest(t)
 
