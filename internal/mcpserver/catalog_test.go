@@ -155,20 +155,51 @@ func TestCatalogIsAccountScoped(t *testing.T) {
 	}
 }
 
+// modelPaginationStylesForTest reads each operation's declared pagination style
+// straight from the vendored behavior model, independently of the loader, so
+// the page-parameter tests check the catalog against the model rather than
+// against the code under test.
+func modelPaginationStylesForTest(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := modelFS.ReadFile("model/behavior-model.json")
+	require.NoError(t, err)
+	var model struct {
+		Operations map[string]struct {
+			Pagination *struct {
+				Style string `json:"style"`
+			} `json:"pagination"`
+		} `json:"operations"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &model))
+	styles := map[string]string{}
+	for id, op := range model.Operations {
+		if op.Pagination != nil {
+			styles[id] = op.Pagination.Style
+		}
+	}
+	return styles
+}
+
 // TestCatalogPaginatedActionsTakePage pins the synthesized page parameter:
-// every operation the behavior model marks paginated must declare a page
-// query parameter, whether the OpenAPI export supplies it or loadCatalog
-// synthesizes it. Otherwise the next_page value a listing returns could
-// never be passed back — the dispatcher rejects undeclared parameters.
+// every Link-style paginated operation must declare exactly one page query
+// parameter, whether the OpenAPI export supplies it or loadCatalog
+// synthesizes it. Otherwise the next_page value a listing returns could never
+// be passed back — the dispatcher rejects undeclared parameters.
+//
+// 61 is the Link-style count. The model marks 63 operations paginated; the
+// other two are the event feed's poll lanes (PollEvents, PollInbox), which
+// basecamp-sdk#914 declares cursor-style. They page by position, not by page
+// number, and are pinned separately below.
 func TestCatalogPaginatedActionsTakePage(t *testing.T) {
 	cat := loadForTest(t)
-	paginated := 0
+	styles := modelPaginationStylesForTest(t)
+	link := 0
 	for _, d := range cat.Domains {
 		for _, op := range d.Operations {
-			if !op.Paginated {
+			if !op.Paginated || styles[op.ID] != "link" {
 				continue
 			}
-			paginated++
+			link++
 			pages := 0
 			for _, p := range op.Params {
 				if p.In != "query" || p.Name != "page" {
@@ -181,7 +212,39 @@ func TestCatalogPaginatedActionsTakePage(t *testing.T) {
 			assert.Equal(t, 1, pages, "operation %q must declare exactly one page query parameter", op.ID)
 		}
 	}
-	assert.Equal(t, 61, paginated, "paginated operation count")
+	assert.Equal(t, 61, link, "Link-style paginated operation count")
+}
+
+// TestCatalogCursorPaginatedActionsTakeNoPage pins the other half. A
+// cursor-style operation pages by an opaque position its own response
+// carries, and a Link-style page number means nothing to it: BC3 ignores it,
+// so a caller who passes page=2 is served page one again and told nothing.
+// The page parameter is keyed off the style the model declares, so this also
+// checks that every operation the model calls paginated has a style the
+// loader recognizes — a new style must be decided about, not defaulted.
+func TestCatalogCursorPaginatedActionsTakeNoPage(t *testing.T) {
+	cat := loadForTest(t)
+	styles := modelPaginationStylesForTest(t)
+	cursor := 0
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if !op.Paginated {
+				continue
+			}
+			style := styles[op.ID]
+			assert.Contains(t, []string{"link", "cursor"}, style,
+				"operation %q declares pagination style %q, which the loader has not decided about", op.ID, style)
+			if style != "cursor" {
+				continue
+			}
+			cursor++
+			for _, p := range op.Params {
+				assert.False(t, p.In == "query" && p.Name == "page",
+					"cursor-style operation %q must not take a Link-style page parameter", op.ID)
+			}
+		}
+	}
+	assert.Equal(t, 2, cursor, "cursor-style operation count (the event feed's two poll lanes)")
 }
 
 // TestCatalogSnapshot renders the full served surface — every tool
@@ -255,4 +318,22 @@ func pseudoVersionCommit(version string) (string, bool) {
 		return "", false
 	}
 	return match[2], true
+}
+
+// A paginated operation whose declared style the loader has not decided about
+// stops the load rather than being defaulted. Either default is a silent
+// guess: a page parameter the server ignores, or a listing whose later pages
+// cannot be reached. The load failing is how a model sync that brings a new
+// style gets a decision instead of a guess.
+func TestCatalogRefusesAnUndecidedPaginationStyle(t *testing.T) {
+	cat := &catalog.Catalog{Domains: []*catalog.Domain{{
+		Key:        "probe",
+		Operations: []*catalog.Operation{{ID: "ListThings", Paginated: true}},
+	}}}
+
+	err := synthesizePageParams(cat, map[string]string{"ListThings": "offset"})
+
+	require.Error(t, err, "an undecided style must stop the load")
+	assert.Contains(t, err.Error(), `"offset"`)
+	assert.Empty(t, cat.Domains[0].Operations[0].Params, "nothing may be synthesized for an undecided style")
 }

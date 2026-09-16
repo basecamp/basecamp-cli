@@ -8377,7 +8377,7 @@
     },
     "/{accountId}/events.json": {
       "get": {
-        "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: the body envelope, not the Link header. `position` is the\ndurable cursor (persist it only after processing the page's events); `next`\nis an absolute continuation URL present only while this walk has more to\nserve. Not wired into the generic Link paginator \u2014 see the section note.\n\n**Errors.** 400 (FeedRequestError) for a malformed position (resume with\n`since=`) or a malformed filter (fix the filters; a position reset will not\nhelp), told apart by its optional `reason` and undifferentiated when `reason`\nis absent. 409 (FeedFilterMismatchError) when the position was minted for a\ndifferent filter set. 410 (FeedPositionGoneError) when the position predates\nthe feed's epoch; its `resume` re-enters at the epoch.",
+        "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: cursor style \u2014 the body envelope, not the Link header.\n`position` is the durable cursor (persist it only after processing the\npage's events); `next` is an absolute continuation URL present only while\nthis walk has more to serve. One call answers one page; no generator emits\na walk for the cursor style \u2014 see the section note.\n\n**Errors.** 400 (FeedRequestError) for a malformed position (resume with\n`since=`) or a malformed filter (fix the filters; a position reset will not\nhelp), told apart by its optional `reason` and undifferentiated when `reason`\nis absent. 409 (FeedFilterMismatchError) when the position was minted for a\ndifferent filter set. 410 (FeedPositionGoneError) when the position predates\nthe feed's epoch; its `resume` re-enters at the epoch.",
         "operationId": "PollEvents",
         "parameters": [
           {
@@ -8549,6 +8549,11 @@
         "tags": [
           "EventFeed"
         ],
+        "x-basecamp-pagination": {
+          "style": "cursor",
+          "key": "events",
+          "maxPageSize": 100
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -9302,7 +9307,7 @@
     },
     "/{accountId}/inbox.json": {
       "get": {
-        "description": "Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403.\n\nThe inbox is the low-noise \"someone addressed you\" lane as its own resource\nrather than a filter over the account feed. **Agents only for now**: any\nother principal receives 403.\n\nAn item is a first-class delivery with its own identity: one event can\naddress the same principal for several reasons, and each reason is its own\nitem. Deduplicate by `addressing_id`, never by event id. Items are never\nself-addressed, are kept for 30 days, and are dropped at read time when the\nevent is no longer readable.\n\n**Entry**: `since=0` replays the earliest retained items, `since=now` enters\nat the present, `position` resumes. Inbox positions are bound to the\naccount, the principal, and the filter set, and are never interchangeable\nwith feed positions.\n\n**Pagination**: the body envelope (`items`, `position`, `next`), exactly as\nPollEvents \u2014 not the Link header, and not the generic paginator.\n\n**Errors** follow PollEvents (FeedRequestError 400, FeedFilterMismatchError\n409), except that 403 carries no body \u2014 the agent guard's bare\n`head :forbidden` (BareForbiddenError) \u2014 and that the 410 is the inbox's own\nInboxPositionGoneError: the position fell behind the retention window, there\nis no epoch, and `resume` re-enters at `since=0`, the earliest retained item\n\u2014 not the feed's recovery, and not interchangeable with it.",
+        "description": "Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403.\n\nThe inbox is the low-noise \"someone addressed you\" lane as its own resource\nrather than a filter over the account feed. **Agents only for now**: any\nother principal receives 403.\n\nAn item is a first-class delivery with its own identity: one event can\naddress the same principal for several reasons, and each reason is its own\nitem. Deduplicate by `addressing_id`, never by event id. Items are never\nself-addressed, are kept for 30 days, and are dropped at read time when the\nevent is no longer readable.\n\n**Entry**: `since=0` replays the earliest retained items, `since=now` enters\nat the present, `position` resumes. Inbox positions are bound to the\naccount, the principal, and the filter set, and are never interchangeable\nwith feed positions.\n\n**Pagination**: cursor style, exactly as PollEvents \u2014 the body envelope\n(`items`, `position`, `next`), not the Link header and not the generic\npaginator. Up to 100 items per page.\n\n**Errors** follow PollEvents (FeedRequestError 400, FeedFilterMismatchError\n409), except that 403 carries no body \u2014 the agent guard's bare\n`head :forbidden` (BareForbiddenError) \u2014 and that the 410 is the inbox's own\nInboxPositionGoneError: the position fell behind the retention window, there\nis no epoch, and `resume` re-enters at `since=0`, the earliest retained item\n\u2014 not the feed's recovery, and not interchangeable with it.",
         "operationId": "PollInbox",
         "parameters": [
           {
@@ -9440,6 +9445,11 @@
         "tags": [
           "EventFeed"
         ],
+        "x-basecamp-pagination": {
+          "style": "cursor",
+          "key": "items",
+          "maxPageSize": 100
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,

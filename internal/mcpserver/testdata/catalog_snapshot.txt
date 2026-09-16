@@ -320,8 +320,8 @@ Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
-- poll_events (RO): Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page)
-- poll_inbox (RO): Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403
+- poll_events (RO, paginated): Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page)
+- poll_inbox (RO, paginated): Poll the authenticated agent's inbox for the items that addressed it (oldest first, strict item-id order); people receive 403
 
 == basecamp_clientside
 The Clientside: client approvals, correspondences, replies, and client visibility of recordings.
