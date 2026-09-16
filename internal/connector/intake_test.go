@@ -50,7 +50,18 @@ func (c *fixedClock) now() time.Time { return c.at }
 
 func newTestIntake(t *testing.T, polls eventfeed.PollSource, pointers io.Writer) (*Intake, *Ledger, *Queue) {
 	t.Helper()
-	ledger := newTestLedger(t)
+	return newTestIntakeWith(t, newTestLedger(t), polls, pointers)
+}
+
+// newTestIntakeOn builds an intake over an existing ledger, as a later start
+// would.
+func newTestIntakeOn(t *testing.T, ledger *Ledger, pointers io.Writer) (*Intake, *Ledger, *Queue) {
+	t.Helper()
+	return newTestIntakeWith(t, ledger, nil, pointers)
+}
+
+func newTestIntakeWith(t *testing.T, ledger *Ledger, polls eventfeed.PollSource, pointers io.Writer) (*Intake, *Ledger, *Queue) {
+	t.Helper()
 	queue, err := NewQueue(DefaultBacklogWarn, DefaultBacklogPause)
 	require.NoError(t, err)
 	if polls == nil {

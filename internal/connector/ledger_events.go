@@ -121,6 +121,17 @@ func (l *Ledger) Get(ctx context.Context, id int64) (Record, bool, error) {
 	return records[0], true, nil
 }
 
+// RecordsInStateAfter returns up to limit records in state whose id is above
+// afterID, oldest first — the paging form of RecordsInState.
+func (l *Ledger) RecordsInStateAfter(ctx context.Context, state RecordState, afterID int64, limit int) ([]Record, error) {
+	rows, err := l.db.QueryContext(ctx,
+		selectRecords+` WHERE state = ? AND id > ? ORDER BY id LIMIT ?`, string(state), afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("connector: list %s records: %w", state, err)
+	}
+	return scanRecords(rows)
+}
+
 // RecordsInState returns up to limit records in state, oldest event first.
 // Every non-terminal state is re-run on start, and this is how they are found.
 func (l *Ledger) RecordsInState(ctx context.Context, state RecordState, limit int) ([]Record, error) {

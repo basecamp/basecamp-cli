@@ -285,6 +285,9 @@ func (in *Intake) Run(ctx context.Context) error {
 	if err := in.resumeReconciliation(repairCtx); err != nil {
 		return err
 	}
+	if err := in.requeueSeen(ctx); err != nil {
+		return err
+	}
 
 	since := in.opts.SinceEventID
 	for {
@@ -725,6 +728,39 @@ func entryClassOf(resumeURL string) EntryClass {
 		return EntryReplay
 	}
 }
+
+// requeueSeen hands every record still in seen to the queue.
+//
+// The ledger row is written before the pointer line and before the hand-off,
+// so that a crash can never lose the pointer — but that ordering means a
+// failure after the commit leaves an event the ledger's own dedupe will
+// suppress on every retry. Nothing may be left in that state, so a start
+// offers every record nothing has judged yet. Offering one twice costs
+// nothing: the queue carries ids, and admission moves a record out of seen
+// before it acts.
+func (in *Intake) requeueSeen(ctx context.Context) error {
+	var after int64
+	for {
+		records, err := in.ledger.RecordsInStateAfter(ctx, StateSeen, after, requeueBatch)
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if err := in.queue.Offer(ctx, record.ID); err != nil {
+				// A shutdown mid-requeue leaves the rest recorded and still
+				// seen, which the next start offers again.
+				return err
+			}
+			after = record.ID
+		}
+		if len(records) < requeueBatch {
+			return nil
+		}
+	}
+}
+
+// requeueBatch is how many seen records a start reads at a time.
+const requeueBatch = 500
 
 // resumeReconciliation restarts every open loss's repair walk on start. A
 // crash between the overflow and its repair is a delay, not a loss of the

@@ -256,11 +256,21 @@ func TestIntakeSurvivesARestartWithoutDuplicating(t *testing.T) {
 
 	// The ledger row is written before the pointer line and the hand-off, so
 	// the counts are asserted on their own terms.
-	require.Eventually(t, func() bool { return countLines(pointers.String()) == 1 && queue.Depth() == 1 },
+	//
+	// One pointer line: the event the previous run already saw is not written
+	// out again. Two ids in the queue: that event was left unjudged in the
+	// ledger, so this start hands it over too, exactly once.
+	require.Eventually(t, func() bool { return countLines(pointers.String()) == 1 && queue.Depth() == 2 },
 		5*time.Second, 5*time.Millisecond,
-		"the event the previous run already saw is not a second unit of work")
+		"the event the previous run already saw is not written out again, and the unjudged one is handed over")
 	assert.Equal(t, 1, countLines(pointers.String()))
-	assert.Equal(t, 1, queue.Depth())
+	queued := map[int64]int{}
+	for range 2 {
+		id, err := queue.Take(ctx)
+		require.NoError(t, err)
+		queued[id]++
+	}
+	assert.Equal(t, map[int64]int{17099838500: 1, 17099838501: 1}, queued)
 
 	cancel()
 	select {
