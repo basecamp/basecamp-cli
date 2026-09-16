@@ -962,8 +962,9 @@ basecamp events ticket --json                      # Mint a live-stream ticket
 Each page is an envelope: `events` (or `items`), a durable `position`, and a
 `next` continuation URL while the current walk has more to serve. Persist
 `position` only after processing the page, then pass it back with
-`--position`. `--all` walks `next` to the end of the current walk — it is not
-a live tail.
+`--position`. The response's `notice` spells the whole resume command out,
+filters included. `--all` walks `next` to the end of the current walk — it is
+not a live tail.
 
 The feed is a notification lane, not an audit log:
 

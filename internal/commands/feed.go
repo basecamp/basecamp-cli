@@ -473,13 +473,31 @@ func checkContinuation(baseURL, raw string) error {
 	return nil
 }
 
-// feedWalkNotice reports a walk that stopped at its page cap rather than at
-// the end of the walk, so a caller reads "more remains" instead of "done".
-func feedWalkNotice(capped bool, maxPages int) string {
-	if !capped {
-		return ""
+// resumeNotice is where a person gets their position back.
+//
+// The envelope carries it for machines, but the rendered output is the rows —
+// and the generic renderer drops a field named "position" from objects
+// anyway, since on a to-do or a card that name means an ordering integer. So
+// the notice, which every format prints verbatim, carries the whole resume
+// command. A walk that stopped at its page cap says so in the same sentence,
+// because "more remains" and "here is where to continue" are one thought.
+func (r feedRequest) resumeNotice(position string, capped bool, maxPages int) string {
+	notice := ""
+	if capped {
+		notice = fmt.Sprintf("Stopped at --max-pages %d; more remains. ", maxPages)
 	}
-	return fmt.Sprintf("Stopped at --max-pages %d; more remains. Poll again from the position above.", maxPages)
+	if position == "" {
+		return strings.TrimSpace(notice)
+	}
+	return notice + "Resume from here with: " + r.positionCommand(position)
+}
+
+// positionCommand is the invocation that resumes from a position. The filters
+// ride along because a position is bound to the set it was minted for: the
+// same command without them is a different filter set, and the server answers
+// 409.
+func (r feedRequest) positionCommand(position string) string {
+	return fmt.Sprintf("%s --position %s%s", r.lane.pollCmd, position, r.filters)
 }
 
 // newEventsPollCmd builds `basecamp events poll`.
@@ -616,18 +634,17 @@ event id and refetch the referenced recording before acting on it.`,
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(summary),
-				// The envelope is the machine contract, but it is one object,
-				// so --count would answer 1 for any page and --ids-only would
-				// find no id to print. The rows are what those modes are
-				// about; --json keeps the resumable envelope.
+				output.WithNotice(request.resumeNotice(position, capped, maxPages)),
+				// The envelope is one object: rendered for a person it is a
+				// Go dump, --count answers 1 for any page, and --ids-only
+				// finds no id to print. The rows are what all three want.
+				// The position a person needs to resume comes back in the
+				// notice below, since it lives in the envelope, not the rows.
 				output.WithDisplayData(events),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
-						Action: "resume",
-						// A position is bound to its filter set, so the
-						// resume command carries the filters this poll used;
-						// without them the server answers 409.
-						Cmd:         "basecamp events poll --position <position>" + request.filters,
+						Action:      "resume",
+						Cmd:         request.positionCommand(position),
 						Description: "Poll again from this page's position, with the same filters",
 					},
 					output.Breadcrumb{
@@ -637,10 +654,6 @@ event id and refetch the referenced recording before acting on it.`,
 					},
 				),
 			}
-			if notice := feedWalkNotice(capped, maxPages); notice != "" {
-				respOpts = append(respOpts, output.WithNotice(notice))
-			}
-
 			return app.OK(map[string]any{
 				"events":   events,
 				"position": position,

@@ -231,7 +231,7 @@ func TestEventsPollAllFollowsNextUntilItIsAbsent(t *testing.T) {
 	assert.Len(t, data.Events, 3)
 	assert.Equal(t, "pos-2", data.Position)
 	assert.Empty(t, data.Next)
-	assert.Empty(t, envelope.Notice)
+	assert.NotContains(t, envelope.Notice, "--max-pages")
 
 	queries := transport.queriesFor(feedEventsPath)
 	require.Len(t, queries, 2)
@@ -574,6 +574,46 @@ func TestPositionGoneFallsBackWhenTheResumeURLIsNotRenderable(t *testing.T) {
 	assert.Equal(t, "Re-enter with: basecamp events poll --since 900", requireFeedError(t, err).Hint)
 }
 
+// The rendered output is the rows, and the generic renderer drops a field
+// named "position" from objects anyway, so a person polling without --json
+// would have no way to resume. The notice carries the whole command, in every
+// format, hints on or off.
+func TestHumanOutputCarriesTheResumeCommand(t *testing.T) {
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK, feedPageJSON("pos-1", "", 11)))
+	app.Output = output.New(output.Options{Format: output.FormatMarkdown, Writer: out})
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "now",
+		"--types", "message.created"))
+
+	assert.Contains(t, out.String(),
+		"Resume from here with: basecamp events poll --position pos-1 --types message.created")
+}
+
+func TestInboxHumanOutputCarriesTheResumeCommand(t *testing.T) {
+	app, _, out := setupFeedApp(t, inboxRoute(http.StatusOK, inboxPageJSON("inbox-pos-1", "", 991)))
+	app.Output = output.New(output.Options{Format: output.FormatMarkdown, Writer: out})
+
+	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app, "--since", "now"))
+
+	assert.Contains(t, out.String(), "Resume from here with: basecamp inbox --position inbox-pos-1")
+}
+
+// A capped walk says both things in one notice: more remains, and here is
+// where to continue from.
+func TestACappedWalkSaysSoAndStillHandsBackThePosition(t *testing.T) {
+	next := feedBaseURL + feedEventsPath + "?position=pos-1"
+	app, _, out := setupFeedApp(t, eventsRoute(http.StatusOK,
+		feedPageJSON("pos-1", next, 11),
+		feedPageJSON("pos-2", next, 12),
+	))
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "poll", "--since", "0", "--all", "--max-pages", "1"))
+
+	assert.Equal(t,
+		"Stopped at --max-pages 1; more remains. Resume from here with: basecamp events poll --position pos-1",
+		decodeFeedEnvelope(t, out).Notice)
+}
+
 // --count counts the page's rows and --ids-only prints their identities; for
 // the inbox that identity is the addressing id, never the event id.
 func TestEnumeratingOutputModesSeeTheRows(t *testing.T) {
@@ -609,7 +649,7 @@ func TestResumeBreadcrumbCarriesTheFilters(t *testing.T) {
 		"--types", "message.created", "--buckets", "1,2", "--exclude-performers", "self"))
 
 	assert.Equal(t,
-		"basecamp events poll --position <position> --types message.created"+
+		"basecamp events poll --position pos-1 --types message.created"+
 			" --buckets 1,2 --exclude-performers self",
 		resumeBreadcrumb(t, out))
 }
@@ -620,7 +660,7 @@ func TestInboxResumeBreadcrumbCarriesItsOwnFilters(t *testing.T) {
 
 	require.NoError(t, executeRecordingCommand(NewInboxCmd(), app, "--since", "now", "--reasons", "mentioned"))
 
-	assert.Equal(t, "basecamp inbox --position <position> --reasons mentioned", resumeBreadcrumb(t, out))
+	assert.Equal(t, "basecamp inbox --position inbox-pos-1 --reasons mentioned", resumeBreadcrumb(t, out))
 }
 
 // resumeBreadcrumb returns the command the response's resume breadcrumb

@@ -123,9 +123,10 @@ deduplicate by addressing_id, never by the event's id.`,
 
 			respOpts := []output.ResponseOption{
 				output.WithSummary(summary),
+				output.WithNotice(request.resumeNotice(position, capped, maxPages)),
 				// Rows for the enumerating output modes, as in events poll —
 				// and an item's identity here is its addressing id, so that is
-				// what the row's id is. The machine envelope keeps
+				// what the row's id is. The rendered envelope keeps
 				// addressing_id under its own name, because applying the
 				// feed's dedupe-by-event-id rule to the inbox would discard
 				// every reason but one.
@@ -133,7 +134,7 @@ deduplicate by addressing_id, never by the event's id.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "resume",
-						Cmd:         "basecamp inbox --position <position>" + request.filters,
+						Cmd:         request.positionCommand(position),
 						Description: "Poll again from this page's position, with the same filters",
 					},
 					output.Breadcrumb{
@@ -143,10 +144,6 @@ deduplicate by addressing_id, never by the event's id.`,
 					},
 				),
 			}
-			if notice := feedWalkNotice(capped, maxPages); notice != "" {
-				respOpts = append(respOpts, output.WithNotice(notice))
-			}
-
 			return app.OK(map[string]any{
 				"items":    items,
 				"position": position,
