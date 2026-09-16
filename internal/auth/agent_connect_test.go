@@ -772,3 +772,24 @@ func TestAgentConnectOriginComparisonIgnoresDefaultPortSpelling(t *testing.T) {
 	assert.False(t, sameOrigin("https://elsewhere.example/a", "https://auth.example/b"))
 	assert.False(t, sameOrigin("http://auth.example/a", "https://auth.example/b"))
 }
+
+// TestConnectAgentRefusesAHandoverWiderThanTheRequest: the approval page
+// offers a downgrade, not an upgrade. A handover reporting full for a
+// connection that asked for read-only is the server contradicting the
+// ceremony, and adopting it would leave a write-capable agent on a machine
+// whose operator asked for read.
+func TestConnectAgentRefusesAHandoverWiderThanTheRequest(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) { return http.StatusOK, connectionJSON(scopeFull) }
+	m := connectManager(t, as)
+
+	cl := &collectLogger{}
+	opts := connectOptions(cl, newTestClock())
+	opts.Scope = scopeRead
+	_, err := m.ConnectAgent(context.Background(), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read-only")
+	assert.Empty(t, as.calls(&as.tokenForms), "a handover wider than the request is never minted with")
+	assertNoAgentCredential(t, m)
+	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+}

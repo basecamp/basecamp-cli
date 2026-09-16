@@ -268,6 +268,19 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 		return nil, err
 	}
 
+	// The approval may narrow what was asked for — that is what the
+	// approval page's downgrade is — but it cannot widen it. A handover
+	// wider than the request is the server contradicting the ceremony, and
+	// adopting it would store a write-capable agent on a machine whose
+	// operator asked for read-only. The code is spent either way, so this
+	// costs what a refused mint costs and says the same thing.
+	if widensScope(scope, conn.Scope) {
+		warnHandoverLost(log)
+		return nil, agentConnectFailure(
+			"The agent connection was approved with full access, and this connection asked for read-only",
+			"Nothing was stored. Connect again without --scope read to take the access the operator approved.")
+	}
+
 	// The scope stored is the one the poll answered with: approval
 	// provisions the client with what the operator approved, so a read
 	// downgrade narrows the client itself and minting under the scope that
