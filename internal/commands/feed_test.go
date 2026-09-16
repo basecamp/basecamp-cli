@@ -524,12 +524,49 @@ func TestEventsTicketShowSecretPrintsItVerbatim(t *testing.T) {
 }
 
 func TestRedactTicketURLWithholdsWhatItCannotReduce(t *testing.T) {
-	assert.Equal(t, redactedTicket, redactTicketURL("wss://chat.example.test/195539477"))
-	assert.Equal(t, redactedTicket, redactTicketURL("://"))
+	assert.Equal(t, redactedTicket, redactTicketURL("wss://chat.example.test/195539477", "tkt-secret"))
+	assert.Equal(t, redactedTicket, redactTicketURL("://", "tkt-secret"))
 
-	redacted := redactTicketURL("wss://chat.example.test/195539477?ticket=tkt-secret")
+	redacted := redactTicketURL("wss://chat.example.test/195539477?ticket=tkt-secret", "tkt-secret")
 	assert.NotContains(t, redacted, "tkt-secret")
 	assert.Contains(t, redacted, "chat.example.test/195539477")
+}
+
+// Redacting the ticket parameter is not the same as redacting the ticket: the
+// response is not ours to trust, and a URL that carries the credential
+// anywhere else is withheld whole rather than echoed with one parameter
+// blanked.
+func TestRedactTicketURLWithholdsATicketEchoedOutsideItsParameter(t *testing.T) {
+	for _, raw := range []string{
+		"wss://chat.example.test/195539477?ticket=tkt-secret#tkt-secret",
+		"wss://chat.example.test/tkt-secret?ticket=tkt-secret",
+		"wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret",
+		"wss://tkt-secret@chat.example.test/195539477?ticket=tkt-secret",
+	} {
+		assert.NotContains(t, redactTicketURL(raw, "tkt-secret"), "tkt-secret", raw)
+	}
+}
+
+// An empty ticket must not make every URL look like it carries one.
+func TestRedactTicketURLStillRendersWhenTheTicketIsEmpty(t *testing.T) {
+	assert.Equal(t,
+		"wss://chat.example.test/195539477?ticket="+url.QueryEscape(redactedTicket),
+		redactTicketURL("wss://chat.example.test/195539477?ticket=", ""))
+}
+
+// The whole point of the redacted URL is that a person can still see which
+// cable endpoint they would be opening.
+func TestEventsTicketRedactionKeepsTheEndpointVisible(t *testing.T) {
+	app, _, out := setupFeedApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   feedTicketPath,
+		status: http.StatusOK,
+		body:   `{"ticket":"tkt-secret","expires_in":120,"url":"wss://chat.example.test/195539477?ticket=tkt-secret#tkt-secret"}`,
+	})
+
+	require.NoError(t, executeRecordingCommand(NewEventsCmd(), app, "ticket"))
+
+	assert.NotContains(t, out.String(), "tkt-secret")
 }
 
 // A 410 on a filtered poll must hand back a re-entry that still carries the

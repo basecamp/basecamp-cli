@@ -726,7 +726,7 @@ attempt; an open socket does not refresh one.
 			}
 			if !showSecret {
 				data["ticket"] = redactedTicket
-				data["url"] = redactTicketURL(ticket.URL)
+				data["url"] = redactTicketURL(ticket.URL, ticket.Ticket)
 			}
 
 			respOpts := []output.ResponseOption{
@@ -750,10 +750,15 @@ attempt; an open socket does not refresh one.
 // credential invites a consumer to present it.
 const redactedTicket = "[REDACTED]"
 
-// redactTicketURL renders a cable URL without its credential. A URL that
-// cannot be parsed is withheld whole rather than echoed: the ticket is
-// opaque, so any component of an unparseable URL can be carrying it.
-func redactTicketURL(raw string) string {
+// redactTicketURL renders a cable URL without its credential. The ticket is
+// opaque and the response is not ours to trust, so the display URL is built
+// from the components a cable URL needs rather than by editing the one that
+// arrived: userinfo and fragment are dropped outright, and a URL that cannot
+// be parsed, carries no ticket parameter, or still contains the ticket after
+// all that — echoed in the path, or in a second parameter — is withheld
+// whole. Any component can be carrying it, so a rendering that still holds
+// it is worth nothing.
+func redactTicketURL(raw, ticket string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return redactedTicket
@@ -763,6 +768,16 @@ func redactTicketURL(raw string) string {
 		return redactedTicket
 	}
 	query.Set("ticket", redactedTicket)
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
+
+	display := url.URL{
+		Scheme:   parsed.Scheme,
+		Host:     parsed.Host,
+		Path:     parsed.Path,
+		RawQuery: query.Encode(),
+	}
+	rendered := display.String()
+	if ticket != "" && strings.Contains(rendered, ticket) {
+		return redactedTicket
+	}
+	return rendered
 }
