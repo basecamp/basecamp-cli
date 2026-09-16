@@ -32,13 +32,19 @@ type Writer struct {
 // Keying on the sink makes that impossible whoever calls this, without every
 // caller having to agree to pass one instance around.
 //
-// A sink whose type is not comparable cannot be the same sink twice (it is
-// always a copy), so it gets a Writer of its own.
+// Only reference-like sinks are keyed — a pointer, a channel, an unsafe
+// pointer — which covers every real one, os.Stdout included. A value-typed
+// sink is a copy rather than the same sink, and hashing one can panic when it
+// holds an uncomparable field, so it gets a Writer of its own. The map holds
+// one entry per distinct sink for the life of the process; a connector has
+// one stdout.
 func NewWriter(w io.Writer) *Writer {
 	if w == nil {
 		return &Writer{}
 	}
-	if !reflect.TypeOf(w).Comparable() {
+	switch reflect.TypeOf(w).Kind() {
+	case reflect.Pointer, reflect.Chan, reflect.UnsafePointer:
+	default:
 		return &Writer{w: w}
 	}
 	sinksMu.Lock()
