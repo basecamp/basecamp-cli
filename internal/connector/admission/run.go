@@ -51,6 +51,11 @@ type RunOptions struct {
 // the first other error otherwise: a ledger that cannot load or commit, or a
 // line that cannot be written, is not something to skip past. An event whose
 // decision ctx interrupted is not committed; it stays as it was loaded.
+//
+// The stdout line is written after the commit, so it is best-effort: a
+// shutdown between the two leaves the verdict written and its line unwritten,
+// and a decided record is not loaded again. The ledger, not the stream, is the
+// record of what was decided.
 func Run(ctx context.Context, opts RunOptions) error {
 	if opts.Source == nil || opts.Records == nil || opts.Admitter == nil || opts.Committer == nil {
 		return errors.New("admission: run needs a source, records, an admitter and a committer")
@@ -150,11 +155,13 @@ type Line struct {
 
 // LineFor builds the stdout line for a verdict.
 func LineFor(v Verdict) Line {
-	// Every string is sanitized for a terminal. The line is a wire, but it is
-	// also what a person watching the connector sees, and the event type and
-	// URL come from Basecamp: JSON escapes C0 controls but passes C1 controls
-	// such as U+009B (CSI) through as raw UTF-8.
-	clean := richtext.SanitizeSingleLine
+	// Every string is stripped of terminal controls. The line is a wire, but
+	// it is also what a person watching the connector sees, and the event
+	// type and URL come from Basecamp: JSON escapes C0 controls but passes C1
+	// controls such as U+009B (CSI) through as raw UTF-8. Whitespace is left
+	// alone — JSON escapes newlines and tabs, and a route is a local path that
+	// must survive as written.
+	clean := richtext.SanitizeTerminal
 	return Line{
 		Type:         "event",
 		EventID:      v.EventID,

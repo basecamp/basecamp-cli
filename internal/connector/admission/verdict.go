@@ -21,6 +21,8 @@ const (
 	DefaultReadAttempts = 5
 	DefaultReadBackoff  = 2 * time.Second
 	maxReadBackoff      = 30 * time.Second
+	// maxRetryAfter is the longest Retry-After waited for in place.
+	maxRetryAfter = 2 * time.Minute
 )
 
 // ReplyKind names where a reply to the record goes.
@@ -162,13 +164,17 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (Verdict, error) {
 		Revision:    ev.Revision,
 	}
 
+	if ev.SeenAt.IsZero() {
+		ev.SeenAt = time.Now()
+	}
+
 	gate := Gate(ev, a.policy, a.matrix)
 	if gate.Discarded() {
 		return v.end(StateDiscarded, gate.Reason), nil
 	}
 
 	if gate.ConfirmMembership {
-		member, reason, err := a.memberOf(ctx, ev.BucketID, ev.Performer())
+		member, reason, err := a.memberOf(ctx, ev.BucketID, ev.Performer(), ev.SeenAt)
 		if err != nil {
 			return Verdict{}, err
 		}
@@ -364,7 +370,7 @@ func (a *Admitter) authorTrusted(ctx context.Context, ev Event, summary *basecam
 	case a.policy.Trust.Mode == TrustAllowlist && slices.Contains(a.policy.Trust.AllowlistIDs, author):
 		return "", "", nil
 	case a.policy.Trust.Mode == TrustProject:
-		member, reason, err := a.memberOf(ctx, ev.BucketID, author)
+		member, reason, err := a.memberOf(ctx, ev.BucketID, author, ev.SeenAt)
 		switch {
 		case err != nil:
 			return "", "", err
@@ -410,16 +416,19 @@ func (a *Admitter) subscribed(ctx context.Context, recordingID int64) (bool, Rea
 	return subscribed, "", nil
 }
 
-func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64) (bool, Reason, error) {
+func (a *Admitter) memberOf(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, Reason, error) {
 	var member bool
 	err := a.retry(ctx, func() error {
 		var err error
-		member, err = a.reads.Members.NonClientMember(ctx, bucketID, personID)
+		member, err = a.reads.Members.NonClientMember(ctx, bucketID, personID, asOf)
 		return err
 	})
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return false, "", ctxErr
+		}
+		if errors.Is(err, ErrMembershipUnverified) {
+			return false, ReasonTrustUnverified, nil
 		}
 		return false, ReasonReadFailed, nil
 	}
@@ -441,7 +450,19 @@ func (a *Admitter) retry(ctx context.Context, read func() error) error {
 		if ctx.Err() != nil || final(err) || attempt >= a.attempts {
 			return err
 		}
-		if sleepErr := a.sleep(ctx, wait); sleepErr != nil {
+		// A throttled read waits as long as the server asked, never less:
+		// retrying inside the throttle only spends the attempts. A server
+		// asking for longer than maxRetryAfter is not waited for in place;
+		// the record blocks and the blocked schedule comes back to it.
+		pause := wait
+		if apiErr, ok := errors.AsType[*basecamp.Error](err); ok && apiErr.RetryAfter > 0 {
+			asked := time.Duration(apiErr.RetryAfter) * time.Second
+			if asked > maxRetryAfter {
+				return err
+			}
+			pause = max(pause, asked)
+		}
+		if sleepErr := a.sleep(ctx, pause); sleepErr != nil {
 			return sleepErr
 		}
 		wait = min(wait*2, maxReadBackoff)
@@ -456,7 +477,8 @@ func final(err error) bool {
 			return true
 		}
 	}
-	return errors.Is(err, basecamp.ErrRecordingUnresolved) ||
+	return errors.Is(err, ErrMembershipUnverified) ||
+		errors.Is(err, basecamp.ErrRecordingUnresolved) ||
 		errors.Is(err, basecamp.ErrNoRecordingType) ||
 		errors.Is(err, basecamp.ErrUnknownRecordingType) ||
 		errors.Is(err, basecamp.ErrBucketMismatch)

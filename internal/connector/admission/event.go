@@ -1,6 +1,9 @@
 package admission
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ActorTypeAgent is the feed's actor type for an Agent person. Only the push
 // lane carries actor_type; a poll row leaves it empty.
@@ -34,6 +37,11 @@ type Event struct {
 	// part of the feed's pointer: the ledger's Commit compares it, so a
 	// decision made on an older load never overwrites a newer one.
 	Revision int64
+	// SeenAt is when intake wrote the pointer, on this machine's clock. A
+	// membership refusal counts as verified only from a project listing read
+	// after it. Zero means unknown, and admission uses the time it started
+	// deciding.
+	SeenAt time.Time
 }
 
 // Performer is the effective performer: the delegating agent when the action

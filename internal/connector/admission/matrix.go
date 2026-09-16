@@ -113,6 +113,10 @@ const (
 	ReasonReadFailed Reason = "read_failed"
 	// ReasonReadUnresolved: a chat line found under no visible Campfire.
 	ReasonReadUnresolved Reason = "read_unresolved"
+	// ReasonTrustUnverified: in project trust mode, the only project listing
+	// at hand predates the event and a fresh one was read too recently to read
+	// again; the person may have been added since.
+	ReasonTrustUnverified Reason = "trust_unverified"
 	// ReasonDeltaUnverified: the assignment event was not found within the
 	// events read's bound, or was found without its details, so who was added
 	// is unknown.

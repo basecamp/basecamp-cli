@@ -56,8 +56,9 @@
 //     delta_unverified; it never admits and never discards.
 //  3. Discarded means verified. A discard rests on the pointer and the policy,
 //     or on a read that answered with what the verdict needs. A negative
-//     subscription answer is always read fresh; a membership refusal is either
-//     named by the listing or read fresh. A read that failed, was refused, or answered
+//     subscription answer is always read fresh, and a membership refusal comes
+//     only from a listing read after the event was seen; otherwise the record
+//     is held as trust_unverified. A read that failed, was refused, or answered
 //     without an author, a parent or a Campfire blocks; blocked records are
 //     retained and recovered.
 //  4. Only an admitted verdict carries the recording's content. A blocked or

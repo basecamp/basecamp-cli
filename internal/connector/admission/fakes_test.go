@@ -50,6 +50,7 @@ type fakeReads struct {
 	assignErr     error
 	members       map[int64]map[int64]bool
 	memberErr     error
+	memberAsOf    []time.Time
 
 	summaryCalls int
 	subCalls     []int64
@@ -110,10 +111,11 @@ func (f *fakeReads) AddedPersonIDs(_ context.Context, _, eventID int64) ([]int64
 	return added, ok, nil
 }
 
-func (f *fakeReads) NonClientMember(_ context.Context, bucketID, personID int64) (bool, error) {
+func (f *fakeReads) NonClientMember(_ context.Context, bucketID, personID int64, asOf time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.memberCalls++
+	f.memberAsOf = append(f.memberAsOf, asOf)
 	if f.memberErr != nil {
 		return false, f.memberErr
 	}

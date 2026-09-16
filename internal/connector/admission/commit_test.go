@@ -394,8 +394,16 @@ func TestALineIsWrittenWholeOrNotAtAll(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSuffix(w.b.String(), "\n")), &m), "a writer that takes a line in pieces still gets all of it")
 	assert.True(t, strings.HasSuffix(w.b.String(), "}\n"))
 
-	err := (&lineWriter{w: stuckWriter{}}).write(Verdict{EventID: 1, State: StateDiscarded})
-	require.ErrorIs(t, err, io.ErrShortWrite)
+	// Bounded: a writer loop that forgot this case would spin, and should fail
+	// this test by name rather than hang the suite.
+	done := make(chan error, 1)
+	go func() { done <- (&lineWriter{w: stuckWriter{}}).write(Verdict{EventID: 1, State: StateDiscarded}) }()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, io.ErrShortWrite)
+	case <-time.After(2 * time.Second):
+		t.Fatal("a writer that takes nothing was retried forever")
+	}
 }
 
 func TestLinesCannotCarryTerminalControls(t *testing.T) {
@@ -443,4 +451,13 @@ func TestRunStopsOnALoadFailure(t *testing.T) {
 		Committer: NewCommitter(newFakeLedger()),
 	})
 	require.ErrorContains(t, err, "database is locked")
+}
+
+func TestLinesKeepLocalPathsAsWritten(t *testing.T) {
+	var b strings.Builder
+	require.NoError(t, (&lineWriter{w: &b}).write(Verdict{EventID: 1, State: StateAdmitted, Route: " /work/My  Projects\tA", Class: "in ternal"}))
+	var m map[string]any
+	require.NoError(t, json.Unmarshal([]byte(b.String()), &m))
+	assert.Equal(t, " /work/My  Projects\tA", m["route"], "whitespace in a path is not a terminal control")
+	assert.Equal(t, "in ternal", m["class"])
 }

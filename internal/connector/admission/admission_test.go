@@ -665,6 +665,17 @@ func TestProjectTrustMode(t *testing.T) {
 		assert.Equal(t, ReasonAgentAuthored, v.Reason)
 	})
 
+	t.Run("a refusal the membership read could not verify is held", func(t *testing.T) {
+		f := setup(t, memberID)
+		f.memberErr = ErrMembershipUnverified
+		v := decide(t, newAdmitter(t, p, f), comment(memberID))
+		assert.Equal(t, StateBlocked, v.State)
+		assert.Equal(t, ReasonTrustUnverified, v.Reason)
+		assert.Equal(t, 1, f.memberCalls, "an answer, not a failure: not retried in place")
+		_, timed := NextBlockedRetry(v.Reason, testNow, testNow)
+		assert.True(t, timed)
+	})
+
 	t.Run("a membership read that fails blocks rather than discards", func(t *testing.T) {
 		f := setup(t, memberID)
 		f.memberErr = errTransport
@@ -930,4 +941,74 @@ func TestAVerdictCarriesTheRevisionItWasDecidedFrom(t *testing.T) {
 	f := newFakeReads()
 	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID, Revision: 4})
 	assert.EqualValues(t, 4, v.Revision)
+}
+
+func TestAThrottledReadWaitsAsLongAsTheServerAsks(t *testing.T) {
+	f := newFakeReads()
+	throttled := &basecamp.Error{Code: basecamp.CodeRateLimit, Message: "slow down", HTTPStatus: 429, Retryable: true, RetryAfter: 60}
+	f.summaryErrs = []error{throttled, throttled}
+	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	var waits []time.Duration
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateAdmitted, v.State)
+	require.Len(t, waits, 2)
+	for _, w := range waits {
+		assert.GreaterOrEqual(t, w, 60*time.Second, "a 429's Retry-After is the floor of the backoff")
+	}
+}
+
+func TestAThrottleLongerThanTheCapBlocksInsteadOfWaiting(t *testing.T) {
+	f := newFakeReads()
+	f.summaryErrs = []error{&basecamp.Error{Code: basecamp.CodeRateLimit, HTTPStatus: 429, Retryable: true, RetryAfter: 3600}}
+	var waited bool
+	a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error { waited = true; return nil }))
+	require.NoError(t, err)
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonReadFailed, v.Reason)
+	assert.False(t, waited, "an hour is the blocked schedule's to wait, not a fetcher's")
+	assert.Equal(t, 1, f.summaryCalls)
+}
+
+func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
+	p := basePolicy()
+	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
+	seen := testNow.Add(-time.Hour)
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
+	f.members[routedProj] = map[int64]bool{memberID: true}
+
+	ev := Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: memberID, SeenAt: seen}
+	decide(t, newAdmitter(t, p, f), ev)
+	require.Len(t, f.memberAsOf, 1)
+	assert.Equal(t, seen, f.memberAsOf[0], "the performer's membership, as of the event")
+
+	// An author distinct from the performer is asked as of the event too.
+	g := newFakeReads()
+	g.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
+	g.members[routedProj] = map[int64]bool{memberID: true}
+	moved := ev
+	moved.CreatorID = operatorID
+	decide(t, newAdmitter(t, p, g), moved)
+	require.Len(t, g.memberAsOf, 1)
+	assert.Equal(t, seen, g.memberAsOf[0], "the author's membership, as of the event")
+
+	// Unknown seen time: the time admission started, never the zero time,
+	// which every cached listing would satisfy.
+	h := newFakeReads()
+	h.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
+	h.members[routedProj] = map[int64]bool{memberID: true}
+	before := time.Now()
+	unknown := ev
+	unknown.SeenAt = time.Time{}
+	decide(t, newAdmitter(t, p, h), unknown)
+	require.Len(t, h.memberAsOf, 1)
+	assert.False(t, h.memberAsOf[0].Before(before))
 }

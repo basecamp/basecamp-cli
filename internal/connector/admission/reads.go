@@ -2,6 +2,8 @@ package admission
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
@@ -27,9 +29,18 @@ type AssignmentReader interface {
 
 // MemberReader answers whether a person is a non-client member of a project.
 // Only project trust mode consults it.
+//
+// A "no" discards the event, so it must come from a listing read at or after
+// asOf — the moment the event was seen. When the reader holds only an older
+// listing and may not read a fresh one yet, it returns ErrMembershipUnverified
+// and the record is held rather than refused.
 type MemberReader interface {
-	NonClientMember(ctx context.Context, bucketID, personID int64) (bool, error)
+	NonClientMember(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, error)
 }
+
+// ErrMembershipUnverified reports a refusal the reader could not verify
+// against a listing as recent as the event.
+var ErrMembershipUnverified = errors.New("admission: membership not verified against a listing as recent as the event")
 
 // Reads bundles the reads admission may make. Members may be nil unless the
 // policy's trust mode is project.

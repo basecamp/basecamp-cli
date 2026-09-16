@@ -228,26 +228,123 @@ func TestSDKReadsOwnOneRetryBudget(t *testing.T) {
 	assert.EqualValues(t, 1, calls.Load(), "one HTTP request per admission attempt")
 }
 
-func TestMembershipSeesSomeoneAddedAfterTheListingWasCached(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if calls.Add(1) == 1 {
-			_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, operatorID)
-			return
-		}
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false},{"id":%d,"client":false}]`, operatorID, memberID)
-	}))
-	c := &clock{now: testNow}
-	members := NewMembers(client, c.Now)
+// listing serves project people from a slice the test changes, counting reads.
+type listing struct {
+	mu     sync.Mutex
+	people string
+	calls  atomic.Int32
+}
 
-	got, err := members.NonClientMember(context.Background(), routedProj, operatorID)
+func (l *listing) set(people string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.people = people
+}
+
+func (l *listing) client(t *testing.T) *basecamp.AccountClient {
+	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, fmt.Sprintf("/999/projects/%d/people.json", routedProj), r.URL.Path)
+		l.calls.Add(1)
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		_, _ = w.Write([]byte(l.people))
+	}))
+}
+
+func TestMembershipExcludesClientsAndAgents(t *testing.T) {
+	l := &listing{}
+	l.set(fmt.Sprintf(`[{"id":%d,"personable_type":"User","client":false},{"id":%d,"personable_type":"Client","client":true},{"id":%d,"personable_type":"Agent","client":false}]`, memberID, clientID, otherAgent))
+	c := &clock{now: testNow}
+	members := NewMembers(l.client(t), c.Now)
+	seen := testNow.Add(-time.Second)
+
+	for _, tc := range []struct {
+		id   int64
+		want bool
+	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}} {
+		got, err := members.NonClientMember(context.Background(), routedProj, tc.id, seen)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, got, "person %d", tc.id)
+	}
+	assert.EqualValues(t, 1, l.calls.Load(), "one listing, read after every event it answers")
+}
+
+func TestAPersonAddedAfterACachedListingIsHeldThenAdmitted(t *testing.T) {
+	l := &listing{}
+	l.set(fmt.Sprintf(`[{"id":%d,"client":false}]`, operatorID))
+	c := &clock{now: testNow}
+	members := NewMembers(l.client(t), c.Now)
+
+	_, err := members.NonClientMember(context.Background(), routedProj, operatorID, testNow)
 	require.NoError(t, err)
-	assert.True(t, got)
+
+	// Bob is added and posts ten seconds later; the cached listing predates
+	// his event, and the floor forbids reading it again yet.
+	c.advance(10 * time.Second)
+	l.set(fmt.Sprintf(`[{"id":%d,"client":false},{"id":%d,"client":false}]`, operatorID, memberID))
+	_, err = members.NonClientMember(context.Background(), routedProj, memberID, c.Now())
+	require.ErrorIs(t, err, ErrMembershipUnverified, "held, not refused")
+
+	// On the blocked schedule's retry, past the floor, a fresh listing names him.
 	c.advance(MembershipRefreshFloor)
-	got, err = members.NonClientMember(context.Background(), routedProj, memberID)
+	got, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow.Add(10*time.Second))
 	require.NoError(t, err)
 	assert.True(t, got)
-	assert.EqualValues(t, 2, calls.Load())
+	assert.EqualValues(t, 2, l.calls.Load())
+}
+
+func TestARefusalFromAListingOlderThanTheEventIsReadAgain(t *testing.T) {
+	l := &listing{}
+	l.set(fmt.Sprintf(`[{"id":%d,"client":true}]`, clientID))
+	c := &clock{now: testNow}
+	members := NewMembers(l.client(t), c.Now)
+
+	got, err := members.NonClientMember(context.Background(), routedProj, clientID, testNow)
+	require.NoError(t, err)
+	assert.False(t, got)
+
+	// Promoted from client to member, then posts, after the floor.
+	c.advance(MembershipRefreshFloor)
+	l.set(fmt.Sprintf(`[{"id":%d,"client":false}]`, clientID))
+	got, err = members.NonClientMember(context.Background(), routedProj, clientID, c.Now())
+	require.NoError(t, err)
+	assert.True(t, got)
+	assert.EqualValues(t, 2, l.calls.Load())
+}
+
+func TestOneListingAnswersABurstSeenBeforeIt(t *testing.T) {
+	l := &listing{}
+	l.set(fmt.Sprintf(`[{"id":%d,"client":true}]`, clientID))
+	c := &clock{now: testNow}
+	members := NewMembers(l.client(t), c.Now)
+
+	for i := range 50 {
+		seen := testNow.Add(-time.Duration(50-i) * time.Second)
+		got, err := members.NonClientMember(context.Background(), routedProj, clientID+int64(i%3), seen)
+		require.NoError(t, err)
+		assert.False(t, got)
+	}
+	assert.EqualValues(t, 1, l.calls.Load(), "fifty events from outside the project: one listing")
+}
+
+func TestAMemberIsServedFromCacheForItsTTL(t *testing.T) {
+	l := &listing{}
+	l.set(fmt.Sprintf(`[{"id":%d,"client":false}]`, memberID))
+	c := &clock{now: testNow}
+	members := NewMembers(l.client(t), c.Now)
+
+	for _, after := range []time.Duration{0, time.Minute, MembershipTTL - time.Second} {
+		c.now = testNow.Add(after)
+		got, err := members.NonClientMember(context.Background(), routedProj, memberID, c.now)
+		require.NoError(t, err)
+		assert.True(t, got)
+	}
+	assert.EqualValues(t, 1, l.calls.Load())
+
+	c.advance(time.Second)
+	_, err := members.NonClientMember(context.Background(), routedProj, memberID, c.Now())
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, l.calls.Load(), "someone removed from the project stops being trusted within the TTL")
 }
 
 func TestMembershipFailureIsNotCached(t *testing.T) {
@@ -261,93 +358,11 @@ func TestMembershipFailureIsNotCached(t *testing.T) {
 	}))
 	members := NewMembers(client, time.Now)
 
-	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	_, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow)
 	require.Error(t, err)
-	got, err := members.NonClientMember(context.Background(), routedProj, memberID)
+	got, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow)
 	require.NoError(t, err)
 	assert.True(t, got)
-}
-
-func TestMembershipListingExpires(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
-	}))
-	c := &clock{now: testNow}
-	members := NewMembers(client, c.Now)
-
-	for range 2 {
-		_, err := members.NonClientMember(context.Background(), routedProj, memberID)
-		require.NoError(t, err)
-	}
-	assert.EqualValues(t, 1, calls.Load())
-	c.advance(MembershipTTL)
-	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
-	require.NoError(t, err)
-	assert.EqualValues(t, 2, calls.Load(), "someone removed from the project stops being trusted within the TTL")
-}
-
-func TestMembershipExcludesClientsAndIsCached(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, fmt.Sprintf("/999/projects/%d/people.json", routedProj), r.URL.Path)
-		calls.Add(1)
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"name":"Member","personable_type":"User","client":false},{"id":%d,"name":"Client","personable_type":"Client","client":true},{"id":%d,"name":"Other agent","personable_type":"Agent","client":false}]`, memberID, clientID, otherAgent)
-	}))
-	members := NewMembers(client, time.Now)
-
-	for _, tc := range []struct {
-		id   int64
-		want bool
-	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}} {
-		got, err := members.NonClientMember(context.Background(), routedProj, tc.id)
-		require.NoError(t, err)
-		assert.Equal(t, tc.want, got, "person %d", tc.id)
-	}
-	assert.EqualValues(t, 1, calls.Load(), "a client or an agent the listing names is a cached refusal; someone it does not name, within the refresh floor, too")
-}
-
-func TestARefusalTheListingNamesNeedsNoFreshListing(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":true},{"id":%d,"personable_type":"Agent","client":false}]`, clientID, otherAgent)
-	}))
-	c := &clock{now: testNow}
-	members := NewMembers(client, c.Now)
-
-	_, err := members.NonClientMember(context.Background(), routedProj, clientID)
-	require.NoError(t, err)
-	c.advance(MembershipRefreshFloor)
-	for range 20 {
-		for _, id := range []int64{clientID, otherAgent} {
-			got, err := members.NonClientMember(context.Background(), routedProj, id)
-			require.NoError(t, err)
-			assert.False(t, got)
-		}
-	}
-	assert.EqualValues(t, 1, calls.Load(), "a client or agent the listing names is refused from the cache, past the floor")
-}
-
-func TestUnnamedPeopleCostOneListingPerFloor(t *testing.T) {
-	var calls atomic.Int32
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, memberID)
-	}))
-	c := &clock{now: testNow}
-	members := NewMembers(client, c.Now)
-
-	_, err := members.NonClientMember(context.Background(), routedProj, memberID)
-	require.NoError(t, err)
-	c.advance(MembershipRefreshFloor)
-	for i := range int64(50) {
-		got, err := members.NonClientMember(context.Background(), routedProj, 5000+i)
-		require.NoError(t, err)
-		assert.False(t, got)
-	}
-	assert.EqualValues(t, 2, calls.Load(), "fifty strangers after the floor: one fresh listing")
 }
 
 func TestCacheIsBounded(t *testing.T) {
@@ -356,4 +371,18 @@ func TestCacheIsBounded(t *testing.T) {
 		c.put(i, true)
 	}
 	assert.LessOrEqual(t, len(c.entries), maxCacheEntries)
+}
+
+func TestACallerCannotRaiseTheReadRetryCap(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	reads := NewSDKReads(&basecamp.Config{BaseURL: srv.URL}, staticToken{}, "999", basecamp.WithMaxRetries(5))
+
+	_, err := reads.Subscriptions.Subscribed(context.Background(), 1)
+	require.Error(t, err)
+	assert.EqualValues(t, 1, calls.Load(), "the admitter owns the retry budget, whatever the caller passes")
 }

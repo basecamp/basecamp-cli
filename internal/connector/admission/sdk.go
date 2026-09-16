@@ -105,15 +105,12 @@ type Members struct {
 	cache  *ttlCache[int64, projectPeople]
 }
 
-// projectPeople is one listing: who is a member for trust, and who the
-// listing named at all.
+// projectPeople is one listing: who is a member for trust.
 type projectPeople struct {
 	members map[int64]bool
-	listed  map[int64]bool
 }
 
-// MembershipRefreshFloor bounds how often a listing is re-read for someone it
-// did not name.
+// MembershipRefreshFloor bounds how often a project's listing is read.
 const MembershipRefreshFloor = 30 * time.Second
 
 // NewMembers builds the cached membership read.
@@ -125,27 +122,29 @@ func NewMembers(client *basecamp.AccountClient, now func() time.Time) *Members {
 // project's listing names who is neither a client nor an Agent principal (the
 // listing serves agents, with client false).
 //
-// A cached listing answers for everyone it names, yes or no: a client or an
-// agent it lists is a verified refusal. Someone it does not name may have been
-// added since, and "no" discards the event, so the listing is read again for
-// them — at most once per MembershipRefreshFloor per project, so a burst of
-// events from people outside the project costs one listing, not one each.
-func (m *Members) NonClientMember(ctx context.Context, bucketID, personID int64) (bool, error) {
+// "Yes" is served from a cached listing for its TTL. "No" discards the event,
+// so it is served only from a listing read at or after asOf; everyone the
+// listing did not yet know about, or knew as a client since promoted, was
+// added after the event and cannot have been trusted at it. With only an
+// older listing, the listing is read again — at most once per
+// MembershipRefreshFloor per project, so a burst of events costs one listing,
+// which then answers every event seen before it. Inside the floor the answer
+// is ErrMembershipUnverified: held, never refused.
+func (m *Members) NonClientMember(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, error) {
 	people, fetched, ok := m.cache.getWithAge(bucketID)
-	if ok && (people.listed[personID] || m.now().Sub(fetched) < MembershipRefreshFloor) {
+	if ok && (people.members[personID] || !fetched.Before(asOf)) {
 		return people.members[personID], nil
+	}
+	if ok && m.now().Sub(fetched) < MembershipRefreshFloor {
+		return false, ErrMembershipUnverified
 	}
 	res, err := m.client.People().ListProjectPeople(ctx, bucketID, nil)
 	if err != nil {
 		return false, err
 	}
-	people = projectPeople{members: make(map[int64]bool, len(res.People)), listed: make(map[int64]bool, len(res.People))}
+	people = projectPeople{members: make(map[int64]bool, len(res.People))}
 	for _, p := range res.People {
-		if p.ID <= 0 {
-			continue
-		}
-		people.listed[p.ID] = true
-		if !p.Client && p.PersonableType != personableAgent {
+		if p.ID > 0 && !p.Client && p.PersonableType != personableAgent {
 			people.members[p.ID] = true
 		}
 	}

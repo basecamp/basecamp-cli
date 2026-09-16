@@ -130,12 +130,13 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 }
 
 // Blocked-record recovery. A record blocked on a read (read_failed,
-// read_unresolved) or on an unverified assignment delta is retried every ten
-// minutes for a day after it was first blocked, and on redispatch at any time
-// after that. bucket_mismatch and unroutable are not timed: the pointer's
-// bucket and type never change, so only a person's redispatch re-runs them. It is never discarded for having failed: the checkpoint may
-// already be past the event, and a tombstone would turn an outage into a
-// permanent loss.
+// read_unresolved), on unverified trust (trust_unverified) or on an
+// unverified assignment delta is retried every ten minutes for a day after it
+// was first blocked, and on redispatch at any time after that. bucket_mismatch
+// and unroutable are not timed: the pointer's bucket and type never change, so
+// only a person's redispatch re-runs them. A blocked record is never
+// discarded for having failed: the checkpoint may already be past the event,
+// and a tombstone would turn an outage into a permanent loss.
 const (
 	BlockedRetryInterval = 10 * time.Minute
 	BlockedRetryWindow   = 24 * time.Hour
@@ -146,7 +147,7 @@ const (
 // a person's redispatch once the window has passed.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt time.Time) (time.Time, bool) {
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified:
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified:
 	default:
 		return time.Time{}, false
 	}
