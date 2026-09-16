@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -102,9 +101,12 @@ connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
 (Windows), setup refuses rather than write a trust file it cannot vouch for.
 
-Every check runs before anything is kept. When one fails, setup exits
-non-zero, does not write connect.json, and removes a credential its own
-connection stored in that run.
+Every check runs before connect.json is written, and it is written only
+when all of them pass; otherwise setup exits non-zero. When setup returns an
+error before the credential its own connection stored has proved to be the
+right one (token, identity, account, scope), it removes that credential and
+the profile entry it added. A proven credential is kept, so a rerun needs no
+new approval.
 
 Run setup again to change any of it; what you do not pass is kept.
 
@@ -146,91 +148,151 @@ Examples:
 	return cmd
 }
 
-// setupTransaction is what a setup run changed outside connect.json before
-// it knew it would succeed: a credential stored by the connection or login
-// it ran, and the global config entry that credential needed. A run that
-// fails puts both back exactly as they were, so a failed setup never
-// leaves a profile holding a credential connect.json does not describe.
+// setupTransaction is what a setup run changed outside connect.json while
+// it was obtaining a credential. Its invariants:
+//
+//  1. It undoes only what this run did: the credential its own connection or
+//     login stored, the profile entry that step registered, and the account
+//     that step bound to an entry that had none. Nothing else in the global
+//     config is rewritten, so a concurrent change to another profile or
+//     setting survives a rollback.
+//  2. It undoes them only while the credential is unproven: until the token,
+//     identity, kind, person, account and scope checks have passed. After
+//     that the credential is the right one, and a later failure (trust, the
+//     ticket, a route, the write) keeps it, so setup can be run again
+//     without another approval. A correct credential with no connect.json
+//     runs nothing.
+//  3. A config change is undone even when no credential was stored (the
+//     connection commits the profile entry before it writes the credential,
+//     and that write can fail).
+//  4. connect.json is never part of it: Save is one atomic rename after
+//     every check has passed, and its temporary file is removed on every
+//     path.
 type setupTransaction struct {
-	// connected is set once the run's own connection or login stored a
-	// credential; before that there is nothing to undo.
-	connected bool
-	committed bool
+	profile string
+	flow    string // "agent" or "login": which credential step ran
+
+	// stored is set when the run's own credential step stored a credential.
+	stored bool
+	// verified is set once the credential has passed every check that says
+	// it is the right one; from then on nothing is undone.
+	verified bool
 
 	credentialKey string
-	configPath    string
-	configBefore  []byte
-	configExisted bool
+	entryExisted  bool
+	accountBefore string
 }
 
-// snapshot records the global config file as it is, before a credential
-// step can register or bind a profile in it.
-func (tx *setupTransaction) snapshot(app *appctx.App) error {
+// snapshot records the profile's global config entry before a credential
+// step can register or bind it.
+func (tx *setupTransaction) snapshot(app *appctx.App, profile, flow string) error {
+	tx.profile, tx.flow = profile, flow
 	tx.credentialKey = app.Auth.CredentialKey()
-	tx.configPath = filepath.Join(config.GlobalConfigDir(), "config.json")
-	data, err := os.ReadFile(tx.configPath)
-	switch {
-	case err == nil:
-		tx.configBefore, tx.configExisted = data, true
-	case errors.Is(err, os.ErrNotExist):
-	default:
-		return fmt.Errorf("read %s: %w", tx.configPath, err)
+	configData, _, err := loadGlobalConfigFile()
+	if err != nil {
+		return err
+	}
+	if entry := globalProfileEntry(configData, profile); entry != nil {
+		tx.entryExisted = true
+		tx.accountBefore = entryAccount(entry)
 	}
 	return nil
 }
 
-// rollback removes the credential the run stored and restores the global
-// config file byte for byte. It reports what it could not undo.
+// configChanged reports whether the credential step changed the profile's
+// entry: registered it, or bound an account to it.
+func (tx *setupTransaction) configChanged() bool {
+	configData, _, err := loadGlobalConfigFile()
+	if err != nil {
+		return true // cannot tell; rollback checks again
+	}
+	entry := globalProfileEntry(configData, tx.profile)
+	switch {
+	case !tx.entryExisted:
+		return entry != nil
+	case entry == nil:
+		return false
+	default:
+		return entryAccount(entry) != tx.accountBefore
+	}
+}
+
+// entryAccount is a profile entry's account_id, as a string or a number.
+func entryAccount(entry map[string]any) string {
+	switch v := entry["account_id"].(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	return ""
+}
+
+// needsRollback reports whether a failed run must undo its credential step.
+func (tx *setupTransaction) needsRollback() bool {
+	return tx.credentialKey != "" && !tx.verified && (tx.stored || tx.configChanged())
+}
+
+// rollback undoes the credential step, per the invariants above, and reports
+// what it could not undo.
 func (tx *setupTransaction) rollback(app *appctx.App) error {
 	var errs []error
-	if err := app.Auth.GetStore().Delete(tx.credentialKey); err != nil && !errors.Is(err, auth.ErrNoCredential) {
-		errs = append(errs, fmt.Errorf("remove the stored credential: %w", err))
-	}
-	if tx.configExisted {
-		if err := writeFileAtomically(tx.configPath, tx.configBefore); err != nil {
-			errs = append(errs, fmt.Errorf("restore %s: %w", tx.configPath, err))
+	if tx.stored {
+		if err := app.Auth.GetStore().Delete(tx.credentialKey); err != nil && !errors.Is(err, auth.ErrNoCredential) {
+			errs = append(errs, fmt.Errorf("remove the stored credential: %w", err))
 		}
-	} else if err := os.Remove(tx.configPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, fmt.Errorf("remove %s: %w", tx.configPath, err))
+	}
+	configData, configPath, err := loadGlobalConfigFile()
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	entry := globalProfileEntry(configData, tx.profile)
+	switch {
+	case entry == nil:
+	case !tx.entryExisted:
+		if err := unregisterProfile(tx.profile); err != nil {
+			errs = append(errs, fmt.Errorf("remove the profile entry: %w", err))
+		}
+	case entryAccount(entry) != tx.accountBefore && tx.accountBefore == "":
+		delete(entry, "account_id")
+		if err := atomicWriteJSON(configPath, configData); err != nil {
+			errs = append(errs, fmt.Errorf("unbind the profile's account: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }
 
-func writeFileAtomically(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
-	if err != nil {
-		return err
+// note is what the operator is told about the undone credential step.
+func (tx *setupTransaction) note(rbErr error) string {
+	profile := shellQuote(tx.profile)
+	if rbErr != nil {
+		return "Undoing this run's credential step failed (" + rbErr.Error() + "): run `basecamp auth logout -P " + profile + "` and check the profile in `basecamp profile show " + profile + "`."
 	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
+	if tx.flow == "agent" && tx.stored {
+		return "The agent connection this run made was removed from this computer; disconnect it in Basecamp too, since its secret was issued."
 	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
+	if tx.stored {
+		return "The login this run stored was removed from this computer."
 	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return "The profile entry this run added was removed."
 }
 
 func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) error {
 	tx := &setupTransaction{}
 	err := runConnectSetupTx(cmd, app, f, tx)
-	if err == nil || !tx.connected || tx.committed {
+	if err == nil || !tx.needsRollback() {
 		return err
 	}
-	note := "The connection this run made was removed from this computer; disconnect it in Basecamp too, since its secret was issued."
-	if rbErr := tx.rollback(app); rbErr != nil {
-		note = "Undoing the connection this run made failed (" + rbErr.Error() + "): run `basecamp auth logout -P " + shellQuote(app.Config.ActiveProfile) + "`, and disconnect it in Basecamp."
-	}
+	return withHint(err, tx.note(tx.rollback(app)))
+}
+
+// withHint appends a sentence to an error's hint.
+func withHint(err error, note string) error {
 	var apiErr *output.Error
 	if errors.As(err, &apiErr) {
-		undone := *apiErr
-		undone.Hint = strings.TrimSpace(apiErr.Hint + " " + note)
-		return &undone
+		amended := *apiErr
+		amended.Hint = strings.TrimSpace(apiErr.Hint + " " + note)
+		return &amended
 	}
 	return fmt.Errorf("%w (%s)", err, note)
 }
@@ -315,13 +377,19 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 	}
 
 	if held == "" {
-		if err := tx.snapshot(app); err != nil {
+		flow := "agent"
+		if expect != 0 {
+			flow = "login"
+		}
+		if err := tx.snapshot(app, name, flow); err != nil {
 			return output.ErrUsage(err.Error())
 		}
+	} else {
+		tx.verified = true // a credential this run did not store is never undone
 	}
 	kind, err := ensureConnectCredential(cmd, app, name, held, expect)
 	if held == "" && connectCredentialStored(cmd.Context(), app) {
-		tx.connected = true
+		tx.stored = true
 	}
 	if err != nil {
 		return err
@@ -356,7 +424,7 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 	// Token.
 	provider := &managerTokens{mgr: app.Auth}
 	if _, err := app.Auth.AccessToken(ctx); err != nil {
-		return output.ErrAuth(fmt.Sprintf("Profile %q holds a credential that does not produce a token: %v", name, err))
+		return output.ErrAuth(fmt.Sprintf("Profile %q holds a credential that does not produce a token: %s", name, setup.ErrorText(err)))
 	}
 	checks = append(checks, setup.Check{Name: "Token", Status: setup.StatusPass, Message: "The profile's credential yields a token"})
 
@@ -381,7 +449,15 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 	if err != nil {
 		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
-	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
+	scopeCheck := setup.ScopeCheck(creds.OAuthType, creds.Scope)
+	if scopeCheck.Status == setup.StatusFail && !tx.verified {
+		// A credential this run just stored with too little scope is the
+		// wrong credential, not a check to report on.
+		return output.ErrUsageHint(scopeCheck.Message, scopeCheck.Hint)
+	}
+	checks = append(checks, scopeCheck)
+	// From here the credential is proven: whatever fails next keeps it.
+	tx.verified = true
 
 	// Trust, verified before anything is written: connect.json is the trust
 	// anchor, and nobody in it is recorded unverified. People are read
@@ -459,7 +535,6 @@ func runConnectSetupTx(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
 	report.Written = true
-	tx.committed = true
 
 	summary := summarizeChecks(asDoctorChecks(report.Checks()))
 	if !report.Ready() {
@@ -746,7 +821,7 @@ func checkConnectIdentity(ctx context.Context, app *appctx.App, client *basecamp
 		}
 		endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
 		if err != nil {
-			return c, err
+			return c, output.ErrAuth("Could not locate the login's identity endpoint: " + setup.ErrorText(err))
 		}
 		info, err := client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
 		if err != nil {

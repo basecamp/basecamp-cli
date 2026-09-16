@@ -2,7 +2,6 @@ package setup
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -85,20 +84,14 @@ func (r SDKReader) Person(ctx context.Context, id int64) (Person, error) {
 	return fromSDK(p), nil
 }
 
-// streamTicketPath is the account feed's ticket mint (bc3 13049).
-const streamTicketPath = "/events/stream_ticket.json"
-
-// MintStreamTicket implements Reader.
+// MintStreamTicket implements Reader, through the SDK's own stream-ticket
+// operation. The ticket is checked for shape and dropped here.
 func (r SDKReader) MintStreamTicket(ctx context.Context) error {
-	resp, err := r.Client.Post(ctx, streamTicketPath, nil)
+	ticket, err := r.Client.EventFeed().CreateStreamTicket(ctx)
 	if err != nil {
 		return err
 	}
-	var minted struct {
-		Ticket string `json:"ticket"`
-		URL    string `json:"url"`
-	}
-	if err := json.Unmarshal(resp.Data, &minted); err != nil || minted.Ticket == "" || minted.URL == "" {
+	if ticket == nil || ticket.Ticket == "" || ticket.URL == "" {
 		return ErrMalformedTicket
 	}
 	return nil
