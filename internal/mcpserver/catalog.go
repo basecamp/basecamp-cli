@@ -43,6 +43,9 @@ func loadCatalog() (*catalog.Catalog, error) {
 		return nil, err
 	}
 	synthesizePageParams(cat)
+	if err := installComposites(cat); err != nil {
+		return nil, err
+	}
 	return cat, nil
 }
 

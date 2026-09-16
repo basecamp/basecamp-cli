@@ -34,6 +34,7 @@ func TestCatalogServesCuratedDomains(t *testing.T) {
 		"basecamp_campfires", "basecamp_boosts", "basecamp_schedules", "basecamp_files",
 		"basecamp_people", "basecamp_automation", "basecamp_reports", "basecamp_everything",
 		"basecamp_clientside", "basecamp_forwards", "basecamp_account",
+		"basecamp_recordings",
 	}, tools)
 }
 
@@ -54,14 +55,80 @@ func TestCatalogExcludesBinaryUploads(t *testing.T) {
 		"CreateCampfireUpload": true,
 		"UpdateAccountLogo":    true,
 	}
-	total := 0
+	model, composite := 0, 0
 	for _, d := range cat.Domains {
 		for _, op := range d.Operations {
-			total++
+			if isComposite(op) {
+				composite++
+				continue
+			}
+			model++
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 259, total, "served operation count")
+	assert.Equal(t, 259, model, "served model operation count")
+	assert.Equal(t, 1, composite, "served composite operation count")
+}
+
+// isComposite reports the SDK compositions this package serves itself: no
+// single Basecamp endpoint backs them, so they carry no method and no path.
+// That absence is the catalog's synthetic marker, and the tests below read
+// it the way a client would.
+func isComposite(op *catalog.Operation) bool {
+	return op.Method == "" && op.Path == ""
+}
+
+// TestCatalogMarksCompositesSynthetic pins how a composite action announces
+// itself: no method, no path, and a summary that says so. A model operation
+// always carries both, so the two can never be confused.
+func TestCatalogMarksCompositesSynthetic(t *testing.T) {
+	cat := loadForTest(t)
+
+	seen := map[string]bool{}
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if !isComposite(op) {
+				assert.NotEmpty(t, op.Method, "model operation %q must carry a method", op.ID)
+				assert.NotEmpty(t, op.Path, "model operation %q must carry a path", op.ID)
+				continue
+			}
+			seen[d.Key+"."+op.Action] = true
+			assert.True(t, strings.HasPrefix(op.Summary, "Synthetic: "),
+				"composite %q summary must say it is synthetic, got %q", op.ID, op.Summary)
+			assert.NotEmpty(t, op.Doc, "composite %q must document what it composes", op.ID)
+		}
+	}
+	assert.Equal(t, map[string]bool{"recordings.summarize": true}, seen)
+}
+
+// TestCatalogDeclaresMentionsOnCreateComment pins the other half of the
+// composite surface: the mentions parameter is advertised on the model
+// operation that posts a comment, so describe shows it and the dispatcher
+// accepts it.
+func TestCatalogDeclaresMentionsOnCreateComment(t *testing.T) {
+	cat := loadForTest(t)
+
+	var op *catalog.Operation
+	for _, d := range cat.Domains {
+		if d.Key != "messages" {
+			continue
+		}
+		for _, candidate := range d.Operations {
+			if candidate.Action == "create_comment" {
+				op = candidate
+			}
+		}
+	}
+	require.NotNil(t, op, "messages must serve create_comment")
+
+	properties, ok := op.Body["properties"].(map[string]any)
+	require.True(t, ok, "create_comment must declare body properties")
+	mentions, ok := properties["mentions"].(map[string]any)
+	require.True(t, ok, "create_comment must declare a mentions property")
+	assert.Equal(t, "array", mentions["type"])
+	items, ok := mentions["items"].(map[string]any)
+	require.True(t, ok, "mentions must declare its item schema")
+	assert.NotEmpty(t, items["anyOf"], "a person id is a number or a quoted number, and the schema must say so")
 }
 
 // TestCatalogIsAccountScoped pins the rescope: the CLI's account-scoped SDK
@@ -71,6 +138,9 @@ func TestCatalogIsAccountScoped(t *testing.T) {
 	cat := loadForTest(t)
 	for _, d := range cat.Domains {
 		for _, op := range d.Operations {
+			if isComposite(op) {
+				continue // no request of its own to scope
+			}
 			assert.NotContains(t, op.Path, "{accountId}", "operation %q path", op.ID)
 			require.True(t, strings.HasPrefix(op.Path, "/"), "operation %q path %q", op.ID, op.Path)
 			for _, p := range op.Params {
@@ -145,6 +215,39 @@ func TestCatalogModelProvenance(t *testing.T) {
 	require.NoError(t, err)
 	match := regexp.MustCompile(`github\.com/basecamp/basecamp-sdk/go (v\S+)`).FindSubmatch(gomod)
 	require.NotNil(t, match, "basecamp-sdk dependency not found in go.mod")
-	assert.Equal(t, string(match[1]), strings.TrimPrefix(provenance.Ref, "go/"),
+	version := string(match[1])
+
+	// A tagged release names itself: the snapshot records the tag the
+	// export came from. A pseudo-version names a commit instead —
+	// vX.Y.Z-0.YYYYMMDDhhmmss-abcdef123456 — and its last segment is the
+	// 12-character prefix of that commit, which is the stronger thing to
+	// pin: the snapshot must have been taken from the very commit go.mod
+	// links in, not merely from a matching version string.
+	// Either way the ref must not be a dirty describe: the sync script
+	// marks a checkout with uncommitted model edits, and a snapshot taken
+	// from one corresponds to no commit at all.
+	assert.False(t, strings.HasSuffix(provenance.Ref, "-dirty"),
+		"vendored model was synced from a dirty basecamp-sdk checkout (%s) — sync from a clean one", provenance.Ref)
+
+	if commit, ok := pseudoVersionCommit(version); ok {
+		assert.True(t, strings.HasPrefix(provenance.Commit, commit),
+			"vendored model was synced from commit %s, but go.mod links in %s — run scripts/sync-mcp-model.sh against that checkout",
+			provenance.Commit, version)
+		return
+	}
+	assert.Equal(t, version, strings.TrimPrefix(provenance.Ref, "go/"),
 		"vendored model must match the basecamp-sdk version go.mod pins — run scripts/sync-mcp-model.sh against that checkout")
+}
+
+// pseudoVersionCommit returns the commit prefix a Go pseudo-version carries,
+// and false for a plain release version. The timestamp follows a "-" when
+// the version has no base prerelease (v0.0.0-20260916083520-5acb2f9aaca9)
+// and a "." when it has one (v0.18.1-0.20260916083520-5acb2f9aaca9), so
+// both separators are accepted.
+func pseudoVersionCommit(version string) (string, bool) {
+	match := regexp.MustCompile(`[-.]([0-9]{14})-([0-9a-f]{12})$`).FindStringSubmatch(version)
+	if match == nil {
+		return "", false
+	}
+	return match[2], true
 }

@@ -141,7 +141,7 @@ func TestMCPCommandServesMCP(t *testing.T) {
 		require.NoError(t, err)
 		names = append(names, tool.Name)
 	}
-	assert.Len(t, names, 15, "tools = %v", names)
+	assert.Len(t, names, 16, "tools = %v", names)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "basecamp_projects",

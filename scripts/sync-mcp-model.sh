@@ -10,13 +10,13 @@
 # snapshot in lockstep with the basecamp-sdk version pinned in go.mod —
 # TestCatalogModelProvenance enforces it.
 #
-# Tag patch: the SDK export leaves a handful of operations untagged, and the
-# toolkit catalog joins operations to domains by tag (exactly one per
-# operation, refused otherwise). Until the tags land upstream in the Smithy
-# model, this script assigns them here — the patch tables below are the whole
-# divergence from the upstream export, applied on copy and recorded in
-# PROVENANCE.json so a future SDK release that tags them upstream shows up as
-# a sync-time conflict rather than a silent double-tag.
+# Tag patch: the toolkit catalog joins operations to domains by tag (exactly
+# one per operation, refused otherwise), and the SDK export used to leave a
+# handful of operations untagged. It no longer does, so PATCHED_TAGS is empty
+# and the only divergence from the upstream export is EXCLUDED_OPERATIONS.
+# The table stays as a seam: an operation that grew an upstream tag is a
+# sync-time conflict rather than a silent double-tag, and an operation that
+# arrives untagged stops the sync rather than failing later at Load.
 #
 # Exclusions: raw-binary upload operations (multipart/octet-stream bodies)
 # can't ride the JSON tool-call convention, and the toolkit refuses non-JSON
@@ -54,23 +54,10 @@ EXCLUDED_OPERATIONS = {
     "UpdateAccountLogo",
 }
 
-PATCHED_TAGS = {
-    "GetAnswersByPerson": "Automation",
-    "GetQuestionReminders": "Automation",
-    "ListQuestionAnswerers": "Automation",
-    "PauseQuestion": "Automation",
-    "ResumeQuestion": "Automation",
-    "UpdateQuestionNotificationSettings": "Automation",
-    "RepositionTodo": "Todos",
-    "SubscribeToCardColumn": "Card Tables",
-    "UnsubscribeFromCardColumn": "Card Tables",
-    "GetAssignedTodos": "Reports",
-    "GetOverdueTodos": "Reports",
-    "GetPersonProgress": "Reports",
-    "GetProgressReport": "Reports",
-    "GetProjectTimeline": "Reports",
-    "GetUpcomingSchedule": "Reports",
-    "ListAssignablePeople": "Reports",
+PATCHED_TAGS: dict[str, str] = {
+    # Empty: basecamp-sdk now tags every exported operation itself
+    # (basecamp-sdk#878). Kept as a seam, because the export has left
+    # operations untagged before and the catalog join refuses them.
 }
 
 sdk, dest = sys.argv[1], sys.argv[2]
@@ -135,7 +122,7 @@ cat > "$dest/PROVENANCE.json" <<JSON
   "ref": "$ref",
   "files": ["behavior-model.json", "openapi.json"],
   "synced_by": "scripts/sync-mcp-model.sh",
-  "patches": "tags assigned to operations the export leaves untagged (PATCHED_TAGS); binary-upload operations dropped (EXCLUDED_OPERATIONS) — see the sync script"
+  "patches": "binary-upload operations dropped (EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"
 }
 JSON
 

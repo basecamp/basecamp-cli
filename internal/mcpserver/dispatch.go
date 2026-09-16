@@ -22,11 +22,18 @@ import (
 // CLI's *basecamp.AccountClient satisfies it; the client carries auth, token
 // refresh, retry, account scoping, and base URL resolution, so the
 // dispatcher only assembles paths and bodies.
+//
+// The four verbs serve every model operation. The two services serve the
+// composite actions (see composite.go), which are SDK compositions rather
+// than single requests and so cannot be assembled from a method and a path.
 type API interface {
 	Get(ctx context.Context, path string) (*basecamp.Response, error)
 	Post(ctx context.Context, path string, body any) (*basecamp.Response, error)
 	Put(ctx context.Context, path string, body any) (*basecamp.Response, error)
 	Delete(ctx context.Context, path string) (*basecamp.Response, error)
+
+	Recordings() *basecamp.RecordingsService
+	Comments() *basecamp.CommentsService
 }
 
 // The CLI hands its account-scoped client straight to New.
@@ -50,6 +57,18 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	full, ok := domain.Operation(op.Action)
 	if !ok {
 		return gateway.ErrorResult("internal error: action %q not in domain %q", op.Action, dom.Name()), nil
+	}
+
+	// Composite actions are SDK compositions, not model operations: they
+	// have no method and no path to assemble, so they are served before
+	// buildRequest ever looks for one.
+	if composite, ok := compositeHandlers[dom.Name()+"."+op.Action]; ok {
+		return composite(ctx, d.api, full, params)
+	}
+	// A model operation may still carry a composite parameter, consumed
+	// here rather than sent: mentions on messages.create_comment.
+	if err := expandMentions(ctx, d.api, dom.Name(), op.Action, params); err != nil {
+		return gateway.ErrorResult("%v", err), nil
 	}
 
 	path, body, err := buildRequest(full, params)
