@@ -774,16 +774,16 @@ const redactedTicket = "[REDACTED]"
 // rendering happens to choose (a ticket "abc/def" echoed as "abc%2Fdef"
 // reads as neither). Userinfo and the fragment are dropped the same way.
 //
-// What is left is compared decoded: url.Parse unescapes the path, so a copy
-// escaped into it is still caught, and a URL carrying the ticket in its host
-// or path is withheld whole. An unparseable URL, or one with no ticket
-// parameter, is withheld too — it is not the shape this was promised.
+// What survives is then vetted as the finished string rather than component
+// by component, because a list of components to check is a list to be caught
+// out by — the scheme was missed exactly that way. Both spellings are tested:
+// the rendering, which escapes, and the decoded path, which is where an
+// escaped copy would hide from it. Anything still holding the ticket is
+// withheld whole, as is a URL that will not parse or carries no ticket
+// parameter — that is not the shape this was promised.
 func redactTicketURL(raw, ticket string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || !parsed.Query().Has("ticket") {
-		return redactedTicket
-	}
-	if ticket != "" && (strings.Contains(parsed.Host, ticket) || strings.Contains(parsed.Path, ticket)) {
 		return redactedTicket
 	}
 
@@ -793,5 +793,9 @@ func redactTicketURL(raw, ticket string) string {
 		Path:     parsed.Path,
 		RawQuery: url.Values{"ticket": {redactedTicket}}.Encode(),
 	}
-	return display.String()
+	rendered := display.String()
+	if ticket != "" && (strings.Contains(rendered, ticket) || strings.Contains(parsed.Path, ticket)) {
+		return redactedTicket
+	}
+	return rendered
 }

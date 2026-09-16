@@ -565,6 +565,7 @@ func TestRedactTicketURLWithholdsATicketEchoedOutsideItsParameter(t *testing.T) 
 		"wss://chat.example.test/195539477?ticket=tkt-secret&retry=tkt-secret",
 		"wss://tkt-secret@chat.example.test/195539477?ticket=tkt-secret",
 		"wss://chat.example.test/195539477%2Ftkt-secret?ticket=tkt-secret",
+		"tkt-secret://chat.example.test/195539477?ticket=tkt-secret",
 	} {
 		assert.NotContains(t, redactTicketURL(raw, "tkt-secret"), "tkt-secret", raw)
 	}
