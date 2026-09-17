@@ -145,8 +145,9 @@ type worktreeView struct {
 	Path  string `json:"path"`
 	State string `json:"state"`
 	// SizeBytes is what the worktree takes up on disk, so an operator can
-	// see what reclaiming it is worth; -1 when it could not be read.
-	SizeBytes  int64  `json:"size_bytes"`
+	// see what reclaiming it is worth; -1 when it is there and could not be
+	// read, and nothing at all for one that is gone.
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
 	WorkDir    string `json:"work_dir"`
 	Branch     string `json:"branch"`
 	Route      string `json:"route"`
@@ -166,6 +167,15 @@ type pruneView struct {
 // sizeLimit bounds how long reading a worktree's size may take: a listing is
 // not worth holding for a tree that cannot be walked.
 const sizeLimit = 5 * time.Second
+
+// sizeOf is what a worktree takes up on disk. A worktree that is gone takes
+// up nothing, and is not walked for an answer.
+func sizeOf(w connector.Worktree) int64 {
+	if w.State == connector.WorktreeRemoved {
+		return 0
+	}
+	return dirSize(w.Path)
+}
 
 // dirSize is what a directory takes up, in bytes, following no symlink; -1
 // when it cannot be read in time or at all.
@@ -199,7 +209,7 @@ func dirSize(path string) int64 {
 
 func viewWorktree(w connector.Worktree) worktreeView {
 	v := worktreeView{
-		Path: w.Path, State: string(w.State), SizeBytes: dirSize(w.Path), WorkDir: w.WorkDir,
+		Path: w.Path, State: string(w.State), SizeBytes: sizeOf(w), WorkDir: w.WorkDir,
 		Branch: w.Branch, Route: w.Route, Reason: string(w.RetainedReason),
 		EventID: w.OriginatingEventID, TaskID: w.TaskID,
 	}

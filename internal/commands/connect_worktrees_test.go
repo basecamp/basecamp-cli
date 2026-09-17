@@ -93,6 +93,22 @@ func TestConnectWorktreesListShowsTheKeptOnes(t *testing.T) {
 	assert.Contains(t, out.String(), `"reason": "dirty"`)
 }
 
+// A listing says what each kept worktree takes up, and says nothing about the
+// size of one that is gone.
+func TestConnectWorktreesSayWhatTheyTakeUp(t *testing.T) {
+	app, out, w := worktreesCmdEnv(t)
+	require.NoError(t, os.MkdirAll(w.Path, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(w.Path, "notes.txt"), bytes.Repeat([]byte("x"), 1234), 0o600))
+	require.NoError(t, runWorktreesCmd(t, app, "list"))
+	assert.Contains(t, out.String(), `"size_bytes": 1234`)
+
+	out.Reset()
+	require.NoError(t, os.RemoveAll(w.Path))
+	require.NoError(t, runWorktreesCmd(t, app, "prune"))
+	assert.Contains(t, out.String(), `"action": "missing"`)
+	assert.NotContains(t, out.String(), `"size_bytes"`, "a worktree that is gone has no size")
+}
+
 func TestConnectWorktreesPruneRefusesWhatItCannotName(t *testing.T) {
 	app, _, _ := worktreesCmdEnv(t)
 	err := runWorktreesCmd(t, app, "prune", "--force", "relative/path")
