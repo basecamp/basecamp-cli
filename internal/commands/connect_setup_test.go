@@ -1337,3 +1337,33 @@ func TestConnectShowRefusesAnUnsafeConnectJSON(t *testing.T) {
 		})
 	}
 }
+
+// A person reading show in a terminal or as Markdown sees what matters: the
+// agent, the operator, the trust and every route, which the generic object
+// renderer would drop.
+func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	var route string
+	for _, r := range f.Projects {
+		route = r.Path
+	}
+
+	for _, format := range []output.Format{output.FormatStyled, output.FormatMarkdown} {
+		app := newConnectSetupApp(t, s, "agent")
+		app.Output = output.New(output.Options{Format: format, Writer: &bytes.Buffer{}})
+		out, err := runConnectShowCmd(t, app)
+		require.NoError(t, err, out)
+		for _, want := range []string{
+			fmt.Sprintf("person %d (agent)", setupAgentPerson),
+			fmt.Sprintf("person %d", setupOperatorPerson),
+			"operator",
+			fmt.Sprintf("%d → %s", setupProject, route),
+			"deadline 45m0s",
+		} {
+			assert.Contains(t, out, want, "format %v", format)
+		}
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,12 +71,12 @@ Examples:
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return runConnectShow(app)
+			return runConnectShow(cmd, app)
 		},
 	}
 }
 
-func runConnectShow(app *appctx.App) error {
+func runConnectShow(cmd *cobra.Command, app *appctx.App) error {
 	name := app.Config.ActiveProfile
 	if name == "" {
 		return output.ErrUsageHint("Show needs the agent's profile", "Pass -P/--profile <name>.")
@@ -90,13 +92,90 @@ func runConnectShow(app *appctx.App) error {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return output.ErrNotFoundHint("connect.json for profile", name,
-			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile <your profile> --route <project-id>=<dir>")
+			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile '<your profile>' --route '<project-id>=<dir>'")
+	case err != nil && runtime.GOOS == "windows":
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
 	case err != nil:
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
 			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
 	}
+
+	if format := app.Output.EffectiveFormat(); format == output.FormatStyled || format == output.FormatMarkdown {
+		// The generic object renderer drops nested maps, which is where the
+		// agent, the trust and the routes live: say them in lines instead.
+		_, err := fmt.Fprint(cmd.OutOrStdout(), connectShowText(name, path, f, format == output.FormatMarkdown))
+		return err
+	}
 	return app.OK(connectShowResult{Path: path, File: f},
 		output.WithSummary(fmt.Sprintf("Profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
+}
+
+// connectShowText is show's output for a person: every setting connect.json
+// records, one to a line, with the routes in project order.
+func connectShowText(name, path string, f setup.File, markdown bool) string {
+	var b strings.Builder
+	item := func(label, value string) {
+		if markdown {
+			fmt.Fprintf(&b, "- **%s:** %s\n", label, value)
+		} else {
+			fmt.Fprintf(&b, "  %-9s %s\n", label+":", value)
+		}
+	}
+	if markdown {
+		fmt.Fprintf(&b, "## Connector setup for profile %q\n\n", name)
+	} else {
+		fmt.Fprintf(&b, "Connector setup for profile %q\n\n", name)
+	}
+	item("File", richtext.SanitizeSingleLine(path))
+	item("Account", f.AccountID)
+	agent := fmt.Sprintf("person %d (%s)", f.Agent.PersonID, f.Agent.Kind)
+	if f.Agent.IdentityID != 0 {
+		agent += fmt.Sprintf(", identity %d", f.Agent.IdentityID)
+	}
+	item("Agent", agent)
+	item("Operator", fmt.Sprintf("person %d", f.Trust.OperatorID))
+	trust := string(f.Trust.Mode)
+	if len(f.Trust.AllowlistIDs) > 0 {
+		ids := make([]string, len(f.Trust.AllowlistIDs))
+		for i, id := range f.Trust.AllowlistIDs {
+			ids[i] = strconv.FormatInt(id, 10)
+		}
+		trust += ": people " + strings.Join(ids, ", ")
+	}
+	item("Trust", trust)
+	worktrees := "off"
+	if f.Worktrees {
+		worktrees = "on"
+	}
+	item("Workers", fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees))
+
+	ids := make([]int64, 0, len(f.Projects))
+	for id := range f.Projects {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	if len(ids) == 0 {
+		item("Projects", "none routed")
+		return b.String()
+	}
+	item("Projects", strconv.Itoa(len(ids))+" routed")
+	for _, id := range ids {
+		r := f.Projects[id]
+		line := fmt.Sprintf("%d → %s", id, richtext.SanitizeSingleLine(r.Path))
+		if r.Class != "" {
+			line += ", class " + r.Class
+		}
+		if r.WatchCompletions {
+			line += ", watches completions"
+		}
+		if markdown {
+			fmt.Fprintf(&b, "  - %s\n", line)
+		} else {
+			fmt.Fprintf(&b, "            %s\n", line)
+		}
+	}
+	return b.String()
 }
 
 // connectShowResult is show's data: where the file is, and what it holds.
