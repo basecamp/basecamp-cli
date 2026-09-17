@@ -749,3 +749,40 @@ func TestOutboxFlushCapsARequestAtItsDeadline(t *testing.T) {
 	assert.Less(t, time.Since(started), MinPostWindow+5*time.Second)
 	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State)
 }
+
+// A queue of intents arriving as fast as they can be sent does not starve
+// reconciliation: the running connector sends in batches.
+func TestOutboxRunReconcilesWhileSendsKeepArriving(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	stale := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.add(stale.Destination, adapterAgentID, stale.Body)
+
+	// Every send admits another request, so there is always one more to send.
+	next := int64(100)
+	admit := func() {
+		next++
+		seenRecord(t, ledger, next)
+		_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(next, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	basecamp.beforePost = func(Destination, string) error {
+		admit()
+		return nil
+	}
+	clock.Advance(2 * DefaultReconcileAfter)
+	seenRecord(t, ledger, 2)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(2, 0, obCommentReply))
+	require.NoError(t, err)
+
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: basecamp, Tick: time.Millisecond})
+	require.NoError(t, err)
+	// Cancel without a deadline: a flush with one claims nothing, and this
+	// run must actually be sending while reconciliation is due.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	require.NoError(t, ob.Run(runCtx))
+	assert.Equal(t, IntentSent, obIntent(t, ledger, stale.Key).State, "the stale sending intent was reconciled")
+}

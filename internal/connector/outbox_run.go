@@ -58,6 +58,9 @@ const (
 	// MinPostWindow is the least time a flush with a deadline needs left to
 	// claim another intent.
 	MinPostWindow = 5 * time.Second
+	// RunBatch is how many intents a running connector sends between
+	// reconciliation passes.
+	RunBatch = 16
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -136,8 +139,11 @@ func (o *Outbox) Run(ctx context.Context) error {
 	ticker := time.NewTicker(o.opts.Tick)
 	defer ticker.Stop()
 	for {
-		if err := o.Flush(ctx); err != nil && ctx.Err() == nil {
+		if err := o.flushSome(ctx, RunBatch); err != nil && ctx.Err() == nil {
 			o.log.Warn("connector: outbox", "error", err)
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil && ctx.Err() == nil {
 			o.log.Warn("connector: outbox reconciliation", "error", err)
@@ -161,9 +167,18 @@ func (o *Outbox) Recover(ctx context.Context) error {
 // is left or ctx ends. One flush claims an intent at most once: a claim that
 // came back for an intent already claimed would be a second send, and stops
 // the flush instead.
-func (o *Outbox) Flush(ctx context.Context) error {
+func (o *Outbox) Flush(ctx context.Context) error { return o.flushSome(ctx, 0) }
+
+// flushSome sends at most limit intents, or every due one when limit is zero.
+// The running connector sends in batches so that a queue arriving as fast as
+// it can be posted cannot starve reconciliation; only the shutdown flush
+// drains.
+func (o *Outbox) flushSome(ctx context.Context, limit int) error {
 	claimed := map[int64]bool{}
 	for ctx.Err() == nil {
+		if limit > 0 && len(claimed) >= limit {
+			return nil
+		}
 		if o.opts.Paused != nil {
 			paused, err := o.opts.Paused(ctx)
 			if err != nil {
@@ -591,6 +606,10 @@ SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`
 		} else {
 			unreceipted[MessageText(body)] = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("connector: lifecycle messages at %d: %w", recordingID, err)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
