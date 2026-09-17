@@ -406,6 +406,8 @@ func TestPromoteRunAgainFinishesAMoveWithoutItsShadow(t *testing.T) {
 
 // Import validates the reconciliation it is handed, not only the file it was
 // parsed from: a caller that built the value itself meets the same rules.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestImportValidatesWhatItIsHanded(t *testing.T) {
 	ctx := context.Background()
 	for name, r := range map[string]Reconciliation{
