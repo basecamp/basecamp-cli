@@ -41,6 +41,8 @@ type agentLogEntry struct {
 	Event     int64     `json:"event,omitempty"`
 	N         int       `json:"n,omitempty"`
 	Step      string    `json:"step"`
+	// Child is the pid of the process a "grandchild" step started.
+	Child int `json:"child,omitempty"`
 	// Prompt is the prompt as the agent received it, on a "prompt" step.
 	Prompt string `json:"prompt,omitempty"`
 }
@@ -233,6 +235,21 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 	case "exit":
 		code, _ := strconv.Atoi(arg)
 		os.Exit(code)
+	case "grandchild":
+		// A process of the worker's own that outlives it, in its process
+		// group, holding its working directory: the tree the one-owner rule
+		// says nothing may be released around.
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		pid, err := syscall.ForkExec("/bin/sleep", []string{"sleep", "300"}, &syscall.ProcAttr{Dir: wd, Env: []string{}})
+		if err != nil {
+			return err
+		}
+		pgid, _ := syscall.Getpgid(0)
+		return appendJSONLine(filepath.Join(w.dir, agentLogFile),
+			agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Event: event, N: n, Step: "grandchild", Child: pid})
 	case "arrive":
 		// A further event on the conversation while this one is in hand.
 		id, err := strconv.ParseInt(arg, 10, 64)

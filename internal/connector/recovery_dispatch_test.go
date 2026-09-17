@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -216,29 +218,50 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 	})
 }
 
-// assertNoWorkerOutlivedItsRecord: every worker the ledger recorded is gone
-// once its attempt is settled. A settled record with a live process would be
-// a worker acting with nobody's authority.
+// assertNoWorkerOutlivedItsRecord holds the one-owner rule on every attempt
+// the ledger settled: the worker it recorded is not the process running under
+// that pid, and its process group has no members left. A settled record with
+// any of its tree still running would be work going on with nobody owning it.
 func (h *harness) assertNoWorkerOutlivedItsRecord() {
 	t := h.t
 	t.Helper()
-	l := h.ledger()
-	rows, err := l.db.QueryContext(context.Background(), `SELECT id, state, COALESCE(pid, 0), COALESCE(pgid, 0), process_started FROM attempts WHERE pid IS NOT NULL AND pid > 0`)
-	require.NoError(t, err)
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			id, state string
-			pid, pgid int
-			started   sql.NullString
-		)
-		require.NoError(t, rows.Scan(&id, &state, &pid, &pgid, &started))
-		if state != string(AttemptEnded) {
+	for _, a := range recordedAttempts(t, h.ledger()) {
+		if a.state != string(AttemptEnded) {
 			continue
 		}
-		assert.True(t, processGone(pid), "attempt %s is ended, but its worker (pid %d) still runs", id, pid)
+		owns, err := driver.OwnsWorker(a.process)
+		assert.False(t, owns, "attempt %s is ended, but its worker (pid %d) still runs", a.id, a.process.PID)
+		assert.NoError(t, err, "attempt %s is ended, but its process group %d still has members", a.id, a.process.PGID)
+	}
+}
+
+type recordedAttempt struct {
+	id, state string
+	process   driver.Process
+}
+
+// recordedAttempts is every attempt whose worker the ledger recorded: pid,
+// group and start time, the identity the one-owner rule acts on.
+func recordedAttempts(t *testing.T, l *Ledger) []recordedAttempt {
+	t.Helper()
+	rows, err := l.db.QueryContext(context.Background(), `SELECT id, state, pid, pgid, process_started FROM attempts WHERE pid IS NOT NULL AND pid > 0`)
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []recordedAttempt
+	for rows.Next() {
+		var (
+			a       recordedAttempt
+			started sql.NullString
+		)
+		require.NoError(t, rows.Scan(&a.id, &a.state, &a.process.PID, &a.process.PGID, &started))
+		if started.Valid {
+			a.process.StartedAt, err = parseStamp(started.String)
+			require.NoError(t, err)
+		}
+		out = append(out, a)
 	}
 	require.NoError(t, rows.Err())
+	return out
 }
 
 func (h *harness) assertRecovered(row crashRow) {
@@ -564,5 +587,64 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 				assert.Equal(t, row.waiting, waiting, "guard acknowledgements waiting for a person")
 			})
 		}
+	})
+}
+
+// One owner, one release point: a worker's tree that outlives it keeps its
+// attempt live, its record non-terminal and its working directory unreleased,
+// through any number of restarts, because recovery holds an attempt whose
+// worker it cannot verify rather than settling around it. Once the tree is
+// gone, the next restart settles the attempt and releases the directory.
+func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, d harnessDriver) {
+		raceSubset(t, false)
+		h := newHarness(t, d, harnessScenario{Plans: map[string][]string{"101#1": {"get", "grandchild", "kill", "exit:0"}}})
+		h.publish(feedEntry{Event: todoEvent(101, 5001)})
+		h.run(harnessRun{Killed: true})
+
+		var grandchild int
+		for _, e := range h.agentLog() {
+			if e.Step == "grandchild" && e.Child > 0 {
+				grandchild = e.Child
+			}
+		}
+		require.Positive(t, grandchild, "the worker started its grandchild")
+		t.Cleanup(func() { _ = syscall.Kill(grandchild, syscall.SIGKILL) })
+		l := h.ledger()
+		attempts := recordedAttempts(t, l)
+		require.Len(t, attempts, 1)
+		worker := attempts[0].process
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(worker.PID), nil }), "the worker itself exited")
+		require.True(t, drivertest.Alive(grandchild))
+		drivertest.RequireGroupHeld(t, worker)
+
+		for range 2 {
+			h.runUntilLog(harnessRun{}, "could not verify whether a previous worker still runs")
+			attempts = recordedAttempts(t, l)
+			require.Len(t, attempts, 1, "nothing is started around a held attempt")
+			assert.NotEqual(t, string(AttemptEnded), attempts[0].state, "the attempt stays live while its tree runs")
+			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
+			assert.False(t, h.released(), "the working directory is not released")
+			assert.Empty(t, h.connectorPosts(), "an attempt that is still live has no completion to post")
+			assert.True(t, drivertest.Alive(grandchild), "recovery does not signal a group whose leader it cannot verify")
+			_, err := driver.OwnsWorker(worker)
+			assert.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
+		}
+
+		// The tree ends; the next restart may settle and release.
+		require.NoError(t, syscall.Kill(grandchild, syscall.SIGKILL))
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(grandchild), nil }))
+		h.run(harnessRun{})
+		attempts = recordedAttempts(t, l)
+		require.Len(t, attempts, 1)
+		assert.Equal(t, string(AttemptEnded), attempts[0].state)
+		assert.Equal(t, StateCompleted, stateOf(t, l, 101))
+		assert.Equal(t, string(OutcomeUnknown), outcomeOf(t, l, 101))
+		assert.True(t, h.released(), "released once the tree is gone")
+		assert.Len(t, h.notices(101), 1)
+		assert.Equal(t, 1, h.handed(101), "and never run again")
+		h.assertNoWorkerOutlivedItsRecord()
 	})
 }
