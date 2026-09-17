@@ -40,8 +40,14 @@ import (
 // holds the worktrees lock, and goes through removeWorktree. Nothing else in
 // the connector deletes a worktree's directory or git's record of it
 // (<repo>/.git/worktrees/<name>), and nothing runs `git worktree remove`.
-// Reconciling a row whose directory is already gone is not a removal: there
-// is nothing left to delete.
+//
+// A worktree whose directory something outside the connector removed is a
+// case of its own: what is left — git's record and the task branch — reaches
+// whatever it reaches, and the connector neither judges that nor deletes any
+// of it. The row is kept, said to be orphaned, and listed with the record, so
+// an operator sees it; naming its path in a force is what deletes the branch,
+// and git's own `worktree prune` is what clears the record. Nothing about
+// reachability is decided on that path at all.
 //
 // WHAT is work. Anything on the disk that is not a tracked file, unchanged:
 // a modified, staged, untracked or ignored file, a directory git has no file
@@ -81,7 +87,9 @@ import (
 // task's process group and holds a descriptor inside the directory.
 //
 // WHO forces. Only an operator, naming the worktree's path in `basecamp
-// connect worktrees prune --force <path>`.
+// connect worktrees prune --force <path>`. A force is a decision about work,
+// not a judgment of it: it is the one thing that goes ahead where the rule
+// above would keep a worktree, and what it can find is kept under refs first.
 //
 // # Invariants
 //
@@ -540,10 +548,10 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 	result := PruneResult{Worktree: after, RetainedRefs: refs}
 	gone := after.State == WorktreeRemoving && !exists(after.Path) && !exists(frozenName(after.Path))
 	switch {
-	case after.State == WorktreeRemoved && after.RemovedBy == RemovedMissing:
-		result.Action = PruneMissing
 	case force && (after.State == WorktreeRemoved || gone):
 		result.Action = PruneForced
+	case after.State == WorktreeRemoved && after.RemovedBy == RemovedMissing:
+		result.Action = PruneMissing
 	case after.State == WorktreeRemoved || gone:
 		// Removing and gone is a removal the ledger could not record yet.
 		result.Action = PruneRemoved
@@ -571,18 +579,20 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree) Worktree {
 		w.log.Info("connector: restored a worktree a removal left frozen", "path", r.Path)
 	}
 	if !exists(r.Path) {
-		return w.forget(ctx, r, from, nil, nil)
+		return w.forget(ctx, r, from, nil)
 	}
 	return w.retain(ctx, r, RetainedFinished, from)
 }
 
-// forget reconciles a row whose worktree is not on disk. The directory is
-// already gone, so nothing of it is deleted here; what is left to decide is
-// the task branch, which reaches commits of its own. The connector never
-// decides that: only an operator's discard deletes the branch, and only once
-// every commit it and the record still reach is held elsewhere, or kept by a
-// force.
-func (w *Worktrees) forget(ctx context.Context, r Worktree, from []WorktreeState, how *removal, refs *[]string) Worktree {
+// forget reconciles a row whose worktree is not on disk: something outside
+// the connector removed the directory. What is left is git's record of the
+// worktree and the task branch, which reach whatever they reach. The
+// connector does not judge that and does not delete any of it — that is the
+// class of defect this stopped trying to get right — so the row is kept,
+// said to be orphaned, and listed with its record and the refs in it. Only an
+// operator's explicit discard (`worktrees prune --force <path>`) deletes the
+// branch, having been told what goes.
+func (w *Worktrees) forget(ctx context.Context, r Worktree, from []WorktreeState, how *removal) Worktree {
 	if w.movedElsewhere(ctx, r) {
 		// Moved out from under the connector: its files are someone's.
 		return w.retain(ctx, r, RetainedMoved, from)
@@ -592,45 +602,18 @@ func (w *Worktrees) forget(ctx context.Context, r Worktree, from []WorktreeState
 		return w.retain(ctx, r, RetainedUnverified, from)
 	}
 	ours := tip != "" && r.BranchCreated && strings.HasPrefix(r.Branch, BranchPrefix)
-	if how == nil {
-		// The connector's own: it deletes nothing. A row with a branch of
-		// ours still on it is kept, so an operator decides; a row with
-		// nothing of ours left is closed, because there is nothing to decide.
-		if ours {
-			return w.retain(ctx, r, RetainedFinished, from)
-		}
+	if !ours && !exists(r.AdminDir) {
+		// Nothing of the connector's is left: no branch it made, no record.
+		// There is nothing to decide and nothing to delete.
 		return w.recordGone(ctx, r, from)
 	}
-	// Git's record of the worktree is git's to prune; what it still reaches
-	// is what the branch's deletion would forget.
-	tips, err := w.recordTips(ctx, r)
-	if err != nil {
-		return w.retain(ctx, r, RetainedUnverified, from)
+	if how == nil || !how.force {
+		return w.retain(ctx, r, RetainedOrphaned, from)
 	}
-	var unheld []string
-	for _, commit := range tips {
-		switch held, err := w.held(ctx, r, commit); {
-		case err != nil:
-			return w.retain(ctx, r, RetainedUnverified, from)
-		case !held:
-			unheld = append(unheld, commit)
-		}
-	}
-	if len(unheld) > 0 {
-		if !how.force {
-			return w.retain(ctx, r, RetainedUnpushed, from)
-		}
-		// A force keeps what nothing else holds, then the branch may go.
-		kept, err := w.keepCommits(ctx, r, unheld)
-		if err != nil {
-			return w.retain(ctx, r, RetainedUnverified, from)
-		}
-		if refs != nil {
-			*refs = append(*refs, kept...)
-		}
-	}
+	// The operator named this worktree: the branch it made goes, at the
+	// commit it stands at, and git's record is left for `git worktree prune`.
 	if ours {
-		w.deleteBranchAt(ctx, r, tip)
+		w.deleteBranch(ctx, r, tip)
 	}
 	return w.recordGone(ctx, r, from)
 }
@@ -662,7 +645,7 @@ func (w *Worktrees) settleKeeping(ctx context.Context, r Worktree, by RemovedBy,
 	}
 
 	if !exists(r.Path) {
-		return w.forget(ctx, r, from, &removal{force: force}, refs)
+		return w.forget(ctx, r, from, &removal{force: force})
 	}
 	return w.removeWorktree(ctx, r, by, removal{force: force}, refs)
 }
@@ -765,6 +748,19 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 		return w.retain(ctx, r, judged.reason, removing)
 	}
 
+	// Every commit the worktree reaches is held under a ref of the
+	// connector's own before anything is deleted, and let go only once the
+	// removal is over. Whatever else holds those commits — a remote branch a
+	// fetch prunes, a branch someone deletes — may go while the removal runs:
+	// it takes nothing with it. These refs hold nothing for anybody else (see
+	// RemovingRefPrefix), so one left by a crash cannot pass for a holder.
+	if _, err := w.anchor(ctx, r, judged.tips); err != nil {
+		w.log.Warn("connector: a worktree's commits could not be held for its removal; kept", "path", r.Path, "error", err)
+		if w.restore(r, v, admin) {
+			return w.retain(ctx, r, RetainedUnverified, removing)
+		}
+		return r
+	}
 	// The branch goes first, in the transaction that proves the judgment
 	// still stands: every ref the judgment leaned on is verified where it was
 	// found, so a fetch, a reset or a branch deleted since makes git refuse
@@ -773,27 +769,19 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	// unreachable, while the other order would leave a branch nothing later
 	// settles.
 	if !w.endBranch(ctx, r, judged) {
+		// The removal does not happen: its anchors go, each only while what
+		// the judgment found still holds its commit.
+		w.dropAnchors(ctx, r, judged)
 		if w.restore(r, v, admin) {
 			return w.retain(ctx, r, RetainedUnverified, removing)
 		}
 		w.log.Warn("connector: a frozen worktree could not be restored; the next start restores it", "path", r.Path)
 		return r
 	}
-	// Every commit the worktree reaches is now held by a ref of the
-	// connector's own, made after the judgment was proven still to stand and
-	// let go only once the removal is over. Whatever else holds those commits
-	// — a remote branch a fetch prunes, a branch someone deletes — may go
-	// while the deleting runs: it takes nothing with it.
-	if _, err := w.anchor(ctx, r, judged.tips); err != nil {
-		w.log.Warn("connector: a worktree's commits could not be held for its removal; kept", "path", r.Path, "error", err)
-		if w.restore(r, v, admin) {
-			return w.retain(ctx, r, RetainedUnverified, removing)
-		}
-		return r
-	}
 	// Delete the frozen copy: the directory, then the record.
 	if err := os.RemoveAll(v.dir); err != nil {
 		w.log.Warn("connector: a frozen worktree could not be deleted; kept", "path", r.Path, "error", err)
+		w.dropAnchors(ctx, r, judged)
 		if w.restore(r, v, admin) {
 			return w.retain(ctx, r, RetainedUnverified, removing)
 		}
@@ -1065,9 +1053,16 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 		}
 		tips = append(tips, strings.Fields(string(out))...)
 	}
-	// Those refs' own reflogs are not read: git logs ref updates only for
-	// HEAD, refs/heads, refs/remotes and refs/notes, so a per-worktree ref has
-	// none to read.
+	// Those refs' own reflogs, when the repository keeps them: git logs ref
+	// updates under refs/ only with core.logAllRefUpdates=always, and a
+	// per-worktree ref's log lives in the record and goes with it.
+	for _, dir := range []string{"refs/worktree", "refs/bisect", "refs/rewritten"} {
+		logged, err := reflogDirTips(filepath.Join(v.gitDir, "logs", filepath.FromSlash(dir)))
+		if err != nil {
+			return judgment{reason: RetainedUnverified}
+		}
+		tips = append(tips, logged...)
+	}
 	//
 	// The record's pseudo-refs are its too, and go with it: ORIG_HEAD is what
 	// a reset left behind, and the rest are an operation's.
@@ -1090,13 +1085,13 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 	tips = append(tips, stashed...)
 	// A reflog that is not there is not a reflog that holds nothing: with
 	// core.logAllRefUpdates off, or after an expire, what the worktree
-	// reached is unreadable, and what cannot be read is not judged clean.
-	if !bare {
-		switch _, err := os.Lstat(filepath.Join(v.gitDir, "logs", "HEAD")); {
-		case err == nil:
-		case errors.Is(err, os.ErrNotExist):
-			return judgment{reason: RetainedUnverified}
-		default:
+	// reached is unreadable, and what cannot be read is not judged clean —
+	// unless an operator names this worktree and forces it, which is a
+	// decision about work, not a judgment. Every repository keeps reflogs by
+	// default; one that does not would otherwise leave rows nothing could
+	// ever clear.
+	if !bare && !how.force {
+		if _, err := os.Lstat(filepath.Join(v.gitDir, "logs", "HEAD")); err != nil {
 			return judgment{reason: RetainedUnverified}
 		}
 	}
@@ -1218,125 +1213,31 @@ func (w *Worktrees) movedElsewhere(ctx context.Context, r Worktree) bool {
 	return false
 }
 
-// recordTips is every commit git's record of a missing worktree still
-// reaches, and that deleting the record and the task branch would forget: the
-// record's HEAD and its reflog, its per-worktree refs, its pseudo-refs, what
-// an operation in progress stashed away, and the task branch's own reflog. It
-// reads and deletes nothing, and any doubt is an error, never an empty
-// answer.
-func (w *Worktrees) recordTips(ctx context.Context, r Worktree) ([]string, error) {
+// reflogDirTips is every commit the reflogs under one directory of a record
+// name. A directory that is not there is a repository that logs nothing
+// there, which names nothing.
+func reflogDirTips(dir string) ([]string, error) {
 	var tips []string
-	if r.BranchCreated && strings.HasPrefix(r.Branch, BranchPrefix) {
-		// The branch, and its own reflog, which deleting it forgets. A branch
-		// that is not there any more reaches nothing.
-		tip, err := w.branchTip(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		if tip != "" {
-			tips = append(tips, tip)
-			out, err := w.gitOut(ctx, r.Repository, "reflog", "show", "--format=%H", "refs/heads/"+r.Branch, "--")
-			if err != nil {
-				return nil, err
-			}
-			tips = append(tips, strings.Fields(out)...)
-		}
-	}
-	if r.AdminDir == "" {
-		return tips, nil
-	}
-	if _, err := os.Lstat(r.AdminDir); errors.Is(err, os.ErrNotExist) {
-		return tips, nil
-	} else if err != nil {
-		return nil, err
-	}
-	// A submodule's git data in the record is its own commits, which no ref
-	// here reaches: the row is kept.
-	switch entries, err := os.ReadDir(filepath.Join(r.AdminDir, "modules")); {
-	case err == nil && len(entries) > 0:
-		return nil, errors.New("connector: the record holds a submodule's git data")
-	case err != nil && !errors.Is(err, os.ErrNotExist):
-		return nil, err
-	}
-	out, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "for-each-ref", "--format=%(objectname)", "refs/worktree/", "refs/bisect/", "refs/rewritten/"}, "for-each-ref")
-	if err != nil {
-		return nil, err
-	}
-	tips = append(tips, strings.Fields(string(out))...)
-	stashed, err := autostashTips(r.AdminDir)
-	if err != nil {
-		return nil, err
-	}
-	tips = append(tips, stashed...)
-	// The record's pseudo-refs, as judge reads them: they live in the record
-	// and go with it.
-	for _, name := range pseudoRefs {
-		out, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--quiet", "--end-of-options", name + "^{commit}"}, "rev-parse")
-		var exitErr *exec.ExitError
-		switch {
-		case err == nil:
-			tips = append(tips, strings.Fields(string(out))...)
-		case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
-		default:
-			return nil, err
-		}
-	}
-	// A record whose HEAD names no commit — a removal that crashed between
-	// deleting the directory and deleting the record, after the branch HEAD
-	// named was deleted — is still judged: git refuses to read the reflog of
-	// a HEAD it cannot resolve, so the reflog's own file is read for the
-	// commits it names. Only a git that could not answer (anything but the
-	// quiet "no such revision") is doubt.
-	head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--quiet", "--end-of-options", "HEAD^{commit}"}, "rev-parse")
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		tips = append(tips, strings.TrimSpace(string(head)))
-		out, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "reflog", "show", "--format=%H", "HEAD", "--"}, "reflog")
-		if err != nil {
-			return nil, err
-		}
-		tips = append(tips, strings.Fields(string(out))...)
-	case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
-		logged, err := reflogFileTips(filepath.Join(r.AdminDir, "logs", "HEAD"))
-		if err != nil {
-			return nil, err
-		}
-		tips = append(tips, logged...)
-	default:
-		return nil, err
-	}
-	// A reflog that is not there is no evidence, as the frozen judgment says:
-	// a record whose HEAD was never logged cannot say what it reached.
-	if _, err := os.Lstat(filepath.Join(r.AdminDir, "logs", "HEAD")); err != nil {
-		return nil, fmt.Errorf("connector: the record of %s keeps no reflog: %w", r.Path, err)
-	}
-	slices.Sort(tips)
-	return slices.Compact(tips), nil
-}
-
-// autostashTips is every commit an operation in progress stashed away in a
-// record: git writes the object name to a file, and nothing else names it.
-func autostashTips(gitDir string) ([]string, error) {
-	var tips []string
-	for _, name := range autostashFiles {
-		data, err := os.ReadFile(filepath.Join(gitDir, name))
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
-			continue
+			return nil
 		case err != nil:
-			return nil, err
+			return err
+		case d.IsDir():
+			return nil
 		}
-		if oid := strings.TrimSpace(string(data)); isObjectName(oid) {
-			tips = append(tips, oid)
+		logged, err := reflogFileTips(path)
+		if err != nil {
+			return err
 		}
+		tips = append(tips, logged...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return tips, nil
-}
-
-// isObjectName reports whether a field is an object name and not the zero one.
-func isObjectName(field string) bool {
-	return len(field) >= 40 && strings.Trim(field, "0123456789abcdef") == "" && strings.Trim(field, "0") != ""
 }
 
 // reflogFileTips is every commit a reflog file names, read as git writes it:
@@ -1358,14 +1259,47 @@ func reflogFileTips(path string) ([]string, error) {
 		// who, when and why, which name nothing.
 		for _, field := range fields[:min(2, len(fields))] {
 			if !isObjectName(field) {
-				// Not an object name, or the zero one an entry that came from
-				// nothing begins with.
 				continue
 			}
 			tips = append(tips, field)
 		}
 	}
 	return tips, nil
+}
+
+// autostashTips is every commit an operation in progress stashed away in a
+// record: git writes the object name to a file, and nothing else names it.
+func autostashTips(gitDir string) ([]string, error) {
+	var tips []string
+	for _, name := range autostashFiles {
+		data, err := os.ReadFile(filepath.Join(gitDir, name))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		if oid := strings.TrimSpace(string(data)); isObjectName(oid) {
+			tips = append(tips, oid)
+		}
+	}
+	return tips, nil
+}
+
+// isGitDir reports whether a directory is a repository's git data: git's own
+// test is a HEAD, an objects directory and a refs directory.
+func isGitDir(path string) bool {
+	for _, name := range []string{"HEAD", "objects", "refs"} {
+		if _, err := os.Lstat(filepath.Join(path, name)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// isObjectName reports whether a field is an object name and not the zero one.
+func isObjectName(field string) bool {
+	return len(field) >= 40 && strings.Trim(field, "0123456789abcdef") == "" && strings.Trim(field, "0") != ""
 }
 
 // exists reports whether a path is anything but proven absent: a path that
@@ -1483,6 +1417,14 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, v view) (untracked, git
 			case d.IsDir():
 				if !dirs[rel] {
 					found.untracked = true
+					// A directory git does not track that is itself a
+					// repository — `git init --bare` or a clone with no
+					// worktree — is git data like any other: no ref here can
+					// keep its commits, so it is never removed, forced or not.
+					if isGitDir(path) {
+						found.gitlink = true
+						return filepath.SkipAll
+					}
 				}
 				return nil
 			case !files[rel]:
@@ -1502,16 +1444,6 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, v view) (untracked, git
 	case <-ctx.Done():
 		return false, false, ctx.Err()
 	}
-}
-
-// held reports whether a commit is safe to lose from this worktree: a ref the
-// connector keeps contains it — a remote branch, a local branch that is not a
-// task's, or a ref a forced removal of this same worktree kept it under. The
-// base the worktree was made from is no different: the route's branch usually
-// holds it, but a route reset since is not evidence that it does.
-func (w *Worktrees) held(ctx context.Context, r Worktree, commit string) (bool, error) {
-	ref, _, err := w.holder(ctx, r, commit)
-	return ref != "", err
 }
 
 // holder is a ref the connector keeps that contains commit, and the commit it
@@ -1541,27 +1473,17 @@ func (w *Worktrees) branchTip(ctx context.Context, r Worktree) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// deleteBranchAt deletes the task branch of a worktree that is no longer on
-// disk, only while the branch still points at commit, which was verified held
-// (invariant 4), and only when this row made it.
-func (w *Worktrees) deleteBranchAt(ctx context.Context, r Worktree, commit string) {
+// deleteBranch deletes the task branch of a worktree whose directory is gone,
+// at the commit it stands at and only when this row made it. An operator
+// asked for it by naming the worktree, and was told what goes; nothing here
+// judges what the branch reaches.
+func (w *Worktrees) deleteBranch(ctx context.Context, r Worktree, commit string) {
 	if commit == "" || !r.BranchCreated || !strings.HasPrefix(r.Branch, BranchPrefix) {
 		return
 	}
-	// One ref transaction: the branch goes only while it is still at commit
-	// and, unless commit is the base, only while the ref that holds commit is
-	// still where it was when it was found to hold it. A fetch or reset that
-	// moves the holder in between makes git refuse the whole transaction.
-	stdin := "start\n"
-	ref, oid, err := w.holder(ctx, r, commit)
-	if err != nil || ref == "" {
-		w.log.Debug("connector: task branch kept: nothing holds its commit", "branch", r.Branch)
-		return
-	}
-	stdin += "verify " + ref + " " + oid + "\n"
-	stdin += "delete refs/heads/" + r.Branch + " " + commit + "\nprepare\ncommit\n"
+	stdin := "start\ndelete refs/heads/" + r.Branch + " " + commit + "\nprepare\ncommit\n"
 	if err := w.gitStdin(ctx, r.Repository, stdin, "update-ref", "--stdin"); err != nil {
-		w.log.Debug("connector: task branch kept", "branch", r.Branch, "error", err)
+		w.log.Warn("connector: a task branch could not be deleted", "branch", r.Branch, "error", err)
 	}
 }
 

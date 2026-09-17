@@ -65,6 +65,11 @@ func worktreesCmdEnv(t *testing.T) (*appctx.App, *bytes.Buffer, connector.Worktr
 	w.WorkDir = w.Path
 	id, err := ledger.BeginWorktree(context.Background(), w)
 	require.NoError(t, err)
+	// Git's record of it, as the connector stores it once the worktree is
+	// made: what is left of an orphan.
+	w.AdminDir = filepath.Join(repo, ".git", "worktrees", "7-abcdef")
+	require.NoError(t, os.MkdirAll(w.AdminDir, 0o700))
+	require.NoError(t, ledger.WorktreeAdminDir(context.Background(), id, w.AdminDir))
 	require.NoError(t, ledger.RetainWorktree(context.Background(), id, connector.RetainedDirty, connector.WorktreeCreating))
 
 	cfg := config.Default()
@@ -105,8 +110,16 @@ func TestConnectWorktreesSayWhatTheyTakeUp(t *testing.T) {
 	out.Reset()
 	require.NoError(t, os.RemoveAll(w.Path))
 	require.NoError(t, runWorktreesCmd(t, app, "prune"))
-	assert.Contains(t, out.String(), `"action": "missing"`)
+	assert.Contains(t, out.String(), `"reason": "orphaned"`)
 	assert.NotContains(t, out.String(), `"size_bytes"`, "a worktree that is gone has no size")
+}
+
+// An orphaned worktree is listed with git's record of it, which is what is
+// left to deal with.
+func TestConnectWorktreesShowTheRecordOfAnOrphan(t *testing.T) {
+	app, out, w := worktreesCmdEnv(t)
+	require.NoError(t, runWorktreesCmd(t, app, "list"))
+	assert.Contains(t, out.String(), `"record": "`+w.AdminDir+`"`)
 }
 
 func TestConnectWorktreesPruneRefusesWhatItCannotName(t *testing.T) {
@@ -120,11 +133,22 @@ func TestConnectWorktreesPruneRefusesWhatItCannotName(t *testing.T) {
 	assert.Contains(t, err.Error(), "Nothing was pruned")
 }
 
-func TestConnectWorktreesPruneRecordsOnesTheOperatorRemoved(t *testing.T) {
+// A worktree whose directory is gone is reported as orphaned, with git's
+// record of it, and a plain prune deletes none of what it left; the operator
+// naming its path is what clears it.
+func TestConnectWorktreesPruneLeavesAnOrphanAloneUntilItIsNamed(t *testing.T) {
 	app, out, w := worktreesCmdEnv(t)
 	require.NoError(t, runWorktreesCmd(t, app, "prune"))
-	assert.Contains(t, out.String(), `"action": "missing"`)
+	assert.Contains(t, out.String(), `"reason": "orphaned"`)
+	assert.Contains(t, out.String(), `"record"`, "what is left of it")
 	assert.NotContains(t, out.String(), `"force_refused"`, "nothing was forced")
+	out.Reset()
+	require.NoError(t, runWorktreesCmd(t, app, "list"))
+	assert.Contains(t, out.String(), w.Path, "still listed for the operator")
+
+	out.Reset()
+	require.NoError(t, runWorktreesCmd(t, app, "prune", "--force", w.Path))
+	assert.Contains(t, out.String(), `"action": "forced"`)
 	out.Reset()
 	require.NoError(t, runWorktreesCmd(t, app, "list"))
 	assert.NotContains(t, out.String(), w.Path)

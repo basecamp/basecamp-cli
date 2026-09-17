@@ -91,14 +91,22 @@ reaches held elsewhere, or whose directory you removed yourself. This is the
 only thing that removes a worktree. One that still holds work is kept and
 listed with why.
 
---force <path> removes that worktree even with work in it; name each one.
+--force <path> removes that worktree even with work in it; name each one, and
+it tells you what goes.
 Every commit it reaches that nothing else holds is first kept under
 refs/basecamp-connect/retained/ (retained_refs), so a force discards files,
 never commits. A worktree holding a submodule's own git data, or a lock, is
 never forced; neither is one that is no longer where it was (reason "moved"):
 move it back, or remove it yourself and prune again. A force that could not go
 through is reported as kept with force_refused. Worktrees of tasks still
-running are never touched.`,
+running are never touched.
+
+A worktree whose directory something else removed (reason "orphaned") is left
+exactly as it is — git's record of it and the task branch, whatever they reach
+— and only a force on its path deletes the branch, leaving the record for
+` + "`git worktree prune`" + `. A worktree whose state could not be read
+(reason "unverified") is kept; forcing it keeps every commit that could be
+found, which in a repository that keeps no reflogs may not be all of them.`,
 		Example: `  basecamp connect worktrees prune -P agent
   basecamp connect worktrees prune -P agent --force ~/.local/state/basecamp/connect/2914079-52007412/worktrees/app-1a2b3c4d/17-a1b2c3`,
 		Args: cobra.NoArgs,
@@ -147,11 +155,15 @@ type worktreeView struct {
 	// SizeBytes is what the worktree takes up on disk, so an operator can
 	// see what reclaiming it is worth; -1 when it is there and could not be
 	// read, and nothing at all for one that is gone.
-	SizeBytes  int64  `json:"size_bytes,omitempty"`
-	WorkDir    string `json:"work_dir"`
-	Branch     string `json:"branch"`
-	Route      string `json:"route"`
-	Reason     string `json:"reason,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	WorkDir   string `json:"work_dir"`
+	Branch    string `json:"branch"`
+	Route     string `json:"route"`
+	Reason    string `json:"reason,omitempty"`
+	// Record is git's record of the worktree (<repo>/.git/worktrees/<name>),
+	// which outlives a directory something else removed: what an operator
+	// needs to find what is left, and what `git worktree prune` clears.
+	Record     string `json:"record,omitempty"`
 	EventID    int64  `json:"event_id"`
 	TaskID     int64  `json:"task_id,omitempty"`
 	RetainedAt string `json:"retained_at,omitempty"`
@@ -167,6 +179,18 @@ type pruneView struct {
 // sizeLimit bounds how long reading a worktree's size may take: a listing is
 // not worth holding for a tree that cannot be walked.
 const sizeLimit = 5 * time.Second
+
+// recordOf is git's record of the worktree, when it is still there: the
+// directory an orphaned worktree leaves behind.
+func recordOf(w connector.Worktree) string {
+	if w.AdminDir == "" || w.State == connector.WorktreeRemoved {
+		return ""
+	}
+	if _, err := os.Lstat(w.AdminDir); err != nil {
+		return ""
+	}
+	return w.AdminDir
+}
 
 // sizeOf is what a worktree takes up on disk. A worktree that is not there
 // takes up nothing, and is not walked for an answer; one a removal has
@@ -229,7 +253,7 @@ func dirSize(path string) int64 {
 func viewWorktree(w connector.Worktree) worktreeView {
 	v := worktreeView{
 		Path: w.Path, State: string(w.State), SizeBytes: sizeOf(w), WorkDir: w.WorkDir,
-		Branch: w.Branch, Route: w.Route, Reason: string(w.RetainedReason),
+		Branch: w.Branch, Route: w.Route, Reason: string(w.RetainedReason), Record: recordOf(w),
 		EventID: w.OriginatingEventID, TaskID: w.TaskID,
 	}
 	if !w.RetainedAt.IsZero() {

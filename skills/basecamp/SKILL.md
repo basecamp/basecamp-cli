@@ -1457,7 +1457,7 @@ basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<di
 basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
 basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
 basecamp connect setup -P agent --worker codex --worktrees  # Run workers with Codex instead of Claude Code, and give each task its own git worktree
-basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk and why it is kept (finished, dirty, unpushed, locked, moved, unverified)
+basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk, git's record of it, and why it is kept (finished, dirty, unpushed, locked, moved, unverified, orphaned)
 basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (every commit it reaches is kept under refs/basecamp-connect/retained/, not branches)
 ```
 
@@ -1474,7 +1474,9 @@ With worktrees on, a task's worktree is kept when the task ends — the connecto
 removes none of its own accord — and listed by `connect worktrees list` with its
 size. Removing them is the operator's call: `connect worktrees prune` removes
 those that hold no work, and never pass `--force` for a path the operator did not
-name. A Codex worker cannot commit (its sandbox cannot write the
+name. A worktree whose directory something else removed is reported as
+`orphaned`: the connector leaves git's record of it and the task branch exactly
+as they are, and only a force on its path deletes the branch. A Codex worker cannot commit (its sandbox cannot write the
 worktree's git data), so with Codex every task that edits files leaves a kept
 worktree.
 

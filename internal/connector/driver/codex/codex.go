@@ -73,6 +73,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -991,6 +992,7 @@ func (s *session) stderrRefusals() {
 	// Every line the worker's stderr kept, sanitized: a refusal Codex logs
 	// and does not put on the stream is one of them, wherever it is in the
 	// output.
+	seen := map[string]int{}
 	for _, line := range s.worker.StderrLines(s.red) {
 		if !refusedByApproval(line) {
 			continue
@@ -999,10 +1001,12 @@ func (s *session) stderrRefusals() {
 		if strings.Contains(line, "patch rejected") {
 			tool, kind = "apply_patch", driver.ToolEdit
 		}
-		// Codex gives these no id: the line itself is the key, so reading the
-		// same output again — every way a turn can end reads it — records
-		// each refusal once.
-		s.refused("stderr:"+line, "", tool, kind)
+		// Codex gives these no id, so the key is the line and how many times
+		// it has been seen in this output: two refusals Codex logged the same
+		// way are two, and reading the same output again — every way a turn
+		// can end reads it — records each of them once.
+		seen[line]++
+		s.refused("stderr:"+strconv.Itoa(seen[line])+":"+line, "", tool, kind)
 	}
 }
 

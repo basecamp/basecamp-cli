@@ -1009,6 +1009,8 @@ func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {
 			"patch rejected: writing outside of the project; rejected by user approval settings",
 			"ERROR: command failed because the approval policy is never",
 			"thinking about the next step",
+			// The same diagnostic twice is two refusals, not one.
+			"ERROR: command failed because the approval policy is never",
 		}, "\n"),
 	})
 	cfg := h.config()
@@ -1016,8 +1018,8 @@ func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {
 	s, result, err := h.run(context.Background(), cfg)
 	require.NoError(t, err)
 	require.NoError(t, s.Close())
-	assert.Len(t, recorder.Recorded(), 2, "both refusals, though neither is the last line")
-	assert.Len(t, result.Refusals, 2)
+	assert.Len(t, recorder.Recorded(), 3, "every refusal, wherever it is and however it reads")
+	assert.Len(t, result.Refusals, 3)
 }
 
 // A refusal Codex logged is recorded even when the turn it belonged to has

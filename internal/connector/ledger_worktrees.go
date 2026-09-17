@@ -34,7 +34,7 @@ CREATE TABLE worktrees (
   state                TEXT    NOT NULL
                        CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
   retained_reason      TEXT    NOT NULL DEFAULT ''
-                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified', 'finished')),
+                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified', 'finished', 'orphaned')),
   created_at           TEXT    NOT NULL,
   finished_at          TEXT,
   retained_at          TEXT,
@@ -89,6 +89,12 @@ const (
 	// RetainedMoved is a worktree that is no longer where the ledger says:
 	// someone moved it, and its files are theirs to deal with.
 	RetainedMoved RetainedReason = "moved"
+	// RetainedOrphaned is a worktree whose directory something outside the
+	// connector removed. Git's record of it and the task branch are still
+	// there, reaching whatever they reach; the connector neither judges that
+	// nor deletes any of it. An operator's explicit discard does, and is
+	// told what goes.
+	RetainedOrphaned RetainedReason = "orphaned"
 	// RetainedFinished is a worktree whose task ended. Nothing the connector
 	// does removes a worktree, so this is why most kept worktrees are kept:
 	// the work is done with, and an operator says when it goes.
