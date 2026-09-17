@@ -1330,6 +1330,50 @@ func TestAHolderThatGoesWhileTheRemovalRunsTakesNothingWithIt(t *testing.T) {
 	assert.Contains(t, refs, RemovingRefPrefix, "the commit is still held by a ref of the connector's own")
 }
 
+// A force on an orphan whose branch could not be deleted keeps the row: an
+// operator is never left with something nothing lists.
+func TestAnOrphanWhoseBranchStaysKeepsItsRow(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(320)
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	require.NoError(t, os.RemoveAll(row.Path))
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) exit 1;; esac`))
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.Equal(t, RetainedOrphaned, results[0].Reason)
+	assert.True(t, h.branchExists(row.Branch))
+	assert.Equal(t, WorktreeRetained, h.row(workDir).State, "still listed")
+}
+
+// A pseudo-ref can name more than one commit — FETCH_HEAD does, and an
+// octopus MERGE_HEAD does — and every one of them goes with the record.
+func TestEveryCommitAPseudoRefNamesIsJudged(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(319)
+	first := h.git(h.repo, "rev-parse", "HEAD")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	second := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "reset", "-q", "--hard", row.BaseCommit)
+	h.git(workDir, "reflog", "expire", "--expire=now", "--all")
+	h.git(h.repo, "reflog", "expire", "--expire=now", "--all")
+	// Nothing else in the record names it: the reset's ORIG_HEAD goes.
+	origHead := h.git(workDir, "rev-parse", "--path-format=absolute", "--git-path", "ORIG_HEAD")
+	require.NoError(t, os.Remove(origHead))
+	// A fetch's FETCH_HEAD: the held commit first, the unheld one after it.
+	fetchHead := h.git(workDir, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+	require.NoError(t, os.WriteFile(fetchHead, []byte(first+"\t\tbranch 'main' of origin\n"+second+"\tnot-for-merge\tbranch 'other' of origin\n"), 0o600))
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnpushed, after.RetainedReason, "the second name is judged too")
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", second+"^{commit}").Run())
+}
+
 // A bare repository a worker made inside its worktree is git data too: a
 // force discards files, never commits, and no ref here could keep these.
 func TestABareRepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {

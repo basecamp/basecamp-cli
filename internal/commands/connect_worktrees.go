@@ -87,15 +87,14 @@ func newConnectWorktreesPruneCmd() *cobra.Command {
 		Use:   "prune",
 		Short: "Remove the kept worktrees you have dealt with",
 		Long: `Remove every kept worktree that holds no work: clean, with every commit it
-reaches held elsewhere, or whose directory you removed yourself. This is the
-only thing that removes a worktree. One that still holds work is kept and
-listed with why.
+reaches held elsewhere. This is the only thing that removes a worktree. One
+that still holds work is kept and listed with why.
 
 --force <path> removes that worktree even with work in it; name each one, and
 it tells you what goes.
 Every commit it reaches that nothing else holds is first kept under
-refs/basecamp-connect/retained/ (retained_refs), so a force discards files,
-never commits. A worktree holding a submodule's own git data, or a lock, is
+refs/basecamp-connect/retained/ (retained_refs), so a force on a worktree that
+is still on disk discards files, never commits. A worktree holding a submodule's own git data, or a lock, is
 never forced; neither is one that is no longer where it was (reason "moved"):
 move it back, or remove it yourself and prune again. A force that could not go
 through is reported as kept with force_refused. Worktrees of tasks still
@@ -103,8 +102,11 @@ running are never touched.
 
 A worktree whose directory something else removed (reason "orphaned") is left
 exactly as it is — git's record of it and the task branch, whatever they reach
-— and only a force on its path deletes the branch, leaving the record for
-` + "`git worktree prune`" + `. A worktree whose state could not be read
+— and a plain prune leaves it alone. A force on its path deletes the task
+branch and nothing else, leaving git's record for ` + "`git worktree prune`" + `:
+commits only that branch or that record reached go when you do that, and
+nothing here works out which those are. Move the directory back, or keep the
+branch, if you want them. A worktree whose state could not be read
 (reason "unverified") is kept; forcing it keeps every commit that could be
 found, which in a repository that keeps no reflogs may not be all of them.`,
 		Example: `  basecamp connect worktrees prune -P agent
@@ -180,6 +182,14 @@ type pruneView struct {
 // not worth holding for a tree that cannot be walked.
 const sizeLimit = 5 * time.Second
 
+// reasonOf is why a worktree is kept: nothing, for one that is not.
+func reasonOf(w connector.Worktree) string {
+	if w.State == connector.WorktreeRemoved {
+		return ""
+	}
+	return string(w.RetainedReason)
+}
+
 // recordOf is git's record of the worktree, when it is still there: the
 // directory an orphaned worktree leaves behind.
 func recordOf(w connector.Worktree) string {
@@ -253,7 +263,7 @@ func dirSize(path string) int64 {
 func viewWorktree(w connector.Worktree) worktreeView {
 	v := worktreeView{
 		Path: w.Path, State: string(w.State), SizeBytes: sizeOf(w), WorkDir: w.WorkDir,
-		Branch: w.Branch, Route: w.Route, Reason: string(w.RetainedReason), Record: recordOf(w),
+		Branch: w.Branch, Route: w.Route, Reason: reasonOf(w), Record: recordOf(w),
 		EventID: w.OriginatingEventID, TaskID: w.TaskID,
 	}
 	if !w.RetainedAt.IsZero() {

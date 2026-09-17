@@ -612,8 +612,10 @@ func (w *Worktrees) forget(ctx context.Context, r Worktree, from []WorktreeState
 	}
 	// The operator named this worktree: the branch it made goes, at the
 	// commit it stands at, and git's record is left for `git worktree prune`.
-	if ours {
-		w.deleteBranch(ctx, r, tip)
+	// A branch that could not be deleted keeps the row, so nothing is left
+	// behind that nothing lists.
+	if ours && !w.deleteBranch(ctx, r, tip) {
+		return w.retain(ctx, r, RetainedOrphaned, from)
 	}
 	return w.recordGone(ctx, r, from)
 }
@@ -1065,19 +1067,15 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 	}
 	//
 	// The record's pseudo-refs are its too, and go with it: ORIG_HEAD is what
-	// a reset left behind, and the rest are an operation's.
-	for _, name := range pseudoRefs {
-		out, err := w.gitRawIn(ctx, v, "rev-parse", "--verify", "--quiet", "--end-of-options", name+"^{commit}")
-		var exitErr *exec.ExitError
-		switch {
-		case err == nil:
-			tips = append(tips, strings.Fields(string(out))...)
-		case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
-			// Not there, or not a commit.
-		default:
-			return judgment{reason: RetainedUnverified}
-		}
+	// a reset left behind, and the rest are an operation's. They are read as
+	// the files they are, because some of them — FETCH_HEAD, and MERGE_HEAD
+	// in an octopus merge — name more than one commit, which `rev-parse`
+	// would reduce to the first.
+	named, err := pseudoRefTips(v.gitDir)
+	if err != nil {
+		return judgment{reason: RetainedUnverified}
 	}
+	tips = append(tips, named...)
 	stashed, err := autostashTips(v.gitDir)
 	if err != nil {
 		return judgment{reason: RetainedUnverified}
@@ -1262,6 +1260,29 @@ func reflogFileTips(path string) ([]string, error) {
 				continue
 			}
 			tips = append(tips, field)
+		}
+	}
+	return tips, nil
+}
+
+// pseudoRefTips is every object name the record's pseudo-refs hold: one per
+// line, first field, as git writes FETCH_HEAD and the rest. A file that is
+// not there names nothing; one that cannot be read is an error.
+func pseudoRefTips(gitDir string) ([]string, error) {
+	var tips []string
+	for _, name := range pseudoRefs {
+		data, err := os.ReadFile(filepath.Join(gitDir, name))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		for line := range strings.SplitSeq(string(data), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) > 0 && isObjectName(fields[0]) {
+				tips = append(tips, fields[0])
+			}
 		}
 	}
 	return tips, nil
@@ -1477,14 +1498,16 @@ func (w *Worktrees) branchTip(ctx context.Context, r Worktree) (string, error) {
 // at the commit it stands at and only when this row made it. An operator
 // asked for it by naming the worktree, and was told what goes; nothing here
 // judges what the branch reaches.
-func (w *Worktrees) deleteBranch(ctx context.Context, r Worktree, commit string) {
+func (w *Worktrees) deleteBranch(ctx context.Context, r Worktree, commit string) bool {
 	if commit == "" || !r.BranchCreated || !strings.HasPrefix(r.Branch, BranchPrefix) {
-		return
+		return true
 	}
 	stdin := "start\ndelete refs/heads/" + r.Branch + " " + commit + "\nprepare\ncommit\n"
 	if err := w.gitStdin(ctx, r.Repository, stdin, "update-ref", "--stdin"); err != nil {
 		w.log.Warn("connector: a task branch could not be deleted", "branch", r.Branch, "error", err)
+		return false
 	}
+	return true
 }
 
 // endBranch is the last thing a removal does before the frozen copy goes: one
