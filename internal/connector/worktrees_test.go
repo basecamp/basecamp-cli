@@ -404,7 +404,7 @@ func TestAMovedWorktreeIsKept(t *testing.T) {
 
 	row = h.finish(workDir)
 	assert.Equal(t, WorktreeRetained, row.State)
-	assert.Equal(t, RetainedUnverified, row.RetainedReason)
+	assert.Equal(t, RetainedMoved, row.RetainedReason)
 	assert.True(t, h.branchExists(row.Branch), "the branch the moved worktree has checked out")
 	assert.FileExists(t, filepath.Join(moved, "app", "README"))
 }
@@ -454,7 +454,7 @@ func TestABranchTheConnectorDidNotMakeIsNotDeleted(t *testing.T) {
 	id, err := h.ledger.BeginWorktree(ctx, record)
 	require.NoError(t, err)
 	record.ID = id
-	require.Error(t, h.wt.add(ctx, record), "the branch is already someone's")
+	require.Error(t, h.wt.add(ctx, &record), "the branch is already someone's")
 
 	unlock, err := h.wt.lock(ctx)
 	require.NoError(t, err)
@@ -746,4 +746,37 @@ func TestAnUnreadablePathCountsAsThere(t *testing.T) {
 
 	assert.True(t, exists(inside), "unreadable is not absent")
 	assert.False(t, exists(filepath.Join(dir, "never")), "absent is absent")
+}
+
+// A moved worktree is not forced away either: there is nothing at the path to
+// judge, and prune says so instead of trying.
+func TestAMovedWorktreeIsNotForced(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(93)
+	moved := filepath.Join(t.TempDir(), "moved")
+	h.git(h.repo, "worktree", "move", row.Path, moved)
+	row = h.finish(workDir)
+	require.Equal(t, RetainedMoved, row.RetainedReason)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.Equal(t, RetainedMoved, results[0].Reason)
+	assert.False(t, results[0].ForceRefused, "prune says where it is, it does not try and fail")
+	assert.FileExists(t, filepath.Join(moved, "app", "README"))
+}
+
+// A branch the connector made for a worktree that then failed to appear is
+// its own to clean up.
+func TestAFailedAddLeavesNoBranchBehind(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
+	_, err := h.wt.Prepare(context.Background(), filepath.Join(h.repo, "app"), 94)
+	require.Error(t, err)
+	rows, err := h.ledger.Worktrees(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.True(t, rows[0].BranchCreated)
+	assert.False(t, h.branchExists(rows[0].Branch), "the branch it made goes with it")
 }

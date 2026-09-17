@@ -257,7 +257,7 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 	}
 	record.ID = id
 
-	err = w.add(ctx, record)
+	err = w.add(ctx, &record)
 	if err == nil {
 		record.AdminDir, err = w.gitOut(ctx, record.Path, "rev-parse", "--absolute-git-dir")
 	}
@@ -280,7 +280,7 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 	return workDir, nil
 }
 
-func (w *Worktrees) add(ctx context.Context, r Worktree) error {
+func (w *Worktrees) add(ctx context.Context, r *Worktree) error {
 	if err := os.MkdirAll(w.root, 0o700); err != nil {
 		return err
 	}
@@ -296,6 +296,9 @@ func (w *Worktrees) add(ctx context.Context, r Worktree) error {
 	if err := w.ledger.WorktreeBranchCreated(ctx, r.ID); err != nil {
 		return err
 	}
+	// The caller settles this record if anything below fails, and only a
+	// record that says the branch is ours lets it be deleted again.
+	r.BranchCreated = true
 	// The checkout runs in the new worktree, so the filters blanked are the
 	// ones its own configuration defines (an include on its branch among
 	// them), not the checkout's the route is in.
@@ -371,6 +374,9 @@ type PruneResult struct {
 	// BranchKept is a forced removal's branch, kept because its commits are
 	// held nowhere else.
 	BranchKept bool
+	// ForceRefused is a --force that could not go through: the worktree's
+	// state could not be established well enough to remove it safely.
+	ForceRefused bool
 	// HeadBranch is a branch a forced removal made for a detached HEAD whose
 	// commit nothing else held.
 	HeadBranch string
@@ -427,6 +433,9 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 		result.Action = PruneMissing
 	case after.State == WorktreeRemoved:
 		result.Action = PruneRemoved
+	case force && after.RetainedReason == RetainedMoved:
+		// There is nothing here to force: the directory is somewhere else.
+		result.Action, result.Reason = PruneKept, after.RetainedReason
 	case force && after.RetainedReason != RetainedLocked:
 		result = w.forceRemove(ctx, after)
 	default:
@@ -438,7 +447,7 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 // forceRemove removes a retained worktree the operator named, keeping its
 // branch unless its commits are held elsewhere.
 func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
-	kept := PruneResult{Worktree: r, Action: PruneKept, Reason: r.RetainedReason}
+	kept := PruneResult{Worktree: r, Action: PruneKept, Reason: r.RetainedReason, ForceRefused: true}
 	headBranch, err := w.anchorHead(ctx, r)
 	if err != nil {
 		// A HEAD that cannot be read or kept is not forced away.
@@ -521,7 +530,7 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 
 	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
 		// Moved out from under the connector: its files are still someone's.
-		return w.retain(ctx, r, RetainedUnverified, from)
+		return w.retain(ctx, r, RetainedMoved, from)
 	}
 	reason, tip := w.inspect(ctx, r)
 	if reason != "" {

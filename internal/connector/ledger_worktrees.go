@@ -34,7 +34,7 @@ CREATE TABLE worktrees (
   state                TEXT    NOT NULL
                        CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
   retained_reason      TEXT    NOT NULL DEFAULT ''
-                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'unverified')),
+                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified')),
   created_at           TEXT    NOT NULL,
   finished_at          TEXT,
   retained_at          TEXT,
@@ -86,6 +86,9 @@ const (
 	// RetainedUnverified is a worktree whose state could not be read. It is
 	// kept, because a check that failed proves nothing is safe to delete.
 	RetainedUnverified RetainedReason = "unverified"
+	// RetainedMoved is a worktree that is no longer where the ledger says:
+	// someone moved it, and its files are theirs to deal with.
+	RetainedMoved RetainedReason = "moved"
 )
 
 // RemovedBy is who removed a worktree.

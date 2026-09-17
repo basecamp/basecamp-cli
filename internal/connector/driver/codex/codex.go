@@ -460,6 +460,8 @@ type session struct {
 	mu       sync.Mutex
 	id       string
 	prompted bool
+	// ended is the reader's record that the worker's output is over.
+	ended bool
 	// cancelEarly is a Cancel before any prompt: the prompt, when it comes,
 	// is not sent.
 	cancelEarly bool
