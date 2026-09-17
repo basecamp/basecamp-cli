@@ -113,8 +113,10 @@ func parsePackage(t *testing.T, fset *token.FileSet, dir string) (map[string]*as
 		files[name] = file
 
 		for _, decl := range file.Decls {
-			// Methods are keyed by name too: a name collision only widens
-			// what is scanned.
+			// Keyed by bare name, methods included, so the last declaration
+			// of a name wins and the others are never followed or read as
+			// wrappers. No colliding name in these packages carries a hint
+			// (Error, label, NewTUICmd, the per-platform private_* files).
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
 				funcs[fn.Name.Name] = fn
 			}
@@ -246,8 +248,7 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, sinks map[stri
 
 	// collect takes every string in an expression, notes the local names
 	// whose values the text is built from, and follows the functions it
-	// calls — including a function literal called in place, and the call a
-	// method chain starts from.
+	// calls.
 	//
 	// Only a name that is the text itself counts: the whole expression, or a
 	// side of a concatenation. A name passed as an argument is a value the
@@ -277,23 +278,12 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, sinks map[stri
 					}
 				}
 			case *ast.SelectorExpr:
-				if _, named := node.X.(*ast.Ident); !named {
-					collect(node.X) // newX("basecamp ...").String()
-				}
 				return false
 			case *ast.CallExpr:
 				callee := calleeName(node)
 				if decl, ok := funcs[callee]; ok && !visited[callee] {
 					visited[callee] = true
 					collect(decl.Body)
-				}
-				switch fn := node.Fun.(type) {
-				case *ast.FuncLit:
-					collect(fn.Body) // func() string { ... }()
-				case *ast.SelectorExpr:
-					if _, named := fn.X.(*ast.Ident); !named {
-						collect(fn.X)
-					}
 				}
 				for _, arg := range node.Args {
 					if _, named := arg.(*ast.Ident); !named {
