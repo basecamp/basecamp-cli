@@ -53,7 +53,7 @@ func New(api API, cfg Config) (*Server, error) {
 		if cfg.ReadOnly {
 			// Every connect action records something; a read-only server
 			// would serve the domain with nothing in it.
-			return nil, fmt.Errorf("the %s domain cannot be served read-only", connectToolName)
+			return nil, fmt.Errorf("the %s domain (%s) cannot be served read-only", connectDomainKey, connectToolName)
 		}
 		for _, d := range cat.Domains {
 			if d.Key == connectDomainKey {

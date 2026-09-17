@@ -126,6 +126,16 @@ func NewMCPCmd() *cobra.Command {
 	return cmd
 }
 
+// stateDirHint says what the refused directory should have been.
+func stateDirHint(refusal *connector.StateDirError) string {
+	switch refusal.Why {
+	case connector.StateDirOtherAccount:
+		return fmt.Sprintf("It belongs to account %s; this server serves account %s.", refusal.Account, refusal.Want)
+	default:
+		return fmt.Sprintf("The connector's state directories live in %s, named <account>-<agent person id>.", refusal.Root)
+	}
+}
+
 // takeConnectTaskToken reads the task token and removes it from the
 // environment, so nothing this process starts inherits it. That clears it from
 // what the process hands on, not from its own /proc environ, which only this
@@ -151,7 +161,13 @@ func openConnectDispatch(ctx context.Context, stateDir, accountID, token string)
 
 	agentID, err := connector.ResolveStateDir(stateDir, accountID)
 	if err != nil {
-		return nil, nil, output.ErrUsage(fmt.Sprintf("--connect-state: %s", strings.TrimPrefix(err.Error(), "connector: ")))
+		var refusal *connector.StateDirError
+		if errors.As(err, &refusal) {
+			return nil, nil, output.ErrUsageHint(
+				fmt.Sprintf("--connect-state %s is %s", refusal.Dir, refusal.Why),
+				stateDirHint(refusal))
+		}
+		return nil, nil, err
 	}
 
 	// The connector owns the ledger: a worker's server opens it as it is, and

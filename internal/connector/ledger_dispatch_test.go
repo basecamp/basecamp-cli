@@ -821,6 +821,17 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := ResolveStateDir(dir, "999")
 			assert.ErrorIs(t, err, ErrNotAStateDir)
+			var refusal *StateDirError
+			require.ErrorAs(t, err, &refusal, "the refusal says why in fields, not in a message to be parsed")
+			assert.Equal(t, root, refusal.Root)
+			assert.Equal(t, "999", refusal.Want)
+			if name == "another account" {
+				assert.Equal(t, StateDirOtherAccount, refusal.Why)
+				assert.Equal(t, "1000", refusal.Account)
+			}
+			if name == "outside the root" {
+				assert.Equal(t, StateDirElsewhere, refusal.Why)
+			}
 		})
 	}
 

@@ -451,7 +451,7 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = ? WHERE task_id = ? AND event_id = ? AND delivery = 'admitted'`, now, taskID, eventID); err != nil {
 			return Instruction{}, false, fmt.Errorf("connector: expose event %d: %w", eventID, err)
 		}
-		te.delivery, wrote = DeliveryExposed, true
+		wrote = true
 	}
 	if te.guard == "armed" {
 		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET guard = 'canceled' WHERE task_id = ? AND event_id = ? AND guard = 'armed'`, taskID, eventID); err != nil {
@@ -460,6 +460,12 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		wrote = true
 	}
 	if wrote {
+		// Read back what the writes left rather than what was read before
+		// them: the instruction reports the row, not this call's expectation
+		// of it.
+		if te, err = loadTaskEvent(ctx, tx, taskID, eventID); err != nil {
+			return Instruction{}, false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return Instruction{}, false, fmt.Errorf("connector: commit get_dispatch: %w", err)
 		}
@@ -934,8 +940,48 @@ func StateDirName(accountID string, agentID int64) string {
 }
 
 // ErrNotAStateDir is a directory that is not a connector state directory for
-// the account asked about.
+// the account asked about. StateDirError carries why.
 var ErrNotAStateDir = errors.New("not the connector's state directory for this account")
+
+// StateDirError says which rule a state directory failed, in fields a caller
+// can build its own message from rather than by reading this one.
+type StateDirError struct {
+	// Dir is the directory as given, made absolute.
+	Dir string
+	// Root is the connector's state root, the only place a state directory
+	// lives.
+	Root string
+	// Account is the account the directory names, empty when it names none;
+	// Want is the account it had to name.
+	Account, Want string
+	// Why is the rule it failed.
+	Why StateDirProblem
+}
+
+// StateDirProblem is why a state directory was refused.
+type StateDirProblem string
+
+const (
+	// StateDirElsewhere is a directory outside the state root.
+	StateDirElsewhere StateDirProblem = "outside the connector's state root"
+	// StateDirMisnamed is a directory not named <account>-<agent person id>.
+	StateDirMisnamed StateDirProblem = "not named <account>-<agent person id>"
+	// StateDirOtherAccount is another account's state directory.
+	StateDirOtherAccount StateDirProblem = "another account's"
+)
+
+func (e *StateDirError) Error() string {
+	switch e.Why {
+	case StateDirElsewhere:
+		return fmt.Sprintf("%s is not inside %s", e.Dir, e.Root)
+	case StateDirOtherAccount:
+		return fmt.Sprintf("%s belongs to account %s, not %s", e.Dir, e.Account, e.Want)
+	default:
+		return fmt.Sprintf("%s is not named <account>-<agent person id>", e.Dir)
+	}
+}
+
+func (e *StateDirError) Unwrap() error { return ErrNotAStateDir }
 
 // StateRoot is where every connector state directory lives:
 // $XDG_STATE_HOME/basecamp/connect, or ~/.local/state/basecamp/connect when
@@ -969,18 +1015,21 @@ func ResolveStateDir(dir, accountID string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
 	}
+	refuse := func(why StateDirProblem, account string) (int64, error) {
+		return 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
+	}
 	if filepath.Dir(abs) != root {
-		return 0, fmt.Errorf("connector: %s is not inside %s: %w", abs, root, ErrNotAStateDir)
+		return refuse(StateDirElsewhere, "")
 	}
 	account, agent, ok := strings.Cut(filepath.Base(abs), "-")
 	agentID, err := strconv.ParseInt(agent, 10, 64)
 	if !ok || err != nil || agentID <= 0 {
-		return 0, fmt.Errorf("connector: %s is not named <account>-<agent person id>: %w", abs, ErrNotAStateDir)
+		return refuse(StateDirMisnamed, account)
 	}
 	given, errGiven := strconv.ParseUint(account, 10, 64)
 	want, errWant := strconv.ParseUint(accountID, 10, 64)
 	if errGiven != nil || errWant != nil || given == 0 || given != want {
-		return 0, fmt.Errorf("connector: %s belongs to account %s, not %s: %w", abs, account, accountID, ErrNotAStateDir)
+		return refuse(StateDirOtherAccount, account)
 	}
 	return agentID, nil
 }

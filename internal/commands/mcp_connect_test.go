@@ -183,12 +183,13 @@ func TestMCPCommandRefusesABadConnectState(t *testing.T) {
 	for name, tc := range map[string]struct {
 		dir, token, want string
 	}{
-		"no token":            {dir, "", connectTaskTokenEnv},
-		"another account":     {otherAccount, grant.Token, "belongs to account 1000"},
-		"not a state dir":     {notAStateDir, grant.Token, "not named <account>-<agent person id>"},
-		"outside the root":    {elsewhere, grant.Token, "is not inside"},
-		"no ledger":           {empty, grant.Token, "no connector ledger"},
-		"a token for no task": {dir, "not-a-task-token", "names no current task"},
+		"no token":        {dir, "", connectTaskTokenEnv},
+		"another account": {otherAccount, grant.Token, "belongs to account 1000"},
+		"not a state dir": {notAStateDir, grant.Token, "not named <account>-<agent person id>"},
+		"named for an agent that is not a number": {mkdir(filepath.Join(root, "999-abc")), grant.Token, "not named"},
+		"outside the root":                        {elsewhere, grant.Token, "outside the connector's state root"},
+		"no ledger":                               {empty, grant.Token, "no connector ledger"},
+		"a token for no task":                     {dir, "not-a-task-token", "names no current task"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(connectTaskTokenEnv, tc.token)

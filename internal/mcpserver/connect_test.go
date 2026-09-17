@@ -117,6 +117,8 @@ func TestTheConnectDomainSurvivesNarrowing(t *testing.T) {
 func TestTheConnectDomainIsNeverReadOnly(t *testing.T) {
 	_, err := New(newTestAPI(noUpstream(t)), Config{Connect: &fakeDispatch{}, ReadOnly: true})
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "the "+connectDomainKey+" domain ("+connectToolName+")",
+		"the refusal names the domain and the tool it is served as, which are not the same name")
 }
 
 func TestGetDispatchOverMCP(t *testing.T) {
