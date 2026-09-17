@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
@@ -70,8 +72,10 @@ const (
 // connector makes about a crash rests on the answer to "have I seen this id
 // before?" surviving the crash.
 type Ledger struct {
-	db  *sql.DB
-	now func() time.Time
+	db *sql.DB
+	// path is the file, absolute: what this process holds open (ErrLedgerInUse).
+	path string
+	now  func() time.Time
 }
 
 // OpenLedger opens (creating if absent) the ledger at path and brings its
@@ -128,22 +132,31 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 		// query, fragment or an escape, and open some other file.
 		return nil, fmt.Errorf("connector: ledger path %q contains a character the SQLite URI cannot carry (?, # or %%)", path)
 	}
-	if err := securePath(path, owner); err != nil {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("connector: ledger path %q: %w", path, err)
+	}
+	// The descriptor check runs for the first Ledger on this file and never
+	// while another one is open: its close would drop that one's locks.
+	file := claimLedger(abs)
+	if err := checkLedgerFile(file, path, abs, owner); err != nil {
+		releaseLedger(abs)
 		return nil, err
 	}
 
 	db, err := sql.Open("sqlite", ledgerDSN(path, owner))
 	if err != nil {
+		releaseLedger(abs)
 		return nil, fmt.Errorf("connector: open ledger: %w", err)
 	}
 	// One writer. SQLite serializes writers anyway, and a pool merely turns
 	// that serialization into SQLITE_BUSY under load.
 	db.SetMaxOpenConns(1)
 
-	l := &Ledger{db: db, now: time.Now}
+	l := &Ledger{db: db, path: abs, now: time.Now}
 	if owner {
 		if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
-			_ = db.Close()
+			_ = l.Close()
 			return nil, err
 		}
 	} else {
@@ -154,11 +167,11 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 			return err
 		})
 		if err != nil {
-			_ = db.Close()
+			_ = l.Close()
 			return nil, fmt.Errorf("connector: read ledger schema: %w", err)
 		}
 		if version != len(migrations) {
-			_ = db.Close()
+			_ = l.Close()
 			return nil, fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", version, len(migrations), ErrLedgerSchema)
 		}
 	}
@@ -167,7 +180,7 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 	// tightening them too costs nothing.
 	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
 		if err := os.Chmod(sidecar, 0o600); err != nil && !os.IsNotExist(err) {
-			_ = db.Close()
+			_ = l.Close()
 			return nil, fmt.Errorf("connector: secure ledger sidecar: %w", err)
 		}
 	}
@@ -249,8 +262,117 @@ func securePath(path string, create bool) error {
 	return nil
 }
 
-// Close releases the ledger's handle.
-func (l *Ledger) Close() error { return l.db.Close() }
+// Close releases the ledger's handle and lets this process open the file
+// again.
+func (l *Ledger) Close() error {
+	releaseLedger(l.path)
+	return l.db.Close()
+}
+
+// Opening one ledger file more than once in a process, safely.
+//
+// The privacy check opens the file and closes it, and POSIX drops every lock
+// a process holds on a file when any descriptor for it is closed — including
+// the locks SQLite is holding on another connection. So the check runs
+// exactly once per file per process, while nothing else has it open. A later
+// Ledger on the same file (a status read beside a running connector, a
+// promote) is verified instead against what that check established: the same
+// file, still this user's own, still owner-only, in a directory that is
+// still 0700. Stat never opens anything, so it takes no locks away.
+//
+// ErrLedgerNotTheSameFile is a second open of a path that no longer names the
+// file the check passed.
+var ErrLedgerNotTheSameFile = errors.New("the ledger path no longer names the file this process checked")
+
+var openLedgers struct {
+	sync.Mutex
+	files map[string]*openLedgerFile
+}
+
+type openLedgerFile struct {
+	refs int
+	// mu serializes the check itself, so opens that race each other on a
+	// fresh file do not verify against a check that has not run yet.
+	mu sync.Mutex
+	// info is the file as the descriptor check saw it, nil until it has run.
+	info os.FileInfo
+}
+
+// securePathRuns counts the checks that open the file. A test pins that a
+// second Ledger on a live file runs none.
+var securePathRuns atomic.Int64
+
+// claimLedger records this process opening path and returns that file's
+// entry, whose lock the caller takes to check it.
+func claimLedger(path string) *openLedgerFile {
+	openLedgers.Lock()
+	defer openLedgers.Unlock()
+	if openLedgers.files == nil {
+		openLedgers.files = map[string]*openLedgerFile{}
+	}
+	file := openLedgers.files[path]
+	if file == nil {
+		file = &openLedgerFile{}
+		openLedgers.files[path] = file
+	}
+	file.refs++
+	return file
+}
+
+func releaseLedger(path string) {
+	openLedgers.Lock()
+	defer openLedgers.Unlock()
+	file := openLedgers.files[path]
+	if file == nil {
+		return
+	}
+	if file.refs--; file.refs <= 0 {
+		delete(openLedgers.files, path)
+	}
+}
+
+// checkLedgerFile runs the descriptor check once per file, and holds every
+// later open against what it established.
+func checkLedgerFile(file *openLedgerFile, path, abs string, owner bool) error {
+	file.mu.Lock()
+	defer file.mu.Unlock()
+	if file.info != nil {
+		return verifySameFile(abs, file.info)
+	}
+	securePathRuns.Add(1)
+	if err := securePath(path, owner); err != nil {
+		return err
+	}
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return fmt.Errorf("connector: inspect the ledger: %w", err)
+	}
+	file.info = info
+	return nil
+}
+
+// verifySameFile holds a second open to what the first one's check
+// established, without opening anything.
+func verifySameFile(path string, checked os.FileInfo) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("connector: secure the ledger: %w", err)
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(info, checked) {
+		return fmt.Errorf("connector: secure the ledger: %s: %w", path, ErrLedgerNotTheSameFile)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("connector: secure the ledger: %s can be read by other users (mode %04o)", path, perm)
+	}
+	dir, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("connector: inspect ledger directory: %w", err)
+	}
+	if perm := dir.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", filepath.Dir(path), perm)
+	}
+	return nil
+}
 
 // migrations are applied in order, each exactly once. A migration is never
 // edited after it ships: the ledger outlives the binary that created it.
@@ -432,6 +554,26 @@ CREATE TABLE task_events (
 
 CREATE UNIQUE INDEX task_events_one_live_task ON task_events (event_id) WHERE retired_at IS NULL;
 CREATE INDEX task_events_event ON task_events (event_id, delivery);
+
+CREATE TRIGGER tasks_supersession_is_final
+BEFORE UPDATE OF superseded_at ON tasks
+WHEN OLD.superseded_at IS NOT NULL AND NEW.superseded_at IS NOT OLD.superseded_at
+BEGIN
+  SELECT RAISE(ABORT, 'a superseded task stays superseded');
+END;
+
+CREATE TRIGGER task_events_retirement_is_final
+BEFORE UPDATE OF retired_at ON task_events
+WHEN OLD.retired_at IS NOT NULL AND NEW.retired_at IS NOT OLD.retired_at
+BEGIN
+  SELECT RAISE(ABORT, 'a retired task event stays retired');
+END;
+
+CREATE TRIGGER task_events_are_not_deleted
+BEFORE DELETE ON task_events
+BEGIN
+  SELECT RAISE(ABORT, 'a task event is retired, never deleted');
+END;
 
 CREATE TRIGGER task_events_withdrawal_is_for_a_failed_spawn
 BEFORE UPDATE OF withdrawn_at ON task_events

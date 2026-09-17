@@ -14,7 +14,9 @@ import (
 //
 //  1. no mention of the agent survives;
 //  2. every other person the reader found is still found, in order;
-//  3. text with no mention of the agent comes back unchanged.
+//  3. text with no mention of the agent comes back unchanged;
+//  4. everything outside the removed spans is kept, byte for byte — a
+//     removal takes a mention, never the instruction around it.
 //
 // The pieces are combined in threes, so each hostile form meets each other in
 // both orders and inside or around an element.
@@ -85,6 +87,9 @@ func checkStrip(t *testing.T, input string) {
 		}
 	}
 
+	if kept := keptOutsideRemovals(input, adapterAgentID); kept != "" && !strings.Contains(got, kept) && !isEscapeFallback(input, got) {
+		t.Fatalf("text outside the removed mentions was lost\n in: %q\nout: %q\nkept: %q", input, got, kept)
+	}
 	if slices.Contains(after, adapterAgentID) {
 		t.Fatalf("the agent's mention survived\n in: %q\nout: %q", input, got)
 	}
@@ -155,4 +160,21 @@ func restoreSpan(input string, removed [][2]int, keep [2]int) string {
 	}
 	b.WriteString(input[pos:])
 	return b.String()
+}
+
+// keptOutsideRemovals is the longest run of text the strip did not remove,
+// which the output must still contain.
+func keptOutsideRemovals(input string, personID int64) string {
+	_, removed := stripOnce(input, personID)
+	longest, pos := "", 0
+	for _, span := range removed {
+		if between := input[pos:span[0]]; len(between) > len(longest) {
+			longest = between
+		}
+		pos = span[1]
+	}
+	if tail := input[pos:]; len(tail) > len(longest) {
+		longest = tail
+	}
+	return longest
 }

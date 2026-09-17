@@ -64,6 +64,9 @@ func testWithdrawal(t *testing.T) {
 				defer func() { _ = tx2.Rollback() }()
 				require.Error(t, f.ledger.withdrawExposure(ctx, tx2, f.grant.ID, 1, StateAdmitted, ""), "once")
 				require.Error(t, f.ledger.withdrawExposure(ctx, tx2, f.grant.ID, 2, StateAdmitted, ""), "a sibling never exposed has nothing to withdraw")
+				// The database refuses the same, whoever writes.
+				_, err = tx2.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'raw' WHERE event_id = 2`)
+				require.Error(t, err)
 				_, err = tx2.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'again' WHERE event_id = 1`)
 				require.Error(t, err, "once, whoever writes")
 				_, err = tx2.ExecContext(ctx, `UPDATE task_events SET delivery = 'delivered' WHERE event_id = 1`)
@@ -382,6 +385,30 @@ func testWorkerActions(t *testing.T) {
 			}
 		}
 	}
+}
+
+// A task's own columns are the database's too: supersession and retirement
+// are final, and neither row is ever deleted.
+func TestATaskIsSupersededNeverUnsupersededOrDeleted(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+
+	for name, statement := range map[string]string{
+		"un-supersede the task":    `UPDATE tasks SET superseded_at = NULL WHERE id = ?`,
+		"delete the task":          `DELETE FROM tasks WHERE id = ?`, // its events reference it
+		"un-retire its events":     `UPDATE task_events SET retired_at = NULL WHERE task_id = ?`,
+		"delete its events":        `DELETE FROM task_events WHERE task_id = ?`,
+		"change the retired stamp": `UPDATE task_events SET retired_at = 'later' WHERE task_id = ?`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.ledger.db.ExecContext(ctx, statement, f.grant.ID)
+			require.Error(t, err)
+		})
+	}
+	_, err := f.ledger.Dispatch(ctx, f.grant.Token, adapterAgentID)
+	assert.ErrorIs(t, err, ErrTaskTokenRefused, "the token stays refused")
+	assert.ErrorIs(t, f.ledger.SupersedeTask(ctx, 404), ErrNoSuchTask, "an unknown task is not silently superseded")
 }
 
 // testTaskTransitions: live to superseded, once, and a token valid only

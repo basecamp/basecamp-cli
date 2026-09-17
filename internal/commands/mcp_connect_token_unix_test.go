@@ -32,6 +32,9 @@ func tokenPipe(t *testing.T, token string) int {
 	fd, err := syscall.Dup(int(r.Fd()))
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
+	// The command closes it once it reads the token; a case that never gets
+	// that far leaves it to this.
+	t.Cleanup(func() { _ = syscall.Close(fd) })
 	return fd
 }
 
@@ -163,6 +166,7 @@ func heldPipe(t *testing.T, written string) int {
 	fd, err := syscall.Dup(int(r.Fd()))
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
+	t.Cleanup(func() { _ = syscall.Close(fd) })
 	return fd
 }
 

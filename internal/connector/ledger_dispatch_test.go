@@ -570,19 +570,30 @@ func TestCompletedWorkIsServedOnlyToItsWorker(t *testing.T) {
 }
 
 func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
-	ledger := newTestLedger(t)
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	ledger, err := OpenLedger(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
 	ctx := context.Background()
 	seenRecord(t, ledger, 1)
-	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+	_, err = ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 	require.NoError(t, err)
 
+	// Each racer has its own handle on the file, so SQLite sees the race
+	// rather than database/sql's one connection serializing it.
 	const racers = 8
 	errs := make([]error, racers)
 	done := make(chan struct{})
 	for i := range racers {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			_, errs[i] = ledger.CreateTask(ctx, []int64{1})
+			handle, err := OpenExistingLedger(ctx, path)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer handle.Close()
+			_, errs[i] = handle.CreateTask(ctx, []int64{1})
 		}()
 	}
 	for range racers {
@@ -811,6 +822,8 @@ func TestStripMentionsOf(t *testing.T) {
 		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "a b"},
 		"the first sgid is the one":      {strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1), strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1)},
 		"a stray < before it":            {"<" + agent + "hi " + other, "< hi " + other},
+		"self-closing, then a stray close": {selfClosing + " please deploy</p><p>thanks</p></bc-attachment> tail",
+			" " + " please deploy</p><p>thanks</p></bc-attachment> tail"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))
@@ -849,6 +862,8 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 		"no agent":           filepath.Join(root, "999-"),
 		"no account":         filepath.Join(root, "-52007412"),
 		"not a number":       filepath.Join(root, "999-abc"),
+		"a signed agent":     filepath.Join(root, "999-+52007412"),
+		"a padded agent":     filepath.Join(root, "999-052007412"),
 		"the root itself":    root,
 		"above the root":     filepath.Join(root, "..", StateDirName("999", adapterAgentID)),
 	} {
@@ -1005,6 +1020,9 @@ func TestAWithdrawalIsRefusedWhenAWorkerCouldHaveTheInstruction(t *testing.T) {
 		require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
 		_, err = f.ledger.createTask(ctx, tx, []int64{1, 2})
 		require.NoError(t, err)
+		// The database refuses it whoever writes, and on an untouched row.
+		_, err = tx.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'raw' WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+		require.Error(t, err)
 		require.Error(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""), "create before withdraw is the wrong order")
 	})
 

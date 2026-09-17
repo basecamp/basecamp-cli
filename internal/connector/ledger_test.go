@@ -238,3 +238,46 @@ func TestLedgerRefusesALooseAncestor(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, setup.ErrNotPrivate)
 }
+
+// A second Ledger on a file this process already has open — a status read
+// beside a running connector, a promote — must not run the check that opens
+// the file: POSIX drops every lock this process holds on a file when any
+// descriptor for it is closed, SQLite's included, and the first handle would
+// go on believing it still held them.
+func TestASecondLedgerOnALiveFileNeitherOpensNorDisturbsIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	ctx := context.Background()
+	_, err = first.RecordSeen(ctx, testEvent(1), LanePoll)
+	require.NoError(t, err)
+	checksBefore := securePathRuns.Load()
+
+	second, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer second.Close()
+
+	assert.Equal(t, checksBefore, securePathRuns.Load(), "the check that opens the file did not run again")
+
+	// Both handles read and write, in both orders, with the other's locks
+	// still in place.
+	_, err = second.RecordSeen(ctx, testEvent(2), LanePoll)
+	require.NoError(t, err)
+	record, ok, err := first.Get(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, ok, "the first handle reads what the second wrote")
+	assert.Equal(t, StateSeen, record.State)
+	require.NoError(t, first.SetState(ctx, 1, StateDiscarded, "untrusted_author"))
+	record, ok, err = second.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, StateDiscarded, record.State)
+
+	// The file has to be the one that was checked.
+	require.NoError(t, second.Close())
+	require.NoError(t, os.Rename(path, path+".moved"))
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	_, err = OpenLedger(path)
+	assert.ErrorIs(t, err, ErrLedgerNotTheSameFile)
+}

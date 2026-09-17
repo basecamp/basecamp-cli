@@ -74,7 +74,16 @@ import (
 //
 //	live        created by the dispatcher (CreateTask); its token is valid
 //	superseded  by the dispatcher or an operator's redispatch (SupersedeTask);
-//	            its token is refused; terminal
+//	            its token is refused; terminal, and the row is never deleted
+//
+// An operator's redispatch is the dispatcher's own two writes in one
+// transaction: supersedeTask on the live task — which refuses its token from
+// then on, retires its rows, and returns what no worker was handed to
+// admitted — and createTask for the events being run again. It can therefore
+// redispatch an admitted, queued or dispatched record, which covers held work
+// waiting for its outcome and the spawn-failure retry. A completed or
+// discarded record it cannot: those are terminal here, so redispatching one
+// is a decision this ledger does not carry (plan step 21 owns it).
 //
 // # Delivery (task_events.delivery), per event on a task
 //
@@ -180,6 +189,8 @@ var (
 	// work a worker was handed that is not settled yet. A conversation has
 	// one task at a time.
 	ErrConversationBusy = errors.New("the event's conversation already has a task")
+	// ErrNoSuchTask is a task id the ledger does not hold.
+	ErrNoSuchTask = errors.New("no such task")
 	// ErrEventOnLiveTask is an event a live task already carries. Handing it
 	// to a second task would give two workers one instruction.
 	ErrEventOnLiveTask = errors.New("the event is already on a live task")
@@ -242,14 +253,9 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 
-	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
-	if err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
-	}
-	taskID, err := res.LastInsertId()
-	if err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
-	}
+	// Read first, write after: a refusal leaves the caller's transaction as
+	// it found it, whatever the caller then does with it.
+	guards := make([]string, 0, len(eventIDs))
 	for _, id := range eventIDs {
 		var acknowledge, hasInstruction int
 		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction); {
@@ -257,6 +263,15 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		var onLive bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM task_events WHERE event_id = ? AND retired_at IS NULL)`, id).Scan(&onLive); err != nil {
+			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		if onLive {
+			// The unique index refuses it too, whoever writes; this is the
+			// same refusal with the event named.
+			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
 		}
 		if hasInstruction == 0 {
 			// A task a worker could pull nothing from would read as a task
@@ -268,18 +283,13 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 		if acknowledge != 0 {
 			guard = "armed"
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guard); err != nil {
-			if isConstraint(err) {
-				return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
-			}
-			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
-		}
+		guards = append(guards, guard)
 	}
 
 	// One task per conversation: every dispatched record on the events'
-	// conversations must be among the events this task takes. Checked after
-	// every event is on the task — so an event already on a live task is told
-	// as that — and before any of them moves, so the records this call
+	// conversations must be among the events this task takes. Checked before
+	// anything is written, so a refusal leaves the caller's transaction
+	// untouched, and before any record moves, so the records this call
 	// dispatches never count.
 	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
 	args := make([]any, 0, len(eventIDs)*2)
@@ -303,6 +313,22 @@ LIMIT 1`, args...).Scan(&busy); {
 		return TaskGrant{}, fmt.Errorf("connector: read conversations: %w", err)
 	}
 
+	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
+	if err != nil {
+		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
+	}
+	taskID, err := res.LastInsertId()
+	if err != nil {
+		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
+	}
+	for i, id := range eventIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guards[i]); err != nil {
+			if isConstraint(err) {
+				return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
+			}
+			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+	}
 	for _, id := range eventIDs {
 		// Admitted or queued work joins a task; a dispatched record whose
 		// task was superseded joins its replacement.
@@ -341,6 +367,13 @@ func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 // supersedeTask is SupersedeTask inside the caller's transaction, so a
 // redispatch can retire the old task and create the new one in one commit.
 func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?)`, taskID).Scan(&exists); err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+	if !exists {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, ErrNoSuchTask)
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT event_id FROM task_events WHERE task_id = ? AND retired_at IS NULL AND delivery = 'admitted'`, taskID)
 	if err != nil {
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
@@ -572,7 +605,7 @@ func (d *TaskDispatch) get(ctx context.Context, eventID int64) (Instruction, boo
 	if eventID == 0 {
 		err := tx.QueryRowContext(ctx, `
 SELECT te.event_id FROM task_events te JOIN events e ON e.id = te.event_id
-WHERE te.task_id = ? AND te.delivery IN ('admitted', 'exposed') AND `+servableSQL+`
+WHERE te.task_id = ? AND te.retired_at IS NULL AND te.delivery IN ('admitted', 'exposed') AND `+servableSQL+`
 ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Instruction{}, false, nil
@@ -842,7 +875,7 @@ func loadTaskEvent(ctx context.Context, tx *sql.Tx, taskID, eventID int64) (task
 	)
 	err := tx.QueryRowContext(ctx, `
 SELECT delivery, guard, ack_id, outcome, links, reply_id, pulled_at IS NOT NULL
-FROM task_events WHERE task_id = ? AND event_id = ?`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID, &te.pulled)
+FROM task_events WHERE task_id = ? AND event_id = ? AND retired_at IS NULL`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID, &te.pulled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return te, fmt.Errorf("connector: event %d: %w", eventID, ErrNotOnTask)
 	}
@@ -914,8 +947,10 @@ func sameID(stored sql.NullInt64, given *int64) bool {
 // markup, not by review.
 //
 // A mention element runs from its start tag to the first end tag of the same
-// name, unless another attachment starts first or none closes, in which case
-// the start tag stands alone. What it leaves behind is a space, not nothing:
+// name, unless it closes itself, another attachment starts first, or none
+// closes, in which case the start tag stands alone. So no removal can swallow
+// the instruction between a self-closing mention and some later stray closing
+// tag. What it leaves behind is a space, not nothing:
 // closing the gap could join a "<" before the element to the text after it
 // into a tag that swallows what follows — someone else's mention included —
 // and a space can never begin one.
@@ -956,7 +991,14 @@ func stripOnce(text string, personID int64) (string, [][2]int) {
 			if id, isPerson := basecamp.PersonIDFromSGID(t.sgid); isPerson && id == personID {
 				out.WriteString(text[pos:t.start])
 				out.WriteString(strippedMention)
-				pos = mentionEnd(text, t.end)
+				if strings.HasSuffix(text[t.start:t.end], "/>") {
+					// A self-closing tag is the whole element: what follows
+					// is not its content, and a later stray closing tag is
+					// not its end.
+					pos = t.end
+				} else {
+					pos = mentionEnd(text, t.end)
+				}
 				removed = append(removed, [2]int{t.start, pos})
 				continue
 			}
@@ -1211,7 +1253,9 @@ func ResolveStateDir(dir, accountID string) (string, int64, error) {
 	}
 	account, agent, ok := strings.Cut(filepath.Base(abs), "-")
 	agentID, err := strconv.ParseInt(agent, 10, 64)
-	if !ok || err != nil || agentID <= 0 {
+	if !ok || err != nil || agentID <= 0 || agent != strconv.FormatInt(agentID, 10) {
+		// The agent is spelled one way, so one directory answers to one name:
+		// "+52007412" and "052007412" are other directories, not this one.
 		return refuse(StateDirMisnamed, account)
 	}
 	given, errGiven := strconv.ParseUint(account, 10, 64)
