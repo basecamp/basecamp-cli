@@ -988,3 +988,41 @@ WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses')
 	assert.False(t, exists(row.Path))
 
 }
+
+// A missing worktree whose record in the repository still reaches a commit
+// nothing else holds is kept, so the operator hears of it before git's own
+// prune takes it; the connector deletes nothing either way.
+func TestAMissingWorktreeWhoseRecordHoldsACommitIsKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(105)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "reflog only")
+	h.git(workDir, "checkout", "-q", row.Branch)
+	require.NoError(t, os.RemoveAll(row.Path))
+
+	row = h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, row.State)
+	assert.DirExists(t, row.AdminDir)
+}
+
+// A forced removal the ledger could not record is still reported forced.
+func TestAForcedRemovalTheLedgerCouldNotRecordIsReportedForced(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, _ := h.prepare(106)
+	h.write(workDir, "wip.txt", "wip\n")
+	row := h.finish(workDir)
+	require.Equal(t, RetainedDirty, row.RetainedReason)
+	_, err := h.ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_removed BEFORE UPDATE OF state ON worktrees
+WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses'); END`)
+	require.NoError(t, err)
+
+	results, err := h.wt.Prune(ctx, []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action)
+	assert.False(t, results[0].ForceRefused)
+	assert.False(t, exists(row.Path))
+}

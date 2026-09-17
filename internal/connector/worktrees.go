@@ -87,7 +87,9 @@ type Worktrees struct {
 	env    []string
 	path   func(root, repository, name string) string
 	log    *slog.Logger
-	now    func() time.Time
+	// walkLimit is WalkLimit; a test seam.
+	walkLimit time.Duration
+	now       func() time.Time
 
 	// Off leaves new tasks in their route; see WorktreesOptions.Off.
 	off bool
@@ -170,7 +172,7 @@ func NewWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 	})
 	return &Worktrees{
 		ledger: opts.Ledger, root: opts.Root, git: opts.Git, env: env, path: opts.Path, log: opts.Logger,
-		now: time.Now, off: opts.Off, failures: map[string]prepareFailure{},
+		now: time.Now, off: opts.Off, walkLimit: WalkLimit, failures: map[string]prepareFailure{},
 	}, nil
 }
 
@@ -357,6 +359,9 @@ func (w *Worktrees) Finish(ctx context.Context, _ string, workDir string) error 
 	}
 	defer unlock()
 	if after := w.settle(ctx, record, RemovedByConnector); after.State == WorktreeRemoving {
+		if exists(after.Path) {
+			return fmt.Errorf("connector: worktree %s is kept, but the ledger could not record it; the next start does", record.Path)
+		}
 		return fmt.Errorf("connector: worktree %s was removed but not recorded; the next start records it", record.Path)
 	}
 	return nil
@@ -521,10 +526,50 @@ func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 		}
 	}
 	if err := w.ledger.RemovedWorktree(ctx, r.ID, RemovedByPruneForced, WorktreeRemoving); err != nil {
-		return kept
+		// The worktree is gone whatever the ledger says; the row stays
+		// removing and the next settle records it missing.
+		w.log.Warn("connector: a forced removal happened but the ledger could not record it", "path", r.Path, "error", err)
+		r.State = WorktreeRemoving
+		return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept, HeadBranch: headBranch}
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, RemovedByPruneForced
 	return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept, HeadBranch: headBranch}
+}
+
+// recordHoldsNothing reports whether git's record of a missing worktree
+// (<repo>/.git/worktrees/<name>) reaches only commits held elsewhere: its HEAD,
+// its reflog, its per-worktree refs. It reads and deletes nothing, and any
+// doubt is false.
+func (w *Worktrees) recordHoldsNothing(ctx context.Context, r Worktree) bool {
+	if r.AdminDir == "" {
+		return true
+	}
+	if _, err := os.Lstat(r.AdminDir); errors.Is(err, os.ErrNotExist) {
+		return true
+	} else if err != nil {
+		return false
+	}
+	var tips []string
+	for _, args := range [][]string{
+		{"reflog", "show", "--format=%H", "HEAD", "--"},
+		{"for-each-ref", "--format=%(objectname)", "refs/worktree/"},
+	} {
+		out, err := w.run(ctx, safeGit, append([]string{"--git-dir", r.AdminDir}, args...), args[0])
+		if err != nil {
+			return false
+		}
+		tips = append(tips, strings.Fields(string(out))...)
+	}
+	if head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"}, "rev-parse"); err == nil {
+		tips = append(tips, strings.TrimSpace(string(head)))
+	}
+	slices.Sort(tips)
+	for _, commit := range slices.Compact(tips) {
+		if held, err := w.held(ctx, r, commit); err != nil || !held {
+			return false
+		}
+	}
+	return true
 }
 
 // discardUnpopulated removes a worktree whose checkout never happened: its
@@ -611,7 +656,12 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 		// submodule's git directory, a reflog, or a lock someone set for a
 		// directory that is only away, and `git worktree prune` is the
 		// operator's to run. A branch git made stays unless it still points at
-		// the base, which holds nothing of the task's.
+		// the base, which holds nothing of the task's. But a record that still
+		// reaches a commit nothing else holds keeps the row, so the operator
+		// hears of it before git's own prune takes it.
+		if !w.recordHoldsNothing(ctx, r) {
+			return w.retain(ctx, r, RetainedUnverified, from)
+		}
 		w.deleteBranchAt(ctx, r, r.BaseCommit)
 		gone := RemovedMissing
 		if r.State == WorktreeCreating {
@@ -851,50 +901,64 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, r Worktree) (bool, erro
 		}
 	}
 	found := errors.New("untracked")
-	// Bounded: a tree too big to read in time is not proven clean, and a task
-	// that left one must not hold the connector's shutdown.
-	deadline := time.Now().Add(WalkLimit)
-	err = filepath.WalkDir(r.Path, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if time.Now().After(deadline) {
-			return errors.New("connector: the worktree could not be read in time")
-		}
-		rel, err := filepath.Rel(r.Path, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		switch {
-		case rel == ".git" && !d.IsDir():
-			// The worktree's link to its repository.
-			return nil
-		case gitlinks[rel]:
-			if !d.IsDir() {
-				return found
-			}
-			entries, err := os.ReadDir(path)
+	// Bounded: a tree too big to read in time, or a filesystem call that never
+	// returns (a mount a worker left), is not proven clean, and must not hold
+	// the connector's shutdown. The walk runs apart and is abandoned at the
+	// deadline; a call stuck in the kernel keeps only its own goroutine.
+	deadline := time.Now().Add(w.walkLimit)
+	walked := make(chan error, 1)
+	go func() {
+		walked <- filepath.WalkDir(r.Path, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if len(entries) > 0 {
-				return found
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-			return filepath.SkipDir
-		case d.IsDir():
-			if !dirs[rel] {
+			if time.Now().After(deadline) {
+				return errors.New("connector: the worktree could not be read in time")
+			}
+			rel, err := filepath.Rel(r.Path, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			switch {
+			case rel == ".git" && !d.IsDir():
+				// The worktree's link to its repository.
+				return nil
+			case gitlinks[rel]:
+				if !d.IsDir() {
+					return found
+				}
+				entries, err := os.ReadDir(path)
+				if err != nil {
+					return err
+				}
+				if len(entries) > 0 {
+					return found
+				}
+				return filepath.SkipDir
+			case d.IsDir():
+				if !dirs[rel] {
+					return found
+				}
+				return nil
+			case !files[rel]:
 				return found
 			}
 			return nil
-		case !files[rel]:
-			return found
-		}
-		return nil
-	})
+		})
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case err = <-walked:
+	case <-timer.C:
+		err = errors.New("connector: the worktree could not be read in time")
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
 	if errors.Is(err, found) {
 		return true, nil
 	}

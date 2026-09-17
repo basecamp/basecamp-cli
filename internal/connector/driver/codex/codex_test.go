@@ -489,6 +489,7 @@ func TestASessionTakesOnePrompt(t *testing.T) {
 	require.ErrorIs(t, err, driver.ErrSessionEnded)
 	assert.ErrorIs(t, err, errOnePrompt, "refused as a second prompt, not as a write to a closed pipe")
 	assert.False(t, h.drv.Capabilities().FollowUpPrompts)
+	assert.False(t, h.drv.Capabilities().LoadSession, "no ledger record can name a Codex thread to resume yet")
 }
 
 // Invariant 6: updates carry kinds, ids and counts. A refusal Codex's

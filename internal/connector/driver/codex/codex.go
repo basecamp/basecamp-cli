@@ -133,7 +133,11 @@ func (d *Driver) Name() string { return Name }
 
 // Capabilities implements driver.Driver. A Codex process takes one prompt.
 func (d *Driver) Capabilities() driver.Capabilities {
-	return driver.Capabilities{LoadSession: true}
+	// LoadSession works (codex exec resume), but it is not advertised: the
+	// thread id is known only once the prompt is written, after the
+	// dispatcher has recorded the session, so no ledger record could name
+	// one to resume.
+	return driver.Capabilities{}
 }
 
 // NewSession implements driver.Driver. The session's id is Codex's thread id,
