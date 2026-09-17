@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -151,4 +152,38 @@ func TestASweepThatCannotHandOverKeepsTheStrandedID(t *testing.T) {
 	id, err := full.Take(bounded)
 	require.NoError(t, err, "the id the earlier sweep kept should be handed over now")
 	assert.Equal(t, int64(42), id)
+}
+
+// The start's re-queue offers what is in seen and then forgets the ids it
+// carried in — but only those. A repair walk is already running by then, and
+// it serves OLD ids, which the paging may already have passed: one stranded
+// mid-pass must not be forgotten by a clear that assumed it had offered
+// everything.
+func TestTheStartOnlyForgetsTheStrandedIDsItCarriedIn(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	_, err := ledger.RecordSeen(ctx, testEvent(1), LanePoll)
+	require.NoError(t, err)
+
+	intake, _, _ := newTestIntakeOn(t, ledger, nil)
+	queue, err := NewQueue(1, 10)
+	require.NoError(t, err)
+	intake.queue = queue
+	var once sync.Once
+	// Stranded while the re-queue is paging: a repair walk's hand-off failing
+	// on an id the paging has already gone past.
+	queue.OnWarn = func(int) { once.Do(func() { intake.strand(999) }) }
+
+	require.NoError(t, intake.requeueSeen(ctx))
+	require.Equal(t, 1, queue.Depth())
+
+	intake.sweepStranded(ctx)
+
+	require.Equal(t, 2, queue.Depth(), "the id stranded mid-pass was never offered")
+	first, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+	second, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(999), second)
 }

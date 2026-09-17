@@ -118,8 +118,20 @@ func EnsurePrivateFile(path string) error {
 		created, createErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		switch {
 		case createErr == nil:
-			defer created.Close()
-			return checkPrivateReadableFile(created, path)
+			// The handle is writable, so its close is reported rather than
+			// deferred away: a close that fails is a file that may not be
+			// there, and the caller is about to treat it as one that is.
+			// Nothing has been written to it, so the durable part is the
+			// directory entry, which is what is synced.
+			if err := checkPrivateReadableFile(created, path); err != nil {
+				_ = created.Close()
+				return err
+			}
+			if err := created.Close(); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
+			}
+			syncDir(filepath.Dir(path))
+			return nil
 		case !errors.Is(createErr, os.ErrExist):
 			return fmt.Errorf("create %s: %w", path, createErr)
 		}

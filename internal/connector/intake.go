@@ -779,6 +779,19 @@ func entryClassOf(resumeURL string) EntryClass {
 	}
 }
 
+// strandedIDs is the ids a handover failed on, oldest first, as the feed
+// served them.
+func (in *Intake) strandedIDs() []int64 {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	ids := make([]int64, 0, len(in.stranded))
+	for id := range in.stranded {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 // strand remembers an id the ledger has but the queue does not.
 //
 // Every commit goes through ingest, and every handover failure after a commit
@@ -805,16 +818,10 @@ func (in *Intake) strand(id int64) {
 // It offers and only then forgets: an offer refused by a canceled context
 // leaves the id stranded for the next sweep, or for the next start.
 func (in *Intake) sweepStranded(ctx context.Context) {
-	in.mu.Lock()
-	ids := make([]int64, 0, len(in.stranded))
-	for id := range in.stranded {
-		ids = append(ids, id)
-	}
-	in.mu.Unlock()
+	ids := in.strandedIDs()
 	if len(ids) == 0 {
 		return
 	}
-	slices.Sort(ids) // oldest first, as the feed served them
 	for _, id := range ids {
 		if err := in.queue.Offer(ctx, id); err != nil {
 			in.log.Warn("an event the ledger holds could not be handed over; it stays for the next sweep", "event_id", id, "error", err)
@@ -842,6 +849,11 @@ func (in *Intake) sweepStranded(ctx context.Context) {
 // every watcher for the ordinary case, to close a gap in the stream rather
 // than in the work.
 func (in *Intake) requeueSeen(ctx context.Context) error {
+	// What is cleared at the end is what was stranded when this began. A
+	// repair walk is already running by now, and it serves OLD ids, which the
+	// paging below may already have passed: one stranded mid-pass would be
+	// forgotten by a clear that assumed it had offered everything.
+	carried := in.strandedIDs()
 	var after int64
 	for {
 		records, err := in.ledger.RecordsInStateAfter(ctx, StateSeen, after, requeueBatch)
@@ -860,7 +872,9 @@ func (in *Intake) requeueSeen(ctx context.Context) error {
 			// Everything in seen has just been offered, the ids a previous
 			// run stranded included.
 			in.mu.Lock()
-			in.stranded = nil
+			for _, id := range carried {
+				delete(in.stranded, id)
+			}
 			in.mu.Unlock()
 			return nil
 		}
@@ -957,6 +971,11 @@ func (in *Intake) startRepairWorkers(ctx context.Context) {
 // sweepLosses is the periodic repair of both things that can be left behind:
 // an event committed but never handed over, and an open loss nothing is
 // walking.
+//
+// One goroutine does both, so a handover that waits at the pause threshold
+// also holds up the re-offering of open losses. That is the right way round:
+// the backlog is full, the pipeline is stopped, and starting more repair
+// walks would only make the backlog worse.
 //
 // The queue is bounded, so an overloaded connector can turn one away; and a
 // walk can end early, leaving its loss open. Neither may leave a loss with

@@ -23,7 +23,7 @@ var ErrAlreadyRunning = errors.New("connector: another connector already holds t
 // mentions being dispatched twice, which is a property of the identity, not of
 // the file that names it.
 //
-// The kernel drops an flock when the holding descriptor closes, process death
+// The kernel drops a flock when the holding descriptor closes, process death
 // included, so a crashed connector cannot wedge the lock and there is no
 // stale-lock reaping to get wrong. The metadata written beside it is
 // diagnostic only: the lock is the lock.
