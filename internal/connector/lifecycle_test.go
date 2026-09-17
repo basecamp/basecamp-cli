@@ -177,7 +177,7 @@ func TestCompletionIsNotWrittenWhenEverythingSucceededWithAReply(t *testing.T) {
 	ctx := context.Background()
 	obAdmit(t, ledger, 1, "recording:10304028989")
 	l := obLaunch(t, ledger, 1)
-	d, err := ledger.Dispatch(l.Token, adapterAgentID)
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: id64(4242)})
 	require.NoError(t, err)
