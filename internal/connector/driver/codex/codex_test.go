@@ -575,3 +575,37 @@ func zombie(stat string) bool {
 	_, rest, ok := strings.Cut(stat, ") ")
 	return ok && strings.HasPrefix(rest, "Z")
 }
+
+// Invariant 3: a turn that fails, or loses its process, before the policy
+// check has spoken waits for it, so an unsafe session reads as unsafe.
+func TestAFailedTurnWaitsForThePolicyCheck(t *testing.T) {
+	for name, sc := range map[string]scenario{
+		"turn failed":  {Events: []string{`{"type":"turn.started"}`, `{"type":"turn.failed","error":{"message":"x"}}`}, Exit: 1},
+		"process gone": {Events: []string{`{"type":"turn.started"}`}, Exit: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// No policy record: the check only fails when its timeout passes,
+			// well after the turn ended.
+			h := newHarness(t, sc)
+			_, _, err := h.run(context.Background(), h.config())
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+		})
+	}
+}
+
+// Invariant 5: a Cancel that comes before the prompt it races cancels that
+// prompt; nothing is sent and the worker is ended.
+func TestACancelBeforeThePromptCancelsIt(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true, Events: []string{`{"type":"turn.started"}`}})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	require.NoError(t, s.Cancel(context.Background()))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := s.Prompt(ctx, "Event 1.")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnCanceled, result.Stop)
+	waitDone(t, s)
+}

@@ -27,7 +27,11 @@
 //     so the driver reads the policy Codex actually applied from the turn's
 //     turn_context record in its rollout file, and ends the session as
 //     unsafe (ErrUnsafeMode) when it is not the one asked for or cannot be
-//     read. A turn is never reported finished before that check passed.
+//     read. A turn is never reported finished before that check passed, and
+//     a turn that fails or loses its process after Codex reported its thread
+//     waits for the check too, so an unsafe session is reported as unsafe.
+//     The check runs beside the turn, not before it: Codex writes the record
+//     as the turn starts, so the window is the first model response.
 //  4. Every MCP server is required: Codex refuses to start a turn when one
 //     fails to initialize, so a worker never runs without its Basecamp
 //     server.
@@ -442,14 +446,17 @@ type session struct {
 	updates   chan driver.Update
 	readerEnd chan struct{}
 
-	mu         sync.Mutex
-	id         string
-	prompted   bool
-	turn       *turn
-	verifyDone chan struct{}
-	verifyErr  error
-	closed     bool
-	writeMu    sync.Mutex
+	mu       sync.Mutex
+	id       string
+	prompted bool
+	// cancelEarly is a Cancel before any prompt: the prompt, when it comes,
+	// is not sent.
+	cancelEarly bool
+	turn        *turn
+	verifyDone  chan struct{}
+	verifyErr   error
+	closed      bool
+	writeMu     sync.Mutex
 }
 
 // turn is the prompt in flight.
@@ -487,6 +494,13 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	case s.prompted:
 		s.mu.Unlock()
 		return driver.PromptResult{}, errOnePrompt
+	case s.cancelEarly:
+		// Cancel came before the prompt: nothing is written, and the worker
+		// is ended.
+		s.prompted = true
+		s.mu.Unlock()
+		go s.worker.Terminate(s.grace)
+		return driver.PromptResult{Stop: driver.TurnCanceled}, nil
 	}
 	s.prompted = true
 	t := &turn{done: make(chan struct{})}
@@ -511,12 +525,17 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 }
 
 // Cancel implements driver.Session: the process group is ended, and the turn
-// in flight ends canceled.
+// in flight ends canceled. A Cancel before the session's prompt cancels that
+// prompt, which the dispatcher may send from another goroutine an instant
+// later.
 func (s *session) Cancel(context.Context) error {
 	s.mu.Lock()
 	t := s.turn
 	if t != nil {
 		t.canceled = true
+	} else if !s.prompted {
+		// A cancel that races the prompt it is meant for.
+		s.cancelEarly = true
 	}
 	s.mu.Unlock()
 	if t == nil {
@@ -579,9 +598,12 @@ func (s *session) read() {
 			canceled := t.canceled
 			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
-			if canceled {
+			switch err := s.failedVerification(); {
+			case canceled:
 				s.finish(t, driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil)
-			} else {
+			case err != nil:
+				s.finish(t, driver.PromptResult{Refusals: refusals}, err)
+			default:
 				s.finish(t, driver.PromptResult{Refusals: refusals}, driver.ErrSessionEnded)
 			}
 		}
@@ -677,6 +699,20 @@ func (s *session) unsafe(err error) {
 		s.finish(t, driver.PromptResult{}, err)
 	}
 	s.worker.Terminate(0)
+}
+
+// failedVerification is a turn that ended some other way than completed: once
+// Codex reported its thread, the check's verdict is waited for, so an unsafe
+// session is reported as unsafe rather than as a plain failure. Before a
+// thread there was no turn to verify.
+func (s *session) failedVerification() error {
+	s.mu.Lock()
+	started := s.verifyDone != nil
+	s.mu.Unlock()
+	if !started {
+		return nil
+	}
+	return s.verified()
 }
 
 // verified waits for the policy check's verdict.
@@ -805,6 +841,11 @@ func (s *session) turnFailed() {
 	s.mu.Unlock()
 	if canceled {
 		s.finish(t, driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil)
+		return
+	}
+	if err := s.failedVerification(); err != nil {
+		s.finish(t, driver.PromptResult{Refusals: refusals}, err)
+		s.worker.Terminate(0)
 		return
 	}
 	s.finish(t, driver.PromptResult{Refusals: refusals}, errors.New("codex: the turn failed"))
