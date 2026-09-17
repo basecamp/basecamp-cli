@@ -929,12 +929,20 @@ GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
 // route) no approved pair covers: work admitted under a route connect.json no
 // longer has, which nothing will start until a person routes it again or
 // discards it.
-func (l *Ledger) StrandedRecords(ctx context.Context, approved map[int64]string) (int, error) {
+// buckets is the run's --project scope: work in a project this run does not
+// hear is another run's to dispatch, not stranded, so it is not counted.
+func (l *Ledger) StrandedRecords(ctx context.Context, approved map[int64]string, buckets []int64) (int, error) {
 	var where strings.Builder
-	args := make([]any, 0, 2*len(approved))
+	args := make([]any, 0, 2*len(approved)+len(buckets))
 	for bucket, route := range approved {
 		where.WriteString(" AND NOT (e.bucket_id = ? AND e.route = ?)")
 		args = append(args, bucket, route)
+	}
+	if len(buckets) > 0 {
+		where.WriteString(" AND e.bucket_id IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(buckets)), ", ") + ")")
+		for _, bucket := range buckets {
+			args = append(args, bucket)
+		}
 	}
 	//nolint:gosec // G202: the condition is this package's constants and placeholders, never a value
 	query := `SELECT COUNT(*) FROM events e WHERE ` + startableCondition + where.String()

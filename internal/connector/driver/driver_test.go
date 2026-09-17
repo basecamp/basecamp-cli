@@ -179,3 +179,28 @@ func processStartTimeGone(pid int) bool {
 	_, err := processStartTime(pid)
 	return errors.Is(err, os.ErrNotExist)
 }
+
+// The one-owner rule's identity question: a pid is not an identity.
+func TestOwnsWorkerAnswersWhetherThisIsStillTheWorker(t *testing.T) {
+	w, child := startWithChild(t)
+	p := w.Process()
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+
+	owns, err := OwnsWorker(p)
+	require.NoError(t, err)
+	assert.True(t, owns, "the worker it started")
+
+	reused := p
+	reused.StartedAt = p.StartedAt.Add(-time.Hour)
+	owns, err = OwnsWorker(reused)
+	assert.False(t, owns, "the same pid with another start time is another process")
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader, "and its group still has members")
+
+	owns, err = OwnsWorker(Process{PID: 1 << 30, PGID: 1 << 30, StartedAt: time.Now()})
+	assert.False(t, owns)
+	assert.NoError(t, err, "a pid that names nothing, in a group with no members, is simply gone")
+
+	owns, err = OwnsWorker(Process{})
+	assert.False(t, owns)
+	assert.NoError(t, err, "a session with no process here is nothing to own")
+}

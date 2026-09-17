@@ -28,5 +28,15 @@ func (*Worker) Exit() Exit              { return Exit{} }
 func (*Worker) StderrTail() string      { return "" }
 func (*Worker) Terminate(time.Duration) {}
 
+// OwnsWorker cannot answer off Unix, and an identity that cannot be
+// established is never acted on.
+func OwnsWorker(Process) (bool, error) { return false, errUnsupported }
+
+// GroupMembersRemain cannot answer off Unix.
+func GroupMembersRemain(Process) bool { return false }
+
+// ConfirmGroupGone cannot answer off Unix.
+func ConfirmGroupGone(Process, time.Duration) error { return errUnsupported }
+
 // TerminateRecorded does nothing off Unix.
 func TerminateRecorded(Process, time.Duration) (bool, error) { return false, errUnsupported }

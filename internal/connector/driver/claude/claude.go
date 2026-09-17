@@ -290,9 +290,16 @@ type session struct {
 	// beforePromptWrite runs between a turn's registration and its write; a
 	// test seam.
 	beforePromptWrite func()
+	// beforeCancelWrite runs inside Cancel, under the write lock, before the
+	// interrupt is written; a test seam.
+	beforeCancelWrite func()
 	// cancelPending is a cancel that arrived with no turn to interrupt. The
 	// next turn takes it.
 	cancelPending bool
+	// ended is why the session ended, when it ended with no turn in flight to
+	// carry the reason: the next Prompt answers with it rather than waiting
+	// for a turn nothing will finish.
+	ended error
 
 	mu       sync.Mutex
 	turn     *turn
@@ -325,9 +332,13 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	// never before it, where it would interrupt nothing.
 	s.writeMu.Lock()
 	s.mu.Lock()
-	if s.closed {
+	if s.closed || s.ended != nil {
+		ended := s.ended
 		s.mu.Unlock()
 		s.writeMu.Unlock()
+		if ended != nil {
+			return driver.PromptResult{}, ended
+		}
 		return driver.PromptResult{}, driver.ErrSessionEnded
 	}
 	if s.turn != nil {
@@ -346,12 +357,10 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}
 	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}}
 	err := s.writeLocked(msg)
-	if pending {
+	if pending && err == nil {
 		// The interrupt follows the prompt it cancels, still under the write
 		// lock, so nothing can come between them.
-		if id, idErr := newUUID(); idErr == nil && err == nil {
-			err = s.writeLocked(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "interrupt"}})
-		}
+		err = s.writeLocked(interruptRequest())
 	}
 	s.writeMu.Unlock()
 	if err != nil {
@@ -366,7 +375,15 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 }
 
 // Cancel implements driver.Session: Claude Code's interrupt control request.
+// Cancel implements driver.Session: Claude Code's interrupt control request.
+//
+// It takes the write lock before it looks at the turn, the same order Prompt
+// takes them, so the turn it interrupts is the turn it observed: no prompt
+// can register and be written in between and take the interrupt meant for
+// another turn.
 func (s *session) Cancel(context.Context) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	s.mu.Lock()
 	t := s.turn
 	if t != nil {
@@ -380,11 +397,20 @@ func (s *session) Cancel(context.Context) error {
 	if t == nil {
 		return nil
 	}
+	if s.beforeCancelWrite != nil {
+		s.beforeCancelWrite()
+	}
+	return s.writeLocked(interruptRequest())
+}
+
+// interruptRequest is Claude Code's interrupt control request. A request id
+// it will not answer twice is enough; the reply is not awaited.
+func interruptRequest() map[string]any {
 	id, err := newUUID()
 	if err != nil {
-		return err
+		id = "interrupt"
 	}
-	return s.write(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "interrupt"}})
+	return map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "interrupt"}}
 }
 
 // Close implements driver.Session.
@@ -445,6 +471,15 @@ func (s *session) finish(t *turn, result driver.PromptResult, err error) {
 	close(t.done)
 }
 
+// end records why the session is over, for a prompt that comes after it.
+func (s *session) end(err error) {
+	s.mu.Lock()
+	if s.ended == nil {
+		s.ended = err
+	}
+	s.mu.Unlock()
+}
+
 func (s *session) emit(u driver.Update) {
 	u.At = time.Now()
 	select {
@@ -466,6 +501,9 @@ func (s *session) read() {
 		if t != nil {
 			s.finish(t, driver.PromptResult{}, driver.ErrSessionEnded)
 		}
+		// Whatever comes next: there is no reader to finish a turn, so a
+		// later prompt is answered rather than left waiting.
+		s.end(driver.ErrSessionEnded)
 		close(s.readerEnd)
 	}()
 	scanner := bufio.NewScanner(s.worker.Stdout())
@@ -591,6 +629,11 @@ func (s *session) handleInit(m streamMessage) {
 	if problem != nil {
 		if t != nil {
 			s.finish(t, driver.PromptResult{}, problem)
+		} else {
+			// No turn to carry it: the next Prompt answers with the reason
+			// this session was ended, so an unsafe mode is never read as a
+			// worker merely gone.
+			s.end(problem)
 		}
 		s.worker.Terminate(0)
 	}

@@ -90,12 +90,26 @@ func fakeClaude(scenario string) {
 		status = "failed"
 	}
 
+	if scenario == "badmode-eager" {
+		// An init before any prompt, in a mode the policy did not ask for.
+		emit(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID, "permissionMode": "bypassPermissions", "mcp_servers": []any{}})
+		select {}
+	}
+
 	in := bufio.NewScanner(os.Stdin)
 	inited := false
 	for in.Scan() {
 		var msg map[string]any
 		if json.Unmarshal(in.Bytes(), &msg) != nil {
 			continue
+		}
+		switch msg["type"] {
+		case "control_request", "user":
+			// The order messages reach the agent is what a cancel's
+			// correctness rests on.
+			kind, _ := msg["type"].(string)
+			report.Extra["wire"] += kind + " "
+			writeReport()
 		}
 		switch msg["type"] {
 		case "control_request":
@@ -485,4 +499,63 @@ func TestACancelBeforeAnyTurnCancelsTheNextOne(t *testing.T) {
 	result, err := s.Prompt(context.Background(), "hello")
 	require.NoError(t, err)
 	assert.Equal(t, driver.TurnCanceled, result.Stop)
+}
+
+// Copilot on #739: the interrupt goes to the turn Cancel observed, never to a
+// prompt that registered after it.
+func TestACancelNeverInterruptsALaterTurn(t *testing.T) {
+	f := newFixture(t, "hang")
+	s := start(t, f)
+	ss := s.(*session)
+	first := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "one")
+		first <- result
+	}()
+	require.Eventually(t, func() bool {
+		ss.mu.Lock()
+		defer ss.mu.Unlock()
+		return ss.turn != nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	second := make(chan driver.PromptResult, 1)
+	ss.beforeCancelWrite = func() {
+		// The turn Cancel observed finishes, and another prompt tries to take
+		// its place before the interrupt is written.
+		ss.mu.Lock()
+		t := ss.turn
+		ss.mu.Unlock()
+		ss.finish(t, driver.PromptResult{Stop: driver.TurnEndTurn}, nil)
+		go func() {
+			result, _ := s.Prompt(context.Background(), "two")
+			second <- result
+		}()
+		time.Sleep(300 * time.Millisecond)
+	}
+	require.NoError(t, s.Cancel(context.Background()))
+	<-first
+
+	select {
+	case <-second:
+	case <-time.After(5 * time.Second):
+	}
+	assert.Equal(t, "user control_request user ", f.readReport(t).Extra["wire"],
+		"the interrupt follows the turn it was asked for, and never the prompt that came after it")
+}
+
+// Review r3: an unsafe mode found before the first turn registers is still a
+// failure, not a session that merely ended.
+func TestAnUnsafeModeBeforeTheFirstTurnIsStillUnsafe(t *testing.T) {
+	f := newFixture(t, "badmode-eager")
+	s := start(t, f)
+	require.Eventually(t, func() bool {
+		select {
+		case <-s.Done():
+			return true
+		default:
+			return false
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+	_, err := s.Prompt(context.Background(), "hello")
+	assert.ErrorIs(t, err, driver.ErrUnsafeMode, "the reason the session ended, not a bare session-ended")
 }

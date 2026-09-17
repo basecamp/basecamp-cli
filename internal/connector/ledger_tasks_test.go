@@ -432,13 +432,17 @@ func TestStrandedRecordsCountsWorkNoRouteCovers(t *testing.T) {
 	_, err := ledger.Admission().Commit(ctx, moved)
 	require.NoError(t, err)
 
-	stranded, err := ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute})
+	stranded, err := ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stranded, "the record admitted under a route connect.json no longer has")
 
-	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute, adapterBucketID + 1: "/work/moved"})
+	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute, adapterBucketID + 1: "/work/moved"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stranded, "the route must be approved for the record's own project")
+
+	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID + 5: testRoute}, []int64{adapterBucketID + 5})
+	require.NoError(t, err)
+	assert.Zero(t, stranded, "work in a project this run does not hear is another run's, not stranded")
 }
 
 // Review r2: the worker's acknowledgement is never adopted as its reply.

@@ -24,6 +24,37 @@ const startTolerance = 3 * time.Second
 // pipes a stray descendant still holds.
 const pipeWaitDelay = 2 * time.Second
 
+// # One owner, one release point
+//
+// This is the connector's rule for a task's process tree, its working
+// directory (or worktree), and its ledger record. All three belong to one
+// owner — the attempt — and are released at one point, in this order:
+//
+//  1. Every worker starts as the leader of its own process group
+//     (StartWorker), so the tree it makes can be signaled as one.
+//  2. A cancel, a deadline or a shutdown ends that group: SIGTERM, a bounded
+//     wait, then SIGKILL, by process group id and never by name (Terminate).
+//  3. The group is then CONFIRMED gone (ConfirmGroupGone). Only after that
+//     may the attempt be settled, its directory or worktree released, and its
+//     record made terminal.
+//  4. A group that cannot be confirmed gone — members left, a pid whose
+//     identity cannot be established, a platform that cannot say — leaves the
+//     record HELD: live in the ledger, its conversation and directory still
+//     its own, for a person to settle. Never terminal, never released.
+//  5. A restart reaps by the same rule (TerminateRecorded, then the same
+//     confirmation), and asks OwnsWorker first: a pid is not an identity, so
+//     ownership is the pid AND the start time recorded with it. Everything
+//     that acts on a recorded worker — recovery, status, redispatch, discard,
+//     hold — asks OwnsWorker rather than testing a pid of its own.
+//
+// The one thing this cannot cover is a descendant that leaves the group by
+// calling setsid: it is outside every group signal, and the connector can
+// only avoid waiting on it (WaitDelay, CloseStdout). Containment is the
+// sandbox launcher's job, not this rule's.
+//
+// Cards that start workers, remove worktrees or settle records use the
+// functions here rather than writing their own.
+//
 // Worker is a process a spawn driver started: the leader of its own process
 // group, with its stdin and stdout piped and its stderr kept, redacted, for
 // diagnosis. Every spawn driver starts its agent through StartWorker, so the
@@ -179,13 +210,24 @@ func (w *Worker) Terminate(grace time.Duration) {
 // treat the worker as finished.
 var ErrGroupOutlivedLeader = errors.New("driver: the recorded process group outlived its leader")
 
-// TerminateRecorded ends a worker a previous connector process started, by
-// the process group it recorded, but only while the group's leader is still
-// that process: a pid the kernel has since given to something else is left
-// alone. A group whose leader is gone but which still has members is
-// ErrGroupOutlivedLeader, because those members may be the worker's children.
-// It reports whether it signaled anything.
-func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
+// OwnsWorker answers the one-owner rule's identity question: is the process
+// this record names still the worker the task owns?
+//
+// A pid is not an identity — the kernel reuses them — so ownership is the pid
+// AND the start time the owner recorded for it. Everything that acts on a
+// recorded worker (recovery, status, redispatch, discard, hold) asks this
+// before it acts, rather than writing its own pid check:
+//
+//   - (true, nil): the process is still that worker. It may be signaled.
+//   - (false, nil): it is gone, and its group has no members left. Its record
+//     may be settled and its directory released.
+//   - (false, ErrGroupOutlivedLeader): the leader is gone or is now some other
+//     process, and the recorded group still has members — they may be the
+//     worker's children. Nothing may be settled or released.
+//   - (false, err): the identity cannot be established here (an unreadable
+//     process table, a platform that cannot say). Nothing may be settled or
+//     released either.
+func OwnsWorker(p Process) (bool, error) {
 	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
 		return false, nil
 	}
@@ -198,6 +240,20 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	}
 	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
 		return false, groupGone(p.PGID)
+	}
+	return true, nil
+}
+
+// TerminateRecorded ends a worker a previous connector process started, by
+// the process group it recorded, and only while OwnsWorker says that group is
+// still this task's worker: a pid the kernel has since given to something
+// else is left alone. It reports whether it signaled anything.
+func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
+	switch owns, err := OwnsWorker(p); {
+	case err != nil:
+		return false, err
+	case !owns:
+		return false, nil
 	}
 	if err := signalGroup(p.PGID, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
@@ -216,6 +272,13 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	return true, nil
 }
 
+// GroupMembersRemain reports whether the process group still has members. It
+// signals nothing: it is the observation the one-owner rule's step 3 and 4
+// rest on, and what a caller asks when it must not disturb the group.
+func GroupMembersRemain(p Process) bool {
+	return p.PGID > 1 && signalGroup(p.PGID, 0) == nil
+}
+
 // groupGone reports nil when the recorded group has no members left, and
 // ErrGroupOutlivedLeader when it still has some: a leader that exited does
 // not take its group with it.
@@ -224,6 +287,33 @@ func groupGone(pgid int) error {
 		return fmt.Errorf("%w: %d", ErrGroupOutlivedLeader, pgid)
 	}
 	return nil
+}
+
+// ConfirmGroupGone is step 3 of the one-owner rule: it answers whether a
+// worker's process group is gone, and it is what every caller asks before
+// settling an attempt, releasing a working directory or removing a worktree.
+//
+// It signals the group once more — a worker that ignored SIGTERM gets SIGKILL
+// — then waits up to grace for the last member to go. A group with members
+// left is ErrGroupOutlivedLeader, and the zero Process (a session the
+// connector cannot signal at all) is gone as far as this rule goes, since
+// there is nothing of it here to own.
+func ConfirmGroupGone(p Process, grace time.Duration) error {
+	if p.PGID <= 0 {
+		return nil
+	}
+	if err := groupGone(p.PGID); err == nil {
+		return nil
+	}
+	_ = signalGroup(p.PGID, syscall.SIGKILL)
+	deadline := time.Now().Add(grace)
+	for {
+		err := groupGone(p.PGID)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // tailBuffer keeps the last max bytes written to it.
