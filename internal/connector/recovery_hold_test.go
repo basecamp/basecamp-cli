@@ -184,7 +184,7 @@ func TestRecoveryACrashInImportNeverDispatchesAHeldRecord(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				file := `{"version":1,"entries":[{"event_id":101,"decision":"held"},{"event_id":102,"decision":"done"}]}`
+				file := `{"version":1,"entries":[{"event_id":102,"decision":"done"},{"event_id":101,"decision":"held"}]}`
 				runKilled(t, "import:"+step, "LEDGER="+filepath.Join(c.stateDir, LedgerFile), "RECONCILIATION="+file)
 				h.run(harnessRun{StateDir: c.stateDir})
 				l := h.ledgerAt(c.stateDir)
