@@ -31,7 +31,7 @@ func execWorkerMCP(exe, profile, state, token string) error {
 	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, 0); err != nil {
 		return fmt.Errorf("worker-mcp: keep the token descriptor across exec: %w", err)
 	}
-	err = syscall.Exec(exe, workerMCPArgs(exe, profile, state, fd), workerMCPEnv())
+	err = syscall.Exec(exe, workerMCPArgs(exe, profile, state, fd), workerMCPEnv()) //nolint:gosec // G204: this binary, re-executed as `mcp`; no argument is a secret or content
 	runtime.KeepAlive(read)
 	return fmt.Errorf("worker-mcp: exec basecamp mcp: %w", err)
 }

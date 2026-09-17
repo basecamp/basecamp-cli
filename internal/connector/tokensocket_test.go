@@ -3,10 +3,13 @@
 package connector
 
 import (
+	"context"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -30,7 +33,8 @@ func tokenDir(t *testing.T) string {
 // fetch connects and reads whatever the socket hands over.
 func fetch(t *testing.T, path string) (string, error) {
 	t.Helper()
-	conn, err := net.DialTimeout("unix", path, 2*time.Second)
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return "", err
 	}
@@ -107,4 +111,25 @@ func TestATokenSocketNeedsAPrivateDirectory(t *testing.T) {
 	assert.Error(t, err)
 	_, statErr := os.Lstat(filepath.Join(dir, TokenSocketName))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Codex starts its MCP servers in process groups of their own, so a
+// descendant of the worker in another group is the worker's too.
+func TestAWorkersDescendantInItsOwnGroupGetsTheToken(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is needed for a child in a group of its own")
+	}
+	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 10*time.Second)
+	require.NoError(t, err)
+	// This test process plays the worker; the child it starts is its
+	// descendant, in a new process group.
+	s.AllowGroup(os.Getpid())
+	script := "import socket,sys\ns=socket.socket(socket.AF_UNIX)\ns.connect(sys.argv[1])\nprint(s.recv(256).decode().strip())"
+	cmd := exec.CommandContext(context.Background(), python, "-c", script, s.Path())
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Equal(t, socketTestToken, strings.TrimSpace(string(out)))
+	assert.Equal(t, HandoffDelivered, s.Result())
 }

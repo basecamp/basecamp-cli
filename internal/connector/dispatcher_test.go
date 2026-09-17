@@ -270,7 +270,8 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	fake.turn = func(s *fakeSession, n int, _ string) (driver.PromptResult, error) {
 		if n == 1 {
 			socket := cfg.MCPServers[0].Args[len(cfg.MCPServers[0].Args)-1]
-			conn, err := net.DialTimeout("unix", socket, 2*time.Second)
+			dialer := net.Dialer{Timeout: 2 * time.Second}
+			conn, err := dialer.DialContext(context.Background(), "unix", socket)
 			if err == nil {
 				data, _ := io.ReadAll(conn)
 				_ = conn.Close()

@@ -28,8 +28,10 @@ import (
 //     refused.
 //  3. Before it writes anything it checks the peer's credentials with the
 //     kernel (SO_PEERCRED on Linux, LOCAL_PEERCRED and LOCAL_PEERPID on
-//     macOS): the peer must be this user, and its process must be in the
-//     worker's own process group. Anything else is closed with no token.
+//     macOS): the peer must be this user, and its process must belong to the
+//     worker — in the worker's process group, or a descendant of the worker
+//     process, since an agent may start its MCP servers in groups of their
+//     own (Codex does). Anything else is closed with no token.
 //  4. It expires: if nothing connects within the window, it closes and
 //     unlinks, and nothing is handed over.
 //
@@ -86,9 +88,10 @@ type TokenSocket struct {
 	stop    chan struct{}
 	close   sync.Once
 
-	// peer and groupOf read the kernel; test seams.
-	peer    func(*net.UnixConn) (PeerCredentials, error)
-	groupOf func(pid int) (int, error)
+	// peer, groupOf and parentOf read the kernel; test seams.
+	peer     func(*net.UnixConn) (PeerCredentials, error)
+	groupOf  func(pid int) (int, error)
+	parentOf func(pid int) (int, error)
 }
 
 // ServeTaskToken binds the one-use socket for token in dir, which must be the
@@ -98,6 +101,10 @@ func ServeTaskToken(dir, token string, window time.Duration) (*TokenSocket, erro
 }
 
 func serveTaskToken(dir, token string, window time.Duration, peer func(*net.UnixConn) (PeerCredentials, error), groupOf func(int) (int, error)) (*TokenSocket, error) {
+	return serveTaskTokenWith(dir, token, window, peer, groupOf, parentProcessOf)
+}
+
+func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.UnixConn) (PeerCredentials, error), groupOf, parentOf func(int) (int, error)) (*TokenSocket, error) {
 	if token == "" {
 		return nil, errors.New("connector: a token socket needs the token")
 	}
@@ -124,7 +131,7 @@ func serveTaskToken(dir, token string, window time.Duration, peer func(*net.Unix
 	s := &TokenSocket{
 		path: path, token: token, listener: listener,
 		group: make(chan int, 1), result: make(chan Handoff, 1), stop: make(chan struct{}),
-		peer: peer, groupOf: groupOf,
+		peer: peer, groupOf: groupOf, parentOf: parentOf,
 	}
 	go s.serve(window)
 	return s, nil
@@ -133,9 +140,10 @@ func serveTaskToken(dir, token string, window time.Duration, peer func(*net.Unix
 // Path is where the bridge connects. It carries no secret.
 func (s *TokenSocket) Path() string { return s.path }
 
-// AllowGroup names the worker's process group once the worker exists. Until
-// it is named, a connection waits for it, within the window; a zero or
-// negative group is never allowed.
+// AllowGroup names the worker once it exists, by its process group — which,
+// for a worker the connector started, is also the worker's own pid, since the
+// worker leads its group. Until it is named, a connection waits for it,
+// within the window; a group of 1 or less is never allowed.
 func (s *TokenSocket) AllowGroup(pgid int) {
 	s.setOnce.Do(func() { s.group <- pgid })
 }
@@ -198,6 +206,26 @@ func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) bool {
 	if want <= 1 {
 		return false
 	}
-	got, err := s.groupOf(cred.PID)
-	return err == nil && got == want
+	if got, err := s.groupOf(cred.PID); err == nil && got == want {
+		return true
+	}
+	return s.descendsFrom(cred.PID, want)
+}
+
+// maxAncestry bounds the walk up a peer's parents.
+const maxAncestry = 64
+
+// descendsFrom reports whether pid is a descendant of ancestor.
+func (s *TokenSocket) descendsFrom(pid, ancestor int) bool {
+	for range maxAncestry {
+		parent, err := s.parentOf(pid)
+		if err != nil || parent <= 1 {
+			return false
+		}
+		if parent == ancestor {
+			return true
+		}
+		pid = parent
+	}
+	return false
 }

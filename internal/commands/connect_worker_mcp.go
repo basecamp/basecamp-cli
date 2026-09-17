@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -67,7 +68,8 @@ func newConnectWorkerMCPCmd() *cobra.Command {
 // hands over nothing — this process is not the worker's, or the socket was
 // already used — is a refusal, not an empty token.
 func receiveTaskToken(path string, timeout time.Duration) (string, error) {
-	conn, err := net.DialTimeout("unix", path, timeout)
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(context.Background(), "unix", path)
 	if err != nil {
 		return "", fmt.Errorf("worker-mcp: the connector's token socket: %w", err)
 	}
