@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Verify that commands and flags referenced in skill files exist in the CLI surface.
 # Catches stale skill references: renamed commands, removed flags, etc.
+#
+# Usage: scripts/check-skill-drift.sh [skill] [surface] [baseline] [breaking]
+#   skill     the SKILL.md to read            (default skills/basecamp/SKILL.md)
+#   surface   the CLI surface snapshot        (default .surface)
+#   baseline  acknowledged drift              (default .surface-skill-drift)
+#   breaking  acknowledged surface removals   (default .surface-breaking)
 set -euo pipefail
 
 SKILL="${1:-skills/basecamp/SKILL.md}"
@@ -30,6 +36,25 @@ new_drift=0
 # Check whether an entry is in the baseline file (avoids Bash 4+ associative arrays).
 is_baselined() {
   [ -f "$BASELINE" ] && grep -qxF "$1" "$BASELINE"
+}
+
+# Check whether a command path is one the CLI has acknowledged removing.
+is_removed() {
+  [ -f "$BREAKING" ] && grep -qxF "CMD $1" "$BREAKING"
+}
+
+# extract_candidates reads text and prints every "basecamp <word>..." command
+# reference in it, one per line.
+#
+# A word that runs on into a filename or a key — "basecamp upload report.pdf",
+# "basecamp config set account_id" — is not a word of the command: the match
+# has to end where a word ends, and a ".", "_" or "/" followed by more of a
+# name is not an end. So "basecamp upload report.pdf" yields "basecamp upload",
+# and "basecamp auth status." at the end of a sentence still yields the whole
+# command.
+extract_candidates() {
+  grep -oE 'basecamp( [a-z][-a-z0-9]+)+([^-a-z0-9._/]|[._/]([^a-zA-Z0-9]|$)|$)' \
+    | sed -E 's/[^a-z0-9-]+$//' || true
 }
 
 # resolve_cmd prints the longest prefix of a candidate that is a CMD in
@@ -64,7 +89,9 @@ resolve_cmd() {
 # Those two escapes cannot tell an argument value from a subcommand we
 # removed — "basecamp recordings archive" reads as the [type] argument once
 # `archive` is gone — so a word that names a removed command fails first,
-# whichever escape would otherwise have taken it.
+# whichever escape would otherwise have taken it. They cannot tell one from a
+# subcommand that never existed either: under a command that has both
+# arguments and subcommands, an invented subcommand still passes as a value.
 #
 # Prints "<resolved command>|<word it does not have>" and returns 0 when the
 # candidate is verified, 1 when it is not. On a failure the resolved command
@@ -85,10 +112,11 @@ verify_cmd() {
     return 0
   fi
 
+  local word="${parts[$depth]}"
   # A word that names a command we removed is drift whatever else it could
   # be, so it is refused before the escapes below could read it as prose.
-  if [ -f "$BREAKING" ] && grep -qxF "CMD ${matched} ${parts[$depth]}" "$BREAKING"; then
-    echo "${matched}|${parts[$depth]}"
+  if is_removed "${matched} ${word}"; then
+    echo "${matched}|${word}"
     return 1
   fi
   # Leftover words are argument values when the command takes arguments.
@@ -102,8 +130,22 @@ verify_cmd() {
     return 0
   fi
 
-  echo "${matched}|${parts[$depth]}"
+  echo "${matched}|${word}"
   return 1
+}
+
+# drift_key prints the baseline entry that acknowledges a failed candidate,
+# given verify_cmd's output for it.
+drift_key() {
+  local candidate="$1" result="$2"
+  local resolved="${result%%|*}" word="${result#*|}"
+  if [ -z "$resolved" ] || [ "$resolved" = "basecamp" ]; then
+    # Nothing past "basecamp" names a command: the whole reference is the
+    # drift, and the whole reference is what a baseline entry names.
+    echo "CMD ${candidate}"
+  else
+    echo "CMD ${resolved} ${word}"
+  fi
 }
 
 # Check whether a flag exists on a command or any of its subcommands.
@@ -123,37 +165,33 @@ flag_exists() {
 skill_body=$(awk '/^---$/{n++; next} n>=2' "$SKILL")
 
 # --- Phase 1: Command references ---
-# Extract "basecamp <subcommand>..." patterns, resolve to longest matching CMD.
+# Extract "basecamp <subcommand>..." patterns and verify each resolves.
 while IFS= read -r candidate; do
+  [ -z "$candidate" ] && continue
   status=0
   result=$(verify_cmd "$candidate") || status=$?
 
   if [ "$status" -ne 0 ]; then
     resolved="${result%%|*}"
     word="${result#*|}"
+    key=$(drift_key "$candidate" "$result")
     if [ -z "$resolved" ] || [ "$resolved" = "basecamp" ]; then
-      # Nothing past "basecamp" names a command: the whole reference is the
-      # drift, and the whole reference is what a baseline entry names.
       message="command not in surface: $candidate"
-      key="CMD ${candidate}"
+    elif is_removed "${resolved} ${word}"; then
+      message="removed command: \"$candidate\" — ${resolved} no longer has \"${word}\""
     else
-      if grep -qxF "CMD ${resolved} ${word}" "$BREAKING" 2>/dev/null; then
-        message="removed command: \"$candidate\" — ${resolved} no longer has \"${word}\""
-      else
-        message="cannot verify \"$candidate\": ${resolved} has no subcommand \"${word}\""
-      fi
-      key="CMD ${resolved} ${word}"
+      message="cannot verify \"$candidate\": ${resolved} has no subcommand \"${word}\""
     fi
     if is_baselined "$key"; then
       : # known drift
     else
-      echo "DRIFT: $message"
+      echo "DRIFT: $message (baseline entry: $key)"
       new_drift=$((new_drift + 1))
     fi
     errors=$((errors + 1))
   fi
   cmd_checked=$((cmd_checked + 1))
-done < <(echo "$skill_body" | grep -oE 'basecamp( [a-z][-a-z0-9]+)+' | sort -u)
+done < <(echo "$skill_body" | extract_candidates | sort -u)
 
 # --- Phase 2: Flag references ---
 # For lines with "basecamp <cmd> ... --flag", verify each flag exists on the
@@ -164,18 +202,22 @@ trap 'rm -f "$tmpfile"' EXIT
 echo "$skill_body" | grep -nE 'basecamp [a-z].+--[a-z]' > "$tmpfile" || true
 
 while IFS=: read -r lineno line; do
-  # Extract command candidate using BASH_REMATCH to avoid grep|head SIGPIPE
-  if [[ "$line" =~ basecamp(\ [a-z][-a-z0-9]+)+ ]]; then
-    cmd_candidate="${BASH_REMATCH[0]}"
-  else
-    continue
-  fi
+  # The first command reference on the line, read whole so no pipe is cut
+  # short under pipefail.
+  candidates=$(printf '%s\n' "$line" | extract_candidates)
+  cmd_candidate="${candidates%%$'\n'*}"
+  [ -z "$cmd_candidate" ] && continue
 
-  # A command phase 1 already reported is no base for a flag check.
   status=0
   result=$(verify_cmd "$cmd_candidate") || status=$?
-  [ "$status" -ne 0 ] && continue
+  if [ "$status" -ne 0 ]; then
+    # New drift was reported once, in phase 1, and is no base for a flag
+    # check. Acknowledged drift still has its flags checked, against the
+    # deepest command that does exist, as they always were.
+    is_baselined "$(drift_key "$cmd_candidate" "$result")" || continue
+  fi
   matched="${result%%|*}"
+  [ -z "$matched" ] && continue
 
   for flag in $(echo "$line" | grep -oE -- '--[a-z][-a-z0-9]*' | sort -u); do
     # Skip cobra built-ins
@@ -203,8 +245,8 @@ if [ $new_drift -gt 0 ]; then
   echo ""
   echo "Found ${new_drift} new skill drift issue(s) (${baselined} baselined)."
   echo "Update ${SKILL} to match the current CLI surface (.surface),"
-  echo "or add entries to ${BASELINE} if the drift is intentional —"
-  echo "a hidden command is not in .surface, and is baselined as \"CMD <path>\"."
+  echo "or add the entry each DRIFT line names to ${BASELINE} if the drift is intentional —"
+  echo "a hidden command is never in .surface, and has to be acknowledged that way."
   exit 1
 fi
 

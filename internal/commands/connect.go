@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -865,7 +866,9 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 		// An entry that names an account nothing can use is not an unbound
 		// profile: say what is wrong with the account it does name.
 		if p.AccountID != "" {
-			return "", err
+			return "", output.ErrUsageHint(
+				fmt.Sprintf("Profile %q names account %q, which is not an account ID", name, p.AccountID),
+				"Correct account_id in the config file that defines the profile.")
 		}
 		return "", unboundProfileError(name)
 	}
@@ -880,25 +883,36 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 // unboundProfileError refuses a profile that names no account, with the
 // remedy that will work for this one.
 //
-// Nothing binds an account on its own — `profile` has no command for it. The
-// account is written by whichever command stores the credential, so the
-// remedy is normally to store it again. But both of those refuse an
-// accountless entry that is not the global config's, because the entry they
-// would write would stay shadowed by the system, repo or local config that
-// defines it (auth.go and auth_agent.go both say so). For that profile the
-// only remedy is the file the entry comes from.
+// No command binds an account on its own — `profile` has none for it. Of the
+// commands that store a credential, only the headless ones write the account
+// too, and of those only `auth agent connect` fits here: it takes the
+// Agent's own account. A bot user logs in through the browser, and that login
+// binds nothing, so a bot's account goes into its config entry by hand.
+//
+// Even `auth agent connect` refuses an accountless entry that is not the
+// global config's, because the entry it would write stays shadowed by the
+// system, repo or local config that defines it. For that profile the only
+// remedy is the file the entry comes from.
 func unboundProfileError(name string) error {
 	message := fmt.Sprintf("Profile %q is not bound to an account", name)
-	profile := shellQuote(name)
+	// The same question `auth agent connect` asks itself, so the hint is
+	// right whenever that command is: it takes an unbound global entry as
+	// its own to write. Where that reading is wrong — a trusted repo or
+	// local config defining the same accountless profile, which keeps
+	// shadowing the global entry after it is written — it is wrong for the
+	// command too, and telling them apart needs per-profile provenance the
+	// config layer does not keep.
+	//
 	// A global config that cannot be read is no reason to fail here: the
-	// commands named below report that themselves, in full.
+	// command named below reports that itself, in full.
 	if unbound, err := globalProfileIsUnbound(name); err == nil && !unbound {
 		return output.ErrUsageHint(message,
-			"This entry is not the global config's, so storing the credential again cannot bind it. Add account_id to the config file that defines it.")
+			"The entry is not the global config's, so no command can bind it. Add account_id to the config file that defines it.")
 	}
+	global := filepath.Join(config.GlobalConfigDir(), "config.json")
 	return output.ErrUsageHint(message,
-		"Bind it where the credential is stored: basecamp auth agent connect -P "+profile+
-			" takes the agent's own account, and on the bot-user path basecamp auth login -P "+profile+" --account <id> binds the one you name.")
+		"For an Agent, connecting it binds its own account: basecamp auth agent connect -P "+shellQuote(name)+
+			". A bot user's login binds none, so for a bot add account_id to the profile's entry in "+richtext.SanitizeSingleLine(global)+".")
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,

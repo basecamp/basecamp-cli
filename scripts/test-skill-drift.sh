@@ -128,6 +128,15 @@ write_skill removed_under_leaf 'Run `basecamp todos list stale` for the stale on
 assert_fails removed_under_leaf 'removed command' \
   'a removed subcommand fails even under a command with no subcommands left'
 
+# A removed name is only a command when it is a whole word. The same word
+# running on into a filename or a key is an argument value.
+write_skill removed_name_as_value 'Run `basecamp recordings vaults.json` and `basecamp todos list stale_only`.'
+assert_passes removed_name_as_value \
+  'a removed name running on into a filename or key is an argument value'
+
+write_skill sentence_end 'When in doubt, run basecamp profile list.'
+assert_passes sentence_end 'a command at the end of a sentence still resolves whole'
+
 # --- What already failed, and still has to ---
 
 write_skill unknown 'Run `basecamp bogus thing` for this.'
@@ -143,12 +152,40 @@ assert_passes goodflag 'a flag the command does have passes'
 
 # --- The baseline still suppresses drift, now for commands too ---
 
+# Whatever entry a DRIFT line names is the one that acknowledges it — including
+# where the words past the command are prose, not a path.
+write_skill prose_after_group 'Use basecamp profile to see your profiles.'
+run_check prose_after_group
+entry=$(printf '%s\n' "$out" | sed -nE 's/^DRIFT: .*\(baseline entry: (.*)\)$/\1/p')
+if [ "$status" -ne 0 ] && [ "$entry" = "CMD basecamp profile to" ]; then
+  ok 'the report names the baseline entry that acknowledges it'
+else
+  not_ok "the report names the baseline entry that acknowledges it — exited ${status}: ${out}"
+fi
+printf '%s\n' "$entry" > "${work}/named_entry"
+run_check prose_after_group "${work}/named_entry"
+if [ "$status" -eq 0 ]; then
+  ok 'adding the named entry to the baseline acknowledges the drift'
+else
+  not_ok "adding the named entry to the baseline acknowledges the drift — exited ${status}: ${out}"
+fi
+
 printf 'CMD basecamp profile set\n' > "${work}/baselined"
 run_check invented "${work}/baselined"
 if [ "$status" -eq 0 ]; then
   ok 'a baselined command reference is not new drift'
 else
   not_ok "a baselined command reference is not new drift — exited ${status}: ${out}"
+fi
+
+# An acknowledged command is still a command whose flags can be wrong: they
+# are checked against the deepest command that does exist, as they always were.
+write_skill baselined_flag 'Run `basecamp profile set agent --totally-bogus`.'
+run_check baselined_flag "${work}/baselined"
+if [ "$status" -ne 0 ] && [[ "$out" == *'flag --totally-bogus not found on basecamp profile'* ]]; then
+  ok 'a baselined command still has its flags checked'
+else
+  not_ok "a baselined command still has its flags checked — exited ${status}: ${out}"
 fi
 
 # --- One report per bad command, not one per flag on its line ---

@@ -34,16 +34,18 @@ func hintOf(t *testing.T, err error) string {
 	return e.Hint
 }
 
-// The remedy for an accountless profile is the command that stores the
-// credential, because that is what writes the account — there is no command
-// that binds one on its own.
-func TestUnboundProfileHintNamesTheCommandThatBinds(t *testing.T) {
+// No command binds an account on its own. Connecting an Agent writes its
+// account; a bot user's browser login writes none — `auth login --account`
+// binds only on the headless paths — so a bot's remedy is its config entry,
+// and naming `auth login` would send the operator round the same loop.
+func TestUnboundProfileHintNamesOnlyWhatBinds(t *testing.T) {
 	writeGlobalConfig(t, `{"profiles":{"agent":{"base_url":"https://3.basecampapi.com"}}}`)
 
 	hint := hintOf(t, unboundProfileError("agent"))
 
 	assert.Contains(t, hint, "basecamp auth agent connect -P agent")
-	assert.Contains(t, hint, "basecamp auth login -P agent --account <id>")
+	assert.Contains(t, hint, "add account_id to the profile's entry in "+filepath.Join(config.GlobalConfigDir(), "config.json"))
+	assert.NotContains(t, hint, "auth login", "a browser login binds no account")
 }
 
 // Storing the credential again cannot bind a profile whose accountless entry
@@ -70,6 +72,7 @@ func TestConnectAccountReportsAnUnusableAccountAsItself(t *testing.T) {
 	_, err := connectAccount(app, "agent")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `Invalid account ID "not-a-number"`)
+	assert.Contains(t, err.Error(), `Profile "agent" names account "not-a-number"`)
 	assert.NotContains(t, err.Error(), "not bound")
+	assert.Contains(t, hintOf(t, err), "Correct account_id")
 }

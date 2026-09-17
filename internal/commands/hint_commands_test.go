@@ -22,70 +22,132 @@ import (
 // got "unknown command" at the moment they were already stuck.
 //
 // So every command named in a hint is resolved here against the real command
-// tree. Resolving to the nearest existing ancestor is what let the invented
-// subcommand through the skill drift check; this test resolves exactly, and
-// allows leftover words only where they cannot be a subcommand: after a
-// command that takes positional arguments (they are argument values), or
-// after a leaf that has no subcommands (they are prose).
+// tree, exactly. Leftover words past the deepest command a phrase reaches are
+// allowed only where the CLI itself would not read them as a subcommand: past
+// a leaf (nothing to mistake them for), or past a command that runs and whose
+// own argument validator accepts the word. A word naming a command
+// .surface-breaking records as removed fails whatever else it could be.
 //
-// Two scopes, for two reasons. Hint text everywhere in the package, because
-// a hint is an instruction. Every string in connect.go, because its help and
-// examples are the connector's setup documentation and are followed the same
-// way.
+// This is stricter than scripts/check-skill-drift.sh can be, because it asks
+// the command rather than .surface: `basecamp setup agentz` fails both, but
+// only this test knows `basecamp skill anything` really runs.
+//
+// Scopes: hint text in this package and in internal/connector/setup, whose
+// readiness checks write the hints `connect setup` shows; and every string in
+// connect.go, whose help and examples are the connector's setup
+// documentation and are followed the same way. Commands only — a hint's
+// flags are not checked here.
 func TestHintCommandsResolve(t *testing.T) {
 	root := buildRootWithAllCommands()
 	removed := removedCommands(t)
 	fset := token.NewFileSet()
 
-	entries, err := os.ReadDir(".")
+	type reference struct{ file, phrase string }
+	found := map[reference]bool{}
+	seen := map[token.Pos]bool{}
+
+	for _, dir := range []string{".", "../connector/setup"} {
+		files, funcs := parsePackage(t, fset, dir)
+		for name, file := range files {
+			everything := dir == "." && name == "connect.go"
+			for _, lit := range hintLiterals(file, funcs, everything) {
+				if seen[lit.Pos()] {
+					continue // a helper reached from more than one hint
+				}
+				seen[lit.Pos()] = true
+
+				text, err := strconv.Unquote(lit.Value)
+				require.NoError(t, err, "a string literal that compiled unquotes")
+				for _, phrase := range commandPhrases(text) {
+					pos := fset.Position(lit.Pos())
+					found[reference{filepath.Base(pos.Filename), phrase}] = true
+
+					resolved, word, ok := resolveCommandPhrase(root, removed, phrase)
+					reason := "has no subcommand"
+					if removed[resolved+" "+word] {
+						reason = "no longer has"
+					}
+					assert.Truef(t, ok, "%s: hint names %q, and %q %s %q", pos, phrase, resolved, reason, word)
+				}
+			}
+		}
+	}
+
+	// A scan that stops seeing a kind of hint passes silently forever, so one
+	// known reference per kind has to be found.
+	for _, want := range []struct {
+		reference
+		kind string
+	}{
+		{reference{"connect.go", "basecamp auth agent connect"}, "every string in connect.go"},
+		{reference{"auth_agent.go", "basecamp auth login"}, "an ErrUsageHint argument"},
+		{reference{"connect.go", "basecamp auth login"}, "a Hint field in a composite literal"},
+		{reference{"boost.go", "basecamp boost list"}, "a hint built into a variable"},
+		{reference{"wizard.go", "basecamp auth status"}, "a hint returned by a helper"},
+		{reference{"doctor.go", "basecamp upgrade"}, "an assignment to a Hint field"},
+		{reference{"feed.go", "basecamp events poll"}, "a hint-named field"},
+		{reference{"checks.go", "basecamp connect setup"}, "a readiness check's hint"},
+	} {
+		assert.Truef(t, found[want.reference], "no longer sees %s: %q in %s", want.kind, want.phrase, want.file)
+	}
+}
+
+// parsePackage parses every non-test file in dir, and indexes the functions
+// they declare by name so a hint built by a helper can be followed into it.
+func parsePackage(t *testing.T, fset *token.FileSet, dir string) (map[string]*ast.File, map[string]*ast.FuncDecl) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 
-	var checked int
+	files := map[string]*ast.File{}
+	funcs := map[string]*ast.FuncDecl{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
 		require.NoError(t, err)
+		files[name] = file
 
-		for _, lit := range hintLiterals(file, name == "connect.go") {
-			text, err := strconv.Unquote(lit.Value)
-			if err != nil {
-				continue // a raw string with an unquotable escape; nothing to read
-			}
-			for _, phrase := range commandPhrases(text) {
-				checked++
-				resolved, word, ok := resolveCommandPhrase(root, removed, phrase)
-				reason := "has no subcommand"
-				if removed[resolved+" "+word] {
-					reason = "no longer has"
-				}
-				assert.Truef(t, ok, "%s: hint names %q, and %q %s %q",
-					fset.Position(lit.Pos()), phrase, resolved, reason, word)
+		for _, decl := range file.Decls {
+			// Methods are keyed by name too: a name collision only widens
+			// what is scanned.
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
+				funcs[fn.Name.Name] = fn
 			}
 		}
 	}
+	require.NotEmpty(t, files, dir)
+	return files, funcs
+}
 
-	// A scan that stopped finding hints would pass silently forever.
-	assert.Greaterf(t, checked, 40, "only %d command references scanned — the scan has stopped seeing hints", checked)
+// isHintName reports whether an identifier names hint text: Hint,
+// forbiddenHint, agentReadsRefusedHint, hint.
+func isHintName(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), "hint")
 }
 
 // hintLiterals returns the string literals in a file that an operator is
 // meant to read: the hint argument of the hint-carrying error constructors,
-// the Hint field of an output.Error, and — when everything is wanted — every
-// string literal in the file.
+// anything written to a hint-named field, variable or constant, and — when
+// everything is wanted — every string literal in the file.
 //
-// A hint is not always written where it is passed: some are built into a
-// variable first (boost.go builds one, then adds --event to it). So the
-// names a hint expression mentions are collected too, and a second pass
-// takes the literals assigned to them anywhere in the file. Over-reaching
-// there costs nothing: a literal with no command in it is scanned and
-// passes.
-func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
+// A hint is not always written where it is passed. Some are built into a
+// variable first (boost.go builds one, then appends --event), and some are
+// returned by a helper (wizard.go passes wizardEscapeHint()). So the names a
+// hint expression mentions are followed to their assignments, and the
+// functions it calls are followed into their bodies. Over-reaching there
+// costs nothing: a literal with no command in it is scanned and passes.
+func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything bool) []*ast.BasicLit {
 	var lits []*ast.BasicLit
 	names := map[string]bool{}
-	collect := func(n ast.Node) {
+	visited := map[string]bool{}
+
+	// collect takes every string in an expression, notes the names it
+	// mentions, and follows the functions it calls.
+	var collect func(ast.Node)
+	collect = func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.BasicLit:
@@ -94,13 +156,30 @@ func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 				}
 			case *ast.Ident:
 				names[node.Name] = true
+			case *ast.CallExpr:
+				callee := ""
+				switch fn := node.Fun.(type) {
+				case *ast.Ident:
+					callee = fn.Name
+				case *ast.SelectorExpr:
+					callee = fn.Sel.Name
+				}
+				if decl, ok := funcs[callee]; ok && !visited[callee] {
+					visited[callee] = true
+					collect(decl.Body)
+				}
 			}
 			return true
 		})
 	}
 
 	if everything {
-		collect(file)
+		ast.Inspect(file, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				lits = append(lits, lit)
+			}
+			return true
+		})
 		return lits
 	}
 
@@ -110,29 +189,45 @@ func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			sel, ok := node.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if i, ok := hintArg[sel.Sel.Name]; ok && len(node.Args) > i {
-				collect(node.Args[i])
+			if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
+				if i, ok := hintArg[sel.Sel.Name]; ok && len(node.Args) > i {
+					collect(node.Args[i])
+				}
 			}
 		case *ast.KeyValueExpr:
-			if key, ok := node.Key.(*ast.Ident); ok && key.Name == "Hint" {
+			if key, ok := node.Key.(*ast.Ident); ok && isHintName(key.Name) {
 				collect(node.Value)
+			}
+		case *ast.AssignStmt:
+			for _, lhs := range node.Lhs {
+				if isHintName(assignedName(lhs)) {
+					for _, rhs := range node.Rhs {
+						collect(rhs)
+					}
+					break
+				}
+			}
+		case *ast.ValueSpec:
+			for _, id := range node.Names {
+				if isHintName(id.Name) {
+					for _, v := range node.Values {
+						collect(v)
+					}
+					break
+				}
 			}
 		}
 		return true
 	})
 
-	// Second pass: whatever was assigned to a name a hint is built from.
+	// Whatever was assigned to a name a hint is built from.
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.AssignStmt:
 			for _, lhs := range node.Lhs {
-				if id, ok := lhs.(*ast.Ident); ok && names[id.Name] {
+				if names[assignedName(lhs)] {
 					for _, rhs := range node.Rhs {
-						collectStrings(rhs, &lits)
+						collect(rhs)
 					}
 					break
 				}
@@ -141,7 +236,7 @@ func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 			for _, id := range node.Names {
 				if names[id.Name] {
 					for _, v := range node.Values {
-						collectStrings(v, &lits)
+						collect(v)
 					}
 					break
 				}
@@ -152,20 +247,21 @@ func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 	return lits
 }
 
-func collectStrings(n ast.Node, into *[]*ast.BasicLit) {
-	ast.Inspect(n, func(n ast.Node) bool {
-		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-			*into = append(*into, lit)
-		}
-		return true
-	})
+// assignedName is the name an assignment writes: a variable's, or a field's.
+func assignedName(lhs ast.Expr) string {
+	switch target := lhs.(type) {
+	case *ast.Ident:
+		return target.Name
+	case *ast.SelectorExpr:
+		return target.Sel.Name
+	}
+	return ""
 }
 
 // removedCommands is every command path .surface-breaking records the CLI as
 // having dropped. A word past a resolved command that names one of these is
 // drift whatever else it could be — without it, "basecamp recordings archive"
-// reads as the [type] argument the moment `archive` is removed, which is the
-// hole the nearest-ancestor fallback used to leave everywhere.
+// reads as the [type] argument the moment `archive` is removed.
 func removedCommands(t *testing.T) map[string]bool {
 	t.Helper()
 	data, err := os.ReadFile("../../.surface-breaking")
@@ -181,16 +277,35 @@ func removedCommands(t *testing.T) map[string]bool {
 }
 
 // commandPhrase matches a command reference the way scripts/check-skill-drift.sh
-// extracts one, so a hint and a skill are read by the same rule.
+// extracts one.
 var commandPhrase = regexp.MustCompile(`basecamp( [a-z][-a-z0-9]+)+`)
 
+// commandPhrases returns the command references in text. A last word that
+// runs on into a filename or a key — "upload report.pdf", "config set
+// account_id" — is an argument, not a word of the command, and is dropped.
 func commandPhrases(text string) []string {
-	return commandPhrase.FindAllString(text, -1)
+	var phrases []string
+	for _, loc := range commandPhrase.FindAllStringIndex(text, -1) {
+		phrase, rest := text[loc[0]:loc[1]], text[loc[1]:]
+		if len(rest) > 1 && strings.ContainsRune("._/", rune(rest[0])) && isNameByte(rest[1]) {
+			i := strings.LastIndexByte(phrase, ' ')
+			if i <= len("basecamp") {
+				continue
+			}
+			phrase = phrase[:i]
+		}
+		phrases = append(phrases, phrase)
+	}
+	return phrases
+}
+
+func isNameByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
 }
 
 // resolveCommandPhrase walks a command phrase down the tree. It reports the
-// deepest command the phrase reaches, the first word past it that command
-// does not have, and whether the phrase resolves.
+// deepest command the phrase reaches, the first word past it that the CLI
+// would not accept there, and whether the phrase resolves.
 func resolveCommandPhrase(root *cobra.Command, removed map[string]bool, phrase string) (resolved, word string, ok bool) {
 	words := strings.Fields(phrase)
 	cmd := root
@@ -202,21 +317,37 @@ func resolveCommandPhrase(root *cobra.Command, removed map[string]bool, phrase s
 		}
 		cmd = sub
 	}
+	path := cmd.CommandPath()
 	if i == len(words) {
-		return cmd.CommandPath(), "", true
+		return path, "", true
 	}
-	if removed[cmd.CommandPath()+" "+words[i]] {
-		return cmd.CommandPath(), words[i], false
+	if removed[path+" "+words[i]] {
+		return path, words[i], false
 	}
-	// Leftover words cannot be an invented subcommand when the command runs
-	// as it stands — they are its arguments, or prose about running it — nor
-	// when it has no subcommands they could be mistaken for. What is left is
-	// a group that only dispatches, where the next word has to be one of the
-	// subcommands it dispatches to.
-	if cmd.Runnable() || !cmd.HasSubCommands() {
-		return cmd.CommandPath(), "", true
+	// Past a leaf there is no subcommand to mistake a word for: it is an
+	// argument, or prose about running the command.
+	if !cmd.HasSubCommands() {
+		return path, "", true
 	}
-	return cmd.CommandPath(), words[i], false
+	// Past a group, the word is fine only where the CLI would take it as an
+	// argument: the group runs, and its own validator accepts the word.
+	if cmd.Runnable() && acceptsArgument(cmd, words[i]) {
+		return path, "", true
+	}
+	return path, words[i], false
+}
+
+// acceptsArgument asks cmd's own argument validator whether word can be its
+// first argument, in an invocation of up to three.
+func acceptsArgument(cmd *cobra.Command, word string) bool {
+	args := []string{word}
+	for len(args) <= 3 {
+		if cmd.ValidateArgs(args) == nil {
+			return true
+		}
+		args = append(args, "x")
+	}
+	return false
 }
 
 func childNamed(cmd *cobra.Command, name string) *cobra.Command {
