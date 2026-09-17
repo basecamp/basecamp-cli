@@ -16,3 +16,5 @@ func peerCredentials(*net.UnixConn) (PeerCredentials, error) {
 }
 
 func processGroupOf(int) (int, error) { return 0, errNoPeerCredentials }
+
+func parentProcessOf(int) (int, error) { return 0, errNoPeerCredentials }

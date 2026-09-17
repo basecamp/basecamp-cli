@@ -1,7 +1,11 @@
 package connector
 
 import (
+	"errors"
 	"net"
+	"os"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -28,3 +32,20 @@ func peerCredentials(conn *net.UnixConn) (PeerCredentials, error) {
 }
 
 func processGroupOf(pid int) (int, error) { return unix.Getpgid(pid) }
+
+// parentProcessOf reads a process's parent from /proc/<pid>/stat.
+func parentProcessOf(pid int) (int, error) {
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, err
+	}
+	end := strings.LastIndexByte(string(raw), ')')
+	if end < 0 {
+		return 0, errors.New("connector: unreadable /proc stat")
+	}
+	fields := strings.Fields(string(raw)[end+1:])
+	if len(fields) < 2 {
+		return 0, errors.New("connector: short /proc stat")
+	}
+	return strconv.Atoi(fields[1])
+}

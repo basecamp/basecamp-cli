@@ -35,3 +35,12 @@ func peerCredentials(conn *net.UnixConn) (PeerCredentials, error) {
 }
 
 func processGroupOf(pid int) (int, error) { return unix.Getpgid(pid) }
+
+// parentProcessOf reads a process's parent from kern.proc.pid.
+func parentProcessOf(pid int) (int, error) {
+	info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return 0, err
+	}
+	return int(info.Eproc.Ppid), nil
+}
