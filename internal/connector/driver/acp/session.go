@@ -39,8 +39,8 @@ type session struct {
 	mode     string
 	modeSeen chan struct{}
 	verified bool
-	// canceled is a cancel the connector asked for, whether or not a turn was
-	// in flight when it did.
+	// canceled is a cancel that found no turn to end: the next turn starts
+	// canceled, and takes the flag with it.
 	canceled      bool
 	unsafe        error
 	replaying     bool
@@ -470,9 +470,10 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		return driver.PromptResult{}, refuse
 	}
 	t := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
-	// A cancel that arrived before the turn it was meant for ends this one:
-	// the connector asked for no further work on this session.
+	// A cancel that arrived before the turn it was meant for ends this one,
+	// and only this one.
 	t.canceled = s.canceled
+	s.canceled = false
 	s.turn = t
 	id := s.id
 	s.mu.Unlock()
@@ -581,9 +582,10 @@ func (s *session) Cancel(ctx context.Context) error {
 	if t != nil {
 		t.canceled = true
 	}
-	// A cancel with no turn in flight is remembered: the dispatcher asked for
-	// this session to stop, and a turn that starts after it starts canceled.
-	s.canceled = true
+	// A cancel with no turn in flight is remembered for the next one: the
+	// dispatcher asked for this session to stop, and the turn it meant to end
+	// may be a moment from starting.
+	s.canceled = t == nil
 	id := s.id
 	s.mu.Unlock()
 	// The prompt this cancel ends is on the wire; a later prompt cannot start

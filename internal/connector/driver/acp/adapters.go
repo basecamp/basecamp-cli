@@ -126,7 +126,7 @@ var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MC
 
 // mcpServersKey finds a TOML line that declares MCP servers: a table header
 // or a dotted or bare key naming mcp_servers, at any depth.
-var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?(("[^"]*"|'[^']*'|[A-Za-z0-9_.\-]+)\.)*['"]?mcp_servers['"]?\s*[.\]=]`)
+var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?(("[^"]*"|'[^']*'|[A-Za-z0-9_\-]+)\s*\.\s*)*['"]?mcp_servers['"]?\s*[.\]=]`)
 
 // escapedTOMLKey is a table header or a key whose name carries a backslash
 // escape.

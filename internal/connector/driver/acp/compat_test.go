@@ -18,7 +18,9 @@ package acp
 // BASECAMP_ACP_CHECKS (e.g. "1,3"; all when unset), and
 // BASECAMP_ACP_TRANSCRIPTS (a directory for redacted JSON-RPC transcripts).
 //
-// No credential is used: check 1's token is a dummy string.
+// Credentials: the connector's task token is a dummy string throughout. The
+// adapters authenticate as whatever account they are logged in to on this
+// machine, which is what these prompts are billed to.
 
 import (
 	"context"

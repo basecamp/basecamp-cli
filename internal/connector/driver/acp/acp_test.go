@@ -486,9 +486,9 @@ func TestARefusalIsNeverReportedAsACancel(t *testing.T) {
 	})
 }
 
-func TestACancelWithNoTurnEndsTheNextOne(t *testing.T) {
+func TestACancelWithNoTurnEndsTheNextOneAndOnlyIt(t *testing.T) {
 	h := newHarness(t)
-	h.turns(turnScript{WaitForCancel: true, Stop: string(driver.TurnCanceled)})
+	h.turns(turnScript{WaitForCancel: true, Stop: string(driver.TurnCanceled)}, turnScript{Stop: "end_turn"})
 	s := h.open()
 	require.NoError(t, s.Cancel(context.Background()))
 	assert.NotContains(t, h.record().Methods, "session/cancel", "nothing is sent for a turn that is not there")
@@ -497,6 +497,62 @@ func TestACancelWithNoTurnEndsTheNextOne(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, driver.TurnCanceled, res.Stop, "the turn the cancel raced starts canceled")
 	assert.Contains(t, h.record().Methods, "session/cancel")
+
+	res, err = s.Prompt(context.Background(), "follow-up")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnEndTurn, res.Stop, "a cancel ends one turn, not the session's every turn after it")
+	n := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "one cancel, for one turn")
+}
+
+func TestAPermissionIsNotAllowedOnceTheTurnIsCanceled(t *testing.T) {
+	h := newHarness(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		once.Do(func() { close(started) })
+		<-release
+		return true
+	}
+	h.turns(turnScript{Steps: []step{{Permission: permission(t, map[string]any{"toolCallId": "c1", "kind": "edit"}, standardOptions()...)}},
+		WaitForCancel: true, Stop: string(driver.TurnCanceled)}, turnScript{Stop: "end_turn"})
+	s := h.open()
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		assert.NoError(t, err)
+		answers <- res
+	}()
+	<-started
+	require.NoError(t, s.Cancel(context.Background()))
+	close(release)
+	select {
+	case res := <-answers:
+		assert.Equal(t, driver.TurnCanceled, res.Stop)
+		assert.Len(t, res.Refusals, 1, "a permission the policy allowed while the turn was canceled is refused")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the canceled turn never ended")
+	}
+	_, option := outcomeOf(t, h.record().Outcomes[0])
+	assert.Equal(t, "reject", option)
+
+	// The cancel ended the turn it found; the next one is not born canceled.
+	res, err := s.Prompt(context.Background(), "follow-up")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnEndTurn, res.Stop)
+	n := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n)
 }
 
 // ---------------------------------------------------------------- invariant 5
@@ -925,6 +981,8 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a key with an escape is refused rather than read")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles.\"my profile\".mcp_servers.x]\ncommand = \"/bin/evil\"\n"), 0o600))
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted table path declares them too")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles . demo . mcp_servers . basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "TOML allows space around the dots")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
 	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
 	codexHome := filepath.Join(root, "codex-home")
