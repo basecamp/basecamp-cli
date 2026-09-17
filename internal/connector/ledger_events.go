@@ -446,6 +446,8 @@ var ErrNoSuchRecord = errors.New("no such event record")
 // The tombstone is what makes an explicit replay safe forever, so it is never
 // deleted — only the payload goes. Non-terminal records are never touched:
 // their payload is the only copy of what intake was told.
+// Nor is a completed record a person redispatched while its task was live:
+// that task's end admits it, and admitted needs its snapshot.
 func (l *Ledger) DropContent(ctx context.Context, discardedBefore, completedBefore time.Time) (int, error) {
 	res, err := l.db.ExecContext(ctx, `
 UPDATE events
@@ -455,7 +457,7 @@ SET details = NULL, event_type = '', kind = '', action = '', bucket_id = 0,
     snapshot = NULL, trigger_name = '', acknowledge = 0, conversation_key = '',
     reply_kind = '', reply_recording_id = 0, routed = 0, route = '', class = '',
     recording_url = '', requester_id = 0
-WHERE content_dropped = 0
+WHERE content_dropped = 0 AND redispatch_decision IS NULL
   AND ((state = ? AND updated_at < ?) OR (state = ? AND updated_at < ?))`,
 		string(StateDiscarded), stamp(discardedBefore),
 		string(StateCompleted), stamp(completedBefore))

@@ -20,6 +20,8 @@ type eventTask struct {
 	outcome    Outcome
 	superseded bool
 	ended      bool
+	// completedAt is when the event's outcome settled, as stored.
+	completedAt string
 	// live is the task's attempt that has not ended, if any, with its
 	// recorded process.
 	liveAttempt string
@@ -31,17 +33,18 @@ func loadEventTask(ctx context.Context, tx *sql.Tx, eventID int64) (eventTask, e
 		et                   eventTask
 		delivery, outcome    string
 		superseded, ended    sql.NullString
+		completed            sql.NullString
 		attempt, startedText sql.NullString
 		pid, pgid            sql.NullInt64
 	)
 	err := tx.QueryRowContext(ctx, `
-SELECT te.task_id, te.delivery, te.outcome, t.superseded_at, t.ended_at,
+SELECT te.task_id, te.delivery, te.outcome, te.completed_at, t.superseded_at, t.ended_at,
        a.id, a.pid, a.pgid, a.process_started
 FROM task_events te
 JOIN tasks t ON t.id = te.task_id
 LEFT JOIN attempts a ON a.task_id = t.id AND a.state <> 'ended'
 WHERE te.event_id = ? AND te.withdrawn_at IS NULL
-ORDER BY te.task_id DESC LIMIT 1`, eventID).Scan(&et.taskID, &delivery, &outcome, &superseded, &ended,
+ORDER BY te.task_id DESC LIMIT 1`, eventID).Scan(&et.taskID, &delivery, &outcome, &completed, &superseded, &ended,
 		&attempt, &pid, &pgid, &startedText)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -51,7 +54,7 @@ ORDER BY te.task_id DESC LIMIT 1`, eventID).Scan(&et.taskID, &delivery, &outcome
 	}
 	et.found = true
 	et.delivery, et.outcome = Delivery(delivery), Outcome(outcome)
-	et.superseded, et.ended = superseded.Valid, ended.Valid
+	et.superseded, et.ended, et.completedAt = superseded.Valid, ended.Valid, completed.String
 	if attempt.Valid {
 		et.liveAttempt = attempt.String
 		et.process = AttemptProcess{PID: int(pid.Int64), PGID: int(pgid.Int64)}
@@ -67,9 +70,11 @@ ORDER BY te.task_id DESC LIMIT 1`, eventID).Scan(&et.taskID, &delivery, &outcome
 // operatorRecord is a record with the columns a decision reads.
 type operatorRecord struct {
 	Record
-	review            bool
-	authorizedAt      sql.NullString
-	redispatchPending bool
+	review       bool
+	authorizedAt sql.NullString
+	// redispatchDecision is the redispatch waiting for the record's task to
+	// end; zero when none is.
+	redispatchDecision int64
 }
 
 func loadOperatorRecord(ctx context.Context, tx *sql.Tx, eventID int64) (operatorRecord, error) {
@@ -78,10 +83,12 @@ func loadOperatorRecord(ctx context.Context, tx *sql.Tx, eventID int64) (operato
 		return operatorRecord{}, err
 	}
 	out := operatorRecord{Record: record}
-	if err := tx.QueryRowContext(ctx, `SELECT review, authorized_at, redispatch_pending FROM events WHERE id = ?`, eventID).
-		Scan(&out.review, &out.authorizedAt, &out.redispatchPending); err != nil {
+	var decision sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT review, authorized_at, redispatch_decision FROM events WHERE id = ?`, eventID).
+		Scan(&out.review, &out.authorizedAt, &decision); err != nil {
 		return operatorRecord{}, fmt.Errorf("connector: read event %d: %w", eventID, err)
 	}
+	out.redispatchDecision = decision.Int64
 	return out, nil
 }
 
@@ -165,6 +172,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Routed && record.Decision.ConversationKey != ""
 	now := l.timestamp()
 	authorize := []assignment{{column: "authorized_at", value: now}, {column: "authorized_by", value: by}}
+	recorded := false
 
 	switch record.State {
 	case StateSeen, StateAdmitted, StateQueued, StateDispatched:
@@ -180,7 +188,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 			return refuse("succeeded; a success is not run again")
 		case task.outcome != OutcomeUnknown && task.outcome != OutcomeFailed:
 			return refuse(fmt.Sprintf("has outcome %q", task.outcome))
-		case record.redispatchPending:
+		case record.redispatchDecision != 0:
 			return refuse("already has a redispatch waiting for its task to end")
 		case !dispatchable:
 			return refuse("no longer has the snapshot and route a dispatch needs (retention dropped them, or the verdict carried none)")
@@ -196,12 +204,26 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		if task.liveAttempt != "" {
 			out.Worker = &LiveWorker{AttemptID: task.liveAttempt, TaskID: task.taskID, Process: task.process}
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE events SET authorized_at = ?, authorized_by = ?, redispatch_pending = 1 WHERE id = ?`, now, by, eventID); err != nil {
+		to := StateCompleted
+		if task.ended {
+			to = StateAdmitted
+		}
+		// The decision is the authorization the database checks: the record
+		// names it, and only a decision made after the outcome settled lets a
+		// completed record move (invariant 4).
+		decisionID, err := insertDecision(ctx, tx, decision{action: "redispatch", eventID: eventID, by: by, at: notBefore(now, task.completedAt),
+			fromState: record.State, fromReason: record.Reason, fromOutcome: task.outcome, toState: to,
+			supersededTask: out.SupersededTaskID, note: pendingNote(task)})
+		if err != nil {
+			return RedispatchResult{}, err
+		}
+		recorded = true
+		if _, err := tx.ExecContext(ctx, `UPDATE events SET authorized_at = ?, authorized_by = ?, redispatch_decision = ? WHERE id = ?`, now, by, decisionID, eventID); err != nil {
 			return RedispatchResult{}, fmt.Errorf("connector: authorize event %d: %w", eventID, err)
 		}
 		if task.ended {
 			moved, err := l.move(ctx, tx, transition{id: eventID, state: StateAdmitted, from: []RecordState{StateCompleted}, byOperator: true,
-				set: []assignment{{column: "redispatch_pending", value: 0}}})
+				set: []assignment{{column: "redispatch_decision", value: nil}}})
 			if err != nil {
 				return RedispatchResult{}, err
 			}
@@ -215,14 +237,24 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 
 	case StateHeld:
 		if record.Reason == "" && dispatchable {
-			moved, err := l.move(ctx, tx, transition{id: eventID, state: StateAdmitted, from: []RecordState{StateHeld}, byOperator: true, set: authorize})
+			// Queued behind a live conversation, as admission would write it.
+			target := StateAdmitted
+			var live bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE conversation_key = ? AND id <> ? AND state IN ('admitted', 'dispatched'))`,
+				record.Decision.ConversationKey, eventID).Scan(&live); err != nil {
+				return RedispatchResult{}, fmt.Errorf("connector: read conversation of %d: %w", eventID, err)
+			}
+			if live {
+				target = StateQueued
+			}
+			moved, err := l.move(ctx, tx, transition{id: eventID, state: target, from: []RecordState{StateHeld}, byOperator: true, set: authorize})
 			if err != nil {
 				return RedispatchResult{}, err
 			}
 			if !moved {
 				return RedispatchResult{}, fmt.Errorf("connector: admit event %d: %w", eventID, ErrNotATransition)
 			}
-			out.Admitted = true
+			out.Admitted = target == StateAdmitted
 			break
 		}
 		reason := record.Reason
@@ -257,17 +289,16 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 	if _, out.Held, err = readHold(ctx, tx); err != nil {
 		return RedispatchResult{}, err
 	}
-	note := ""
-	switch {
-	case out.Pending:
-		note = fmt.Sprintf("waits for task %d to end", task.taskID)
-	case out.Rerun:
-		note = "prerequisite runs again"
-	}
-	if err := recordDecision(ctx, tx, decision{action: "redispatch", eventID: eventID, by: by, at: now,
-		fromState: record.State, fromReason: record.Reason, fromOutcome: task.outcome, toState: out.State,
-		supersededTask: out.SupersededTaskID, note: note}); err != nil {
-		return RedispatchResult{}, err
+	if !recorded {
+		note := ""
+		if out.Rerun {
+			note = "prerequisite runs again"
+		}
+		if err := recordDecision(ctx, tx, decision{action: "redispatch", eventID: eventID, by: by, at: now,
+			fromState: record.State, fromReason: record.Reason, fromOutcome: task.outcome, toState: out.State,
+			supersededTask: out.SupersededTaskID, note: note}); err != nil {
+			return RedispatchResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return RedispatchResult{}, fmt.Errorf("connector: commit redispatch of %d: %w", eventID, err)
@@ -340,9 +371,16 @@ func (l *Ledger) discard(ctx context.Context, eventID int64, by string) (Discard
 		return refuse(fmt.Sprintf("is %s: only a held, blocked or unknown record is discarded", record.State))
 	}
 
+	now := l.timestamp()
+	// Recorded before the move, which the database allows out of completed
+	// only against it (invariant 4).
+	if err := recordDecision(ctx, tx, decision{action: "discard", eventID: eventID, by: by, at: notBefore(now, task.completedAt),
+		fromState: record.State, fromReason: record.Reason, fromOutcome: task.outcome, toState: StateDiscarded}); err != nil {
+		return DiscardResult{}, err
+	}
 	moved, err := l.move(ctx, tx, transition{id: eventID, state: StateDiscarded, reason: ReasonByOperator,
 		from: []RecordState{StateHeld, StateBlocked, StateCompleted}, byOperator: true,
-		set: []assignment{{column: "redispatch_pending", value: 0}}})
+		set: []assignment{{column: "redispatch_decision", value: nil}}})
 	if err != nil {
 		return DiscardResult{}, err
 	}
@@ -351,7 +389,6 @@ func (l *Ledger) discard(ctx context.Context, eventID int64, by string) (Discard
 	}
 	// What the connector would still have said about this event is not said:
 	// a guard acknowledgement or holding reply for a record a person closed.
-	now := l.timestamp()
 	res, err := tx.ExecContext(ctx, `
 UPDATE outbox SET state = 'canceled', finished_at = ?, note = 'discarded by a person'
 WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_reply')`, now, eventID)
@@ -363,10 +400,6 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 		return DiscardResult{}, err
 	}
 	out.Canceled = int(canceled)
-	if err := recordDecision(ctx, tx, decision{action: "discard", eventID: eventID, by: by, at: now,
-		fromState: record.State, fromReason: record.Reason, fromOutcome: task.outcome, toState: StateDiscarded}); err != nil {
-		return DiscardResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return DiscardResult{}, fmt.Errorf("connector: commit discard of %d: %w", eventID, err)
 	}
@@ -391,4 +424,21 @@ func (l *Ledger) AuthorizedBlocked(ctx context.Context, limit int) ([]int64, err
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// notBefore is now, or the stored time an outcome settled when that is later:
+// a decision is never recorded as made before the outcome it decides on, even
+// with a clock that stepped back.
+func notBefore(now, settled string) string {
+	if settled > now {
+		return settled
+	}
+	return now
+}
+
+func pendingNote(task eventTask) string {
+	if task.ended {
+		return ""
+	}
+	return fmt.Sprintf("waits for task %d to end", task.taskID)
 }

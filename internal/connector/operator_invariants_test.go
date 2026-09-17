@@ -156,9 +156,9 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
 	require.NoError(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "admitted in the transaction that ended the task")
-	var pending int
-	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT redispatch_pending FROM events WHERE id = 1`).Scan(&pending))
-	assert.Zero(t, pending)
+	var consumed bool
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT redispatch_decision IS NULL FROM events WHERE id = 1`).Scan(&consumed))
+	assert.True(t, consumed, "the task's end consumed the redispatch")
 	second := launchOf(t, l, 1)
 	assert.NotEqual(t, launch.TaskID, second.TaskID)
 }
@@ -457,23 +457,53 @@ func TestInvariant4TheDatabaseRefusesATerminalMoveWithoutADecision(t *testing.T)
 	t.Run("a redispatch of a success", func(t *testing.T) {
 		l := newTestLedger(t)
 		unknownOutcome(t, l, 1)
+		decision := rawDecision(t, l, 1, "redispatch", "9999-01-01T00:00:00.000000000Z")
 		_, err := l.db.ExecContext(ctx, `UPDATE task_events SET outcome = 'succeeded' WHERE event_id = 1`)
 		require.NoError(t, err)
-		_, err = l.db.ExecContext(ctx, `UPDATE events SET redispatch_pending = 1 WHERE id = 1`)
+		_, err = l.db.ExecContext(ctx, `UPDATE events SET redispatch_decision = ? WHERE id = 1`, decision)
 		require.NoError(t, err)
-		_, err = l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_pending = 0 WHERE id = 1`)
+		_, err = l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_decision = NULL WHERE id = 1`)
+		require.Error(t, err)
+	})
+	t.Run("a redispatch naming another event's decision", func(t *testing.T) {
+		l := newTestLedger(t)
+		unknownOutcome(t, l, 1)
+		seenRecord(t, l, 2)
+		decision := rawDecision(t, l, 2, "redispatch", "9999-01-01T00:00:00.000000000Z")
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET redispatch_decision = ? WHERE id = 1`, decision)
+		require.NoError(t, err)
+		_, err = l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_decision = NULL WHERE id = 1`)
+		require.Error(t, err)
+	})
+	t.Run("a redispatch decided before the outcome settled", func(t *testing.T) {
+		l := newTestLedger(t)
+		unknownOutcome(t, l, 1)
+		decision := rawDecision(t, l, 1, "redispatch", "2000-01-01T00:00:00.000000000Z")
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET redispatch_decision = ? WHERE id = 1`, decision)
+		require.NoError(t, err)
+		_, err = l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_decision = NULL WHERE id = 1`)
+		require.Error(t, err)
+	})
+	t.Run("a discard with no decision", func(t *testing.T) {
+		l := newTestLedger(t)
+		unknownOutcome(t, l, 1)
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = 'discarded', reason = 'by_operator' WHERE id = 1`)
 		require.Error(t, err)
 	})
 	t.Run("discarded never leaves", func(t *testing.T) {
 		l := newTestLedger(t)
 		seenRecord(t, l, 1)
 		require.NoError(t, l.SetState(ctx, 1, StateDiscarded, ReasonByOperator))
-		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_pending = 0 WHERE id = 1`)
+		decision := rawDecision(t, l, 1, "redispatch", "9999-01-01T00:00:00.000000000Z")
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET redispatch_decision = ? WHERE id = 1`, decision)
+		require.NoError(t, err)
+		_, err = l.db.ExecContext(ctx, `UPDATE events SET state = 'admitted', redispatch_decision = NULL WHERE id = 1`)
 		require.Error(t, err)
 	})
 	t.Run("an unknown outcome discarded for another reason", func(t *testing.T) {
 		l := newTestLedger(t)
 		unknownOutcome(t, l, 1)
+		rawDecision(t, l, 1, "discard", "9999-01-01T00:00:00.000000000Z")
 		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = 'discarded', reason = 'untrusted_author' WHERE id = 1`)
 		require.Error(t, err)
 	})
@@ -568,4 +598,105 @@ func TestDiscardCancelsAPendingHoldingReply(t *testing.T) {
 	pending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending}})
 	require.NoError(t, err)
 	assert.Empty(t, pending)
+}
+
+// rawDecision writes a decisions row directly, as something other than this
+// package could.
+func rawDecision(t *testing.T, l *Ledger, eventID int64, action, at string) int64 {
+	t.Helper()
+	res, err := l.db.ExecContext(context.Background(), `INSERT INTO decisions (action, event_id, decided_by, decided_at) VALUES (?, ?, 'raw', ?)`, action, eventID, at)
+	require.NoError(t, err)
+	id, err := res.LastInsertId()
+	require.NoError(t, err)
+	return id
+}
+
+// pendingRedispatch leaves event 1 completed(failed) on a live task with a
+// redispatch waiting for the task to end, and returns the task's launch.
+func pendingRedispatch(t *testing.T, l *Ledger) Launch {
+	t.Helper()
+	ctx := context.Background()
+	require.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:9"))
+	launch := launchOf(t, l, 1)
+	d, err := l.Dispatch(launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
+	require.NoError(t, err)
+	got, err := l.Redispatch(ctx, 1, opBy)
+	require.NoError(t, err)
+	require.True(t, got.Pending)
+	return launch
+}
+
+// Retention never strands a waiting redispatch: the record keeps what its
+// admission needs, and the task's end is never refused.
+func TestRetentionKeepsARecordAWaitingRedispatchNeeds(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+	dropped, err := l.DropContent(ctx, time.Now().Add(24*time.Hour), time.Now().Add(24*time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, dropped)
+
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	assert.Equal(t, StateAdmitted, stateOf(t, l, 1))
+}
+
+// A task's end never fails for a waiting redispatch whose record cannot be
+// admitted: it stays completed.
+func TestATaskEndIsNeverRefusedForAWaitingRedispatch(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+	_, err := l.db.ExecContext(ctx, `UPDATE events SET content_dropped = 1, snapshot = NULL WHERE id = 1`)
+	require.NoError(t, err)
+
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	assert.Equal(t, StateCompleted, stateOf(t, l, 1))
+}
+
+// Invariant 3: a hold withdraws a redispatch still waiting for its task.
+func TestInvariant3AHoldWithdrawsAWaitingRedispatch(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	assert.Equal(t, StateCompleted, stateOf(t, l, 1), "the authorization did not survive the hold")
+	_, err = l.Redispatch(ctx, 1, opBy)
+	require.NoError(t, err, "a person can authorize it again")
+}
+
+// An import that says an entry is done withdraws its waiting redispatch.
+func TestImportDoneWithdrawsAWaitingRedispatch(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+	_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: []ReconciliationEntry{{EventID: 1, Decision: DecisionDone}}}, opBy)
+	require.NoError(t, err)
+
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	assert.Equal(t, StateCompleted, stateOf(t, l, 1))
+}
+
+// A held record redispatched onto a live conversation is queued, as admission
+// would write it.
+func TestRedispatchQueuesAHeldRecordBehindALiveConversation(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	require.Equal(t, StateAdmitted, opAdmit(t, l, 2, "recording:9"), "a new generation's record on the same conversation")
+
+	got, err := l.Redispatch(ctx, 1, opBy)
+	require.NoError(t, err)
+	assert.Equal(t, StateQueued, got.State)
+	assert.False(t, got.Admitted)
 }

@@ -47,6 +47,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	}
 	checks := []setup.Check{{Name: "connect.json", Status: setup.StatusPass,
 		Message: fmt.Sprintf("Agent person %d in account %s, driver %s, worker %s", p.file.Agent.PersonID, p.file.AccountID, p.file.Driver, p.file.WorkerName())}}
+	checks = append(checks, driverChecks(p)...)
 
 	agent, agentErr := verifiedConnectAgent(ctx, p)
 	if agentErr != nil {
@@ -191,4 +192,15 @@ func workerBinaryChecks(file setup.File) []setup.Check {
 		checks = append(checks, c)
 	}
 	return checks
+}
+
+// driverChecks refuses a driver the run command refuses: doctor never calls a
+// connector ready that would not start.
+func driverChecks(p connectProfile) []setup.Check {
+	if p.file.Driver == setup.DriverSpawn {
+		return nil
+	}
+	return []setup.Check{{Name: "Driver", Status: setup.StatusFail,
+		Message: fmt.Sprintf("Driver %q is not available yet; the connector runs %q", p.file.Driver, setup.DriverSpawn),
+		Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --driver spawn"}}
 }

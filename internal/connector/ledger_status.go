@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // OpenLedgerReadOnly opens an existing ledger for reading only: no migration,
@@ -24,13 +27,18 @@ func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 	if isInMemory(path) || strings.ContainsAny(path, "?#%") {
 		return nil, fmt.Errorf("connector: ledger path %q cannot be opened as a file", path)
 	}
-	if _, err := os.Lstat(path); err != nil {
-		return nil, err
+	// Vetted as the writer's open vets it, creating nothing: a ledger that
+	// vanishes under a reader (a promote renaming it) is not recreated empty.
+	if err := setup.CheckPrivateFile(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("connector: secure the ledger: %w", err)
 	}
-	// The file exists, so this creates nothing: it vets the directories and
-	// the file through a descriptor, as the writer's open does.
-	if err := securePath(path); err != nil {
+	if info, err := os.Lstat(filepath.Dir(path)); err != nil {
 		return nil, err
+	} else if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", filepath.Dir(path), info.Mode().Perm())
 	}
 	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"
 	db, err := sql.Open("sqlite", dsn)
@@ -378,7 +386,7 @@ func statusQueues(ctx context.Context, tx *sql.Tx, s *Status) error {
 SELECT
   (SELECT COUNT(*) FROM events WHERE review = 1 AND authorized_at IS NULL AND state IN ('seen', 'blocked', 'dispatched')),
   (SELECT COUNT(*) FROM events WHERE state = 'blocked' AND authorized_at IS NOT NULL),
-  (SELECT COUNT(*) FROM events WHERE redispatch_pending = 1)`).Scan(&s.Review, &s.AuthorizedBlocked, &s.RedispatchPending)
+  (SELECT COUNT(*) FROM events WHERE redispatch_decision IS NOT NULL)`).Scan(&s.Review, &s.AuthorizedBlocked, &s.RedispatchPending)
 }
 
 func statusTasks(ctx context.Context, tx *sql.Tx, s *Status) error {

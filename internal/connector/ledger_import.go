@@ -123,6 +123,13 @@ func (l *Ledger) importReconciliation(ctx context.Context, r Reconciliation, by 
 		switch e.Decision {
 		case DecisionDone:
 			done[e.EventID] = true
+			// A person said it is finished: whatever authorized it to run
+			// again, a redispatch waiting for its task included, is withdrawn.
+			if !missing {
+				if _, err := tx.ExecContext(ctx, `UPDATE events SET redispatch_decision = NULL, authorized_at = NULL, authorized_by = '' WHERE id = ?`, e.EventID); err != nil {
+					return ImportResult{}, fmt.Errorf("connector: import event %d: %w", e.EventID, err)
+				}
+			}
 			switch {
 			case missing:
 				// A tombstone and nothing else: the event can never become a

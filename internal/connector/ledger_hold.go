@@ -29,13 +29,14 @@ import (
 //     Release clears it.
 //  3. A hold is one transaction: the marker, a new intake generation, the
 //     review tag on every non-terminal record of the generations before it
-//     (clearing any earlier authorization), and admitted or queued records
-//     moved to held.
+//     (clearing any earlier authorization, a redispatch still waiting for its
+//     task included), and admitted or queued records moved to held.
 //  4. A person's decision is one transaction with the state change it makes,
 //     and it records who decided. A terminal record leaves its state only
-//     through such a decision: completed to admitted when the write also
-//     clears a recorded redispatch, completed(unknown) to discarded(by_operator).
-//     Discarded never leaves. A trigger refuses every other edge.
+//     against a decision row made after its outcome settled: completed to
+//     admitted by the redispatch the record names, which the move consumes;
+//     completed(unknown) to discarded(by_operator) by a discard. Discarded
+//     never leaves. A trigger refuses every other edge.
 //  5. A redispatch never runs two workers for one event. The replaced task's
 //     token is superseded in the authorization's transaction, and an event
 //     whose task is still live is not admitted until that task ends: the
@@ -93,7 +94,7 @@ ALTER TABLE events ADD COLUMN generation         INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE events ADD COLUMN review             INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE events ADD COLUMN authorized_at      TEXT;
 ALTER TABLE events ADD COLUMN authorized_by      TEXT    NOT NULL DEFAULT '';
-ALTER TABLE events ADD COLUMN redispatch_pending INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN redispatch_decision INTEGER REFERENCES decisions (id);
 CREATE INDEX events_review ON events (review, state);
 
 CREATE TRIGGER events_generation
@@ -137,15 +138,25 @@ BEFORE UPDATE OF state ON events
 WHEN OLD.state IN ('completed', 'discarded') AND NEW.state <> OLD.state
   AND NOT (
     OLD.state = 'completed' AND NEW.state = 'admitted'
-    AND OLD.redispatch_pending = 1 AND NEW.redispatch_pending = 0
+    AND OLD.redispatch_decision IS NOT NULL AND NEW.redispatch_decision IS NULL
     AND OLD.content_dropped = 0 AND OLD.snapshot IS NOT NULL
     AND (SELECT te.outcome FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
          ORDER BY te.task_id DESC LIMIT 1) IN ('unknown', 'failed')
+    AND EXISTS (
+      SELECT 1 FROM decisions d
+      WHERE d.id = OLD.redispatch_decision AND d.event_id = OLD.id AND d.action = 'redispatch'
+        AND d.decided_at >= (SELECT te.completed_at FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
+                             ORDER BY te.task_id DESC LIMIT 1))
   )
   AND NOT (
     OLD.state = 'completed' AND NEW.state = 'discarded' AND NEW.reason = 'by_operator'
     AND (SELECT te.outcome FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
          ORDER BY te.task_id DESC LIMIT 1) = 'unknown'
+    AND EXISTS (
+      SELECT 1 FROM decisions d
+      WHERE d.event_id = OLD.id AND d.action = 'discard'
+        AND d.decided_at >= (SELECT te.completed_at FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
+                             ORDER BY te.task_id DESC LIMIT 1))
   )
 BEGIN
   SELECT RAISE(ABORT, 'a terminal record cannot change state');
@@ -156,9 +167,10 @@ AFTER UPDATE OF ended_at ON tasks
 WHEN OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL
 BEGIN
   UPDATE events
-  SET state = 'admitted', reason = '', redispatch_pending = 0, revision = revision + 1,
+  SET state = 'admitted', reason = '', redispatch_decision = NULL, revision = revision + 1,
       updated_at = NEW.ended_at, blocked_at = NULL, retry_at = NULL
-  WHERE state = 'completed' AND redispatch_pending = 1
+  WHERE state = 'completed' AND redispatch_decision IS NOT NULL
+    AND content_dropped = 0 AND snapshot IS NOT NULL
     AND id IN (SELECT event_id FROM task_events WHERE task_id = NEW.id);
 END;
 `
@@ -176,8 +188,10 @@ const (
 // states a record may leave for it. The lifecycle's own edges (ledger_events.go)
 // are what the connector does by itself; these are never taken automatically.
 var operatorEdges = map[RecordState][]RecordState{
-	// A redispatch admits a completed record, or a held one with its snapshot.
+	// A redispatch admits a completed record, or a held one with its snapshot
+	// (queued when its conversation is live).
 	StateAdmitted: {StateCompleted, StateHeld},
+	StateQueued:   {StateHeld},
 	// A hold holds what was waiting for a worker.
 	StateHeld: {StateAdmitted, StateQueued},
 	// A redispatch of a record held over a blocking reason runs it again as
@@ -289,6 +303,11 @@ WHERE state NOT IN ('completed', 'discarded') AND generation < ?`, generation)
 	n, err := tagged.RowsAffected()
 	if err != nil {
 		return HoldResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE events SET redispatch_decision = NULL, authorized_at = NULL, authorized_by = ''
+WHERE state = 'completed' AND redispatch_decision IS NOT NULL`); err != nil {
+		return HoldResult{}, fmt.Errorf("connector: revoke waiting redispatches: %w", err)
 	}
 	holdStep("tagged")
 	var stillWaiting int
@@ -411,15 +430,20 @@ type decision struct {
 }
 
 func recordDecision(ctx context.Context, tx Tx, d decision) error {
-	_, err := tx.ExecContext(ctx, `
+	_, err := insertDecision(ctx, tx, d)
+	return err
+}
+
+func insertDecision(ctx context.Context, tx Tx, d decision) (int64, error) {
+	res, err := tx.ExecContext(ctx, `
 INSERT INTO decisions (action, event_id, decided_by, decided_at, from_state, from_reason, from_outcome, to_state, superseded_task_id, note)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.action, nullableID64(d.eventID), d.by, d.at, string(d.fromState), d.fromReason, string(d.fromOutcome),
 		string(d.toState), nullableID64(d.supersededTask), d.note)
 	if err != nil {
-		return fmt.Errorf("connector: record the decision: %w", err)
+		return 0, fmt.Errorf("connector: record the decision: %w", err)
 	}
-	return nil
+	return res.LastInsertId()
 }
 
 // Connection states the run command reports for status.

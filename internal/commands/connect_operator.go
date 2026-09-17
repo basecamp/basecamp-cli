@@ -102,7 +102,8 @@ func openConnectLedger(p connectProfile) (*connector.Ledger, error) {
 		return nil, err
 	}
 	// A verdict a redispatch writes calls for the lifecycle messages a running
-	// connector's would; the running connector's outbox sends them.
+	// connector's verdict would: the same intents, which the connector's outbox
+	// sends.
 	ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
 	return ledger, nil
 }
@@ -149,6 +150,9 @@ type connectStatusReport struct {
 	Status  connector.Status `json:"status"`
 }
 
+// connectRunning is what the instance lock's holder wrote. Alive says a
+// process with that pid exists now; after a crash the file stays behind, and
+// the pid may since belong to another process.
 type connectRunning struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
@@ -211,7 +215,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 
 	switch {
 	case r.Running != nil && r.Running.Alive:
-		fmt.Fprintf(w, "  Running        pid %d since %s\n", r.Running.PID, clean(r.Running.StartedAt))
+		fmt.Fprintf(w, "  Running        pid %d since %s (as its lock file says)\n", r.Running.PID, clean(r.Running.StartedAt))
 	default:
 		fmt.Fprintf(w, "  Running        no\n")
 	}
@@ -321,8 +325,9 @@ and who authorized it is recorded.
 A completed or held record is admitted at once (a completed one whose task is
 still running, when that task ends). A blocked record keeps its state and
 runs what blocked it again — the read, the events lookup, the route check —
-and is admitted the moment that succeeds. While the hold stands the record is
-authorized and nothing launches until release.
+and is admitted the moment that succeeds; if it blocks again, the record stays
+blocked with the authorization, and redispatch runs it again. While the hold
+stands the record is authorized and nothing launches until release.
 
 It works on the ledger's transactions, so it is safe while the connector runs;
 the running connector dispatches what it admits.`,
@@ -375,8 +380,11 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 			PID: res.Worker.Process.PID, PGID: res.Worker.Process.PGID, StartedAt: res.Worker.Process.StartedAt,
 		}, driver.DefaultGrace)
 		report.WorkerStopped = signaled
-		if err != nil {
-			report.WorkerNote = "the recorded worker could not be verified, so nothing was signaled; its token is retired: " + err.Error()
+		switch {
+		case err != nil:
+			report.WorkerNote = "the recorded worker could not be verified, so nothing was signaled; its token is retired: " + richtext.SanitizeSingleLine(err.Error())
+		case !signaled:
+			report.WorkerNote = "no recorded worker process was still running under its recorded start; nothing was signaled, and its token is retired"
 		}
 	}
 	if res.Rerun {
@@ -403,7 +411,7 @@ func redispatchSummary(r connectRedispatchReport) string {
 			s += " (" + r.VerdictNote + ")"
 		}
 	case r.RerunSkipped != "":
-		s = fmt.Sprintf("Event %d authorized and still blocked; its prerequisite did not run: %s", r.EventID, r.RerunSkipped)
+		s = fmt.Sprintf("Event %d authorized and still blocked; its prerequisite did not run (%s). Run redispatch again to retry it", r.EventID, r.RerunSkipped)
 	default:
 		s = fmt.Sprintf("Event %d authorized", r.EventID)
 	}

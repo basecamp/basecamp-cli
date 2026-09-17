@@ -94,7 +94,15 @@ func TestOpenLedgerReadOnlyCreatesNothing(t *testing.T) {
 	_, err = os.Lstat(dir)
 	assert.ErrorIs(t, err, os.ErrNotExist)
 
-	l, err := OpenLedger(filepath.Join(dir, LedgerFile))
+	l, err := OpenLedger(filepath.Join(dir, "other.db"))
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+	_, err = OpenLedgerReadOnly(context.Background(), filepath.Join(dir, LedgerFile))
+	require.ErrorIs(t, err, os.ErrNotExist, "a ledger gone from a private directory")
+	_, err = os.Lstat(filepath.Join(dir, LedgerFile))
+	assert.ErrorIs(t, err, os.ErrNotExist, "is not recreated by a reader")
+
+	l, err = OpenLedger(filepath.Join(dir, LedgerFile))
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
 	reader, err := OpenLedgerReadOnly(context.Background(), filepath.Join(dir, LedgerFile))

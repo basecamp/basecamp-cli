@@ -231,8 +231,12 @@ func TestConnectHoldFlagIsOnTheRunCommand(t *testing.T) {
 func TestConnectDoctorWorkerBinaries(t *testing.T) {
 	file := setup.New("agent")
 	assert.Equal(t, []string{"claude"}, workerBinaries(file))
+	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: file}))
 	file.Driver = setup.DriverACP
 	assert.Equal(t, []string{"claude-agent-acp"}, workerBinaries(file))
+	checks := driverChecks(connectProfile{name: "agent", file: file})
+	require.Len(t, checks, 1)
+	assert.Equal(t, setup.StatusFail, checks[0].Status, "a driver the run command refuses is not ready")
 }
 
 func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {

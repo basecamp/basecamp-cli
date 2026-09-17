@@ -41,22 +41,30 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	cmd := exec.CommandContext(ctx, exe, args...) //nolint:gosec // this binary, with a validated profile name
 	cmd.Env = driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), connector.MCPServerEnv...), os.LookupEnv, nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	defer func() {
-		// The group this check started, and nothing else.
+	// The group this check started, and nothing else, signaled while its
+	// leader is still unreaped (nothing waits on it before this runs), so the
+	// group id cannot have been reused.
+	stop := func() {
 		if cmd.Process != nil && cmd.Process.Pid > 1 {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = cmd.Wait()
 		}
-	}()
+	}
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "basecamp-connect-doctor", Version: version.Version}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
+		stop()
+		if cmd.Process != nil {
+			_ = cmd.Wait()
+		}
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server did not complete the handshake: "+setup.ErrorText(err)
 		c.Hint = "Run basecamp mcp -P " + shellQuote(profile) + " and read its stderr."
 		return c
 	}
-	defer func() { _ = session.Close() }()
+	defer func() {
+		stop()
+		_ = session.Close() // reaps the leader
+	}()
 	tools := 0
 	for _, err := range session.Tools(ctx, nil) {
 		if err != nil {
