@@ -487,6 +487,17 @@ func TestInvariant4TheDatabaseRefusesATerminalMoveWithoutADecision(t *testing.T)
 	t.Run("a discard with no decision", func(t *testing.T) {
 		l := newTestLedger(t)
 		unknownOutcome(t, l, 1)
+		// Decisions that are not this record's discard do not stand in for one.
+		seenRecord(t, l, 2)
+		rawDecision(t, l, 2, "discard", "9999-01-01T00:00:00.000000000Z")
+		rawDecision(t, l, 1, "redispatch", "9999-01-01T00:00:00.000000000Z")
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = 'discarded', reason = 'by_operator' WHERE id = 1`)
+		require.Error(t, err)
+	})
+	t.Run("a discard decided before the outcome settled", func(t *testing.T) {
+		l := newTestLedger(t)
+		unknownOutcome(t, l, 1)
+		rawDecision(t, l, 1, "discard", "2000-01-01T00:00:00.000000000Z")
 		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = 'discarded', reason = 'by_operator' WHERE id = 1`)
 		require.Error(t, err)
 	})
