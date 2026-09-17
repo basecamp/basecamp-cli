@@ -156,11 +156,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case err != nil:
 		return output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
-	if file.Worktrees && !f.shadow {
-		// Refused rather than ignored: workers would share the route's
-		// checkout while connect.json says each task gets its own.
-		return output.ErrUsage("connect.json asks for worktrees, which this basecamp does not support yet; run setup with --worktrees=false")
-	}
 	driverName := file.Driver
 	if f.driver != "" {
 		driverName = f.driver
