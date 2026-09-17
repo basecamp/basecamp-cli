@@ -61,6 +61,18 @@ func StartTree(t *testing.T, dir string) (*driver.Worker, int) {
 	return worker, grandchild
 }
 
+// SurvivingWorker is StartTree with its leader already gone: the process the
+// ledger would have recorded, plus the grandchild still running in dir. It is
+// the fixture for "the task's tree outlived the worker", which every release
+// path must hold against.
+func SurvivingWorker(t *testing.T, dir string) (driver.Process, int) {
+	t.Helper()
+	worker, grandchild := StartTree(t, dir)
+	<-worker.Done()
+	RequireGroupHeld(t, worker.Process())
+	return worker.Process(), grandchild
+}
+
 // Alive reports whether a pid still names a live process.
 func Alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 

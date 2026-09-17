@@ -296,9 +296,8 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			d.hold()
 			continue
 		}
-		signaled, err := d.terminateRecorded(driver.Process{
-			PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt,
-		}, driver.DefaultGrace)
+		worker := driver.Process{PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt}
+		signaled, err := d.terminateRecorded(worker, driver.DefaultGrace)
 		if err != nil {
 			// A worker that may still be running with the operator's
 			// authority is not settled around. Its attempt stays live, so its
@@ -309,20 +308,12 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			d.hold()
 			continue
 		}
-		settlement, err := d.settle(ctx, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost})
-		if err != nil {
-			// One attempt that cannot be settled holds its own conversation
-			// and directory; it does not stop the connector.
-			d.log.Error("connector: could not settle an attempt a previous process left; it stays live",
-				"attempt_id", a.AttemptID, "error", err)
-			d.hold()
-			continue
-		}
-		d.log.Info("connector: settled an attempt a previous process left", "attempt_id", a.AttemptID,
+		d.log.Info("connector: ending an attempt a previous process left", "attempt_id", a.AttemptID,
 			"task_id", a.TaskID, "was", string(a.State), "worker_signaled", signaled)
-		d.finishWorkspace(ctx, a.Route, a.WorkDir)
-		d.adopt(ctx, settlement)
-		d.line(DispatchLine{Type: "dispatch", TaskID: a.TaskID, AttemptID: a.AttemptID, State: string(AttemptEnded), StopReason: string(StopLost)})
+		// Through the one release point, which confirms the group is gone
+		// before anything is settled or released.
+		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
+			worker, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
 	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
 		if err := w.Recover(ctx); err != nil {
@@ -486,7 +477,10 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		EventID: record.ID, Route: route, WorkDir: workDir, Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
 	})
 	if err != nil {
-		d.finishWorkspace(ctx, route, workDir)
+		// No task was created, so there is no attempt to release and no
+		// worker to confirm: the directory prepared for it was never a
+		// task's.
+		d.discardPreparedWorkspace(ctx, route, workDir)
 		return false, err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs, State: string(AttemptLaunching)})
@@ -497,7 +491,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		d.log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
-		d.end(settleCtx, launch, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		d.release(settleCtx, launch, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
 		return false, nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
@@ -509,7 +503,10 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		unusable := errors.Is(err, driver.ErrUnusable)
 		d.log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
 			"no_process", spawnFailed, "unusable", unusable, "error", driver.Redact(err.Error()))
-		d.end(settleCtx, launch, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		// A driver returns an error from NewSession only when it left no
+		// process behind (driver invariant 4), so there is no group to
+		// confirm; the release point still owns the settlement.
+		d.release(settleCtx, launch, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return false, nil
 	}
@@ -517,7 +514,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
 		_ = session.Close()
 		cleanup()
-		d.end(settleCtx, launch, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
+		d.release(settleCtx, launch, p, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
 		return false, err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
@@ -571,6 +568,45 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 // left for the next start.
 const settleAttempts = 5
 
+// release is the ONE place an attempt is settled, its working directory
+// released and its end reported: the single release point of the driver
+// package's one-owner rule. Nothing else in the connector calls EndAttempt,
+// Workspaces.Finish, or writes an ended dispatch line — a source test holds
+// that (dispatcher_boundary_test.go).
+//
+// It releases nothing until the worker's process group is confirmed gone, and
+// nothing if the ledger refuses the settlement. Either way the attempt stays
+// live: its token, its conversation and its directory are still its own, a
+// person settles it, and this process stops counting it among the workers it
+// may start.
+func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, end AttemptEnd, run *taskRun) {
+	if err := d.confirmGroupGone(worker, d.opts.CancelGrace); err != nil {
+		d.hold()
+		if run != nil {
+			d.forget(launch.AttemptID)
+		}
+		d.log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
+			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
+		return
+	}
+	settlement, err := d.settle(ctx, end)
+	if err != nil {
+		d.hold()
+		if run != nil {
+			d.forget(launch.AttemptID)
+		}
+		d.log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
+			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
+		return
+	}
+	d.adopt(ctx, settlement)
+	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
+	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
+	if run != nil {
+		d.forget(launch.AttemptID)
+	}
+}
+
 // settle ends an attempt in the ledger, retrying a failure with backoff: an
 // attempt left live holds its token, conversation and directory.
 func (d *Dispatcher) settle(ctx context.Context, end AttemptEnd) (Settlement, error) {
@@ -585,22 +621,6 @@ func (d *Dispatcher) settle(ctx context.Context, end AttemptEnd) (Settlement, er
 	}
 }
 
-// end settles an attempt and forgets its run.
-func (d *Dispatcher) end(ctx context.Context, launch Launch, end AttemptEnd, run *taskRun) {
-	settlement, err := d.settle(ctx, end)
-	if err != nil {
-		d.log.Error("connector: could not settle an attempt; it is settled as lost on the next start",
-			"attempt_id", end.AttemptID, "error", err)
-	} else {
-		d.adopt(ctx, settlement)
-	}
-	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
-	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
-	if run != nil {
-		d.forget(launch.AttemptID)
-	}
-}
-
 // forget drops a run from the live set. The ledger, not this map, is the
 // record of what a task is.
 func (d *Dispatcher) forget(attemptID string) {
@@ -609,7 +629,20 @@ func (d *Dispatcher) forget(attemptID string) {
 	d.mu.Unlock()
 }
 
+// finishWorkspace releases a task's working directory. It is the release
+// point's alone: a directory is released only once the task that owned it is
+// settled and its worker's group is confirmed gone.
 func (d *Dispatcher) finishWorkspace(ctx context.Context, route, workDir string) {
+	d.workspaceFinished(ctx, route, workDir)
+}
+
+// discardPreparedWorkspace releases a directory prepared for a task that was
+// never created, so no worker ever ran in it.
+func (d *Dispatcher) discardPreparedWorkspace(ctx context.Context, route, workDir string) {
+	d.workspaceFinished(ctx, route, workDir)
+}
+
+func (d *Dispatcher) workspaceFinished(ctx context.Context, route, workDir string) {
 	if d.opts.Workspaces == nil || workDir == "" {
 		return
 	}
@@ -714,19 +747,9 @@ func (r *taskRun) supervise(ctx context.Context) {
 	refusals := r.refusals
 	r.mu.Unlock()
 
-	// One owner, one release point (driver's "One owner, one release point"):
-	// the attempt is settled and its directory released only once the
-	// worker's process group is confirmed gone. A group still holding
-	// members keeps the attempt live and the directory its own.
-	if err := d.confirmGroupGone(r.session.Process(), d.opts.CancelGrace); err != nil {
-		d.log.Error("connector: the worker's process group is still alive; its attempt stays live and its directory held",
-			"attempt_id", r.launch.AttemptID, "task_id", r.launch.TaskID, "error", err)
-		d.hold()
-		d.forget(r.launch.AttemptID)
-		d.line(DispatchLine{Type: "dispatch", TaskID: r.launch.TaskID, AttemptID: r.launch.AttemptID, State: string(AttemptRunning)})
-		return
-	}
-	d.end(settleCtx, r.launch, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, Refusals: refusals}, r)
+	// Through the one release point: it confirms the worker's group is gone
+	// before the attempt is settled or its directory released.
+	d.release(settleCtx, r.launch, r.session.Process(), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, Refusals: refusals}, r)
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt
