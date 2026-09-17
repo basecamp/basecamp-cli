@@ -3,7 +3,11 @@ package connector
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Backlog thresholds. Intake is the only work on the feed's delivery path, so
@@ -64,6 +68,8 @@ type Queue struct {
 	// it stops. The feed is not being consumed in between.
 	OnPause  func(depth int)
 	OnResume func(depth int)
+	// Logger reports a callback that panicked. Optional; silent when unset.
+	Logger *slog.Logger
 }
 
 // NewQueue builds a queue that warns at warnAt and pauses the feed at pauseAt.
@@ -90,8 +96,26 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	// can never be applied before the increment it belongs to, and a crossing
 	// can never be lost to the order two operations happen to take the lock in.
 	q.stage(1)
+	// An offer that leaves without sending must take its count back with it,
+	// on every way out — the ordinary cancellation, and an unwinding this
+	// function did not choose. A count left behind is a queue that reports an
+	// item nobody can take and, at the threshold, a pause nothing can lift.
+	settled := false
+	settle := func(sent bool) {
+		if settled {
+			return
+		}
+		settled = true
+		if !sent {
+			q.stage(-1)
+			q.deliver()
+		}
+	}
+	defer func() { settle(false) }()
+
 	select {
 	case q.ids <- id:
+		settle(true)
 		q.afterOp()
 		q.deliver()
 		return nil
@@ -99,21 +123,25 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	}
 
 	q.stageWait(1)
-	q.deliver()
+	// Registered BEFORE the pause is delivered: the wait is recorded, and
+	// what ends it must already be in place when anything else runs.
 	defer func() {
 		q.stageWait(-1)
 		q.deliver()
 	}()
+	q.deliver()
 
 	select {
 	case q.ids <- id:
+		settle(true)
 		q.afterOp()
 		q.deliver()
 		return nil
 	case <-ctx.Done():
-		// It never went in, so it is not backlog.
-		q.stage(-1)
-		q.deliver()
+		// It never went in, so it is not backlog. Taken back here rather than
+		// left to the defer, so the resume that follows reports the depth
+		// without it.
+		settle(false)
 		return ctx.Err()
 	}
 }
@@ -232,17 +260,41 @@ func (q *Queue) deliver() {
 		edge := q.pending[0]
 		q.pending = q.pending[1:]
 		q.edges.Unlock()
-		// The lock is retaken by a defer, not after the call: a callback that
-		// panics unwinds through here, and the cleanup above unlocks. Retaking
-		// it on the way out of every callback — returned or panicked — is what
-		// makes that unlock the one that pairs with this Lock.
+		// The lock is retaken by a defer, not after the call: fire contains a
+		// panic, but a future change to it must not be able to leave this
+		// loop, or the cleanup above, holding nothing.
 		func() {
 			defer q.edges.Lock()
-			if edge.fire != nil {
-				edge.fire(edge.depth)
-			}
+			q.fire(edge)
 		}()
 	}
+}
+
+// fire runs one callback with the lock released and a panic contained.
+//
+// The callbacks belong to whoever built the queue, and the goroutine they run
+// on is the feed's delivery path or a worker taking work off it. A callback
+// that panics is a reporting bug; it is not a reason to lose the connection,
+// and it must not leave the queue part-way through an update. The state the
+// callback is told about was committed before it ran, so what it does cannot
+// change it.
+func (q *Queue) fire(edge queueEdge) {
+	defer func() {
+		if p := recover(); p != nil {
+			q.logger().Error("a backlog callback panicked; the queue carried on without it",
+				"panic", richtext.SanitizeSingleLine(fmt.Sprint(p)))
+		}
+	}()
+	if edge.fire != nil {
+		edge.fire(edge.depth)
+	}
+}
+
+func (q *Queue) logger() *slog.Logger {
+	if q.Logger != nil {
+		return q.Logger
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 type queueEdge struct {

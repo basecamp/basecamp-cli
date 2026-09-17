@@ -1,7 +1,9 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -149,32 +151,31 @@ func TestACrossingIsNotLostToAConcurrentTake(t *testing.T) {
 	assert.Zero(t, queue.Depth())
 }
 
+// A callback belongs to whoever built the queue, and a panic in one is a
+// reporting bug — not a reason to lose the feed. It is contained, and the
+// queue's own state is correct afterwards because it was committed before the
+// callback ran.
 func TestAPanickingBacklogCallbackLeavesTheQueueUsable(t *testing.T) {
 	queue, err := NewQueue(1, 4)
 	require.NoError(t, err)
 
-	var recoveries int
-	queue.OnWarn = func(int) { panic("a warning callback panics") }
+	var warnings, recoveries int
+	queue.OnWarn = func(int) { warnings++; panic("a warning callback panics") }
 	queue.OnRecover = func(int) { recoveries++ }
 
-	// The panic belongs to the callback. It must reach the caller, who can
-	// recover it, and not take the process — or the drain — with it.
-	panicked := func() (caught bool) {
-		defer func() { caught = recover() != nil }()
-		require.NoError(t, queue.Offer(context.Background(), 1))
-		return false
-	}()
-	require.True(t, panicked, "the callback's panic should reach the caller")
+	ctx := context.Background()
+	require.NoError(t, queue.Offer(ctx, 1), "the callback's panic is not the offer's failure")
+	assert.Equal(t, 1, warnings)
 
 	// The drain is unlatched and the queue still works: a second id goes in,
 	// both come out, and the recovery edge is delivered.
-	require.NoError(t, queue.Offer(context.Background(), 2))
+	require.NoError(t, queue.Offer(ctx, 2))
 	assert.Equal(t, 2, queue.Depth())
 
-	first, err := queue.Take(context.Background())
+	first, err := queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), first)
-	second, err := queue.Take(context.Background())
+	second, err := queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), second)
 	assert.Equal(t, 0, queue.Depth())
@@ -248,4 +249,53 @@ func TestPauseAndResumeAreObservedInTheOrderTheyHappened(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), third)
 	assert.False(t, queue.Paused())
+}
+
+// A pause callback that panics must leave nothing behind: the id it was
+// waiting for still goes in, the depth is the queue's real depth, the pause
+// lifts, and the next crossing is reported.
+func TestAPanickingPauseCallbackLeavesNoPhantomBacklog(t *testing.T) {
+	queue, err := NewQueue(1, 1)
+	require.NoError(t, err)
+
+	var logs bytes.Buffer
+	queue.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	var pauses, resumes atomic.Int32
+	queue.OnPause = func(int) {
+		if pauses.Add(1) == 1 {
+			panic("a pause callback panics")
+		}
+	}
+	queue.OnResume = func(int) { resumes.Add(1) }
+
+	ctx := context.Background()
+	require.NoError(t, queue.Offer(ctx, 1))
+
+	waiting := make(chan error, 1)
+	go func() { waiting <- queue.Offer(ctx, 2) }()
+	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
+
+	first, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+	require.NoError(t, <-waiting, "the offer the panicking callback announced still completes")
+
+	assert.Equal(t, 1, queue.Depth(), "no phantom item")
+	assert.False(t, queue.Paused(), "no phantom pause")
+	assert.Contains(t, logs.String(), "a backlog callback panicked")
+
+	// And the next crossing is still reported, on both sides.
+	second, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), second)
+	require.NoError(t, queue.Offer(ctx, 3))
+	blocked := make(chan error, 1)
+	go func() { blocked <- queue.Offer(ctx, 4) }()
+	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
+	require.NoError(t, <-blocked)
+	assert.Equal(t, int32(2), pauses.Load())
+	assert.Equal(t, int32(2), resumes.Load())
+	assert.Equal(t, 1, queue.Depth())
 }
