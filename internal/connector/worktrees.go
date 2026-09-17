@@ -33,8 +33,8 @@ import (
 // Each is held by a test in worktrees_test.go.
 //
 //  1. No work is ever deleted by the connector. A worktree is removed only
-//     when it is clean (no modified or untracked file, no operation in
-//     progress, not locked) and every commit it holds — its HEAD and its
+//     when it is clean (no modified, untracked or ignored file, no index
+//     entry hiding its edits, no operation in progress, not locked) and every commit it holds — its HEAD and its
 //     task branch — is the base it was made from or is held by a remote
 //     branch or by a local branch that is not another task's. Any error
 //     while deciding that retains it.
@@ -480,12 +480,29 @@ func (w *Worktrees) inspect(ctx context.Context, r Worktree) (RetainedReason, st
 			return RetainedUnverified, ""
 		}
 	}
-	status, err := w.gitRaw(ctx, r.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none")
+	// Ignored files count: a fresh checkout has none, so any is something
+	// written during the task (a local config, a report), and git's own
+	// removal would delete it without asking.
+	status, err := w.gitRaw(ctx, r.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=none")
 	if err != nil {
 		return RetainedUnverified, ""
 	}
 	if len(status) > 0 {
 		return RetainedDirty, ""
+	}
+	// An index entry marked skip-worktree or assume-unchanged hides its edits
+	// from status.
+	entries, err := w.gitRaw(ctx, r.Path, "ls-files", "-v", "-z")
+	if err != nil {
+		return RetainedUnverified, ""
+	}
+	for entry := range strings.SplitSeq(string(entries), "\x00") {
+		if entry == "" {
+			continue
+		}
+		if tag := entry[0]; tag == 'S' || (tag >= 'a' && tag <= 'z') {
+			return RetainedDirty, ""
+		}
 	}
 
 	head, err := w.gitOut(ctx, r.Path, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")

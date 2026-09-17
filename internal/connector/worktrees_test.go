@@ -173,6 +173,20 @@ func TestUncommittedWorkSurvivesTheTaskAndIsRetained(t *testing.T) {
 			h.git(d, "add", "staged.txt")
 		},
 		"deleted": func(h *worktreeHarness, d string) { require.NoError(h.t, os.Remove(filepath.Join(d, "README"))) },
+		"ignored": func(h *worktreeHarness, d string) {
+			exclude := h.git(d, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+			require.NoError(h.t, os.MkdirAll(filepath.Dir(exclude), 0o700))
+			require.NoError(h.t, os.WriteFile(exclude, []byte("*.local\n"), 0o600))
+			h.write(d, "report.local", "results\n")
+		},
+		"skip-worktree": func(h *worktreeHarness, d string) {
+			h.git(d, "update-index", "--skip-worktree", "README")
+			h.write(d, "README", "hidden edit\n")
+		},
+		"assume-unchanged": func(h *worktreeHarness, d string) {
+			h.git(d, "update-index", "--assume-unchanged", "README")
+			h.write(d, "README", "hidden edit\n")
+		},
 		"merge in progress": func(h *worktreeHarness, d string) {
 			marker := h.git(d, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD")
 			require.NoError(h.t, os.WriteFile(marker, []byte(h.git(d, "rev-parse", "HEAD")+"\n"), 0o600))
