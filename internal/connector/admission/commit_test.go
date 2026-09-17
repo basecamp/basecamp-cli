@@ -1,6 +1,8 @@
 package admission
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -396,7 +398,7 @@ func (stuckWriter) Write([]byte) (int, error) { return 0, nil }
 
 func TestALineIsWrittenWholeOrNotAtAll(t *testing.T) {
 	w := &chunkWriter{chunk: 7}
-	require.NoError(t, (&lineWriter{w: w}).write(Verdict{EventID: 1, EventType: "card.created", State: StateDiscarded, Reason: ReasonNotInMatrix}))
+	require.NoError(t, newLineWriter(nil, w).write(Verdict{EventID: 1, EventType: "card.created", State: StateDiscarded, Reason: ReasonNotInMatrix}))
 	var m map[string]any
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSuffix(w.b.String(), "\n")), &m), "a writer that takes a line in pieces still gets all of it")
 	assert.True(t, strings.HasSuffix(w.b.String(), "}\n"))
@@ -404,7 +406,7 @@ func TestALineIsWrittenWholeOrNotAtAll(t *testing.T) {
 	// Bounded: a writer loop that forgot this case would spin, and should fail
 	// this test by name rather than hang the suite.
 	done := make(chan error, 1)
-	go func() { done <- (&lineWriter{w: stuckWriter{}}).write(Verdict{EventID: 1, State: StateDiscarded}) }()
+	go func() { done <- newLineWriter(nil, stuckWriter{}).write(Verdict{EventID: 1, State: StateDiscarded}) }()
 	select {
 	case err := <-done:
 		require.ErrorIs(t, err, io.ErrShortWrite)
@@ -416,7 +418,7 @@ func TestALineIsWrittenWholeOrNotAtAll(t *testing.T) {
 func TestLinesCannotCarryTerminalControls(t *testing.T) {
 	esc, csi, bel := string(rune(0x1b)), string(rune(0x9b)), string(rune(0x07))
 	var b strings.Builder
-	require.NoError(t, (&lineWriter{w: &b}).write(Verdict{
+	require.NoError(t, newLineWriter(nil, &b).write(Verdict{
 		EventID:      1,
 		EventType:    "card.created" + esc + "]0;owned" + bel,
 		RecordingURL: "https://app.basecamp.com/x" + csi + "31m" + esc + "[2J",
@@ -462,9 +464,65 @@ func TestRunStopsOnALoadFailure(t *testing.T) {
 
 func TestLinesKeepLocalPathsAsWritten(t *testing.T) {
 	var b strings.Builder
-	require.NoError(t, (&lineWriter{w: &b}).write(Verdict{EventID: 1, State: StateAdmitted, Route: " /work/My  Projects\tA", Class: "in ternal"}))
+	require.NoError(t, newLineWriter(nil, &b).write(Verdict{EventID: 1, State: StateAdmitted, Route: " /work/My  Projects\tA", Class: "in ternal"}))
 	var m map[string]any
 	require.NoError(t, json.Unmarshal([]byte(b.String()), &m))
 	assert.Equal(t, " /work/My  Projects\tA", m["route"], "whitespace in a path is not a terminal control")
 	assert.Equal(t, "in ternal", m["class"])
+}
+
+// A sink that is safe for concurrent use, so the only race a run can report is
+// one of admission's own making.
+type lockedSink struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *lockedSink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+// The verdict writer is built before any worker exists. Built on first use, a
+// pool of workers reaching their first lines together would read and assign it
+// at once — a data race on the ordinary path, not an edge case.
+func TestTheVerdictWriterIsBuiltBeforeAnyWorkerWrites(t *testing.T) {
+	sink := &lockedSink{}
+	lines := newLineWriter(nil, sink)
+
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Go(func() {
+			for i := range 25 {
+				require.NoError(t, lines.write(Verdict{
+					EventID:   int64(worker*100 + i),
+					EventType: "comment.created",
+					State:     StateAdmitted,
+				}))
+			}
+		})
+	}
+	wg.Wait()
+
+	scanner := bufio.NewScanner(bytes.NewReader(sink.buf.Bytes()))
+	count := 0
+	for scanner.Scan() {
+		var line map[string]any
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &line), "torn line %d: %q", count, scanner.Text())
+		count++
+	}
+	require.NoError(t, scanner.Err())
+	assert.Equal(t, 200, count)
+}
+
+// One sink has one writer, whoever asks for it: the lock that keeps lines
+// whole is only one lock if there is only one of it.
+func TestOneSinkHasOneWriter(t *testing.T) {
+	sink := &lockedSink{}
+
+	first := newLineWriter(nil, sink)
+	second := newLineWriter(nil, sink)
+
+	assert.Same(t, first.out, second.out)
 }

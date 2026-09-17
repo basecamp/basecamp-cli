@@ -72,7 +72,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	lines := &lineWriter{w: opts.Lines, out: opts.LineWriter}
+	// Built here, before the workers exist, so nothing is initialized on a
+	// path two of them can take at once.
+	lines := newLineWriter(opts.LineWriter, opts.Lines)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -182,22 +184,33 @@ func LineFor(v Verdict) Line {
 	}
 }
 
+// lineWriter is the verdict stream. It holds a writer and nothing else: no
+// flag, no once, no first-use path.
+//
+// It used to build the writer on the first verdict, which is a race the moment
+// admission has more than one worker — two of them reaching their first line
+// together read and assign the same field. Laziness is not a thing to guard
+// here; it is a thing to remove. The writer is built once, before any worker
+// starts, and injected.
 type lineWriter struct {
-	w io.Writer
+	out *ndjson.Writer
+}
 
-	once sync.Once
-	out  *ndjson.Writer
+// newLineWriter takes the writer a caller wiring admission beside intake
+// passes in, or builds one for the sink. There is exactly one writer per sink
+// either way: NewWriter returns the same writer for the same sink, so the one
+// lock is the one lock.
+func newLineWriter(out *ndjson.Writer, sink io.Writer) *lineWriter {
+	if out == nil && sink != nil {
+		out = ndjson.NewWriter(sink)
+	}
+	return &lineWriter{out: out}
 }
 
 func (l *lineWriter) write(v Verdict) error {
-	if l.w == nil && l.out == nil {
+	if l.out == nil {
 		return nil
 	}
-	l.once.Do(func() {
-		if l.out == nil {
-			l.out = ndjson.NewWriter(l.w)
-		}
-	})
 	if err := l.out.WriteLine(LineFor(v)); err != nil {
 		return fmt.Errorf("admission: %w", err)
 	}
