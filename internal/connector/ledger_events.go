@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
@@ -152,9 +154,55 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 	return n, nil
 }
 
+// lifecycle is the ledger's state machine: for each state, the states a record
+// may move to from it.
+//
+// Intake writes only seen; the rest is written by admission and dispatch. The
+// table lives here anyway, because the guarantee it makes is the ledger's: a
+// completed or discarded record is finished, and a store that lets one move
+// back into the working states is a store where an event can be dispatched
+// twice, or where a tombstone whose payload has been dropped is picked up as
+// work with nothing in it.
+//
+// Blocked is not terminal on purpose: it is retained and retried, so it has
+// edges back into the working states. Completed and discarded have none.
+var lifecycle = map[RecordState][]RecordState{
+	StateSeen:       {StateAdmitted, StateBlocked, StateDiscarded},
+	StateAdmitted:   {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
+	StateQueued:     {StateDispatched, StateBlocked, StateDiscarded},
+	StateBlocked:    {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
+	StateDispatched: {StateCompleted, StateBlocked},
+	StateCompleted:  nil,
+	StateDiscarded:  nil,
+}
+
+// enterableFrom is the states a record may be in for a move to target to be
+// allowed, target itself included: writing the state a record already has is a
+// repeat, not a move, so a retry after a crash is not an error.
+func enterableFrom(target RecordState) []string {
+	froms := []string{string(target)}
+	for from, tos := range lifecycle {
+		if slices.Contains(tos, target) {
+			froms = append(froms, string(from))
+		}
+	}
+	// Sorted so the statement is the same every time it is built, whatever
+	// order the map ranges in.
+	slices.Sort(froms)
+	return froms
+}
+
+// ErrNotATransition reports a state change the lifecycle does not have.
+var ErrNotATransition = errors.New("not a transition the ledger's lifecycle allows")
+
 // SetState moves a record to state with a reason, which must be empty for
 // every state but blocked and discarded — those two are the only ones a reason
 // explains.
+//
+// The move is refused unless the lifecycle has that edge, and it is refused by
+// the UPDATE itself rather than by a read before it: a check and a write in
+// two statements is a race, and this is the guarantee that a finished record
+// stays finished.
 func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reason string) error {
 	switch state {
 	case StateBlocked, StateDiscarded:
@@ -169,9 +217,17 @@ func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reas
 		// A state outside the lifecycle is a row no recovery scan looks for.
 		return fmt.Errorf("connector: set state of %d: %q is not a ledger state", id, state)
 	}
-	res, err := l.db.ExecContext(ctx,
-		`UPDATE events SET state = ?, reason = ?, updated_at = ? WHERE id = ?`,
-		string(state), reason, l.timestamp(), id)
+	froms := enterableFrom(state)
+	args := []any{string(state), reason, l.timestamp(), id}
+	for _, from := range froms {
+		args = append(args, from)
+	}
+	// The only thing concatenated is a list of "?" as long as the lifecycle's
+	// own edge list. Every value is bound.
+	//nolint:gosec // G202: placeholders, not values
+	query := `UPDATE events SET state = ?, reason = ?, updated_at = ? WHERE id = ? AND state IN (` +
+		strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + `)`
+	res, err := l.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("connector: set state of %d: %w", id, err)
 	}
@@ -180,9 +236,22 @@ func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reas
 		return fmt.Errorf("connector: set state of %d: %w", id, err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("connector: set state of %d: %w", id, ErrNoSuchRecord)
+		return l.explainRefusal(ctx, id, state)
 	}
 	return nil
+}
+
+// explainRefusal says why an update changed nothing: there is no such record,
+// or the record is somewhere the lifecycle cannot leave for state.
+func (l *Ledger) explainRefusal(ctx context.Context, id int64, state RecordState) error {
+	var current string
+	switch err := l.db.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, id).Scan(&current); {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("connector: set state of %d: %w", id, ErrNoSuchRecord)
+	case err != nil:
+		return fmt.Errorf("connector: set state of %d: %w", id, err)
+	}
+	return fmt.Errorf("connector: set state of %d: %s to %s is %w", id, current, state, ErrNotATransition)
 }
 
 // ErrNoSuchRecord reports a state change addressed at an id the ledger does

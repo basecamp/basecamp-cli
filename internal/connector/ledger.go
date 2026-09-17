@@ -267,6 +267,21 @@ CREATE TABLE gaps (
 	// one and its open losses carry an empty set, which reads as "the
 	// connector's own".
 	`ALTER TABLE losses ADD COLUMN filters TEXT NOT NULL DEFAULT ''`,
+	// Migration 3. Terminal means terminal, in the database and not only in
+	// the code that writes to it. A completed or discarded record that could
+	// be moved back into the working states could be dispatched a second
+	// time, or — once its payload has been dropped and only the tombstone
+	// remains — requeued as work with nothing in it. The Go side refuses
+	// every edge the lifecycle does not have; this refuses the two that
+	// matter to anything that ever writes to this file.
+	`
+CREATE TRIGGER events_terminal_is_terminal
+BEFORE UPDATE OF state ON events
+WHEN OLD.state IN ('completed', 'discarded') AND NEW.state <> OLD.state
+BEGIN
+  SELECT RAISE(ABORT, 'a terminal record cannot change state');
+END;
+`,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

@@ -250,3 +250,100 @@ func TestInvariantH2ConcurrentFreshOpensAllSucceed(t *testing.T) {
 		assert.NoError(t, err)
 	}
 }
+
+// E4: terminal means terminal. A completed or discarded record that could move
+// back into the working states could be dispatched a second time — and once
+// DropContent has taken its payload, requeued as work with nothing in it.
+func TestInvariantE4TerminalRecordsHaveNoWayBack(t *testing.T) {
+	active := []RecordState{StateSeen, StateAdmitted, StateQueued, StateBlocked, StateDispatched}
+	for _, terminal := range []RecordState{StateCompleted, StateDiscarded} {
+		for _, target := range append(active, terminalPeer(terminal)) {
+			t.Run(string(terminal)+" to "+string(target), func(t *testing.T) {
+				ledger := newTestLedger(t)
+				ctx := context.Background()
+				require.NoError(t, reachTerminal(t, ledger, 1, terminal))
+
+				reason := ""
+				if target == StateBlocked || target == StateDiscarded {
+					reason = "a reason"
+				}
+				err := ledger.SetState(ctx, 1, target, reason)
+
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrNotATransition)
+				record, ok, getErr := ledger.Get(ctx, 1)
+				require.NoError(t, getErr)
+				require.True(t, ok)
+				assert.Equal(t, terminal, record.State, "the record stayed where it was")
+			})
+		}
+	}
+}
+
+// Writing the state a record already has is a repeat, not a move: a retry
+// after a crash is not an error, and the record does not leave its state.
+func TestInvariantE4TerminalRecordsTolerateARepeat(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	require.NoError(t, reachTerminal(t, ledger, 1, StateCompleted))
+
+	require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
+
+	record, ok, err := ledger.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, StateCompleted, record.State)
+}
+
+// The refusal is the database's too, so anything that ever writes to this file
+// meets it — not only this package's own SetState.
+func TestInvariantE4TheDatabaseRefusesLeavingATerminalState(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	require.NoError(t, reachTerminal(t, ledger, 1, StateDiscarded))
+
+	_, err := ledger.db.ExecContext(ctx, `UPDATE events SET state = 'seen' WHERE id = 1`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "terminal record")
+}
+
+// A record that does not exist is told apart from a transition that is not
+// allowed: one is a missing row, the other a refusal.
+func TestInvariantE4AMissingRecordIsNotARefusedTransition(t *testing.T) {
+	ledger := newTestLedger(t)
+
+	err := ledger.SetState(context.Background(), 404, StateAdmitted, "")
+
+	assert.ErrorIs(t, err, ErrNoSuchRecord)
+	assert.NotErrorIs(t, err, ErrNotATransition)
+}
+
+// terminalPeer is the other terminal state, so the pairs cover completed to
+// discarded and back.
+func terminalPeer(state RecordState) RecordState {
+	if state == StateCompleted {
+		return StateDiscarded
+	}
+	return StateCompleted
+}
+
+// reachTerminal walks a fresh record to a terminal state along the lifecycle's
+// own edges.
+func reachTerminal(t *testing.T, ledger *Ledger, id int64, terminal RecordState) error {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := ledger.RecordSeen(ctx, testEvent(id), LanePoll); err != nil {
+		return err
+	}
+	if terminal == StateDiscarded {
+		return ledger.SetState(ctx, id, StateDiscarded, "untrusted_author")
+	}
+	if err := ledger.SetState(ctx, id, StateAdmitted, ""); err != nil {
+		return err
+	}
+	if err := ledger.SetState(ctx, id, StateDispatched, ""); err != nil {
+		return err
+	}
+	return ledger.SetState(ctx, id, StateCompleted, "")
+}
