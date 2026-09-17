@@ -117,11 +117,13 @@ def run_case(c, model, skill_text, api_key, verbose: false)
   messages = [{ "role" => "user", "content" => "#{c["task"]}#{context}" }]
   trace = []
   response = ""
+  stop_reason = nil
 
   exhausted = false
   MAX_TURNS.times do |turn|
     resp = api_call(model, system, messages, api_key)
     response = resp["content"].select { |b| b["type"] == "text" }.map { |b| b["text"] }.join("\n")
+    stop_reason = resp["stop_reason"]
     tool_uses = resp["content"].select { |b| b["type"] == "tool_use" }
     break if tool_uses.empty?
 
@@ -136,11 +138,19 @@ def run_case(c, model, skill_text, api_key, verbose: false)
     exhausted = true if turn == MAX_TURNS - 1
   end
 
+  # A reply cut off by the token limit is not a final reply, whatever it
+  # happens to contain.
+  response = nil if stop_reason == "max_tokens"
+
   [trace, response, exhausted]
 end
 
 def grade(c, trace, response = "")
   failures = []
+  if response.nil?
+    failures << "response: the final reply was cut off at max_tokens"
+    response = ""
+  end
 
   (c["accept"] || []).each do |pat|
     unless trace.any? { |t| Regexp.new(pat).match?(t) }

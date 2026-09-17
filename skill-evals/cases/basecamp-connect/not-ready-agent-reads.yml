@@ -28,4 +28,4 @@ reject:
 accept_response:
   - '(?i)bot[- ]user'
   - '(?i)(member|add(ed)? (the agent )?to|on the project|in the project)'
-  - '(?i)(not|n.t)\W+(been\W+)?(written|changed|saved|added|routed)|nothing\W+(was\W+)?(written|changed)|unchanged'
+  - '(?i)(not|n.t)\W+(be(en)?\W+)?(written|write|changed|saved|added|add|routed)\b|nothing\W+(was\W+)?(written|changed)|unchanged'

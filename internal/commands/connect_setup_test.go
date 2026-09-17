@@ -1391,6 +1391,23 @@ func TestConnectShowRefusesAnotherProfilesPolicy(t *testing.T) {
 	assert.NotContains(t, out+buf.String(), `"projects"`)
 }
 
+// A route path is a clean absolute path, which may still hold control
+// characters: human output shows them escaped, never raw.
+func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
+	path := "/home/me/Work/Q3 \x1b[31mred\u009b $launch"
+	f := setup.New("agent")
+	f.AccountID = "999"
+	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
+	f.Trust.OperatorID = 1001
+	f.Projects[222] = admission.Route{Path: path}
+	for _, markdown := range []bool{false, true} {
+		out := connectShowText("agent", "/x/connect.json", f, markdown)
+		assert.NotContains(t, out, "\x1b", "markdown %v", markdown)
+		assert.NotContains(t, out, "\u009b", "markdown %v", markdown)
+		assert.Contains(t, out, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
+	}
+}
+
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
 	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
 	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))

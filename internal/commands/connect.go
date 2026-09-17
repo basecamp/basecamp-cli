@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -172,7 +173,7 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 		// span for Markdown, so nothing in it renders as formatting.
 		shown := strconv.Quote(r.Path)
 		if markdown {
-			shown = markdownCode(r.Path)
+			shown = markdownCode(escapeControls(r.Path))
 		}
 		line := fmt.Sprintf("%d → %s", id, shown)
 		if r.Class != "" {
@@ -186,6 +187,22 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 		} else {
 			fmt.Fprintf(&b, "            %s\n", line)
 		}
+	}
+	return b.String()
+}
+
+// escapeControls writes every control or non-printable rune in s as a Go
+// escape (\x1b, \u009b), so a path can reach a terminal or a pager without
+// a single control byte, and still reads exactly.
+func escapeControls(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) || !unicode.IsPrint(r) {
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+			continue
+		}
+		b.WriteRune(r)
 	}
 	return b.String()
 }

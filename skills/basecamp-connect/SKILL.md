@@ -37,8 +37,8 @@ explain the result. This skill is the reference you do that from.
 
 | Command | Owns | Run it when |
 |---------|------|-------------|
-| `basecamp auth agent connect -P <profile>` | The agent's **credential**, stored under a CLI profile | The profile does not exist yet, or the person agrees to replace its Agent credential |
-| `basecamp connect setup -P <profile>` | **Policy and readiness**: connect.json and the checks | First setup after the credential, and every change to trust or routes |
+| `basecamp auth agent connect -P '<profile>'` | The agent's **credential**, stored under a CLI profile | The profile does not exist yet, or the person agrees to replace its Agent credential |
+| `basecamp connect setup -P '<profile>'` | **Policy and readiness**: connect.json and the checks | First setup after the credential, and every change to trust or routes |
 
 - **Order on first setup:** connect, confirm who the credential is, then setup.
   Setup does not obtain a credential.
@@ -49,7 +49,7 @@ explain the result. This skill is the reference you do that from.
   setup with no flags to check the new credential against connect.json.
   Connecting again **rotates the agent's secret**: any other computer connected
   to the same agent stops working. Do it only when the person agrees.
-- `basecamp connect show -P <profile>` reads back what setup recorded, and
+- `basecamp connect show -P '<profile>'` reads back what setup recorded, and
   changes nothing.
 - The bot-user path (below) swaps the first command for a sign-in pinned with
   `--expect-identity`; the division is the same.
@@ -152,7 +152,7 @@ widens trust.
 | `trust.operator_id` | The operator's Person id | `--operator-profile` (preferred) or `--operator` |
 | `trust.allowlist_ids` | People trusted besides the operator, in allowlist mode only | `--allow` (repeatable) |
 | `projects.<id>.path` | The directory that project's work runs in: absolute, symlinks resolved | `--route '<id>=<dir>'`, `--remove-route <id>` |
-| `projects.<id>.class` | A short label (lowercase letters, digits, `-`, `_`, at most 40) carried on the project's records | `--class '<id>=<class>'`; `--class '<id>='` clears it |
+| `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
 | `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
 | `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
 | `concurrency` | Workers at once, 1 to 32 (default 2) | `--concurrency` |
@@ -223,7 +223,7 @@ could look up:
 Work through these in order, asking only what you cannot find out.
 
 **1. Profile and credential.** Agree on a profile name: letters, digits, `-`
-and `_` only, for example the agent's name. Inspect it (steps 1 to 3 above).
+and `_`, starting with a letter or digit, for example the agent's name. Inspect it (steps 1 to 3 above).
 
 - **The profile does not exist, Agent person** (the normal path): run
   `basecamp auth agent connect -P '<profile>'` as described under Interactive
@@ -270,7 +270,8 @@ pass `--allow <id>` for each.
   (`git -C '<dir>' rev-parse --show-toplevel`).
 - Offer `--watch-completions` only when the person wants the agent to act on
   every completed to-do or card in a project without being assigned. Offer
-  `--class` only when they want projects labelled (for example `internal`).
+  `--class` only when they want projects labelled (for example `internal`; see
+  the connect.json table for what a label may contain).
   Leave `--driver`, `--concurrency` and `--deadline` at their defaults unless
   asked.
 
