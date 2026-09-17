@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 )
 
 // Backlog thresholds. Intake is the only work on the feed's delivery path, so
@@ -23,9 +22,11 @@ const (
 
 // Queue is the seam between intake and admission: intake writes a pointer and
 // hands over an id, admission reads it when it gets there. Two queues with
-// visible depth rather than one pipeline, so a busy dispatcher can never stall
-// the socket — and so the place where work is piling up is the place the depth
-// is showing.
+// visible depth rather than one pipeline, so a busy dispatcher is absorbed up
+// to the pause threshold instead of being felt on the socket — and so the
+// place where work is piling up is the place the depth is showing. At that
+// threshold the offer waits: the backlog is bounded, and the pause is the
+// backpressure reaching the feed, reported rather than hidden.
 type Queue struct {
 	ids    chan int64
 	warnAt int
@@ -47,8 +48,13 @@ type Queue struct {
 	delivering bool
 	// waiting counts offers blocked for room. Intake and every open repair
 	// walk offer concurrently, so a single flag would be cleared by the first
-	// waiter to resume while another — perhaps the feed — still waits.
-	waiting atomic.Int32
+	// waiter to resume while another — perhaps the feed — still waits. It is
+	// held under edges with the depth, because its callbacks go through the
+	// same ordered drain: told out of order, a resume that started first but
+	// finished last leaves the operator reading "resumed" while the feed is
+	// paused.
+	waiting int
+	paused  bool
 
 	// OnWarn fires when the depth first crosses the warning threshold, and
 	// OnRecover when it falls back below. Both are optional.
@@ -92,13 +98,11 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	default:
 	}
 
-	if q.waiting.Add(1) == 1 && q.OnPause != nil {
-		q.OnPause(q.Depth())
-	}
+	q.stageWait(1)
+	q.deliver()
 	defer func() {
-		if q.waiting.Add(-1) == 0 && q.OnResume != nil {
-			q.OnResume(q.Depth())
-		}
+		q.stageWait(-1)
+		q.deliver()
 	}()
 
 	select {
@@ -140,7 +144,11 @@ func (q *Queue) Depth() int {
 
 // Paused reports whether an offer is currently waiting for room — which is to
 // say whether the feed is being consumed.
-func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
+func (q *Queue) Paused() bool {
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	return q.waiting > 0
+}
 
 // afterOp is a test seam: it runs between a channel operation and whatever
 // follows it, which is where a crossing used to be lost.
@@ -175,6 +183,29 @@ func (q *Queue) stage(delta int) {
 	case depth < q.warnAt && q.warned:
 		q.warned = false
 		q.pending = append(q.pending, queueEdge{fire: q.OnRecover, depth: depth})
+	}
+}
+
+// stageWait records an offer starting or finishing its wait for room and the
+// pause edge that crosses, without delivering it.
+//
+// Pause and resume are transitions of the same state as the warning edges, so
+// they are decided under the same lock and delivered by the same drain, in the
+// order they were decided. Fired from the waiting goroutines themselves they
+// could interleave: a resume delayed in its callback could land after a later
+// pause, and an observer would be left believing the feed is being read when
+// it is not.
+func (q *Queue) stageWait(delta int) {
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	q.waiting += delta
+	switch {
+	case q.waiting > 0 && !q.paused:
+		q.paused = true
+		q.pending = append(q.pending, queueEdge{fire: q.OnPause, depth: q.depth})
+	case q.waiting == 0 && q.paused:
+		q.paused = false
+		q.pending = append(q.pending, queueEdge{fire: q.OnResume, depth: q.depth})
 	}
 }
 

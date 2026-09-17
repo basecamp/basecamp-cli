@@ -112,8 +112,10 @@ func LiveOptions(live *eventfeed.Live) Options {
 // Intake is the feed's delivery path: write the pointer, hand over the id.
 //
 // Everything else — reading the recording, judging it, dispatching it — is
-// downstream of the queue, so a slow admission or a busy dispatcher can never
-// stall the socket.
+// downstream of the queue, so a slow admission or a busy dispatcher is
+// absorbed by the backlog rather than felt by the socket — until the backlog
+// reaches its pause threshold, where intake stops reading the feed on purpose
+// rather than let the queue grow without bound.
 type Intake struct {
 	opts    Options
 	ledger  *Ledger

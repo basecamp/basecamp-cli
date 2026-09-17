@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofrs/flock"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // ErrAlreadyRunning reports a second connector for the same agent.
@@ -28,8 +28,8 @@ var ErrAlreadyRunning = errors.New("connector: another connector already holds t
 // stale-lock reaping to get wrong. The metadata written beside it is
 // diagnostic only: the lock is the lock.
 type InstanceLock struct {
-	flock *flock.Flock
-	path  string
+	unlock func() error
+	path   string
 }
 
 // instanceHolder is what a running connector writes beside its lock so the
@@ -51,18 +51,23 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 	// "2914079" are one account and must meet one lock, or the refusal of a
 	// second connector is a matter of how the id was typed.
 	accountID = strconv.FormatUint(account, 10)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("connector: create state directory: %w", err)
-	}
 
 	path := filepath.Join(dir, "instance-"+accountID+"-"+strconv.FormatInt(agentPersonID, 10)+".lock")
-	lock := flock.New(path)
-	held, err := lock.TryLock()
-	if err != nil {
-		return nil, fmt.Errorf("connector: take the instance lock: %w", err)
-	}
-	if !held {
+	// The lock is only a lock if nobody else can reach it. A directory that
+	// merely EXISTS at 0700 is not enough — MkdirAll leaves a group-writable
+	// one exactly as it found it — so the directory, everything above it and
+	// the lock file itself are vetted here, by the same check the connector's
+	// trust file gets. Someone who can write the directory can point two
+	// connectors at two inodes, and then neither excludes the other: one
+	// agent's mentions dispatched twice, which is the failure this lock
+	// exists to prevent.
+	unlock, err := setup.TryLockPrivate(path)
+	switch {
+	case errors.Is(err, setup.ErrLockHeld):
 		return nil, fmt.Errorf("%w: %s", ErrAlreadyRunning, describeHolder(path))
+	case err != nil:
+		// No lock means no connector. There is no degraded mode here.
+		return nil, fmt.Errorf("connector: take the instance lock: %w", err)
 	}
 
 	holder, err := json.Marshal(instanceHolder{
@@ -77,13 +82,13 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 		_ = os.WriteFile(path+".json", append(holder, '\n'), 0o600)
 	}
 
-	return &InstanceLock{flock: lock, path: path}, nil
+	return &InstanceLock{unlock: unlock, path: path}, nil
 }
 
 // Release drops the lock.
 func (l *InstanceLock) Release() error {
 	_ = os.Remove(l.path + ".json")
-	return l.flock.Unlock()
+	return l.unlock()
 }
 
 // Path is the lock file, for diagnostics.

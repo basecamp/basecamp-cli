@@ -180,3 +180,72 @@ func TestAPanickingBacklogCallbackLeavesTheQueueUsable(t *testing.T) {
 	assert.Equal(t, 0, queue.Depth())
 	assert.Equal(t, 1, recoveries, "the drain should still be delivering edges")
 }
+
+// An operator watching the queue must never be told the feed resumed while it
+// is paused. The transitions are delivered in the order they happened, even
+// when an earlier callback is slower than a later transition.
+func TestPauseAndResumeAreObservedInTheOrderTheyHappened(t *testing.T) {
+	queue, err := NewQueue(1, 1)
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var seen []string
+	record := func(what string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, what)
+	}
+	observed := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
+	resumeStarted, holdResume := make(chan struct{}), make(chan struct{})
+	queue.OnPause = func(int) { record("paused") }
+	var firstResume sync.Once
+	queue.OnResume = func(int) {
+		held := false
+		firstResume.Do(func() { held = true; close(resumeStarted) })
+		if held {
+			<-holdResume
+		}
+		record("resumed")
+	}
+
+	ctx := context.Background()
+	require.NoError(t, queue.Offer(ctx, 1))
+
+	var waiters sync.WaitGroup
+	waiters.Add(1)
+	go func() {
+		defer waiters.Done()
+		assert.NoError(t, queue.Offer(ctx, 2)) // waits for room, then resumes
+	}()
+	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
+
+	first, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+	<-resumeStarted // the resume has begun and is not finished
+
+	waiters.Add(1)
+	go func() {
+		defer waiters.Done()
+		assert.NoError(t, queue.Offer(ctx, 3)) // pauses again, mid-resume
+	}()
+	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
+
+	close(holdResume)
+	require.Eventually(t, func() bool { return len(observed()) == 3 }, time.Second, time.Millisecond)
+	assert.Equal(t, []string{"paused", "resumed", "paused"}, observed(),
+		"a resume that started first must not be reported after the pause that followed it")
+
+	second, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), second)
+	waiters.Wait()
+	third, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), third)
+	assert.False(t, queue.Paused())
+}

@@ -7,8 +7,14 @@
 // Feed rows are pointers — id, type, bucket, creator, recording — and nothing
 // else. No title, no body, no URL, no names. Intake writes that pointer to the
 // ledger if the id is new and hands the id to a queue. That is the whole of
-// the work on the feed's delivery path, so a slow admission or a busy
-// dispatcher can never stall the socket.
+// the work on the feed's delivery path: a slow admission or a busy dispatcher
+// is absorbed by the backlog rather than felt by the socket.
+//
+// Absorbed, not unbounded. The backlog is a bounded queue, and at its pause
+// threshold an offer waits for room — which is intake deliberately stopping
+// its read of the feed, so the backlog cannot grow until it is the process's
+// memory that fails. The decoupling holds up to that depth; past it,
+// backpressure is the design, and the pause is reported rather than hidden.
 //
 // Deciding whether an event deserves an agent's attention is admission's job
 // and it costs a read per event it cares about. Intake does none of it. It
