@@ -49,7 +49,17 @@ object per line (events seen, verdicts, dispatches, lifecycle messages;
 never content), and logs
 go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
 shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
-isolated state directory and dispatches nothing. macOS and Linux only.`,
+isolated state directory and dispatches nothing. --hold sets a durable hold:
+intake and admission run, nothing dispatches or posts, and earlier records
+wait for review, until basecamp connect release. macOS and Linux only.
+
+  basecamp connect status             what it heard, holds and ran
+  basecamp connect doctor             what it needs to run
+  basecamp connect redispatch <id>    authorize a record to run
+  basecamp connect discard <id>       close a record without running it
+  basecamp connect release            clear the hold
+  basecamp connect shadow promote     make the shadow ledger the connector's, held
+  basecamp connect import <file>      apply a cutover reconciliation file`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --route 12345=/src/app
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,
@@ -63,9 +73,8 @@ isolated state directory and dispatches nothing. macOS and Linux only.`,
 		},
 	}
 	addConnectRunFlags(cmd, &run)
-	cmd.AddCommand(newConnectSetupCmd())
-	cmd.AddCommand(newConnectWorkerMCPCmd())
-	cmd.AddCommand(newConnectShowCmd())
+	cmd.AddCommand(newConnectSetupCmd(), newConnectWorkerMCPCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
+		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
 	return cmd
 }
 

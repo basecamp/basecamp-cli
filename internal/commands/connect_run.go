@@ -38,6 +38,7 @@ type connectRunFlags struct {
 	shadow   bool
 	since    int64
 	driver   string
+	hold     bool
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -48,6 +49,7 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn)")
+	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until `basecamp connect release`, and earlier records wait for review")
 }
 
 // connectStateHome is the directory holding the connector's state root, from
@@ -88,13 +90,28 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return ensurePrivateChain(stateHome, connectStateParts(file, shadow)...)
+}
+
+// connectStatePath is connectStateDir's path, created nothing: for commands
+// that only read the connector's state, and must not make a directory to do
+// it.
+func connectStatePath(file setup.File, shadow bool) (string, error) {
+	stateHome, err := connectStateHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{stateHome}, connectStateParts(file, shadow)...)...), nil
+}
+
+func connectStateParts(file setup.File, shadow bool) []string {
 	group := "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return ensurePrivateChain(stateHome, "basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID)}
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
@@ -237,6 +254,21 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	defer func() { _ = ledger.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	if f.hold {
+		// Before intake starts: nothing this run admits may dispatch ahead of
+		// the marker.
+		held, err := ledger.SetHold(ctx, operatorName(), connector.HoldByOperator)
+		if err != nil {
+			return err
+		}
+		logger.Info("connector: held", "generation", held.Hold.Generation, "tagged_for_review", held.Tagged, "held", held.Held)
+	}
+	if hold, ok, err := ledger.HoldMarker(ctx); err != nil {
+		return err
+	} else if ok {
+		logger.Warn("connector: the hold stands; nothing is dispatched or posted until `basecamp connect release`",
+			"since", hold.HeldAt, "by", richtext.SanitizeSingleLine(hold.HeldBy))
+	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
 
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)

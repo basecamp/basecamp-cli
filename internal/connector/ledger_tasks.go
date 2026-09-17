@@ -890,7 +890,9 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 }
 
 // StartableRecords returns up to limit records waiting for a worker, the
-// oldest per conversation, oldest first, whatever their route.
+// oldest per conversation, oldest first, whatever their route. While the hold
+// marker stands there are none: the database would refuse their launch
+// (ledger_hold.go).
 func (l *Ledger) StartableRecords(ctx context.Context, limit int) ([]Record, error) {
 	return l.startable(ctx, "", nil, limit)
 }
@@ -945,6 +947,7 @@ func (l *Ledger) startable(ctx context.Context, extra string, args []any, limit 
 SELECT MIN(e.id) FROM events e
 WHERE ` + startableCondition + extra + `
   AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.ended_at IS NULL AND t.conversation_key = e.conversation_key)
+  AND NOT EXISTS (SELECT 1 FROM hold_marker)
 GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
 	rows, err := l.db.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {

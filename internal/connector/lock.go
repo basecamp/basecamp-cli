@@ -105,3 +105,29 @@ func describeHolder(path string) string {
 	}
 	return fmt.Sprintf("held by pid %d since %s", holder.PID, holder.StartedAt)
 }
+
+// InstanceHolderInfo is what a running connector wrote beside its lock.
+type InstanceHolderInfo struct {
+	PID       int
+	StartedAt string
+}
+
+// InstanceHolder reads what a connector holding the lock in dir wrote about
+// itself, without taking the lock: status must not make a starting connector
+// find its own lock held. It is diagnostic, and can be stale after a crash.
+func InstanceHolder(dir, accountID string, agentPersonID int64) (InstanceHolderInfo, bool) {
+	account, err := strconv.ParseUint(accountID, 10, 64)
+	if err != nil || account == 0 || agentPersonID <= 0 {
+		return InstanceHolderInfo{}, false
+	}
+	path := filepath.Join(dir, "instance-"+strconv.FormatUint(account, 10)+"-"+strconv.FormatInt(agentPersonID, 10)+".lock.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return InstanceHolderInfo{}, false
+	}
+	var holder instanceHolder
+	if err := json.Unmarshal(raw, &holder); err != nil || holder.PID <= 0 {
+		return InstanceHolderInfo{}, false
+	}
+	return InstanceHolderInfo{PID: holder.PID, StartedAt: holder.StartedAt}, true
+}
