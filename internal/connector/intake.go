@@ -167,6 +167,12 @@ type Intake struct {
 
 	repairs     sync.WaitGroup
 	repairQueue chan Loss
+	// repairQueueSize and repairSweep override the pool's defaults in tests.
+	repairQueueSize int
+	repairSweep     time.Duration
+	// inFlight is the losses a worker is walking or the queue is holding, so
+	// the sweeper does not offer one twice.
+	inFlight map[int64]bool
 	// lifetime is Run's context. Repair walks are bound to it rather than to
 	// a connection, so a reconnect does not abandon a walk and a shutdown does
 	// not strand Run waiting on one — an unfinished walk simply resumes on the
@@ -829,10 +835,26 @@ func (in *Intake) startRepair(loss Loss) {
 		in.log.Warn("no repair workers are running; this loss stays open for the next start", "loss_id", loss.ID)
 		return
 	}
+	in.mu.Lock()
+	if in.inFlight == nil {
+		in.inFlight = make(map[int64]bool)
+	}
+	if in.inFlight[loss.ID] {
+		in.mu.Unlock()
+		return
+	}
+	in.inFlight[loss.ID] = true
+	in.mu.Unlock()
+
 	select {
 	case queue <- loss:
 	default:
-		in.log.Warn("the repair queue is full; this loss stays open for the next start", "loss_id", loss.ID)
+		// No room now. The sweeper offers it again, so a loss is never left
+		// with nothing that will attempt it.
+		in.mu.Lock()
+		delete(in.inFlight, loss.ID)
+		in.mu.Unlock()
+		in.log.Warn("the repair queue is full; this loss is left for the sweep", "loss_id", loss.ID)
 	}
 }
 
@@ -847,14 +869,55 @@ func (in *Intake) startRepairWorkers(ctx context.Context) {
 		in.mu.Unlock()
 		return
 	}
-	queue := make(chan Loss, repairQueueDepth)
+	size := in.repairQueueSize
+	if size <= 0 {
+		size = repairQueueDepth
+	}
+	queue := make(chan Loss, size)
 	in.repairQueue = queue
 	in.mu.Unlock()
 	for range maxConcurrentRepairs {
 		in.repairs.Add(1)
 		go in.repairWorker(ctx, queue)
 	}
+	in.repairs.Add(1)
+	go in.sweepLosses(ctx)
 }
+
+// sweepLosses offers every open loss nothing is already walking.
+//
+// The queue is bounded, so an overloaded connector can turn one away; and a
+// walk can end early, leaving its loss open. Neither may leave a loss with
+// nothing that will attempt it again, and waiting for a restart is not an
+// answer for a connector that runs for weeks. The sweep is what closes that:
+// every open loss is either being walked, or is offered again here.
+func (in *Intake) sweepLosses(ctx context.Context) {
+	defer in.repairs.Done()
+	every := in.repairSweep
+	if every <= 0 {
+		every = defaultRepairSweep
+	}
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			losses, err := in.ledger.OpenLosses(ctx)
+			if err != nil {
+				in.log.Warn("could not read the open losses", "error", err)
+				continue
+			}
+			for _, loss := range losses {
+				in.startRepair(loss)
+			}
+		}
+	}
+}
+
+// defaultRepairSweep is how often the open losses are re-offered.
+const defaultRepairSweep = time.Minute
 
 // releaseRepairWorkers forgets a pool whose workers have stopped, so the next
 // Run starts its own. A queue left in place would take losses nobody walks,
@@ -884,6 +947,11 @@ func (in *Intake) repairWorker(ctx context.Context, queue chan Loss) {
 }
 
 func (in *Intake) runRepair(ctx context.Context, loss Loss) {
+	defer func() {
+		in.mu.Lock()
+		delete(in.inFlight, loss.ID)
+		in.mu.Unlock()
+	}()
 	walker := &repairWalker{
 		ledger:   in.ledger,
 		polls:    in.opts.PollsFor(),

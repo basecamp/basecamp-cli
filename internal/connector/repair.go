@@ -60,9 +60,9 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 		if !w.now().Before(loss.DeadlineAt) {
 			// Past the window already — perhaps across restarts whose walks
 			// each ended in a failure no retry fixes. One last pass is still
-			// worth trying; after it, the loss closes either way.
-			err := w.finalPass(ctx, &loss)
-			return err
+			// worth trying; after it the loss closes, unless the server
+			// refused that attempt too.
+			return w.finalPass(ctx, &loss)
 		}
 
 		done, err := w.settled(ctx, loss)
@@ -86,22 +86,6 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 			return err
 		}
 
-		if !w.now().Before(loss.DeadlineAt) {
-			// The window is closed. What is still missing is a late
-			// straggler, a recording deleted before it became poll-visible,
-			// or history behind the epoch. It is recorded as unrecovered and
-			// shown by status — the poll lane may still serve it later, and
-			// intake resolves it then like any other event.
-			unrecovered, err := w.ledger.CloseLoss(ctx, loss.ID, w.now())
-			if err != nil {
-				return err
-			}
-			if unrecovered > 0 {
-				w.log.Error("a buffer overflow left events unrecovered", "loss_id", loss.ID, "unrecovered", unrecovered)
-			}
-			return nil
-		}
-
 		// A missing id the walk did not serve is NOT yet a gap: `next` can end
 		// while an event is still inside the poll lane's safety delay. The
 		// walk repeats on the repair cadence until the window closes — or
@@ -110,11 +94,30 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 		if w.retryAfter > wait {
 			wait = w.retryAfter
 		}
-		w.retryAfter = 0
+		if w.retryAfter > 0 {
+			if err := w.postpone(ctx, &loss); err != nil {
+				return err
+			}
+		}
 		if err := w.wait(ctx, wait); err != nil {
 			return err
 		}
 	}
+}
+
+// postpone moves a loss's window out by the wait the server asked for.
+//
+// This is the whole rule for a throttle, in one place: it is not a failure and
+// not a verdict, and the time it costs belongs to the server, not to the loss.
+// The window therefore never runs out while a server is asking for patience,
+// and a throttled attempt never condemns an id.
+func (w *repairWalker) postpone(ctx context.Context, loss *Loss) error {
+	extended := loss.DeadlineAt.Add(w.retryAfter)
+	if err := w.ledger.ExtendLossDeadline(ctx, loss.ID, extended); err != nil {
+		return err
+	}
+	loss.DeadlineAt = extended
+	return nil
 }
 
 // finalPass runs one walk for a loss past its window and then closes it,
@@ -126,13 +129,24 @@ func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
 	if _, err := w.walk(ctx, loss); err != nil && !errors.Is(err, errReconciliationEnded) {
 		return err
 	}
+	if done, err := w.settled(ctx, *loss); err != nil || done {
+		return err
+	}
 	if w.retryAfter > 0 {
-		// The server refused the only attempt this pass had and named a wait.
-		// Nothing was learned about the missing ids, and a throttle is not a
-		// verdict: the loss stays open and the next start tries again.
-		w.log.Warn("the last repair attempt was throttled; the loss stays open for the next start",
-			"loss_id", loss.ID, "retry_after", w.retryAfter)
-		return nil
+		// The server refused this attempt and named a wait, so there is
+		// nothing to conclude about the ids. The window moves out by the wait
+		// and the loss is walked again.
+		wait := w.retryAfter
+		if err := w.postpone(ctx, loss); err != nil {
+			return err
+		}
+		w.retryAfter = 0
+		w.log.Warn("the last repair attempt was throttled; waiting as the server asked and trying again",
+			"loss_id", loss.ID, "retry_after", wait)
+		if err := w.wait(ctx, wait); err != nil {
+			return err
+		}
+		return w.reconcile(ctx, *loss)
 	}
 	if err := ctx.Err(); err != nil {
 		// The final attempt did not run to its end; closing now would condemn

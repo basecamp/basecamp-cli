@@ -170,24 +170,41 @@ func TestARepairWalkHonoursRetryAfter(t *testing.T) {
 		"the server asked for fifteen minutes; the repair cadence does not overrule it")
 }
 
-// C2: a throttle is not a verdict. A final pass whose only poll was refused
-// with Retry-After has learned nothing about the missing ids, so the loss
-// stays open for the next start rather than closing them as unrecovered.
-func TestAThrottledFinalPassLeavesTheLossOpen(t *testing.T) {
+// C2: a throttle is not a verdict. A server that only ever asks for patience
+// can never turn a loss into unrecovered ids, however long its window has been
+// over: the wait is the server's time, not the loss's.
+func TestAPermanentlyThrottlingServerNeverCondemnsALoss(t *testing.T) {
 	ledger := newTestLedger(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
 	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-time.Hour), time.Minute, eventfeed.Filters{})
 	require.NoError(t, err)
 
-	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}}}
+	polls := &alwaysThrottling{}
 	walker, _ := newTestWalker(t, ledger, polls, clock)
-	require.NoError(t, walker.reconcile(ctx, loss))
+	waits := 0
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		clock.at = clock.at.Add(d)
+		if waits++; waits >= 5 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}
+	require.ErrorIs(t, walker.reconcile(ctx, loss), context.Canceled)
 
-	open, err := ledger.OpenLosses(ctx)
+	open, err := ledger.OpenLosses(context.Background())
 	require.NoError(t, err)
-	assert.Len(t, open, 1, "the window closed, but nothing was learned about the ids")
-	unrecovered, err := ledger.UnrecoveredIDs(ctx)
+	require.Len(t, open, 1, "still scheduled, never condemned")
+	assert.True(t, open[0].DeadlineAt.After(loss.DeadlineAt), "the window moved out by what the server asked for")
+	unrecovered, err := ledger.UnrecoveredIDs(context.Background())
 	require.NoError(t, err)
-	assert.Empty(t, unrecovered, "a throttle is not a verdict")
+	assert.Empty(t, unrecovered)
+}
+
+type alwaysThrottling struct{}
+
+func (alwaysThrottling) Poll(context.Context, eventfeed.Cursor, eventfeed.Filters) (eventfeed.PollPage, error) {
+	return eventfeed.PollPage{}, &eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}
 }

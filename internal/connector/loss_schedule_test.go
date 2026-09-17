@@ -1,0 +1,74 @@
+package connector
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+)
+
+// C2: a loss is always somewhere — repaired, scheduled for another attempt, or
+// closed with a reason. Waiting on a server's own delay is not spending the
+// window, so a throttle can neither condemn the ids nor run the clock out.
+func TestAThrottleDoesNotSpendTheLossWindow(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	// A window with a minute left, and a server asking for fifteen.
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-9*time.Minute), 10*time.Minute, eventfeed.Filters{})
+	require.NoError(t, err)
+	before := loss.DeadlineAt
+
+	// Two refusals, each longer than what is left of the window, then the
+	// page. Only a window that does not spend on the server's own delays
+	// still has attempts left by then.
+	throttle := &eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}
+	polls := &scriptedPolls{
+		errs:  []error{throttle, throttle},
+		pages: []eventfeed.PollPage{{}, {}, {Events: []eventfeed.Event{testEvent(17099838509)}, Position: "p"}},
+	}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		clock.at = clock.at.Add(d)
+		return nil
+	}
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	unrecovered, err := ledger.UnrecoveredIDs(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, unrecovered, "the server refused the attempt; it says nothing about the ids")
+	recovered, err := ledger.MissingIDs(ctx, loss.ID, LossRecovered)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{17099838509}, recovered, "the retry after the wait found it")
+	_ = before
+}
+
+// C2: a loss the repair queue had no room for is swept back in, without
+// waiting for a restart.
+func TestALossSkippedByAFullQueueIsSweptBackIn(t *testing.T) {
+	polls := &countingPolls{}
+	intake, ledger, _ := newTestIntake(t, polls, nil)
+	intake.opts.RepairInterval = time.Hour
+	intake.repairQueueSize = 1
+	intake.repairSweep = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for i := range 6 {
+		_, err := ledger.RecordLoss(ctx, []int64{int64(2000 + i)}, intake.now().Add(-time.Hour), time.Minute, eventfeed.Filters{})
+		require.NoError(t, err)
+	}
+	require.NoError(t, intake.resumeReconciliation(ctx))
+
+	require.Eventually(t, func() bool {
+		open, err := ledger.OpenLosses(context.Background())
+		return err == nil && len(open) == 0
+	}, 10*time.Second, 20*time.Millisecond, "every open loss is eventually attempted, queue or no queue")
+
+	cancel()
+	intake.repairs.Wait()
+}

@@ -257,6 +257,17 @@ func (l *Ledger) MissingIDs(ctx context.Context, lossID int64, state LossState) 
 	return ids, rows.Err()
 }
 
+// ExtendLossDeadline pushes a loss's window out, for time the walk spent
+// waiting on the server rather than working.
+func (l *Ledger) ExtendLossDeadline(ctx context.Context, lossID int64, deadline time.Time) error {
+	_, err := l.db.ExecContext(ctx,
+		`UPDATE losses SET deadline_at = ? WHERE id = ?`, stamp(deadline.UTC()), lossID)
+	if err != nil {
+		return fmt.Errorf("connector: extend loss deadline: %w", err)
+	}
+	return nil
+}
+
 // SaveRepairCursor records where the repair walk has reached.
 //
 // This is the walk's own cursor and it is stored on the loss, never on the
