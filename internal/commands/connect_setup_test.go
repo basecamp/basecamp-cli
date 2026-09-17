@@ -1289,6 +1289,10 @@ func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
 	assert.Equal(t, before, after, "show changes nothing")
 }
 
+// A profile that exists and has never been set up is not found. A profile
+// that does not exist at all never reaches this command: the root refuses an
+// unknown -P for every command, which is what tells a typo from a profile
+// with no connector policy.
 func TestConnectShowOnAProfileNeverSetUpIsNotFound(t *testing.T) {
 	s := startConnectSetupServer(t)
 	app := connectSetupApp(t, s, "agent")

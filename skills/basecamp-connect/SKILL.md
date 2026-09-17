@@ -207,7 +207,9 @@ could look up:
    file through the same safety checks the connector uses, and refuses a
    symlink, a file anyone else could have changed, one that does not parse, or
    one that names another profile.
-   A `not_found` error means the profile has never been set up. **Never read
+   A `not_found` error means the profile exists and has never been set up; an
+   `unknown profile` error (`api_error`) means no such profile, which is also
+   what every other command says about it. **Never read
    connect.json directly** (no `cat`, no file read): that skips those checks.
    To tell the person which projects are routed, look each id up under the
    agent's profile (`basecamp projects show <id> -P '<profile>' --json`); if that

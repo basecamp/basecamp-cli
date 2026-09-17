@@ -62,6 +62,10 @@ regular file, could have been changed by another user, or does not parse.
 Nothing is changed and nothing is fetched: show reads no credential and
 makes no request. To check readiness, run setup again.
 
+A profile that does not exist is refused before this runs, naming the
+profiles there are, as it is for every command; a profile that exists and
+has never been set up is reported as not found.
+
 Examples:
   basecamp connect show -P agent
   basecamp connect show -P agent --json`,
