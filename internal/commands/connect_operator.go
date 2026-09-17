@@ -211,6 +211,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	ledger, err := connector.OpenLedgerReadOnly(cmd.Context(), filepath.Join(dir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
+		if shadow {
+			return output.ErrUsageHint(fmt.Sprintf("Profile %q has no shadow ledger", p.name), "Run the shadow connector first: basecamp connect -P "+shellQuote(p.name)+" --shadow")
+		}
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
 	}
 	if err != nil {

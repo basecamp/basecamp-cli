@@ -393,14 +393,44 @@ is bound to account X, and this command named account Y* (drop `--account`), and
 *Profile holds a person's login, not an Agent's credential* (either it is a bot
 user and needs `--expect-identity`, or the wrong login is stored: ask).
 
+## Seeing and deciding what the connector ran
+
+These read or change the connector's own ledger for a set-up profile. They are
+the person's decisions, so run the deciding ones only when the person asks for
+that record or that step.
+
+- `basecamp connect status -P '<profile>'` (`--shadow` for a shadow run's
+  ledger; `--json` for fields): whether it runs, the hold, the feed position
+  (held or not, never the position), gaps, queues, live tasks and their workers,
+  lifecycle messages waiting for a person, held records, the last dispatches.
+  Read-only and safe while the connector runs. It shows no content.
+- `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
+  poll, the ledger, the worker binary, and a handshake with the agent's MCP
+  server. Nothing is written or posted.
+- `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
+  run again or for the first time. Accepted for an unknown or failed outcome, a
+  blocked record and a held one; refused for a success, a discarded record and
+  anything live. It stops the replaced worker only when that process is
+  provably still it, and says what became of it.
+- `basecamp connect discard -P '<profile>' <event_id>`: close a held, blocked
+  or unknown record without running it.
+- `basecamp connect -P '<profile>' --hold` starts the connector held: nothing
+  dispatches or posts, and earlier records wait for review.
+  `basecamp connect release -P '<profile>'` clears the hold; held records stay
+  held until each is redispatched or discarded.
+- Cutover only, with both the shadow run and the connector stopped:
+  `basecamp connect shadow promote -P '<profile>'` makes the shadow ledger the
+  connector's, held, and `basecamp connect import -P '<profile>' <file>`
+  applies a reconciliation file. Run these only when the person is doing a
+  cutover and asks for them.
+
 ## Not built yet
 
-Setup is all there is today. These come with card 24, behind step 21, and do not
-exist in the CLI yet, so do not try them or look for flags for them:
+These come with card 24 and do not exist in the CLI yet, so do not try them or
+look for flags for them:
 
-- starting and supervising the connector, and reading its pointer lines;
+- supervising the connector from this skill, and reading its pointer lines;
 - a `service install` subcommand that keeps it running under systemd or launchd;
-- status, doctor and redispatch commands for the connector;
 - the Claude Code and Codex plugins that start it.
 
 When the person asks to start the connector, say plainly that setup is done (or

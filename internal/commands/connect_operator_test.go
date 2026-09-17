@@ -367,3 +367,10 @@ func TestImportRunsOnALedgerOlderThanTheBuild(t *testing.T) {
 	assert.NotContains(t, err.Error(), "already holds this account")
 	assert.NotContains(t, err.Error(), "Stop the connector")
 }
+
+func TestConnectStatusOnAMissingShadowLedgerPointsAtTheShadowRun(t *testing.T) {
+	f := newOperatorFixture(t)
+	_, err := f.run(t, output.FormatJSON, "status", "--shadow")
+	require.Error(t, err)
+	assert.Contains(t, usageError(t, err).Hint, "--shadow")
+}
