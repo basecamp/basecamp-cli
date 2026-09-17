@@ -244,6 +244,14 @@ func TestConnectDoctorWorkerBinaries(t *testing.T) {
 	checks := driverChecks(connectProfile{name: "agent", file: file})
 	require.Len(t, checks, 1)
 	assert.Equal(t, setup.StatusFail, checks[0].Status, "a driver the run command refuses is not ready")
+
+	// Worktrees are the run command's other refusal.
+	worktrees := setup.New("agent")
+	worktrees.Worktrees = true
+	checks = driverChecks(connectProfile{name: "agent", file: worktrees})
+	require.Len(t, checks, 1)
+	assert.Equal(t, "Worktrees", checks[0].Name)
+	assert.Equal(t, setup.StatusFail, checks[0].Status, "what the connector refuses to start with is not ready")
 }
 
 func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {

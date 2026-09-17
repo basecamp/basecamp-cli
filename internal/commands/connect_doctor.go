@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -201,13 +202,23 @@ func workerBinaryChecks(file setup.File) []setup.Check {
 	return checks
 }
 
-// driverChecks refuses a driver the run command refuses: doctor never calls a
+// driverChecks refuses what the run command refuses: doctor never calls a
 // connector ready that would not start.
 func driverChecks(p connectProfile) []setup.Check {
-	if p.file.Driver == setup.DriverSpawn {
-		return nil
+	var checks []setup.Check
+	if !connectSupportedOS(runtime.GOOS) {
+		checks = append(checks, setup.Check{Name: "Platform", Status: setup.StatusFail,
+			Message: fmt.Sprintf("The connector does not run on %s: it ends a worker by its process group and start time, which macOS and Linux alone can say", runtime.GOOS)})
 	}
-	return []setup.Check{{Name: "Driver", Status: setup.StatusFail,
-		Message: fmt.Sprintf("Driver %q is not available yet; the connector runs %q", p.file.Driver, setup.DriverSpawn),
-		Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --driver spawn"}}
+	if p.file.Driver != setup.DriverSpawn {
+		checks = append(checks, setup.Check{Name: "Driver", Status: setup.StatusFail,
+			Message: fmt.Sprintf("Driver %q is not available yet; the connector runs %q", p.file.Driver, setup.DriverSpawn),
+			Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --driver spawn"})
+	}
+	if p.file.Worktrees {
+		checks = append(checks, setup.Check{Name: "Worktrees", Status: setup.StatusFail,
+			Message: "connect.json asks for worktrees, which this basecamp does not support yet, and the connector refuses to start with them",
+			Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --worktrees=false"})
+	}
+	return checks
 }
