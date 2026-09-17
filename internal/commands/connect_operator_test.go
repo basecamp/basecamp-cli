@@ -317,5 +317,28 @@ func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
 
 	_, err = f.run(t, output.FormatJSON, "release")
 	require.Error(t, err)
-	assert.Contains(t, usageError(t, err).Message, "older ledger schema")
+	assert.Contains(t, usageError(t, err).Message, "older than this build")
+}
+
+// The migration guard is the lock itself, not the metadata beside it: a
+// connector whose lock file carries nothing still stops the migration.
+func TestTheMigrationGuardIsTheLockNotItsMetadata(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	dir, err := connectStatePath(f.file, false)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	_, err = db.ExecContext(context.Background(), `DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	defer func() { _ = lock.Release() }()
+	require.NoError(t, os.Remove(lock.Path()+".json"), "the holder's metadata is best-effort and may be missing")
+
+	_, err = f.run(t, output.FormatJSON, "release")
+	require.Error(t, err)
+	assert.Contains(t, usageError(t, err).Message, "older than this build")
 }

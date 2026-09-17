@@ -87,37 +87,52 @@ func parseEventIDArg(raw string) (int64, error) {
 }
 
 // openConnectLedger opens the connector's ledger for a decision. It must
-// already exist: a decision is about records the connector wrote.
-func openConnectLedger(p connectProfile) (*connector.Ledger, error) {
+// already exist: a decision is about records the connector wrote. The returned
+// func releases whatever the open holds, and is never nil.
+func openConnectLedger(p connectProfile) (*connector.Ledger, func(), error) {
+	done := func() {}
 	dir, err := connectStatePath(p.file, false)
 	if err != nil {
-		return nil, err
+		return nil, done, err
 	}
 	path := filepath.Join(dir, connector.LedgerFile)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
+		return nil, done, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
 	}
-	// Opening for a decision migrates the ledger. A connector already running
-	// on an older binary's schema must not have its triggers replaced under
-	// it: it is stopped first.
+	// Opening for a decision migrates the ledger, and a connector running on
+	// an older binary's schema must not have its triggers replaced under it.
+	// The instance lock is what says no connector is running — the metadata
+	// beside it is diagnostic — so it is taken before the migration and held
+	// until the ledger is closed.
 	if reader, err := connector.OpenLedgerReadOnly(context.Background(), path); err == nil {
 		_ = reader.Close()
 	} else if errors.Is(err, connector.ErrLedgerOutOfDate) {
-		if holder, running := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); running && processAlive(holder.PID) {
-			return nil, output.ErrUsageHint(
-				fmt.Sprintf("The connector (pid %d) is running on an older ledger schema, and this command would migrate it under it", holder.PID),
+		lock, lockErr := connector.AcquireInstanceLock(dir, p.file.AccountID, p.file.Agent.PersonID, time.Now())
+		switch {
+		case errors.Is(lockErr, connector.ErrAlreadyRunning):
+			return nil, done, output.ErrUsageHint(
+				"The connector is running on a ledger older than this build, and this command would migrate it underneath it: "+lockErr.Error(),
 				"Stop the connector, run this command, and start it again.")
+		case lockErr != nil:
+			return nil, done, lockErr
 		}
+		done = func() { _ = lock.Release() }
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, done, err
 	}
 	ledger, err := connector.OpenLedger(path)
 	if err != nil {
-		return nil, err
+		done()
+		return nil, func() {}, err
 	}
 	// A verdict a redispatch writes calls for the lifecycle messages a running
 	// connector's verdict would: the same intents, which the connector's outbox
 	// sends.
 	ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
-	return ledger, nil
+	return ledger, func() {
+		_ = ledger.Close()
+		done()
+	}, nil
 }
 
 func decisionError(err error) error {
@@ -374,11 +389,11 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	if err != nil {
 		return err
 	}
-	ledger, err := openConnectLedger(p)
+	ledger, done, err := openConnectLedger(p)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = ledger.Close() }()
+	defer done()
 
 	res, err := ledger.Redispatch(ctx, id, operatorName())
 	if err != nil {
@@ -542,11 +557,11 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 			if err != nil {
 				return err
 			}
-			ledger, err := openConnectLedger(p)
+			ledger, done, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = ledger.Close() }()
+			defer done()
 			res, err := ledger.Discard(cmd.Context(), id, operatorName())
 			if err != nil {
 				return decisionError(err)
@@ -576,11 +591,11 @@ held records stay held until each is redispatched or discarded.`,
 			if err != nil {
 				return err
 			}
-			ledger, err := openConnectLedger(p)
+			ledger, done, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = ledger.Close() }()
+			defer done()
 			res, err := ledger.Release(cmd.Context(), operatorName())
 			if err != nil {
 				return err
@@ -707,11 +722,11 @@ The file is JSON:
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			ledger, err := openConnectLedger(p)
+			ledger, done, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}
-			defer func() { _ = ledger.Close() }()
+			defer done()
 			res, err := ledger.Import(cmd.Context(), r, operatorName())
 			if err != nil {
 				return decisionError(err)

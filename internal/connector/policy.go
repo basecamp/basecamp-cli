@@ -87,6 +87,12 @@ func (p Policy) inside(locations []string) bool {
 		return false
 	}
 	for _, loc := range locations {
+		if strings.TrimSpace(loc) == "" {
+			// A location that names nothing resolves to the working directory
+			// itself, which would let a request that named no path pass as one
+			// inside it.
+			return false
+		}
 		if !filepath.IsAbs(loc) {
 			loc = filepath.Join(p.WorkDir, loc)
 		}
