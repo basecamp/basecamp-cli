@@ -1,10 +1,12 @@
 package drivertest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
@@ -88,4 +90,30 @@ func RequireRedacted(t *testing.T, secret string, paths []RedactionPath) {
 			}
 		})
 	}
+}
+
+// Refusals is a driver.RefusalRecorder that keeps what it is told, for a
+// driver's test of the refusal rule (driver's "Refusals"): every refusal
+// recorded once, at the moment it is read, including one a worker that died
+// before its result never repeated.
+type Refusals struct {
+	mu    sync.Mutex
+	calls []driver.Refusal
+}
+
+var _ driver.RefusalRecorder = (*Refusals)(nil)
+
+// RecordRefusal implements driver.RefusalRecorder.
+func (r *Refusals) RecordRefusal(_ context.Context, refusal driver.Refusal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, refusal)
+	return nil
+}
+
+// Recorded is every refusal recorded so far, in order.
+func (r *Refusals) Recorded() []driver.Refusal {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.calls)
 }

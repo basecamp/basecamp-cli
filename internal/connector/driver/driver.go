@@ -29,9 +29,11 @@
 //     the host's own configuration.
 //  3. A refusal is the driver's own record. A policy refusal is not
 //     distinguishable from a cancel by the agent's stop reason, so every
-//     refusal the driver made or observed is reported as a Refusal on the
-//     prompt's result and as an update, and a stop the connector did not ask
-//     for is never reported as TurnCanceled.
+//     refusal the driver made or observed is recorded once, through
+//     SessionConfig.Refusals, at the moment it is made or observed; it is
+//     reported as well as a Refusal on the prompt's result and as an update;
+//     and a stop the connector did not ask for is never reported as
+//     TurnCanceled. See "Refusals" below.
 //  4. ErrNotStarted means no worker process ever existed. It is the only
 //     start error after which the connector retries on its own, so a driver
 //     returns it only when it can prove nothing ran; any doubt is some other
@@ -46,7 +48,36 @@
 //  6. Content stays in the stream. Updates carry kinds, ids, tool names and
 //     counts; they never carry the agent's text or a tool's input, so a sink
 //     that logs an update cannot log content. What a sink does log from an
-//     agent stream goes through Redact.
+//     agent stream goes through the redaction rule (redact.go).
+//
+// # Refusals: where one is recorded, and when it counts as settled
+//
+// A refusal is a permission the agent asked for and did not get. It is
+// recorded in the ledger, once, at the moment the driver answers the request
+// — or, for an agent that answers its own requests under a mode the driver
+// froze (claude -p), at the moment the driver first reads that it was
+// refused. It is never held only in a session's memory, because a worker that
+// exits before its result, a connector that crashes mid-turn, and a turn cut
+// short by a deadline all end the session that memory lives in.
+//
+//  1. The driver calls SessionConfig.Refusals.RecordRefusal before it sends
+//     its answer to the agent, or before it emits the update for a refusal
+//     it observed. It calls it once per tool call id: a refusal the stream
+//     announced and the result repeats is one refusal.
+//  2. The dispatcher's recorder writes it to the attempt's row at once
+//     (connector.Ledger.RecordRefusal: attempts.refusals, incremented while
+//     the attempt is live). A write the ledger refuses is carried by the
+//     recorder into the attempt's settlement instead, and logged.
+//  3. The refusal is settled with its attempt: EndAttempt adds whatever the
+//     recorder could not write, and the ended attempt's count is final. The
+//     session's updates are drained before the attempt is released, and the
+//     recorder is called before an update is emitted, so a worker that exits
+//     between a refusal and its result has already recorded it.
+//
+// Where this can still be broken: a refusal the agent never reports — a tool
+// it declined to ask for, or a denial its stream does not carry — is not a
+// refusal the driver can record; and the once-per-tool-call rule is the
+// driver's (a set of ids per session), not a key in the ledger.
 package driver
 
 import (
@@ -145,6 +176,9 @@ type SessionConfig struct {
 	// files into (an MCP config, say). The driver removes what it wrote when
 	// the session is closed; the dispatcher sweeps the directory on start.
 	PrivateDir string
+	// Refusals records every refusal at the moment it is made or observed.
+	// Nil records nothing; the dispatcher always sets it.
+	Refusals RefusalRecorder
 	// Redaction is what the driver takes out of every error it returns and
 	// every text an update or a stderr tail carries (redact.go). The driver
 	// adds the environment it builds, its MCP servers' environments and
@@ -222,6 +256,13 @@ type Refusal struct {
 	ToolCallID string
 	// Tool is the tool's name or ACP kind; never its input.
 	Tool string
+}
+
+// RefusalRecorder records a refusal at the moment a driver makes or observes
+// it (see "Refusals" above). RecordRefusal must not block for long: a driver
+// calls it on the goroutine that reads the agent's stream.
+type RefusalRecorder interface {
+	RecordRefusal(ctx context.Context, r Refusal) error
 }
 
 // Usage is token accounting.

@@ -586,8 +586,10 @@ type AttemptEnd struct {
 	// NoAutomaticRetry refuses the withdrawal even then: a task under the
 	// sandbox launcher is never retried automatically.
 	NoAutomaticRetry bool
-	// Refusals is how many permissions the driver refused.
-	Refusals int
+	// UnrecordedRefusals are refusals RecordRefusal could not write when they
+	// happened, settled here with the attempt. Refusals it did write are
+	// already on the attempt.
+	UnrecordedRefusals int
 }
 
 // Settlement is what ending an attempt did to its task.
@@ -655,8 +657,8 @@ func (l *Ledger) endAttempt(ctx context.Context, end AttemptEnd) (Settlement, er
 	}
 	now := l.timestamp()
 	if _, err := tx.ExecContext(ctx, `
-UPDATE attempts SET state = 'ended', ended_at = ?, stop_reason = ?, spawn_failed = ?, refusals = ? WHERE id = ?`,
-		now, string(end.Stop), end.SpawnFailed, end.Refusals, end.AttemptID); err != nil {
+UPDATE attempts SET state = 'ended', ended_at = ?, stop_reason = ?, spawn_failed = ?, refusals = refusals + ? WHERE id = ?`,
+		now, string(end.Stop), end.SpawnFailed, end.UnrecordedRefusals, end.AttemptID); err != nil {
 		return Settlement{}, fmt.Errorf("connector: end attempt %s: %w", end.AttemptID, err)
 	}
 
@@ -954,6 +956,24 @@ func (l *Ledger) StrandedRecords(ctx context.Context, approved map[int64]string,
 		return 0, fmt.Errorf("connector: count stranded records: %w", err)
 	}
 	return n, nil
+}
+
+// RecordRefusal records one refusal on a live attempt, at the moment the
+// driver made or observed it (driver's "Refusals"). An attempt that has ended
+// is ErrNoLiveAttempt: its count was settled with it.
+func (l *Ledger) RecordRefusal(ctx context.Context, attemptID string) error {
+	return retryBusy(func() error {
+		res, err := l.db.ExecContext(ctx, `UPDATE attempts SET refusals = refusals + 1 WHERE id = ? AND state <> 'ended'`, attemptID)
+		if err != nil {
+			return fmt.Errorf("connector: record refusal on %s: %w", attemptID, err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return fmt.Errorf("connector: record refusal on %s: %w", attemptID, ErrNoLiveAttempt)
+		}
+		return nil
+	})
 }
 
 // RecordProgress stamps the live attempt's last progress, which still-running
