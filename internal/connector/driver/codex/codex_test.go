@@ -785,3 +785,25 @@ func waitDeaf(t *testing.T, h *harness) {
 	}
 	t.Fatal("the fake never stopped reading")
 }
+
+// The same for Close on its own: a prompt still blocked writing to a worker
+// that stopped reading does not hold it.
+func TestCloseSurvivesAWorkerThatStoppedReading(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Deaf: true, Hang: true, Events: []string{`{"type":"turn.started"}`}})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("Event 1. ", 200_000)) }()
+	waitDeaf(t, h)
+
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("a worker that stopped reading held Close")
+	}
+	waitDone(t, s)
+}
