@@ -16,11 +16,13 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // fakeDriver hands out fakeSessions and lets a test script each turn.
 type fakeDriver struct {
 	mu       sync.Mutex
+	process  driver.Process
 	startErr []error
 	onStart  func(cfg driver.SessionConfig)
 	sessions []*fakeSession
@@ -73,7 +75,10 @@ type fakeSession struct {
 
 func (s *fakeSession) ID() string { return "session-1" }
 func (s *fakeSession) Process() driver.Process {
-	return driver.Process{PID: 999999, PGID: 999999, StartedAt: time.Now()}
+	if s.d.process.PGID != 0 {
+		return s.d.process
+	}
+	return driver.Process{PID: 1 << 30, PGID: 1 << 30, StartedAt: time.Now()}
 }
 
 func (s *fakeSession) Prompt(_ context.Context, prompt string) (driver.PromptResult, error) {
@@ -558,6 +563,7 @@ type fakeWorkspaces struct {
 	perTask   bool
 	mu        sync.Mutex
 	n         int
+	finished  int
 	recovered bool
 }
 
@@ -567,8 +573,13 @@ func (w *fakeWorkspaces) Prepare(_ context.Context, route string, eventID int64)
 	w.n++
 	return route + "-wt-" + string(rune('0'+w.n)), nil
 }
-func (w *fakeWorkspaces) Finish(context.Context, string, string) error { return nil }
-func (w *fakeWorkspaces) PerTaskDirs() bool                            { return w.perTask }
+func (w *fakeWorkspaces) Finish(context.Context, string, string) error {
+	w.mu.Lock()
+	w.finished++
+	w.mu.Unlock()
+	return nil
+}
+func (w *fakeWorkspaces) PerTaskDirs() bool { return w.perTask }
 func (w *fakeWorkspaces) Recover(context.Context) error {
 	w.mu.Lock()
 	w.recovered = true
@@ -865,4 +876,76 @@ func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
 	fake.mu.Unlock()
 	assert.Equal(t, 1, live, "the held attempt's worker may still exist, so only one more starts")
 	close(hold)
+}
+
+// The one-owner rule (see internal/connector/driver/worker.go): a task whose
+// process tree is still alive never has its directory released or its record
+// settled.
+func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
+	work := t.TempDir()
+	worker, grandchild := drivertest.StartTree(t, work)
+	<-worker.Done() // the leader is gone; its grandchild is not
+
+	fake := newFakeDriver()
+	// The session reports the worker's group, which still has a member, and
+	// closing it kills nothing.
+	fake.process = worker.Process()
+	ws := &fakeWorkspaces{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Workspaces = ws
+		o.CancelGrace = 200 * time.Millisecond
+	})
+	// Confirmation without signaling, so the fixture's tree survives the
+	// check as a tree that ignored every signal would.
+	h.d.confirmGroupGone = func(p driver.Process, _ time.Duration) error {
+		if driver.GroupMembersRemain(p) {
+			return driver.ErrGroupOutlivedLeader
+		}
+		return nil
+	}
+	h.routes[adapterBucketID] = admission.Route{Path: work}
+	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
+	h.run(t)
+
+	require.Eventually(t, func() bool {
+		attempts, err := h.ledger.LiveAttempts(context.Background())
+		return err == nil && len(attempts) == 1 && attempts[0].State == AttemptRunning
+	}, 5*time.Second, 20*time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	drivertest.RequireGroupHeld(t, worker.Process())
+	assert.True(t, drivertest.Alive(grandchild))
+
+	attempt := liveAttemptID(t, h.ledger)
+	assert.Equal(t, "running", readAttempt(t, h.ledger, attempt).State, "the record is not terminal")
+	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	assert.Zero(t, ws.finished, "the working directory is not released")
+}
+
+// liveAttemptID is the id of the one attempt that has not ended.
+func liveAttemptID(t *testing.T, ledger *Ledger) string {
+	t.Helper()
+	attempts, err := ledger.LiveAttempts(context.Background())
+	require.NoError(t, err)
+	require.Len(t, attempts, 1)
+	return attempts[0].AttemptID
+}
+
+// Review r3: a turn a stop cut short still refused what it refused.
+func TestAStoppedTurnStillCountsItsRefusals(t *testing.T) {
+	fake := newFakeDriver()
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		<-s.canceled
+		return driver.PromptResult{Stop: driver.TurnCanceled, Refusals: []driver.Refusal{
+			{ToolCallID: "t1", Tool: "Bash"}, {ToolCallID: "t2", Tool: "WebFetch"},
+		}}, nil
+	}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Deadline = 100 * time.Millisecond })
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	assert.Equal(t, "deadline", h.attemptsEnded(t, 1)[0].StopReason)
+	var refusals int
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts`).Scan(&refusals))
+	assert.Equal(t, 2, refusals)
 }

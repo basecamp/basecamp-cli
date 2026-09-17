@@ -179,6 +179,8 @@ type Dispatcher struct {
 	// afterTurn runs when a turn has ended cleanly, before anything more is
 	// exposed; a test seam.
 	afterTurn func()
+	// confirmGroupGone is the one-owner rule's step 3; a test seam.
+	confirmGroupGone func(driver.Process, time.Duration) error
 	// strandedAt is when the stranded count was last reported. Read and
 	// written only by the dispatch loop.
 	strandedAt time.Time
@@ -233,6 +235,7 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		live:   map[string]*taskRun{},
 
 		terminateRecorded: driver.TerminateRecorded,
+		confirmGroupGone:  driver.ConfirmGroupGone,
 	}, nil
 }
 
@@ -411,8 +414,6 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	return nil
 }
 
-// approvedRoutes is connect.json's routes now, narrowed to the projects this
-// run hears.
 // StrandedInterval is how often the dispatcher says how much admitted work
 // no route of connect.json's covers.
 const StrandedInterval = 10 * time.Minute
@@ -425,7 +426,7 @@ func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]stri
 		return
 	}
 	d.strandedAt = time.Now()
-	stranded, err := d.ledger.StrandedRecords(ctx, approved)
+	stranded, err := d.ledger.StrandedRecords(ctx, approved, d.opts.Buckets)
 	if err != nil {
 		d.log.Warn("connector: counting stranded records", "error", err)
 		return
@@ -596,10 +597,16 @@ func (d *Dispatcher) end(ctx context.Context, launch Launch, end AttemptEnd, run
 	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
 	if run != nil {
-		d.mu.Lock()
-		delete(d.live, launch.AttemptID)
-		d.mu.Unlock()
+		d.forget(launch.AttemptID)
 	}
+}
+
+// forget drops a run from the live set. The ledger, not this map, is the
+// record of what a task is.
+func (d *Dispatcher) forget(attemptID string) {
+	d.mu.Lock()
+	delete(d.live, attemptID)
+	d.mu.Unlock()
 }
 
 func (d *Dispatcher) finishWorkspace(ctx context.Context, route, workDir string) {
@@ -706,6 +713,19 @@ func (r *taskRun) supervise(ctx context.Context) {
 	r.mu.Lock()
 	refusals := r.refusals
 	r.mu.Unlock()
+
+	// One owner, one release point (driver's "One owner, one release point"):
+	// the attempt is settled and its directory released only once the
+	// worker's process group is confirmed gone. A group still holding
+	// members keeps the attempt live and the directory its own.
+	if err := d.confirmGroupGone(r.session.Process(), d.opts.CancelGrace); err != nil {
+		d.log.Error("connector: the worker's process group is still alive; its attempt stays live and its directory held",
+			"attempt_id", r.launch.AttemptID, "task_id", r.launch.TaskID, "error", err)
+		d.hold()
+		d.forget(r.launch.AttemptID)
+		d.line(DispatchLine{Type: "dispatch", TaskID: r.launch.TaskID, AttemptID: r.launch.AttemptID, State: string(AttemptRunning)})
+		return
+	}
 	d.end(settleCtx, r.launch, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, Refusals: refusals}, r)
 }
 
@@ -800,7 +820,9 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 	stopFor := func(reason StopReason) (driver.PromptResult, StopReason, bool) {
 		_ = r.session.Cancel(context.WithoutCancel(ctx))
 		select {
-		case <-answers:
+		case a := <-answers:
+			// The turn the stop cut short still refused what it refused.
+			r.addRefusals(len(a.result.Refusals))
 		case <-r.session.Done():
 		case <-time.After(d.opts.CancelGrace):
 		}
