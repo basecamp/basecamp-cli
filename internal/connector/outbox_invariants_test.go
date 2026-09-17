@@ -1278,3 +1278,51 @@ func TestOutboxStartStopsOnALedgerFailureWhateverTheBoundDoesAfter(t *testing.T)
 	require.Error(t, obOutbox(t, ledger, hangingAt{basecamp, 901}).Start(ctx))
 	assert.Less(t, time.Since(started), 2500*time.Millisecond, "the pass stops at the failure rather than spending the bound")
 }
+
+// A ledger that cannot even list what is sending stops the start before
+// anything is sent.
+func TestOutboxStartStopsWhenTheLedgerCannotListSendingIntents(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	stale := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	clock.Advance(10 * time.Minute)
+	seenRecord(t, ledger, 2)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(2, 0, obCommentReply))
+	require.NoError(t, err)
+	// A row the ledger cannot read back.
+	_, err = ledger.db.ExecContext(ctx, `UPDATE outbox SET reconcile_at = 'garbage' WHERE id = ?`, stale.ID)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.Error(t, obOutbox(t, ledger, basecamp).Start(ctx))
+	assert.Zero(t, basecamp.postCount())
+}
+
+// cancelingLister ends its caller's context as it answers, as a shutdown
+// arriving mid-reconciliation would.
+type cancelingLister struct {
+	*fakeBasecamp
+	cancel func()
+}
+
+func (c cancelingLister) List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
+	out, err := c.fakeBasecamp.List(ctx, dest, since)
+	c.cancel()
+	return out, err
+}
+
+// A ledger failure is marked where it happens: a context that ends at the
+// same moment does not hide it from a start.
+func TestOutboxALedgerFailureIsNotHiddenByAnEndingContext(t *testing.T) {
+	ledger, clock := obLedger(t)
+	stale := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.add(stale.Destination, adapterAgentID, stale.Body)
+	clock.Advance(10 * time.Minute)
+	_, err := ledger.db.ExecContext(context.Background(), `ALTER TABLE task_events RENAME TO task_events_gone`)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.Error(t, obOutbox(t, ledger, cancelingLister{basecamp, cancel}).Start(ctx))
+}

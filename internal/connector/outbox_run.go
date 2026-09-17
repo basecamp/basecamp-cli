@@ -299,10 +299,12 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 		// never posted.
 		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, RefusedNote)
 		if err != nil {
-			// The ledger failed, not Basecamp. The intent stays sending, which
-			// reconciliation settles, finding nothing; the failure is an error
-			// wherever it happens, so a start stops on it.
-			return intent.ID, false, fmt.Errorf("connector: settle refused lifecycle message %d: %w", intent.ID, err)
+			// The ledger failed, not Basecamp: either the refusal was not
+			// written, and the intent stays sending for reconciliation to
+			// settle, finding nothing; or it was written and could not be read
+			// back. Either way it is an error wherever it happens, so a start
+			// stops on it.
+			return intent.ID, false, fmt.Errorf("connector: record or read back the refusal of lifecycle message %d: %w", intent.ID, err)
 		}
 		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		o.line(settled)
@@ -324,10 +326,11 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 	}
 	recorded, err := o.ledger.recordReceipt(context.WithoutCancel(ctx), intent.ID, receipt)
 	if err != nil {
-		// The message exists and reconciliation will find it by its body,
-		// but the ledger failed: that is an error wherever it happens, so a
-		// start stops on it.
-		return intent.ID, false, fmt.Errorf("connector: record receipt of lifecycle message %d: %w", intent.ID, err)
+		// The message exists. Either the receipt was not written, and
+		// reconciliation will find the message by its body, or it was written
+		// and could not be read back. The ledger failed either way: that is an
+		// error wherever it happens, so a start stops on it.
+		return intent.ID, false, fmt.Errorf("connector: record or read back the receipt of lifecycle message %d: %w", intent.ID, err)
 	}
 	o.line(recorded)
 	return intent.ID, false, nil
@@ -471,7 +474,10 @@ func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int
 	defer o.mu.Unlock()
 	intents, err := o.ledger.Intents(ctx, IntentFilter{States: []IntentState{IntentSending}})
 	if err != nil {
-		return 0, err
+		if ctx.Err() != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("%w: %w", errLedger, err)
 	}
 	now := o.ledger.now()
 	cutoff := now.Add(-age)
@@ -495,11 +501,14 @@ func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int
 			if firstErr == nil {
 				firstErr = err
 			}
-			if !errors.Is(err, errBackedOff) && ctx.Err() == nil {
+			if errors.Is(err, errLedger) {
 				// The ledger failed. The pass stops here: nothing it does
 				// afterwards — nor a bound running out meanwhile — may hide
-				// that from a start.
-				hardErr = fmt.Errorf("%w: %w", errLedger, err)
+				// that from a start. The intent is put back a little, best
+				// effort, so a running connector does not list the same
+				// destination on every tick while the ledger recovers.
+				o.ledger.deferReconcile(context.WithoutCancel(ctx), in.ID, DefaultReconcileBackoff)
+				hardErr = err
 				break
 			}
 			continue
@@ -530,13 +539,19 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 	listCtx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
 	defer cancel()
 	listed, err := o.opts.Poster.List(listCtx, in.Destination, since)
+	// From here on the ledger is written without ctx: a listing that answered
+	// is settled even as shutdown begins, and so every error below is the
+	// ledger's own, marked where it happens rather than guessed from ctx.
+	ledgerCtx := context.WithoutCancel(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
+			// Cut short by the bound or shutdown: not a failure of Basecamp's
+			// nor the ledger's, and nothing is recorded.
 			return false, err
 		}
-		updated, settled, recErr := o.ledger.listingFailed(context.WithoutCancel(ctx), in, err)
+		updated, settled, recErr := o.ledger.listingFailed(ledgerCtx, in, err)
 		if recErr != nil {
-			return false, recErr
+			return false, fmt.Errorf("%w: %w", errLedger, recErr)
 		}
 		if settled {
 			o.line(updated)
@@ -544,13 +559,13 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 		}
 		return false, fmt.Errorf("%w: %w", errBackedOff, err)
 	}
-	candidate, note, err := o.ledger.adoptable(ctx, in, listed)
+	candidate, note, err := o.ledger.adoptable(ledgerCtx, in, listed)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: %w", errLedger, err)
 	}
-	updated, err := o.ledger.settleReconciled(ctx, in.ID, candidate, note)
+	updated, err := o.ledger.settleReconciled(ledgerCtx, in.ID, candidate, note)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: %w", errLedger, err)
 	}
 	o.line(updated)
 	return true, nil

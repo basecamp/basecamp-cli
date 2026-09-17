@@ -142,8 +142,14 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 			require.ErrorAs(t, waitErr, &exitErr)
 			require.Equal(t, syscall.SIGKILL, exitErr.Sys().(syscall.WaitStatus).Signal())
 
-			// Restart: a fresh outbox on the same ledger, Basecamp answering
-			// normally now.
+			// Restart: a fresh ledger handle, opened after the killed process
+			// is gone — as a restarted connector would — and a fresh outbox
+			// on it, Basecamp answering normally now. Every assertion below
+			// reads through this handle.
+			require.NoError(t, ledger.Close())
+			ledger, err = OpenLedger(path)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = ledger.Close() })
 			server.setOnPost(nil)
 			postsBefore := server.postCount()
 			restarted, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: server.poster(t)})
