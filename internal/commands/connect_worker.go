@@ -38,6 +38,12 @@ type workerStop struct {
 // so: the task's end — which admits the redispatched record — waits for the
 // owner to confirm the group gone, so nothing runs twice meanwhile.
 func stopReplacedWorker(p driver.Process, grace time.Duration) workerStop {
+	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
+		// A worker still launching has no recorded process yet: there is
+		// nothing this command can prove is it, so nothing is signaled.
+		return workerStop{state: workerNotRecorded,
+			note: "the replaced attempt had not recorded its worker process yet, so nothing was signaled; its token is retired, and the redispatch waits until that task ends"}
+	}
 	switch owns, err := driver.OwnsWorker(p); {
 	case errors.Is(err, driver.ErrGroupOutlivedLeader):
 		return workerStop{state: workerHeld,
@@ -56,6 +62,11 @@ func stopReplacedWorker(p driver.Process, grace time.Duration) workerStop {
 	if err := driver.ConfirmGroupGone(p, grace); err != nil {
 		return workerStop{signaled: signaled, state: workerHeld,
 			note: "the worker was signaled but its process group did not go; the redispatch waits until it has"}
+	}
+	// The group is gone, but "stopped" is only said of the worker itself.
+	if owns, err := driver.OwnsWorker(p); owns || err != nil {
+		return workerStop{signaled: signaled, state: workerUnverified,
+			note: "the recorded worker is still running outside its recorded process group, so it was not stopped; its token is retired, and the redispatch waits until that task ends"}
 	}
 	return workerStop{signaled: signaled, state: workerStopped}
 }

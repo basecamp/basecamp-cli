@@ -88,3 +88,33 @@ func TestAPidAloneIsNotTheWorker(t *testing.T) {
 	assert.False(t, got.signaled)
 	assert.True(t, drivertest.Alive(grandchild))
 }
+
+// A worker still launching has recorded no process: nothing is signaled, and
+// it is not called gone.
+func TestRedispatchDoesNotCallAnUnrecordedWorkerGone(t *testing.T) {
+	got := stopReplacedWorker(driver.Process{}, time.Second)
+	assert.Equal(t, workerNotRecorded, got.state)
+	assert.False(t, got.signaled)
+}
+
+// A worker whose recorded group holds nothing is not called stopped while it
+// still runs.
+func TestRedispatchDoesNotCallAWorkerOutsideItsGroupStopped(t *testing.T) {
+	worker, _ := runningTree(t)
+	p := worker.Process()
+	// A group with no members: one this test started and has already reaped,
+	// never an arbitrary number that could name someone else's group.
+	gone, err := driver.StartWorker(context.Background(), nil, driver.Scope{WorkDir: t.TempDir()},
+		driver.Command{Path: "/bin/sh", Args: []string{"-c", "exit 0"}, Env: []string{"PATH=/bin:/usr/bin"}})
+	if err != nil {
+		t.Fatalf("start a short worker: %v", err)
+	}
+	<-gone.Done()
+	if driver.GroupMembersRemain(gone.Process()) {
+		t.Skip("the short worker's group is still in use")
+	}
+	p.PGID = gone.Process().PGID
+	got := stopReplacedWorker(p, 200*time.Millisecond)
+	assert.NotEqual(t, workerStopped, got.state, got.note)
+	assert.True(t, drivertest.Alive(p.PID))
+}
