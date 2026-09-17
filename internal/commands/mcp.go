@@ -176,7 +176,7 @@ func stateDirHint(refusal *connector.StateDirError) string {
 // connector's ledger, it never starts one.
 func openConnectDispatch(ctx context.Context, stateDir, accountID, token string) (*connector.TaskDispatch, func(), error) {
 
-	agentID, err := connector.ResolveStateDir(stateDir, accountID)
+	dir, agentID, err := connector.ResolveStateDir(stateDir, accountID)
 	if err != nil {
 		var refusal *connector.StateDirError
 		if errors.As(err, &refusal) {
@@ -189,10 +189,10 @@ func openConnectDispatch(ctx context.Context, stateDir, accountID, token string)
 
 	// The connector owns the ledger: a worker's server opens it as it is, and
 	// never creates or migrates it.
-	ledger, err := connector.OpenExistingLedger(ctx, filepath.Join(stateDir, connector.LedgerFile))
+	ledger, err := connector.OpenExistingLedger(ctx, filepath.Join(dir, connector.LedgerFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, output.ErrUsage(fmt.Sprintf("no connector ledger in %s", stateDir))
+			return nil, nil, output.ErrUsage(fmt.Sprintf("no connector ledger in %s", dir))
 		}
 		return nil, nil, err
 	}
@@ -200,7 +200,7 @@ func openConnectDispatch(ctx context.Context, stateDir, accountID, token string)
 	if err != nil {
 		_ = ledger.Close()
 		if errors.Is(err, connector.ErrTaskTokenRefused) {
-			return nil, nil, output.ErrUsage("the task token names no current task in " + stateDir)
+			return nil, nil, output.ErrUsage("the task token names no current task in " + dir)
 		}
 		return nil, nil, err
 	}

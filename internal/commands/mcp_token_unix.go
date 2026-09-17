@@ -59,7 +59,7 @@ func readTaskToken(fd int) (string, error) {
 
 	var data []byte
 	buf := make([]byte, 256)
-	for len(data) <= maxTaskTokenBytes && !bytes.Contains(data, []byte("\n")) {
+	for len(data) <= maxTaskTokenBytes && bytes.IndexByte(data, '\n') < 0 {
 		n, err := file.Read(buf)
 		data = append(data, buf[:n]...)
 		if err == nil {

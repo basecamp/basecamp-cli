@@ -43,14 +43,15 @@ import (
 //	blocked     queued      admission                                re-decided, conversation live
 //	blocked     blocked     admission                                re-decided, still blocked
 //	blocked     discarded   admission, operator                      verdict, or discard
-//	blocked     dispatched  dispatcher (CreateTask)                  redispatch of a blocked record
+//	blocked     dispatched  —                                        an edge the lifecycle map has and no
+//	                                                                 caller can take: a task needs an
+//	                                                                 instruction, and blocked has none
 //	admitted    dispatched  dispatcher (CreateTask)                  joins a task
 //	queued      dispatched  dispatcher (CreateTask)                  joins a task
 //	dispatched  dispatched  dispatcher (CreateTask)                  redispatch onto a new task
 //	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker, task retired
 //	dispatched  admitted    dispatcher (withdrawExposure)            exposed at launch, spawn proven failed: retry
 //	dispatched  blocked     dispatcher (withdrawExposure)            exposed at launch, spawn failed again
-//	dispatched  blocked     dispatcher                               never handed to a worker
 //	dispatched  completed   worker (complete_dispatch), dispatcher   the outcome, reported or settled
 //	admitted    queued      lifecycle bookkeeping                    —
 //	admitted    blocked     lifecycle bookkeeping                    —
@@ -62,9 +63,12 @@ import (
 //
 // Writing the state a record already has is a repeat and always allowed. Any
 // pair not in the table is refused. Into dispatched and out of it, the task
-// decides: a record enters dispatched only when a live task already carries
-// it, and leaves it — other than to completed — only when none does
-// (events_dispatched_while_on_a_live_task, and move).
+// decides, as a rule about the moves rather than about the state: a record
+// enters dispatched only when a live task already carries it, and leaves it —
+// other than to completed — only when none does
+// (events_dispatched_while_on_a_live_task, and move). A record can therefore
+// be dispatched with no live task, and one case is expected: work a worker was
+// handed, whose task was superseded, waiting for its outcome (invariant 7).
 //
 // # Task (tasks)
 //
@@ -113,7 +117,8 @@ import (
 //     spec's automatic retry: an exposure written at launch whose spawn
 //     failed before any worker process existed is withdrawn, and the record
 //     returns to admitted for its one retry, or goes to blocked after a
-//     second failure (withdrawExposure).
+//     second failure (withdrawExposure) — the only way from dispatched to
+//     blocked.
 //  5. A worker acts only on its own task's rows, reports only what it was
 //     handed, and a reported outcome stands.
 //  6. A task is made only of instructions a worker can pull, and finished
@@ -780,6 +785,14 @@ func (d *TaskDispatch) report(ctx context.Context, eventID int64, apply func(con
 	}
 	wrote, err := apply(ctx, tx, taskID, te)
 	if err != nil {
+		// A refusal the worker can read is passed on as it is: wrapping it
+		// would put this package's name in the middle of the message the
+		// worker is shown.
+		for _, refusal := range []error{ErrInvalidReport, ErrReportConflict, ErrNotDispatchable, ErrHeldByWorker} {
+			if errors.Is(err, refusal) {
+				return Receipt{}, err
+			}
+		}
 		return Receipt{}, fmt.Errorf("connector: report on event %d: %w", eventID, err)
 	}
 	if wrote {
@@ -1173,23 +1186,25 @@ func StateRoot() (string, error) {
 
 // ResolveStateDir is the one place a state directory is accepted: dir must
 // be exactly StateRoot/<account>-<agent person id>, and its account must be
-// accountID, compared as numbers. It returns the agent's Person id.
+// accountID, compared as numbers. It returns the directory made absolute —
+// which is the one every caller should go on to use — and the agent's Person
+// id.
 //
 // The location is part of the check, not only the name. A directory named
 // for this account anywhere else — a copy of another account's ledger renamed
 // to match — is refused, because the name is what binds a ledger to an
 // account and anyone can choose a name.
-func ResolveStateDir(dir, accountID string) (int64, error) {
+func ResolveStateDir(dir, accountID string) (string, int64, error) {
 	root, err := StateRoot()
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
+		return "", 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
 	}
-	refuse := func(why StateDirProblem, account string) (int64, error) {
-		return 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
+	refuse := func(why StateDirProblem, account string) (string, int64, error) {
+		return "", 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
 	}
 	if filepath.Dir(abs) != root {
 		return refuse(StateDirElsewhere, "")
@@ -1204,7 +1219,7 @@ func ResolveStateDir(dir, accountID string) (int64, error) {
 	if errGiven != nil || errWant != nil || given == 0 || given != want {
 		return refuse(StateDirOtherAccount, account)
 	}
-	return agentID, nil
+	return abs, agentID, nil
 }
 
 // LedgerFile is the ledger's file name inside the state directory.

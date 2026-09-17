@@ -458,9 +458,10 @@ func TestEveryMoveKeepsTheBlockedScheduleInputs(t *testing.T) {
 	assert.Nil(t, d.BlockedAt, "a record that left blocked is not blocked")
 	assert.Nil(t, d.RetryAt)
 
-	// Back into blocked after a dispatch: a new window from now, and the
-	// verdict that follows keeps it. A record leaves dispatched when its task
-	// is superseded.
+	// Blocked again after a dispatch that was superseded: a new window from
+	// now, and the verdict that follows keeps it. Superseding a task returns
+	// an event no worker was handed to admitted, and it is blocked from
+	// there.
 	grant := dispatchForTest(t, ledger, 1)
 	require.NoError(t, ledger.SupersedeTask(ctx, grant.ID))
 	require.NoError(t, ledger.SetState(ctx, 1, StateBlocked, "read_failed"))

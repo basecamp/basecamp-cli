@@ -779,6 +779,7 @@ func TestCompleteRefusesMalformedReports(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := f.d.Complete(ctx, 1, c)
 			require.ErrorIs(t, err, ErrInvalidReport)
+			assert.NotContains(t, err.Error(), "report on event", "what the worker got wrong reaches it without the ledger's own wrapping")
 			assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 		})
 	}
@@ -832,12 +833,14 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "basecamp", "connect"), root)
 	canonical := filepath.Join(root, StateDirName("999", adapterAgentID))
 
-	agentID, err := ResolveStateDir(canonical, "999")
+	resolved, agentID, err := ResolveStateDir(canonical, "999")
 	require.NoError(t, err)
 	assert.Equal(t, adapterAgentID, agentID)
-	agentID, err = ResolveStateDir(canonical+"/", "0999")
-	require.NoError(t, err, "accounts compare as numbers, and a trailing slash is the same directory")
+	assert.Equal(t, canonical, resolved)
+	resolved, agentID, err = ResolveStateDir(canonical+"/../"+StateDirName("999", adapterAgentID)+"/", "0999")
+	require.NoError(t, err, "accounts compare as numbers, and a trailing slash or a .. is the same directory")
 	assert.Equal(t, adapterAgentID, agentID)
+	assert.Equal(t, canonical, resolved, "the directory every caller goes on to use is the one that was checked")
 
 	for name, dir := range map[string]string{
 		"outside the root":   filepath.Join(t.TempDir(), StateDirName("999", adapterAgentID)),
@@ -850,7 +853,7 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 		"above the root":     filepath.Join(root, "..", StateDirName("999", adapterAgentID)),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ResolveStateDir(dir, "999")
+			_, _, err := ResolveStateDir(dir, "999")
 			assert.ErrorIs(t, err, ErrNotAStateDir)
 			var refusal *StateDirError
 			require.ErrorAs(t, err, &refusal, "the refusal says why in fields, not in a message to be parsed")
