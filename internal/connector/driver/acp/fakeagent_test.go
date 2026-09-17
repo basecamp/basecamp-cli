@@ -97,7 +97,10 @@ type step struct {
 	SessionID  string          `json:"session_id"`
 	Permission json.RawMessage `json:"permission,omitempty"`
 	ModeChange string          `json:"mode_change"`
-	SleepMS    int             `json:"sleep_ms"`
+	// MCPInit sends Claude Code's init, forwarded as claude-agent-acp does,
+	// with these MCP server statuses.
+	MCPInit map[string]string `json:"mcp_init,omitempty"`
+	SleepMS int               `json:"sleep_ms"`
 }
 
 type agentRecord struct {
@@ -408,6 +411,15 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 		}
 		if len(st.Update) > 0 {
 			a.update(sid, st.Update)
+		}
+		if st.MCPInit != nil {
+			servers := []any{}
+			for name, status := range st.MCPInit {
+				servers = append(servers, map[string]any{"name": name, "status": status})
+			}
+			a.send(map[string]any{"jsonrpc": "2.0", "method": "_claude/sdkMessage", "params": map[string]any{
+				"sessionId": sid, "message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": servers,
+					"cwd": "/somewhere", "tools": []string{"Bash"}, "model": "x"}}})
 		}
 		if st.ModeChange != "" {
 			a.update(sid, map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": st.ModeChange})

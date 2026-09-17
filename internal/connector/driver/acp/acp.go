@@ -49,6 +49,11 @@
 //  7. Nothing the agent volunteers is kept: _auth/status_update (which
 //     carries the account's email) is dropped unread, updates carry no text,
 //     and agent-written text that reaches an error is redacted first.
+//  8. No session goes on without its MCP servers. The adapter's own account of
+//     them is read (Claude Code's init, forwarded; codex-acp's startup
+//     failures), and a server that did not connect — or, for Claude, a first
+//     turn that ends with no init at all — fails the turn with
+//     ErrMCPServerNotConnected and ends the worker.
 package acp
 
 import (
@@ -210,6 +215,10 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		return nil, err
 	}
 	s := newSession(worker, cfg.Policy, mode, d.opts.CloseGrace, d.opts.trace)
+	s.mcpStatus = d.opts.Adapter.MCPStatus
+	for _, srv := range cfg.MCPServers {
+		s.mcpNames = append(s.mcpNames, srv.Name)
+	}
 	hctx, cancel := context.WithTimeout(ctx, d.opts.HandshakeTimeout)
 	defer cancel()
 	if err := s.handshake(hctx, d, cfg, servers, loadID); err != nil {

@@ -13,7 +13,7 @@ package acp
 // is skipped unless the adapters are installed:
 //
 //	make acp-adapters      # npm ci the pinned adapters (once)
-//	make test-acp-compat   # the six checks against both
+//	make test-acp-compat   # the seven checks against both
 //
 // Environment: BASECAMP_ACP_ADAPTERS_DIR (required; the npm prefix),
 // BASECAMP_ACP_ADAPTER (one adapter name; both when unset),
@@ -133,6 +133,12 @@ func (e compatEnv) driverFor(t *testing.T, part string) *Driver {
 	}
 	if tdir := os.Getenv("BASECAMP_ACP_TRANSCRIPTS"); tdir != "" {
 		if err := os.MkdirAll(tdir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// The transcripts hold prompts, tool text and host paths; only emails
+		// and credential-shaped runs are redacted. Owner-only, even when the
+		// directory was there before.
+		if err := os.Chmod(tdir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		name := fmt.Sprintf("%s-check%s%s.jsonl", e.adapter.Name, e.check, part)
@@ -561,7 +567,9 @@ func checkDecoyMCPServer(t *testing.T, e compatEnv) {
 // wherever the adapter starts it, the handoff must be delivered, and the
 // token must not be in any environment, command line or file of the worker's
 // processes. No Basecamp account is involved: the bridge's profile is a dummy
-// in a private config, so the `basecamp mcp` it becomes goes no further.
+// in a private config, so the `basecamp mcp` it becomes cannot authenticate —
+// which is also how this checks that a session whose MCP server did not
+// connect is refused rather than run.
 func checkTokenBridge(t *testing.T, e compatEnv) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the process walk reads /proc")
@@ -628,12 +636,42 @@ func checkTokenBridge(t *testing.T, e compatEnv) {
 			places = addWorkerProcesses(places, s.Process().PID)
 			select {
 			case h := <-handed:
-				places = addWorkerProcesses(places, s.Process().PID)
 				if h != connector.HandoffDelivered {
 					_ = s.Close()
 					t.Fatalf("the bridge did not take the token: %s", h)
 				}
-				t.Logf("handoff %s %s after NewSession began; %d worker processes seen", h, time.Since(started).Round(time.Millisecond), len(places.Args))
+				t.Logf("handoff %s %s after NewSession began", h, time.Since(started).Round(time.Millisecond))
+				// The bridge execs `basecamp mcp` once it has the token: walk
+				// the tree again only when that process is there, so the
+				// server that holds the token is among what is checked.
+				mcpSeen := false
+				for wait := time.Now().Add(30 * time.Second); time.Now().Before(wait); time.Sleep(100 * time.Millisecond) {
+					places = addWorkerProcesses(places, s.Process().PID)
+					for _, args := range places.Args {
+						if strings.Contains(args, " mcp ") && strings.Contains(args, "--connect-token-fd") {
+							mcpSeen = true
+						}
+					}
+					if mcpSeen {
+						break
+					}
+				}
+				if !mcpSeen {
+					_ = s.Close()
+					t.Fatal("the bridge never became basecamp mcp")
+				}
+				// And the agent's own account of the server. The bridge's
+				// `basecamp mcp` cannot serve here — its profile is a dummy
+				// with no credentials — so the agent reports the server
+				// failed, and the driver must refuse to go on with a session
+				// whose MCP server did not connect (invariant 8). A session
+				// whose server does serve is the live end-to-end proof.
+				_, err := s.Prompt(turnCtx(t), "Reply with just the word OK. Do not use any tools.")
+				if !errors.Is(err, ErrMCPServerNotConnected) {
+					_ = s.Close()
+					t.Fatalf("a turn ran with an MCP server that did not connect: %v", err)
+				}
+				t.Logf("the turn was refused: %v; %d worker processes seen", err, len(places.Args))
 				_ = s.Close()
 				return
 			case <-deadline:

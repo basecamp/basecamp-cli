@@ -47,6 +47,12 @@ type Adapter struct {
 	// LoadSession is what the pinned version advertises, until a session
 	// reports what the installed one does.
 	LoadSession bool
+	// MCPStatus is how the adapter tells the client whether the session's MCP
+	// servers connected: MCPStatusInit (the agent's init message, which must
+	// report every server connected before the first turn ends) or
+	// MCPStatusStartupFailures (a failed startup is reported, success is
+	// not). The driver ends a session whose server did not connect.
+	MCPStatus MCPStatus
 	// Preflight refuses, before anything starts, a session the adapter would
 	// run with configuration the connector cannot switch off: nil when there is
 	// none to check.
@@ -73,6 +79,7 @@ var ClaudeAgentACP = Adapter{
 	},
 	SessionMeta: map[string]any{
 		"claudeCode": map[string]any{
+			"emitRawSDKMessages": []map[string]string{{"type": "system", "subtype": "init"}},
 			"options": map[string]any{
 				"settingSources":                  []string{},
 				"allowDangerouslySkipPermissions": false,
@@ -84,6 +91,9 @@ var ClaudeAgentACP = Adapter{
 			},
 		},
 	},
+	// Claude Code's init message, and only it, is forwarded: the driver
+	// reads each MCP server's name and status from it and nothing else.
+	MCPStatus:   MCPStatusInit,
 	LoadSession: true,
 }
 
@@ -118,11 +128,31 @@ var CodexACP = Adapter{
 		"DISABLE_MCP_CONFIG_FILTERING": "true",
 	},
 	Preflight: codexPreflight,
+	MCPStatus: MCPStatusStartupFailures,
 	Modes: map[driver.PermissionMode]string{
 		driver.ModeEditsInWorkDir: "read-only",
 	},
 	LoadSession: true,
 }
+
+// MCPStatus names how an adapter reports its MCP servers' startup.
+type MCPStatus string
+
+const (
+	// MCPStatusInit: claude-agent-acp forwards Claude Code's system/init
+	// message, with each MCP server's status, as a _claude/sdkMessage
+	// notification when the session asks for it.
+	MCPStatusInit MCPStatus = "init"
+	// MCPStatusStartupFailures: codex-acp reports a server that failed or
+	// was canceled at startup as a failed tool call named
+	// mcp_startup.<server>.
+	MCPStatusStartupFailures MCPStatus = "startup_failures"
+)
+
+// ErrMCPServerNotConnected is a session whose MCP server did not connect: the
+// worker would run without the tools the connector gave it, the Basecamp
+// tools and its task token among them.
+var ErrMCPServerNotConnected = errors.New("acp: an MCP server of the session did not connect")
 
 // ErrForeignMCPConfig is agent configuration that declares MCP servers of its
 // own, which the connector cannot keep out of a session.

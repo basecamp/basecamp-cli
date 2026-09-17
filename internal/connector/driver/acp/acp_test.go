@@ -870,6 +870,10 @@ func TestThePinnedAdapters(t *testing.T) {
 	}
 	options := ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["options"].(map[string]any)
 	assert.Equal(t, true, options["strictMcpConfig"], "only the session's MCP servers")
+	assert.Equal(t, MCPStatusInit, ClaudeAgentACP.MCPStatus)
+	assert.Equal(t, []map[string]string{{"type": "system", "subtype": "init"}}, ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["emitRawSDKMessages"],
+		"the init, and only the init, is forwarded")
+	assert.Equal(t, MCPStatusStartupFailures, CodexACP.MCPStatus)
 	assert.Equal(t, []string{"EnterPlanMode", "ExitPlanMode"}, options["disallowedTools"], "a plan-mode switch would leave the verified mode")
 	assert.Equal(t, []string{}, options["settingSources"], "none of the host's settings")
 	assert.Equal(t, false, options["allowDangerouslySkipPermissions"])
@@ -1485,4 +1489,78 @@ func TestTheAdapterInstallRefusesAnUnsupportedNode(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &lock))
 	assert.NotEmpty(t, lock.Packages["node_modules/"+ClaudeAgentACP.Package].Engines["node"],
 		"the pinned adapter states the Node it needs, which --engine-strict enforces")
+}
+
+// A session whose MCP server did not connect does not go on: the worker
+// would run without the Basecamp tools and its task token, and a turn that
+// ends without them would be settled as finished.
+func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
+	withStatus := func(h *harness, status MCPStatus) *Driver {
+		d := h.driver()
+		d.opts.Adapter.MCPStatus = status
+		return d
+	}
+	t.Run("claude: the init reports every server connected", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "connected"}}}, Stop: "end_turn"}, turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		for range 2 {
+			res, err := s.Prompt(context.Background(), "go")
+			require.NoError(t, err)
+			assert.Equal(t, driver.TurnEndTurn, res.Stop)
+		}
+	})
+	for name, init := range map[string]map[string]string{
+		"claude: the server failed":     {"basecamp": "failed"},
+		"claude: the server is pending": {"basecamp": "pending"},
+		"claude: the server is missing": {"other": "connected"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.turns(turnScript{Steps: []step{{MCPInit: init}, {SleepMS: 3000}}, Stop: "end_turn"})
+			s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+			require.NoError(t, err)
+			defer s.Close()
+			_, err = s.Prompt(context.Background(), "go")
+			require.ErrorIs(t, err, ErrMCPServerNotConnected)
+			select {
+			case <-s.Done():
+			case <-time.After(10 * time.Second):
+				t.Fatal("the worker was not ended")
+			}
+		})
+	}
+	t.Run("claude: a turn that ends with no init at all", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "never told is not connected")
+	})
+	t.Run("codex: a startup failure", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp_startup.basecamp", "kind": "other",
+				"title": "mcp__basecamp__startup", "status": "failed"})},
+			{SleepMS: 3000},
+		}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+	})
+	t.Run("codex: no failure reported is no failure", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.NoError(t, err)
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -51,8 +52,13 @@ type session struct {
 	deciding int
 	// canceled is a cancel that found no turn to end: the next turn starts
 	// canceled, and takes the flag with it.
-	canceled      bool
-	unsafe        error
+	canceled bool
+	unsafe   error
+	// mcpStatus, mcpNames and mcpConfirmed are how the session learns its MCP
+	// servers connected (Adapter.MCPStatus).
+	mcpStatus     MCPStatus
+	mcpNames      []string
+	mcpConfirmed  bool
 	replaying     bool
 	updatesClosed bool
 	closed        bool
@@ -390,29 +396,56 @@ func (s *session) reportModeSince(id string, since int64) {
 	s.mode = id
 	close(s.modeSeen)
 	s.modeSeen = make(chan struct{})
-	unsafe := s.verified && id != s.askMode && s.unsafe == nil
+	unsafe := s.verified && id != s.askMode
+	s.mu.Unlock()
 	if unsafe {
-		s.unsafe = fmt.Errorf("%w: the agent left mode %q for %q", driver.ErrUnsafeMode, s.askMode, agentText(id))
+		s.fail(fmt.Errorf("%w: the agent left mode %q for %q", driver.ErrUnsafeMode, s.askMode, agentText(id)))
 	}
+}
+
+// fail ends a session that cannot go on: its turn fails with err, and its
+// worker is ended after. The first failure is the one reported.
+func (s *session) fail(err error) {
+	s.mu.Lock()
+	if s.unsafe != nil {
+		s.mu.Unlock()
+		return
+	}
+	s.unsafe = err
 	t := s.turn
 	end := s.endUnsafe
 	s.mu.Unlock()
-	if unsafe {
-		// The turn is failed first and the worker ended after, so whoever
-		// waits on both hears ErrUnsafeMode before the worker is gone.
-		go func() {
-			if t != nil {
-				s.conn.abandon(t.call)
-				// Bounded: a turn whose prompt is still stuck in a write the
-				// agent never reads must not keep the worker alive.
-				select {
-				case <-t.done:
-				case <-time.After(s.grace):
-				}
+	// The turn is failed first and the worker ended after, so whoever waits
+	// on both hears err before the worker is gone.
+	go func() {
+		if t != nil {
+			s.conn.abandon(t.call)
+			// Bounded: a turn whose prompt is still stuck in a write the
+			// agent never reads must not keep the worker alive.
+			select {
+			case <-t.done:
+			case <-time.After(s.grace):
 			}
-			end()
-		}()
+		}
+		end()
+	}()
+}
+
+// reportMCPServers takes the agent's own account of its MCP servers: every
+// server the session was given must be connected (invariant 8).
+func (s *session) reportMCPServers(statuses map[string]string) {
+	s.mu.Lock()
+	names := slices.Clone(s.mcpNames)
+	s.mu.Unlock()
+	for _, name := range names {
+		if status := statuses[name]; status != "connected" {
+			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, agentText(status)))
+			return
+		}
 	}
+	s.mu.Lock()
+	s.mcpConfirmed = true
+	s.mu.Unlock()
 }
 
 func modeOption(options []configOption) *configOption {
@@ -558,7 +591,14 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 	canceled := t.canceled
 	unsafe := s.unsafe
 	usage := s.context
+	unconfirmed := s.mcpStatus == MCPStatusInit && len(s.mcpNames) > 0 && !s.mcpConfirmed
 	s.mu.Unlock()
+	if unsafe == nil && err == nil && unconfirmed {
+		// A turn ended and the agent never said its MCP servers connected:
+		// nothing it did can be vouched for, and nothing more is asked of it.
+		unsafe = fmt.Errorf("%w: the agent never reported its MCP servers", ErrMCPServerNotConnected)
+		s.fail(unsafe)
+	}
 
 	result := driver.PromptResult{Refusals: refusals, Usage: usage}
 	if resp.Usage != nil {
@@ -840,6 +880,10 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 // session/update is read; _auth/status_update, which carries the account's
 // email, and every extension are dropped unread (invariant 7).
 func (s *session) onNotification(method string, params json.RawMessage) {
+	if method == "_claude/sdkMessage" {
+		s.onSDKMessage(params)
+		return
+	}
 	if method != "session/update" {
 		return
 	}
@@ -853,6 +897,14 @@ func (s *session) onNotification(method string, params json.RawMessage) {
 	u, ok := decodeUpdate(n.Update)
 	if !ok {
 		return
+	}
+	if s.mcpStatus == MCPStatusStartupFailures && strings.HasPrefix(u.ToolCallID, "mcp_startup.") &&
+		(u.Status == string(driver.ToolFailed) || u.Status == "cancelled") { //nolint:misspell // codex-acp's wire value
+		name := strings.TrimPrefix(u.ToolCallID, "mcp_startup.")
+		if unescaped, err := url.PathUnescape(name); err == nil {
+			name = unescaped
+		}
+		s.reportMCPServers(map[string]string{name: "failed"})
 	}
 	switch u.SessionUpdate {
 	case "current_mode_update":
@@ -908,6 +960,34 @@ func (s *session) emit(u driver.Update) {
 	case s.updates <- u:
 	default:
 	}
+}
+
+// onSDKMessage reads the one Claude Code message the session asks
+// claude-agent-acp to forward, its init, for each MCP server's name and
+// status. Everything else in it, and every other message, is dropped unread.
+func (s *session) onSDKMessage(params json.RawMessage) {
+	if s.mcpStatus != MCPStatusInit {
+		return
+	}
+	var n struct {
+		SessionID string `json:"sessionId"`
+		Message   struct {
+			Type       string `json:"type"`
+			Subtype    string `json:"subtype"`
+			MCPServers []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"mcp_servers"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(params, &n) != nil || !s.ours(n.SessionID) || n.Message.Type != "system" || n.Message.Subtype != "init" {
+		return
+	}
+	statuses := map[string]string{}
+	for _, srv := range n.Message.MCPServers {
+		statuses[srv.Name] = srv.Status
+	}
+	s.reportMCPServers(statuses)
 }
 
 // onRequest answers the agent's requests. The client offers no fs and no

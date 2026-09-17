@@ -96,6 +96,9 @@ type conn struct {
 	// spawns no more than this many goroutines, and the rest are refused as
 	// they are read.
 	handlers chan struct{}
+	// busy carries the ids of requests refused at the bound to the one
+	// goroutine that answers them.
+	busy chan json.RawMessage
 
 	done chan struct{}
 
@@ -105,10 +108,26 @@ type conn struct {
 }
 
 func newConn(w io.Writer) *conn {
-	return &conn{
+	c := &conn{
 		w: w, pending: map[int64]chan wireMessage{},
 		handlers: make(chan struct{}, maxHandlers),
+		busy:     make(chan json.RawMessage, maxHandlers),
 		done:     make(chan struct{}),
+	}
+	go c.answerBusy()
+	return c
+}
+
+// answerBusy answers requests refused at the handler bound, until the
+// connection ends.
+func (c *conn) answerBusy() {
+	for {
+		select {
+		case id := <-c.busy:
+			c.replyError(id, codeBusy, "too many requests at once")
+		case <-c.done:
+			return
+		}
 	}
 }
 
@@ -152,7 +171,13 @@ func (c *conn) read(r io.Reader) error {
 				if c.onBusy != nil {
 					c.onBusy(m.Method, m.Params)
 				}
-				c.replyError(m.ID, codeBusy, "too many requests at once")
+				// Answered off the reader, and dropped if even that is full:
+				// an agent flooding requests while it has stopped reading its
+				// input must not stall what the client reads from it.
+				select {
+				case c.busy <- m.ID:
+				default:
+				}
 				continue
 			}
 			id, method, params := m.ID, m.Method, m.Params
