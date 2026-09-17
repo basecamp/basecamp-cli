@@ -80,7 +80,7 @@ func (h *worktreeHarness) lookup(k string) (string, bool) {
 
 func (h *worktreeHarness) git(dir string, args ...string) string {
 	h.t.Helper()
-	cmd := exec.Command("git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = []string{"HOME=" + h.home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1"}
 	out, err := cmd.CombinedOutput()
@@ -154,8 +154,8 @@ func TestPrepareMakesAWorktreeOnATaskBranchOutsideTheCheckout(t *testing.T) {
 // Invariant 1: a worktree with nothing to lose is removed, with its branch.
 func TestAWorktreeWithNothingToLoseIsRemoved(t *testing.T) {
 	h := newWorktreeHarness(t)
-	workDir, row := h.prepare(1)
-	row = h.finish(workDir)
+	workDir, _ := h.prepare(1)
+	row := h.finish(workDir)
 	assert.Equal(t, WorktreeRemoved, row.State)
 	assert.Equal(t, RemovedByConnector, row.RemovedBy)
 	assert.False(t, exists(row.Path))
@@ -232,10 +232,10 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 	})
 	t.Run("held only by another task's branch", func(t *testing.T) {
 		h := newWorktreeHarness(t)
-		workDir, row := h.prepare(6)
+		workDir, _ := h.prepare(6)
 		sha := commit(h, workDir, "work.txt")
 		h.git(h.repo, "branch", BranchPrefix+"99-other", sha)
-		row = h.finish(workDir)
+		row := h.finish(workDir)
 		assert.Equal(t, RetainedUnpushed, row.RetainedReason)
 	})
 	t.Run("detached away from an unpushed branch", func(t *testing.T) {
@@ -261,10 +261,10 @@ func TestALockedWorktreeIsRetained(t *testing.T) {
 // do something first.
 func fakeGit(t *testing.T, script string) string {
 	t.Helper()
-	real, err := exec.LookPath("git")
+	gitPath, err := exec.LookPath("git")
 	require.NoError(t, err)
 	path := filepath.Join(t.TempDir(), "git")
-	body := "#!/bin/sh\nREAL=" + real + "\n" + script + "\nexec \"$REAL\" \"$@\"\n"
+	body := "#!/bin/sh\nREAL=" + gitPath + "\n" + script + "\nexec \"$REAL\" \"$@\"\n"
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o700))
 	return path
 }

@@ -165,6 +165,8 @@ var validServerName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // environment file named by $0, delete it, and exec the server. A file that
 // cannot be sourced stops the server before it starts, and Codex, which
 // requires the server, refuses the turn.
+//
+//nolint:gosec // G101: a shell script, not a credential
 const mcpWrapper = `set -a && . "$0" && set +a && rm -f -- "$0" && exec "$@"`
 
 // Args is the command line for a session, without the binary. envFiles maps

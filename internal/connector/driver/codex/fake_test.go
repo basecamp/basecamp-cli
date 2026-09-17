@@ -3,6 +3,7 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,7 +94,7 @@ func fakeCodex() int {
 			if info, err := os.Stat(server.file); err == nil {
 				obs.EnvFile[server.file] = fmt.Sprintf("%o", info.Mode().Perm())
 			}
-			cmd := exec.Command(server.command, server.args...) //nolint:gosec // the fake runs what the driver configured
+			cmd := exec.CommandContext(context.Background(), server.command, server.args...) //nolint:gosec // the fake runs what the driver configured
 			cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
 			if err := cmd.Run(); err != nil {
 				obs.MCPExit = 1
@@ -107,7 +108,7 @@ func fakeCodex() int {
 	}
 
 	if sc.Child {
-		child := exec.Command("sleep", "300")
+		child := exec.CommandContext(context.Background(), "sleep", "300")
 		if err := child.Start(); err == nil {
 			obs.ChildPID = child.Process.Pid
 			save()
@@ -179,7 +180,7 @@ func mcpServers(argv []string) []fakeServer {
 			arguments[name] = a
 		}
 	}
-	var out []fakeServer
+	out := make([]fakeServer, 0, len(commands))
 	for name, command := range commands {
 		a := arguments[name]
 		s := fakeServer{command: command, args: a}

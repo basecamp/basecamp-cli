@@ -478,7 +478,7 @@ func TestUpdatesCarryNoContentAndRefusalsAreRecorded(t *testing.T) {
 	data, err := json.Marshal(updates)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), secret)
-	kinds := []driver.UpdateKind{}
+	kinds := make([]driver.UpdateKind, 0, len(updates))
 	for _, u := range updates {
 		kinds = append(kinds, u.Kind)
 	}
@@ -564,7 +564,7 @@ func assertGone(t *testing.T, pid int) {
 }
 
 func execCommand(name string, args ...string) *exec.Cmd {
-	return exec.Command(name, args...) //nolint:gosec // test helper
+	return exec.CommandContext(context.Background(), name, args...) //nolint:gosec // test helper
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
