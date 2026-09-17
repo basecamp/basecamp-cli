@@ -88,9 +88,9 @@ func TestAThrottleInsideTheWindowPostponesItImmediately(t *testing.T) {
 	}
 	walker, _ := newTestWalker(t, ledger, polls, clock)
 	var atWait time.Time
-	walker.sleep = func(_ context.Context, d time.Duration) error {
+	walker.sleep = func(sleepCtx context.Context, d time.Duration) error {
 		if atWait.IsZero() {
-			open, err := ledger.OpenLosses(context.Background())
+			open, err := ledger.OpenLosses(sleepCtx)
 			require.NoError(t, err)
 			require.Len(t, open, 1)
 			atWait = open[0].DeadlineAt
