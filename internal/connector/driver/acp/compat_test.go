@@ -766,11 +766,24 @@ func checkMCPRestart(t *testing.T, e compatEnv) {
 	}
 	t.Logf("killed the session's MCP server (pid %d)", first.PID)
 
-	res, err := s.Prompt(turnCtx(t), "Use the basecamp MCP tool named note with the text after. "+
-		"If that tool is not available to you, reply with exactly UNAVAILABLE and use no tools.")
-	second := readRecord(t, record, func(r stubRecord) bool {
-		return r.PID != 0 && r.PID != first.PID && slices.Contains(r.Methods, "initialize")
-	}, 60*time.Second)
+	// Asked twice: a model that answers without reaching for the tool tells
+	// us nothing about the adapter, and which of the two happened is not
+	// visible from here.
+	var res driver.PromptResult
+	var second stubRecord
+	for range 2 {
+		res, err = s.Prompt(turnCtx(t), "Use the basecamp MCP tool named note with the text after. "+
+			"You must call that tool. If calling it fails, say exactly UNAVAILABLE.")
+		second = readRecord(t, record, func(r stubRecord) bool {
+			return r.PID != 0 && r.PID != first.PID && slices.Contains(r.Methods, "initialize")
+		}, 30*time.Second)
+		if second.PID != 0 && second.PID != first.PID {
+			break
+		}
+		if err != nil {
+			break
+		}
+	}
 	switch {
 	case second.PID != 0 && second.PID != first.PID:
 		worker := s.Process()
@@ -785,9 +798,10 @@ func checkMCPRestart(t *testing.T, e compatEnv) {
 	case errors.Is(err, ErrMCPServerNotConnected):
 		t.Logf("NOT RESTARTED, and reported: %s left the server dead and said so; the driver refused the turn: %v", e.adapter.Name, err)
 	default:
-		t.Logf("NOT RESTARTED, and not reported: %s left the server dead and the turn ended stop=%v err=%v; "+
-			"nothing but the session's own account of its servers stands between a worker and a turn without its tools",
-			e.adapter.Name, res.Stop, err)
+		t.Logf("NO RESTART SEEN, and nothing reported: %s put no new server on the record across two turns, "+
+			"which ended stop=%v err=%v. Either the adapter left the server dead or the model never reached for the "+
+			"tool; neither is visible to the client, so nothing but the session's own account of its servers stands "+
+			"between a worker and a turn without its tools", e.adapter.Name, res.Stop, err)
 	}
 }
 
