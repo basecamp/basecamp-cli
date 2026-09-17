@@ -323,6 +323,55 @@ ALTER TABLE events ADD COLUMN requester_id       INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE events ADD COLUMN snapshot           BLOB;
 CREATE INDEX events_conversation ON events (conversation_key, state);
 `,
+	// Migration 5. The worker's side of a dispatch: the task a worker's token
+	// names, and each event's delivery state on it.
+	//
+	// These are the columns the basecamp_connect domain reads and writes and
+	// nothing more. The dispatcher's attempts, deadlines and working
+	// directories extend these tables rather than replace them.
+	//
+	// A task keeps a hash of its token, never the token: the ledger is a
+	// file other processes open, and the token is what binds a worker to its
+	// task. superseded_at is set when a redispatch replaces the worker, and a
+	// superseded token is refused.
+	//
+	// delivery is admitted → exposed → delivered → completed and never goes
+	// back, held by the trigger as the events lifecycle is. guard is the
+	// thirty-second acknowledgement guard: '' where none applies, armed until
+	// get_dispatch cancels it or the connector fires it.
+	`
+CREATE TABLE tasks (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_sha256  TEXT NOT NULL UNIQUE,
+  created_at    TEXT NOT NULL,
+  superseded_at TEXT
+);
+
+CREATE TABLE task_events (
+  task_id      INTEGER NOT NULL REFERENCES tasks (id),
+  event_id     INTEGER NOT NULL REFERENCES events (id),
+  delivery     TEXT    NOT NULL DEFAULT 'admitted'
+               CHECK (delivery IN ('admitted', 'exposed', 'delivered', 'completed')),
+  guard        TEXT    NOT NULL DEFAULT ''
+               CHECK (guard IN ('', 'armed', 'canceled', 'fired')),
+  exposed_at   TEXT,
+  delivered_at TEXT,
+  completed_at TEXT,
+  ack_id       INTEGER,
+  outcome      TEXT    NOT NULL DEFAULT '',
+  links        TEXT    NOT NULL DEFAULT '[]',
+  reply_id     INTEGER,
+  PRIMARY KEY (task_id, event_id)
+);
+
+CREATE TRIGGER task_events_delivery_moves_forward
+BEFORE UPDATE OF delivery ON task_events
+WHEN (CASE NEW.delivery WHEN 'admitted' THEN 0 WHEN 'exposed' THEN 1 WHEN 'delivered' THEN 2 ELSE 3 END)
+   < (CASE OLD.delivery WHEN 'admitted' THEN 0 WHEN 'exposed' THEN 1 WHEN 'delivered' THEN 2 ELSE 3 END)
+BEGIN
+  SELECT RAISE(ABORT, 'a delivery state never goes back');
+END;
+`,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

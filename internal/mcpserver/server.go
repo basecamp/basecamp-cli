@@ -24,6 +24,10 @@ type Config struct {
 	// Domains narrows the served domains by key ("projects", "todos", ...).
 	// Empty means all. Unknown keys are a startup error — fail closed.
 	Domains []string
+	// Connect, when set, serves the basecamp_connect domain from it: the one
+	// task a connector-started worker was given. Unset, the domain does not
+	// exist on this server.
+	Connect Dispatch
 }
 
 // Server wraps the toolkit gateway serving Basecamp's derived catalog,
@@ -44,10 +48,24 @@ func New(api API, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("derive catalog: %w", err)
 	}
 
+	if cfg.Connect != nil {
+		if cfg.ReadOnly {
+			// Every connect action records something; a read-only server
+			// would serve the domain with nothing in it.
+			return nil, fmt.Errorf("the %s domain cannot be served read-only", connectToolName)
+		}
+		for _, d := range cat.Domains {
+			if d.Key == connectDomainKey {
+				return nil, fmt.Errorf("the model already serves a %q domain; the connector's would shadow it", connectDomainKey)
+			}
+		}
+		cat.Domains = append(cat.Domains, connectDomain())
+	}
+
 	gw, err := gateway.New(cat.GatewayDomains(), gateway.Config{
 		ReadOnly: cfg.ReadOnly,
 		Domains:  cfg.Domains,
-		Handler:  dispatcher{api: api}.handle,
+		Handler:  dispatcher{api: api, connect: cfg.Connect}.handle,
 	})
 	if err != nil {
 		return nil, err

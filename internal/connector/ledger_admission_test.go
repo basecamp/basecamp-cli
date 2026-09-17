@@ -602,7 +602,7 @@ func TestMigrationFourCarriesAnEarlierLedger(t *testing.T) {
 	t.Cleanup(func() { _ = ledger.Close() })
 	version, err := ledger.SchemaVersion(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 4, version)
+	assert.Equal(t, len(migrations), version)
 
 	ev, ok, err := ledger.Admission().LoadUndecided(context.Background(), 1)
 	require.NoError(t, err)
