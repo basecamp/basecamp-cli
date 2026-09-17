@@ -494,9 +494,7 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
 		// Nothing on disk. A branch git made stays unless it still points at
 		// the base, which holds nothing of the task's.
-		if r.BranchCreated {
-			w.deleteBranchAt(ctx, r, r.BaseCommit)
-		}
+		w.deleteBranchAt(ctx, r, r.BaseCommit)
 		gone := RemovedMissing
 		if r.State == WorktreeCreating {
 			gone = RemovedNeverCreated
