@@ -48,16 +48,17 @@ import (
 //     pending to canceled in get_dispatch's own transaction, and a guard that
 //     already went out marks every task event it answers for as fired, so a
 //     worker is told the connector acknowledged.
-//  9. A guard is reported fired from the moment it is claimed, and never
-//     after it is proven not sent. The claim marks its task events fired in
-//     the claim's own transaction, so no worker asking while the request is
-//     in flight acknowledges a second time. A refusal re-arms them in the
-//     refusal's transaction, so every worker that asks afterwards
-//     acknowledges. A worker that asked in between was told the connector
-//     acknowledged and does not: that one acknowledgement is missing. This is
-//     the spec's trade, chosen over its alternative — marking fired only once
-//     the request succeeds lets a worker asking in flight acknowledge beside
-//     a guard that lands, a double acknowledgement on the normal path.
+//  9. A guard is reported fired from the moment it is claimed, and that is
+//     final: #736's task_events_guard_settles_once lets a guard move only
+//     from armed. The claim marks its task events fired in the claim's own
+//     transaction, so no worker asking while the request is in flight
+//     acknowledges a second time. If Basecamp then refuses the request, the
+//     intent is canceled — nothing was created — but its task events stay
+//     fired, so that task's workers do not acknowledge either: the
+//     acknowledgement is missing, never doubled, the spec's own preference.
+//     A later task for the event (a person's redispatch) arms afresh, since
+//     a canceled intent marks nothing fired. How a refusal is recorded across
+//     the ledger follows card 18's shared rule once it lands.
 //  10. Reconciliation never holds up sending for long. A running connector
 //     sends a batch, then lists at most one due destination; each listing is
 //     bounded in time; each failure backs its intent off, doubling, and the
@@ -521,9 +522,9 @@ WHERE id = ? AND (state = 'indeterminate' OR (state = 'canceled' AND note = '` +
 const RefusedNote = "the request was refused; no message was created"
 
 // refuse settles a sending intent Basecamp refused. The request created
-// nothing, so unlike an uncertain send this one stands the guard down again:
-// the worker is not told the connector acknowledged something that does not
-// exist, and no later task event is written fired for it.
+// nothing, so the intent is canceled rather than left uncertain, and no later
+// task event is written fired for it. Task events the claim already marked
+// fired stay fired (invariant 9).
 func (l *Ledger) refuse(ctx context.Context, in Intent, note string) (Intent, error) {
 	err := retryBusy(func() error {
 		tx, err := l.db.BeginTx(ctx, nil)
@@ -540,11 +541,6 @@ func (l *Ledger) refuse(ctx context.Context, in Intent, note string) (Intent, er
 			return err
 		} else if n == 0 {
 			return fmt.Errorf("connector: refuse intent %d: it is not sending", in.ID)
-		}
-		if in.Kind == IntentGuardAck {
-			if _, err := tx.ExecContext(ctx, `UPDATE task_events SET guard = 'armed' WHERE event_id = ? AND guard = 'fired'`, in.EventID); err != nil {
-				return fmt.Errorf("connector: stand the guard on %d down: %w", in.EventID, err)
-			}
 		}
 		return tx.Commit()
 	})

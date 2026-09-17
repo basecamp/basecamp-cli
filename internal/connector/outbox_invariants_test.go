@@ -920,28 +920,46 @@ func TestOutboxAnIntentWithNoRecordIsCanceled(t *testing.T) {
 	assert.Zero(t, basecamp.postCount())
 }
 
-// A guard Basecamp refused acknowledged nothing, so the worker is not told it
-// did: the guard stands down and the worker acknowledges in its own words.
-func TestOutboxARefusedGuardStandsDownAgain(t *testing.T) {
-	ledger, clock := obLedger(t)
-	ctx := context.Background()
-	obAdmit(t, ledger, 1, "recording:10304028989")
-	// The task is already live, so its task event carries the armed guard the
-	// claim marks fired.
-	l := obLaunch(t, ledger, 1)
-	basecamp := newFakeBasecamp(clock.Now)
-	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
-	clock.Advance(DefaultGuardDelay)
-	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
-	assert.Equal(t, IntentCanceled, obIntent(t, ledger, guardKey(1)).State)
+// A guard Basecamp refused created nothing, so its intent is canceled. Task
+// events the claim marked fired stay fired — #736 settles a guard once — so
+// the acknowledgement is missing, never doubled; a task created afterwards
+// arms afresh.
+func TestOutboxARefusedGuardIsMissingNeverDoubled(t *testing.T) {
+	t.Run("task live when the guard is refused", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock := obLedger(t)
+		obAdmit(t, ledger, 1, "recording:10304028989")
+		l := obLaunch(t, ledger, 1)
+		basecamp := newFakeBasecamp(clock.Now)
+		basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+		clock.Advance(DefaultGuardDelay)
+		require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+		assert.Equal(t, IntentCanceled, obIntent(t, ledger, guardKey(1)).State)
 
-	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
-	require.NoError(t, err)
-	instruction, ok, err := d.Get(ctx, 1)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.True(t, instruction.Acknowledge)
-	assert.False(t, instruction.GuardAcknowledged, "the worker acknowledges, since nobody did")
+		d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+		require.NoError(t, err)
+		instruction, ok, err := d.Get(ctx, 1)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.True(t, instruction.GuardAcknowledged, "settled once: missing rather than doubled")
+	})
+
+	t.Run("task created after the guard was refused", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock := obLedger(t)
+		obAdmit(t, ledger, 1, "recording:10304028989")
+		basecamp := newFakeBasecamp(clock.Now)
+		basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+		clock.Advance(DefaultGuardDelay)
+		require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+
+		l := obLaunch(t, ledger, 1)
+		d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+		require.NoError(t, err)
+		instruction, _, err := d.Get(ctx, 1)
+		require.NoError(t, err)
+		assert.False(t, instruction.GuardAcknowledged, "nothing was acknowledged, so the worker does")
+	})
 }
 
 // Slow destinations cannot hold up a guard that is due: the running connector
@@ -1052,10 +1070,8 @@ func TestOutboxAResendDuringAFlushWaitsForTheNext(t *testing.T) {
 }
 
 // Invariant 9: a worker that asks while a guard is in flight is told the
-// connector acknowledged, and a worker that asks after Basecamp refused it is
-// not. The first case is the stated trade: its acknowledgement goes missing
-// rather than doubled.
-func TestOutboxAGuardIsFiredWhileInFlightAndArmedAfterRefusal(t *testing.T) {
+// connector acknowledged, and that stands if Basecamp then refuses it.
+func TestOutboxAGuardIsFiredFromItsClaim(t *testing.T) {
 	ledger, clock := obLedger(t)
 	ctx := context.Background()
 	obAdmit(t, ledger, 1, "recording:10304028989")
@@ -1066,9 +1082,8 @@ func TestOutboxAGuardIsFiredWhileInFlightAndArmedAfterRefusal(t *testing.T) {
 	basecamp := newFakeBasecamp(clock.Now)
 	var inFlight Instruction
 	basecamp.beforePost = func(Destination, string) error {
-		// The worker asks while the guard's request is in flight.
 		var err error
-		inFlight, _, err = d.Get(ctx, 1)
+		inFlight, _, err = d.Get(context.Background(), 1)
 		require.NoError(t, err)
 		return fmt.Errorf("404: %w", ErrNotPosted)
 	}
@@ -1076,10 +1091,9 @@ func TestOutboxAGuardIsFiredWhileInFlightAndArmedAfterRefusal(t *testing.T) {
 	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 	assert.True(t, inFlight.GuardAcknowledged, "no double acknowledgement while the guard may land")
 
-	// A follow-up worker, or the same one asking again, is told the truth.
 	after, _, err := d.Get(ctx, 1)
 	require.NoError(t, err)
-	assert.False(t, after.GuardAcknowledged, "a refused guard acknowledged nothing")
+	assert.True(t, after.GuardAcknowledged, "a guard settles once")
 }
 
 // orderedPoster records the order of listings and posts.

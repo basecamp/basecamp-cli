@@ -294,9 +294,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 	cancel()
 	if errors.Is(postErr, ErrNotPosted) {
 		// Basecamp refused the request, so no message exists to find: nothing
-		// to reconcile, and a guard that stands down again rather than
-		// telling a worker the connector acknowledged something that was
-		// never posted.
+		// to reconcile. The intent is canceled (invariant 9).
 		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, RefusedNote)
 		if err != nil {
 			// The ledger failed, not Basecamp: either the refusal was not
