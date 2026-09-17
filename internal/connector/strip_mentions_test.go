@@ -56,6 +56,12 @@ func mentionPieces() []string {
 		`<bc-attachment sgid="`,
 		`"`,
 		`<div title="`,
+		`<`,
+		`<p `,
+		`>`,
+		`/`,
+		`<b`,
+		`bc-attachment sgid="` + a + `">`,
 	}
 }
 
@@ -142,6 +148,8 @@ func restoreSpan(input string, removed [][2]int, keep [2]int) string {
 		b.WriteString(input[pos:span[0]])
 		if span == keep {
 			b.WriteString(input[span[0]:span[1]])
+		} else {
+			b.WriteString(strippedMention)
 		}
 		pos = span[1]
 	}

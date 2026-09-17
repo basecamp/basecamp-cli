@@ -143,7 +143,7 @@ func TestGetDispatchHandsOutOnlyTheAllowlist(t *testing.T) {
 		RequesterID:      adapterOperatorID,
 		Acknowledge:      true,
 		Delivery:         DeliveryExposed,
-		Content:          "<div> please ask " + mentionMarkup(otherPersonID) + " about it</div>",
+		Content:          "<div>  please ask " + mentionMarkup(otherPersonID) + " about it</div>",
 		ContentUpdatedAt: time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC),
 	}, got)
 
@@ -761,22 +761,24 @@ func TestStripMentionsOf(t *testing.T) {
 	selfClosing := strings.Replace(agent, "></bc-attachment>", " />", 1)
 	unclosed := strings.Replace(agent, "</bc-attachment>", "", 1)
 
+	// A removed mention leaves a space, so what was around it cannot join.
 	for name, tc := range map[string]struct{ in, want string }{
-		"the agent's mention":            {"<div>" + agent + " do it</div>", "<div> do it</div>"},
-		"with its figure":                {"<div>" + withFigure + " do it</div>", "<div> do it</div>"},
-		"another person's mention stays": {"<div>" + other + " and " + agent + "</div>", "<div>" + other + " and </div>"},
-		"a file stays":                   {file + agent, file},
-		"self-closing":                   {"a" + selfClosing + "b", "ab"},
-		"self-closing, before another":   {selfClosing + other, other},
-		"unclosed, before another":       {unclosed + " x " + other, " x " + other},
-		"every occurrence":               {agent + " and " + agent, " and "},
+		"the agent's mention":            {"<div>" + agent + " do it</div>", "<div>  do it</div>"},
+		"with its figure":                {"<div>" + withFigure + " do it</div>", "<div>  do it</div>"},
+		"another person's mention stays": {"<div>" + other + " and " + agent + "</div>", "<div>" + other + " and  </div>"},
+		"a file stays":                   {file + agent, file + " "},
+		"self-closing":                   {"a" + selfClosing + "b", "a b"},
+		"self-closing, before another":   {selfClosing + other, " " + other},
+		"unclosed, before another":       {unclosed + " x " + other, "  x " + other},
+		"every occurrence":               {agent + " and " + agent, "  and  "},
 		"no attachments":                 {"<div>plain</div>", "<div>plain</div>"},
-		"single-quoted sgid":             {"a" + strings.ReplaceAll(agent, `"`, "'") + "b", "ab"},
-		"a > inside another attribute":   {"a" + strings.Replace(agent, "<bc-attachment ", `<bc-attachment caption="x > y" `, 1) + "b", "ab"},
-		"an entity in the sgid":          {"a" + entityEncodedSGID(agent) + "b", "ab"},
+		"single-quoted sgid":             {"a" + strings.ReplaceAll(agent, `"`, "'") + "b", "a b"},
+		"a > inside another attribute":   {"a" + strings.Replace(agent, "<bc-attachment ", `<bc-attachment caption="x > y" `, 1) + "b", "a b"},
+		"an entity in the sgid":          {"a" + entityEncodedSGID(agent) + "b", "a b"},
 		"inside a comment it is text":    {"<!-- " + agent + " -->" + other, "<!-- " + agent + " -->" + other},
-		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "ab"},
+		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "a b"},
 		"the first sgid is the one":      {strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1), strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1)},
+		"a stray < before it":            {"<" + agent + "hi " + other, "< hi " + other},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))

@@ -723,22 +723,29 @@ func sameID(stored sql.NullInt64, given *int64) bool {
 //
 // A mention element runs from its start tag to the first end tag of the same
 // name, unless another attachment starts first or none closes, in which case
-// the start tag stands alone.
+// the start tag stands alone. What it leaves behind is a space, not nothing:
+// closing the gap could join a "<" before the element to the text after it
+// into a tag that swallows what follows — someone else's mention included —
+// and a space can never begin one.
 func StripMentionsOf(richText string, personID int64) string {
 	if !slices.Contains(basecamp.MentionedPersonIDs(richText), personID) {
 		return richText
 	}
 	out, _ := stripOnce(richText, personID)
 	if slices.Contains(basecamp.MentionedPersonIDs(out), personID) {
-		// The walk is the reader's, so one pass removes every mention it
-		// reads; a mention left means removing one joined the text around it
-		// into another. Handing that out would put the agent's own mention in
-		// front of the worker, and handing out nothing would lose the
-		// instruction. The escaped text keeps the words and no markup.
+		// The walk is the reader's and a removal cannot join what is around
+		// it, so one pass removes every mention the reader reads: this is a
+		// backstop, and no corpus or fuzz input has reached it. Handing the
+		// text out would put the agent's own mention in front of the worker,
+		// and handing out nothing would lose the instruction; the escaped
+		// text keeps the words and no markup.
 		return html.EscapeString(out)
 	}
 	return out
 }
+
+// strippedMention is what a removed mention leaves in the text.
+const strippedMention = " "
 
 // stripOnce removes each mention element of personID the walk finds, and
 // returns the text and the removed spans, as offsets into text.
@@ -756,6 +763,7 @@ func stripOnce(text string, personID int64) (string, [][2]int) {
 		if !t.isEnd && strings.EqualFold(t.name, "bc-attachment") {
 			if id, isPerson := basecamp.PersonIDFromSGID(t.sgid); isPerson && id == personID {
 				out.WriteString(text[pos:t.start])
+				out.WriteString(strippedMention)
 				pos = mentionEnd(text, t.end)
 				removed = append(removed, [2]int{t.start, pos})
 				continue
