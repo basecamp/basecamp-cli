@@ -261,12 +261,15 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		if reason == "" {
 			reason = "held_incomplete"
 		}
-		moved, err := l.move(ctx, tx, transition{id: eventID, state: StateBlocked, reason: reason, from: []RecordState{StateHeld}, byOperator: true, set: authorize})
+		moved, err := l.move(ctx, tx, transition{id: eventID, state: StateBlocked, reason: reason, from: []RecordState{StateHeld}, byOperator: true})
 		if err != nil {
 			return RedispatchResult{}, err
 		}
 		if !moved {
 			return RedispatchResult{}, fmt.Errorf("connector: authorize event %d: %w", eventID, ErrNotATransition)
+		}
+		if err := authorizeBlocked(ctx, tx, eventID, now, by); err != nil {
+			return RedispatchResult{}, err
 		}
 		out.Rerun = true
 
@@ -274,8 +277,8 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		// The record keeps its state; what blocked it runs again. Writing
 		// the authorization is not a state change and leaves the revision
 		// the re-run loads at.
-		if _, err := tx.ExecContext(ctx, `UPDATE events SET authorized_at = ?, authorized_by = ? WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
-			return RedispatchResult{}, fmt.Errorf("connector: authorize event %d: %w", eventID, err)
+		if err := authorizeBlocked(ctx, tx, eventID, now, by); err != nil {
+			return RedispatchResult{}, err
 		}
 		out.Rerun = true
 
@@ -444,4 +447,18 @@ func pendingNote(task eventTask) string {
 		return ""
 	}
 	return fmt.Sprintf("waits for task %d to end", task.taskID)
+}
+
+// authorizeBlocked records a person's authorization on a blocked record, never
+// dated before the record entered its current run of blocked states: an
+// authorization counts for that block only when it is not older than it
+// (AuthorizedBlocked), and neither a move's own later stamp nor a clock that
+// stepped back may make a fresh one look stale.
+func authorizeBlocked(ctx context.Context, tx *sql.Tx, eventID int64, now, by string) error {
+	if _, err := tx.ExecContext(ctx, `
+UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?
+WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
+		return fmt.Errorf("connector: authorize event %d: %w", eventID, err)
+	}
+	return nil
 }

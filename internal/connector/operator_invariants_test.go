@@ -929,3 +929,25 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 		assert.NotContains(t, claimed.Body, "redispatch 1")
 	}
 }
+
+// A record held over a blocking reason and redispatched is authorized for the
+// block that redispatch put it in, though the move stamps the block after the
+// authorization's own time was taken.
+func TestARedispatchOntoBlockedIsAuthorizedForThatBlock(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	_, err = l.db.ExecContext(ctx, `UPDATE events SET reason = 'no_route' WHERE id = 1`)
+	require.NoError(t, err)
+	base := time.Now()
+	calls := 0
+	l.now = func() time.Time { calls++; return base.Add(time.Duration(calls) * time.Second) } // each stamp later than the last
+
+	_, err = l.Redispatch(ctx, 1, opBy)
+	require.NoError(t, err)
+	ids, err := l.AuthorizedBlocked(ctx, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{1}, ids)
+}
