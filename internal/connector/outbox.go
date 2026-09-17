@@ -240,29 +240,24 @@ type newIntent struct {
 	notBefore   time.Time
 }
 
-// writeIntent inserts an intent in tx unless its key already exists. It
-// reports whether it wrote one.
-func writeIntent(ctx context.Context, tx Tx, now time.Time, in newIntent) (bool, error) {
+// writeIntent inserts an intent in tx unless its key already exists.
+func writeIntent(ctx context.Context, tx Tx, now time.Time, in newIntent) error {
 	if in.destination.RecordingID <= 0 || in.body == "" {
-		return false, nil
+		return nil
 	}
 	if in.notBefore.IsZero() {
 		in.notBefore = now
 	}
-	res, err := tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 INSERT INTO outbox (intent_key, kind, event_id, task_id, attempt_id, occurrence, bucket_id, message_kind, recording_id, body, created_at, not_before)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (intent_key) DO NOTHING`,
 		in.key, string(in.kind), nullableID64(in.eventID), nullableID64(in.taskID), nullableString(in.attemptID), in.occurrence,
 		in.destination.BucketID, string(in.destination.Kind), in.destination.RecordingID, in.body, stamp(now), stamp(in.notBefore))
 	if err != nil {
-		return false, fmt.Errorf("connector: write outbox intent %s: %w", in.key, err)
+		return fmt.Errorf("connector: write outbox intent %s: %w", in.key, err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return nil
 }
 
 func nullableID64(id int64) any {
@@ -439,27 +434,29 @@ func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution
 	if strings.TrimSpace(r.By) == "" {
 		return errors.New("connector: a resolution records who decided")
 	}
-	var (
-		set  string
-		args []any
-	)
 	now := l.timestamp()
+	var (
+		query string
+		args  []any
+	)
 	switch r.Resolution {
 	case ResolveSent:
 		if r.ReceiptID <= 0 {
 			return errors.New("connector: a sent resolution names the message")
 		}
-		set, args = `state = 'sent', receipt_id = ?, finished_at = ?`, []any{r.ReceiptID, now}
+		query = `UPDATE outbox SET state = 'sent', receipt_id = ?, finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
+		args = []any{r.ReceiptID, now}
 	case ResolveAbandon:
-		set, args = `state = 'abandoned', finished_at = ?`, []any{now}
+		query = `UPDATE outbox SET state = 'abandoned', finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
+		args = []any{now}
 	case ResolveResend:
-		set, args = `state = 'pending', sending_at = NULL, finished_at = NULL, not_before = ?`, []any{now}
+		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, not_before = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
+		args = []any{now}
 	default:
 		return fmt.Errorf("connector: %q is not a resolution", r.Resolution)
 	}
 	return retryBusy(func() error {
-		res, err := l.db.ExecContext(ctx, `UPDATE outbox SET `+set+`, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`,
-			append(args, r.By, "resolved: "+string(r.Resolution), id)...)
+		res, err := l.db.ExecContext(ctx, query, append(args, r.By, "resolved: "+string(r.Resolution), id)...)
 		if err != nil {
 			if isUniqueViolation(err) {
 				return fmt.Errorf("connector: resolve intent %d: %w", id, ErrReceiptOwned)

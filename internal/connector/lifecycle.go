@@ -213,7 +213,7 @@ func verdictIntents(ctx context.Context, tx Tx, now time.Time, guardDelay time.D
 	}
 	switch {
 	case v.State == StateAdmitted || v.State == StateQueued:
-		_, err := writeIntent(ctx, tx, now, newIntent{
+		err := writeIntent(ctx, tx, now, newIntent{
 			key:         guardKey(v.EventID),
 			kind:        IntentGuardAck,
 			eventID:     v.EventID,
@@ -227,7 +227,7 @@ func verdictIntents(ctx context.Context, tx Tx, now time.Time, guardDelay time.D
 		if !ok || v.ReplyRecordingID <= 0 {
 			return nil
 		}
-		_, err := writeIntent(ctx, tx, now, newIntent{
+		err := writeIntent(ctx, tx, now, newIntent{
 			key:         holdingKey(v.EventID),
 			kind:        IntentHoldingReply,
 			eventID:     v.EventID,
@@ -276,7 +276,7 @@ func completionIntent(ctx context.Context, tx Tx, now time.Time, s Settlement) e
 	if err != nil || !ok {
 		return err
 	}
-	_, err = writeIntent(ctx, tx, now, newIntent{
+	err = writeIntent(ctx, tx, now, newIntent{
 		key:         completionKey(settled.AttemptID),
 		kind:        IntentCompletion,
 		taskID:      settled.TaskID,
@@ -358,7 +358,7 @@ func stillRunningIntent(ctx context.Context, tx Tx, now time.Time, tick StillRun
 	if err != nil {
 		return err
 	}
-	_, err = writeIntent(ctx, tx, now, newIntent{
+	err = writeIntent(ctx, tx, now, newIntent{
 		key:         stillRunningKey(tick.AttemptID, tick.Occurrence),
 		kind:        IntentStillRunning,
 		taskID:      tick.TaskID,
