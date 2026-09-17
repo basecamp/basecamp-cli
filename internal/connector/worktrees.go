@@ -46,8 +46,10 @@ import (
 // edit. An operation in progress (merge, rebase, cherry-pick, revert,
 // bisect). A lock someone set. A submodule's git data. And every commit the
 // worktree reaches — HEAD, the task branch, their reflogs, per-worktree refs
-// — that no ref the connector keeps holds, a kept ref being a remote branch,
-// a local branch that is not a task's, or the base it was made from. A stash
+// (refs/worktree, refs/bisect, refs/rewritten) — that no ref the connector
+// keeps holds, a kept ref being a remote branch, a local branch that is not a
+// task's, a ref a forced removal of this worktree kept it under, or the base
+// it was made from. A stash
 // is in refs/stash, which belongs to the repository and is never touched.
 //
 // WHAT happens to work. The connector never discards it. Without an
@@ -58,8 +60,9 @@ import (
 // that cannot be read) is not removed.
 //
 // HOW the check holds until the removal. removeWorktree freezes the worktree
-// before it judges anything: it renames git's record of it and then its
-// directory aside, each an atomic rename. From then on no git command can
+// before it judges anything: it locks git's record of it (as `git worktree
+// lock` does, so git's own prune leaves the frozen record alone), renames the
+// record and then the directory aside, each an atomic rename. From then on no git command can
 // move its HEAD or commit in it (its .git file names a record that is not
 // there), and nothing that reaches it by path can write to it. The evidence
 // is judged on the frozen copy, and the frozen copy is what is deleted — or
@@ -82,11 +85,12 @@ import (
 //  3. Nothing the repository, its configuration or a worker's files name
 //     runs: git never looks inside a submodule's directory (the disk is judged
 //     before git is asked anything that could recurse, and status ignores
-//     submodules), and every git call runs with hooks, the fsmonitor and every
-//     content filter its configuration defines disabled, with a fixed
-//     environment.
-//  4. A task branch is deleted only if this connector created it, and only by
-//     compare-and-delete against a commit judged held.
+//     submodules), and every git call runs with hooks, the fsmonitor,
+//     signature verification and every content filter its configuration
+//     defines disabled, with a fixed environment.
+//  4. A task branch is deleted only if this connector created it, and only in
+//     one ref transaction that deletes it at the commit judged held and
+//     verifies the ref holding that commit has not moved.
 //
 // Placement goes through Options.Path, one function, because under the
 // sandbox launcher (step 26) the working directory comes from broker-owned
@@ -480,7 +484,11 @@ func (w *Worktrees) Prune(ctx context.Context, force []string) ([]PruneResult, e
 
 func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneResult {
 	var refs []string
-	after := w.settleKeeping(ctx, r, RemovedByPrune, force, &refs)
+	by := RemovedByPrune
+	if force {
+		by = RemovedByPruneForced
+	}
+	after := w.settleKeeping(ctx, r, by, force, &refs)
 	result := PruneResult{Worktree: after, RetainedRefs: refs}
 	gone := after.State == WorktreeRemoving && !exists(after.Path) && !exists(frozenName(after.Path))
 	switch {
@@ -564,12 +572,16 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	from := []WorktreeState{r.State}
 	admin := r.AdminDir
 	if admin == "" {
-		// A row from before the record's place was kept.
-		out, err := w.gitOut(ctx, r.Path, "rev-parse", "--absolute-git-dir")
+		// A row whose record's place was never stored: found, proven to be
+		// this worktree's own record, and stored before anything is renamed.
+		found, err := w.recordOf(ctx, r)
 		if err != nil {
 			return w.retain(ctx, r, RetainedUnverified, from)
 		}
-		admin = out
+		if err := w.ledger.WorktreeAdminDir(ctx, r.ID, found); err != nil {
+			return w.retain(ctx, r, RetainedUnverified, from)
+		}
+		admin, r.AdminDir = found, found
 	}
 	if r.State != WorktreeRemoving {
 		if err := w.ledger.MoveWorktree(ctx, r.ID, WorktreeRemoving, from...); err != nil {
@@ -580,13 +592,24 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	}
 	removing := []WorktreeState{WorktreeRemoving}
 
-	// Freeze: the record, then the directory.
+	// Freeze: lock the record, rename it, then the directory. The lock is
+	// git's own: a frozen record's gitdir names a directory that is not there,
+	// and git's prune deletes such a record unless it is locked.
+	switch taken, err := lockRecord(admin); {
+	case err != nil:
+		return w.retain(ctx, r, RetainedUnverified, removing)
+	case !taken:
+		return w.retain(ctx, r, RetainedLocked, removing)
+	}
 	v := view{dir: frozenName(r.Path), gitDir: frozenName(admin)}
 	if err := os.Rename(admin, v.gitDir); err != nil {
+		unlockRecord(admin)
 		return w.retain(ctx, r, RetainedUnverified, removing)
 	}
 	if err := os.Rename(r.Path, v.dir); err != nil {
-		if os.Rename(v.gitDir, admin) != nil {
+		if os.Rename(v.gitDir, admin) == nil {
+			unlockRecord(admin)
+		} else {
 			w.log.Warn("connector: a worktree's record could not be restored; the next start restores it", "path", r.Path)
 			return r
 		}
@@ -651,7 +674,74 @@ func (w *Worktrees) restore(r Worktree, v view, admin string) bool {
 	if exists(v.gitDir) && os.Rename(v.gitDir, admin) != nil {
 		return false
 	}
+	unlockRecord(admin)
 	return true
+}
+
+// recordLockReason marks a lock on git's record of a worktree as the
+// connector's own, taken while a removal holds it frozen.
+const recordLockReason = "basecamp-connect: removal in progress\n"
+
+// lockRecord locks git's record of a worktree for the connector, the way
+// `git worktree lock` does, if nobody holds a lock on it. taken is false for a
+// lock someone else holds.
+func lockRecord(admin string) (taken bool, err error) {
+	f, err := os.OpenFile(filepath.Join(admin, "locked"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ownRecordLock(filepath.Join(admin, "locked")), nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := f.WriteString(recordLockReason); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return false, err
+	}
+	return true, f.Close()
+}
+
+// ownRecordLock reports whether a record's lock file is the connector's.
+func ownRecordLock(path string) bool {
+	content, err := os.ReadFile(path)
+	return err == nil && string(content) == recordLockReason
+}
+
+// unlockRecord removes the connector's own lock on a record, never another's.
+func unlockRecord(admin string) {
+	path := filepath.Join(admin, "locked")
+	if ownRecordLock(path) {
+		_ = os.Remove(path)
+	}
+}
+
+// recordOf finds git's record of a worktree and proves it is this worktree's:
+// under the repository's common directory's worktrees/, with a gitdir that
+// names this worktree's .git.
+func (w *Worktrees) recordOf(ctx context.Context, r Worktree) (string, error) {
+	admin, err := w.gitOut(ctx, r.Path, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", err
+	}
+	common, err := w.gitOut(ctx, r.Repository, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !samePath(filepath.Dir(admin), filepath.Join(common, "worktrees")) {
+		return "", fmt.Errorf("connector: %s is not a worktree record of %s", admin, r.Repository)
+	}
+	at, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+	if err != nil {
+		return "", err
+	}
+	named := strings.TrimSpace(string(at))
+	if !filepath.IsAbs(named) {
+		named = filepath.Join(admin, named)
+	}
+	if !samePath(filepath.Dir(named), r.Path) {
+		return "", fmt.Errorf("connector: %s is another worktree's record", admin)
+	}
+	return admin, nil
 }
 
 // unfreeze restores the names of a worktree a crash left frozen. It reports
@@ -670,6 +760,9 @@ func (w *Worktrees) unfreeze(r Worktree) (restored, ok bool) {
 			return restored, false
 		}
 		restored = true
+	}
+	if r.AdminDir != "" {
+		unlockRecord(r.AdminDir)
 	}
 	return restored, true
 }
@@ -703,8 +796,9 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 	}
 	gitPath := func(name string) string { return filepath.Join(v.gitDir, name) }
 	switch _, err := os.Lstat(gitPath("locked")); {
-	case err == nil:
+	case err == nil && !ownRecordLock(gitPath("locked")):
 		return RetainedLocked, "", nil
+	case err == nil:
 	case !errors.Is(err, os.ErrNotExist):
 		return RetainedUnverified, "", nil
 	}
@@ -785,7 +879,7 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 	}
 	for _, args := range [][]string{
 		{"reflog", "show", "--format=%H", "HEAD", "--"},
-		{"for-each-ref", "--format=%(objectname)", "refs/worktree/"},
+		{"for-each-ref", "--format=%(objectname)", "refs/worktree/", "refs/bisect/", "refs/rewritten/"},
 	} {
 		out, err := w.gitRawIn(ctx, v, args...)
 		if err != nil {
@@ -887,7 +981,7 @@ func (w *Worktrees) recordHoldsNothing(ctx context.Context, r Worktree) bool {
 	var tips []string
 	for _, args := range [][]string{
 		{"reflog", "show", "--format=%H", "HEAD", "--"},
-		{"for-each-ref", "--format=%(objectname)", "refs/worktree/"},
+		{"for-each-ref", "--format=%(objectname)", "refs/worktree/", "refs/bisect/", "refs/rewritten/"},
 	} {
 		out, err := w.run(ctx, safeGit, append([]string{"--git-dir", r.AdminDir}, args...), args[0])
 		if err != nil {
@@ -895,9 +989,11 @@ func (w *Worktrees) recordHoldsNothing(ctx context.Context, r Worktree) bool {
 		}
 		tips = append(tips, strings.Fields(string(out))...)
 	}
-	if head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"}, "rev-parse"); err == nil {
-		tips = append(tips, strings.TrimSpace(string(head)))
+	head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"}, "rev-parse")
+	if err != nil {
+		return false
 	}
+	tips = append(tips, strings.TrimSpace(string(head)))
 	slices.Sort(tips)
 	for _, commit := range slices.Compact(tips) {
 		if held, err := w.held(ctx, r, commit); err != nil || !held {
@@ -1019,24 +1115,34 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, v view) (untracked, git
 }
 
 // held reports whether a commit is safe to lose from this worktree: it is the
-// base the worktree was made from, or a remote branch or a local branch that
-// is not a task branch contains it.
+// base the worktree was made from, or a ref the connector keeps contains it —
+// a remote branch, a local branch that is not a task's, or a ref a forced
+// removal of this same worktree kept it under.
 func (w *Worktrees) held(ctx context.Context, r Worktree, commit string) (bool, error) {
 	if commit == r.BaseCommit {
 		return true, nil
 	}
-	refs, err := w.gitOut(ctx, r.Repository, "for-each-ref", "--format=%(refname)", "--contains", commit, "refs/remotes", "refs/heads")
+	ref, _, err := w.holder(ctx, r, commit)
+	return ref != "", err
+}
+
+// holder is a ref the connector keeps that contains commit, and the commit it
+// points at; "" when there is none.
+func (w *Worktrees) holder(ctx context.Context, r Worktree, commit string) (string, string, error) {
+	own := RetainedRefPrefix + safeName(filepath.Base(r.Path)) + "/"
+	out, err := w.gitOut(ctx, r.Repository, "for-each-ref", "--format=%(refname) %(objectname)", "--contains", commit, "refs/remotes", "refs/heads", own)
 	if err != nil {
-		return false, err
+		return "", "", err
 	}
-	for ref := range strings.SplitSeq(refs, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
+		ref, oid, ok := strings.Cut(line, " ")
 		switch {
-		case ref == "", strings.HasPrefix(ref, "refs/heads/"+BranchPrefix):
-		case strings.HasPrefix(ref, "refs/remotes/"), strings.HasPrefix(ref, "refs/heads/"):
-			return true, nil
+		case !ok, strings.HasPrefix(ref, "refs/heads/"+BranchPrefix):
+		case strings.HasPrefix(ref, "refs/remotes/"), strings.HasPrefix(ref, "refs/heads/"), strings.HasPrefix(ref, own):
+			return ref, oid, nil
 		}
 	}
-	return false, nil
+	return "", "", nil
 }
 
 func (w *Worktrees) branchTip(ctx context.Context, r Worktree) (string, error) {
@@ -1054,7 +1160,21 @@ func (w *Worktrees) deleteBranchAt(ctx context.Context, r Worktree, commit strin
 	if commit == "" || !r.BranchCreated || !strings.HasPrefix(r.Branch, BranchPrefix) {
 		return
 	}
-	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "-d", "refs/heads/"+r.Branch, commit); err != nil {
+	// One ref transaction: the branch goes only while it is still at commit
+	// and, unless commit is the base, only while the ref that holds commit is
+	// still where it was when it was found to hold it. A fetch or reset that
+	// moves the holder in between makes git refuse the whole transaction.
+	stdin := "start\n"
+	if commit != r.BaseCommit {
+		ref, oid, err := w.holder(ctx, r, commit)
+		if err != nil || ref == "" {
+			w.log.Debug("connector: task branch kept: nothing holds its commit", "branch", r.Branch)
+			return
+		}
+		stdin += "verify " + ref + " " + oid + "\n"
+	}
+	stdin += "delete refs/heads/" + r.Branch + " " + commit + "\nprepare\ncommit\n"
+	if err := w.gitStdin(ctx, r.Repository, stdin, "update-ref", "--stdin"); err != nil {
 		w.log.Debug("connector: task branch kept", "branch", r.Branch, "error", err)
 	}
 }
@@ -1140,7 +1260,12 @@ func (w *Worktrees) gitRawIn(ctx context.Context, v view, args ...string) ([]byt
 }
 
 // safeGit is the configuration every git call runs with.
-var safeGit = [][2]string{{"core.hooksPath", "/dev/null"}, {"core.fsmonitor", "false"}}
+var safeGit = [][2]string{
+	{"core.hooksPath", "/dev/null"},
+	{"core.fsmonitor", "false"},
+	// A reflog or log that verifies signatures runs gpg.program.
+	{"log.showSignature", "false"},
+}
 
 // filterOverrides blanks every content filter git's configuration defines
 // for dir. A checkout runs a path's smudge, clean or process filter, which is
@@ -1179,8 +1304,27 @@ func (w *Worktrees) filterOverrides(ctx context.Context, v view) ([][2]string, e
 	return guard, nil
 }
 
+// gitStdin runs git in dir, guarded as gitRaw is, with input on stdin.
+func (w *Worktrees) gitStdin(ctx context.Context, dir, input string, args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	guard, err := w.filterOverrides(ctx, view{dir: dir})
+	if err != nil {
+		return err
+	}
+	_, err = w.runInput(ctx, guard, view{dir: dir}.args(args...), args[0], input)
+	return err
+}
+
 func (w *Worktrees) run(ctx context.Context, config [][2]string, args []string, what string) ([]byte, error) {
+	return w.runInput(ctx, config, args, what, "")
+}
+
+func (w *Worktrees) runInput(ctx context.Context, config [][2]string, args []string, what, input string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, w.git, args...) //nolint:gosec // G204: git with the connector's own arguments
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	env := slices.Clone(w.env)
 	env = append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
 	for i, kv := range config {

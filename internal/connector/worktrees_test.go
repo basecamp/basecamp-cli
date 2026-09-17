@@ -304,7 +304,7 @@ func TestABranchThatMovedIsNotDeleted(t *testing.T) {
 	h.git(other, "add", "moved.txt")
 	h.git(other, "commit", "-q", "-m", "moved")
 	moved := h.git(other, "rev-parse", "HEAD")
-	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref -d"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/`+row.Branch+` `+moved+`;; esac`))
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/`+row.Branch+` `+moved+`;; esac`))
 	row = h.finish(workDir)
 	assert.Equal(t, WorktreeRemoved, row.State)
 	assert.Equal(t, moved, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
@@ -809,7 +809,9 @@ func TestPruneRemovesOnlyWhatTheOperatorDealtWith(t *testing.T) {
 	assert.Equal(t, PruneMissing, actions[gone.Path].Action)
 	assert.Equal(t, PruneForced, actions[forced.Path].Action)
 	assert.NotEmpty(t, actions[forced.Path].RetainedRefs, "an unpushed commit is kept under a ref")
-	assert.True(t, h.branchExists(forced.Branch))
+	for _, ref := range actions[forced.Path].RetainedRefs {
+		assert.NotEmpty(t, h.git(h.repo, "for-each-ref", ref), "the kept ref is there")
+	}
 	assert.False(t, exists(forced.Path))
 	assert.Equal(t, WorktreeLive, h.row(liveDir).State)
 	assert.True(t, exists(filepath.Join(liveDir, "wip.txt")))
@@ -1081,6 +1083,14 @@ func TestTheWorktreeRule(t *testing.T) {
 		{name: "a file written by path between the check and the removal", frozen: func(t *testing.T, _ *worktreeHarness, _ string, row Worktree) {
 			assert.Error(t, os.WriteFile(filepath.Join(row.Path, "app", "late.txt"), []byte("x"), 0o600), "the path does not reach a frozen worktree")
 		}, want: WorktreeRemoved},
+		{name: "git's own prune while frozen", work: func(h *worktreeHarness, d string, row Worktree) string {
+			h.git(d, "checkout", "-q", "--detach")
+			sha := commit(h, d, "c.txt")
+			h.git(d, "checkout", "-q", row.Branch)
+			return sha
+		}, frozen: func(t *testing.T, h *worktreeHarness, _ string, _ Worktree) {
+			h.git(h.repo, "worktree", "prune", "--expire=now")
+		}, want: WorktreeRetained, reason: RetainedUnpushed},
 		{name: "forced unpushed commit", work: func(h *worktreeHarness, d string, _ Worktree) string { return commit(h, d, "c.txt") }, force: true, want: WorktreeRemoved},
 		{name: "forced commit only the reflog reaches", work: func(h *worktreeHarness, d string, row Worktree) string {
 			h.git(d, "checkout", "-q", "--detach")
@@ -1117,6 +1127,9 @@ func TestTheWorktreeRule(t *testing.T) {
 			assert.Equal(t, tc.want, after.State)
 			if tc.reason != "" {
 				assert.Equal(t, tc.reason, after.RetainedReason)
+			}
+			if tc.force && after.State == WorktreeRemoved {
+				assert.Equal(t, RemovedByPruneForced, after.RemovedBy)
 			}
 			if tc.want == WorktreeRetained {
 				assert.DirExists(t, workDir, "a kept worktree is where it was")
@@ -1157,4 +1170,64 @@ func TestACrashWhileFrozenIsRestoredOnTheNextStart(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "wip.txt"))
 	assert.DirExists(t, row.AdminDir)
 	assert.NoDirExists(t, frozenName(row.Path))
+}
+
+// A row whose record's place was never stored has it found, proven and stored
+// before anything is renamed, so a crash while frozen is restored too.
+func TestACrashWhileFrozenWithoutAStoredRecordIsRestored(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, row := h.prepare(302)
+	_, err := h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET admin_dir = '' WHERE id = ?`, row.ID)
+	require.NoError(t, err)
+	h.write(workDir, "wip.txt", "wip\n")
+	h.wt.whileFrozen = func(string) error { return errors.New("crash") }
+	require.Error(t, h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir))
+	require.NotEmpty(t, h.row(workDir).AdminDir, "stored before the freeze")
+
+	h.wt.whileFrozen = nil
+	require.NoError(t, h.wt.Recover(ctx))
+	after := h.row(workDir)
+	assert.Equal(t, RetainedDirty, after.RetainedReason)
+	assert.DirExists(t, row.AdminDir)
+	assert.NoFileExists(t, filepath.Join(row.AdminDir, "locked"), "the connector's lock goes with the freeze")
+}
+
+// Invariant 3: configuration that verifies signatures does not make the
+// connector's git run a program.
+func TestSignatureVerificationDoesNotRun(t *testing.T) {
+	h := newWorktreeHarness(t)
+	marker := filepath.Join(t.TempDir(), "gpg-ran")
+	script := filepath.Join(t.TempDir(), "gpg")
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o700))
+	h.git(h.repo, "config", "log.showSignature", "true")
+	h.git(h.repo, "config", "gpg.program", script)
+	workDir, row := h.prepare(303)
+	// A commit carrying a signature header, as a worker could hand-make.
+	tree := h.git(workDir, "rev-parse", "HEAD^{tree}")
+	body := "tree " + tree + "\nparent " + row.BaseCommit + "\nauthor T <t@example.invalid> 1 +0000\ncommitter T <t@example.invalid> 1 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n -----END PGP SIGNATURE-----\n\nsigned\n"
+	obj := filepath.Join(t.TempDir(), "commit")
+	require.NoError(t, os.WriteFile(obj, []byte(body), 0o600))
+	signed := h.git(workDir, "hash-object", "-t", "commit", "-w", obj)
+	h.git(workDir, "reset", "-q", "--soft", signed)
+
+	h.finish(workDir)
+	assert.NoFileExists(t, marker, "no signature program ran")
+}
+
+// Invariant 4: a task branch is deleted in one ref transaction with a check
+// that its holder has not moved; a holder moved in between keeps the branch.
+func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(304)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	h.git(workDir, "push", "-q", "origin", row.Branch)
+	// Just before the transaction, the only holder, the remote-tracking ref,
+	// is reset away.
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/remotes/origin/`+row.Branch+` `+row.BaseCommit+`;; esac`))
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRemoved, after.State)
+	assert.True(t, h.branchExists(row.Branch), "the branch holding the commit alone is kept")
 }
