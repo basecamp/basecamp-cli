@@ -146,7 +146,7 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 		return err
 	}
 
-	token, err := w.takeToken(server.Args)
+	token, err := w.takeToken(ctx, server.Args)
 	if err != nil {
 		return err
 	}
@@ -168,13 +168,13 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 // internal/commands/connect_worker_mcp.go): the socket path is in the
 // server's arguments, the token is a line on the socket, and it is served
 // only to the worker's own process group — which this agent leads.
-func (w *fakeWorker) takeToken(args []string) (string, error) {
+func (w *fakeWorker) takeToken(ctx context.Context, args []string) (string, error) {
 	i := slices.Index(args, "--socket")
 	if i < 0 || i+1 >= len(args) {
 		return "", errors.New("the MCP server has no --socket")
 	}
 	dialer := net.Dialer{Timeout: 30 * time.Second}
-	conn, err := dialer.DialContext(context.Background(), "unix", args[i+1])
+	conn, err := dialer.DialContext(ctx, "unix", args[i+1])
 	if err != nil {
 		return "", fmt.Errorf("the connector's token socket: %w", err)
 	}
