@@ -202,8 +202,10 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 		// that cause through the promote.
 		preHeld bool
 	}
-	crashes := []crash{{step: "renamed", preHeld: true}, {step: "synced", preHeld: true}}
-	for _, step := range []string{"locked", "marker", "tagged", "held", "checkpointed", "renamed", "synced"} {
+	steps := []string{"locked", "marker", "tagged", "held", "checkpointed", "renamed", "synced"}
+	crashes := make([]crash, 0, len(steps)+2)
+	crashes = append(crashes, crash{step: "renamed", preHeld: true}, crash{step: "synced", preHeld: true})
+	for _, step := range steps {
 		crashes = append(crashes, crash{step: step})
 	}
 	for _, c := range crashes {
