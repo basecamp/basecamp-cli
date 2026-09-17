@@ -4,6 +4,7 @@ package connector
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -112,7 +113,7 @@ func readFeed(dir string) ([]feedEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	slices.SortFunc(out, func(a, b feedEntry) int { return int(a.Event.ID - b.Event.ID) })
+	slices.SortFunc(out, func(a, b feedEntry) int { return cmp.Compare(a.Event.ID, b.Event.ID) })
 	feedCache.path, feedCache.size, feedCache.entries = path, info.Size(), out
 	return out, nil
 }
@@ -532,23 +533,6 @@ func (p storePoster) List(_ context.Context, dest Destination, since time.Time) 
 	for _, m := range all {
 		if m.Kind == dest.Kind && m.RecordingID == dest.RecordingID && !m.At.Before(since) {
 			out = append(out, PostedMessage{ID: m.ID, CreatedAt: m.At, Content: m.Content})
-		}
-	}
-	return out, nil
-}
-
-// storeReplies is the dispatcher's reply lister over the fake Basecamp.
-type storeReplies struct{ dir string }
-
-func (r storeReplies) AgentReplies(_ context.Context, _ int64, kind string, recordingID int64, since time.Time) ([]AgentReply, error) {
-	all, err := storedMessages(r.dir)
-	if err != nil {
-		return nil, err
-	}
-	var out []AgentReply
-	for _, m := range all {
-		if string(m.Kind) == kind && m.RecordingID == recordingID && !m.At.Before(since) {
-			out = append(out, AgentReply{ID: m.ID, CreatedAt: m.At})
 		}
 	}
 	return out, nil

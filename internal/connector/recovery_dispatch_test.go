@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"math"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -109,18 +110,24 @@ func (h *harness) notices(eventID int64) []storedMessage {
 }
 
 // processGone says pid no longer runs: it does not exist, or it is a zombie
-// nobody has reaped yet.
-func processGone(pid int) bool {
+// nobody has reaped yet. The state comes from /proc where there is one, and
+// from ps elsewhere (macOS), since a zombie still answers kill(pid, 0).
+func processGone(ctx context.Context, pid int) bool {
 	if err := syscall.Kill(pid, 0); err != nil {
 		return true
 	}
-	stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if err != nil {
-		return false
+	if stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat"); err == nil {
+		// The state follows the parenthesised command name.
+		fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
+		return len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X")
 	}
-	// The state follows the parenthesised command name.
-	fields := strings.Fields(string(stat[strings.LastIndexByte(string(stat), ')')+1:]))
-	return len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X")
+	out, err := exec.CommandContext(ctx, "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	state := strings.TrimSpace(string(out))
+	if err != nil && state == "" {
+		// ps exits non-zero when the pid names no process.
+		return true
+	}
+	return strings.HasPrefix(state, "Z")
 }
 
 // completedWork is a worker that does the whole job.
@@ -201,7 +208,7 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 					lingering = recordedWorkers(t, h.ledger())
 					require.NotEmpty(t, lingering, "the crash left a worker the ledger recorded")
 					for _, pid := range lingering {
-						assert.False(t, processGone(pid), "the worker outlived the connector, pid %d", pid)
+						assert.False(t, processGone(context.Background(), pid), "the worker outlived the connector, pid %d", pid)
 					}
 				}
 
@@ -209,12 +216,12 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 				h.run(harnessRun{})
 				h.assertRecovered(row)
 				for _, pid := range lingering {
-					assert.True(t, processGone(pid), "the restart ended the worker the crash left, pid %d", pid)
+					assert.True(t, processGone(context.Background(), pid), "the restart ended the worker the crash left, pid %d", pid)
 				}
 				// The worker's own child too: it is ended as a group, not as
 				// a pid.
 				for _, child := range children {
-					assert.True(t, processGone(child.PID), "the restart ended the worker's child, pid %d", child.PID)
+					assert.True(t, processGone(context.Background(), child.PID), "the restart ended the worker's child, pid %d", child.PID)
 				}
 
 				// A second restart finds nothing to do and sends nothing.
@@ -634,8 +641,8 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		worker := attempts[0].process
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(worker.PID), nil }), "the worker itself exited")
-		require.False(t, processGone(grandchild.PID), "its grandchild did not")
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(ctx, worker.PID), nil }), "the worker itself exited")
+		require.False(t, processGone(context.Background(), grandchild.PID), "its grandchild did not")
 		drivertest.RequireGroupHeld(t, worker)
 
 		for i, other := range []int64{102, 103} {
@@ -647,14 +654,14 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
 			assert.False(t, h.releasedDir(h.workDir()), "the working directory is not released")
 			assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
-			assert.False(t, processGone(grandchild.PID), "recovery does not signal a group whose leader it cannot verify")
+			assert.False(t, processGone(context.Background(), grandchild.PID), "recovery does not signal a group whose leader it cannot verify")
 			_, err := driver.OwnsWorker(worker)
 			assert.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
 		}
 
 		// The tree ends; the next restart may settle and release.
 		killRecorded(t, grandchild)
-		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(grandchild.PID), nil }))
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(ctx, grandchild.PID), nil }))
 		h.run(harnessRun{})
 		assert.Equal(t, string(AttemptEnded), attemptState(t, l, attempts[0].id))
 		assert.Equal(t, StateCompleted, stateOf(t, l, 101))

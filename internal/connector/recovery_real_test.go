@@ -117,7 +117,7 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 					}
 					assert.LessOrEqual(t, len(h.notices(101)), 1, "at most one completion notice")
 					for _, pid := range pids {
-						assert.True(t, processGone(pid), "the worker the crash left is gone, pid %d", pid)
+						assert.True(t, processGone(context.Background(), pid), "the worker the crash left is gone, pid %d", pid)
 					}
 					t.Logf("%s: outcome %s, stop %s, notices %d", row.name, outcome, attempts[0].StopReason, len(h.notices(101)))
 				})

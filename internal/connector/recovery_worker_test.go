@@ -301,12 +301,15 @@ func (w *fakeWorker) killConnector(ctx context.Context) error {
 	// Only while it is still the process that wrote the file: a pid is not an
 	// identity.
 	if owns, err := driver.OwnsWorker(running); err != nil || !owns {
-		return fmt.Errorf("the connector's pid %d is no longer the connector (%v)", pid, err)
+		if err == nil {
+			err = errors.New("its start time no longer matches")
+		}
+		return fmt.Errorf("the connector's pid %d is no longer the connector: %w", pid, err)
 	}
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		return fmt.Errorf("kill the connector (pid %d): %w", pid, err)
 	}
-	return waitFor(ctx, func() (bool, error) { return processGone(pid), nil })
+	return waitFor(ctx, func() (bool, error) { return processGone(ctx, pid), nil })
 }
 
 // harnessConnector reads the identity the connector wrote when it started.
