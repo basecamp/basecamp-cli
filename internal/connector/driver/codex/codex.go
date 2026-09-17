@@ -318,6 +318,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		envFiles:    envFiles,
 		grace:       d.opts.CloseGrace,
 		verifyAfter: d.opts.VerifyTimeout,
+		writing:     make(chan struct{}, 1),
 		updates:     make(chan driver.Update, 256),
 		readerEnd:   make(chan struct{}),
 	}
@@ -469,7 +470,12 @@ type session struct {
 	verifyDone  chan struct{}
 	verifyErr   error
 	closed      bool
-	writeMu     sync.Mutex
+	// writing is a one-slot semaphore around the worker's stdin. A lock
+	// would be worse: a worker that stops reading its input blocks the
+	// write, and everything waiting on the lock — Close among them — waits
+	// with it. Whoever cannot take it in time goes on without it and ends
+	// the process instead.
+	writing chan struct{}
 }
 
 // turn is the prompt in flight.
@@ -525,12 +531,12 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	s.turn = t
 	s.mu.Unlock()
 
-	s.writeMu.Lock()
+	s.writing <- struct{}{}
 	_, err := io.WriteString(s.worker.Stdin(), prompt)
 	if closeErr := s.worker.Stdin().Close(); err == nil {
 		err = closeErr
 	}
-	s.writeMu.Unlock()
+	<-s.writing
 	if err != nil {
 		// A cancel that closed the worker's stdin is what made the write
 		// fail: the turn is canceled, not a session that ended on its own.
@@ -577,9 +583,14 @@ func (s *session) Close() error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.writeMu.Lock()
-	_ = s.worker.Stdin().Close()
-	s.writeMu.Unlock()
+	// Stdin is closed under the semaphore when it is free; a prompt still
+	// blocked writing it keeps it, and Terminate below ends that.
+	select {
+	case s.writing <- struct{}{}:
+		_ = s.worker.Stdin().Close()
+		<-s.writing
+	case <-time.After(s.grace):
+	}
 	select {
 	case <-s.worker.Done():
 	case <-time.After(s.grace):

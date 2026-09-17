@@ -736,3 +736,41 @@ func TestARefusalLoggedAsTheWorkerDiesIsCounted(t *testing.T) {
 	assert.Positive(t, <-drained)
 	require.NoError(t, s.Close())
 }
+
+// A worker that stops reading its input cannot hold Close or Cancel: the
+// prompt's write waits on the worker, and nothing else waits on the write.
+func TestAWorkerThatStopsReadingHoldsNothing(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Deaf: true, Hang: true, Events: []string{`{"type":"turn.started"}`}})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("Event 1. ", 200_000)) }()
+	waitDeaf(t, h)
+
+	done := make(chan struct{})
+	go func() {
+		require.NoError(t, s.Cancel(context.Background()))
+		_ = s.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("a worker that stopped reading held Cancel or Close")
+	}
+	waitDone(t, s)
+}
+
+func waitDeaf(t *testing.T, h *harness) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(filepath.Join(h.home, "observed.json")); err == nil {
+			var obs observed
+			if json.Unmarshal(data, &obs) == nil && obs.Deaf {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the fake never stopped reading")
+}

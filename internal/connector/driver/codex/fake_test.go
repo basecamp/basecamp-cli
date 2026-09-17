@@ -47,6 +47,9 @@ type scenario struct {
 	Escape bool `json:"escape"`
 	// Stderr is written, slowly, after the events.
 	Stderr string `json:"stderr"`
+	// Deaf never reads its stdin: the prompt's write blocks once the pipe
+	// fills.
+	Deaf bool `json:"deaf"`
 	// Hang waits to be killed after the events.
 	Hang bool `json:"hang"`
 	// Exit is the exit status.
@@ -62,6 +65,7 @@ type observed struct {
 	MCPExit    int               `json:"mcp_exit"`
 	ChildPID   int               `json:"child_pid"`
 	EscapedPID int               `json:"escaped_pid"`
+	Deaf       bool              `json:"deaf"`
 	FileAfter  bool              `json:"env_file_after_server"`
 }
 
@@ -91,9 +95,14 @@ func fakeCodex() int {
 		appendRecord(rollout, "turn_context", sc.OldTurnContext)
 	}
 
-	prompt, _ := io.ReadAll(os.Stdin)
-	obs.Prompt = string(prompt)
-	save()
+	if sc.Deaf {
+		obs.Deaf = true
+		save()
+	} else {
+		prompt, _ := io.ReadAll(os.Stdin)
+		obs.Prompt = string(prompt)
+		save()
+	}
 
 	if sc.RunMCP {
 		for _, server := range mcpServers(os.Args) {
