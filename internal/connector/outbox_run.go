@@ -409,13 +409,23 @@ FROM events e WHERE e.id = ?`, in.EventID).Scan(&stillCalledFor); {
 				return fmt.Errorf("connector: outbox claim guard %d: %w", in.ID, err)
 			}
 		}
+		var res sql.Result
 		if next == IntentSending {
-			_, err = tx.ExecContext(ctx, `UPDATE outbox SET state = 'sending', sending_at = ? WHERE id = ? AND state = 'pending'`, now, in.ID)
+			res, err = tx.ExecContext(ctx, `UPDATE outbox SET state = 'sending', sending_at = ? WHERE id = ? AND state = 'pending'`, now, in.ID)
 		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE outbox SET state = 'canceled', finished_at = ?, note = ? WHERE id = ? AND state = 'pending'`, now, note, in.ID)
+			res, err = tx.ExecContext(ctx, `UPDATE outbox SET state = 'canceled', finished_at = ?, note = ? WHERE id = ? AND state = 'pending'`, now, note, in.ID)
 		}
 		if err != nil {
 			return fmt.Errorf("connector: outbox claim %d: %w", in.ID, err)
+		}
+		// The select and this update share one immediate transaction, so the
+		// row cannot have moved; checked rather than reasoned, because
+		// invariant 3 rests on it.
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			ok = false
+			return nil
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("connector: commit outbox claim %d: %w", in.ID, err)
@@ -624,7 +634,7 @@ func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessag
 		}
 		// A worker's own acknowledgement or reply is the worker's, however
 		// alike the words: the guard's fixed form is short enough to collide.
-		workers, err := l.workerMessage(ctx, m.ID)
+		workers, err := l.workerMessage(ctx, in.Destination.Kind, m.ID)
 		if err != nil {
 			return 0, "", err
 		}
@@ -649,11 +659,21 @@ func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessag
 
 // workerMessage reports whether a message id is one a worker reported as its
 // own acknowledgement or reply.
-func (l *Ledger) workerMessage(ctx context.Context, id int64) (bool, error) {
+func (l *Ledger) workerMessage(ctx context.Context, kind MessageKind, id int64) (bool, error) {
+	// Scoped by kind, as receipt ownership is: a boost id and a comment id
+	// are different numbers in different spaces, and a worker acknowledges
+	// with either while its reply is always a comment or a line.
+	query := `SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ?)`
+	if kind != MessageBoost {
+		query = `SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ? OR reply_id = ? OR adopted_reply_id = ?)`
+	}
+	args := []any{id}
+	if kind != MessageBoost {
+		args = append(args, id, id)
+	}
 	var found bool
 	err := retryBusy(func() error {
-		return l.db.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ? OR reply_id = ? OR adopted_reply_id = ?)`, id, id, id).Scan(&found)
+		return l.db.QueryRowContext(ctx, query, args...).Scan(&found)
 	})
 	return found, err
 }
@@ -792,40 +812,43 @@ func (r LifecycleFilteredReplies) AgentReplies(ctx context.Context, bucketID int
 		return nil, fmt.Errorf("connector: no reply listing for %q", kind)
 	}
 	dest := Destination{BucketID: bucketID, Kind: messageKind, RecordingID: recordingID}
-	ctx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
+	// The bound is the listing's alone: the ledger read that follows is
+	// short, and a listing that used nearly all of it must not leave the
+	// ledger no time and be reported as a listing that failed.
+	listCtx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
 	defer cancel()
-	listed, err := r.Lister.List(ctx, dest, since)
+	listed, err := r.Lister.List(listCtx, dest, since)
 	if err != nil {
 		return nil, err
-	}
-	rows, err := r.Ledger.db.QueryContext(ctx, `
-SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
-	if err != nil {
-		return nil, fmt.Errorf("connector: lifecycle messages at %d: %w", recordingID, err)
 	}
 	receipts := map[int64]bool{}
 	unreceipted := map[string]bool{}
-	for rows.Next() {
-		var (
-			receipt sql.NullInt64
-			body    string
-		)
-		if err := rows.Scan(&receipt, &body); err != nil {
-			_ = rows.Close()
-			return nil, err
+	if err := retryBusy(func() error {
+		clear(receipts)
+		clear(unreceipted)
+		rows, err := r.Ledger.db.QueryContext(ctx, `
+SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
+		if err != nil {
+			return err
 		}
-		if receipt.Valid {
-			receipts[receipt.Int64] = true
-		} else {
-			unreceipted[MessageText(body)] = true
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var (
+				receipt sql.NullInt64
+				body    string
+			)
+			if err := rows.Scan(&receipt, &body); err != nil {
+				return err
+			}
+			if receipt.Valid {
+				receipts[receipt.Int64] = true
+			} else {
+				unreceipted[MessageText(body)] = true
+			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
+		return rows.Err()
+	}); err != nil {
 		return nil, fmt.Errorf("connector: lifecycle messages at %d: %w", recordingID, err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 	out := make([]AgentReply, 0, len(listed))
 	for _, m := range listed {

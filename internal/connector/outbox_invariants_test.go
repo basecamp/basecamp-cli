@@ -1348,3 +1348,32 @@ func TestOutboxALedgerFailureIsNotHiddenByAnEndingContext(t *testing.T) {
 	defer cancel()
 	require.Error(t, obOutbox(t, ledger, cancelingLister{basecamp, cancel}).Start(ctx))
 }
+
+// A worker's message is its own by kind as well as by id: a boost id that
+// happens to equal some comment's id is a different message, and does not
+// stop a guard adopting its own boost.
+func TestOutboxAWorkersMessageIsMatchedByKindToo(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	clock.Advance(DefaultGuardDelay)
+	claimed, ok, err := ledger.claimIntent(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	boost := basecamp.add(claimed.Destination, adapterAgentID, claimed.Body)
+	// The worker's reply is a comment whose id is the same number as the
+	// guard's boost.
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: &boost})
+	require.NoError(t, err)
+
+	clock.Advance(2 * time.Minute)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+	got := obIntent(t, ledger, claimed.Key)
+	require.Equal(t, IntentSent, got.State, "a comment id is not a boost id")
+	assert.Equal(t, boost, *got.ReceiptID)
+}

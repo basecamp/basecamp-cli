@@ -455,7 +455,9 @@ func placeholders(n int) string {
 // connector's own lifecycle messages of that kind.
 func (l *Ledger) IsLifecycleReceipt(ctx context.Context, kind MessageKind, id int64) (bool, error) {
 	var found bool
-	err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind = ? AND receipt_id = ?)`, string(kind), id).Scan(&found)
+	err := retryBusy(func() error {
+		return l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind = ? AND receipt_id = ?)`, string(kind), id).Scan(&found)
+	})
 	if err != nil {
 		return false, fmt.Errorf("connector: lifecycle receipt %d: %w", id, err)
 	}
