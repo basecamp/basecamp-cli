@@ -102,6 +102,7 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 	s.conn.onNotification = s.onNotification
 	s.conn.onRequest = s.onRequest
 	s.conn.claim = s.claim
+	s.conn.onResponse = s.onResponse
 	s.conn.onBusy = s.onBusy
 	go func() {
 		if err := s.conn.read(worker.Stdout()); err != nil {
@@ -1006,6 +1007,17 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 // outcomeCanceled is ACP's permission outcome for a request not answered by
 // an option.
 const outcomeCanceled = "cancelled" //nolint:misspell // ACP's wire value
+
+// onResponse marks a turn settling the moment its prompt's answer is read,
+// on the reading goroutine: a request read after that answer is outside the
+// turn, however soon the turn's own goroutine runs.
+func (s *session) onResponse(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.turn; t != nil && t.call != nil && t.call.id == id {
+		t.settling = true
+	}
+}
 
 // inFlight reports whether t is still the turn the agent is working on.
 func (s *session) inFlight(t *turn) bool {

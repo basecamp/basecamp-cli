@@ -78,6 +78,9 @@ type conn struct {
 	// onNotification runs on the reading goroutine, in wire order, so a mode
 	// update is applied before the response that follows it is delivered.
 	onNotification func(method string, params json.RawMessage)
+	// onResponse runs on the reading goroutine before a response is handed
+	// to its caller, so what follows it on the wire is read knowing it came.
+	onResponse func(id int64)
 	// onBusy hears a request refused at the handler bound, before its answer
 	// is written, so the refusal is on the record.
 	onBusy func(method string, params json.RawMessage)
@@ -175,6 +178,9 @@ func (c *conn) read(r io.Reader) error {
 			delete(c.pending, id)
 			c.mu.Unlock()
 			if ch != nil {
+				if c.onResponse != nil {
+					c.onResponse(id)
+				}
 				ch <- m
 			}
 		}

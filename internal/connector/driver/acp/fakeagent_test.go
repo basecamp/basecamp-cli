@@ -101,9 +101,13 @@ type step struct {
 }
 
 type agentRecord struct {
-	PID      int               `json:"pid"`
-	ChildPID int               `json:"child_pid"`
-	Env      []string          `json:"env"`
+	PID      int      `json:"pid"`
+	ChildPID int      `json:"child_pid"`
+	Env      []string `json:"env"`
+	// EnvKV and Args are the whole environment and command line: the fake's
+	// environment holds test values only.
+	EnvKV    []string          `json:"env_kv"`
+	Args     []string          `json:"args"`
 	Probe    map[string]string `json:"probe"`
 	Methods  []string          `json:"methods"`
 	Params   map[string]json.RawMessage
@@ -143,6 +147,8 @@ func runFakeAgent(path string) {
 	a.rec.PID = os.Getpid()
 	a.rec.Params = map[string]json.RawMessage{}
 	a.rec.Probe = map[string]string{}
+	a.rec.EnvKV = os.Environ()
+	a.rec.Args = os.Args
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		a.rec.Env = append(a.rec.Env, name)

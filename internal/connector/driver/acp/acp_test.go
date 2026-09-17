@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 func TestMain(m *testing.M) {
@@ -83,12 +84,13 @@ func (p *recordingPolicy) requests() []driver.PermissionRequest {
 }
 
 type harness struct {
-	t      *testing.T
-	sc     scenario
-	dir    string
-	policy *recordingPolicy
-	lookup map[string]string
-	grace  time.Duration
+	fakeDir string
+	t       *testing.T
+	sc      scenario
+	dir     string
+	policy  *recordingPolicy
+	lookup  map[string]string
+	grace   time.Duration
 }
 
 // newHarness is a fake agent that answers initialize as the pinned adapter,
@@ -98,11 +100,16 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
+	// The fake agent's own files live apart from the session's working
+	// directory: its record holds what it was sent, the task token included,
+	// and the working directory is where no token may be.
+	fakeDir := t.TempDir()
 	return &harness{
-		t:   t,
-		dir: dir,
+		fakeDir: fakeDir,
+		t:       t,
+		dir:     dir,
 		sc: scenario{
-			Record: filepath.Join(dir, "record.json"), AgentName: testPackage, AgentVersion: testVersion,
+			Record: filepath.Join(fakeDir, "record.json"), AgentName: testPackage, AgentVersion: testVersion,
 			Modes: []string{"auto", "ask", "bypassPermissions"}, CurrentMode: "bypassPermissions", ModeConfig: true, Confirm: "readback",
 			LoadSession: true,
 		},
@@ -116,7 +123,7 @@ func (h *harness) driver() *Driver {
 	h.t.Helper()
 	raw, err := json.Marshal(h.sc)
 	require.NoError(h.t, err)
-	path := filepath.Join(h.dir, "scenario.json")
+	path := filepath.Join(h.fakeDir, "scenario.json")
 	require.NoError(h.t, os.WriteFile(path, raw, 0o600))
 	exe, err := os.Executable()
 	require.NoError(h.t, err)
@@ -208,10 +215,19 @@ func TestTheAdapterEnvironmentIsAnAllowlist(t *testing.T) {
 		"BASECAMP_TOKEN":              "test-basecamp-token-not-real",
 	}
 	h.sc.Probe = []string{"FAKE_AGENT_KEY", "FAKE_AGENT_SWITCH"}
-	s := h.open()
-	_ = s.Close()
+	cfg := h.config()
+	drivertest.RequireNoSecretFilesDuring(t, "test-token-not-real", []string{cfg.Cwd, cfg.PrivateDir}, func() {
+		s, err := h.driver().NewSession(context.Background(), cfg)
+		require.NoError(t, err)
+		_ = s.Close()
+	})
 
 	rec := h.record()
+	// The task token reaches the MCP server's declared environment, over the
+	// wire, and nowhere the adapter process itself keeps.
+	drivertest.RequireNoSecret(t, "test-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args, Dirs: []string{cfg.Cwd, cfg.PrivateDir}})
+	drivertest.RequireNoSecret(t, "test-host-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args})
+	drivertest.RequireNoSecret(t, "test-basecamp-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args})
 	assert.Equal(t, []string{"FAKE_AGENT_KEY", "FAKE_AGENT_SWITCH", "HOME", "PATH"}, rec.Env,
 		"the adapter gets the session's environment, its named variables and its own switches, and nothing else")
 	assert.Equal(t, "test-key-not-real", rec.Probe["FAKE_AGENT_KEY"])
@@ -648,6 +664,7 @@ func TestOnlyAStartThatRanNothingIsErrNotStarted(t *testing.T) {
 			_, err := h.driver().NewSession(context.Background(), h.config())
 			require.Error(t, err)
 			assert.NotErrorIs(t, err, driver.ErrNotStarted)
+			assert.Equal(t, h.record().PID, driver.StartedProcess(err).PID, "a start that launched a process says which")
 			assert.NotContains(t, h.record().Methods, "session/new")
 			waitGone(t, h.record().PID)
 		})
@@ -1416,4 +1433,28 @@ func TestAFailedHandshakeAsksForTheGroupsConfirmation(t *testing.T) {
 	require.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
 	require.Len(t, asked, 1)
 	assert.Equal(t, h.record().PID, asked[0].PGID, "the group of the adapter this session started")
+}
+
+// The prompt's answer settles its turn as it is read, on the reading
+// goroutine, so a request read right after it is outside the turn whatever
+// the turn's own goroutine has done yet.
+func TestAnAnswerSettlesItsTurnAsItIsRead(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	s := h.open().(*session)
+	tr := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
+	s.mu.Lock()
+	s.turn = tr
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.mu.Lock()
+		s.turn = nil
+		s.mu.Unlock()
+	})
+
+	s.onResponse(tr.call.id)
+	params := raw(t, map[string]any{"sessionId": "sess-1", "toolCall": map[string]any{"toolCallId": "after", "kind": "edit"},
+		"options": []any{map[string]any{"optionId": "ok", "kind": "allow_once"}, map[string]any{"optionId": "no", "kind": "reject_once"}}})
+	s.onRequest(json.RawMessage(`98`), "session/request_permission", params, s.claim("session/request_permission"))
+	assert.Empty(t, h.policy.requests(), "a request read after the answer is not put to the policy")
 }

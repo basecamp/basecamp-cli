@@ -224,7 +224,9 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		if gone := confirmGroupGone(worker.Process(), d.opts.CloseGrace); gone != nil {
 			err = fmt.Errorf("%w; %w", err, gone)
 		}
-		return nil, fmt.Errorf("%w%s", err, s.stderrNote())
+		// A start that launched a process says which (driver invariant 4):
+		// the connector confirms its group gone before it settles anything.
+		return nil, &driver.StartError{Process: worker.Process(), Err: fmt.Errorf("%w%s", err, s.stderrNote())}
 	}
 	return s, nil
 }
