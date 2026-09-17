@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -82,12 +81,14 @@ func groupRunning(pgid int) (bool, error) {
 		if err != nil || pid <= 0 {
 			continue
 		}
+		// A process whose stat cannot be read is not a member of this user's
+		// worker group: it is gone, or it belongs to someone else (a host
+		// mounted with hidepid answers EACCES for every other user's). Either
+		// way, skipping it loses nothing the rule needs, and failing on it
+		// would hold every attempt on such a host.
 		st, err := readProcStat(pid)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
-				continue
-			}
-			return false, err
+			continue
 		}
 		if st.pgrp == pgid && st.state != 'Z' {
 			return true, nil

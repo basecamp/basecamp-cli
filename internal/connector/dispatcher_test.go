@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -335,11 +336,13 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	})
 }
 
-// estimateTokens is an upper bound on a tokenizer's count, not a guess at it.
-// English prose runs about four characters a token, and the worst case a real
-// tokenizer reaches on text like this — ids, punctuation, tool names — is
-// about two. Card 22 measured a 899-byte prompt at 322 tokens with the real
-// tokenizer, which this bounds at 450.
+// estimateTokens is a deliberately pessimistic count: two characters a token,
+// where English prose runs about four and the worst a real tokenizer reaches
+// on text like this — ids, punctuation, tool names — is about two. It is a
+// calibrated bound, not a proof: card 22 measured an 899-byte prompt at 322
+// tokens with the real tokenizer, which this puts at 450, and the budget's
+// margin is what absorbs the difference. A byte-per-token adversary would
+// beat it, and nothing an agent writes reaches this prompt.
 func estimateTokens(s string) int {
 	return (len(s) + 1) / 2
 }
@@ -1249,4 +1252,74 @@ func TestARefusalTheLedgerRefusedIsCarriedToTheSettlement(t *testing.T) {
 	r := &refusalRecorder{ledger: ledger, attemptID: "no-such-attempt", log: slog.New(slog.DiscardHandler)}
 	assert.Error(t, r.RecordRefusal(context.Background(), driver.Refusal{ToolCallID: "t1", Tool: "Bash"}))
 	assert.Equal(t, 1, r.unrecorded())
+}
+
+// Card 23's review: an agent may start the connector's own MCP server in a
+// process group of its own (Codex does), so the release point ends the
+// process that took the task token as well as the worker's group.
+func TestTheProcessThatTookTheTokenIsEndedWithTheWorker(t *testing.T) {
+	// A process of its own, standing in for the bridge an agent started
+	// outside the worker's group.
+	bridge := exec.CommandContext(context.Background(), "/bin/sleep", "300")
+	bridge.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, bridge.Start())
+	t.Cleanup(func() {
+		_ = bridge.Process.Kill()
+		_ = bridge.Wait()
+	})
+	taker, err := driver.LookupProcess(bridge.Process.Pid)
+	require.NoError(t, err)
+
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	socket, err := ServeTaskToken(tokenDir(t), "test-token-not-real", time.Second)
+	require.NoError(t, err)
+	defer socket.Close()
+	socket.mu.Lock()
+	socket.taker = taker
+	socket.mu.Unlock()
+	run := &taskRun{d: h.d, tokens: socket}
+
+	// A worker in another group entirely, already confirmed gone.
+	worker := driver.Process{PID: 1 << 30, PGID: 1 << 30}
+	require.NoError(t, h.d.confirmTakerGone(worker, run))
+	// Alive() counts a zombie, and this test is the process that has not
+	// reaped it; the rule's own question is whether anything of the group
+	// still runs.
+	assert.False(t, driver.GroupMembersRemain(taker), "the process holding the task token is ended with its worker")
+
+	// Asked again, with nothing of it left, it is still gone.
+	assert.NoError(t, h.d.confirmTakerGone(worker, run))
+}
+
+// A token taken inside the worker's own group is already covered by the
+// worker's own confirmation, and is not signaled twice.
+func TestATakerInTheWorkersGroupIsNotEndedTwice(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	socket, err := ServeTaskToken(tokenDir(t), "test-token-not-real", time.Second)
+	require.NoError(t, err)
+	defer socket.Close()
+	socket.mu.Lock()
+	socket.taker = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
+	socket.mu.Unlock()
+	run := &taskRun{d: h.d, tokens: socket}
+	require.NoError(t, h.d.confirmTakerGone(driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp()}, run))
+	assert.NoError(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, run),
+		"this process's own group is never signaled, whatever a record says")
+}
+
+// Card 23's review: a session the driver ended because it was not the one the
+// connector asked for — an MCP server that never connected — is failed, not
+// lost. Lost is for a worker that went away.
+func TestASessionThatIsNotTheOneAskedForIsFailed(t *testing.T) {
+	fake := newFakeDriver()
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		// As the driver does: it ends the worker itself, so without the
+		// sentinel this reads as a worker that was signaled and went.
+		s.exitWith(driver.Exit{Signaled: true})
+		return driver.PromptResult{}, fmt.Errorf("%w: MCP server %q did not connect", driver.ErrSessionUnverified, MCPServerName)
+	}
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	assert.Equal(t, "failed", h.attemptsEnded(t, 1)[0].StopReason)
 }

@@ -790,3 +790,18 @@ func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
 		})
 	}
 }
+
+// Card 23's review: a worker whose Basecamp MCP server never connected can
+// neither read its dispatch nor report it, so the driver ends the session
+// with the sentinel the dispatcher settles as failed.
+func TestAnMCPServerThatDidNotConnectIsAnUnverifiedSession(t *testing.T) {
+	f := newFixture(t, "mcpfailed")
+	s := start(t, f)
+	_, err := s.Prompt(context.Background(), "hello")
+	assert.ErrorIs(t, err, driver.ErrSessionUnverified)
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("a session with no Basecamp tools was left running")
+	}
+}

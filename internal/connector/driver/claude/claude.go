@@ -695,7 +695,7 @@ func (s *session) handleInit(m streamMessage) {
 	case m.PermissionMode != s.mode:
 		problem = fmt.Errorf("%w: asked for %q, the agent reports %q", driver.ErrUnsafeMode, s.mode, m.PermissionMode)
 	case m.SessionID != s.id:
-		problem = fmt.Errorf("claude: asked for session %s, the agent reports another", s.id)
+		problem = fmt.Errorf("%w: asked for session %s, the agent reports another", driver.ErrSessionUnverified, s.id)
 	default:
 		for _, name := range s.mcpNames {
 			connected := false
@@ -705,7 +705,7 @@ func (s *session) handleInit(m streamMessage) {
 				}
 			}
 			if !connected {
-				problem = fmt.Errorf("claude: MCP server %q did not connect", name)
+				problem = fmt.Errorf("%w: MCP server %q did not connect", driver.ErrSessionUnverified, name)
 			}
 		}
 	}
