@@ -301,3 +301,24 @@ func TestTheTokenPreScanStopsAtADoubleDash(t *testing.T) {
 	_, found := connectTokenFDArg([]string{"mcp", "--", "--connect-token-fd", "3"})
 	assert.False(t, found)
 }
+
+// "mcp" has to be the command, not a word somewhere in the arguments, and a
+// read-only server reads no token: it serves no connect domain.
+func TestTheTokenPreScanReadsOnlyThisCommandsDescriptor(t *testing.T) {
+	for name, args := range map[string][]string{
+		"another command's argument": {"search", "--", "mcp", "--connect-token-fd", "3"},
+		"a query that says mcp":      {"search", "mcp", "--connect-token-fd", "3"},
+		"a flag value that says mcp": {"search", "--query", "mcp", "--connect-token-fd", "3"},
+		"read-only":                  {"mcp", "--read-only", "--connect-token-fd", "3"},
+		"a descriptor past a --":     {"mcp", "--", "--connect-token-fd", "3"},
+		"out of range":               {"mcp", "--connect-token-fd", "99999999999999"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, found := connectTokenFDArg(args)
+			assert.False(t, found)
+		})
+	}
+	fd, found := connectTokenFDArg([]string{"mcp", "--connect-state", "/x", "--connect-token-fd", "3"})
+	require.True(t, found)
+	assert.Equal(t, 3, fd)
+}

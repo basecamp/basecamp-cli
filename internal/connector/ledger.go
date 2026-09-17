@@ -603,11 +603,14 @@ BEGIN
   SELECT RAISE(ABORT, 'a superseded task stays superseded');
 END;
 
-CREATE TRIGGER task_events_retirement_is_final
+CREATE TRIGGER task_events_retirement_follows_supersession
 BEFORE UPDATE OF retired_at ON task_events
-WHEN OLD.retired_at IS NOT NULL AND NEW.retired_at IS NOT OLD.retired_at
+WHEN NEW.retired_at IS NOT OLD.retired_at AND (
+  OLD.retired_at IS NOT NULL
+  OR NEW.retired_at IS NULL
+  OR NOT EXISTS (SELECT 1 FROM tasks WHERE id = OLD.task_id AND superseded_at IS NOT NULL))
 BEGIN
-  SELECT RAISE(ABORT, 'a retired task event stays retired');
+  SELECT RAISE(ABORT, 'a task event is retired when its task is superseded, once');
 END;
 
 CREATE TRIGGER task_events_are_not_deleted
@@ -630,9 +633,12 @@ END;
 
 CREATE TRIGGER task_events_pull_is_recorded_once
 BEFORE UPDATE OF pulled_at ON task_events
-WHEN OLD.pulled_at IS NOT NULL AND NEW.pulled_at IS NOT OLD.pulled_at
+WHEN NEW.pulled_at IS NOT OLD.pulled_at AND (
+  OLD.pulled_at IS NOT NULL
+  OR OLD.retired_at IS NOT NULL
+  OR OLD.withdrawn_at IS NOT NULL)
 BEGIN
-  SELECT RAISE(ABORT, 'a pull is recorded once');
+  SELECT RAISE(ABORT, 'a pull is recorded once, and only on a live exposure');
 END;
 
 CREATE TRIGGER task_events_withdrawn_is_final

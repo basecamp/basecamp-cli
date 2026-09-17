@@ -430,3 +430,28 @@ func testTaskTransitions(t *testing.T) {
 	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT superseded_at FROM tasks WHERE id = ?`, f.grant.ID).Scan(&again))
 	assert.Equal(t, first, again)
 }
+
+// Retirement follows supersession, and a pull is recorded only on a live
+// exposure — in the database, so a raw writer meets the same rules.
+func TestTheDatabaseTiesRetirementAndPullsToTheirTask(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET retired_at = 'now' WHERE event_id = 1`)
+	require.Error(t, err, "a live task's events are not retired")
+
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'now' WHERE event_id = 1`)
+	require.Error(t, err, "a retired exposure is not pulled")
+
+	fresh := newDispatchFixture(t)
+	_, err = fresh.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+	require.NoError(t, err)
+	tx, err := fresh.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, fresh.ledger.supersedeTask(ctx, tx, fresh.grant.ID))
+	require.NoError(t, fresh.ledger.withdrawExposure(ctx, tx, fresh.grant.ID, 1, StateAdmitted, ""))
+	require.NoError(t, tx.Commit())
+	_, err = fresh.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'now' WHERE event_id = 1`)
+	require.Error(t, err, "a withdrawn exposure is not pulled either")
+}

@@ -148,9 +148,8 @@ func TestMCPCommandTakesTheTokenBeforeAuthenticating(t *testing.T) {
 	}
 }
 
-// The token is read at startup, before the command knows its flags, so a
-// read-only server is refused after that read rather than before it — and the
-// descriptor is closed either way, never left open for a child to inherit.
+// A read-only server serves no connect domain, so the startup read skips it
+// entirely and the descriptor is left exactly as it was.
 func TestMCPCommandRefusesToServeConnectReadOnly(t *testing.T) {
 	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
 	fd := tokenPipe(t, grant.Token+"\n")
@@ -159,9 +158,8 @@ func TestMCPCommandRefusesToServeConnectReadOnly(t *testing.T) {
 	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only", "--connect-token-fd", strconv.Itoa(fd))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read-only")
-	if nowDev, nowIno, open := fdIdentity(t, fd); open {
-		assert.False(t, nowDev == dev && nowIno == ino, "the descriptor is closed")
-	}
+	nowDev, nowIno, open := fdIdentity(t, fd)
+	assert.True(t, open && nowDev == dev && nowIno == ino, "the descriptor was not touched")
 }
 
 func TestMCPCommandWithoutConnectStateHasNoConnectDomain(t *testing.T) {

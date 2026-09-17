@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -69,7 +69,7 @@ func TakeConnectTaskToken(args []string) {
 //
 // Anything malformed is left to Cobra and the command to report.
 func connectTokenFDArg(args []string) (int, bool) {
-	if !slices.Contains(args, "mcp") {
+	if !isMCPInvocation(args) {
 		return 0, false
 	}
 	fd, found := 0, false
@@ -93,12 +93,40 @@ func connectTokenFDArg(args []string) (int, bool) {
 			return 0, false
 		}
 		parsed, err := strconv.ParseInt(value, 0, 64)
-		if err != nil {
+		if err != nil || parsed > math.MaxInt32 || parsed < math.MinInt32 {
+			// A descriptor number is small; anything else is not one, and
+			// narrowing it would not mean what was written.
 			return 0, false
 		}
 		fd, found = int(parsed), true
 	}
 	return fd, found
+}
+
+// isMCPInvocation reports arguments that run this command: "mcp" as the first
+// word that is not a flag or a flag's value, before any "--". A "mcp" further
+// along is an argument to something else.
+//
+// A read-only server is not one of them: it serves no connect domain, so
+// there is nothing to read a token for.
+func isMCPInvocation(args []string) bool {
+	command := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return false
+		case arg == "--read-only":
+			return false
+		case strings.HasPrefix(arg, "-"):
+			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++ // its value
+			}
+		case command == "":
+			command = arg
+		}
+	}
+	return command == "mcp"
 }
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is
