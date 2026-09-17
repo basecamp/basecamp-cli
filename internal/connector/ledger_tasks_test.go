@@ -123,7 +123,7 @@ func TestAnEventIsOnAtMostOneLiveTask(t *testing.T) {
 	_, err := ledger.db.ExecContext(context.Background(), `INSERT INTO tasks (token_sha256, created_at) VALUES ('z', 'now')`)
 	require.NoError(t, err)
 	_, err = ledger.db.ExecContext(context.Background(), `INSERT INTO task_events (task_id, event_id) VALUES (?, 1)`, l.TaskID+1)
-	assert.ErrorContains(t, err, "at most one live task")
+	assert.ErrorContains(t, err, "UNIQUE constraint failed")
 }
 
 // Ledger invariant 3.
@@ -132,7 +132,7 @@ func TestAnEndedTaskHasNoValidToken(t *testing.T) {
 	ctx := context.Background()
 	admitOn(t, ledger, 1, "recording:1")
 	l := launch(t, ledger, 1)
-	d, err := ledger.Dispatch(l.Token, adapterAgentID)
+	d, err := ledger.Dispatch(context.Background(), l.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, ok, err := d.Get(ctx, 1)
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestASpawnFailureNeverWithdrawsAnExposureTheWorkerMade(t *testing.T) {
 	admitOn(t, ledger, 1, "recording:1")
 	admitOn(t, ledger, 2, "recording:1")
 	l := launch(t, ledger, 1)
-	d, err := ledger.Dispatch(l.Token, adapterAgentID)
+	d, err := ledger.Dispatch(context.Background(), l.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, _, err = d.Get(ctx, 2)
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestSettlementKeepsReportsAndReturnsWhatWasNeverExposed(t *testing.T) {
 		admitOn(t, ledger, id, "recording:1")
 	}
 	l := launch(t, ledger, 1)
-	d, err := ledger.Dispatch(l.Token, adapterAgentID)
+	d, err := ledger.Dispatch(context.Background(), l.Token, adapterAgentID)
 	require.NoError(t, err)
 	reply := int64(99)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed, ReplyID: &reply})
@@ -370,7 +370,7 @@ func TestAnAdoptedReplyNeverMakesAnOutcome(t *testing.T) {
 	ctx := context.Background()
 	admitOn(t, ledger, 1, "recording:1")
 	l := launch(t, ledger, 1)
-	d, err := ledger.Dispatch(l.Token, adapterAgentID)
+	d, err := ledger.Dispatch(context.Background(), l.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, err = d.Ack(ctx, 1, nil)
 	require.NoError(t, err)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,16 +28,18 @@ import (
 //     A follow-up is written exposed (ExposeEvent) before a prompt about it is
 //     sent.
 //  2. One live task per conversation, one per working directory, one live
-//     attempt per task, one live task per event. Unique partial indexes and a
-//     trigger, so two dispatchers on one ledger cannot both win.
-//  3. An ended task has no valid token. Ending a task and superseding its
-//     token are one write, and a trigger refuses the first without the
-//     second, so a worker that outlives its task is refused by
-//     basecamp_connect.
+//     attempt per task, and (migration 5's task_events_one_live_task) one live
+//     task per event. Unique partial indexes, so two dispatchers on one ledger
+//     cannot both win.
+//  3. An ended task has no valid token and no live events. Ending a task,
+//     superseding its token and retiring its events are one transaction, and
+//     a trigger refuses the end without the supersession, so a worker that
+//     outlives its task is refused by basecamp_connect.
 //  4. Automatic retry is bounded and proven. An exposure is withdrawn — the
 //     record back to admitted — only when the attempt that wrote it ended with
 //     the driver's report that no worker process existed, and only for the
-//     event's first such withdrawal; a second is blocked(spawn_failed), which
+//     event's first such withdrawal (withdrawn_at, kept on the retired row,
+//     is that budget); a second is blocked(spawn_failed), which
 //     waits for a person. Anything else that ends an exposed, unreported event
 //     makes it completed with outcome unknown.
 //  5. Outcomes and stop reasons are separate. A stop reason is written on the
@@ -72,16 +73,6 @@ END;
 ALTER TABLE task_events ADD COLUMN exposed_attempt_id TEXT;
 ALTER TABLE task_events ADD COLUMN withdrawn_at       TEXT;
 ALTER TABLE task_events ADD COLUMN adopted_reply_id   INTEGER;
-
-CREATE TRIGGER task_events_one_live_task
-BEFORE INSERT ON task_events
-WHEN EXISTS (
-  SELECT 1 FROM task_events te JOIN tasks t ON t.id = te.task_id
-  WHERE te.event_id = NEW.event_id AND t.superseded_at IS NULL AND te.withdrawn_at IS NULL
-)
-BEGIN
-  SELECT RAISE(ABORT, 'an event is on at most one live task');
-END;
 
 CREATE TABLE attempts (
   id               TEXT    PRIMARY KEY,
@@ -259,10 +250,6 @@ func (l *Ledger) LaunchTask(ctx context.Context, spec LaunchSpec) (Launch, error
 	if spec.Route == "" || spec.Driver == "" {
 		return Launch{}, errors.New("connector: a launch needs a route and a driver")
 	}
-	token, err := newToken()
-	if err != nil {
-		return Launch{}, err
-	}
 	attemptID, err := newAttemptID()
 	if err != nil {
 		return Launch{}, err
@@ -270,13 +257,13 @@ func (l *Ledger) LaunchTask(ctx context.Context, spec LaunchSpec) (Launch, error
 	var out Launch
 	err = retryBusy(func() error {
 		var err error
-		out, err = l.launchTask(ctx, spec, token, attemptID)
+		out, err = l.launchTask(ctx, spec, attemptID)
 		return err
 	})
 	return out, err
 }
 
-func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, token, attemptID string) (Launch, error) {
+func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, attemptID string) (Launch, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Launch{}, fmt.Errorf("connector: begin launch: %w", err)
@@ -298,8 +285,7 @@ func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, token, attempt
 	var busy bool
 	if err := tx.QueryRowContext(ctx, `
 SELECT EXISTS (SELECT 1 FROM tasks WHERE ended_at IS NULL AND (conversation_key = ? OR work_dir = ?))
-    OR EXISTS (SELECT 1 FROM task_events te JOIN tasks t ON t.id = te.task_id
-               WHERE te.event_id = ? AND t.superseded_at IS NULL AND te.withdrawn_at IS NULL)`,
+    OR EXISTS (SELECT 1 FROM task_events WHERE event_id = ? AND retired_at IS NULL)`,
 		record.Decision.ConversationKey, spec.WorkDir, spec.EventID).Scan(&busy); err != nil {
 		return Launch{}, fmt.Errorf("connector: launch event %d: %w", spec.EventID, err)
 	}
@@ -315,15 +301,21 @@ SELECT EXISTS (SELECT 1 FROM tasks WHERE ended_at IS NULL AND (conversation_key 
 		deadlineAt = now.Add(spec.Deadline)
 		deadline = stamp(deadlineAt)
 	}
-	res, err := tx.ExecContext(ctx, `
-INSERT INTO tasks (token_sha256, created_at, conversation_key, route, work_dir, driver, originating_event_id, deadline_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		tokenHash(token), nowStamp, record.Decision.ConversationKey, spec.Route, spec.WorkDir, spec.Driver, spec.EventID, deadline)
+	// The originating event first, then every other record on the
+	// conversation that waits for a worker. createTask dispatches them all
+	// and refuses an event a live task already carries.
+	joinable, err := joinableOn(ctx, tx, record.Decision.ConversationKey, spec.EventID)
 	if err != nil {
-		return Launch{}, fmt.Errorf("connector: create task for %d: %w", spec.EventID, err)
+		return Launch{}, err
 	}
-	taskID, err := res.LastInsertId()
+	grant, err := l.createTask(ctx, tx, append([]int64{spec.EventID}, joinable...))
 	if err != nil {
+		return Launch{}, err
+	}
+	taskID := grant.ID
+	if _, err := tx.ExecContext(ctx, `
+UPDATE tasks SET conversation_key = ?, route = ?, work_dir = ?, driver = ?, originating_event_id = ?, deadline_at = ?
+WHERE id = ?`, record.Decision.ConversationKey, spec.Route, spec.WorkDir, spec.Driver, spec.EventID, deadline, taskID); err != nil {
 		return Launch{}, fmt.Errorf("connector: create task for %d: %w", spec.EventID, err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -331,25 +323,16 @@ INSERT INTO attempts (id, task_id, seq, driver, state, launched_at) VALUES (?, ?
 		attemptID, taskID, spec.Driver, nowStamp); err != nil {
 		return Launch{}, fmt.Errorf("connector: write attempt for %d: %w", spec.EventID, err)
 	}
-
-	moved, err := l.move(ctx, tx, transition{id: spec.EventID, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued}})
-	if err != nil {
-		return Launch{}, err
-	}
-	if !moved {
-		return Launch{}, fmt.Errorf("connector: launch event %d: %w", spec.EventID, ErrNotStartable)
-	}
+	// The prompt names the originating event's recording, so it is exposed
+	// before the driver is asked for anything.
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO task_events (task_id, event_id, delivery, guard, exposed_at, exposed_attempt_id)
-VALUES (?, ?, 'exposed', ?, ?, ?)`,
-		taskID, spec.EventID, guardFor(record.Decision.Acknowledge), nowStamp, attemptID); err != nil {
+UPDATE task_events SET delivery = 'exposed', exposed_at = ?, exposed_attempt_id = ?
+WHERE task_id = ? AND event_id = ?`, nowStamp, attemptID, taskID, spec.EventID); err != nil {
 		return Launch{}, fmt.Errorf("connector: expose event %d: %w", spec.EventID, err)
 	}
+	joined := joinable
+	token := grant.Token
 
-	joined, err := l.joinConversation(ctx, tx, taskID, record.Decision.ConversationKey)
-	if err != nil {
-		return Launch{}, err
-	}
 	out := Launch{
 		TaskID:          taskID,
 		Token:           token,
@@ -385,48 +368,53 @@ func guardFor(acknowledge bool) string {
 const startableCondition = `
 e.state IN ('admitted', 'queued') AND e.content_dropped = 0 AND e.snapshot IS NOT NULL
 AND e.routed = 1 AND e.conversation_key <> ''
-AND NOT EXISTS (SELECT 1 FROM task_events te JOIN tasks t ON t.id = te.task_id
-                WHERE te.event_id = e.id AND t.superseded_at IS NULL AND te.withdrawn_at IS NULL)`
+AND NOT EXISTS (SELECT 1 FROM task_events te WHERE te.event_id = e.id AND te.retired_at IS NULL)`
 
-// joinConversation puts every record on key that waits for a worker onto
-// taskID at delivery admitted, moves each to dispatched, and returns their
-// ids, oldest first.
-func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key string) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.id, e.acknowledge FROM events e WHERE e.conversation_key = ? AND `+startableCondition+` ORDER BY e.id`, key)
+// joinableOn lists the records on key, other than except, that wait for a
+// worker, oldest first.
+func joinableOn(ctx context.Context, tx *sql.Tx, key string, except int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.conversation_key = ? AND e.id <> ? AND `+startableCondition+` ORDER BY e.id`, key, except)
 	if err != nil {
-		return nil, fmt.Errorf("connector: find follow-ups for task %d: %w", taskID, err)
+		return nil, fmt.Errorf("connector: find follow-ups on %s: %w", key, err)
 	}
-	type pending struct {
-		id          int64
-		acknowledge bool
-	}
-	var found []pending
+	defer func() { _ = rows.Close() }()
+	var ids []int64
 	for rows.Next() {
-		var p pending
-		if err := rows.Scan(&p.id, &p.acknowledge); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("connector: find follow-ups for task %d: %w", taskID, err)
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		found = append(found, p)
+		ids = append(ids, id)
 	}
-	if err := rows.Close(); err != nil {
+	return ids, rows.Err()
+}
+
+// joinConversation puts every record on key that waits for a worker onto the
+// live task taskID at delivery admitted, dispatched, as createTask would have,
+// and returns their ids, oldest first.
+func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key string) ([]int64, error) {
+	ids, err := joinableOn(ctx, tx, key, 0)
+	if err != nil {
 		return nil, err
 	}
-	ids := make([]int64, 0, len(found))
-	for _, p := range found {
-		// A record on a task is dispatched, exposed or not: it has left the
-		// queue, and only the task's end returns it.
-		moved, err := l.move(ctx, tx, transition{id: p.id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued}})
+	for _, id := range ids {
+		var acknowledge bool
+		if err := tx.QueryRowContext(ctx, `SELECT acknowledge FROM events WHERE id = ?`, id).Scan(&acknowledge); err != nil {
+			return nil, fmt.Errorf("connector: join event %d to task %d: %w", id, taskID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guardFor(acknowledge)); err != nil {
+			if isConstraint(err) {
+				return nil, fmt.Errorf("connector: join event %d to task %d: %w", id, taskID, ErrEventOnLiveTask)
+			}
+			return nil, fmt.Errorf("connector: join event %d to task %d: %w", id, taskID, err)
+		}
+		moved, err := l.move(ctx, tx, transition{id: id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued}})
 		if err != nil {
 			return nil, err
 		}
 		if !moved {
-			return nil, fmt.Errorf("connector: join event %d to task %d: %w", p.id, taskID, ErrNotStartable)
+			return nil, fmt.Errorf("connector: join event %d to task %d: %w", id, taskID, ErrNotStartable)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, p.id, guardFor(p.acknowledge)); err != nil {
-			return nil, fmt.Errorf("connector: join event %d to task %d: %w", p.id, taskID, err)
-		}
-		ids = append(ids, p.id)
 	}
 	return ids, nil
 }
@@ -471,7 +459,7 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 // first: the follow-ups a live session has not been prompted with.
 func (l *Ledger) UnexposedEvents(ctx context.Context, taskID int64) ([]int64, error) {
 	rows, err := l.db.QueryContext(ctx, `
-SELECT event_id FROM task_events WHERE task_id = ? AND delivery = 'admitted' AND withdrawn_at IS NULL ORDER BY event_id`, taskID)
+SELECT event_id FROM task_events WHERE task_id = ? AND delivery = 'admitted' AND retired_at IS NULL ORDER BY event_id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("connector: unexposed events of task %d: %w", taskID, err)
 	}
@@ -504,7 +492,7 @@ func (l *Ledger) ExposeEvent(ctx context.Context, attemptID string, eventID int6
 			return err
 		}
 		var delivery string
-		switch err := tx.QueryRowContext(ctx, `SELECT delivery FROM task_events WHERE task_id = ? AND event_id = ? AND withdrawn_at IS NULL`, taskID, eventID).Scan(&delivery); {
+		switch err := tx.QueryRowContext(ctx, `SELECT delivery FROM task_events WHERE task_id = ? AND event_id = ? AND retired_at IS NULL`, taskID, eventID).Scan(&delivery); {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("connector: expose event %d: %w", eventID, ErrNotOnTask)
 		case err != nil:
@@ -686,7 +674,7 @@ UPDATE attempts SET state = 'ended', ended_at = ?, stop_reason = ?, spawn_failed
 	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT event_id, delivery, outcome, reply_id, exposed_attempt_id FROM task_events
-WHERE task_id = ? AND withdrawn_at IS NULL ORDER BY event_id`, taskID)
+WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 	if err != nil {
 		return Settlement{}, fmt.Errorf("connector: settle task %d: %w", taskID, err)
 	}
@@ -752,6 +740,9 @@ UPDATE task_events SET delivery = 'completed', completed_at = ?, outcome = ? WHE
 	if _, err := tx.ExecContext(ctx, `
 UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?), ended_at = ? WHERE id = ?`, now, now, taskID); err != nil {
 		return Settlement{}, fmt.Errorf("connector: end task %d: %w", taskID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
+		return Settlement{}, fmt.Errorf("connector: retire task %d: %w", taskID, err)
 	}
 	if l.hooks.AttemptEnded != nil {
 		if err := l.hooks.AttemptEnded(ctx, tx, settlement); err != nil {
@@ -1046,14 +1037,6 @@ WHERE task_id = ? AND event_id = ? AND outcome = 'unknown' AND reply_id IS NULL 
 		}
 		return nil
 	})
-}
-
-func newToken() (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("connector: task token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func newAttemptID() (string, error) {
