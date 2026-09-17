@@ -21,6 +21,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 const (
@@ -271,6 +272,32 @@ func TestTheTokenReachesOnlyTheMCPServer(t *testing.T) {
 	entries, err := os.ReadDir(h.private)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+
+	// The credential rule's places (drivertest): Codex's environment and argv,
+	// what the session wrote to its log, and every file the working directory,
+	// the private directory and Codex's home are left holding.
+	drivertest.RequireNoSecret(t, testToken, drivertest.Places{
+		Env:   obs.Env,
+		Args:  obs.Args,
+		Texts: []string{s.(*session).worker.StderrTail()},
+		Dirs:  []string{h.workDir, h.private, filepath.Join(h.home, "sessions")},
+	})
+}
+
+// The credential rule, while the session runs: no file under the private
+// directory ever carries the token. The driver does not hold this yet: the
+// MCP server's environment file lives from its writing until the wrapper
+// deletes it, before the server starts. Card 18's worker-mcp bridge carries
+// the token over a one-use socket instead, and this test is switched on with
+// it.
+func TestNoTokenFileEverExists(t *testing.T) {
+	t.Skip("the env-file window closes with card 18's worker-mcp bridge; see the codex package doc")
+	h := newHarness(t, scenario{RunMCP: true, TurnContext: safeTurnContext(), Events: []string{turnCompleted()}})
+	drivertest.RequireNoSecretFilesDuring(t, testToken, []string{h.private, h.workDir}, func() {
+		s, _, err := h.run(context.Background(), h.config())
+		require.NoError(t, err)
+		require.NoError(t, s.Close())
+	})
 }
 
 // Close removes an environment file the server never consumed.
