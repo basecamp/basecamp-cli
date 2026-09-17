@@ -77,6 +77,10 @@ var ClaudeAgentACP = Adapter{
 				"settingSources":                  []string{},
 				"allowDangerouslySkipPermissions": false,
 				"strictMcpConfig":                 true,
+				// A plan-mode switch is the model leaving the mode the driver
+				// verified, which ends the session; the worker has no one to
+				// present a plan to anyway.
+				"disallowedTools": []string{"EnterPlanMode", "ExitPlanMode"},
 			},
 		},
 	},

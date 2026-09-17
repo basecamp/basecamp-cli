@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -47,6 +48,9 @@ type scenario struct {
 	// current_mode_update follows set_mode), "none", or "error" (set_mode
 	// fails).
 	Confirm string `json:"confirm"`
+	// ModeBeforeSetAnswer is a mode update sent on the wire just before the
+	// answer to the set that was supposed to confirm the asking mode.
+	ModeBeforeSetAnswer string `json:"mode_before_set_answer"`
 
 	// Replay are updates sent before a load's response.
 	Replay []json.RawMessage `json:"replay"`
@@ -77,6 +81,9 @@ type turnScript struct {
 	ErrorMessage  string          `json:"error_message"`
 	// Hang never answers the prompt.
 	Hang bool `json:"hang"`
+	// FloodPermissions asks for this many permissions at once.
+	FloodPermissions int             `json:"flood_permissions"`
+	FloodCall        json.RawMessage `json:"flood_call,omitempty"`
 }
 
 type step struct {
@@ -336,6 +343,9 @@ func (a *fakeAgent) handle(id json.RawMessage, method string, params json.RawMes
 		}
 		opts := a.configOptions(a.mode)
 		a.mu.Unlock()
+		if sc.ModeBeforeSetAnswer != "" {
+			a.update(a.sessionID(), map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": sc.ModeBeforeSetAnswer})
+		}
 		a.reply(id, map[string]any{"configOptions": opts})
 	case "session/cancel":
 		a.mu.Lock()
@@ -391,6 +401,26 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 			a.mu.Unlock()
 			a.flush()
 		}
+	}
+	if ts.FloodPermissions > 0 {
+		var wg sync.WaitGroup
+		for i := range ts.FloodPermissions {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var p map[string]any
+				_ = json.Unmarshal(ts.FloodCall, &p)
+				p["sessionId"] = a.sessionID()
+				call, _ := p["toolCall"].(map[string]any)
+				call["toolCallId"] = fmt.Sprintf("flood-%d", i)
+				outcome := a.request("session/request_permission", p)
+				a.mu.Lock()
+				a.rec.Outcomes = append(a.rec.Outcomes, outcome)
+				a.mu.Unlock()
+			}()
+		}
+		wg.Wait()
+		a.flush()
 	}
 	if ts.Hang {
 		select {}

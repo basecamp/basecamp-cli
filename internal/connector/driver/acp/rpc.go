@@ -148,15 +148,18 @@ func (c *conn) read(r io.Reader) error {
 // delivered to this caller.
 func (c *conn) call(ctx context.Context, method string, params, out any) error {
 	p := c.register(method)
-	if err := c.sendCall(p, params); err != nil {
-		return err
-	}
 	type answer struct {
 		raw json.RawMessage
 		err error
 	}
 	answers := make(chan answer, 1)
 	go func() {
+		// The write is on this goroutine too: an agent that has stopped
+		// reading its input would otherwise hold the caller past its context.
+		if err := c.sendCall(p, params); err != nil {
+			answers <- answer{nil, err}
+			return
+		}
 		raw, err := p.result()
 		answers <- answer{raw, err}
 	}()

@@ -32,11 +32,18 @@ type session struct {
 	// channel, not a mutex, so a cancel can give up waiting on a prompt whose
 	// write is stuck.
 	promptSem chan struct{}
+	// decisions bounds the permission requests decided at once: an agent that
+	// floods them cannot spawn work without end, and what does not fit is
+	// refused.
+	decisions chan struct{}
 
-	mu       sync.Mutex
-	id       string
-	turn     *turn
-	mode     string
+	mu   sync.Mutex
+	id   string
+	turn *turn
+	mode string
+	// modeSeq counts mode reports, so an answer to a set cannot overwrite a
+	// report that arrived after that set went out.
+	modeSeq  int64
 	modeSeen chan struct{}
 	verified bool
 	// canceled is a cancel that found no turn to end: the next turn starts
@@ -80,6 +87,7 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 		readerEnd: make(chan struct{}),
 		modeSeen:  make(chan struct{}),
 		promptSem: make(chan struct{}, 1),
+		decisions: make(chan struct{}, maxDecisions),
 		tools:     map[string]toolInfo{},
 	}
 	s.endUnsafe = func() { worker.Terminate(0) }
@@ -307,6 +315,9 @@ func (s *session) enterAskingMode(ctx context.Context, st sessionState) error {
 		var r struct {
 			ConfigOptions []configOption `json:"configOptions"`
 		}
+		s.mu.Lock()
+		seq := s.modeSeq
+		s.mu.Unlock()
 		err := s.conn.call(ctx, "session/set_config_option", map[string]any{"sessionId": st.SessionID, "configId": modeOpt.ID, "value": s.askMode}, &r)
 		if err != nil {
 			return fmt.Errorf("%w: session/set_config_option: %w", driver.ErrUnsafeMode, err)
@@ -315,7 +326,7 @@ func (s *session) enterAskingMode(ctx context.Context, st sessionState) error {
 		if !ok {
 			return fmt.Errorf("%w: session/set_config_option answered no mode", driver.ErrUnsafeMode)
 		}
-		s.reportMode(v)
+		s.reportModeSince(v, seq)
 	} else {
 		wait, cancel := context.WithTimeout(ctx, modeConfirmWait)
 		defer cancel()
@@ -354,8 +365,19 @@ func (s *session) awaitMode(ctx context.Context) {
 // reportMode records the mode the agent reports. Once the asking mode is
 // confirmed, any other mode makes the session unsafe: its turn fails with
 // ErrUnsafeMode and its process group is ended (invariant 2).
-func (s *session) reportMode(id string) {
+func (s *session) reportMode(id string) { s.reportModeSince(id, -1) }
+
+// reportModeSince records a mode the agent reports. since is the sequence the
+// caller last saw: a report older than what has arrived since then is dropped,
+// so the answer to a set_config_option cannot undo a mode update that followed
+// it on the wire. A negative since always applies.
+func (s *session) reportModeSince(id string, since int64) {
 	s.mu.Lock()
+	if since >= 0 && s.modeSeq != since {
+		s.mu.Unlock()
+		return
+	}
+	s.modeSeq++
 	s.mode = id
 	close(s.modeSeen)
 	s.modeSeen = make(chan struct{})
@@ -854,6 +876,16 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 	}
 	call, _ := decodeUpdate(p.ToolCall)
 
+	select {
+	case s.decisions <- struct{}{}:
+		defer func() { <-s.decisions }()
+	default:
+		// More at once than a session has any business asking: refused
+		// without a decision, and without a goroutine of its own waiting.
+		s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+		return
+	}
+
 	s.mu.Lock()
 	t := s.turn
 	askable := t != nil && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
@@ -946,6 +978,9 @@ type toolInfo struct {
 	locations []string
 }
 
+// maxDecisions bounds the permission requests one session decides at once.
+const maxDecisions = 8
+
 // maxTools bounds the tool calls remembered for one session.
 const maxTools = 1024
 
@@ -1006,18 +1041,22 @@ func toolName(u sessionUpdate) string {
 	return ""
 }
 
-// plainName keeps a tool name to identifier characters.
+// plainName is a tool name the policy can key on, or nothing. A name is never
+// made plain by dropping what is not: "mcp__base camp__x" must not become the
+// allowed "mcp__basecamp__x", so a name with anything outside the set is no
+// name at all, and the call is decided on its kind.
 func plainName(s string) string {
-	out := make([]rune, 0, len(s))
+	if s == "" || len(s) > 100 {
+		return ""
+	}
 	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
-			out = append(out, r)
-		}
-		if len(out) >= 100 {
-			break
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+		default:
+			return ""
 		}
 	}
-	return string(out)
+	return s
 }
 
 func toolKind(kind string) driver.ToolKind {

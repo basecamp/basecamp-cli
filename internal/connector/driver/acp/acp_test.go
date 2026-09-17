@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -247,11 +248,14 @@ func TestTheAskingModeIsConfirmedByAModeUpdate(t *testing.T) {
 
 func TestASessionThatCannotBePutInItsAskingModeIsNotRun(t *testing.T) {
 	cases := map[string]func(*scenario){
-		"the mode is not offered":             func(sc *scenario) { sc.Modes = []string{"auto", "bypassPermissions"} },
-		"the read-back reports the old mode":  func(sc *scenario) { sc.Confirm = "stale" },
-		"no mode update follows":              func(sc *scenario) { sc.ModeConfig = false; sc.Confirm = "none" },
-		"set_mode fails":                      func(sc *scenario) { sc.Confirm = "error" },
-		"the agent has no modes at all":       func(sc *scenario) { sc.Modes = nil; sc.ModeConfig = false },
+		"the mode is not offered":            func(sc *scenario) { sc.Modes = []string{"auto", "bypassPermissions"} },
+		"the read-back reports the old mode": func(sc *scenario) { sc.Confirm = "stale" },
+		"no mode update follows":             func(sc *scenario) { sc.ModeConfig = false; sc.Confirm = "none" },
+		"set_mode fails":                     func(sc *scenario) { sc.Confirm = "error" },
+		"the agent has no modes at all":      func(sc *scenario) { sc.Modes = nil; sc.ModeConfig = false },
+		"a mode update overtakes the answer that confirms it": func(sc *scenario) {
+			sc.ModeBeforeSetAnswer = "bypassPermissions"
+		},
 		"only a stale mode update, no option": func(sc *scenario) { sc.ModeConfig = false; sc.Confirm = "stale" },
 	}
 	for name, mutate := range cases {
@@ -381,6 +385,8 @@ func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
 		// Nor is an input that claims one without the title.
 		{Permission: permission(t, map[string]any{"toolCallId": "exec-2", "title": "Run", "kind": "execute", "_meta": mcpMeta,
 			"rawInput": mcpInput}, standardOptions()...)},
+		// A name that is not plain is no name at all, never a name made plain.
+		{Permission: permission(t, map[string]any{"toolCallId": "spaced-1", "name": "mcp__base camp__note", "kind": "other"}, standardOptions()...)},
 		// Nor a title and input that agree, without codex's MCP marker.
 		{Permission: permission(t, map[string]any{"toolCallId": "exec-3", "title": "mcp.basecamp.get_dispatch", "kind": "execute",
 			"rawInput": mcpInput}, standardOptions()...)},
@@ -407,7 +413,7 @@ func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
 		tools[r.ToolCallID] = r.Tool
 	}
 	assert.Equal(t, map[string]string{
-		"mcp-1": "mcp__basecamp__get_dispatch", "exec-1": "", "exec-2": "", "exec-3": "", "toolu_2": "Bash",
+		"mcp-1": "mcp__basecamp__get_dispatch", "exec-1": "", "exec-2": "", "exec-3": "", "toolu_2": "Bash", "spaced-1": "",
 		"toolu_1": "mcp__basecamp__note", "toolu_3": "mcp__basecamp__note", "mcp-9": "",
 	}, tools)
 	outcomes := h.record().Outcomes
@@ -416,8 +422,8 @@ func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
 		_, id := outcomeOf(t, o)
 		options = append(options, id)
 	}
-	assert.Equal(t, []string{"allow-once", "reject", "reject", "reject", "reject", "allow-once", "allow-once", "reject", "reject"}, options)
-	assert.Len(t, res.Refusals, 6)
+	assert.Equal(t, []string{"allow-once", "reject", "reject", "reject", "reject", "reject", "allow-once", "allow-once", "reject", "reject"}, options)
+	assert.Len(t, res.Refusals, 7)
 }
 
 func TestARequestOutsideATurnIsRefusedUnasked(t *testing.T) {
@@ -837,6 +843,7 @@ func TestThePinnedAdapters(t *testing.T) {
 	}
 	options := ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["options"].(map[string]any)
 	assert.Equal(t, true, options["strictMcpConfig"], "only the session's MCP servers")
+	assert.Equal(t, []string{"EnterPlanMode", "ExitPlanMode"}, options["disallowedTools"], "a plan-mode switch would leave the verified mode")
 	assert.Equal(t, []string{}, options["settingSources"], "none of the host's settings")
 	assert.Equal(t, false, options["allowDangerouslySkipPermissions"])
 	assert.Equal(t, "true", CodexACP.SetEnv["DISABLE_MCP_CONFIG_FILTERING"], "the requested server is never dropped for a configured one")
@@ -1040,4 +1047,45 @@ func TestAgentTextIsFitForALog(t *testing.T) {
 		assert.NotContains(t, err.Error(), bad)
 	}
 	assert.Contains(t, err.Error(), "quota for")
+}
+
+func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	var deciding atomic.Int32
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		deciding.Add(1)
+		defer deciding.Add(-1)
+		<-release
+		return true
+	}
+	h.turns(turnScript{
+		FloodPermissions: 40,
+		FloodCall:        permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		Stop:             "end_turn",
+	})
+	s := h.open()
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		assert.NoError(t, err)
+		answers <- res
+	}()
+	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 10*time.Second, 10*time.Millisecond,
+		"the session decides at most %d at once", maxDecisions)
+	time.Sleep(200 * time.Millisecond)
+	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
+	close(release)
+	select {
+	case <-answers:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the flooded turn never ended")
+	}
+	canceled := 0
+	for _, o := range h.record().Outcomes {
+		if outcome, _ := outcomeOf(t, o); outcome == outcomeCanceled {
+			canceled++
+		}
+	}
+	assert.Positive(t, canceled, "what does not fit is refused rather than queued")
 }
