@@ -49,11 +49,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
 **SDK version:** the pin in `go.mod`, with
-`internal/version/sdk-provenance.json` authoritative for the exact commit. The
-event-feed operations are unreleased, so that pin is a basecamp-sdk `main`
-pseudo-version rather than a release tag; it builds on v0.18.0, the latest
-release. The
-command surface below largely dates to the v0.12.0 bump, which added 20 exported
+`internal/version/sdk-provenance.json` authoritative for the exact commit. That
+pin is basecamp-sdk v0.19.0, the release that ships the event-feed operations.
+The command surface below largely dates to the v0.12.0 bump, which added 20 exported
 Go methods over 13 new backend operations; the extra seven wrapped endpoints
 that already existed but were reachable only through the raw generated client,
 which the andon-cord rule forbids the CLI from calling. v0.13.0–v0.15.0
