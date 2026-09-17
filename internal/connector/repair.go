@@ -238,7 +238,13 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 		cursor = eventfeed.Cursor{Position: loss.RepairCursor}
 	}
 
-	last := loss.RepairCursor
+	// loss.RepairCursor is the walk's memory of what is DURABLE, and it is
+	// kept equal to what the ledger holds at every point below. A 410 is why:
+	// the epoch makes the pre-epoch position permanently unusable, and
+	// pollFailure clears it on disk — so a pass that then ends for any other
+	// reason must not hand a copy of that position back to its caller, which
+	// would put it back in memory and start every later pass at a position
+	// the feed has already refused.
 	pass := &repairPass{followed: map[string]bool{}}
 	walked := map[string]bool{}
 	maxPages := w.maxPages
@@ -249,26 +255,27 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 		if err := ctx.Err(); err != nil {
 			// Cancellation is a delay, never a verdict: the loss stays open
 			// on disk for the next start.
-			return last, err
+			return loss.RepairCursor, err
 		}
 		if pages >= maxPages {
 			// Distinct positions forever evade cycle detection. The pass ends
 			// at the cap, and the next one resumes from the cursor saved on
 			// the last page.
 			w.log.Warn("a repair pass reached its page cap; resuming on the repair cadence", "loss_id", loss.ID, "pages", pages)
-			return last, nil
+			return loss.RepairCursor, nil
 		}
 		pages++
 		page, err := w.polls.Poll(ctx, cursor, w.filters)
 		if err != nil {
 			next, err := w.pollFailure(ctx, loss, cursor, err, pass)
 			if err != nil || next == nil {
-				return last, err
+				// pollFailure has already written whatever this failure did
+				// to the durable cursor — cleared it at an epoch fence, or
+				// left it alone — so what is returned is that, never a copy
+				// of the position the failure just invalidated.
+				return loss.RepairCursor, err
 			}
 			cursor = *next
-			if cursor.PageURL == "" && cursor.Position == "" {
-				last = ""
-			}
 			continue
 		}
 
@@ -277,15 +284,17 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 			// what marks the missing id recovered, and it is one code path
 			// rather than two that must agree.
 			if err := w.ingest(ctx, event, LaneRepair); err != nil {
-				return last, err
+				return loss.RepairCursor, err
 			}
 		}
 
 		if page.Position != "" {
-			last = page.Position
+			// Saved first, remembered second: the walk's memory of the cursor
+			// never runs ahead of the ledger's.
 			if err := w.ledger.SaveRepairCursor(ctx, loss.ID, page.Position); err != nil {
-				return last, err
+				return loss.RepairCursor, err
 			}
+			loss.RepairCursor = page.Position
 		}
 
 		if page.Next == "" {
@@ -293,7 +302,7 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 			// page cut short by the safety horizon withholds the link on
 			// purpose, so the caller polls again rather than concluding
 			// anything.
-			return last, nil
+			return loss.RepairCursor, nil
 		}
 		// An empty page with a `next` is ordinary — the walk crossed rows the
 		// filters excluded — so the loop never stops on len(Events) == 0.
@@ -301,12 +310,12 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 			// A next already walked this pass — itself, or a cycle — would
 			// spin. The pass ends and the repair cadence is the backoff.
 			w.log.Warn("a repair page's next repeats a URL this pass already walked; ending the pass", "loss_id", loss.ID)
-			return last, nil
+			return loss.RepairCursor, nil
 		}
 		walked[page.Next] = true
 		if err := sameOrigin(w.origin, page.Next); err != nil {
 			w.log.Error("a repair page's next URL leaves the API origin; the loss stays open for the next start", "loss_id", loss.ID)
-			return last, errReconciliationEnded
+			return loss.RepairCursor, errReconciliationEnded
 		}
 		cursor = eventfeed.Cursor{PageURL: page.Next}
 	}

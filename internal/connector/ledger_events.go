@@ -167,11 +167,18 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // Blocked is not terminal on purpose: it is retained and retried, so it has
 // edges back into the working states. Completed and discarded have none.
 var lifecycle = map[RecordState][]RecordState{
-	StateSeen:       {StateAdmitted, StateBlocked, StateDiscarded},
-	StateAdmitted:   {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
-	StateQueued:     {StateDispatched, StateBlocked, StateDiscarded},
-	StateBlocked:    {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
-	StateDispatched: {StateCompleted, StateBlocked},
+	// seen to queued is one edge, not two: admission commits an admitted
+	// verdict AS queued when the conversation is already live, so the record
+	// never passes through admitted at all.
+	StateSeen:     {StateAdmitted, StateQueued, StateBlocked, StateDiscarded},
+	StateAdmitted: {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
+	StateQueued:   {StateDispatched, StateBlocked, StateDiscarded},
+	StateBlocked:  {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
+	// A dispatched record whose worker never started has its exposure
+	// withdrawn and returns to admitted. It is never discarded: a dispatched
+	// event ends completed, with an outcome, even when the outcome is
+	// unknown.
+	StateDispatched: {StateCompleted, StateBlocked, StateAdmitted},
 	StateCompleted:  nil,
 	StateDiscarded:  nil,
 }
@@ -218,15 +225,21 @@ func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reas
 		return fmt.Errorf("connector: set state of %d: %q is not a ledger state", id, state)
 	}
 	froms := enterableFrom(state)
-	args := []any{string(state), reason, l.timestamp(), id}
+	args := []any{string(state), reason, string(state), l.timestamp(), id}
 	for _, from := range froms {
 		args = append(args, from)
 	}
 	// The only thing concatenated is a list of "?" as long as the lifecycle's
 	// own edge list. Every value is bound.
 	//nolint:gosec // G202: placeholders, not values
-	query := `UPDATE events SET state = ?, reason = ?, updated_at = ? WHERE id = ? AND state IN (` +
-		strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + `)`
+	//
+	// updated_at is left alone when the state does not change. It is the
+	// retention clock DropContent reads, and a repeated write of the state a
+	// record already has would silently restart the window on a finished
+	// record.
+	query := `UPDATE events SET state = ?, reason = ?,
+  updated_at = CASE WHEN state = ? THEN updated_at ELSE ? END
+WHERE id = ? AND state IN (` + strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + `)`
 	res, err := l.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("connector: set state of %d: %w", id, err)
@@ -243,6 +256,10 @@ func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reas
 
 // explainRefusal says why an update changed nothing: there is no such record,
 // or the record is somewhere the lifecycle cannot leave for state.
+//
+// The refusal itself already happened, in the UPDATE. This is the message, and
+// it reads the row a second time: under a concurrent writer it can name a
+// state the record has since left. Diagnostics, not a verdict to act on.
 func (l *Ledger) explainRefusal(ctx context.Context, id int64, state RecordState) error {
 	var current string
 	switch err := l.db.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, id).Scan(&current); {

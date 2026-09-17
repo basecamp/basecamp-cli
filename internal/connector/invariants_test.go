@@ -347,3 +347,112 @@ func reachTerminal(t *testing.T, ledger *Ledger, id int64, terminal RecordState)
 	}
 	return ledger.SetState(ctx, id, StateCompleted, "")
 }
+
+// A2: a cursor older than the feed's current epoch is never usable. A 410 with
+// an epoch says the history below it is gone for good, so the position the
+// walk was holding is not merely superseded — it is refused by the server
+// forever, and a pass that ends for some other reason must not hand it back.
+func TestInvariantA2APreEpochCursorIsNeverUsedAgain(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	// The missing id is above the epoch, so the walk still has something to
+	// serve after the fence and follows the resume.
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838700}, clock.at, time.Hour, eventfeed.Filters{})
+	require.NoError(t, err)
+	require.NoError(t, ledger.SaveRepairCursor(ctx, loss.ID, "PRE-EPOCH-POSITION"))
+	loss.RepairCursor = "PRE-EPOCH-POSITION"
+
+	const epoch = int64(17099838600)
+	polls := &scriptedPolls{errs: []error{
+		// The stored cursor is below the epoch: the fence.
+		&eventfeed.PollError{
+			Kind:         eventfeed.PollGone,
+			EpochAfterID: epoch,
+			ResumeURL:    "https://3.basecampapi.com/2914079/events.json?since=17099838600",
+			Err:          errors.New("gone"),
+		},
+		// The resume then fails transiently — a connection reset, not a
+		// verdict — and the pass ends.
+		errors.New("connection reset"),
+	}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+
+	cursor, err := walker.walk(ctx, &loss)
+	require.NoError(t, err)
+
+	assert.Empty(t, cursor, "the pass must not carry the refused position back to its caller")
+	assert.Empty(t, loss.RepairCursor)
+	stored, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Empty(t, stored[0].RepairCursor, "the pre-epoch cursor is gone from the ledger too")
+	assert.Equal(t, epoch, stored[0].RepairSince)
+
+	// The next pass enters at the epoch, never at the refused position.
+	polls.errs = nil
+	_, err = walker.walk(ctx, &stored[0])
+	require.NoError(t, err)
+	entered := polls.cursors[len(polls.cursors)-1]
+	assert.Equal(t, "17099838600", entered.Since)
+	// The first poll of the first pass is where the refusal was discovered.
+	// Nothing after it may name that position again.
+	for _, seen := range polls.cursors[1:] {
+		assert.NotEqual(t, "PRE-EPOCH-POSITION", seen.Position, "no pass may re-enter at the refused position")
+	}
+}
+
+// The lifecycle carries the edges the later cards actually commit, so neither
+// has to write state around SetState to make its own contract work.
+func TestInvariantE4TheLifecycleCarriesTheEdgesLaterCardsCommit(t *testing.T) {
+	// Admission commits an admitted verdict AS queued when the conversation
+	// is live, so the record goes from seen to queued in one write.
+	t.Run("seen to queued", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ctx := context.Background()
+		_, err := ledger.RecordSeen(ctx, testEvent(1), LanePoll)
+		require.NoError(t, err)
+
+		require.NoError(t, ledger.SetState(ctx, 1, StateQueued, ""))
+
+		record, ok, err := ledger.Get(ctx, 1)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, StateQueued, record.State)
+	})
+
+	// A dispatched record whose worker never started has its exposure
+	// withdrawn and returns to admitted.
+	t.Run("dispatched back to admitted", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ctx := context.Background()
+		_, err := ledger.RecordSeen(ctx, testEvent(1), LanePoll)
+		require.NoError(t, err)
+		require.NoError(t, ledger.SetState(ctx, 1, StateAdmitted, ""))
+		require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+
+		require.NoError(t, ledger.SetState(ctx, 1, StateAdmitted, ""))
+
+		record, ok, err := ledger.Get(ctx, 1)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, StateAdmitted, record.State)
+	})
+}
+
+// updated_at is the retention clock. Writing the state a record already has is
+// a repeat, and a repeat must not restart the window on a finished record.
+func TestInvariantE4ARepeatDoesNotRestartRetention(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	ledger.now = func() time.Time { return at }
+	require.NoError(t, reachTerminal(t, ledger, 1, StateCompleted))
+
+	ledger.now = func() time.Time { return at.Add(90 * 24 * time.Hour) }
+	require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
+
+	dropped, err := ledger.DropContent(ctx, at.Add(time.Hour), at.Add(time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 1, dropped, "the repeat must not have pushed the record's retention forward")
+}
