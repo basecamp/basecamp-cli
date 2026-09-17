@@ -579,33 +579,47 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 	if origin.Includes(config.SourceGlobal) {
 		return ""
 	}
-	closest := richtext.SanitizeSingleLine(origin.Closest().Path)
+	closest := origin.Closest()
 	if hidden := origin.ReplacedLayer(config.SourceGlobal); hidden != nil {
-		replacer := firstEntryForAnotherBasecamp(origin, *hidden)
-		return fmt.Sprintf("Its entry in %s is for %s, not %s, so it replaces the global config's entry in %s and any account bound there. Add account_id to the profile's entry in %s",
-			richtext.SanitizeSingleLine(replacer.Path), richtext.SanitizeSingleLine(replacer.BaseURL),
-			richtext.SanitizeSingleLine(hidden.BaseURL), richtext.SanitizeSingleLine(hidden.Path), closest)
+		// The entry that replaced it did so for being on another Basecamp,
+		// or for naming another account there.
+		why := fmt.Sprintf("is for %s, not %s", richtext.SanitizeSingleLine(hidden.By.BaseURL), richtext.SanitizeSingleLine(hidden.BaseURL))
+		if config.NormalizeBaseURL(hidden.By.BaseURL) == config.NormalizeBaseURL(hidden.BaseURL) {
+			why = "names another account"
+		}
+		return fmt.Sprintf("Its entry in %s %s, so it replaces the global config's entry in %s and any account bound there. Add account_id to the profile's entry in %s",
+			richtext.SanitizeSingleLine(hidden.By.Path), why, richtext.SanitizeSingleLine(hidden.Path), richtext.SanitizeSingleLine(closest.Path))
 	}
-	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Add account_id to the profile's entry there", closest)
+	// The global config has no entry for this profile, so there is nothing
+	// to bind — but an entry added there for the same Basecamp is refined
+	// by the ones that do define it, and the account in it holds. That is
+	// the remedy to name first: a repo config is shared, and an operator's
+	// account does not belong in it (nor can they always write /etc).
+	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Add an entry for it to %s, with the same base_url (%s) and an account_id — or add account_id to the entry in %s",
+		richtext.SanitizeSingleLine(closest.Path),
+		richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json")),
+		richtext.SanitizeSingleLine(closest.BaseURL),
+		richtext.SanitizeSingleLine(closest.Path))
 }
 
-// firstEntryForAnotherBasecamp is the entry that replaced hidden for being
-// on another Basecamp: the first, after it, whose base_url differs. A later
-// entry can be back on hidden's Basecamp, having replaced the one that did.
-// An entry that replaced it for naming another account sets one, and a
-// profile with no account has none of those left; Layers[0] is the fallback.
-func firstEntryForAnotherBasecamp(origin *config.ProfileOrigin, hidden config.ProfileLayer) config.ProfileLayer {
-	after := false
-	for _, l := range append(append([]config.ProfileLayer(nil), origin.Replaced...), origin.Layers...) {
-		if l == hidden {
-			after = true
-			continue
-		}
-		if after && config.NormalizeBaseURL(l.BaseURL) != config.NormalizeBaseURL(hidden.BaseURL) {
-			return l
-		}
+// boundIn names the config file a profile's account came from, as " (bound
+// in <path>)" for a message about that account, and is empty for an entry
+// this invocation made rather than a file.
+func boundIn(cfg *config.Config, name string) string {
+	if path := profileFieldFile(cfg, name, "account_id"); path != "" {
+		return " (bound in " + richtext.SanitizeSingleLine(path) + ")"
 	}
-	return origin.Layers[0]
+	return ""
+}
+
+// profileFieldFile is the path of the config file that set a field on a
+// profile, "" when the profile did not come from files.
+func profileFieldFile(cfg *config.Config, name, field string) string {
+	origin := cfg.ProfileOrigins[name]
+	if origin == nil {
+		return ""
+	}
+	return origin.Fields[field]
 }
 
 // bindProfileAccount sets the account on an existing profile entry in the

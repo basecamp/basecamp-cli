@@ -128,3 +128,19 @@ func TestAuthAgentConnectNamesTheFileDefiningALocalOnlyProfile(t *testing.T) {
 	assert.Contains(t, hintOf(t, err), local)
 	assert.Empty(t, as.mints())
 }
+
+// A profile bound to another account refuses the connection, naming the
+// file the account is bound in — the global config, seen through the local
+// entry that refines it.
+func TestAuthAgentConnectNamesTheFileAProfileIsBoundIn(t *testing.T) {
+	as := startConnectAS(t)
+	app := connectApp(t, as, &config.Config{})
+	writeGlobalConfigHere(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"123"}}}`, as.srv.URL))
+	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"project_id":"42"}}}`, as.srv.URL))
+	reloadApp(t, app, as.srv.URL, "agent")
+
+	_, err := runAgentConnect(t, app, "--device-name", "build-box")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bound to account 123 (bound in "+filepath.Join(config.GlobalConfigDir(), "config.json")+")")
+}

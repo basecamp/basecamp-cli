@@ -275,7 +275,7 @@ func (t *agentConnectTarget) commit(app *appctx.App, conn *auth.AgentConnection)
 		t.existing.AccountID = conn.AccountID
 	case !accountIDsEqual(t.existing.AccountID, conn.AccountID):
 		return false, output.ErrUsageHint(
-			fmt.Sprintf("Profile %q is bound to account %s, and the approved agent belongs to account %s", t.name, t.existing.AccountID, conn.AccountID),
+			fmt.Sprintf("Profile %q is bound to account %s%s, and the approved agent belongs to account %s", t.name, t.existing.AccountID, boundIn(app.Config, t.name), conn.AccountID),
 			"Nothing was stored. Connect the agent under a profile of its own: -P <name>.")
 	}
 	return isDefault, nil

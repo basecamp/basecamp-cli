@@ -53,7 +53,10 @@ func TestUnboundProfileHintNamesTheConfigFileWhenTheEntryIsNotGlobal(t *testing.
 	hint := hintOf(t, unboundProfileError(loadConfig(t), "agent"))
 
 	assert.Contains(t, hint, "Its entry comes from "+local+", not the global config")
-	assert.Contains(t, hint, "Add account_id to the profile's entry there")
+	assert.Contains(t, hint, "Add an entry for it to "+filepath.Join(config.GlobalConfigDir(), "config.json")+
+		", with the same base_url (https://3.basecampapi.com) and an account_id",
+		"a global entry for the same Basecamp is refined by this one, so the account in it holds")
+	assert.Contains(t, hint, "or add account_id to the entry in "+local)
 	assert.NotContains(t, hint, "basecamp auth", "a command that would refuse this profile is no remedy")
 }
 
@@ -94,18 +97,26 @@ func TestConnectAccountNamesTheFileOfAnUnusableAccount(t *testing.T) {
 	assert.Equal(t, "Correct account_id in the profile's entry in "+local+".", hintOf(t, err))
 }
 
-// The file that hid the global entry is the first after it on another
-// Basecamp, even when a closer entry is back on the global entry's Basecamp
-// and replaced that file in turn.
-func TestGlobalBindingBlockerNamesTheFileThatReplacedTheGlobalEntry(t *testing.T) {
+// The hint names the entry that actually replaced the global one, and why,
+// even when a closer entry has since replaced that one in turn.
+func TestGlobalBindingBlockerNamesTheEntryThatReplacedTheGlobalOne(t *testing.T) {
 	global := config.ProfileLayer{Source: config.SourceGlobal, Path: "/g/config.json", BaseURL: "https://3.basecampapi.com"}
-	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "http://localhost:3000"}
-	local := config.ProfileLayer{Source: config.SourceLocal, Path: "/l/config.json", BaseURL: "https://3.basecampapi.com/"}
-	cfg := &config.Config{ProfileOrigins: map[string]*config.ProfileOrigin{
-		"agent": {Replaced: []config.ProfileLayer{global, repo}, Layers: []config.ProfileLayer{local}},
-	}}
+	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "https://3.basecampapi.com/"}
+	local := config.ProfileLayer{Source: config.SourceLocal, Path: "/l/config.json", BaseURL: "http://localhost:3000"}
+	origin := func(by config.ProfileLayer) *config.Config {
+		return &config.Config{ProfileOrigins: map[string]*config.ProfileOrigin{
+			"agent": {
+				Replaced: []config.ReplacedProfileLayer{{ProfileLayer: global, By: by}, {ProfileLayer: repo, By: local}},
+				Layers:   []config.ProfileLayer{local},
+			},
+		}}
+	}
 
 	assert.Equal(t,
-		"Its entry in /r/config.json is for http://localhost:3000, not https://3.basecampapi.com, so it replaces the global config's entry in /g/config.json and any account bound there. Add account_id to the profile's entry in /l/config.json",
-		globalBindingBlocker(cfg, "agent"))
+		"Its entry in /r/config.json names another account, so it replaces the global config's entry in /g/config.json and any account bound there. Add account_id to the profile's entry in /l/config.json",
+		globalBindingBlocker(origin(repo), "agent"), "the repo entry replaced it, for another account on the same Basecamp")
+
+	assert.Equal(t,
+		"Its entry in /l/config.json is for http://localhost:3000, not https://3.basecampapi.com, so it replaces the global config's entry in /g/config.json and any account bound there. Add account_id to the profile's entry in /l/config.json",
+		globalBindingBlocker(origin(local), "agent"), "a replacement for another Basecamp says which")
 }

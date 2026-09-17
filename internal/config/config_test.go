@@ -1326,6 +1326,7 @@ func TestProfileEntryForTheSameBasecampRefinesFieldByField(t *testing.T) {
 		{Source: SourceLocal, Path: paths[1], BaseURL: "https://3.basecampapi.com/"},
 	}, origin.Layers)
 	assert.Empty(t, origin.Replaced)
+	assert.Empty(t, origin.Replaced)
 	assert.Equal(t, map[string]string{
 		"base_url": paths[1], "account_id": paths[0], "project_id": paths[1], "scope": paths[1], "client_id": paths[0],
 	}, origin.Fields)
@@ -1352,6 +1353,7 @@ func TestProfileEntryForAnotherBasecampReplacesTheEntryWhole(t *testing.T) {
 	require.NotNil(t, hidden)
 	assert.Equal(t, paths[1], hidden.Path)
 	assert.Equal(t, "https://3.basecampapi.com", hidden.BaseURL)
+	assert.Equal(t, paths[2], hidden.By.Path, "the repo entry, for another Basecamp, replaced it")
 	assert.Equal(t, map[string]string{"base_url": paths[3], "project_id": paths[3]}, origin.Fields)
 }
 
@@ -1379,8 +1381,26 @@ func TestProfileEntryForAnotherAccountReplacesTheEntryWhole(t *testing.T) {
 
 	assert.Equal(t, &ProfileConfig{BaseURL: "https://3.basecampapi.com", AccountID: "555", ProjectID: "42"}, cfg.Profiles["bot"])
 	origin := cfg.ProfileOrigins["bot"]
-	assert.Equal(t, paths[0], origin.ReplacedLayer(SourceGlobal).Path)
+	hidden := origin.ReplacedLayer(SourceGlobal)
+	assert.Equal(t, paths[0], hidden.Path)
+	assert.Equal(t, paths[1], hidden.By.Path, "the repo entry, for another account, replaced it")
 	assert.Equal(t, []string{paths[1], paths[2]}, []string{origin.Layers[0].Path, origin.Layers[1].Path}, "the same account refines")
+}
+
+// Account IDs are compared as numbers, as the commands compare them: a
+// spelling with leading zeros is the same account, and refines.
+func TestProfileEntryForTheSameAccountSpelledDifferentlyRefines(t *testing.T) {
+	cfg, _ := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999","project_id":"1"}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"0999"}}}`},
+	)
+
+	assert.Equal(t, "1", cfg.Profiles["bot"].ProjectID)
+	assert.True(t, sameAccountID("000123456789012345678901234567890", "123456789012345678901234567890"), "past int64")
+	assert.True(t, sameAccountID("0", "000"))
+	assert.False(t, sameAccountID("999", "9990"))
+	assert.False(t, sameAccountID("x999", "999"))
+	assert.True(t, sameAccountID("abc", "abc"))
 }
 
 // A closer entry that binds an unbound farther one refines it.

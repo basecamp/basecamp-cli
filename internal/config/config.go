@@ -77,21 +77,42 @@ type ProfileOrigin struct {
 	// path of the file that set it.
 	Fields map[string]string
 
-	// Replaced are the files whose entries a closer entry for a different
-	// Basecamp replaced whole, farthest first. Nothing of them applies.
-	Replaced []ProfileLayer
+	// Replaced are the entries a closer one replaced whole, farthest
+	// first, each with the entry that replaced it. Nothing of them
+	// applies.
+	Replaced []ReplacedProfileLayer
+}
+
+// ReplacedProfileLayer is a file's entry for a profile that a closer entry
+// replaced whole, and the entry that replaced it.
+type ReplacedProfileLayer struct {
+	ProfileLayer
+
+	// By is the entry that replaced it: for another Basecamp, or for
+	// another account on the same one.
+	By ProfileLayer
 }
 
 // Includes reports whether a file of the given source contributes to the
 // profile.
 func (o *ProfileOrigin) Includes(source Source) bool {
-	return o.find(o.Layers, source) != nil
+	for _, l := range o.Layers {
+		if l.Source == source {
+			return true
+		}
+	}
+	return false
 }
 
 // ReplacedLayer returns the replaced entry from a file of the given source,
 // nil when no such entry was replaced.
-func (o *ProfileOrigin) ReplacedLayer(source Source) *ProfileLayer {
-	return o.find(o.Replaced, source)
+func (o *ProfileOrigin) ReplacedLayer(source Source) *ReplacedProfileLayer {
+	for i := len(o.Replaced) - 1; i >= 0; i-- {
+		if o.Replaced[i].Source == source {
+			return &o.Replaced[i]
+		}
+	}
+	return nil
 }
 
 // Closest is the closest file contributing to the profile: the one whose
@@ -101,15 +122,6 @@ func (o *ProfileOrigin) Closest() ProfileLayer {
 		return ProfileLayer{}
 	}
 	return o.Layers[len(o.Layers)-1]
-}
-
-func (o *ProfileOrigin) find(layers []ProfileLayer, source Source) *ProfileLayer {
-	for i := len(layers) - 1; i >= 0; i-- {
-		if layers[i].Source == source {
-			return &layers[i]
-		}
-	}
-	return nil
 }
 
 // IsExperimental returns true if the named experimental feature is enabled.
@@ -396,6 +408,9 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 					mergeProfile(cfg, name, profileMap, ProfileLayer{Source: source, Path: path})
 				}
 			}
+			// An aggregate: the last file that contributed any profile.
+			// Which file each profile and field came from is recorded in
+			// ProfileOrigins, and nothing is decided from this.
 			cfg.Sources["profiles"] = string(source)
 		}
 	}
@@ -439,11 +454,14 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 
 	p, origin := cfg.Profiles[name], cfg.ProfileOrigins[name]
 	account := getStringOrNumber(entry, "account_id")
-	otherAccount := p != nil && p.AccountID != "" && account != "" && p.AccountID != account
+	otherAccount := p != nil && p.AccountID != "" && account != "" && !sameAccountID(p.AccountID, account)
 	if p == nil || origin == nil || otherAccount || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
-		replaced := []ProfileLayer(nil)
+		replaced := []ReplacedProfileLayer(nil)
 		if p != nil && origin != nil {
-			replaced = append(append(replaced, origin.Replaced...), origin.Layers...)
+			replaced = append(replaced, origin.Replaced...)
+			for _, l := range origin.Layers {
+				replaced = append(replaced, ReplacedProfileLayer{ProfileLayer: l, By: layer})
+			}
 		}
 		p = &ProfileConfig{}
 		origin = &ProfileOrigin{Replaced: replaced, Fields: make(map[string]string)}
@@ -472,6 +490,24 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 	if v, ok := entry["client_id"].(string); ok {
 		set("client_id", &p.ClientID, v)
 	}
+}
+
+// sameAccountID reports whether two account IDs name the same account: equal
+// as decimal numbers, so "0999" is "999", however many digits they run to.
+// A value that is not all digits is the same only as its exact spelling.
+func sameAccountID(a, b string) bool {
+	if a == b {
+		return true
+	}
+	canonical := func(id string) (string, bool) {
+		if id == "" || strings.TrimLeft(id, "0123456789") != "" {
+			return "", false
+		}
+		return strings.TrimLeft(id, "0"), true
+	}
+	ca, okA := canonical(a)
+	cb, okB := canonical(b)
+	return okA && okB && ca == cb
 }
 
 // LoadFromEnv loads configuration from environment variables.

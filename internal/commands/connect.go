@@ -867,8 +867,8 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 		// profile: say what is wrong with the account it does name.
 		if p.AccountID != "" {
 			where := "the config file that defines the profile"
-			if origin := app.Config.ProfileOrigins[name]; origin != nil && origin.Fields["account_id"] != "" {
-				where = "the profile's entry in " + richtext.SanitizeSingleLine(origin.Fields["account_id"])
+			if path := profileFieldFile(app.Config, name, "account_id"); path != "" {
+				where = "the profile's entry in " + richtext.SanitizeSingleLine(path)
 			}
 			return "", output.ErrUsageHint(
 				fmt.Sprintf("Profile %q names account %q, which is not an account ID", name, p.AccountID),
@@ -878,7 +878,7 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 	}
 	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
 		return "", output.ErrUsageHint(
-			fmt.Sprintf("Profile %q is bound to account %s, and this command named account %s", name, bound, app.Config.AccountID),
+			fmt.Sprintf("Profile %q is bound to account %s%s, and this command named account %s", name, bound, boundIn(app.Config, name), app.Config.AccountID),
 			"Setup works in the profile's own account. Drop --account (or BASECAMP_ACCOUNT_ID).")
 	}
 	return bound, nil

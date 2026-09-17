@@ -1160,7 +1160,7 @@ func requireProfileBinding(app *appctx.App, name string, existing *config.Profil
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to %s, not %s", name, existing.BaseURL, app.Config.BaseURL),
 			"Use a different profile, or drop the BASECAMP_BASE_URL override.")
 	case existing.AccountID != "" && app.Config.AccountID != "" && !accountIDsEqual(app.Config.AccountID, existing.AccountID):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, app.Config.AccountID),
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s%s, not %s", name, existing.AccountID, boundIn(app.Config, name), app.Config.AccountID),
 			"Use a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
 	}
 	return nil
