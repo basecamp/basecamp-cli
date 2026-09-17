@@ -2,13 +2,16 @@ package connector
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
@@ -44,7 +47,46 @@ func TestThePromptRepeatsNothingThatCouldCarryAnInstruction(t *testing.T) {
 	p := DispatchPrompt(Launch{TaskID: 1}, r)
 	assert.NotContains(t, p, "ignore")
 	assert.NotContains(t, p, "do+this")
-	assert.Contains(t, p, "the recording get_dispatch names")
+	assert.NotContains(t, p, "basecamp.com/1/", "a URL the prompt will not repeat is omitted, not rewritten")
+	assert.Contains(t, p, "Event 7: an event.\n")
+}
+
+// A URL over the cap is omitted whole, never cut to fit: the worker reads the
+// recording from get_dispatch.
+func TestAURLOverTheCapIsOmittedNotTruncated(t *testing.T) {
+	base := "https://3.basecamp.com/2914079/buckets/48699913/recordings/"
+	atCap := base + strings.Repeat("1", MaxPromptURL-len(base))
+	over := atCap + "2"
+
+	r := Record{ID: 7}
+	r.Decision.Trigger = "mentioned"
+	r.Decision.RecordingURL = atCap
+	assert.Contains(t, DispatchPrompt(Launch{TaskID: 1}, r), "Event 7: mentioned on "+atCap+".\n")
+
+	r.Decision.RecordingURL = over
+	p := DispatchPrompt(Launch{TaskID: 1}, r)
+	assert.NotContains(t, p, base, "no part of an over-long URL")
+	assert.Contains(t, p, "Event 7: mentioned.\n")
+}
+
+// The spec's budget holds for the worst prompt the connector can write, not
+// only a typical one: the largest ids, the longest trigger, and a URL at the
+// cap.
+func TestTheWorstCasePromptIsUnderTheBudget(t *testing.T) {
+	base := "https://3.basecamp.com/2914079/buckets/48699913/recordings/"
+	r := Record{ID: math.MaxInt64}
+	r.Decision.RecordingURL = base + strings.Repeat("9", MaxPromptURL-len(base))
+	worst := 0
+	for _, trigger := range []admission.Trigger{admission.TriggerMentioned, admission.TriggerSubscribed, admission.TriggerAssigned, admission.TriggerCompleted} {
+		r.Decision.Trigger = string(trigger)
+		p := DispatchPrompt(Launch{TaskID: math.MaxInt64}, r)
+		require.Contains(t, p, r.Decision.RecordingURL, "the URL at the cap is carried")
+		worst = max(worst, estimateTokens(p))
+	}
+	worst = max(worst, estimateTokens(FollowUpPrompt(math.MaxInt64)))
+	t.Logf("worst-case prompt: %d tokens by the upper bound", worst)
+	assert.LessOrEqual(t, worst, 450, "margin under the budget")
+	assert.Less(t, worst, MaxPromptTokens)
 }
 
 // Copilot: containment is decided on the resolved path.
