@@ -43,7 +43,7 @@ import (
 //     canceled; sending → sent | indeterminate, or canceled when Basecamp
 //     answered the request by refusing it, which creates nothing; and
 //     indeterminate → sent | abandoned | pending, those three only by a
-//     person.
+//     person, as is refused → pending once a person has fixed the cause.
 //  8. get_dispatch cancels the guard: a trigger moves the guard intent from
 //     pending to canceled in get_dispatch's own transaction, and a guard that
 //     already went out marks every task event it answers for as fired, so a
@@ -88,6 +88,7 @@ WHEN NEW.state <> OLD.state AND NOT (
      (OLD.state = 'pending'       AND NEW.state IN ('sending', 'canceled'))
   OR (OLD.state = 'sending'       AND NEW.state IN ('sent', 'indeterminate', 'canceled'))
   OR (OLD.state = 'indeterminate' AND NEW.state IN ('sent', 'abandoned', 'pending'))
+  OR (OLD.state = 'canceled'      AND NEW.state = 'pending' AND OLD.note = 'the request was refused; no message was created')
 )
 BEGIN
   SELECT RAISE(ABORT, 'an outbox intent never moves along that edge');
@@ -469,7 +470,10 @@ func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution
 		query = `UPDATE outbox SET state = 'abandoned', finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
 		args = []any{now}
 	case ResolveResend:
-		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, reconcile_failures = 0, reconcile_at = NULL, not_before = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
+		// A refused request created nothing, so a person may send it again
+		// once the cause is fixed, as they may an indeterminate one.
+		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, reconcile_failures = 0, reconcile_at = NULL, not_before = ?, resolved_by = ?, note = ?
+WHERE id = ? AND (state = 'indeterminate' OR (state = 'canceled' AND note = '` + RefusedNote + `'))`
 		args = []any{now}
 	default:
 		return fmt.Errorf("connector: %q is not a resolution", r.Resolution)
@@ -495,6 +499,9 @@ func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution
 		return nil
 	})
 }
+
+// RefusedNote is the note on an intent Basecamp refused.
+const RefusedNote = "the request was refused; no message was created"
 
 // refuse settles a sending intent Basecamp refused. The request created
 // nothing, so unlike an uncertain send this one stands the guard down again:

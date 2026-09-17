@@ -674,10 +674,13 @@ func TestOutboxFlushHonoursItsDeadline(t *testing.T) {
 		_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(id, 0, obCommentReply))
 		require.NoError(t, err)
 	}
-	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: blockingPoster{newFakeBasecamp(clock.Now)}, PostTimeout: 300 * time.Millisecond})
+	// The first claim has half a second of slack; once its request is cut off
+	// at PostTimeout, less than PostTimeout is left, so nothing more is
+	// claimed.
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: blockingPoster{newFakeBasecamp(clock.Now)}, PostTimeout: time.Second})
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	_ = ob.Flush(ctx)
@@ -779,11 +782,23 @@ func TestOutboxRunReconcilesWhileSendsKeepArriving(t *testing.T) {
 	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: basecamp, Tick: time.Millisecond})
 	require.NoError(t, err)
 	// Cancel without a deadline: a flush with one claims nothing, and this
-	// run must actually be sending while reconciliation is due.
+	// run must actually be sending while reconciliation is due. The run is
+	// stopped once the stale intent settles, or after a bound generous enough
+	// for a loaded race-detector runner; a drain that starves reconciliation
+	// never settles it.
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
-	require.NoError(t, ob.Run(runCtx))
+	done := make(chan error, 1)
+	go func() { done <- ob.Run(runCtx) }()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if in, err := ledger.Intent(ctx, stale.ID); err == nil && in.State != IntentSending {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	require.NoError(t, <-done)
 	assert.Equal(t, IntentSent, obIntent(t, ledger, stale.Key).State, "the stale sending intent was reconciled")
 }
 
@@ -924,4 +939,78 @@ func TestOutboxARefusedGuardStandsDownAgain(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, instruction.Acknowledge)
 	assert.False(t, instruction.GuardAcknowledged, "the worker acknowledges, since nobody did")
+}
+
+// Slow destinations cannot hold up a guard that is due: the running connector
+// lists one destination between sends.
+func TestOutboxSlowDestinationsDoNotHoldUpSending(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	for id := int64(1); id <= 3; id++ {
+		sendingHolding(t, ledger, id, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 900 + id})
+	}
+	clock.Advance(2 * DefaultReconcileAfter)
+	seenRecord(t, ledger, 9)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(9, 0, obCommentReply))
+	require.NoError(t, err)
+
+	lister := &countingHangingLister{fakeBasecamp: newFakeBasecamp(clock.Now)}
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: lister, Tick: time.Millisecond})
+	require.NoError(t, err)
+	listCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	lister.cancelAfterFirst = cancel
+	require.NoError(t, ob.Run(listCtx))
+	assert.Equal(t, 1, lister.calls, "one listing per pass")
+	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(9)).State, "the due intent went out before any listing")
+}
+
+// countingHangingLister fails every listing, and ends the run after the first.
+type countingHangingLister struct {
+	*fakeBasecamp
+	calls            int
+	cancelAfterFirst func()
+}
+
+func (c *countingHangingLister) List(context.Context, Destination, time.Time) ([]PostedMessage, error) {
+	c.calls++
+	if c.calls == 1 {
+		c.cancelAfterFirst()
+	}
+	return nil, errWire
+}
+
+// A refused request created nothing, so once a person has fixed the cause
+// they may send it again; nothing else ever takes a canceled intent back.
+func TestOutboxAPersonMayResendARefusedIntent(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+	ob := obOutbox(t, ledger, basecamp)
+	require.NoError(t, ob.Flush(ctx))
+	in := obIntent(t, ledger, holdingKey(1))
+	require.Equal(t, IntentCanceled, in.State)
+
+	basecamp.beforePost = nil
+	require.NoError(t, ledger.ResolveIntent(ctx, in.ID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}))
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(1)).State)
+	assert.Equal(t, 2, basecamp.postCount())
+
+	// A guard get_dispatch canceled is not refused, and is not resendable.
+	obAdmit(t, ledger, 2, "recording:10304028989")
+	l := obLaunch(t, ledger, 2)
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = d.Get(ctx, 2)
+	require.NoError(t, err)
+	guard := obIntent(t, ledger, guardKey(2))
+	require.Equal(t, IntentCanceled, guard.State)
+	require.ErrorIs(t, ledger.ResolveIntent(ctx, guard.ID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}), ErrNotIndeterminate)
+	_, err = ledger.db.ExecContext(ctx, `UPDATE outbox SET state = 'pending' WHERE id = ?`, guard.ID)
+	require.Error(t, err, "the database refuses it too")
 }

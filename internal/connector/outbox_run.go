@@ -64,8 +64,10 @@ const (
 	// claim another intent.
 	MinPostWindow = 5 * time.Second
 	// RunBatch is how many intents a running connector sends between
-	// reconciliation passes.
-	RunBatch = 16
+	// reconciliation passes, and RunReconcileBatch how many destinations it
+	// lists in one pass.
+	RunBatch          = 16
+	RunReconcileBatch = 1
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -150,7 +152,7 @@ func (o *Outbox) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil && ctx.Err() == nil {
+		if _, err := o.reconcileSome(ctx, o.opts.ReconcileAfter, RunReconcileBatch); err != nil && ctx.Err() == nil {
 			o.log.Warn("connector: outbox reconciliation", "error", err)
 		}
 		select {
@@ -248,7 +250,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 		// to reconcile, and a guard that stands down again rather than
 		// telling a worker the connector acknowledged something that was
 		// never posted.
-		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, "the request was refused; no message was created")
+		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, RefusedNote)
 		if err != nil {
 			o.log.Warn("connector: settling a refused lifecycle message", "intent_id", intent.ID, "error", err)
 			return intent.ID, nil
@@ -395,6 +397,16 @@ func (l *Ledger) recordReceipt(ctx context.Context, id, receipt int64) (Intent, 
 // reconcileStale reconciles every sending intent whose sending time is at
 // least age ago. It returns how many it settled.
 func (o *Outbox) reconcileStale(ctx context.Context, age time.Duration) (int, error) {
+	return o.reconcileSome(ctx, age, 0)
+}
+
+// reconcileSome reconciles at most limit due sending intents — every one when
+// limit is zero — and returns how many it settled. Each listing is bounded,
+// but sending waits for the pass, so the running connector lists one
+// destination per tick: a guard due in thirty seconds waits at most one
+// listing, however many destinations are slow. A listing that fails backs
+// its intent off, so the next tick reaches the next one.
+func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	intents, err := o.ledger.Intents(ctx, IntentFilter{States: []IntentState{IntentSending}})
@@ -403,9 +415,12 @@ func (o *Outbox) reconcileStale(ctx context.Context, age time.Duration) (int, er
 	}
 	now := o.ledger.now()
 	cutoff := now.Add(-age)
-	settled := 0
+	settled, listed := 0, 0
 	var firstErr error
 	for i := len(intents) - 1; i >= 0; i-- {
+		if limit > 0 && listed >= limit {
+			break
+		}
 		in := intents[i]
 		if in.SendingAt != nil && in.SendingAt.After(cutoff) {
 			continue
@@ -413,6 +428,7 @@ func (o *Outbox) reconcileStale(ctx context.Context, age time.Duration) (int, er
 		if in.ReconcileAt != nil && in.ReconcileAt.After(now) {
 			continue
 		}
+		listed++
 		done, err := o.reconcile(ctx, in)
 		if err != nil {
 			o.log.Warn("connector: reconciling a lifecycle message", "intent_id", in.ID, "error", err)
