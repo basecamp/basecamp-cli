@@ -730,3 +730,20 @@ func TestWorktreeStatesMoveAlongTheirEdgesOnly(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, h.ledger.MoveWorktree(ctx, row.ID, WorktreeRemoving, WorktreeRetained), ErrWorktreeState)
 }
+
+// A path the connector cannot even look at is not proof that work is gone.
+func TestAnUnreadablePathCountsAsThere(t *testing.T) {
+	dir := t.TempDir()
+	closed := filepath.Join(dir, "closed")
+	require.NoError(t, os.Mkdir(closed, 0o700))
+	inside := filepath.Join(closed, "worktree")
+	require.NoError(t, os.Mkdir(inside, 0o700))
+	require.NoError(t, os.Chmod(closed, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(closed, 0o700) })
+	if _, err := os.Lstat(inside); err == nil {
+		t.Skip("this user can read through a closed directory")
+	}
+
+	assert.True(t, exists(inside), "unreadable is not absent")
+	assert.False(t, exists(filepath.Join(dir, "never")), "absent is absent")
+}

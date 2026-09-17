@@ -707,3 +707,32 @@ func TestARefusalLoggedAtTheVeryEndIsCounted(t *testing.T) {
 	assert.Len(t, result.Refusals, 1)
 	assert.Positive(t, <-drained)
 }
+
+// The same, when the process dies without completing its turn: the refusal is
+// still emitted, and emitting it as the reader ends is not a send on a closed
+// channel.
+func TestARefusalLoggedAsTheWorkerDiesIsCounted(t *testing.T) {
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+		Exit:        1,
+	})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	drained := make(chan int, 1)
+	go func() {
+		n := 0
+		for u := range s.Updates() {
+			if u.Kind == driver.UpdatePermission {
+				n++
+			}
+		}
+		drained <- n
+	}()
+	result, err := s.Prompt(context.Background(), "Event 1.")
+	require.ErrorIs(t, err, driver.ErrSessionEnded)
+	assert.Len(t, result.Refusals, 1)
+	assert.Positive(t, <-drained)
+	require.NoError(t, s.Close())
+}
