@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -220,9 +220,15 @@ func connectFailure(err error) *mcp.CallToolResult {
 		{connector.ErrNotExposed, "not_exposed"},
 		{connector.ErrReportConflict, "report_conflict"},
 		{connector.ErrNotDispatchable, "not_dispatchable"},
+		{connector.ErrInvalidReport, "invalid_report"},
 	} {
 		if errors.Is(err, known.err) {
-			result, encodeErr := gateway.JSONResult(map[string]any{"error": known.kind, "message": known.err.Error()})
+			message := known.err.Error()
+			if known.err == connector.ErrInvalidReport {
+				// What is wrong with the report is the worker's to fix.
+				message = strings.TrimPrefix(err.Error(), "connector: ")
+			}
+			result, encodeErr := gateway.JSONResult(map[string]any{"error": known.kind, "message": message})
 			if encodeErr != nil || result == nil {
 				return gateway.ErrorResult("%s", known.kind)
 			}
@@ -233,5 +239,7 @@ func connectFailure(err error) *mcp.CallToolResult {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return gateway.ErrorResult("the call was canceled")
 	}
-	return gateway.ErrorResult("%s", fmt.Sprint(err))
+	// Anything else is the ledger failing, not the worker: its detail stays
+	// out of the model's transcript.
+	return gateway.ErrorResult("the connector ledger could not answer; try again, and report it if it persists")
 }

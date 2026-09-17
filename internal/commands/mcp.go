@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -78,7 +79,12 @@ func NewMCPCmd() *cobra.Command {
 
 			cfg := mcpserver.Config{ReadOnly: readOnly, Domains: domains}
 			if connectState != "" {
-				dispatch, closeLedger, err := openConnectDispatch(connectState, app.Config.AccountID)
+				if readOnly {
+					// Every connect action records something; refused before
+					// the token or the ledger is touched.
+					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
+				}
+				dispatch, closeLedger, err := openConnectDispatch(cmd.Context(), connectState, app.Config.AccountID)
 				if err != nil {
 					return err
 				}
@@ -121,12 +127,14 @@ func NewMCPCmd() *cobra.Command {
 // agent's id comes from, and a ledger for another account is refused rather
 // than served. The ledger must already exist — a worker's server reads the
 // connector's ledger, it never starts one.
-func openConnectDispatch(stateDir, accountID string) (*connector.TaskDispatch, func(), error) {
+func openConnectDispatch(ctx context.Context, stateDir, accountID string) (*connector.TaskDispatch, func(), error) {
 	token := os.Getenv(connectTaskTokenEnv)
 	if strings.TrimSpace(token) == "" {
 		return nil, nil, output.ErrUsage("--connect-state needs the task token in $" + connectTaskTokenEnv + "; the connector sets it when it starts a worker")
 	}
-	// Nothing this process starts needs it.
+	// Nothing this process starts needs it. This clears it from what the
+	// process hands on, not from its own /proc environ, which only this user
+	// can read.
 	_ = os.Unsetenv(connectTaskTokenEnv)
 
 	name := filepath.Base(filepath.Clean(stateDir))
@@ -135,25 +143,34 @@ func openConnectDispatch(stateDir, accountID string) (*connector.TaskDispatch, f
 	if !ok || err != nil || agentID <= 0 || account == "" {
 		return nil, nil, output.ErrUsage(fmt.Sprintf("--connect-state %q is not a connector state directory (named <account>-<agent person id>)", stateDir))
 	}
-	if account != accountID {
+	if !sameAccount(account, accountID) {
 		return nil, nil, output.ErrUsage(fmt.Sprintf("--connect-state %q belongs to account %s, not %s", stateDir, account, accountID))
 	}
 
-	path := filepath.Join(stateDir, connector.LedgerFile)
-	if _, err := os.Lstat(path); err != nil {
+	// The connector owns the ledger: a worker's server opens it as it is, and
+	// never creates or migrates it.
+	ledger, err := connector.OpenExistingLedger(ctx, filepath.Join(stateDir, connector.LedgerFile))
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, output.ErrUsage(fmt.Sprintf("no connector ledger in %s", stateDir))
 		}
 		return nil, nil, err
 	}
-	ledger, err := connector.OpenLedger(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	dispatch, err := ledger.Dispatch(token, agentID)
+	dispatch, err := ledger.Dispatch(ctx, token, agentID)
 	if err != nil {
 		_ = ledger.Close()
+		if errors.Is(err, connector.ErrTaskTokenRefused) {
+			return nil, nil, output.ErrUsage("$" + connectTaskTokenEnv + " names no current task in " + stateDir)
+		}
 		return nil, nil, err
 	}
 	return dispatch, func() { _ = ledger.Close() }, nil
+}
+
+// sameAccount compares two account ids as numbers, so "0999" and "999" are one
+// account.
+func sameAccount(a, b string) bool {
+	x, errA := strconv.ParseUint(a, 10, 64)
+	y, errB := strconv.ParseUint(b, 10, 64)
+	return errA == nil && errB == nil && x == y
 }

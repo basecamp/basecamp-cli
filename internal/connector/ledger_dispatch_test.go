@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func newDispatchFixture(t *testing.T) dispatchFixture {
 	require.Equal(t, StateQueued, getRecord(t, ledger, 2).State)
 	grant, err := ledger.CreateTask(ctx, []int64{1, 2})
 	require.NoError(t, err)
-	d, err := ledger.Dispatch(grant.Token, adapterAgentID)
+	d, err := ledger.Dispatch(ctx, grant.Token, adapterAgentID)
 	require.NoError(t, err)
 	return dispatchFixture{ledger: ledger, grant: grant, d: d}
 }
@@ -71,6 +72,8 @@ func TestGetDispatchExposesOnceAndRepeatsWriteNothing(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	f.ledger.now = func() time.Time { return t0 }
+	record := getRecord(t, f.ledger, 2)
+	require.Equal(t, StateDispatched, record.State)
 
 	first, ok, err := f.d.Get(ctx, 2)
 	require.NoError(t, err)
@@ -79,8 +82,7 @@ func TestGetDispatchExposesOnceAndRepeatsWriteNothing(t *testing.T) {
 	row := f.row(t, 2)
 	assert.Equal(t, "exposed", row.Delivery)
 	require.NotNil(t, row.ExposedAt)
-	record := getRecord(t, f.ledger, 2)
-	assert.Equal(t, StateDispatched, record.State, "a follow-up handed to a worker is dispatched")
+	assert.Equal(t, "admitted", f.row(t, 1).Delivery, "the other event is not exposed")
 
 	f.ledger.now = func() time.Time { return t0.Add(time.Minute) }
 	again, ok, err := f.d.Get(ctx, 2)
@@ -88,8 +90,7 @@ func TestGetDispatchExposesOnceAndRepeatsWriteNothing(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, first, again, "a repeat returns the same instruction")
 	assert.Equal(t, row, f.row(t, 2), "and marks nothing further")
-	assert.Equal(t, record.Revision, getRecord(t, f.ledger, 2).Revision)
-	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 1).State, "the other event is untouched")
+	assert.Equal(t, record.Revision, getRecord(t, f.ledger, 2).Revision, "exposure is the task's, not the record's")
 }
 
 func TestGetDispatchWithoutAnIDIsTheEarliestNotAcknowledged(t *testing.T) {
@@ -274,7 +275,6 @@ func TestAReportNeedsTheEventHandedOut(t *testing.T) {
 	_, err = f.d.Complete(ctx, 2, Completion{Outcome: OutcomeSucceeded})
 	assert.ErrorIs(t, err, ErrNotExposed)
 	assert.Equal(t, "admitted", f.row(t, 2).Delivery)
-	assert.Equal(t, StateQueued, getRecord(t, f.ledger, 2).State)
 }
 
 // Done when: a superseded token is refused.
@@ -295,9 +295,9 @@ func TestASupersededTokenIsRefused(t *testing.T) {
 	assert.Equal(t, "admitted", f.row(t, 2).Delivery, "a refused get exposes nothing")
 	assert.Equal(t, "exposed", f.row(t, 1).Delivery)
 
-	stranger, err := f.ledger.Dispatch("not-a-token", adapterAgentID)
-	require.NoError(t, err)
-	_, _, err = stranger.Get(ctx, 1)
+	_, err = f.ledger.Dispatch(ctx, "not-a-token", adapterAgentID)
+	assert.ErrorIs(t, err, ErrTaskTokenRefused, "refused when bound, not only on use")
+	_, err = f.ledger.Dispatch(ctx, f.grant.Token, adapterAgentID)
 	assert.ErrorIs(t, err, ErrTaskTokenRefused)
 }
 
@@ -316,17 +316,23 @@ func TestAWorkerSeesOnlyItsOwnTask(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotOnTask)
 	_, _, err = f.d.Get(ctx, 404)
 	assert.ErrorIs(t, err, ErrNotOnTask, "an unknown event reads the same as another task's")
-	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 3).State)
 }
 
 func TestAnEventThatLeftThePathIsNotHandedOut(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 2, StateDiscarded, "by_operator"))
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateBlocked, "no_route"))
 
 	_, _, err := f.d.Get(ctx, 2)
 	assert.ErrorIs(t, err, ErrNotDispatchable)
 	assert.Equal(t, "admitted", f.row(t, 2).Delivery)
+
+	// Withdrawn back to admitted, content and all: not a worker's any more.
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
+	require.NotEmpty(t, getRecord(t, f.ledger, 1).Decision.Snapshot)
+	_, _, err = f.d.Get(ctx, 1)
+	assert.ErrorIs(t, err, ErrNotDispatchable)
+	assert.Equal(t, "admitted", f.row(t, 1).Delivery)
 }
 
 // Retention took the instruction: a completed event asked for again answers
@@ -348,20 +354,173 @@ func TestAnEventWhoseContentWasDroppedIsNotHandedOut(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotDispatchable)
 }
 
-// The dispatcher writes the originating event's record as dispatched when it
-// launches the worker. get_dispatch exposes it all the same.
-func TestGetDispatchExposesAnEventAlreadyDispatchedAtLaunch(t *testing.T) {
+// A record is dispatched exactly while a live task carries it: joining a task
+// moves it there, in the task's own transaction.
+func TestCreateTaskDispatchesItsRecords(t *testing.T) {
+	f := newDispatchFixture(t)
+	assert.Equal(t, StateDispatched, getRecord(t, f.ledger, 1).State)
+	assert.Equal(t, StateDispatched, getRecord(t, f.ledger, 2).State, "the queued follow-up too")
+}
+
+// An event is on at most one live task. A retried launch is refused and
+// writes nothing; after a redispatch supersedes the task, it joins a new one.
+func TestAnEventIsOnOneLiveTask(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateDispatched, ""))
-	revision := getRecord(t, f.ledger, 1).Revision
+	countTasks := func() int {
+		var n int
+		require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&n))
+		return n
+	}
 
-	got, ok, err := f.d.Get(ctx, 1)
+	_, err := f.ledger.CreateTask(ctx, []int64{1})
+	assert.ErrorIs(t, err, ErrEventOnLiveTask)
+	_, err = f.ledger.CreateTask(ctx, []int64{2, 1})
+	assert.ErrorIs(t, err, ErrEventOnLiveTask)
+	assert.Equal(t, 1, countTasks(), "a refused task leaves no task behind")
+
+	// The database refuses it too, whoever writes.
+	_, err = f.ledger.db.ExecContext(ctx, `INSERT INTO tasks (id, token_sha256, created_at) VALUES (99, 'x', 'now')`)
+	require.NoError(t, err)
+	_, err = f.ledger.db.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id) VALUES (99, 1)`)
+	require.Error(t, err)
+
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	grant, err := f.ledger.CreateTask(ctx, []int64{1, 2})
+	require.NoError(t, err)
+	d, err := f.ledger.Dispatch(ctx, grant.Token, adapterAgentID)
+	require.NoError(t, err)
+	got, ok, err := d.Get(ctx, 0)
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, DeliveryExposed, got.Delivery)
-	assert.Equal(t, "exposed", f.row(t, 1).Delivery)
-	assert.Equal(t, revision, getRecord(t, f.ledger, 1).Revision, "the record was already where exposure puts it")
+	assert.Equal(t, int64(1), got.EventID)
+	_, _, err = f.d.Get(ctx, 1)
+	assert.ErrorIs(t, err, ErrTaskTokenRefused)
+}
+
+// The dispatcher writes a task with its attempt and exposure in one commit;
+// a task created in a transaction that rolls back leaves nothing, and does not
+// hold the event.
+func TestCreateTaskInsideACallersTransaction(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+	require.NoError(t, err)
+
+	tx, err := ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = ledger.createTask(ctx, tx, []int64{1})
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
+
+	tx, err = ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = ledger.createTask(ctx, tx, []int64{1})
+	require.NoError(t, err)
+	_, err = ledger.createTask(ctx, tx, []int64{1})
+	require.ErrorIs(t, err, ErrEventOnLiveTask, "one live task per event within a transaction too")
+	require.NoError(t, tx.Rollback())
+
+	tx, err = ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	grant, err := ledger.createTask(ctx, tx, []int64{1})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	_, err = ledger.Dispatch(ctx, grant.Token, adapterAgentID)
+	require.NoError(t, err)
+	assert.Equal(t, StateDispatched, getRecord(t, ledger, 1).State)
+}
+
+func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+	require.NoError(t, err)
+
+	const racers = 8
+	errs := make([]error, racers)
+	done := make(chan struct{})
+	for i := range racers {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			_, errs[i] = ledger.CreateTask(ctx, []int64{1})
+		}()
+	}
+	for range racers {
+		<-done
+	}
+	created := 0
+	for _, err := range errs {
+		if err == nil {
+			created++
+			continue
+		}
+		assert.ErrorIs(t, err, ErrEventOnLiveTask)
+	}
+	assert.Equal(t, 1, created)
+	var live int
+	require.NoError(t, ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE event_id = 1 AND retired_at IS NULL`).Scan(&live))
+	assert.Equal(t, 1, live)
+}
+
+// One event that left the path never hides the rest of the task.
+func TestTheEarliestSkipsAnEventThatLeftThePath(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
+
+	got, ok, err := f.d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), got.EventID)
+}
+
+// A worker's report is what it did: it is recorded even when the record has
+// moved since, and only a dispatched record is completed by it.
+func TestAReportIsRecordedWhateverHappenedToTheRecord(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 2)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateAdmitted, ""))
+
+	_, err = f.d.Ack(ctx, 2, nil)
+	require.NoError(t, err)
+	receipt, err := f.d.Complete(ctx, 2, Completion{Outcome: OutcomeFailed})
+	require.NoError(t, err)
+	assert.Equal(t, DeliveryCompleted, receipt.Delivery)
+	assert.Equal(t, OutcomeFailed, receipt.Outcome)
+	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State)
+}
+
+func TestOpenExistingLedgerNeverCreatesOrMigrates(t *testing.T) {
+	dir := t.TempDir() + "/state"
+	_, err := OpenExistingLedger(context.Background(), dir+"/missing.db")
+	require.Error(t, err)
+
+	path := dir + "/connector.db"
+	all := migrations
+	migrations = all[:4]
+	old, err := OpenLedger(path)
+	migrations = all
+	require.NoError(t, err)
+	require.NoError(t, old.Close())
+
+	_, err = OpenExistingLedger(context.Background(), path)
+	require.ErrorIs(t, err, ErrLedgerSchema)
+	again, err := OpenLedger(path)
+	require.NoError(t, err)
+	version, err := again.SchemaVersion(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, again.Close())
+	assert.Equal(t, len(migrations), version, "migrated only by the owner's open")
+
+	current, err := OpenExistingLedger(context.Background(), path)
+	require.NoError(t, err)
+	require.NoError(t, current.Close())
 }
 
 func TestDeliveryNeverGoesBack(t *testing.T) {
@@ -424,7 +583,7 @@ func TestCompleteRefusesMalformedReports(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := f.d.Complete(ctx, 1, c)
-			require.Error(t, err)
+			require.ErrorIs(t, err, ErrInvalidReport)
 			assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 		})
 	}
@@ -448,9 +607,21 @@ func TestStripMentionsOf(t *testing.T) {
 		"unclosed, before another":       {unclosed + " x " + other, " x " + other},
 		"every occurrence":               {agent + " and " + agent, " and "},
 		"no attachments":                 {"<div>plain</div>", "<div>plain</div>"},
+		"single-quoted sgid":             {"a" + strings.ReplaceAll(agent, `"`, "'") + "b", "ab"},
+		"a > inside another attribute":   {"a" + strings.Replace(agent, "<bc-attachment ", `<bc-attachment caption="x > y" `, 1) + "b", "ab"},
+		"an entity in the sgid":          {"a" + entityEncodedSGID(agent) + "b", "ab"},
+		"inside a comment it is text":    {"<!-- " + agent + " -->" + other, "<!-- " + agent + " -->" + other},
+		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "ab"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))
 		})
 	}
+}
+
+// entityEncodedSGID writes the mention's sgid with its first character as a
+// hex entity, the way a serializer may.
+func entityEncodedSGID(mention string) string {
+	i := strings.Index(mention, `sgid="`) + len(`sgid="`)
+	return mention[:i] + fmt.Sprintf("&#x%x;", mention[i]) + mention[i+1:]
 }

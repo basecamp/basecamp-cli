@@ -104,6 +104,16 @@ func TestTheConnectDomainExistsOnlyWhenConfigured(t *testing.T) {
 		"exactly these three: a worker never reads other tasks")
 }
 
+// A server narrowed with --domains still serves the task's own domain.
+func TestTheConnectDomainSurvivesNarrowing(t *testing.T) {
+	srv, err := New(newTestAPI(noUpstream(t)), Config{Connect: &fakeDispatch{}, Domains: []string{"todos"}})
+	require.NoError(t, err)
+	tools := mcptest.ListTools(t, mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler))))
+	assert.Contains(t, tools, connectToolName)
+	assert.Contains(t, tools, "basecamp_todos")
+	assert.Len(t, tools, 2)
+}
+
 func TestTheConnectDomainIsNeverReadOnly(t *testing.T) {
 	_, err := New(newTestAPI(noUpstream(t)), Config{Connect: &fakeDispatch{}, ReadOnly: true})
 	require.Error(t, err)
@@ -171,6 +181,7 @@ func TestConnectRefusalsAreNamed(t *testing.T) {
 		"not_exposed":        connector.ErrNotExposed,
 		"report_conflict":    connector.ErrReportConflict,
 		"not_dispatchable":   connector.ErrNotDispatchable,
+		"invalid_report":     connector.ErrInvalidReport,
 	} {
 		t.Run(kind, func(t *testing.T) {
 			s := connectSession(t, &fakeDispatch{err: fmt.Errorf("connector: event 7: %w", err)})
@@ -189,8 +200,14 @@ func TestConnectRefusalsAreNamed(t *testing.T) {
 		})
 	}
 
-	s := connectSession(t, &fakeDispatch{err: errors.New("connector: disk I/O error")})
+	s := connectSession(t, &fakeDispatch{err: errors.New("connector: set state of 7: disk I/O error")})
 	text, isError := s.call(getDispatchAction, nil)
 	assert.True(t, isError)
-	assert.Contains(t, text, "disk I/O error")
+	assert.NotContains(t, text, "disk I/O error", "the ledger's own failure stays out of the transcript")
+	assert.Contains(t, text, "connector ledger could not answer")
+
+	s = connectSession(t, &fakeDispatch{err: fmt.Errorf("connector: link %q is not an http(s) URL: %w", "ftp://x", connector.ErrInvalidReport)})
+	text, isError = s.call(completeDispatch, map[string]any{"event_id": 7, "outcome": "failed"})
+	assert.True(t, isError)
+	assert.Contains(t, text, "ftp://x", "what the worker got wrong is said")
 }

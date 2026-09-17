@@ -104,6 +104,51 @@ func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
 	assert.Equal(t, connector.StateDispatched, record.State, "exposure was written to the connector's ledger")
 }
 
+func TestMCPCommandMatchesTheAccountAsANumber(t *testing.T) {
+	dir, grant, _ := connectStateWithTask(t)
+	t.Setenv(connectTaskTokenEnv, grant.Token)
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+	app := setupMCPTestApp(t, "0999", unusedUpstream(t).URL)
+	clientTransport := stubMCPTransport(t)
+	done := make(chan error, 1)
+	go func() { done <- executeMCPCommand(t, app, "--connect-state", dir+"/") }()
+	// Raced against the command: one that refuses the directory exits without
+	// serving, and the client's connect would wait on it forever.
+	type connected struct {
+		session *mcp.ClientSession
+		err     error
+	}
+	connecting := make(chan connected, 1)
+	go func() {
+		client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+		session, err := client.Connect(context.Background(), clientTransport, nil)
+		connecting <- connected{session, err}
+	}()
+	var session *mcp.ClientSession
+	select {
+	case cmdErr := <-done:
+		require.NoError(t, cmdErr, "basecamp mcp refused to serve")
+		t.Fatal("basecamp mcp exited before serving")
+	case c := <-connecting:
+		require.NoError(t, c.err)
+		session = c.session
+	}
+	assert.Contains(t, toolNames(t, session), "basecamp_connect")
+	require.NoError(t, session.Close())
+	require.NoError(t, <-done)
+}
+
+func TestMCPCommandRefusesReadOnlyBeforeTouchingTheToken(t *testing.T) {
+	dir, grant, _ := connectStateWithTask(t)
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+	t.Setenv(connectTaskTokenEnv, grant.Token)
+	app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
+
+	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only")
+	require.Error(t, err)
+	assert.Equal(t, grant.Token, os.Getenv(connectTaskTokenEnv))
+}
+
 func TestMCPCommandWithoutConnectStateHasNoConnectDomain(t *testing.T) {
 	_, grant, _ := connectStateWithTask(t)
 	t.Setenv(connectTaskTokenEnv, grant.Token)
@@ -124,11 +169,12 @@ func TestMCPCommandRefusesABadConnectState(t *testing.T) {
 	for name, tc := range map[string]struct {
 		dir, token, want string
 	}{
-		"no token":          {dir, "", connectTaskTokenEnv},
-		"another account":   {otherAccount, grant.Token, "belongs to account 1000"},
-		"not a state dir":   {notAStateDir, grant.Token, "not a connector state directory"},
-		"no ledger":         {empty, grant.Token, "no connector ledger"},
-		"read-only refused": {dir, grant.Token, "read-only"},
+		"no token":            {dir, "", connectTaskTokenEnv},
+		"another account":     {otherAccount, grant.Token, "belongs to account 1000"},
+		"not a state dir":     {notAStateDir, grant.Token, "not a connector state directory"},
+		"no ledger":           {empty, grant.Token, "no connector ledger"},
+		"read-only refused":   {dir, grant.Token, "read-only"},
+		"a token for no task": {dir, "not-a-task-token", "names no current task"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("BASECAMP_TOKEN", "test-token")

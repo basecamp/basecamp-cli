@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -60,6 +61,11 @@ func New(api API, cfg Config) (*Server, error) {
 			}
 		}
 		cat.Domains = append(cat.Domains, connectDomain())
+		// A server started for a task serves the task's domain whatever else
+		// it is narrowed to: without it the worker cannot pull its dispatch.
+		if len(cfg.Domains) > 0 && !slices.Contains(cfg.Domains, connectDomainKey) {
+			cfg.Domains = append(slices.Clone(cfg.Domains), connectDomainKey)
+		}
 	}
 
 	gw, err := gateway.New(cat.GatewayDomains(), gateway.Config{

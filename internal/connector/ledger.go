@@ -77,6 +77,26 @@ type Ledger struct {
 // OpenLedger opens (creating if absent) the ledger at path and brings its
 // schema up to date.
 func OpenLedger(path string) (*Ledger, error) {
+	return openLedger(context.Background(), path, true)
+}
+
+// ErrLedgerSchema is a ledger whose schema is not the one this binary writes.
+var ErrLedgerSchema = errors.New("the connector ledger's schema is not the version this basecamp writes")
+
+// OpenExistingLedger opens a ledger the connector already created, for a
+// process that reads and reports into it rather than owns it — a worker's
+// MCP server. It never creates the file and never migrates: a different
+// basecamp binary started as a worker must not change the schema under the
+// connector that holds it, so a ledger at any other schema version is
+// refused.
+func OpenExistingLedger(ctx context.Context, path string) (*Ledger, error) {
+	if _, err := os.Lstat(path); err != nil {
+		return nil, fmt.Errorf("connector: open ledger: %w", err)
+	}
+	return openLedger(ctx, path, false)
+}
+
+func openLedger(ctx context.Context, path string, migrate bool) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
 	}
@@ -108,9 +128,26 @@ func OpenLedger(path string) (*Ledger, error) {
 	db.SetMaxOpenConns(1)
 
 	l := &Ledger{db: db, now: time.Now}
-	if err := retryBusy(func() error { return l.migrate(context.Background()) }); err != nil {
-		_ = db.Close()
-		return nil, err
+	if migrate {
+		if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else {
+		var version int
+		err := retryBusy(func() error {
+			var err error
+			version, err = l.schemaVersion(ctx)
+			return err
+		})
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("connector: read ledger schema: %w", err)
+		}
+		if version != len(migrations) {
+			_ = db.Close()
+			return nil, fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", version, len(migrations), ErrLedgerSchema)
+		}
 	}
 	// The WAL and shared-memory sidecars exist now and were created under the
 	// process umask. The private directory already keeps other users out;
@@ -339,6 +376,12 @@ CREATE INDEX events_conversation ON events (conversation_key, state);
 	// back, held by the trigger as the events lifecycle is. guard is the
 	// thirty-second acknowledgement guard: '' where none applies, armed until
 	// get_dispatch cancels it or the connector fires it.
+	//
+	// An event is on at most one live task. retired_at is set on every row of
+	// a task when it is superseded, and the unique index over the rows not
+	// retired is what refuses a second live task for the same event — in the
+	// database, so a dispatcher retrying a launch cannot hand one event to two
+	// workers whatever order its writes land in.
 	`
 CREATE TABLE tasks (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -361,8 +404,11 @@ CREATE TABLE task_events (
   outcome      TEXT    NOT NULL DEFAULT '',
   links        TEXT    NOT NULL DEFAULT '[]',
   reply_id     INTEGER,
+  retired_at   TEXT,
   PRIMARY KEY (task_id, event_id)
 );
+
+CREATE UNIQUE INDEX task_events_one_live_task ON task_events (event_id) WHERE retired_at IS NULL;
 
 CREATE TRIGGER task_events_delivery_moves_forward
 BEFORE UPDATE OF delivery ON task_events
@@ -418,6 +464,19 @@ func (l *Ledger) migrate(ctx context.Context) error {
 
 // SchemaVersion reports the highest applied migration.
 func (l *Ledger) SchemaVersion(ctx context.Context) (int, error) {
+	return l.schemaVersion(ctx)
+}
+
+// schemaVersion reads the version, and reads a ledger with no migration table
+// as version 0 rather than failing.
+func (l *Ledger) schemaVersion(ctx context.Context) (int, error) {
+	var tables int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).Scan(&tables); err != nil {
+		return 0, err
+	}
+	if tables == 0 {
+		return 0, nil
+	}
 	var version int
 	err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version)
 	return version, err

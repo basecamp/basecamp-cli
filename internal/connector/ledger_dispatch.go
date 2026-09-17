@@ -10,11 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
@@ -57,9 +60,14 @@ var (
 	// Reported outcomes stand.
 	ErrReportConflict = errors.New("the event already has a different report")
 	// ErrNotDispatchable is an event whose record left the path to a worker
-	// (a person discarded it, or its content was dropped) after it joined
-	// the task.
+	// after it joined the task: blocked or withdrawn, or its content dropped.
 	ErrNotDispatchable = errors.New("the event can no longer be dispatched")
+	// ErrInvalidReport is a report the worker can correct: an outcome that
+	// is not one of the two, a link that is not a URL, too many links.
+	ErrInvalidReport = errors.New("the report is not valid")
+	// ErrEventOnLiveTask is an event a live task already carries. Handing it
+	// to a second task would give two workers one instruction.
+	ErrEventOnLiveTask = errors.New("the event is already on a live task")
 )
 
 // TaskGrant is a new task and the token that binds a worker to it. The token
@@ -69,10 +77,40 @@ type TaskGrant struct {
 	Token string
 }
 
-// CreateTask puts admitted or queued records on a new task, each at delivery
-// admitted, with the acknowledgement guard armed for the records whose
-// verdict asks for an acknowledgement.
+// CreateTask puts records on a new task at delivery admitted, with the
+// acknowledgement guard armed for the records whose verdict asks for one, and
+// moves each record to dispatched in the same transaction: a record is
+// dispatched exactly while a live task carries it.
+//
+// An event is on at most one live task. A second task for an event whose task
+// was not superseded is refused with ErrEventOnLiveTask, and nothing is
+// written. The refusal is the database's own (task_events_one_live_task), so a
+// retried or concurrent launch cannot get past it. A redispatch supersedes the
+// old task first.
 func (l *Ledger) CreateTask(ctx context.Context, eventIDs []int64) (TaskGrant, error) {
+	var grant TaskGrant
+	err := retryBusy(func() error {
+		tx, err := l.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("connector: begin task: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if grant, err = l.createTask(ctx, tx, eventIDs); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("connector: commit task: %w", err)
+		}
+		return nil
+	})
+	return grant, err
+}
+
+// createTask writes a task inside the caller's transaction, so the dispatcher
+// can write the task, its attempt and the originating event's exposure as one
+// commit. Every guarantee CreateTask documents holds within tx; nothing is
+// committed here, and a refusal leaves tx for the caller to roll back.
+func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (TaskGrant, error) {
 	if len(eventIDs) == 0 {
 		return TaskGrant{}, errors.New("connector: a task needs at least one event")
 	}
@@ -81,12 +119,6 @@ func (l *Ledger) CreateTask(ctx context.Context, eventIDs []int64) (TaskGrant, e
 		return TaskGrant{}, fmt.Errorf("connector: task token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
-
-	tx, err := l.db.BeginTx(ctx, nil)
-	if err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: begin task: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
 	if err != nil {
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
@@ -96,41 +128,62 @@ func (l *Ledger) CreateTask(ctx context.Context, eventIDs []int64) (TaskGrant, e
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
 	}
 	for _, id := range eventIDs {
-		var (
-			state       string
-			acknowledge int
-		)
-		switch err := tx.QueryRowContext(ctx, `SELECT state, acknowledge FROM events WHERE id = ?`, id).Scan(&state, &acknowledge); {
+		var acknowledge int
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge FROM events WHERE id = ?`, id).Scan(&acknowledge); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
-		}
-		if RecordState(state) != StateAdmitted && RecordState(state) != StateQueued {
-			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only an admitted or queued record joins a task", id, state)
 		}
 		guard := ""
 		if acknowledge != 0 {
 			guard = "armed"
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guard); err != nil {
+			if isConstraint(err) {
+				return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
+			}
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: commit task: %w", err)
+		// Admitted or queued work joins a task; a dispatched record whose
+		// task was superseded joins its replacement.
+		moved, err := l.move(ctx, tx, transition{id: id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued, StateDispatched}})
+		if err != nil {
+			return TaskGrant{}, err
+		}
+		if !moved {
+			var state string
+			_ = tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, id).Scan(&state)
+			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only admitted, queued or redispatched work joins a task", id, state)
+		}
 	}
 	return TaskGrant{ID: taskID, Token: token}, nil
 }
 
-// SupersedeTask retires a task's token. Every later dispatch call made with
-// it is refused.
+// SupersedeTask retires a task: its token is refused from then on, and its
+// events are free to join a new task.
 func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
-	_, err := l.db.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, l.timestamp(), taskID)
-	if err != nil {
-		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
-	}
-	return nil
+	return retryBusy(func() error {
+		tx, err := l.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("connector: begin supersede: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		now := l.timestamp()
+		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, now, taskID); err != nil {
+			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
+			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+		}
+		return tx.Commit()
+	})
+}
+
+// isConstraint reports a SQLite constraint violation.
+func isConstraint(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_CONSTRAINT
 }
 
 func tokenHash(token string) string {
@@ -147,18 +200,27 @@ type TaskDispatch struct {
 	agentID int64
 }
 
-// Dispatch binds the ledger to a worker's task token. The token is checked on
-// every call, in the call's own transaction, so a redispatch that supersedes
-// it takes effect at once. agentID is the agent's Person id, whose own
-// mentions are stripped from the instructions handed out.
-func (l *Ledger) Dispatch(token string, agentID int64) (*TaskDispatch, error) {
+// Dispatch binds the ledger to a worker's task token, refusing one that names
+// no live task now. The token is checked again on every call, in the call's
+// own transaction, so a redispatch that supersedes it later takes effect at
+// once. agentID is the agent's Person id, whose own mentions are stripped from
+// the instructions handed out.
+func (l *Ledger) Dispatch(ctx context.Context, token string, agentID int64) (*TaskDispatch, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, errors.New("connector: a dispatch needs the task token")
 	}
 	if agentID <= 0 {
 		return nil, errors.New("connector: a dispatch needs the agent's Person id")
 	}
-	return &TaskDispatch{ledger: l, hash: tokenHash(token), agentID: agentID}, nil
+	d := &TaskDispatch{ledger: l, hash: tokenHash(token), agentID: agentID}
+	var live int
+	if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE token_sha256 = ? AND superseded_at IS NULL`, d.hash).Scan(&live); err != nil {
+		return nil, fmt.Errorf("connector: resolve task token: %w", err)
+	}
+	if live == 0 {
+		return nil, fmt.Errorf("connector: %w", ErrTaskTokenRefused)
+	}
+	return d, nil
 }
 
 // Instruction is what get_dispatch hands a worker. It is an allowlist: every
@@ -228,9 +290,13 @@ const (
 
 // Get returns the instruction for eventID, or for the earliest event on the
 // task not yet acknowledged when eventID is zero; ok is false when there is
-// none. Handing out an event that was never exposed writes exposed — and moves
-// its record to dispatched — before the instruction is returned, and cancels
-// an armed guard. A repeat returns the same instruction and writes nothing.
+// none. Handing out an event that was never exposed writes exposed before the
+// instruction is returned, and cancels an armed guard. A repeat returns the
+// same instruction and writes nothing.
+//
+// Only an event whose record is still on the way to a worker is handed out:
+// dispatched, or completed, with its content. The earliest skips any other,
+// so one event withdrawn or blocked never hides the rest of the task.
 func (d *TaskDispatch) Get(ctx context.Context, eventID int64) (Instruction, bool, error) {
 	var (
 		out Instruction
@@ -267,9 +333,10 @@ func (d *TaskDispatch) get(ctx context.Context, eventID int64) (Instruction, boo
 
 	if eventID == 0 {
 		err := tx.QueryRowContext(ctx, `
-SELECT event_id FROM task_events
-WHERE task_id = ? AND delivery IN ('admitted', 'exposed')
-ORDER BY event_id LIMIT 1`, taskID).Scan(&eventID)
+SELECT te.event_id FROM task_events te JOIN events e ON e.id = te.event_id
+WHERE te.task_id = ? AND te.delivery IN ('admitted', 'exposed')
+  AND e.state = 'dispatched' AND e.content_dropped = 0 AND e.snapshot IS NOT NULL
+ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Instruction{}, false, nil
 		}
@@ -285,29 +352,16 @@ ORDER BY event_id LIMIT 1`, taskID).Scan(&eventID)
 	if err != nil {
 		return Instruction{}, false, err
 	}
-	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
+	servable := record.State == StateDispatched || record.State == StateCompleted
+	if !servable || record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 	}
 
 	now := l.timestamp()
 	wrote := false
 	if te.delivery == DeliveryAdmitted {
-		// Exposure is written before anything about the event leaves this
-		// call, and the record moves to dispatched with it: a worker that
-		// was handed an instruction may act on it whether or not it reports.
-		switch record.State {
-		case StateAdmitted, StateQueued:
-			moved, err := l.move(ctx, tx, transition{id: eventID, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued}})
-			if err != nil {
-				return Instruction{}, false, err
-			}
-			if !moved {
-				return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
-			}
-		case StateDispatched:
-		default:
-			return Instruction{}, false, fmt.Errorf("connector: event %d is %s: %w", eventID, record.State, ErrNotDispatchable)
-		}
+		// Written before anything about the event leaves this call: a worker
+		// handed an instruction may act on it whether or not it reports.
 		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = ? WHERE task_id = ? AND event_id = ? AND delivery = 'admitted'`, now, taskID, eventID); err != nil {
 			return Instruction{}, false, fmt.Errorf("connector: expose event %d: %w", eventID, err)
 		}
@@ -385,12 +439,14 @@ WHERE task_id = ? AND event_id = ?`, d.ledger.timestamp(), nullableID(ackID), ta
 }
 
 // Complete records the worker's outcome and acknowledges the event if it was
-// not already; the record moves to completed. A repeat of the same report
+// not already. The report is recorded whatever has happened to the record
+// since the worker was handed it, because it is what the worker did; the
+// record moves to completed when it is dispatched. A repeat of the same report
 // answers the same receipt; a different one is refused, because a reported
 // outcome stands.
 func (d *TaskDispatch) Complete(ctx context.Context, eventID int64, c Completion) (Receipt, error) {
 	if c.Outcome != OutcomeSucceeded && c.Outcome != OutcomeFailed {
-		return Receipt{}, fmt.Errorf("connector: outcome must be %q or %q", OutcomeSucceeded, OutcomeFailed)
+		return Receipt{}, fmt.Errorf("connector: outcome must be %q or %q: %w", OutcomeSucceeded, OutcomeFailed, ErrInvalidReport)
 	}
 	links, err := normalizeLinks(c.Links)
 	if err != nil {
@@ -410,12 +466,8 @@ func (d *TaskDispatch) Complete(ctx context.Context, eventID int64, c Completion
 				}
 				return false, fmt.Errorf("connector: event %d completed as %s: %w", eventID, te.outcome, ErrReportConflict)
 			}
-			moved, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}})
-			if err != nil {
+			if _, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}}); err != nil {
 				return false, err
-			}
-			if !moved {
-				return false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 			}
 			now := d.ledger.timestamp()
 			_, err = tx.ExecContext(ctx, `
@@ -526,16 +578,16 @@ func loadRecord(ctx context.Context, tx *sql.Tx, id int64) (Record, error) {
 
 func normalizeLinks(links []string) ([]string, error) {
 	if len(links) > maxCompletionLinks {
-		return nil, fmt.Errorf("connector: at most %d links", maxCompletionLinks)
+		return nil, fmt.Errorf("connector: at most %d links: %w", maxCompletionLinks, ErrInvalidReport)
 	}
 	out := make([]string, 0, len(links))
 	for _, link := range links {
 		if len(link) > maxLinkLength {
-			return nil, fmt.Errorf("connector: a link is at most %d characters", maxLinkLength)
+			return nil, fmt.Errorf("connector: a link is at most %d characters: %w", maxLinkLength, ErrInvalidReport)
 		}
 		u, err := url.Parse(link)
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-			return nil, fmt.Errorf("connector: link %q is not an http(s) URL", link)
+			return nil, fmt.Errorf("connector: link %q is not an http(s) URL: %w", link, ErrInvalidReport)
 		}
 		out = append(out, link)
 	}
@@ -556,61 +608,156 @@ func sameID(stored sql.NullInt64, given *int64) bool {
 	return stored.Valid && stored.Int64 == *given
 }
 
-// attachmentOpen is a <bc-attachment> start tag, and attachmentSGID its sgid
-// attribute. Basecamp serves rich text sanitized, with attributes
-// double-quoted and no attachment nested inside another.
-var (
-	attachmentOpen  = regexp.MustCompile(`(?i)<bc-attachment\b[^>]*>`)
-	attachmentClose = regexp.MustCompile(`(?i)</bc-attachment\s*>`)
-	attachmentSGID  = regexp.MustCompile(`(?i)\ssgid\s*=\s*"([^"]*)"`)
-)
-
 // StripMentionsOf removes every mention of personID from rich text, and
 // leaves every other attachment — other people's mentions, files — as it was.
 // A worker handed its own mention reads an instruction addressed to itself,
 // which says nothing the dispatch does not already say.
 //
-// A mention element runs from its start tag to the first closing tag, unless
-// another attachment starts first or none closes, in which case the start
-// tag — self-closing, or never closed — stands alone.
+// The markup is walked tag by tag, the way the SDK's mention reader walks it,
+// so the two agree on what a mention is: a comment is not markup, a ">" in a
+// quoted attribute does not end its tag, either quote style works, and the
+// sgid is entity-decoded before it is read. A mention element runs from its
+// start tag to the first closing tag, unless another attachment starts first
+// or none closes, in which case the start tag stands alone.
 func StripMentionsOf(richText string, personID int64) string {
 	var out strings.Builder
 	pos := 0
-	for {
-		loc := attachmentOpen.FindStringIndex(richText[pos:])
-		if loc == nil {
-			out.WriteString(richText[pos:])
-			return out.String()
+	for pos < len(richText) {
+		t, ok := nextTag(richText, pos)
+		if !ok {
+			break
 		}
-		start, end := pos+loc[0], pos+loc[1]
-		out.WriteString(richText[pos:start])
-		pos = end
+		out.WriteString(richText[pos:t.start])
+		pos = t.end
+		if strings.EqualFold(t.name, "bc-attachment") {
+			if id, isPerson := basecamp.PersonIDFromSGID(html.UnescapeString(t.sgid)); isPerson && id == personID {
+				pos = mentionEnd(richText, t.end)
+				continue
+			}
+		}
+		out.WriteString(richText[t.start:t.end])
+	}
+	out.WriteString(richText[pos:])
+	return out.String()
+}
 
-		tag := richText[start:end]
-		match := attachmentSGID.FindStringSubmatch(tag)
-		id, ok := int64(0), false
-		if match != nil {
-			id, ok = basecamp.PersonIDFromSGID(unescapeAttribute(match[1]))
+// mentionEnd is where the mention whose start tag ends at from ends: after its
+// closing tag, or at from when another attachment starts first or none closes.
+func mentionEnd(text string, from int) int {
+	for at := from; ; {
+		t, ok := nextTag(text, at)
+		if !ok || strings.EqualFold(t.name, "bc-attachment") {
+			return from
 		}
-		if !ok || id != personID {
-			out.WriteString(tag)
-			continue
+		if strings.EqualFold(t.name, "/bc-attachment") {
+			return t.end
 		}
-		rest := richText[end:]
-		closing := attachmentClose.FindStringIndex(rest)
-		next := attachmentOpen.FindStringIndex(rest)
-		if closing != nil && (next == nil || closing[0] < next[0]) {
-			pos = end + closing[1]
-		}
+		at = t.end
 	}
 }
 
-func unescapeAttribute(value string) string {
-	if !strings.Contains(value, "&") {
-		return value
+// tag is one start or end tag: its bounds, its name ("/name" for an end tag)
+// and its sgid attribute, raw.
+type tag struct {
+	start, end int
+	name, sgid string
+}
+
+// nextTag finds the next complete tag at or after pos, skipping comments. ok
+// is false when none remains; a tag or comment left unterminated ends the
+// markup, as it does for a browser.
+func nextTag(text string, pos int) (tag, bool) {
+	for pos < len(text) {
+		i := strings.IndexByte(text[pos:], '<')
+		if i < 0 {
+			return tag{}, false
+		}
+		start := pos + i
+		rest := text[start+1:]
+		if strings.HasPrefix(rest, "!--") {
+			stop := strings.Index(rest[3:], "-->")
+			if stop < 0 {
+				return tag{}, false
+			}
+			pos = start + 1 + 3 + stop + 3
+			continue
+		}
+		n := 0
+		if strings.HasPrefix(rest, "/") {
+			n = 1
+		}
+		nameStart := n
+		for n < len(rest) && isTagNameByte(rest[n]) {
+			n++
+		}
+		if n == nameStart {
+			pos = start + 1
+			continue
+		}
+		t := tag{start: start, name: rest[:n]}
+		at := start + 1 + n
+		for at < len(text) {
+			c := text[at]
+			switch {
+			case c == '>':
+				t.end = at + 1
+				return t, true
+			case isTagNameByte(c):
+				attrStart := at
+				for at < len(text) && isTagNameByte(text[at]) {
+					at++
+				}
+				attr := text[attrStart:at]
+				for at < len(text) && isSpaceByte(text[at]) {
+					at++
+				}
+				if at >= len(text) || text[at] != '=' {
+					continue
+				}
+				at++
+				for at < len(text) && isSpaceByte(text[at]) {
+					at++
+				}
+				value, next := attributeValue(text, at)
+				if next < 0 {
+					return tag{}, false
+				}
+				if t.sgid == "" && strings.EqualFold(attr, "sgid") {
+					t.sgid = value
+				}
+				at = next
+			default:
+				at++
+			}
+		}
+		return tag{}, false
 	}
-	replacer := strings.NewReplacer("&quot;", `"`, "&#39;", "'", "&lt;", "<", "&gt;", ">", "&#43;", "+", "&#x2B;", "+", "&#61;", "=", "&#x3D;", "=", "&amp;", "&")
-	return replacer.Replace(value)
+	return tag{}, false
+}
+
+// attributeValue reads a quoted or bare attribute value at pos and returns it
+// with the position after it; next is -1 for an unterminated quote.
+func attributeValue(text string, pos int) (value string, next int) {
+	if pos < len(text) && (text[pos] == '"' || text[pos] == '\'') {
+		end := strings.IndexByte(text[pos+1:], text[pos])
+		if end < 0 {
+			return "", -1
+		}
+		return text[pos+1 : pos+1+end], pos + end + 2
+	}
+	end := pos
+	for end < len(text) && !isSpaceByte(text[end]) && text[end] != '>' {
+		end++
+	}
+	return text[pos:end], end
+}
+
+func isTagNameByte(c byte) bool {
+	return c == '-' || c == '_' || c == ':' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+func isSpaceByte(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
 // StateDirName is the connector's state directory for one account and agent:
