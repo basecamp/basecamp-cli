@@ -43,11 +43,11 @@ import (
 //	blocked     queued      admission                                re-decided, conversation live
 //	blocked     blocked     admission                                re-decided, still blocked
 //	blocked     discarded   admission, operator                      verdict, or discard
-//	blocked     dispatched  lifecycle bookkeeping                    —
+//	blocked     dispatched  dispatcher (CreateTask)                  redispatch of a blocked record
 //	admitted    dispatched  dispatcher (CreateTask)                  joins a task
 //	queued      dispatched  dispatcher (CreateTask)                  joins a task
 //	dispatched  dispatched  dispatcher (CreateTask)                  redispatch onto a new task
-//	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker
+//	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker, task retired
 //	dispatched  admitted    dispatcher (withdrawExposure)            exposed at launch, spawn proven failed: retry
 //	dispatched  blocked     dispatcher (withdrawExposure)            exposed at launch, spawn failed again
 //	dispatched  blocked     dispatcher                               never handed to a worker
@@ -61,7 +61,10 @@ import (
 //	discarded   —           nobody                                   terminal
 //
 // Writing the state a record already has is a repeat and always allowed. Any
-// pair not in the table is refused.
+// pair not in the table is refused. Into dispatched and out of it, the task
+// decides: a record enters dispatched only when a live task already carries
+// it, and leaves it — other than to completed — only when none does
+// (events_dispatched_while_on_a_live_task, and move).
 //
 // # Task (tasks)
 //
@@ -712,21 +715,24 @@ WHERE task_id = ? AND event_id = ?`, d.ledger.timestamp(), nullableID(ackID), ta
 // answers the same receipt; a different one is refused, because a reported
 // outcome stands.
 func (d *TaskDispatch) Complete(ctx context.Context, eventID int64, c Completion) (Receipt, error) {
-	if c.Outcome != OutcomeSucceeded && c.Outcome != OutcomeFailed {
-		return Receipt{}, fmt.Errorf("connector: outcome must be %q or %q: %w", OutcomeSucceeded, OutcomeFailed, ErrInvalidReport)
-	}
-	links, err := normalizeLinks(c.Links)
-	if err != nil {
-		return Receipt{}, err
-	}
-	encoded, err := json.Marshal(links)
-	if err != nil {
-		return Receipt{}, err
-	}
 	var out Receipt
-	err = retryBusy(func() error {
+	err := retryBusy(func() error {
 		var err error
 		out, err = d.report(ctx, eventID, func(ctx context.Context, tx *sql.Tx, taskID int64, te taskEvent) (bool, error) {
+			// Validated inside the call's transaction, after the token and
+			// the exposure are: a worker whose task was superseded is told
+			// that, whatever it sent.
+			if c.Outcome != OutcomeSucceeded && c.Outcome != OutcomeFailed {
+				return false, fmt.Errorf("connector: outcome must be %q or %q: %w", OutcomeSucceeded, OutcomeFailed, ErrInvalidReport)
+			}
+			links, err := normalizeLinks(c.Links)
+			if err != nil {
+				return false, err
+			}
+			encoded, err := json.Marshal(links)
+			if err != nil {
+				return false, err
+			}
 			if te.delivery == DeliveryCompleted {
 				if te.outcome == string(c.Outcome) && te.links == string(encoded) && sameID(te.replyID, c.ReplyID) {
 					return false, nil

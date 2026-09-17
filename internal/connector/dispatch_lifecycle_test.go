@@ -75,21 +75,39 @@ func testWithdrawal(t *testing.T) {
 
 var allRecordStates = []RecordState{StateSeen, StateAdmitted, StateQueued, StateBlocked, StateDispatched, StateCompleted, StateDiscarded}
 
-// recordTable is the record table: from → the states a move may reach, the
-// state itself (a repeat) excluded. heldRecordTable is dispatched when a
-// worker was handed the event.
+// recordTable is the record table as a plain state write sees it: from → the
+// states SetState may reach, the state itself (a repeat) excluded. Into
+// dispatched and out of it is the task's business — a record enters only
+// when a live task carries it, and leaves (but to completed) only when none
+// does — so a plain write finds no way in, and from a dispatched record on a
+// live task only completed. refusedFor says which refusal each such pair gets.
+// heldRecordTable is dispatched when a worker was handed the event.
 var (
 	recordTable = map[RecordState][]RecordState{
 		StateSeen:       {StateAdmitted, StateQueued, StateBlocked, StateDiscarded},
-		StateAdmitted:   {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
-		StateQueued:     {StateDispatched, StateBlocked, StateDiscarded},
-		StateBlocked:    {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
-		StateDispatched: {StateCompleted, StateBlocked, StateAdmitted},
+		StateAdmitted:   {StateQueued, StateBlocked, StateDiscarded},
+		StateQueued:     {StateBlocked, StateDiscarded},
+		StateBlocked:    {StateAdmitted, StateQueued, StateDiscarded},
+		StateDispatched: {StateCompleted},
 		StateCompleted:  nil,
 		StateDiscarded:  nil,
 	}
 	heldRecordTable = []RecordState{StateCompleted}
 )
+
+// refusedFor is the refusal a pair outside the table gets.
+func refusedFor(from, to RecordState, held bool) error {
+	switch {
+	case held && (to == StateAdmitted || to == StateBlocked):
+		return ErrHeldByWorker
+	case to == StateDispatched && slices.Contains([]RecordState{StateAdmitted, StateQueued, StateBlocked}, from):
+		return ErrNotOnALiveTask
+	case from == StateDispatched && (to == StateAdmitted || to == StateBlocked):
+		return ErrOnALiveTask
+	default:
+		return ErrNotATransition
+	}
+}
 
 // reachRecord puts event 1 in state, handed to a worker when held.
 func reachRecord(t *testing.T, ledger *Ledger, state RecordState, held bool) {
@@ -164,10 +182,14 @@ func testRecordTransitions(t *testing.T) {
 					}
 					require.Error(t, err)
 					assert.Equal(t, from, getRecord(t, ledger, 1).State, "a refused move moves nothing")
-					if held {
-						assert.ErrorIs(t, err, ErrHeldByWorker)
-					} else {
-						assert.ErrorIs(t, err, ErrNotATransition)
+					assert.ErrorIs(t, err, refusedFor(from, to, held))
+					// The dispatch and terminal rules are the database's too, so
+					// they refuse whoever writes; the rest of the lifecycle map
+					// is the ledger's write to keep.
+					refusal := refusedFor(from, to, held)
+					if refusal != ErrNotATransition || from == StateCompleted || from == StateDiscarded {
+						_, rawErr := ledger.db.ExecContext(context.Background(), `UPDATE events SET state = ?, reason = ? WHERE id = 1`, string(to), reasonFor(to))
+						assert.Error(t, rawErr, "a raw write of %s to %s", from, to)
 					}
 				})
 			}

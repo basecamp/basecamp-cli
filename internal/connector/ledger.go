@@ -467,6 +467,17 @@ BEGIN
   SELECT RAISE(ABORT, 'a worker was handed this event; it leaves dispatched only when completed');
 END;
 
+CREATE TRIGGER events_dispatched_while_on_a_live_task
+BEFORE UPDATE OF state ON events
+WHEN NEW.state <> OLD.state AND (
+  (NEW.state = 'dispatched'
+    AND NOT EXISTS (SELECT 1 FROM task_events WHERE event_id = OLD.id AND retired_at IS NULL))
+  OR (OLD.state = 'dispatched' AND NEW.state <> 'completed'
+    AND EXISTS (SELECT 1 FROM task_events WHERE event_id = OLD.id AND retired_at IS NULL)))
+BEGIN
+  SELECT RAISE(ABORT, 'a record is dispatched exactly while a live task carries it');
+END;
+
 CREATE TRIGGER task_events_guard_settles_once
 BEFORE UPDATE OF guard ON task_events
 WHEN NEW.guard <> OLD.guard AND NOT (OLD.guard = 'armed' AND NEW.guard IN ('canceled', 'fired'))

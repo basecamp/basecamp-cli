@@ -122,12 +122,10 @@ func TestAdmissionSkipsARecordPastDeciding(t *testing.T) {
 				require.NoError(t, ledger.SetState(ctx, 1, StateDiscarded, "untrusted_author"))
 			case StateCompleted:
 				require.NoError(t, reachTerminal(t, ledger, 7, StateCompleted))
-				require.NoError(t, ledger.SetState(ctx, 1, StateAdmitted, ""))
-				require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+				dispatchForTest(t, ledger, 1)
 				require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 			case StateDispatched:
-				require.NoError(t, ledger.SetState(ctx, 1, StateAdmitted, ""))
-				require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+				dispatchForTest(t, ledger, 1)
 			default:
 				require.NoError(t, ledger.SetState(ctx, 1, state, ""))
 			}
@@ -245,8 +243,7 @@ func TestAdmissionNeverDecidesARecordPastDeciding(t *testing.T) {
 			require.NoError(t, l.SetState(context.Background(), 1, StateAdmitted, ""))
 		},
 		"dispatched": func(t *testing.T, l *Ledger) {
-			require.NoError(t, l.SetState(context.Background(), 1, StateAdmitted, ""))
-			require.NoError(t, l.SetState(context.Background(), 1, StateDispatched, ""))
+			dispatchForTest(t, l, 1)
 		},
 		"discarded": func(t *testing.T, l *Ledger) {
 			require.NoError(t, l.SetState(context.Background(), 1, StateDiscarded, "by_operator"))
@@ -297,21 +294,21 @@ func TestAdmissionQueuesBehindALiveConversation(t *testing.T) {
 		{"a dispatched record is a running task", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
-			require.NoError(t, l.SetState(context.Background(), 2, StateDispatched, ""))
+			dispatchForTest(t, l, 2)
 		}, admission.StateQueued},
 		{"a queued record alone is not a task", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
 			_, err = l.Admission().Commit(context.Background(), admittedVerdict(3, 0, key))
 			require.NoError(t, err)
-			require.NoError(t, l.SetState(context.Background(), 2, StateDispatched, ""))
+			dispatchForTest(t, l, 2)
 			require.NoError(t, l.SetState(context.Background(), 2, StateCompleted, ""))
 			require.Equal(t, StateQueued, getRecord(t, l, 3).State)
 		}, admission.StateAdmitted},
 		{"a completed task is not live", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
-			require.NoError(t, l.SetState(context.Background(), 2, StateDispatched, ""))
+			dispatchForTest(t, l, 2)
 			require.NoError(t, l.SetState(context.Background(), 2, StateCompleted, ""))
 		}, admission.StateAdmitted},
 		{"a blocked record is not a task", func(t *testing.T, l *Ledger) {
@@ -462,8 +459,10 @@ func TestEveryMoveKeepsTheBlockedScheduleInputs(t *testing.T) {
 	assert.Nil(t, d.RetryAt)
 
 	// Back into blocked after a dispatch: a new window from now, and the
-	// verdict that follows keeps it.
-	require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+	// verdict that follows keeps it. A record leaves dispatched when its task
+	// is superseded.
+	grant := dispatchForTest(t, ledger, 1)
+	require.NoError(t, ledger.SupersedeTask(ctx, grant.ID))
 	require.NoError(t, ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
 	record := getRecord(t, ledger, 1)
 	require.NotNil(t, record.Decision.BlockedAt)
@@ -506,7 +505,7 @@ func TestAMoveToBlockedOrDiscardedDropsTheSnapshot(t *testing.T) {
 		seenRecord(t, ledger, 1)
 		_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 		require.NoError(t, err)
-		require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+		dispatchForTest(t, ledger, 1)
 		require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 		assert.NotEmpty(t, getRecord(t, ledger, 1).Decision.Snapshot)
 	})
@@ -571,7 +570,7 @@ func TestDropContentTakesTheVerdictToo(t *testing.T) {
 	seenRecord(t, ledger, 1)
 	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 	require.NoError(t, err)
-	require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+	dispatchForTest(t, ledger, 1)
 	require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 
 	dropped, err := ledger.DropContent(ctx, at.Add(time.Hour), at.Add(time.Hour))

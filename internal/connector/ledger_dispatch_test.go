@@ -188,7 +188,6 @@ func TestGetDispatchCancelsTheGuardAndReportsAFiredOne(t *testing.T) {
 func TestGetDispatchCancelsAnArmedGuardOnAnAlreadyExposedEvent(t *testing.T) {
 	f := newDispatchFixture(t)
 	// Exposed at launch by the dispatcher, guard still armed.
-	require.NoError(t, f.ledger.SetState(context.Background(), 1, StateDispatched, ""))
 	_, err := f.ledger.db.ExecContext(context.Background(), `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
 	require.NoError(t, err)
 
@@ -328,18 +327,16 @@ func TestAWorkerSeesOnlyItsOwnTask(t *testing.T) {
 func TestAnEventThatLeftThePathIsNotHandedOut(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 2, StateBlocked, "no_route"))
 
+	// A record on a live task cannot be taken off the path around its task.
+	require.ErrorIs(t, f.ledger.SetState(ctx, 2, StateBlocked, "no_route"), ErrOnALiveTask)
+
+	// It can be settled before a worker pulls it: finished work is not
+	// handed out for the first time.
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
 	_, _, err := f.d.Get(ctx, 2)
 	assert.ErrorIs(t, err, ErrNotDispatchable)
 	assert.Equal(t, "admitted", f.row(t, 2).Delivery)
-
-	// Withdrawn back to admitted, content and all: not a worker's any more.
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
-	require.NotEmpty(t, getRecord(t, f.ledger, 1).Decision.Snapshot)
-	_, _, err = f.d.Get(ctx, 1)
-	assert.ErrorIs(t, err, ErrNotDispatchable)
-	assert.Equal(t, "admitted", f.row(t, 1).Delivery)
 }
 
 // Retention took the instruction: a completed event asked for again answers
@@ -446,8 +443,8 @@ func TestCreateTaskInsideACallersTransaction(t *testing.T) {
 func TestCreateTaskRefusesARecordWithoutItsInstruction(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
 	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"), "never handed, it left dispatched with its task")
 	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
 
 	_, err := f.ledger.CreateTask(ctx, []int64{1})
@@ -609,7 +606,7 @@ func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
 func TestTheEarliestSkipsAnEventThatLeftThePath(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""), "settled before any worker pulled it")
 
 	got, ok, err := f.d.Get(ctx, 0)
 	require.NoError(t, err)
@@ -1023,4 +1020,44 @@ func TestAWithdrawalIsRefusedWhenAWorkerCouldHaveTheInstruction(t *testing.T) {
 		_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'later' WHERE event_id = 1`)
 		require.Error(t, err)
 	})
+}
+
+// A worker whose task was superseded is told so, whatever it sends: the token
+// is checked before the report is.
+func TestASupersededWorkerIsRefusedBeforeItsReportIsRead(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+
+	for name, c := range map[string]Completion{
+		"no outcome": {},
+		"not a URL":  {Outcome: OutcomeSucceeded, Links: []string{"javascript:alert(1)"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.d.Complete(ctx, 1, c)
+			require.ErrorIs(t, err, ErrTaskTokenRefused)
+			assert.NotErrorIs(t, err, ErrInvalidReport)
+		})
+	}
+}
+
+// dispatchForTest dispatches a record the only way a record is dispatched: on
+// a task. A record a test walked to admitted by hand has no instruction, so one
+// is attached first; a seen record is admitted first.
+func dispatchForTest(t *testing.T, ledger *Ledger, id int64) TaskGrant {
+	t.Helper()
+	ctx := context.Background()
+	_, err := ledger.db.ExecContext(ctx, `UPDATE events
+SET snapshot = COALESCE(snapshot, CAST('{"content":"do it"}' AS BLOB)),
+    conversation_key = CASE WHEN conversation_key = '' THEN 'recording:' || id ELSE conversation_key END
+WHERE id = ?`, id)
+	require.NoError(t, err)
+	if getRecord(t, ledger, id).State == StateSeen {
+		require.NoError(t, ledger.SetState(ctx, id, StateAdmitted, ""))
+	}
+	grant, err := ledger.CreateTask(ctx, []int64{id})
+	require.NoError(t, err)
+	return grant
 }
