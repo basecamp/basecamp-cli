@@ -1458,3 +1458,31 @@ func TestAnAnswerSettlesItsTurnAsItIsRead(t *testing.T) {
 	s.onRequest(json.RawMessage(`98`), "session/request_permission", params, s.claim("session/request_permission"))
 	assert.Empty(t, h.policy.requests(), "a request read after the answer is not put to the policy")
 }
+
+// The install fails on a Node version an adapter does not support, rather
+// than leaving an installation Locate accepts and the first dispatch cannot
+// run: npm only warns about engines without --engine-strict.
+func TestTheAdapterInstallRefusesAnUnsupportedNode(t *testing.T) {
+	makefile, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "Makefile"))
+	require.NoError(t, err)
+	var install string
+	for _, line := range strings.Split(string(makefile), "\n") {
+		if strings.Contains(line, "npm ci") && strings.Contains(line, "ACP_ADAPTERS_DIR") {
+			install = line
+		}
+	}
+	require.NotEmpty(t, install, "make acp-adapters installs with npm ci")
+	assert.Contains(t, install, "--engine-strict")
+	assert.Contains(t, install, "--ignore-scripts")
+
+	var lock struct {
+		Packages map[string]struct {
+			Engines map[string]string `json:"engines"`
+		} `json:"packages"`
+	}
+	raw, err := os.ReadFile(filepath.Join("adapters", "package-lock.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &lock))
+	assert.NotEmpty(t, lock.Packages["node_modules/"+ClaudeAgentACP.Package].Engines["node"],
+		"the pinned adapter states the Node it needs, which --engine-strict enforces")
+}

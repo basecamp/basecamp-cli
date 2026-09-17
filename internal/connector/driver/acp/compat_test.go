@@ -467,9 +467,16 @@ func checkShellEnvironment(t *testing.T, e compatEnv) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer s.Close()
-	command := `sh -c 'if [ -n "$` + compatProbeVar + `" ]; then echo PRESENT; else echo ABSENT; fi > token-probe.txt; ` +
-		`printf %s "$` + hostTokenVar + `" | sha256sum | cut -c1-64 > host-probe.txt'`
-	res, err := s.Prompt(turnCtx(t), "Run exactly this shell command in the current working directory, once, and then stop: "+command)
+	// A script, not a one-liner: what is under test is what the worker's
+	// shell holds, not how well a model retypes a pipeline.
+	script := "#!/bin/sh\n" +
+		"if [ -n \"$" + compatProbeVar + "\" ]; then echo PRESENT; else echo ABSENT; fi > token-probe.txt\n" +
+		"if command -v sha256sum >/dev/null 2>&1; then H=sha256sum; elif command -v shasum >/dev/null 2>&1; then H=\"shasum -a 256\"; else H=; fi\n" +
+		"if [ -n \"$H\" ]; then printf %s \"$" + hostTokenVar + "\" | $H | cut -c1-64 > host-probe.txt; else echo NOHASH > host-probe.txt; fi\n"
+	if err := os.WriteFile(filepath.Join(wd, "probe.sh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Prompt(turnCtx(t), "Run `sh probe.sh` in the current working directory, once, and then stop. Do not read or change the script.")
 	policy.log(t)
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
@@ -486,8 +493,11 @@ func checkShellEnvironment(t *testing.T, e compatEnv) {
 		if err != nil {
 			t.Fatalf("the host probe did not run: %v", err)
 		}
-		sum := sha256.Sum256([]byte(host))
-		if strings.TrimSpace(string(digest)) == hex.EncodeToString(sum[:]) {
+		seen, err := hostDigestShowsToken(string(digest), host)
+		if err != nil {
+			t.Fatalf("the host probe proves nothing: %v", err)
+		}
+		if seen {
 			t.Errorf("the model's shell sees the host's %s", hostTokenVar)
 		}
 	}

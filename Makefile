@@ -136,12 +136,14 @@ qa-report:
 # ~/.local/share (a relative XDG_DATA_HOME is ignored there too).
 ACP_ADAPTERS_DIR ?= $(if $(filter /%,$(XDG_DATA_HOME)),$(XDG_DATA_HOME),$(HOME)/.local/share)/basecamp/acp-adapters
 
-# Install the pinned ACP adapters (internal/connector/driver/acp/adapters)
+# Install the pinned ACP adapters (internal/connector/driver/acp/adapters).
+# --engine-strict: an adapter whose Node version requirement this machine does
+# not meet fails the install, not the first dispatch.
 .PHONY: acp-adapters
 acp-adapters:
 	@mkdir -p "$(ACP_ADAPTERS_DIR)"
 	cp internal/connector/driver/acp/adapters/package.json internal/connector/driver/acp/adapters/package-lock.json "$(ACP_ADAPTERS_DIR)/"
-	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund
+	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund --engine-strict
 
 # The ACP adapter-compatibility test: six checks through the acp driver
 # against each installed adapter (the spike's four, the worker shell's
