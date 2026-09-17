@@ -179,6 +179,9 @@ type Dispatcher struct {
 	// afterTurn runs when a turn has ended cleanly, before anything more is
 	// exposed; a test seam.
 	afterTurn func()
+	// strandedAt is when the stranded count was last reported. Read and
+	// written only by the dispatch loop.
+	strandedAt time.Time
 }
 
 // NewDispatcher builds a dispatcher.
@@ -271,6 +274,16 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, a := range attempts {
+		if a.Process.PID == 0 {
+			// Launching with no process recorded: the crash fell between the
+			// spawn and the write, so a worker may exist that cannot be
+			// named. Treated as running (the spec's rule) means it is not
+			// settled around either: its attempt stays live and its
+			// conversation and directory stay held.
+			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live and its directory held",
+				"attempt_id", a.AttemptID, "task_id", a.TaskID)
+			continue
+		}
 		signaled, err := d.terminateRecorded(driver.Process{
 			PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt,
 		}, driver.DefaultGrace)
@@ -326,13 +339,16 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	free := d.opts.Concurrency - len(d.live)
 	d.mu.Unlock()
 
-	// Follow-ups first: an event on a live conversation joins its task.
+	approved := d.approvedRoutes()
+	// Follow-ups first: an event on a live conversation joins its task, while
+	// connect.json still approves that task's directory for its project.
 	for _, r := range runs {
-		joined, err := d.ledger.JoinConversation(ctx, r.launch.TaskID)
-		if err != nil {
+		if !r.authorized() {
+			continue
+		}
+		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
 			return err
 		}
-		_ = joined
 	}
 	select {
 	case <-ctx.Done():
@@ -345,18 +361,13 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	// Invariant 2, in the query: only records whose route connect.json
 	// approves now, in the projects this run hears, and on a directory no live
 	// task holds. A record the dispatcher cannot start never fills the window.
-	approved := map[int64]string{}
-	for bucket, route := range d.opts.Routes() {
-		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
-			approved[bucket] = route.Path
-		}
-	}
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
 		Routes: approved, RouteHeld: !d.perTaskDirs(), Limit: d.opts.Concurrency * 4,
 	})
 	if err != nil {
 		return err
 	}
+	d.reportStranded(ctx, approved)
 	for _, record := range records {
 		if free <= 0 {
 			break
@@ -376,6 +387,43 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// approvedRoutes is connect.json's routes now, narrowed to the projects this
+// run hears.
+// StrandedInterval is how often the dispatcher says how much admitted work
+// no route of connect.json's covers.
+const StrandedInterval = 10 * time.Minute
+
+// reportStranded counts the records waiting for a worker that no approved
+// route covers — a project unrouted, or its route changed since the record
+// was admitted — and says so, rather than leaving them silently unstarted.
+func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]string) {
+	if time.Since(d.strandedAt) < StrandedInterval {
+		return
+	}
+	d.strandedAt = time.Now()
+	stranded, err := d.ledger.StrandedRecords(ctx, approved)
+	if err != nil {
+		d.log.Warn("connector: counting stranded records", "error", err)
+		return
+	}
+	if stranded > 0 {
+		d.log.Warn("connector: admitted work no route covers is waiting; route its project or discard it",
+			"records", stranded)
+	}
+}
+
+// approvedRoutes is connect.json's routes now, narrowed to the projects this
+// run hears.
+func (d *Dispatcher) approvedRoutes() map[int64]string {
+	approved := map[int64]string{}
+	for bucket, route := range d.opts.Routes() {
+		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
+			approved[bucket] = route.Path
+		}
+	}
+	return approved
 }
 
 func (d *Dispatcher) perTaskDirs() bool {
@@ -433,9 +481,13 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	if err != nil {
 		cleanup()
 		spawnFailed := errors.Is(err, driver.ErrNotStarted)
+		// A configuration no retry can fix is proof no process existed and
+		// proof that starting again would fail the same way.
+		unusable := errors.Is(err, driver.ErrUnusable)
 		d.log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
-			"no_process", spawnFailed, "error", driver.Redact(err.Error()))
-		d.end(settleCtx, launch, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+			"no_process", spawnFailed, "unusable", unusable, "error", driver.Redact(err.Error()))
+		d.end(settleCtx, launch, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return false, nil
 	}
 	p := session.Process()
@@ -480,6 +532,10 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 		}},
 		Policy:   d.opts.Policy(launch.WorkDir),
 		Launcher: d.opts.Launcher,
+		// EventIDs are the task's events. Only the originating one has been
+		// handed out at launch; the rest are exposed as they are prompted, so
+		// a launcher reading this list is told what the task may cover, not
+		// what the worker has seen.
 		Scope: driver.Scope{
 			TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs,
 			WorkDir: launch.WorkDir, Class: record.Decision.Class,
@@ -533,11 +589,18 @@ func (d *Dispatcher) finishWorkspace(ctx context.Context, route, workDir string)
 	}
 }
 
+// AdoptionBudget bounds the reads one settlement spends on the adopted-reply
+// rule: settlement runs on a context a shutdown does not cancel, and a
+// shutdown must not wait on Basecamp for every live task.
+const AdoptionBudget = 2 * time.Minute
+
 // adopt applies the adopted-reply rule to a settled task.
 func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 	if d.opts.Replies == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, AdoptionBudget)
+	defer cancel()
 	candidates, err := d.ledger.AdoptionCandidates(ctx, s.TaskID)
 	if err != nil {
 		d.log.Warn("connector: adoption candidates", "task_id", s.TaskID, "error", err)
@@ -671,8 +734,14 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 }
 
 // nextFollowUp exposes the next event on the task not yet handed to the
-// worker, and returns it.
+// worker, and returns it. Nothing joins or is exposed once connect.json has
+// stopped approving the task's directory for its project.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
+	if !r.authorized() {
+		r.d.log.Warn("connector: the task's route is no longer approved; no more instructions are handed to its worker",
+			"task_id", r.launch.TaskID)
+		return 0, false, nil
+	}
 	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
 		return 0, false, err
 	}
@@ -718,36 +787,13 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 	for {
 		select {
 		case a := <-answers:
-			r.addRefusals(len(a.result.Refusals))
-			if a.err != nil {
-				if errors.Is(a.err, driver.ErrUnsafeMode) {
-					d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
-					return a.result, StopFailed, true
-				}
-				select {
-				case <-r.session.Done():
-					return a.result, StopLost, true
-				default:
-				}
-				d.log.Warn("connector: prompt failed", "task_id", r.launch.TaskID, "error", driver.Redact(a.err.Error()))
-				return a.result, StopFailed, true
-			}
-			return a.result, "", false
+			return r.answered(a.result, a.err)
 		case <-r.session.Done():
 			// The worker went with a turn in flight. A result it wrote just
 			// before exiting still counts.
 			select {
 			case a := <-answers:
-				r.addRefusals(len(a.result.Refusals))
-				switch {
-				case a.err == nil:
-					return a.result, "", false
-				case errors.Is(a.err, driver.ErrUnsafeMode):
-					// The driver ended an unsafe session itself; that is a
-					// failure, not a worker lost.
-					d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
-					return a.result, StopFailed, true
-				}
+				return r.answered(a.result, a.err)
 			case <-time.After(time.Second):
 			}
 			return driver.PromptResult{}, StopLost, true
@@ -761,6 +807,36 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 			}
 		}
 	}
+}
+
+// answered reads a finished prompt: its refusals are counted whatever it
+// says, and an error is classified — an unsafe session the driver ended is a
+// failure, a worker gone is lost, and anything else waits briefly to see
+// which of the two it was (invariant 4).
+func (r *taskRun) answered(result driver.PromptResult, err error) (driver.PromptResult, StopReason, bool) {
+	r.addRefusals(len(result.Refusals))
+	switch {
+	case err == nil:
+		return result, "", false
+	case errors.Is(err, driver.ErrUnsafeMode):
+		r.d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
+		return result, StopFailed, true
+	case errors.Is(err, driver.ErrSessionEnded):
+		return result, StopLost, true
+	}
+	r.d.log.Warn("connector: prompt failed", "task_id", r.launch.TaskID, "error", driver.Redact(err.Error()))
+	select {
+	case <-r.session.Done():
+		return result, StopLost, true
+	case <-time.After(time.Second):
+	}
+	return result, StopFailed, true
+}
+
+// authorized reports whether connect.json still approves this task's
+// directory for its project, in the projects this run hears.
+func (r *taskRun) authorized() bool {
+	return r.d.approvedRoutes()[r.record.BucketID] == r.launch.Route
 }
 
 func (r *taskRun) addRefusals(n int) {

@@ -87,3 +87,20 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	clock = clock.Add(connectRoutesTTL)
 	assert.Empty(t, routes.Current(), "a file that no longer loads authorizes nothing")
 }
+
+// Copilot and review r2: the run's --project scope reaches the dispatcher.
+func TestConnectDispatcherGetsTheRunsScopeAndSettings(t *testing.T) {
+	file := setup.New("agent")
+	file.Concurrency = 3
+	file.Deadline = setup.Duration(90 * time.Minute)
+	opts := connectDispatcherOptions(connectDispatch{
+		File: file, Buckets: []int64{48929974}, Profile: "agent",
+		Executable: "/usr/local/bin/basecamp", StateDir: "/state/2914079-1", SessionsDir: "/state/2914079-1/sessions",
+	})
+	assert.Equal(t, []int64{48929974}, opts.Buckets, "the projects this run hears are the projects it dispatches")
+	assert.Equal(t, 3, opts.Concurrency)
+	assert.Equal(t, 90*time.Minute, opts.Deadline)
+	assert.Equal(t, "agent", opts.MCP.Profile)
+	assert.Equal(t, "/state/2914079-1", opts.MCP.StateDir)
+	assert.Equal(t, "/state/2914079-1/sessions", opts.PrivateDir)
+}

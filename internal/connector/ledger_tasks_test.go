@@ -420,3 +420,33 @@ func TestAFollowUpOnAnotherRouteDoesNotJoinTheTask(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, joined)
 }
+
+// Review r2: work no approved route covers is counted, not silently stuck.
+func TestStrandedRecordsCountsWorkNoRouteCovers(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	seenRecord(t, ledger, 2)
+	moved := admittedVerdict(2, 0, "recording:2")
+	moved.Route = "/work/moved"
+	_, err := ledger.Admission().Commit(ctx, moved)
+	require.NoError(t, err)
+
+	stranded, err := ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute})
+	require.NoError(t, err)
+	assert.Equal(t, 1, stranded, "the record admitted under a route connect.json no longer has")
+
+	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute, adapterBucketID + 1: "/work/moved"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, stranded, "the route must be approved for the record's own project")
+}
+
+// Review r2: the worker's acknowledgement is never adopted as its reply.
+func TestAnAcknowledgementIsNeverAdoptedAsTheReply(t *testing.T) {
+	acked := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	c := AdoptionCandidate{DeliveredAt: acked, AckID: 7}
+	// The ack comment's server timestamp is after this machine's
+	// delivered_at, so time alone would adopt it.
+	_, ok := AdoptableReply(c, []AgentReply{{ID: 7, CreatedAt: acked.Add(time.Second)}}, nil)
+	assert.False(t, ok)
+}

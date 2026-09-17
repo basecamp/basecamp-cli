@@ -92,7 +92,7 @@ func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driv
 // LoadSession implements driver.Driver.
 func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
 	if !validUUID(sessionID) {
-		return nil, fmt.Errorf("%w: session id %q is not a Claude Code session id", driver.ErrNotStarted, sessionID)
+		return nil, fmt.Errorf("%w: %w: session id %q is not a Claude Code session id", driver.ErrNotStarted, driver.ErrUnusable, sessionID)
 	}
 	return d.start(ctx, cfg, sessionID, true)
 }
@@ -167,7 +167,7 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 
 func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID string, resume bool) (driver.Session, error) {
 	if cfg.Policy == nil || cfg.PrivateDir == "" || cfg.Cwd == "" {
-		return nil, fmt.Errorf("%w: a session needs a policy, a working directory and a private directory", driver.ErrNotStarted)
+		return nil, fmt.Errorf("%w: %w: a session needs a policy, a working directory and a private directory", driver.ErrNotStarted, driver.ErrUnusable)
 	}
 	mcpPath, err := writeMCPConfig(cfg.PrivateDir, cfg.MCPServers)
 	if err != nil {
@@ -176,7 +176,9 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 	args, err := Args(cfg, sessionID, resume, mcpPath, d.opts.Model)
 	if err != nil {
 		_ = os.Remove(mcpPath)
-		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+		// A mode or a policy the flags cannot express is not a start to try
+		// again: it is configuration.
+		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 	}
 	env := mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
 	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
@@ -244,7 +246,7 @@ func writeMCPConfig(dir string, servers []driver.MCPServer) (string, error) {
 	}{MCPServers: map[string]entry{}}
 	for _, s := range servers {
 		if s.Name == "" || s.Command == "" {
-			return "", errors.New("claude: an MCP server needs a name and a command")
+			return "", fmt.Errorf("%w: an MCP server needs a name and a command", driver.ErrUnusable)
 		}
 		env := s.Env
 		if env == nil {
@@ -288,6 +290,9 @@ type session struct {
 	// beforePromptWrite runs between a turn's registration and its write; a
 	// test seam.
 	beforePromptWrite func()
+	// cancelPending is a cancel that arrived with no turn to interrupt. The
+	// next turn takes it.
+	cancelPending bool
 
 	mu       sync.Mutex
 	turn     *turn
@@ -331,6 +336,9 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		return driver.PromptResult{}, errors.New("claude: a turn is already in flight")
 	}
 	t := &turn{done: make(chan struct{})}
+	pending := s.cancelPending
+	s.cancelPending = false
+	t.canceled = pending
 	s.turn = t
 	s.mu.Unlock()
 	if s.beforePromptWrite != nil {
@@ -338,6 +346,13 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}
 	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}}
 	err := s.writeLocked(msg)
+	if pending {
+		// The interrupt follows the prompt it cancels, still under the write
+		// lock, so nothing can come between them.
+		if id, idErr := newUUID(); idErr == nil && err == nil {
+			err = s.writeLocked(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "interrupt"}})
+		}
+	}
 	s.writeMu.Unlock()
 	if err != nil {
 		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
@@ -356,6 +371,10 @@ func (s *session) Cancel(context.Context) error {
 	t := s.turn
 	if t != nil {
 		t.canceled = true
+	} else {
+		// Nothing to interrupt yet: the next turn is the one the connector
+		// meant to cancel, and starts canceled.
+		s.cancelPending = true
 	}
 	s.mu.Unlock()
 	if t == nil {
@@ -438,6 +457,8 @@ func (s *session) emit(u driver.Update) {
 // process closes its stdout.
 func (s *session) read() {
 	defer func() {
+		// Nothing more will be read from the worker's output.
+		s.worker.CloseStdout()
 		close(s.updates)
 		s.mu.Lock()
 		t := s.turn
@@ -604,9 +625,13 @@ func (s *session) handleResult(m streamMessage) {
 	canceled := t.canceled
 	s.mu.Unlock()
 	for _, d := range m.PermissionDenials {
-		if !slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == d.ToolUseID }) {
-			refusals = append(refusals, driver.Refusal{ToolCallID: d.ToolUseID, Tool: d.ToolName})
+		if slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == d.ToolUseID }) {
+			continue
 		}
+		// A refusal the stream did not announce is still the driver's own
+		// record, and is reported both ways (invariant 3).
+		refusals = append(refusals, driver.Refusal{ToolCallID: d.ToolUseID, Tool: d.ToolName})
+		s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: d.ToolUseID, Tool: d.ToolName, ToolKind: toolKind(d.ToolName), Allowed: false})
 	}
 	result := driver.PromptResult{Refusals: refusals}
 	if m.Usage != nil {
