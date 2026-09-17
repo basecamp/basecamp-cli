@@ -60,9 +60,14 @@ type scenario struct {
 	// StopReadingAfter names a method after which the agent reads no more
 	// input.
 	StopReadingAfter string `json:"stop_reading_after"`
+	// MCPInitAtSessionStart is the init the agent forwards while it is
+	// answering session/new, with these server statuses.
+	MCPInitAtSessionStart map[string]string `json:"mcp_init_at_session_start,omitempty"`
 	// Hang names a method the agent never answers.
-	Hang       string `json:"hang"`
-	AuthEmail  string `json:"auth_email"`
+	Hang      string `json:"hang"`
+	AuthEmail string `json:"auth_email"`
+	// Secret is written back where an agent writes text: its stderr.
+	Secret     string `json:"secret"`
 	SpawnChild bool   `json:"spawn_child"`
 	// EscapingChild starts the child in a session of its own, holding the
 	// agent's output: a process group kill does not reach it.
@@ -145,6 +150,9 @@ func runFakeAgent(path string) {
 	}
 	if sc.IgnoreTerminate {
 		signal.Ignore(syscall.SIGTERM)
+	}
+	if sc.Secret != "" {
+		_, _ = os.Stderr.WriteString("the adapter says: " + sc.Secret + "\n")
 	}
 	a := &fakeAgent{sc: sc, out: bufio.NewWriter(os.Stdout), pending: map[int]chan json.RawMessage{}, mode: sc.CurrentMode}
 	a.rec.PID = os.Getpid()
@@ -259,6 +267,17 @@ func (a *fakeAgent) request(method string, params any) json.RawMessage {
 	return <-ch
 }
 
+// sendMCPInit forwards Claude Code's init the way claude-agent-acp does.
+func (a *fakeAgent) sendMCPInit(sessionID string, statuses map[string]string) {
+	servers := make([]any, 0, len(statuses))
+	for name, status := range statuses {
+		servers = append(servers, map[string]any{"name": name, "status": status})
+	}
+	a.send(map[string]any{"jsonrpc": "2.0", "method": "_claude/sdkMessage", "params": map[string]any{
+		"sessionId": sessionID, "message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": servers,
+			"cwd": "/somewhere", "tools": []string{"Bash"}, "model": "x"}}})
+}
+
 func (a *fakeAgent) sessionID() string {
 	if a.sc.SessionID != "" {
 		return a.sc.SessionID
@@ -324,6 +343,9 @@ func (a *fakeAgent) handle(id json.RawMessage, method string, params json.RawMes
 		}
 		a.reply(id, map[string]any{"protocolVersion": version, "agentCapabilities": caps, "agentInfo": map[string]any{"name": sc.AgentName, "version": sc.AgentVersion}})
 	case "session/new":
+		if sc.MCPInitAtSessionStart != nil {
+			a.sendMCPInit(a.sessionID(), sc.MCPInitAtSessionStart)
+		}
 		a.reply(id, a.sessionState())
 	case "session/load", "session/resume":
 		for _, u := range sc.Replay {
@@ -413,13 +435,7 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 			a.update(sid, st.Update)
 		}
 		if st.MCPInit != nil {
-			servers := []any{}
-			for name, status := range st.MCPInit {
-				servers = append(servers, map[string]any{"name": name, "status": status})
-			}
-			a.send(map[string]any{"jsonrpc": "2.0", "method": "_claude/sdkMessage", "params": map[string]any{
-				"sessionId": sid, "message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": servers,
-					"cwd": "/somewhere", "tools": []string{"Bash"}, "model": "x"}}})
+			a.sendMCPInit(sid, st.MCPInit)
 		}
 		if st.ModeChange != "" {
 			a.update(sid, map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": st.ModeChange})

@@ -489,15 +489,36 @@ func (s *session) endAfterTurn(t *turn, end func()) {
 	}()
 }
 
-// reportMCPServers takes the agent's own account of its MCP servers: every
-// server the session was given must be connected (invariant 8).
-func (s *session) reportMCPServers(statuses map[string]string) {
+// reportMCPServers takes the agent's own account of its MCP servers
+// (invariant 8): every server the session was given must be connected, and a
+// server it was never given must not be there at all.
+//
+// complete says whether statuses is the agent's whole account of them (an
+// init) or only what it said about one server (a startup failure).
+func (s *session) reportMCPServers(statuses map[string]string, complete bool) {
 	s.mu.Lock()
 	names := slices.Clone(s.mcpNames)
 	s.mu.Unlock()
-	for _, name := range names {
-		if status := statuses[name]; status != "connected" {
+	for name, status := range statuses {
+		switch {
+		case !slices.Contains(names, name):
+			if complete {
+				// strictMcpConfig and the Codex preflight are meant to leave
+				// the agent nothing else; the agent's own account says so.
+				s.fail(fmt.Errorf("%w: the agent has a server the session never gave it, %q", ErrMCPServerNotConnected, s.conn.agentText(name)))
+				return
+			}
+		case status != "connected":
 			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, s.conn.agentText(status)))
+			return
+		}
+	}
+	if !complete {
+		return
+	}
+	for _, name := range names {
+		if statuses[name] != "connected" {
+			s.fail(fmt.Errorf("%w: the agent did not report %q at all", ErrMCPServerNotConnected, name))
 			return
 		}
 	}
@@ -959,7 +980,7 @@ func (s *session) onNotification(method string, params json.RawMessage) {
 		if unescaped, err := url.PathUnescape(name); err == nil {
 			name = unescaped
 		}
-		s.reportMCPServers(map[string]string{name: "failed"})
+		s.reportMCPServers(map[string]string{name: "failed"}, false)
 	}
 	switch u.SessionUpdate {
 	case "current_mode_update":
@@ -1006,6 +1027,10 @@ func (s *session) emit(u driver.Update) {
 	if len(u.ToolCallID) > maxToolCallID {
 		u.ToolCallID = u.ToolCallID[:maxToolCallID]
 	}
+	// Ids and names are the agent's own text: nothing of a worker's leaves
+	// through an update either (the redaction rule).
+	u.ToolCallID = s.red.Sanitize(u.ToolCallID)
+	u.Tool = s.red.Sanitize(u.Tool)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.updatesClosed || s.replaying {
@@ -1042,7 +1067,7 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 	for _, srv := range n.Message.MCPServers {
 		statuses[srv.Name] = srv.Status
 	}
-	s.reportMCPServers(statuses)
+	s.reportMCPServers(statuses, true)
 }
 
 // onRequest answers the agent's requests. The client offers no fs and no

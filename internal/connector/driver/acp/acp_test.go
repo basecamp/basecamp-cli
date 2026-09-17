@@ -84,13 +84,15 @@ func (p *recordingPolicy) requests() []driver.PermissionRequest {
 }
 
 type harness struct {
-	fakeDir string
-	t       *testing.T
-	sc      scenario
-	dir     string
-	policy  *recordingPolicy
-	lookup  map[string]string
-	grace   time.Duration
+	// withConfig is a test's last word on the session config.
+	withConfig func(driver.SessionConfig) driver.SessionConfig
+	fakeDir    string
+	t          *testing.T
+	sc         scenario
+	dir        string
+	policy     *recordingPolicy
+	lookup     map[string]string
+	grace      time.Duration
 }
 
 // newHarness is a fake agent that answers initialize as the pinned adapter,
@@ -137,7 +139,7 @@ func (h *harness) driver() *Driver {
 }
 
 func (h *harness) config() driver.SessionConfig {
-	return driver.SessionConfig{
+	cfg := driver.SessionConfig{
 		Cwd: h.dir,
 		Env: []string{"HOME=" + h.dir, "PATH=/usr/bin:/bin"},
 		MCPServers: []driver.MCPServer{{
@@ -148,6 +150,10 @@ func (h *harness) config() driver.SessionConfig {
 		Scope:      driver.Scope{WorkDir: h.dir},
 		PrivateDir: h.t.TempDir(),
 	}
+	if h.withConfig != nil {
+		cfg = h.withConfig(cfg)
+	}
+	return cfg
 }
 
 func (h *harness) open() driver.Session {
@@ -1414,7 +1420,7 @@ func TestUpdatesCarryBoundedIDs(t *testing.T) {
 	s.emit(driver.Update{Kind: driver.UpdateToolCall, ToolCallID: strings.Repeat("i", 10*maxToolCallID)})
 	select {
 	case u := <-s.Updates():
-		assert.Len(t, u.ToolCallID, maxToolCallID)
+		assert.LessOrEqual(t, len(u.ToolCallID), maxToolCallID, "an id is cut, and then redacted")
 	case <-time.After(2 * time.Second):
 		t.Fatal("no update")
 	}
@@ -1554,6 +1560,22 @@ func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
 		_, err = s.Prompt(context.Background(), "go")
 		require.ErrorIs(t, err, ErrMCPServerNotConnected)
 	})
+	t.Run("claude: a server the session never gave it", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "connected", "elsewhere": "connected"}}, {SleepMS: 3000}}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+		assert.Contains(t, err.Error(), "never gave it")
+	})
+	t.Run("a failure while the session is opening is what the start reports", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "failed"}
+		_, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "not the closed stream that failure caused")
+	})
 	t.Run("codex: no failure reported is no failure", func(t *testing.T) {
 		h := newHarness(t)
 		h.turns(turnScript{Stop: "end_turn"})
@@ -1626,4 +1648,142 @@ func TestAnAgentThatOutrunsEvenItsRefusalsEndsTheSession(t *testing.T) {
 			t.Fatal("the worker was not ended")
 		}
 	})
+}
+
+// A session that is not the one the connector asked for is the driver
+// package's own sentinel, so every driver settles it the same way.
+func TestAnUnverifiedSessionIsTheSharedSentinel(t *testing.T) {
+	require.ErrorIs(t, ErrMCPServerNotConnected, driver.ErrSessionUnverified)
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "failed"}}, {SleepMS: 3000}}, Stop: "end_turn"})
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+	_, err = s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrSessionUnverified)
+}
+
+// redactionSecret is the value fed through every error path. It is obviously
+// fake, and is planted where a real secret would be: in the session's
+// environment, in its MCP server's environment, in the name of its private
+// directory, and in what the agent writes back.
+const redactionSecret = "test-token-not-real-a71c3e"
+
+func redactionHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.sc.Secret = redactionSecret
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		private := filepath.Join(cfg.PrivateDir, redactionSecret)
+		require.NoError(t, os.Mkdir(private, 0o700))
+		cfg.PrivateDir = private
+		cfg.Env = append(slices.Clone(cfg.Env), "FAKE_AGENT_SECRET="+redactionSecret)
+		cfg.MCPServers[0].Env["BASECAMP_CONNECT_TASK_TOKEN"] = redactionSecret
+		cfg.Redaction = driver.Redaction{Secrets: []string{redactionSecret}}
+		return cfg
+	}
+	return h
+}
+
+// The redaction rule (driver's redact.go): nothing this driver hands back
+// carries the secret, whichever way the session fails.
+func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
+	drivertest.RequireRedacted(t, redactionSecret, []drivertest.RedactionPath{
+		{Name: "start", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			// The adapter is not the pinned one, and its stderr, which
+			// carries the secret, is in the failure.
+			h.sc.AgentVersion = "0.0.0"
+			_, err := h.driver().NewSession(context.Background(), h.config())
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "handshake", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.sc.Confirm = "stale"
+			h.sc.CurrentMode = redactionSecret
+			h.sc.Modes = []string{"ask", redactionSecret}
+			_, err := h.driver().NewSession(context.Background(), h.config())
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.turns(turnScript{Steps: []step{
+				{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": redactionSecret, "name": redactionSecret, "kind": "edit"})},
+				{Permission: permission(t, map[string]any{"toolCallId": redactionSecret, "name": redactionSecret, "kind": "edit"}, standardOptions()...)},
+			}, ErrorMessage: "the agent failed with " + redactionSecret})
+			s := h.open()
+			result, err := s.Prompt(context.Background(), "go")
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.turns(turnScript{Steps: []step{{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk",
+				"content": map[string]any{"type": "text", "text": redactionSecret}})}}, WaitForCancel: true, Stop: string(driver.TurnCanceled)})
+			s := h.open()
+			results := make(chan driver.PromptResult, 1)
+			go func() {
+				res, err := s.Prompt(context.Background(), "go")
+				assert.NoError(t, err)
+				results <- res
+			}()
+			<-s.Updates()
+			err := s.Cancel(context.Background())
+			res := <-results
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{res},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			s := h.open()
+			err := s.Close()
+			_, promptErr := s.Prompt(context.Background(), "go")
+			return drivertest.Crossing{Errors: []error{err, promptErr},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+	})
+}
+
+// drainUpdates is every update the session has emitted so far.
+func drainUpdates(s driver.Session) []driver.Update {
+	var out []driver.Update
+	for {
+		select {
+		case u, ok := <-s.Updates():
+			if !ok {
+				return out
+			}
+			out = append(out, u)
+		case <-time.After(200 * time.Millisecond):
+			return out
+		}
+	}
+}
+
+// A refusal is recorded as it is made, once per tool call id, so a worker
+// that dies before its result has already reported it (driver's "Refusals").
+func TestEveryRefusalIsRecordedOnceAsItIsMade(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	call := map[string]any{"toolCallId": "call-1", "kind": "edit"}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, call, standardOptions()...)},
+		// The same call asked about twice is one refusal.
+		{Permission: permission(t, call, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "call-2", "kind": "execute"}, standardOptions()...)},
+	}, Hang: true})
+	s := h.open()
+	go func() { _, _ = s.Prompt(context.Background(), "go") }()
+	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 2 }, 10*time.Second, 20*time.Millisecond,
+		"each refusal is recorded as it is made, before the turn ends")
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}, {ToolCallID: "call-2", Tool: "execute"}}, recorder.Recorded())
 }

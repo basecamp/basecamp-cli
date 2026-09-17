@@ -152,7 +152,7 @@ const (
 // ErrMCPServerNotConnected is a session whose MCP server did not connect: the
 // worker would run without the tools the connector gave it, the Basecamp
 // tools and its task token among them.
-var ErrMCPServerNotConnected = errors.New("acp: an MCP server of the session did not connect")
+var ErrMCPServerNotConnected = fmt.Errorf("%w: an MCP server of the session did not connect", driver.ErrSessionUnverified)
 
 // ErrForeignMCPConfig is agent configuration that declares MCP servers of its
 // own, which the connector cannot keep out of a session.
