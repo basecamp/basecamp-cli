@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,7 @@ import (
 // its exit and the Wait that reaps it. The script runs once stdin closes.
 func startUnreaped(t *testing.T, script string) (*exec.Cmd, Process) {
 	t.Helper()
-	cmd := exec.Command("/bin/sh", "-c", "read _; "+script)
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", "read _; "+script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)

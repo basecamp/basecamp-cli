@@ -57,7 +57,7 @@ func TestTheScanLeavesADatabaseThisProcessHoldsLocked(t *testing.T) {
 		t.Error("a database file was read")
 	}
 
-	probe := exec.Command(python, "-c", "import fcntl,sys\nf=open(sys.argv[1],'r+')\ntry:\n  fcntl.lockf(f, fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept OSError:\n  sys.exit(3)\n", filepath.Join(dir, "ledger.db"))
+	probe := exec.CommandContext(t.Context(), python, "-c", "import fcntl,sys\nf=open(sys.argv[1],'r+')\ntry:\n  fcntl.lockf(f, fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept OSError:\n  sys.exit(3)\n", filepath.Join(dir, "ledger.db"))
 	err = probe.Run()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
