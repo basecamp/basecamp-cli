@@ -47,6 +47,10 @@ const (
 	StateCompleted RecordState = "completed"
 	// StateDiscarded is terminal with a verified verdict.
 	StateDiscarded RecordState = "discarded"
+	// StateHeld waits for a person. A record tagged for review by a hold
+	// becomes held where it would have waited for a worker, and only a
+	// person's redispatch or discard moves it on. It keeps its snapshot.
+	StateHeld RecordState = "held"
 )
 
 // Lane names which lane first served an event. It is diagnostic: dedupe is by
@@ -497,6 +501,10 @@ END;
 	// Migration 7. The outbox every lifecycle message goes through. See
 	// outbox.go for the invariants it holds.
 	migrationOutbox,
+	// Migration 8. The hold marker, intake generations, the review tag and
+	// people's decisions on records. See ledger_hold.go for the invariants
+	// they hold.
+	migrationOperator,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

@@ -160,6 +160,16 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 	if !moved {
 		return "", explainVerdictRefusal(ctx, tx, v)
 	}
+	if state == StateAdmitted || state == StateQueued {
+		// A record a hold tagged for review is written held by the database
+		// instead (ledger_hold.go). The verdict reports what was written, so
+		// neither the hooks nor the stdout line call it admitted.
+		var written string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, v.EventID).Scan(&written); err != nil {
+			return "", fmt.Errorf("connector: read verdict on %d back: %w", v.EventID, err)
+		}
+		state = RecordState(written)
+	}
 	if l.hooks.VerdictCommitted != nil {
 		committed := CommittedVerdict{
 			EventID:          v.EventID,
