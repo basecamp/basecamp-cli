@@ -274,12 +274,25 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
-		dispatcher, err = connector.NewDispatcher(connectDispatcherOptions(connectDispatch{
+		var workspaces connector.Workspaces
+		if file.Worktrees {
+			worktreesRoot, err := ensurePrivateChain(stateDir, connectWorktreesDir)
+			if err != nil {
+				return err
+			}
+			workspaces, err = connector.NewWorktrees(connector.WorktreesOptions{Ledger: ledger, Root: worktreesRoot, Logger: logger})
+			if err != nil {
+				return err
+			}
+		}
+		options := connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			Replies: connector.SDKReplies{Client: accountClient, AgentID: agentID},
 			Lines:   lines, Logger: logger,
-		}))
+		})
+		options.Workspaces = workspaces
+		dispatcher, err = connector.NewDispatcher(options)
 		if err != nil {
 			return err
 		}

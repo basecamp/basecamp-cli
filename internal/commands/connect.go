@@ -65,6 +65,7 @@ isolated state directory and dispatches nothing. macOS and Linux only.`,
 	cmd.AddCommand(newConnectSetupCmd())
 	cmd.AddCommand(newConnectWorkerMCPCmd())
 	cmd.AddCommand(newConnectShowCmd())
+	cmd.AddCommand(newConnectWorktreesCmd())
 	return cmd
 }
 

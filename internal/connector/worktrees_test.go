@@ -477,5 +477,3 @@ func TestADispatchedTasksUncommittedWorkIsRetained(t *testing.T) {
 		assert.Equal(t, "work\n", string(content))
 	}
 }
-
-
