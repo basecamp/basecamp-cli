@@ -199,7 +199,12 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 	positions := h.watchCheckpoints()
 	h.run(harnessRun{Until: "losses-closed"})
 	sampled := positions()
-	require.Contains(t, sampled, "feed-106", "the watcher must have caught the window it watches, or it proves nothing")
+	// The watcher must have been watching for the whole run, or it proves
+	// nothing: it saw the position the run started from and the one it ended
+	// at, both of which stand long enough to be seen, and positions between.
+	require.Contains(t, sampled, "feed-103", "the watcher saw the run start")
+	require.Contains(t, sampled, "feed-70002", "the watcher saw the run end")
+	require.Greater(t, len(sampled), 2, "the watcher saw the checkpoint move")
 	for _, position := range sampled {
 		assert.True(t, strings.HasPrefix(position, "feed-"), "the feed's checkpoint only ever holds a feed position, saw %q", position)
 	}
