@@ -1238,7 +1238,7 @@ func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
 func TestARepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {
 	h := newWorktreeHarness(t)
 	ctx := context.Background()
-	workDir, row := h.prepare(400)
+	workDir, _ := h.prepare(400)
 	nested := filepath.Join(workDir, "vendor", "lib")
 	require.NoError(t, os.MkdirAll(nested, 0o700))
 	h.git(nested, "init", "-q", "-b", "main")
@@ -1247,7 +1247,7 @@ func TestARepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {
 	h.git(nested, "commit", "-q", "-m", "only copy")
 	commit := h.git(nested, "rev-parse", "HEAD")
 
-	row = h.finish(workDir)
+	row := h.finish(workDir)
 	require.Equal(t, RetainedDirty, row.RetainedReason)
 	results, err := h.wt.Prune(ctx, []string{row.Path})
 	require.NoError(t, err)
