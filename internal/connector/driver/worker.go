@@ -393,7 +393,7 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	}
 	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
-		if errors.Is(signalGroup(p.PGID, 0), syscall.ESRCH) {
+		if groupGone(p.PGID) == nil {
 			return true, nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -414,10 +414,26 @@ func GroupMembersRemain(p Process) bool {
 }
 
 // groupGone reports nil only when the kernel says there is no such process
-// group. Anything else — members left, or a probe that was refused — is not
-// absence, and the rule holds rather than releases.
+// group, or when every member it still lists is a zombie. Anything else —
+// a member that runs, a listing that could not be read, or a probe that was
+// refused — is not absence, and the rule holds rather than releases.
+//
+// A zombie answers a zero-signal like a live process, and one stays a member
+// until its parent waits for it. The connector's own worker is such a child
+// between its exit and the Wait that reaps it, so a probe that counted
+// zombies could hold a finished worker for as long as that Wait is late.
 func groupGone(pgid int) error {
-	return groupProbe(pgid, signalGroup(pgid, 0))
+	err := signalGroup(pgid, 0)
+	if err == nil {
+		running, listErr := groupRunning(pgid)
+		switch {
+		case listErr != nil:
+			return fmt.Errorf("%w: %d: %w", ErrGroupOutlivedLeader, pgid, listErr)
+		case !running:
+			return nil
+		}
+	}
+	return groupProbe(pgid, err)
 }
 
 // groupProbe reads what a zero-signal to a process group said. Only ESRCH —
