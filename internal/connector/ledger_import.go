@@ -156,6 +156,13 @@ VALUES (?, 'discarded', ?, 'import', '', '', '', 0, 0, 0, ?, ?, ?, 1)`, e.EventI
 				}
 				out.Tombstoned++
 			}
+			// As a discard does: what the connector would still have said about
+			// a record a person closed is not said.
+			if _, err := tx.ExecContext(ctx, `
+UPDATE outbox SET state = 'canceled', finished_at = ?, note = 'discarded by a person'
+WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_reply')`, now, e.EventID); err != nil {
+				return ImportResult{}, fmt.Errorf("connector: cancel lifecycle messages for %d: %w", e.EventID, err)
+			}
 			if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: now,
 				fromState: RecordState(state), toState: StateDiscarded, note: "done"}); err != nil {
 				return ImportResult{}, err

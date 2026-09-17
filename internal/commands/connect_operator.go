@@ -97,6 +97,18 @@ func openConnectLedger(p connectProfile) (*connector.Ledger, error) {
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
 	}
+	// Opening for a decision migrates the ledger. A connector already running
+	// on an older binary's schema must not have its triggers replaced under
+	// it: it is stopped first.
+	if reader, err := connector.OpenLedgerReadOnly(context.Background(), path); err == nil {
+		_ = reader.Close()
+	} else if errors.Is(err, connector.ErrLedgerOutOfDate) {
+		if holder, running := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); running && processAlive(holder.PID) {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("The connector (pid %d) is running on an older ledger schema, and this command would migrate it under it", holder.PID),
+				"Stop the connector, run this command, and start it again.")
+		}
+	}
 	ledger, err := connector.OpenLedger(path)
 	if err != nil {
 		return nil, err

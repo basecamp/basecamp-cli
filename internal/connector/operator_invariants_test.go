@@ -735,3 +735,40 @@ func TestRedispatchQueuesAHeldRecordBehindALiveConversation(t *testing.T) {
 	assert.Equal(t, StateQueued, got.State)
 	assert.False(t, got.Admitted)
 }
+
+// A completion notice asks nothing of a person who has already decided the
+// record: the notice says what happened, and no more.
+func TestACompletionNoticeAsksNothingOfADecidedRecord(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+
+	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	intents, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
+	require.NoError(t, err)
+	require.Len(t, intents, 1)
+	assert.Contains(t, intents[0].Body, "Event 1: failed")
+	assert.NotContains(t, intents[0].Body, "redispatch 1", "a person already redispatched it")
+}
+
+// An import that closes a record does not leave it a lifecycle message that
+// asks for a redispatch the ledger would refuse.
+func TestImportCancelsTheMessagesOfARecordItCloses(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	seenRecord(t, l, 1)
+	v := blockedVerdict(1, 0, admission.ReasonNoRoute)
+	v.Trigger, v.Acknowledge = admission.TriggerMentioned, true
+	v.Reply = &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 10304028989}
+	_, err := l.Admission().Commit(ctx, v)
+	require.NoError(t, err)
+
+	_, err = l.Import(ctx, Reconciliation{Version: 1, Entries: []ReconciliationEntry{{EventID: 1, Decision: DecisionDone}}}, opBy)
+	require.NoError(t, err)
+	pending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending}})
+	require.NoError(t, err)
+	assert.Empty(t, pending, "nothing is posted about a record a person closed")
+}

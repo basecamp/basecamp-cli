@@ -314,7 +314,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Lines: lines, Logger: logger})
+		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Paused: ledger.Held, Lines: lines, Logger: logger})
 		if err != nil {
 			return err
 		}
@@ -374,6 +374,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
+	if err := ledger.NoteConnection(ctx, connector.ConnectionStarting, ""); err != nil {
+		return err
+	}
+	defer func() {
+		// Whatever ended the run, status says it is not running any more.
+		_ = ledger.NoteConnection(context.WithoutCancel(ctx), connector.ConnectionStopped, "")
+	}()
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
 		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
 

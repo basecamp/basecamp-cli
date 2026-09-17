@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -15,6 +16,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 
@@ -293,4 +296,26 @@ func TestConnectDoctorMCPHandshakeRunsTheServerWithAnAllowlistedEnvironment(t *t
 	c := mcpHandshakeCheck(context.Background(), "agent")
 	assert.Equal(t, setup.StatusPass, c.Status, c.Message)
 	assert.Contains(t, c.Message, "1 tools", "only the allowlisted environment reached the server")
+}
+
+func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	dir, err := connectStatePath(f.file, false)
+	require.NoError(t, err)
+
+	// A ledger an older binary wrote: its last migration is not recorded.
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	defer func() { _ = lock.Release() }()
+
+	_, err = f.run(t, output.FormatJSON, "release")
+	require.Error(t, err)
+	assert.Contains(t, usageError(t, err).Message, "older ledger schema")
 }

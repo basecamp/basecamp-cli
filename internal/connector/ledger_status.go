@@ -57,10 +57,14 @@ func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 	}
 	if version < len(migrations) {
 		_ = db.Close()
-		return nil, fmt.Errorf("connector: the ledger is at schema %d and this build reads %d; start the connector once to bring it up to date", version, len(migrations))
+		return nil, fmt.Errorf("connector: the ledger is at schema %d and this build reads %d: %w", version, len(migrations), ErrLedgerOutOfDate)
 	}
 	return l, nil
 }
+
+// ErrLedgerOutOfDate is a ledger an older binary wrote, which this build has
+// not migrated. Starting the connector migrates it.
+var ErrLedgerOutOfDate = errors.New("the ledger is older than this build; start the connector once to bring it up to date")
 
 // StatusLimit is how many dispatches status lists.
 const StatusLimit = 20

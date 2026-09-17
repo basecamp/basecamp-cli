@@ -658,6 +658,9 @@ type SettledEvent struct {
 	Withdrawn bool
 	// Blocked is a withdrawal refused a second automatic retry.
 	Blocked bool
+	// Decided is a record a person has already redispatched or discarded, so
+	// the completion notice asks nothing of them.
+	Decided bool
 }
 
 // EndAttempt ends a live attempt with its stop reason, supersedes the task's

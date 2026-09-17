@@ -47,7 +47,9 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	// id is not reused while any member lives, so the signal reaches only what
 	// is left of this group, or nothing.
 	stop := func() {
-		if cmd.Process != nil && cmd.Process.Pid > 1 {
+		// Never after the leader was reaped: a freed group id could name
+		// another group.
+		if cmd.Process != nil && cmd.Process.Pid > 1 && cmd.ProcessState == nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		}
 	}
@@ -55,10 +57,9 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	client := mcp.NewClient(&mcp.Implementation{Name: "basecamp-connect-doctor", Version: version.Version}, nil)
 	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
+		// The client closes, and so reaps, the process when initialize fails;
+		// stop signals only what is left.
 		stop()
-		if cmd.Process != nil {
-			_ = cmd.Wait()
-		}
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server did not complete the handshake: "+setup.ErrorText(err)
 		c.Hint = "Run basecamp mcp -P " + shellQuote(profile) + " and read its stderr."
 		return c
