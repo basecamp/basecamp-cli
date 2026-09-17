@@ -55,9 +55,15 @@ func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("connector: read the ledger's schema: %w", err)
 	}
-	if version < len(migrations) {
+	switch {
+	case version < len(migrations):
 		_ = db.Close()
 		return nil, fmt.Errorf("connector: the ledger is at schema %d and this build reads %d: %w", version, len(migrations), ErrLedgerOutOfDate)
+	case version > len(migrations):
+		// A newer build wrote it: its columns are not this build's to read,
+		// and no decision of this build's may be written into it.
+		_ = db.Close()
+		return nil, fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", version, len(migrations), ErrLedgerSchema)
 	}
 	return l, nil
 }

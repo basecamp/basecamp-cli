@@ -682,20 +682,23 @@ func TestInvariant3AHoldWithdrawsAWaitingRedispatch(t *testing.T) {
 // An import withdraws a waiting redispatch, whether the file says the entry is
 // done or does not name it.
 func TestImportWithdrawsAWaitingRedispatch(t *testing.T) {
-	for name, entries := range map[string][]ReconciliationEntry{
-		"done":    {{EventID: 1, Decision: DecisionDone}},
-		"unnamed": {},
+	for name, c := range map[string]struct {
+		entries []ReconciliationEntry
+		want    RecordState
+	}{
+		"done":    {entries: []ReconciliationEntry{{EventID: 1, Decision: DecisionDone}}, want: StateDiscarded},
+		"unnamed": {want: StateCompleted},
 	} {
 		t.Run(name, func(t *testing.T) {
 			l := newTestLedger(t)
 			ctx := context.Background()
 			launch := pendingRedispatch(t, l)
-			_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: entries}, opBy)
+			_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: c.entries}, opBy)
 			require.NoError(t, err)
 
 			_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
 			require.NoError(t, err)
-			assert.Equal(t, StateCompleted, stateOf(t, l, 1))
+			assert.Equal(t, c.want, stateOf(t, l, 1), "never admitted by the withdrawn redispatch")
 		})
 	}
 }
@@ -883,5 +886,43 @@ func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
 			require.NotZero(t, latest.ID)
 			assert.Contains(t, latest.Body, "redispatch 1", "a person is asked again")
 		})
+	}
+}
+
+// An import's done decision closes an unknown or failed outcome for good: no
+// redispatch is accepted for it and no notice asks for one. A success stays
+// as it was.
+func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	unknownOutcome(t, l, 1)
+	opAdmit(t, l, 2, "recording:2")
+	launch := launchOf(t, l, 2)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	reply := int64(77)
+	_, err = d.Complete(ctx, 2, Completion{Outcome: OutcomeSucceeded, ReplyID: &reply})
+	require.NoError(t, err)
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
+	require.NoError(t, err)
+
+	got, err := l.Import(ctx, Reconciliation{Version: 1, Entries: []ReconciliationEntry{
+		{EventID: 1, Decision: DecisionDone}, {EventID: 2, Decision: DecisionDone},
+	}}, opBy)
+	require.NoError(t, err)
+	assert.Equal(t, 1, got.Tombstoned)
+	assert.Equal(t, 1, got.AlreadyTerminal)
+
+	one := getRecord(t, l, 1)
+	assert.Equal(t, StateDiscarded, one.State)
+	assert.Equal(t, ReasonImportedDone, one.Reason)
+	assert.Equal(t, StateCompleted, stateOf(t, l, 2))
+	_, err = l.Redispatch(ctx, 1, opBy)
+	assert.ErrorIs(t, err, ErrDecisionRefused)
+	claimed, ok, err := l.claimIntent(ctx)
+	require.NoError(t, err)
+	if ok {
+		assert.NotContains(t, claimed.Body, "redispatch 1")
 	}
 }

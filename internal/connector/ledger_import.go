@@ -120,6 +120,7 @@ func (l *Ledger) importReconciliation(ctx context.Context, r Reconciliation, by 
 		if err != nil && !missing {
 			return ImportResult{}, fmt.Errorf("connector: import event %d: %w", e.EventID, err)
 		}
+		recorded := false
 		switch e.Decision {
 		case DecisionDone:
 			done[e.EventID] = true
@@ -141,7 +142,36 @@ VALUES (?, 'discarded', ?, 'import', '', '', '', 0, 0, 0, ?, ?, ?, 1)`, e.EventI
 					return ImportResult{}, fmt.Errorf("connector: import tombstone for %d: %w", e.EventID, err)
 				}
 				out.Inserted++
-			case state == string(StateCompleted) || state == string(StateDiscarded):
+			case state == string(StateCompleted):
+				// An unknown or failed outcome waits for a person, and this
+				// file is that person's decision: the record closes, so no
+				// redispatch or notice asks for it again. A success is already
+				// finished.
+				task, err := loadEventTask(ctx, tx, e.EventID)
+				if err != nil {
+					return ImportResult{}, err
+				}
+				if task.outcome != OutcomeUnknown && task.outcome != OutcomeFailed {
+					out.AlreadyTerminal++
+					break
+				}
+				// Recorded before the move, which the database allows out of
+				// completed only against it (invariant 4).
+				if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: notBefore(now, task.completedAt),
+					fromState: StateCompleted, fromOutcome: task.outcome, toState: StateDiscarded, note: "done"}); err != nil {
+					return ImportResult{}, err
+				}
+				recorded = true
+				moved, err := l.move(ctx, tx, transition{id: e.EventID, state: StateDiscarded, reason: ReasonImportedDone,
+					from: []RecordState{StateCompleted}, byOperator: true})
+				if err != nil {
+					return ImportResult{}, err
+				}
+				if !moved {
+					return ImportResult{}, fmt.Errorf("connector: import: event %d (completed) cannot be closed: %w", e.EventID, ErrDecisionRefused)
+				}
+				out.Tombstoned++
+			case state == string(StateDiscarded):
 				out.AlreadyTerminal++
 			case state == string(StateDispatched):
 				return ImportResult{}, fmt.Errorf("connector: import: event %d is dispatched to a worker; a done decision cannot close it: %w", e.EventID, ErrDecisionRefused)
@@ -163,9 +193,11 @@ UPDATE outbox SET state = 'canceled', finished_at = ?, note = 'discarded by a pe
 WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_reply')`, now, e.EventID); err != nil {
 				return ImportResult{}, fmt.Errorf("connector: cancel lifecycle messages for %d: %w", e.EventID, err)
 			}
-			if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: now,
-				fromState: RecordState(state), toState: StateDiscarded, note: "done"}); err != nil {
-				return ImportResult{}, err
+			if !recorded {
+				if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: now,
+					fromState: RecordState(state), toState: StateDiscarded, note: "done"}); err != nil {
+					return ImportResult{}, err
+				}
 			}
 		case DecisionHeld:
 			if missing {

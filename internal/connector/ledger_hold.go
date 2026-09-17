@@ -35,8 +35,10 @@ import (
 //     and it records who decided. A terminal record leaves its state only
 //     against a decision row made after its outcome settled: completed to
 //     admitted by the redispatch the record names, which the move consumes;
-//     completed(unknown) to discarded(by_operator) by a discard. Discarded
-//     never leaves. A trigger refuses every other edge.
+//     completed(unknown) to discarded(by_operator) by a discard, and
+//     completed(unknown or failed) to discarded(imported_done) by an import's
+//     done decision. Discarded never leaves. A trigger refuses every other
+//     edge.
 //  5. A redispatch never runs two workers for one event. The replaced task's
 //     token is superseded in the authorization's transaction, and an event
 //     whose task is still live is not admitted until that task ends: the
@@ -155,6 +157,16 @@ WHEN OLD.state IN ('completed', 'discarded') AND NEW.state <> OLD.state
     AND EXISTS (
       SELECT 1 FROM decisions d
       WHERE d.event_id = OLD.id AND d.action = 'discard'
+        AND d.decided_at >= (SELECT te.completed_at FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
+                             ORDER BY te.task_id DESC LIMIT 1))
+  )
+  AND NOT (
+    OLD.state = 'completed' AND NEW.state = 'discarded' AND NEW.reason = 'imported_done'
+    AND (SELECT te.outcome FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
+         ORDER BY te.task_id DESC LIMIT 1) IN ('unknown', 'failed')
+    AND EXISTS (
+      SELECT 1 FROM decisions d
+      WHERE d.event_id = OLD.id AND d.action = 'import'
         AND d.decided_at >= (SELECT te.completed_at FROM task_events te WHERE te.event_id = OLD.id AND te.withdrawn_at IS NULL
                              ORDER BY te.task_id DESC LIMIT 1))
   )

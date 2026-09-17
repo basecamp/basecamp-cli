@@ -111,3 +111,17 @@ func TestOpenLedgerReadOnlyCreatesNothing(t *testing.T) {
 	_, err = reader.db.ExecContext(context.Background(), `DELETE FROM events`)
 	assert.Error(t, err, "a read-only ledger refuses writes")
 }
+
+// A ledger a newer build wrote is not this build's to read or decide in.
+func TestOpenLedgerReadOnlyRefusesANewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", LedgerFile)
+	l, err := OpenLedger(path)
+	require.NoError(t, err)
+	_, err = l.db.ExecContext(context.Background(), `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, len(migrations)+1, stamp(time.Now()))
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	_, err = OpenLedgerReadOnly(context.Background(), path)
+	require.ErrorIs(t, err, ErrLedgerSchema)
+	assert.NotErrorIs(t, err, ErrLedgerOutOfDate)
+}
