@@ -220,7 +220,11 @@ func (o *Outbox) flushSome(ctx context.Context, limit int) error {
 func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	intent, ok, err := o.ledger.claimIntent(ctx)
+	skip := make([]int64, 0, len(claimed))
+	for id := range claimed {
+		skip = append(skip, id)
+	}
+	intent, ok, err := o.ledger.claimIntent(ctx, skip...)
 	if err != nil || !ok {
 		return 0, err
 	}
@@ -286,7 +290,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 // claimIntent moves the oldest due pending intent to sending and commits, or,
 // for a guard that no longer applies, to canceled. It is the only way to
 // sending.
-func (l *Ledger) claimIntent(ctx context.Context) (Intent, bool, error) {
+func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, error) {
 	var (
 		out Intent
 		ok  bool
@@ -298,7 +302,17 @@ func (l *Ledger) claimIntent(ctx context.Context) (Intent, bool, error) {
 		}
 		defer func() { _ = tx.Rollback() }()
 		now := l.timestamp()
-		rows, err := tx.QueryContext(ctx, selectIntents+` WHERE state = 'pending' AND not_before <= ? ORDER BY not_before, id LIMIT 1`, now)
+		// A flush never claims an intent it already claimed: one a person sent
+		// back to pending meanwhile waits for the next flush rather than being
+		// claimed, marked sending, and left with no request.
+		query, args := selectIntents+` WHERE state = 'pending' AND not_before <= ?`, []any{now}
+		if len(skip) > 0 {
+			query += ` AND id NOT IN (` + placeholders(len(skip)) + `)`
+			for _, id := range skip {
+				args = append(args, id)
+			}
+		}
+		rows, err := tx.QueryContext(ctx, query+` ORDER BY not_before, id LIMIT 1`, args...)
 		if err != nil {
 			return fmt.Errorf("connector: outbox claim: %w", err)
 		}
@@ -506,7 +520,7 @@ func (l *Ledger) listingFailed(ctx context.Context, in Intent, listErr error) (I
 		if errors.Is(listErr, ErrUnlistable) {
 			note = "destination cannot be listed"
 		}
-		updated, err := l.settleReconciled(ctx, in.ID, 0, note)
+		updated, err := l.giveUpReconciling(ctx, in.ID, failures, note)
 		return updated, err == nil, err
 	}
 	backoff := DefaultReconcileBackoff << (failures - 1)
@@ -595,6 +609,30 @@ func (l *Ledger) receiptOwnedByOther(ctx context.Context, id int64, kind Message
 
 // settleReconciled writes a reconciliation's answer onto a still-sending
 // intent: sent with the adopted receipt, or indeterminate with why.
+// giveUpReconciling settles a sending intent indeterminate after its last
+// failed listing, recording that failure in the same write so the count a
+// person reads is the count that gave up.
+func (l *Ledger) giveUpReconciling(ctx context.Context, id int64, failures int, note string) (Intent, error) {
+	err := retryBusy(func() error {
+		res, err := l.db.ExecContext(ctx, `
+UPDATE outbox SET state = 'indeterminate', finished_at = ?, note = ?, reconcile_failures = ?, reconcile_at = NULL
+WHERE id = ? AND state = 'sending'`, l.timestamp(), note, failures, id)
+		if err != nil {
+			return fmt.Errorf("connector: give up reconciling intent %d: %w", id, err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return fmt.Errorf("connector: give up reconciling intent %d: it is no longer sending", id)
+		}
+		return nil
+	})
+	if err != nil {
+		return Intent{}, err
+	}
+	return l.Intent(ctx, id)
+}
+
 func (l *Ledger) settleReconciled(ctx context.Context, id, receipt int64, note string) (Intent, error) {
 	err := retryBusy(func() error {
 		var (

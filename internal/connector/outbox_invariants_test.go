@@ -500,8 +500,8 @@ func TestOutboxPausedHoldsSending(t *testing.T) {
 }
 
 // Invariant 4, defended in the sender too: should an intent it already
-// claimed ever come back as pending within one flush, the flush stops rather
-// than post it a second time.
+// claimed ever come back as pending within one flush, the flush leaves it for
+// the next rather than post it a second time.
 func TestOutboxFlushNeverClaimsAnIntentTwice(t *testing.T) {
 	ledger, clock := obLedger(t)
 	ctx := context.Background()
@@ -523,8 +523,9 @@ func TestOutboxFlushNeverClaimsAnIntentTwice(t *testing.T) {
 		}
 		return errWire
 	}
-	require.Error(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 	assert.Equal(t, 1, basecamp.postCount())
+	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(1)).State, "left for the next flush, not claimed again in this one")
 }
 
 // A listing that keeps failing backs off, and gives up as indeterminate —
@@ -556,6 +557,7 @@ func TestOutboxAFailingListingBacksOffThenGivesUp(t *testing.T) {
 	}
 	got = obIntent(t, ledger, in.Key)
 	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Equal(t, MaxReconcileFailures, got.ReconcileFailures, "the count that gave up is the count recorded")
 	assert.Zero(t, basecamp.postCount())
 }
 
@@ -570,6 +572,7 @@ func TestOutboxAnUnlistableDestinationIsIndeterminate(t *testing.T) {
 	got := obIntent(t, ledger, in.Key)
 	assert.Equal(t, IntentIndeterminate, got.State)
 	assert.Equal(t, "destination cannot be listed", got.Note)
+	assert.Equal(t, 1, got.ReconcileFailures)
 }
 
 // On start, a sending intent younger than ReconcileAfter is left to land.
@@ -1013,4 +1016,68 @@ func TestOutboxAPersonMayResendARefusedIntent(t *testing.T) {
 	require.ErrorIs(t, ledger.ResolveIntent(ctx, guard.ID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}), ErrNotIndeterminate)
 	_, err = ledger.db.ExecContext(ctx, `UPDATE outbox SET state = 'pending' WHERE id = ?`, guard.ID)
 	require.Error(t, err, "the database refuses it too")
+}
+
+// A person's resend that lands while a flush is still draining waits for the
+// next flush: this one never claims the intent again, so it is not left
+// sending with no request made.
+func TestOutboxAResendDuringAFlushWaitsForTheNext(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(id, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	basecamp := newFakeBasecamp(clock.Now)
+	firstID := obIntent(t, ledger, holdingKey(1)).ID
+	refused := false
+	basecamp.beforePost = func(Destination, string) error {
+		if !refused {
+			refused = true
+			return fmt.Errorf("403: %w", ErrNotPosted)
+		}
+		// The second intent's request: meanwhile a person resends the first.
+		require.NoError(t, ledger.ResolveIntent(context.Background(), firstID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}))
+		return nil
+	}
+	ob := obOutbox(t, ledger, basecamp)
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(1)).State, "not claimed twice in one flush")
+
+	basecamp.beforePost = nil
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(1)).State)
+	assert.Equal(t, 3, basecamp.postCount())
+}
+
+// Invariant 9: a worker that asks while a guard is in flight is told the
+// connector acknowledged, and a worker that asks after Basecamp refused it is
+// not. The first case is the stated trade: its acknowledgement goes missing
+// rather than doubled.
+func TestOutboxAGuardIsFiredWhileInFlightAndArmedAfterRefusal(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	var inFlight Instruction
+	basecamp.beforePost = func(Destination, string) error {
+		// The worker asks while the guard's request is in flight.
+		var err error
+		inFlight, _, err = d.Get(ctx, 1)
+		require.NoError(t, err)
+		return fmt.Errorf("404: %w", ErrNotPosted)
+	}
+	clock.Advance(DefaultGuardDelay)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.True(t, inFlight.GuardAcknowledged, "no double acknowledgement while the guard may land")
+
+	// A follow-up worker, or the same one asking again, is told the truth.
+	after, _, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	assert.False(t, after.GuardAcknowledged, "a refused guard acknowledged nothing")
 }

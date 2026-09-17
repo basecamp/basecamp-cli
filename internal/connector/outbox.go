@@ -48,6 +48,21 @@ import (
 //     pending to canceled in get_dispatch's own transaction, and a guard that
 //     already went out marks every task event it answers for as fired, so a
 //     worker is told the connector acknowledged.
+//  9. A guard is reported fired from the moment it is claimed, and never
+//     after it is proven not sent. The claim marks its task events fired in
+//     the claim's own transaction, so no worker asking while the request is
+//     in flight acknowledges a second time. A refusal re-arms them in the
+//     refusal's transaction, so every worker that asks afterwards
+//     acknowledges. A worker that asked in between was told the connector
+//     acknowledged and does not: that one acknowledgement is missing. This is
+//     the spec's trade, chosen over its alternative — marking fired only once
+//     the request succeeds lets a worker asking in flight acknowledge beside
+//     a guard that lands, a double acknowledgement on the normal path.
+//  10. Reconciliation never holds up sending for long. A running connector
+//     sends a batch, then lists at most one due destination; each listing is
+//     bounded in time; each failure backs its intent off, doubling, and the
+//     intent is indeterminate after MaxReconcileFailures, with that count
+//     recorded.
 const migrationOutbox = `
 CREATE TABLE outbox (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
