@@ -221,7 +221,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 	// Everything this session says passes through the dispatcher's redaction,
 	// plus the environment built here, its MCP servers' environments and its
 	// private directory.
-	more := driver.Redaction{Env: slices.Clone(env), Dirs: []string{cfg.PrivateDir}}
+	more := driver.Redaction{Env: slices.Clone(env), Dirs: []string{cfg.PrivateDir, cfg.SocketDir}}
 	for _, server := range cfg.MCPServers {
 		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
 	}

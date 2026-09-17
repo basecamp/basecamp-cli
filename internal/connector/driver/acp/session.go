@@ -830,12 +830,20 @@ func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
 
 // stderrNote is the end of the adapter's stderr, redacted, for an error.
 func (s *session) stderrNote() string {
-	tail := s.worker.StderrTail(s.red)
-	if tail == "" {
+	// Every bounded line of it, not only the last: an adapter that fails to
+	// start says why on one line and prints a stack trace after it, and the
+	// last line of that trace explains nothing.
+	lines := s.worker.StderrLines(s.red)
+	if len(lines) == 0 {
 		return ""
 	}
-	return " (adapter stderr: " + tail + ")"
+	return " (adapter stderr: " + strings.Join(lines, " | ") + ")"
 }
+
+// StderrLines is every bounded line of the adapter's stderr. An ACP agent
+// reports its refusals over the protocol, never here, so this is diagnostics
+// for a worker that stopped badly, not a record.
+func (s *session) StderrLines() []string { return s.worker.StderrLines(s.red) }
 
 // ---------------------------------------------------------------- from the agent
 
