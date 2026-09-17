@@ -21,7 +21,12 @@ func peerCredentials(conn *net.UnixConn) (PeerCredentials, error) {
 		credOK error
 	)
 	if err := raw.Control(func(fd uintptr) {
-		cred, credOK = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		socket, ok := socketDescriptor(fd)
+		if !ok {
+			credOK = errUnreadableDescriptor
+			return
+		}
+		cred, credOK = unix.GetsockoptUcred(socket, unix.SOL_SOCKET, unix.SO_PEERCRED)
 	}); err != nil {
 		return PeerCredentials{}, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -42,6 +43,22 @@ import (
 // reports as a server that did not connect and the session ends as unsafe.
 // A process inside the worker's group could take the token — but that is the
 // worker, which is who the token is for.
+
+// errUnreadableDescriptor is a socket whose descriptor is not a number the
+// syscall wrappers take. It cannot happen on any platform the connector runs
+// on; the check is here so no conversion is made on an assumption.
+var errUnreadableDescriptor = errors.New("connector: the socket's descriptor is out of range")
+
+// socketDescriptor is a raw connection's descriptor as the int the syscall
+// wrappers take. A descriptor is a small non-negative index the kernel handed
+// out, but Go hands it over as a uintptr, so the range is checked rather than
+// assumed.
+func socketDescriptor(fd uintptr) (int, bool) {
+	if fd > math.MaxInt32 {
+		return 0, false
+	}
+	return int(int32(fd)), true
+}
 
 // DefaultTokenWindow is how long a task token's socket waits for the worker's
 // MCP server. It covers an agent's start-up, not a task's life.

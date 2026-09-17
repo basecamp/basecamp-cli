@@ -74,10 +74,16 @@
 //     recorder is called before an update is emitted, so a worker that exits
 //     between a refusal and its result has already recorded it.
 //
+// Once-ness is the driver's (a set of tool call ids per session), not a key in
+// the ledger: it holds for as long as a session lives, which is as long as a
+// refusal can be reported twice. A connector that restarts does not resume a
+// session — its attempt is settled as lost and its task superseded — so a
+// ledger key on (attempt, tool call) would buy nothing, and this is settled,
+// not open.
+//
 // Where this can still be broken: a refusal the agent never reports — a tool
 // it declined to ask for, or a denial its stream does not carry — is not a
-// refusal the driver can record; and the once-per-tool-call rule is the
-// driver's (a set of ids per session), not a key in the ledger.
+// refusal the driver can record.
 package driver
 
 import (
