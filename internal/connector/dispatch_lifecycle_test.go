@@ -25,6 +25,7 @@ func TestDispatchLifecycleTable(t *testing.T) {
 	t.Run("worker actions", testWorkerActions)
 	t.Run("task", testTaskTransitions)
 	t.Run("withdrawal", testWithdrawal)
+	t.Run("a pull comes first", testDeliveryNeedsAPull)
 }
 
 // testWithdrawal: an exposure is withdrawn only on a superseded task, only
@@ -37,8 +38,12 @@ func testWithdrawal(t *testing.T) {
 				f := newDispatchFixture(t)
 				ctx := context.Background()
 				// Staged along the allowed steps, so the triggers are left in
-				// place.
+				// place. Past exposed, the steps are a worker's, so it pulled.
 				for _, step := range deliveries[1 : slices.Index(deliveries, delivery)+1] {
+					if step == DeliveryDelivered {
+						_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'pulled' WHERE event_id = 1`)
+						require.NoError(t, err)
+					}
 					_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = ? WHERE event_id = 1`, string(step))
 					require.NoError(t, err)
 				}
@@ -223,6 +228,17 @@ func testDeliveryTransitions(t *testing.T) {
 				require.NoError(t, err)
 				_, err = f.ledger.db.ExecContext(ctx, `DROP TRIGGER task_events_exposure_comes_first`)
 				require.NoError(t, err)
+				// A worker pulled it: acknowledging and completing are what a
+				// worker does with what it pulled.
+				if from != DeliveryAdmitted {
+					// Past admitted, a worker pulled it, which it does while
+					// the row is exposed: acknowledging and completing are
+					// what a worker does with what it pulled.
+					_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+					require.NoError(t, err)
+					_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'pulled' WHERE event_id = 1`)
+					require.NoError(t, err)
+				}
 				_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = ? WHERE event_id = 1`, string(from))
 				require.NoError(t, err)
 				reopened := f.ledger.restoreTriggers(t)
@@ -454,4 +470,31 @@ func TestTheDatabaseTiesRetirementAndPullsToTheirTask(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	_, err = fresh.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'now' WHERE event_id = 1`)
 	require.Error(t, err, "a withdrawn exposure is not pulled either")
+}
+
+// Acknowledging and completing are what a worker does with what it pulled. An
+// exposure written at launch that no worker pulled moves no further, except
+// where the dispatcher settles the record itself.
+func testDeliveryNeedsAPull(t *testing.T) {
+	for _, to := range []Delivery{DeliveryDelivered, DeliveryCompleted} {
+		t.Run(string(to), func(t *testing.T) {
+			f := newDispatchFixture(t)
+			ctx := context.Background()
+			_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+			require.NoError(t, err)
+
+			_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = ? WHERE event_id = 1`, string(to))
+			require.Error(t, err, "nothing was pulled")
+
+			// The dispatcher settling its record is the one other way to
+			// completed.
+			require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+			_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = ? WHERE event_id = 1`, string(to))
+			if to == DeliveryCompleted {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -199,7 +200,7 @@ func TestTakeConnectTaskTokenReadsBeforeTheCommandTree(t *testing.T) {
 	dev, ino, _ := fdIdentity(t, fd)
 	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
 
-	TakeConnectTaskToken([]string{"mcp", "--connect-state", "/somewhere", "--connect-token-fd", strconv.Itoa(fd)})
+	TakeConnectTaskToken(testRootForMCP(t), []string{"mcp", "--connect-state", "/somewhere", "--connect-token-fd", strconv.Itoa(fd)})
 
 	require.True(t, takenTaskToken.taken)
 	require.NoError(t, takenTaskToken.err)
@@ -210,25 +211,27 @@ func TestTakeConnectTaskTokenReadsBeforeTheCommandTree(t *testing.T) {
 }
 
 func TestTakeConnectTaskTokenIgnoresEverythingElse(t *testing.T) {
-	t.Cleanup(func() { takenTaskToken.taken = false })
+	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
 	for name, args := range map[string][]string{
-		"another command":             {"projects", "list", "--connect-token-fd", "3"},
-		"no flag":                     {"mcp", "--read-only"},
-		"a flag that starts the same": {"mcp", "--connect-token-fdx", "3"},
-		"not a number":                {"mcp", "--connect-token-fd", "three"},
-		"nothing after it":            {"mcp", "--connect-token-fd"},
+		"another command":             {"search", "list", "--connect-token-fd", "3"},
+		"no flag":                     {"mcp", "--connect-state", "/x"},
+		"a flag that starts the same": {"mcp", "--connect-state", "/x", "--connect-token-fdx", "3"},
+		"no state directory":          {"mcp", "--connect-token-fd", "3"},
+		"read-only":                   {"mcp", "--connect-state", "/x", "--read-only", "--connect-token-fd", "3"},
+		"read-only, spelled out":      {"mcp", "--connect-state", "/x", "--read-only=true", "--connect-token-fd", "3"},
+		"nothing after it":            {"mcp", "--connect-state", "/x", "--connect-token-fd"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			takenTaskToken.taken = false
-			TakeConnectTaskToken(args)
+			TakeConnectTaskToken(testRootForMCP(t), args)
 			assert.False(t, takenTaskToken.taken, "left to Cobra and the command to report")
 		})
 	}
 
-	// Both spellings of the flag are read.
+	// Both spellings of the flag are read, with the state directory given.
 	fd := tokenPipe(t, "token\n")
 	takenTaskToken.taken = false
-	TakeConnectTaskToken([]string{"mcp", "--connect-token-fd=" + strconv.Itoa(fd)})
+	TakeConnectTaskToken(testRootForMCP(t), []string{"mcp", "--connect-state", "/x", "--connect-token-fd=" + strconv.Itoa(fd)})
 	require.True(t, takenTaskToken.taken)
 	assert.Equal(t, "token", takenTaskToken.token)
 }
@@ -263,30 +266,37 @@ func TestTheMCPCommandRefusesATokenNotTakenAtStartup(t *testing.T) {
 // falls to a point where a child could already have inherited it.
 func TestTheTokenPreScanAgreesWithTheFlagParser(t *testing.T) {
 	for _, argv := range [][]string{
-		{"mcp", "--connect-token-fd", "3"},
-		{"mcp", "--connect-token-fd=3"},
-		{"mcp", "--connect-token-fd=0x3"},
-		{"mcp", "--connect-token-fd=010"},
-		{"mcp", "--connect-token-fd", "3", "--connect-token-fd", "4"},
-		{"mcp", "--connect-token-fd=3", "--connect-token-fd=4"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd", "5"},
-		{"mcp", "--connect-token-fdx", "3"},
-		{"mcp", "--connect-token-fd", "three"},
-		{"mcp", "--connect-token-fd"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd=3"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd=0x3"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd=010"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--connect-token-fd", "4"},
+		{"mcp", "--connect-state=/x", "--connect-token-fd=3", "--connect-token-fd=4"},
+		{"--json", "mcp", "--connect-state", "/x", "--connect-token-fd", "5"},
+		{"-v", "mcp", "--connect-state", "/x", "--connect-token-fd", "5"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fdx", "3"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd", "three"},
+		{"mcp", "--connect-state", "/x", "--connect-token-fd"},
 		{"mcp", "--read-only"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			scanned, found := connectTokenFDArg(argv)
+			scanned, found := connectTokenFD(testRootForMCP(t), argv)
 
 			// What the command itself will see, from the flags it declares.
-			var parsed int
-			flags := NewMCPCmd().Flags()
-			parseErr := flags.Parse(argv[1:])
-			if parseErr == nil {
-				parsed, _ = flags.GetInt("connect-token-fd")
-			}
-			if parseErr != nil || !flags.Changed("connect-token-fd") {
-				assert.False(t, found, "the scan read a descriptor the command will not")
+			root := testRootForMCP(t)
+			target, rest, err := root.Find(argv)
+			require.NoError(t, err)
+			flags := target.Flags()
+			flags.AddFlagSet(root.PersistentFlags())
+			parseErr := flags.Parse(rest)
+			readOnly, _ := flags.GetBool("read-only")
+			state, _ := flags.GetString("connect-state")
+			parsed, _ := flags.GetInt("connect-token-fd")
+			wants := parseErr == nil && target.Name() == "mcp" && !readOnly &&
+				state != "" && flags.Changed("connect-token-fd")
+
+			if !wants {
+				assert.False(t, found, "the scan read a descriptor this invocation would not")
 				return
 			}
 			require.True(t, found, "the command will read a descriptor the scan missed")
@@ -298,7 +308,7 @@ func TestTheTokenPreScanAgreesWithTheFlagParser(t *testing.T) {
 // A bare -- ends the flags for pflag, so nothing after it is a descriptor to
 // read: cobra.NoArgs then refuses the command outright.
 func TestTheTokenPreScanStopsAtADoubleDash(t *testing.T) {
-	_, found := connectTokenFDArg([]string{"mcp", "--", "--connect-token-fd", "3"})
+	_, found := connectTokenFD(testRootForMCP(t), []string{"mcp", "--connect-state", "/x", "--", "--connect-token-fd", "3"})
 	assert.False(t, found)
 }
 
@@ -306,19 +316,41 @@ func TestTheTokenPreScanStopsAtADoubleDash(t *testing.T) {
 // read-only server reads no token: it serves no connect domain.
 func TestTheTokenPreScanReadsOnlyThisCommandsDescriptor(t *testing.T) {
 	for name, args := range map[string][]string{
-		"another command's argument": {"search", "--", "mcp", "--connect-token-fd", "3"},
-		"a query that says mcp":      {"search", "mcp", "--connect-token-fd", "3"},
-		"a flag value that says mcp": {"search", "--query", "mcp", "--connect-token-fd", "3"},
-		"read-only":                  {"mcp", "--read-only", "--connect-token-fd", "3"},
-		"a descriptor past a --":     {"mcp", "--", "--connect-token-fd", "3"},
-		"out of range":               {"mcp", "--connect-token-fd", "99999999999999"},
+		"another command's argument": {"search", "--", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
+		"a query that says mcp":      {"search", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
+		"a root bool flag before it": {"--json", "search", "mcp", "--connect-token-fd", "3"},
+		"read-only":                  {"mcp", "--connect-state", "/x", "--read-only", "--connect-token-fd", "3"},
+		"read-only as a value":       {"mcp", "--connect-state", "/x", "--read-only=1", "--connect-token-fd", "3"},
+		"a descriptor past a --":     {"mcp", "--connect-state", "/x", "--", "--connect-token-fd", "3"},
+		"no state directory":         {"mcp", "--connect-token-fd", "3"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, found := connectTokenFDArg(args)
+			_, found := connectTokenFD(testRootForMCP(t), args)
 			assert.False(t, found)
 		})
 	}
-	fd, found := connectTokenFDArg([]string{"mcp", "--connect-state", "/x", "--connect-token-fd", "3"})
-	require.True(t, found)
+	fd, found := connectTokenFD(testRootForMCP(t), []string{"--json", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"})
+	require.True(t, found, "a root flag before the command is the root's, not a value")
 	assert.Equal(t, 3, fd)
+}
+
+// testRootForMCP is the command tree TakeConnectTaskToken resolves against:
+// a root carrying this command, as cli.Execute builds it.
+func testRootForMCP(t *testing.T) *cobra.Command {
+	t.Helper()
+	root := &cobra.Command{Use: "basecamp"}
+	root.PersistentFlags().Bool("json", false, "")
+	root.PersistentFlags().CountP("verbose", "v", "")
+	root.PersistentFlags().String("project", "", "")
+	root.AddCommand(NewMCPCmd())
+	root.AddCommand(&cobra.Command{Use: "search", RunE: func(*cobra.Command, []string) error { return nil }})
+	return root
+}
+
+// A descriptor number no descriptor could have is refused where every other
+// bad one is: at the read, by asking the operating system about it.
+func TestABadDescriptorNumberIsRefusedAtTheRead(t *testing.T) {
+	_, err := readTaskToken(99999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not open")
 }

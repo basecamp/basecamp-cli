@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
-	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
@@ -42,17 +42,21 @@ var takenTaskToken struct {
 	taken bool
 }
 
-// TakeConnectTaskToken reads the connector task token from the descriptor
-// args name, and closes it, before anything else in the process runs.
+// TakeConnectTaskToken reads the connector task token from the descriptor the
+// arguments name, and closes it, before anything else in the process runs.
 //
 // Cobra runs the root command's persistent hooks before any command's own
 // RunE, and those hooks load configuration, tighten directories and may start
-// a background update check. A descriptor still open then is a descriptor a
-// child could inherit, so the read happens ahead of all of it, from the raw
-// arguments. What it found — the token, or the refusal — is the mcp command's
-// to use when it runs.
-func TakeConnectTaskToken(args []string) {
-	fd, ok := connectTokenFDArg(args)
+// a background update check. A descriptor still open then is one a child could
+// inherit, so the read happens ahead of all of it. What it found — the token,
+// or the refusal — is the mcp command's to use when it runs.
+//
+// Which arguments mean what is cobra's answer and pflag's, never a scan of our
+// own: root finds the command the way it will when it executes, and the same
+// flag types parse what is left. A hand-written scan reads a descriptor for an
+// invocation the command then refuses, or misses one it accepts.
+func TakeConnectTaskToken(root *cobra.Command, args []string) {
+	fd, ok := connectTokenFD(root, args)
 	if !ok {
 		return
 	}
@@ -60,73 +64,31 @@ func TakeConnectTaskToken(args []string) {
 	takenTaskToken.token, takenTaskToken.err = readTaskToken(fd)
 }
 
-// connectTokenFDArg finds --connect-token-fd in the raw arguments of an mcp
-// command, reading it exactly as pflag will when the command runs: any base
-// Go accepts, the last occurrence winning, and nothing after a bare "--",
-// which is no longer a flag. The two must agree, or a spelling one of them
-// accepts and the other does not would read one descriptor and serve from
-// another. TestTheTokenPreScanAgreesWithTheFlagParser holds them together.
-//
-// Anything malformed is left to Cobra and the command to report.
-func connectTokenFDArg(args []string) (int, bool) {
-	if !isMCPInvocation(args) {
+// connectTokenFD reports the descriptor to read: this command, serving the
+// connect domain, with a descriptor given. A read-only server serves no
+// connect domain, and a descriptor without a state directory is refused by the
+// command, so neither reads anything.
+func connectTokenFD(root *cobra.Command, args []string) (int, bool) {
+	target, rest, err := root.Find(args)
+	if err != nil || target == nil || target.Name() != "mcp" || target.Parent() == nil {
 		return 0, false
 	}
-	fd, found := 0, false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			break
-		}
-		value, isFlag := strings.CutPrefix(arg, "--connect-token-fd")
-		switch {
-		case !isFlag:
-			continue
-		case strings.HasPrefix(value, "="):
-			value = value[1:]
-		case value != "":
-			continue // a longer flag that merely starts the same way
-		case i+1 < len(args):
-			i++
-			value = args[i]
-		default:
-			return 0, false
-		}
-		parsed, err := strconv.ParseInt(value, 0, 64)
-		if err != nil || parsed > math.MaxInt32 || parsed < math.MinInt32 {
-			// A descriptor number is small; anything else is not one, and
-			// narrowing it would not mean what was written.
-			return 0, false
-		}
-		fd, found = int(parsed), true
-	}
-	return fd, found
-}
 
-// isMCPInvocation reports arguments that run this command: "mcp" as the first
-// word that is not a flag or a flag's value, before any "--". A "mcp" further
-// along is an argument to something else.
-//
-// A read-only server is not one of them: it serves no connect domain, so
-// there is nothing to read a token for.
-func isMCPInvocation(args []string) bool {
-	command := ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--":
-			return false
-		case arg == "--read-only":
-			return false
-		case strings.HasPrefix(arg, "-"):
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				i++ // its value
-			}
-		case command == "":
-			command = arg
-		}
+	// The command's own flags, parsed as the command will parse them. The
+	// root's flags are unknown here and are skipped rather than guessed at.
+	flags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
+	flags.ParseErrorsWhitelist.UnknownFlags = true
+	flags.SetOutput(io.Discard)
+	readOnly := flags.Bool("read-only", false, "")
+	state := flags.String("connect-state", "", "")
+	fd := flags.Int("connect-token-fd", -1, "")
+	if err := flags.Parse(rest); err != nil {
+		return 0, false
 	}
-	return command == "mcp"
+	if *readOnly || strings.TrimSpace(*state) == "" || !flags.Changed("connect-token-fd") {
+		return 0, false
+	}
+	return *fd, true
 }
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is

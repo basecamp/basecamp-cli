@@ -376,20 +376,32 @@ func releaseLedger(file *openLedgerFile) {
 func checkLedgerFile(file *openLedgerFile, path, abs string, owner bool) error {
 	file.mu.Lock()
 	defer file.mu.Unlock()
-	if file.checked {
-		return verifySameFile(abs, file.info)
+	openLedgers.Lock()
+	checked, info := file.checked, file.info
+	openLedgers.Unlock()
+	if checked {
+		return verifySameFile(abs, info)
 	}
 	securePathRuns.Add(1)
 	if err := securePath(path, owner); err != nil {
 		return err
 	}
-	// The check may have created the file, so what it saw is recorded now.
+	// The check may have created the file, so what it saw is recorded now —
+	// under the map's own lock, because that is where the alias scan reads it.
 	info, err := os.Lstat(abs)
 	if err != nil {
 		return fmt.Errorf("connector: inspect the ledger: %w", err)
 	}
-	file.info, file.checked = info, true
+	recordCheckedFile(file, info)
 	return nil
+}
+
+// recordCheckedFile publishes what the descriptor check saw, under the lock
+// the alias scan reads it with.
+func recordCheckedFile(file *openLedgerFile, info os.FileInfo) {
+	openLedgers.Lock()
+	defer openLedgers.Unlock()
+	file.info, file.checked = info, true
 }
 
 // verifySameFile holds a second open to what the first one's check
@@ -603,6 +615,17 @@ BEGIN
   SELECT RAISE(ABORT, 'a superseded task stays superseded');
 END;
 
+-- Retirement is not a second step anyone can forget or skip: superseding a
+-- task retires its events in the same write, so a task's token and its rows
+-- stop being live together.
+CREATE TRIGGER tasks_supersession_retires_its_events
+AFTER UPDATE OF superseded_at ON tasks
+WHEN NEW.superseded_at IS NOT NULL AND OLD.superseded_at IS NULL
+BEGIN
+  UPDATE task_events SET retired_at = NEW.superseded_at
+  WHERE task_id = NEW.id AND retired_at IS NULL;
+END;
+
 CREATE TRIGGER task_events_retirement_follows_supersession
 BEFORE UPDATE OF retired_at ON task_events
 WHEN NEW.retired_at IS NOT OLD.retired_at AND (
@@ -635,6 +658,7 @@ CREATE TRIGGER task_events_pull_is_recorded_once
 BEFORE UPDATE OF pulled_at ON task_events
 WHEN NEW.pulled_at IS NOT OLD.pulled_at AND (
   OLD.pulled_at IS NOT NULL
+  OR OLD.delivery <> 'exposed'
   OR OLD.retired_at IS NOT NULL
   OR OLD.withdrawn_at IS NOT NULL)
 BEGIN
@@ -699,9 +723,12 @@ END;
 
 CREATE TRIGGER task_events_exposure_comes_first
 BEFORE UPDATE OF delivery ON task_events
-WHEN OLD.delivery = 'admitted' AND NEW.delivery IN ('delivered', 'completed')
+WHEN (OLD.delivery = 'admitted' AND NEW.delivery IN ('delivered', 'completed'))
+  OR (NEW.delivery = 'delivered' AND OLD.delivery <> 'delivered' AND OLD.pulled_at IS NULL)
+  OR (NEW.delivery = 'completed' AND OLD.delivery <> 'completed' AND OLD.pulled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM events WHERE id = OLD.event_id AND state = 'completed'))
 BEGIN
-  SELECT RAISE(ABORT, 'nothing a worker was never handed is acknowledged or completed');
+  SELECT RAISE(ABORT, 'a worker acknowledges and completes what it pulled; anything else is the dispatcher settling a completed record');
 END;
 `,
 }

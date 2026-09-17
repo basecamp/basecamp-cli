@@ -417,9 +417,6 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, now, taskID); err != nil {
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
-		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
-	}
 	for _, id := range unexposed {
 		// Only a record still dispatched moves: one a person or a later
 		// verdict already moved stays where it was put.
@@ -1312,8 +1309,12 @@ func ResolveStateDir(dir, accountID string) (string, int64, error) {
 		return refuse(StateDirMisnamed, account)
 	}
 	given, errGiven := strconv.ParseUint(account, 10, 64)
+	if errGiven != nil || given == 0 {
+		// Not an account at all: the name is wrong, not another account's.
+		return refuse(StateDirMisnamed, account)
+	}
 	want, errWant := strconv.ParseUint(accountID, 10, 64)
-	if errGiven != nil || errWant != nil || given == 0 || given != want {
+	if errWant != nil || given != want {
 		return refuse(StateDirOtherAccount, account)
 	}
 	return abs, agentID, nil
