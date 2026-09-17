@@ -1386,8 +1386,9 @@ func TestProfileEntryForAnotherAccountReplacesTheEntryWhole(t *testing.T) {
 	assert.Equal(t, []string{paths[1], paths[2]}, []string{origin.Layers[0].Path, origin.Layers[1].Path}, "the same account refines")
 }
 
-// Account IDs are compared as numbers, as the commands compare them: a
-// spelling with leading zeros is the same account, and refines.
+// IDs are compared as numbers, as the commands and the name resolver
+// compare them: a spelling with leading zeros is the same account, and
+// refines.
 func TestProfileEntryForTheSameAccountSpelledDifferentlyRefines(t *testing.T) {
 	cfg, _ := loadProfileLayers(t,
 		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999","project_id":"1"}}}`},
@@ -1395,11 +1396,11 @@ func TestProfileEntryForTheSameAccountSpelledDifferentlyRefines(t *testing.T) {
 	)
 
 	assert.Equal(t, "1", cfg.Profiles["bot"].ProjectID)
-	assert.True(t, sameAccountID("000123456789012345678901234567890", "123456789012345678901234567890"), "past int64")
-	assert.True(t, sameAccountID("0", "000"))
-	assert.False(t, sameAccountID("999", "9990"))
-	assert.False(t, sameAccountID("x999", "999"))
-	assert.True(t, sameAccountID("abc", "abc"))
+	assert.True(t, sameID("000123456789012345678901234567890", "123456789012345678901234567890"), "past int64")
+	assert.True(t, sameID("0", "000"))
+	assert.False(t, sameID("999", "9990"))
+	assert.False(t, sameID("x999", "999"))
+	assert.True(t, sameID("abc", "abc"))
 }
 
 // A closer entry that binds an unbound farther one refines it.
@@ -1431,4 +1432,11 @@ func TestProfileEntryForAnotherProjectDropsTheInheritedTodolist(t *testing.T) {
 	)
 
 	assert.Equal(t, "7", cfg.Profiles["bot"].TodolistID)
+
+	cfg, _ = loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"9","todolist_id":"3"}}}`},
+		profileLayer{SourceRepo, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"09"}}}`},
+	)
+
+	assert.Equal(t, "3", cfg.Profiles["bot"].TodolistID, "the same project, spelled differently")
 }

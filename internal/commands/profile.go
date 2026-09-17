@@ -636,9 +636,11 @@ func firstReplacedAfterGlobal(origin *config.ProfileOrigin) *config.ReplacedProf
 }
 
 // globalConfigUnusable reports whether the global config file exists but
-// cannot be read or parsed. config.Load skips such a file, profiles and
-// all, so what it recorded about where a profile comes from is not
-// evidence: the entry that defines it may be in the file that was skipped.
+// cannot be read, cannot be parsed, or holds a "profiles" value that is not
+// an object. The loader skips such a file's profiles, so what it recorded
+// about where a profile comes from is not evidence — the entry that defines
+// it may be in the file that was skipped — and every writer refuses the
+// file, which is what the operator has to hear instead.
 func globalConfigUnusable() bool {
 	path := filepath.Join(config.GlobalConfigDir(), "config.json")
 	data, err := os.ReadFile(path) //nolint:gosec // G304: the global config path
@@ -649,7 +651,15 @@ func globalConfigUnusable() bool {
 		return true
 	}
 	var parsed map[string]any
-	return json.Unmarshal(data, &parsed) != nil || parsed == nil
+	if json.Unmarshal(data, &parsed) != nil || parsed == nil {
+		return true
+	}
+	profiles, present := parsed["profiles"]
+	if !present || profiles == nil {
+		return false
+	}
+	_, isObject := profiles.(map[string]any)
+	return !isObject
 }
 
 // boundIn names the config file a profile's account came from, as " (bound

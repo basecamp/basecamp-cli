@@ -177,8 +177,17 @@ func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
 	s := startConnectSetupServer(t)
 	bareSetupApp(t, s, "agent")
 	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, s.srv.URL))
-	writeGlobalConfigHere(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.srv.URL))
+	for _, global := range []string{
+		fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.srv.URL), // never closed
+		`{"profiles":[]}`, // a shape every writer refuses
+	} {
+		writeGlobalConfigHere(t, global)
+		assertSetupReportsTheGlobalConfig(t, s)
+	}
+}
 
+func assertSetupReportsTheGlobalConfig(t *testing.T, s *connectSetupServer) {
+	t.Helper()
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
 	require.Error(t, err, out)
 	hint := hintOf(t, err)

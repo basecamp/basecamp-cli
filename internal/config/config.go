@@ -457,7 +457,7 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 
 	p, origin := cfg.Profiles[name], cfg.ProfileOrigins[name]
 	account := getStringOrNumber(entry, "account_id")
-	otherAccount := p != nil && p.AccountID != "" && account != "" && !sameAccountID(p.AccountID, account)
+	otherAccount := p != nil && p.AccountID != "" && account != "" && !sameID(p.AccountID, account)
 	if p == nil || origin == nil || otherAccount || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
 		replaced := []ReplacedProfileLayer(nil)
 		if p != nil && origin != nil {
@@ -482,7 +482,7 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 		set("account_id", &p.AccountID, account)
 	}
 	if v := getStringOrNumber(entry, "project_id"); v != "" {
-		if p.ProjectID != v && p.TodolistID != "" {
+		if !sameID(p.ProjectID, v) && p.TodolistID != "" {
 			// The inherited todolist is in the project being replaced.
 			p.TodolistID = ""
 			delete(origin.Fields, "todolist_id")
@@ -500,10 +500,11 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 	}
 }
 
-// sameAccountID reports whether two account IDs name the same account: equal
-// as decimal numbers, so "0999" is "999", however many digits they run to.
-// A value that is not all digits is the same only as its exact spelling.
-func sameAccountID(a, b string) bool {
+// sameID reports whether two IDs name the same record: equal as decimal
+// numbers, so "0999" is "999", however many digits they run to — the
+// comparison the commands and the name resolver make. A value that is not
+// all digits is the same only as its exact spelling.
+func sameID(a, b string) bool {
 	if a == b {
 		return true
 	}
