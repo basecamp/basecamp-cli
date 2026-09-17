@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -128,6 +129,73 @@ func (s *Store) withKeyLock(ctx context.Context, key string, fn func() error) er
 	return fn()
 }
 
+// WithCredential runs fn with one key's credential while holding that key's
+// cross-process lock, so no other process's login, refresh, import or
+// logout for the key can land while fn runs. A caller that must act on a
+// credential being what it just read — writing a file that names the
+// identity it authenticates as, say — does its read, its decision and its
+// write inside fn.
+//
+// A host that cannot lock at all is an error here, not a warning: the
+// callers that reach for this are the ones whose guarantee is the lock.
+//
+// fn must not take the same key's lock again — no AccessToken, no
+// StoredAccessToken, no SetUserIdentity, no nested WithCredential. Locks
+// are per open file description, so a second acquire in this process waits
+// on itself until the wait bound expires. fn must not make a network
+// request either: every other process's work on the key queues behind it.
+//
+// A key with nothing stored is reported as ErrNoCredential, never as a nil
+// credential.
+func (s *Store) WithCredential(ctx context.Context, key string, fn func(HeldCredential) error) error {
+	release, err := s.lockFile(lockRequest{name: keyLockName(key), what: "credential", done: ctx.Done(), cause: ctx.Err, require: true})
+	if err != nil {
+		return err
+	}
+	defer release()
+	creds, err := s.load(key, lockRequest{done: ctx.Done(), cause: ctx.Err})
+	if err != nil {
+		return err
+	}
+	held := &heldCredential{creds: creds, key: key}
+	defer held.released.Store(true)
+	return fn(held)
+}
+
+// HeldCredential is a credential read while its key's lock is held, and the
+// proof a write can ask for: a function that must not run without the lock
+// takes one. Only WithCredential makes one, it stops counting when the lock
+// is released, and Held is the only way to read it — the interface carries
+// nothing a wrapper could answer for.
+type HeldCredential interface {
+	// heldUnderLock cannot be implemented outside this package. It can be
+	// promoted by embedding the interface, which is why nothing reads a
+	// proof through methods: Held is the only reader.
+	heldUnderLock()
+}
+
+type heldCredential struct {
+	creds    *Credentials
+	key      string
+	released atomic.Bool
+}
+
+func (h *heldCredential) valid() bool { return !h.released.Load() }
+
+func (h *heldCredential) heldUnderLock() {}
+
+// Held reads a lock proof: the credential and key it was made with, and
+// whether the lock is still held. Anything this package did not make — a
+// nil, a struct embedding the interface — is reported as not held, whatever
+// its own methods say.
+func Held(h HeldCredential) (creds *Credentials, key string, held bool) {
+	own, ok := h.(*heldCredential)
+	if !ok || own == nil || !own.valid() || own.creds == nil || own.key == "" {
+		return nil, "", false
+	}
+	return own.creds, own.key, true
+}
+
 // withStoreLock runs fn while holding the whole-store lock. fn must be one
 // store operation and must not make a network request: every process's
 // Save and Delete queue behind it.
@@ -237,6 +305,11 @@ type lockRequest struct {
 	wait  time.Duration
 	done  <-chan struct{}
 	cause func() error
+	// require refuses the unlocked fall-through: a caller whose guarantee
+	// IS the lock (it decides on a credential and writes a file naming what
+	// that credential authenticates as) gets an error where an ordinary
+	// caller would get a warning and an unsynchronized run.
+	require bool
 }
 
 // lockFile takes the lock named name — exclusive, or shared when the
@@ -271,7 +344,15 @@ func (s *Store) lockFile(req lockRequest) (func(), error) {
 		return s.unlocked(req, err.Error())
 	}
 
-	fl := flock.New(filepath.Join(s.lockDir(), req.name))
+	lockPath := filepath.Join(s.lockDir(), req.name)
+	if req.require {
+		// A required lock is only a lock if every process takes the same
+		// inode: refuse a lock directory or file this user does not own.
+		if err := requirePrivateLockPath(s.lockDir(), lockPath); err != nil {
+			return s.unlocked(req, err.Error())
+		}
+	}
+	fl := flock.New(lockPath)
 	try := fl.TryLock
 	if req.shared {
 		try = fl.TryRLock
@@ -351,6 +432,16 @@ func (s *Store) unlocked(req lockRequest, reason string) (func(), error) {
 	noop := func() {}
 	if err := lockCause(req.cause); err != nil {
 		return noop, err
+	}
+	if req.require {
+		// The caller asked for the lock itself, not for best effort: there
+		// is nothing to fall through to.
+		return noop, &output.Error{
+			Code:    output.CodeLockUnavailable,
+			Message: fmt.Sprintf("This host cannot lock the %s: %s", req.what, richtext.SanitizeSingleLine(reason)),
+			Hint: "Nothing was changed. Other commands still work; connector setup is what needs the lock, so point XDG_CONFIG_HOME at a filesystem that supports locking " +
+				"(some network and FUSE mounts do not).",
+		}
 	}
 	s.warnUnlockable(req.what, reason)
 	return noop, nil

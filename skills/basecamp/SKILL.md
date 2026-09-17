@@ -1453,6 +1453,7 @@ BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth lo
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
+basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<dir>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
 ```
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth

@@ -143,11 +143,16 @@ func NewManager(cfg *config.Config, httpClient *http.Client) *Manager {
 	}
 }
 
+// ProfileCredentialKey is the credential key a named profile's credential
+// is stored under, for a caller that must name one profile's credential
+// without a manager bound to it.
+func ProfileCredentialKey(profile string) string { return "profile:" + profile }
+
 // credentialKey returns the storage key for credentials.
 // Profile mode: "profile:<name>", No-profile mode: origin URL.
 func (m *Manager) credentialKey() string {
 	if m.cfg.ActiveProfile != "" {
-		return "profile:" + m.cfg.ActiveProfile
+		return ProfileCredentialKey(m.cfg.ActiveProfile)
 	}
 	return config.NormalizeBaseURL(m.cfg.BaseURL)
 }

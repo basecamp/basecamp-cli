@@ -1097,3 +1097,138 @@ func TestStoreSaveKeepsOtherKeys(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &all))
 	assert.Len(t, all, 8)
 }
+
+// WithCredential holds the key's lock while fn runs: a caller that decides
+// on a credential and writes inside fn cannot have it replaced underneath.
+func TestWithCredentialHoldsTheKeyLock(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	dir := t.TempDir()
+	store := NewStore(dir)
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+
+	inside := make(chan struct{})
+	replaced := make(chan error, 1)
+	err := store.WithCredential(context.Background(), key, func(held HeldCredential) error {
+		creds, heldKey, ok := Held(held)
+		require.True(t, ok)
+		assert.Equal(t, "first", creds.AccessToken)
+		assert.Equal(t, key, heldKey)
+		go func() {
+			close(inside)
+			replaced <- NewStore(dir).withKeyLock(context.Background(), key, func() error {
+				return NewStore(dir).Save(key, &Credentials{AccessToken: "second", OAuthType: "agent"})
+			})
+		}()
+		<-inside
+		time.Sleep(200 * time.Millisecond) // let the other writer reach the lock
+		// The other writer is waiting on the key lock, so what was read is
+		// still what is stored.
+		again, err := store.Load(key)
+		require.NoError(t, err)
+		assert.Equal(t, "first", again.AccessToken)
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, <-replaced)
+
+	after, err := store.Load(key)
+	require.NoError(t, err)
+	assert.Equal(t, "second", after.AccessToken, "the waiting writer lands once the section ends")
+}
+
+// A host that cannot lock at all is an error for WithCredential, never a
+// warning and an unsynchronized run: its callers' guarantee is the lock.
+func TestWithCredentialRefusesWhenTheHostCannotLock(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	dir := t.TempDir()
+	store := NewStore(dir)
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+	// No lock file can be created where nothing may be written.
+	locks := store.lockDir()
+	require.NoError(t, os.MkdirAll(locks, 0o700))
+	require.NoError(t, os.Chmod(locks, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(locks, 0o700) })
+
+	ran := false
+	err := store.WithCredential(context.Background(), key, func(HeldCredential) error {
+		ran = true
+		return nil
+	})
+	require.Error(t, err)
+	assert.False(t, ran, "the section never runs unlocked")
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+}
+
+// The proof stops being valid when the lock is released, so a callback that
+// keeps it cannot write with it afterwards.
+func TestHeldCredentialIsInvalidAfterTheLockIsReleased(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	store := NewStore(t.TempDir())
+	const key = "profile:agent"
+	require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+
+	var kept HeldCredential
+	require.NoError(t, store.WithCredential(context.Background(), key, func(held HeldCredential) error {
+		kept = held
+		creds, heldKey, ok := Held(held)
+		require.True(t, ok)
+		require.NotNil(t, creds)
+		assert.Equal(t, key, heldKey)
+		return nil
+	}))
+
+	creds, heldKey, ok := Held(kept)
+	assert.False(t, ok, "the lock is gone")
+	assert.Nil(t, creds)
+	assert.Empty(t, heldKey)
+}
+
+// A required lock is only a lock if every process takes the same inode, so
+// a lock directory or lock file this user does not own is refused rather
+// than used.
+func TestWithCredentialRefusesAnUntrustworthyLockPath(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	const key = "profile:agent"
+
+	for name, plant := range map[string]func(t *testing.T, dir string){
+		"the lock directory is a symlink": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.RemoveAll(locks))
+			require.NoError(t, os.Symlink(t.TempDir(), locks))
+		},
+		"the lock directory is writable by others": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.MkdirAll(locks, 0o700))
+			require.NoError(t, os.Chmod(locks, 0o777))
+		},
+		"the lock file is a symlink": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.MkdirAll(locks, 0o700))
+			planted := filepath.Join(locks, keyLockName(key))
+			require.NoError(t, os.RemoveAll(planted))
+			require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "planted"), planted))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			store := NewStore(dir)
+			require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+			plant(t, dir)
+
+			ran := false
+			err := store.WithCredential(context.Background(), key, func(HeldCredential) error {
+				ran = true
+				return nil
+			})
+			require.Error(t, err)
+			assert.False(t, ran, "the section never runs on a lock it cannot trust")
+			var apiErr *output.Error
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+		})
+	}
+}

@@ -1192,6 +1192,12 @@ func pluralize(n int, singular, plural string) string {
 
 // renderDoctorStyled outputs a human-friendly styled format for TTY.
 func renderDoctorStyled(w io.Writer, result *DoctorResult) {
+	renderChecksStyled(w, "Basecamp CLI Doctor", result)
+}
+
+// renderChecksStyled renders a titled list of checks and their summary, for
+// every command that reports checks the way doctor does.
+func renderChecksStyled(w io.Writer, title string, result *DoctorResult) {
 	r := output.NewRenderer(w, false)
 
 	// Status icon styles
@@ -1218,7 +1224,7 @@ func renderDoctorStyled(w io.Writer, result *DoctorResult) {
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, r.Summary.Render("Basecamp CLI Doctor"))
+	fmt.Fprintln(w, r.Summary.Render(title))
 	fmt.Fprintln(w)
 
 	for _, check := range result.Checks {
