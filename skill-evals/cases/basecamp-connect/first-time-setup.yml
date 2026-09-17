@@ -10,6 +10,8 @@ context: >-
   connection.
 tags: [connect]
 mocks:
+  - match: 'connect show'
+    output: '{"ok":false,"code":"not_found","error":"connect.json for profile not found: helper","hint":"The profile has not been set up. Set it up: basecamp connect setup -P helper --operator-profile <your profile> --route <project-id>=<dir>"}'
   - match: 'auth status'
     output: '{"ok":false,"code":"api_error","error":"unknown profile \"helper\" (available: jorge)"}'
   - match: 'profile list'

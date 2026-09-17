@@ -36,10 +36,73 @@ the work to a local coding agent that replies in Basecamp as the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 projects to the directories their work runs in, and checks the connector is
-ready.`,
+ready. Show prints what setup recorded.`,
 	}
 	cmd.AddCommand(newConnectSetupCmd())
+	cmd.AddCommand(newConnectShowCmd())
 	return cmd
+}
+
+// newConnectShowCmd shows a profile's connect.json, read the way the
+// connector reads it: through setup.Load's safety checks, so a symlink, a
+// file someone else could have written, or anything oversized is refused
+// before a byte of it is shown.
+func newConnectShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show a profile's connector setup without changing it",
+		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
+trust mode, each routed project and the worker settings.
+
+The file is read through the same checks setup and the connector apply:
+it is refused, and nothing of it shown, when it is a symlink, is not a
+regular file, could have been changed by another user, or does not parse.
+Nothing is changed and nothing is fetched: show reads no credential and
+makes no request. To check readiness, run setup again.
+
+Examples:
+  basecamp connect show -P agent
+  basecamp connect show -P agent --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return runConnectShow(app)
+		},
+	}
+}
+
+func runConnectShow(app *appctx.App) error {
+	name := app.Config.ActiveProfile
+	if name == "" {
+		return output.ErrUsageHint("Show needs the agent's profile", "Pass -P/--profile <name>.")
+	}
+	if !isValidProfileName(name) {
+		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
+	}
+	path, err := setup.Path(config.GlobalConfigDir(), name)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+	f, err := setup.Load(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return output.ErrNotFoundHint("connect.json for profile", name,
+			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile <your profile> --route <project-id>=<dir>")
+	case err != nil:
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+	}
+	return app.OK(connectShowResult{Path: path, File: f},
+		output.WithSummary(fmt.Sprintf("Profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
+}
+
+// connectShowResult is show's data: where the file is, and what it holds.
+type connectShowResult struct {
+	Path string `json:"path"`
+	setup.File
 }
 
 // connectSetupFlags are setup's flags, as typed.

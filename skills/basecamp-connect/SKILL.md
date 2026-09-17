@@ -49,6 +49,8 @@ explain the result. This skill is the reference you do that from.
   setup with no flags to check the new credential against connect.json.
   Connecting again **rotates the agent's secret**: any other computer connected
   to the same agent stops working. Do it only when the person agrees.
+- `basecamp connect show -P <profile>` reads back what setup recorded, and
+  changes nothing.
 - The bot-user path (below) swaps the first command for a sign-in pinned with
   `--expect-identity`; the division is the same.
 
@@ -82,7 +84,8 @@ the person who the credential is and let them decide. After setup, check
 
 **Shell quoting.** Every value you put into a command goes in single quotes:
 profile names, directories, class labels, anything the person typed. Write a
-single quote inside a value as `'\''`. Project names never reach a command:
+single quote inside a value as `'\''`. Single quotes stop `~` expanding, so
+write a directory as an absolute path. Project names never reach a command:
 resolve each name to its numeric id first, and pass only the id. For example
 the directory `/home/me/Work/Q3 $launch` for project 222 is
 `--route '222=/home/me/Work/Q3 $launch'`.
@@ -107,8 +110,8 @@ The CLI's configuration, its profiles and (when it uses files) its credential
 store also live under `$XDG_CONFIG_HOME/basecamp`, so pointing
 `XDG_CONFIG_HOME` somewhere else hides every profile.
 
-connect.json holds ids, a trust mode and directory paths. It holds no
-credential, so reading it is fine.
+connect.json holds ids, a trust mode and directory paths, and no credential.
+Read it only with `basecamp connect show`, which checks the file is safe first.
 
 ## connect.json
 
@@ -192,16 +195,20 @@ could look up:
    - `storage` `env`: the answer describes `BASECAMP_TOKEN`, not the profile.
      Have the person unset it and check again.
 3. **Who it is:** `basecamp me -P '<profile>' --json` (see Identity above).
-4. **Policy:** read the connect.json file. No file means the profile has never
-   been set up. To tell the person which projects are routed, look each id up
-   under the agent's profile (`basecamp projects show <id> -P '<profile>' --json`);
-   if that is refused, use the operator's profile. Say names, not ids.
-5. **Readiness,** once connect.json exists:
+4. **Policy:** `basecamp connect show -P '<profile>' --json` prints connect.json
+   as setup recorded it, changing nothing and making no request. It reads the
+   file through the same safety checks the connector uses, and refuses a
+   symlink, a file anyone else could have changed, or one that does not parse.
+   A `not_found` error means the profile has never been set up. **Never read
+   connect.json directly** (no `cat`, no file read): that skips those checks.
+   To tell the person which projects are routed, look each id up under the
+   agent's profile (`basecamp projects show <id> -P '<profile>' --json`); if that
+   is refused, use the operator's profile. Say names, not ids.
+5. **Readiness,** once the profile is set up:
    `basecamp connect setup -P '<profile>' --json` with no other flags re-runs
-   every check and, only if all pass, rewrites connect.json with
-   what it already holds. It changes nothing else, and it writes nothing when a
-   check fails. On a profile never set up it refuses, asking for an operator.
-   There is no separate dry-run or status flag; do not invent one.
+   every check and, only if all pass, rewrites connect.json with what it already
+   holds. It changes nothing else, and writes nothing when a check fails. There
+   is no separate dry-run flag; do not invent one.
 
 ## First-time setup, guided
 

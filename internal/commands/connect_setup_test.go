@@ -1234,3 +1234,106 @@ func TestConnectSetupClassifiesCancellationUnderTheLock(t *testing.T) {
 		})
 	}
 }
+
+func runConnectShowCmd(t *testing.T, app *appctx.App, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewConnectCmd()
+	cmd.SetArgs(append([]string{"show"}, args...))
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// Show prints what setup recorded, and changes nothing.
+func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	path := connectSetupPath(t, "agent")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	app := newConnectSetupApp(t, s, "agent")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	require.NoError(t, err, out)
+
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Path     string                    `json:"path"`
+			Profile  string                    `json:"profile"`
+			Agent    setup.Agent               `json:"agent"`
+			Trust    admission.Trust           `json:"trust"`
+			Projects map[int64]admission.Route `json:"projects"`
+			Deadline string                    `json:"deadline"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.True(t, envelope.OK)
+	assert.Equal(t, path, envelope.Data.Path)
+	assert.Equal(t, "agent", envelope.Data.Profile)
+	assert.Equal(t, setup.Agent{PersonID: setupAgentPerson, Kind: setup.KindAgent}, envelope.Data.Agent)
+	assert.Equal(t, setupOperatorPerson, envelope.Data.Trust.OperatorID)
+	assert.Contains(t, envelope.Data.Projects, setupProject)
+	assert.Equal(t, "45m0s", envelope.Data.Deadline)
+	assert.NotContains(t, buf.String(), fakeConnectSecret)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "show changes nothing")
+}
+
+func TestConnectShowOnAProfileNeverSetUpIsNotFound(t *testing.T) {
+	s := startConnectSetupServer(t)
+	app := connectSetupApp(t, s, "agent")
+	out, err := runConnectShowCmd(t, app)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr, out)
+	assert.Equal(t, output.CodeNotFound, apiErr.Code)
+	assert.Contains(t, apiErr.Hint, "basecamp connect setup -P agent")
+}
+
+// A connect.json that is a symlink, or that someone else could have written,
+// is refused before any of it is shown: show is not a way to print an
+// arbitrary local file.
+func TestConnectShowRefusesAnUnsafeConnectJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		plant func(t *testing.T, path string)
+	}{
+		{"a symlink to another file", func(t *testing.T, path string) {
+			// A well-formed policy, so only the refusal to follow the link
+			// stops it being shown.
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			target := filepath.Join(t.TempDir(), "elsewhere.json")
+			require.NoError(t, os.WriteFile(target, data, 0o600))
+			require.NoError(t, os.Remove(path))
+			require.NoError(t, os.Symlink(target, path))
+		}},
+		{"a file others can write", func(t *testing.T, path string) {
+			require.NoError(t, os.Chmod(path, 0o666))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			firstSetup(t, s)
+			tc.plant(t, connectSetupPath(t, "agent"))
+
+			app := newConnectSetupApp(t, s, "agent")
+			var buf bytes.Buffer
+			app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+			out, err := runConnectShowCmd(t, app)
+			var apiErr *output.Error
+			require.ErrorAs(t, err, &apiErr, out)
+			assert.Equal(t, output.CodeUsage, apiErr.Code)
+			assert.NotContains(t, out+buf.String()+apiErr.Message+apiErr.Hint, `"projects"`, "nothing of the file is shown")
+		})
+	}
+}
