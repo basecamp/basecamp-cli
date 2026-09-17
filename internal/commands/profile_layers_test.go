@@ -179,7 +179,8 @@ func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
 	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, s.srv.URL))
 	for _, global := range []string{
 		fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.srv.URL), // never closed
-		`{"profiles":[]}`, // a shape every writer refuses
+		`{"profiles":[]}`,   // a shape every writer refuses
+		`{"profiles":null}`, // and so is null
 	} {
 		writeGlobalConfigHere(t, global)
 		assertSetupReportsTheGlobalConfig(t, s)

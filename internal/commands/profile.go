@@ -636,8 +636,8 @@ func firstReplacedAfterGlobal(origin *config.ProfileOrigin) *config.ReplacedProf
 }
 
 // globalConfigUnusable reports whether the global config file exists but
-// cannot be read, cannot be parsed, or holds a "profiles" value that is not
-// an object. The loader skips such a file's profiles, so what it recorded
+// cannot be read, cannot be parsed, or holds a "profiles" value that is
+// present and not an object (null included). The loader skips such a file's profiles, so what it recorded
 // about where a profile comes from is not evidence — the entry that defines
 // it may be in the file that was skipped — and every writer refuses the
 // file, which is what the operator has to hear instead.
@@ -655,9 +655,11 @@ func globalConfigUnusable() bool {
 		return true
 	}
 	profiles, present := parsed["profiles"]
-	if !present || profiles == nil {
+	if !present {
 		return false
 	}
+	// A present value of any other shape, null included, is what
+	// globalProfilesMap refuses to rewrite.
 	_, isObject := profiles.(map[string]any)
 	return !isObject
 }
