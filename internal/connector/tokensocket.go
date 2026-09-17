@@ -328,9 +328,21 @@ func (s *TokenSocket) Close() {
 // An MCP host that restarts a stdio server re-runs its command, and the
 // bridge takes the token again on every start, so a socket that served once
 // and closed would leave a restarted server with no Basecamp tools and no
-// way to say so. Each handoff is a fresh accept with the same peer checks and
-// its own window; the count is what keeps a crash-looping host from spinning
-// on the socket forever.
+// way to say so.
+//
+// Five, deliberately, and not more: the socket only arms again once the
+// server that holds the token is gone, so the rate is already the rate at
+// which that server dies, and this bound is not about rate. It is about when
+// an attempt's socket ends. A server that has restarted five times in one
+// task is not going to settle down, and the connector should stop offering
+// its token rather than keep a socket armed for the rest of a long task —
+// every moment it is armed is a moment the agent's own tools, which run in
+// the worker's group, could ask for the token instead.
+//
+// Exhaustion is loud rather than quiet: no adapter tells its client that a
+// restarted MCP server came up without a token (card 23 measured both), so
+// the socket reports HandoffSpent and the connector warns against the
+// attempt. A person sees a worker whose tools stopped working and why.
 const MaxTokenHandoffs = 5
 
 // Result waits for what became of the socket's FIRST handoff. Every caller

@@ -68,6 +68,12 @@
 //     from a call — counts every time it happens, identical text included:
 //     two refusals of the same tool are two refusals, and nothing but an id
 //     can say they are one.
+//     The recorder itself deduplicates NOTHING: it records what it is told,
+//     once per call. Deciding what is one refusal is the driver's, which
+//     knows what it read — a tool call id where the agent gives one, and
+//     where a driver reads refusals from lines of output, the line AND its
+//     occurrence in that output, so two identical lines are two refusals and
+//     reading the same output twice records neither again (card 19).
 //  2. The dispatcher's recorder writes it to the attempt's row at once
 //     (connector.Ledger.RecordRefusal: attempts.refusals, incremented while
 //     the attempt is live). A write the ledger refuses is carried by the

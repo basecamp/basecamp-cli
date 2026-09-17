@@ -1520,3 +1520,23 @@ func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
 		}
 	}
 }
+
+// Card 19, through the coordinator: the shared recorder deduplicates
+// nothing. Two identical refusals are two refusals, and what counts as one is
+// the driver's question, not the ledger's.
+func TestTheRecorderCountsWhatItIsToldTwiceIfItIsToldTwice(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	r := &refusalRecorder{ledger: ledger, attemptID: l.AttemptID, log: slog.New(slog.DiscardHandler)}
+
+	same := driver.Refusal{Tool: "Bash"}
+	require.NoError(t, r.RecordRefusal(context.Background(), same))
+	require.NoError(t, r.RecordRefusal(context.Background(), same))
+	assert.Equal(t, 0, r.unrecorded())
+
+	var refusals int
+	require.NoError(t, ledger.db.QueryRowContext(context.Background(),
+		`SELECT refusals FROM attempts WHERE id = ?`, l.AttemptID).Scan(&refusals))
+	assert.Equal(t, 2, refusals, "identical refusals with no call id are distinct")
+}
