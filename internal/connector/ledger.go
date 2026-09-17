@@ -668,6 +668,21 @@ BEGIN
   SELECT RAISE(ABORT, 'a guard only goes from armed to canceled or fired');
 END;
 
+CREATE TRIGGER task_events_join_live_tasks_only
+BEFORE INSERT ON task_events
+WHEN EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id AND superseded_at IS NOT NULL)
+  OR NOT EXISTS (SELECT 1 FROM events WHERE id = NEW.event_id AND state IN ('admitted', 'queued', 'dispatched'))
+BEGIN
+  SELECT RAISE(ABORT, 'only work waiting for a worker joins a task, and only a live one');
+END;
+
+CREATE TRIGGER task_events_do_not_move
+BEFORE UPDATE OF task_id, event_id ON task_events
+WHEN NEW.task_id <> OLD.task_id OR NEW.event_id <> OLD.event_id
+BEGIN
+  SELECT RAISE(ABORT, 'a task event belongs to the task and event it was written for');
+END;
+
 CREATE TRIGGER task_events_delivery_moves_forward
 BEFORE UPDATE OF delivery ON task_events
 WHEN (CASE NEW.delivery WHEN 'admitted' THEN 0 WHEN 'exposed' THEN 1 WHEN 'delivered' THEN 2 ELSE 3 END)

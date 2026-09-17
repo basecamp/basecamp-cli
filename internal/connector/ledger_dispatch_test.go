@@ -1112,3 +1112,101 @@ func TestCreateTaskWritesNothingWhenItRefuses(t *testing.T) {
 	assert.Equal(t, tasksBefore, tasksAfter, "no task row")
 	assert.Equal(t, rowsBefore, rowsAfter, "no task event row")
 }
+
+// Exposure written at launch is the dispatcher's word, not a worker's pull.
+// Until the worker pulls, finished work is not served to it, and it can
+// neither acknowledge nor complete anything.
+func TestALaunchExposureIsNotAPull(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	exposeAtLaunch := func(id int64) {
+		t.Helper()
+		_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = ?`, id)
+		require.NoError(t, err)
+	}
+	exposeAtLaunch(1)
+	exposeAtLaunch(2)
+
+	_, err := f.d.Ack(ctx, 1, nil)
+	assert.ErrorIs(t, err, ErrNotExposed, "nothing was pulled yet")
+	_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	assert.ErrorIs(t, err, ErrNotExposed)
+
+	// Settled before the worker ever pulled it: not served, and not the
+	// earliest either.
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+	_, _, err = f.d.Get(ctx, 1)
+	assert.ErrorIs(t, err, ErrNotDispatchable)
+	got, ok, err := f.d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), got.EventID)
+
+	// Event 2 the worker did pull, just now. Settled after that, it is served
+	// again to the worker that has it, and its report is taken.
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
+	again, ok, err := f.d.Get(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), again.EventID)
+	_, err = f.d.Ack(ctx, 2, nil)
+	require.NoError(t, err)
+}
+
+// A task is live until it is superseded, whatever became of its records, so a
+// conversation whose only event was settled before the worker pulled it is
+// still busy.
+func TestALiveTaskKeepsItsConversationBusy(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
+	seenRecord(t, f.ledger, 3)
+	_, err := f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:10304028989"))
+	require.NoError(t, err)
+
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	require.ErrorIs(t, err, ErrConversationBusy, "the first task is still live")
+
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	require.NoError(t, err)
+}
+
+// A task is made of work waiting for a worker, on a live task, and its rows
+// stay where they were written — the database says so too.
+func TestTheDatabaseRefusesAttachingWorkToTheWrongTask(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	seenRecord(t, f.ledger, 3)
+
+	_, err := f.ledger.db.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id) VALUES (?, 3)`, f.grant.ID)
+	require.Error(t, err, "a seen record is not work waiting for a worker")
+
+	other, err := f.ledger.CreateTask(ctx, []int64{})
+	require.Error(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:3"))
+	require.NoError(t, err)
+	_, err = f.ledger.db.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id) VALUES (?, 3)`, f.grant.ID)
+	require.Error(t, err, "a superseded task takes no new work")
+	_ = other
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET task_id = 99 WHERE event_id = 1`)
+	require.Error(t, err, "a task event does not move between tasks")
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET event_id = 3 WHERE event_id = 1`)
+	require.Error(t, err, "nor between events")
+}
+
+// An instruction is content, not an empty blob: a record with one would be
+// dispatched and never servable.
+func TestCreateTaskRefusesAnEmptyInstruction(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE events SET snapshot = CAST('' AS BLOB) WHERE id = 1`)
+	require.NoError(t, err)
+
+	_, err = f.ledger.CreateTask(ctx, []int64{1})
+	require.ErrorIs(t, err, ErrNotDispatchable)
+}

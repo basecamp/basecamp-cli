@@ -116,7 +116,8 @@ import (
 //
 //  1. One live task per event: task_events_one_live_task.
 //  2. One task per conversation: an event joins a task only if every
-//     dispatched record on its conversation joins the same task (createTask).
+//     dispatched record on its conversation joins the same task, and no live
+//     task carries any of that conversation's events (createTask).
 //  3. The token is valid only while its task is live, checked inside every
 //     worker call's own transaction.
 //  4. Nothing leaves dispatched while a worker may still act: a record with a
@@ -131,7 +132,9 @@ import (
 //  5. A worker acts only on its own task's rows, reports only what it was
 //     handed, and a reported outcome stands.
 //  6. A task is made only of instructions a worker can pull, and finished
-//     work is never handed out for the first time.
+//     work is never handed out for the first time: a completed record is
+//     served, acknowledged and completed only by the worker that pulled it
+//     (pulled_at), never on the strength of an exposure written at launch.
 //  7. Superseding retires the task's rows and returns only what it never
 //     exposed to admitted; what a worker was handed stays dispatched (4) and
 //     waits for its outcome or a redispatch, which supersedes and creates in
@@ -261,7 +264,7 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 			acknowledge, hasInstruction int
 			state                       string
 		)
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL, state FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state); {
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL AND length(snapshot) > 0, state FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
@@ -307,11 +310,18 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	}
 	var busy int64
 	//nolint:gosec // G202: placeholders, not values
+	//
+	// Busy is a record still dispatched on the conversation, or one a live
+	// task still carries: a task stays live until it is superseded, whatever
+	// became of its records, and two live tasks on one conversation would be
+	// two workers on it.
 	switch err := tx.QueryRowContext(ctx, `
 SELECT other.id FROM events other
 JOIN events mine ON mine.conversation_key = other.conversation_key
 WHERE mine.id IN (`+placeholders+`) AND mine.conversation_key <> ''
-  AND other.state = 'dispatched' AND other.id NOT IN (`+placeholders+`)
+  AND other.id NOT IN (`+placeholders+`)
+  AND (other.state = 'dispatched'
+       OR EXISTS (SELECT 1 FROM task_events WHERE event_id = other.id AND retired_at IS NULL))
 LIMIT 1`, args...).Scan(&busy); {
 	case err == nil:
 		return TaskGrant{}, fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", busy, ErrConversationBusy)
@@ -628,7 +638,7 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 	if err != nil {
 		return Instruction{}, false, err
 	}
-	if !servable(record, te.delivery) {
+	if !servable(record, te.pulled) {
 		return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 	}
 
@@ -712,17 +722,18 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 }
 
 // servable is whether an event on a task is handed to its worker: its record
-// is dispatched, or completed after this worker was exposed to it — finished
-// work is never handed out for the first time — and it still has its
-// instruction. servableSQL is the same rule over task_events te and events e,
+// is dispatched, or completed after this worker pulled it — finished work is
+// never handed out for the first time — and it still has its instruction. servableSQL is the same rule over task_events te and events e,
 // for the earliest-event query; the two are kept side by side so they cannot
 // drift.
-func servable(record Record, delivery Delivery) bool {
-	state := record.State == StateDispatched || (record.State == StateCompleted && delivery != DeliveryAdmitted)
+func servable(record Record, pulled bool) bool {
+	// Exposure at launch is the dispatcher's write, not a worker's pull, so
+	// finished work is served again only to a worker that already had it.
+	state := record.State == StateDispatched || (record.State == StateCompleted && pulled)
 	return state && !record.ContentDropped && len(record.Decision.Snapshot) > 0
 }
 
-const servableSQL = `(e.state = 'dispatched' OR (e.state = 'completed' AND te.delivery <> 'admitted'))
+const servableSQL = `(e.state = 'dispatched' OR (e.state = 'completed' AND te.pulled_at IS NOT NULL))
   AND e.content_dropped = 0 AND e.snapshot IS NOT NULL AND length(e.snapshot) > 0`
 
 // Ack records the worker's acknowledgement: delivery moves to delivered, and
@@ -819,7 +830,9 @@ func (d *TaskDispatch) report(ctx context.Context, eventID int64, apply func(con
 	if err != nil {
 		return Receipt{}, err
 	}
-	if te.delivery == DeliveryAdmitted {
+	if !te.pulled {
+		// Exposure at launch is not a worker having the instruction: the
+		// pull is. A worker reports only what it pulled.
 		return Receipt{}, fmt.Errorf("connector: event %d: %w", eventID, ErrNotExposed)
 	}
 	wrote, err := apply(ctx, tx, taskID, te)

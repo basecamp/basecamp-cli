@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,6 +31,63 @@ var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{} }
 // worker's task token. It is not a way in: a token found there is removed and
 // the server refuses to start, so nothing is led to hand it over that way.
 const connectTaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
+
+// takenTaskToken is the token TakeConnectTaskToken read, and whether it ran.
+// The descriptor is read before the command tree runs at all, so nothing this
+// process starts on the way — a config hardening pass, an update check, a
+// keychain helper — can inherit it.
+var takenTaskToken struct {
+	token string
+	err   error
+	taken bool
+}
+
+// TakeConnectTaskToken reads the connector task token from the descriptor
+// args name, and closes it, before anything else in the process runs.
+//
+// Cobra runs the root command's persistent hooks before any command's own
+// RunE, and those hooks load configuration, tighten directories and may start
+// a background update check. A descriptor still open then is a descriptor a
+// child could inherit, so the read happens ahead of all of it, from the raw
+// arguments. What it found — the token, or the refusal — is the mcp command's
+// to use when it runs.
+func TakeConnectTaskToken(args []string) {
+	fd, ok := connectTokenFDArg(args)
+	if !ok {
+		return
+	}
+	takenTaskToken.taken = true
+	takenTaskToken.token, takenTaskToken.err = readTaskToken(fd)
+}
+
+// connectTokenFDArg finds --connect-token-fd in the raw arguments of an mcp
+// command. Anything malformed is left to Cobra and the command to report.
+func connectTokenFDArg(args []string) (int, bool) {
+	if !slices.Contains(args, "mcp") {
+		return 0, false
+	}
+	for i, arg := range args {
+		value, found := strings.CutPrefix(arg, "--connect-token-fd")
+		switch {
+		case !found:
+			continue
+		case strings.HasPrefix(value, "="):
+			value = value[1:]
+		case value != "":
+			continue // a longer flag that merely starts the same way
+		case i+1 < len(args):
+			value = args[i+1]
+		default:
+			return 0, false
+		}
+		fd, err := strconv.Atoi(value)
+		if err != nil {
+			return 0, false
+		}
+		return fd, true
+	}
+	return 0, false
+}
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is
 // 43 characters; anything near this is not one.
@@ -93,7 +153,7 @@ func NewMCPCmd() *cobra.Command {
 					// the token or the ledger is touched.
 					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
 				}
-				token, err := readTaskToken(connectTokenFD)
+				token, err := connectTaskToken(connectTokenFD)
 				if err != nil {
 					return err
 				}
@@ -174,6 +234,16 @@ func stateDirHint(refusal *connector.StateDirError) string {
 // agent's id comes from, and a ledger for another account is refused rather
 // than served. The ledger must already exist — a worker's server reads the
 // connector's ledger, it never starts one.
+// connectTaskToken is what TakeConnectTaskToken read before the command tree
+// ran, or — when nothing did, as in a test that builds this command by hand —
+// the read done here.
+func connectTaskToken(fd int) (string, error) {
+	if takenTaskToken.taken {
+		return takenTaskToken.token, takenTaskToken.err
+	}
+	return readTaskToken(fd)
+}
+
 func openConnectDispatch(ctx context.Context, stateDir, accountID, token string) (*connector.TaskDispatch, func(), error) {
 
 	dir, agentID, err := connector.ResolveStateDir(stateDir, accountID)

@@ -303,6 +303,12 @@ func postRunNoticesEnabled(app *appctx.App) bool {
 
 // Execute runs the root command.
 func Execute() {
+	// Before anything else: a connector-started worker's task token arrives
+	// on an inherited descriptor, and the root command's persistent hooks —
+	// config hardening, profile loading, the update check — run before any
+	// command's own RunE and may start a process that would inherit it.
+	commands.TakeConnectTaskToken(os.Args[1:])
+
 	cmd := NewRootCmd()
 
 	// Add subcommands

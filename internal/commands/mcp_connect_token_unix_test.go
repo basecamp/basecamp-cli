@@ -187,3 +187,60 @@ func TestMCPCommandDoesNotWaitOnAWriteEndLeftOpen(t *testing.T) {
 	assert.Contains(t, err.Error(), "no task token arrived")
 	assert.Less(t, time.Since(started), 5*time.Second)
 }
+
+// The token is read before the command tree runs at all: Cobra's root
+// persistent hooks load config, tighten directories and may start an update
+// check, and a descriptor still open then is one a child could inherit.
+func TestTakeConnectTaskTokenReadsBeforeTheCommandTree(t *testing.T) {
+	fd := tokenPipe(t, "a-task-token\n")
+	dev, ino, _ := fdIdentity(t, fd)
+	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
+
+	TakeConnectTaskToken([]string{"mcp", "--connect-state", "/somewhere", "--connect-token-fd", strconv.Itoa(fd)})
+
+	require.True(t, takenTaskToken.taken)
+	require.NoError(t, takenTaskToken.err)
+	assert.Equal(t, "a-task-token", takenTaskToken.token)
+	if nowDev, nowIno, open := fdIdentity(t, fd); open {
+		assert.False(t, nowDev == dev && nowIno == ino, "the descriptor is closed already")
+	}
+}
+
+func TestTakeConnectTaskTokenIgnoresEverythingElse(t *testing.T) {
+	t.Cleanup(func() { takenTaskToken.taken = false })
+	for name, args := range map[string][]string{
+		"another command":             {"projects", "list", "--connect-token-fd", "3"},
+		"no flag":                     {"mcp", "--read-only"},
+		"a flag that starts the same": {"mcp", "--connect-token-fdx", "3"},
+		"not a number":                {"mcp", "--connect-token-fd", "three"},
+		"nothing after it":            {"mcp", "--connect-token-fd"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			takenTaskToken.taken = false
+			TakeConnectTaskToken(args)
+			assert.False(t, takenTaskToken.taken, "left to Cobra and the command to report")
+		})
+	}
+
+	// Both spellings of the flag are read.
+	fd := tokenPipe(t, "token\n")
+	takenTaskToken.taken = false
+	TakeConnectTaskToken([]string{"mcp", "--connect-token-fd=" + strconv.Itoa(fd)})
+	require.True(t, takenTaskToken.taken)
+	assert.Equal(t, "token", takenTaskToken.token)
+}
+
+// The command serves from the token taken before the tree ran: by then the
+// descriptor is closed, so re-reading it would fail.
+func TestTheMCPCommandUsesTheTokenTakenAtStartup(t *testing.T) {
+	app, dir, grant, _ := connectMCPApp(t, "999", unusedUpstream(t).URL)
+	fd := tokenPipe(t, grant.Token+"\n")
+	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
+
+	TakeConnectTaskToken([]string{"mcp", "--connect-state", dir, "--connect-token-fd", strconv.Itoa(fd)})
+	require.True(t, takenTaskToken.taken)
+	require.NoError(t, takenTaskToken.err)
+
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir, "--connect-token-fd", strconv.Itoa(fd))
+	assert.Contains(t, toolNames(t, session), "basecamp_connect")
+}
