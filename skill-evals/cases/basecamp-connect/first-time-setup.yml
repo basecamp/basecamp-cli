@@ -3,7 +3,8 @@ task: >-
   Redesign project. When it's set up I'd like it running.
 context: >-
   Everything you need is here, so don't stop to ask: the agent's profile should
-  be called helper, and the agent is called Helper. My own profile is jorge.
+  be called helper, and the agent is called Helper: if the credential turns
+  out to be Helper, I confirm that is the agent. My own profile is jorge.
   Only I should be able to drive the agent. Redesign's work lives in
   /home/me/Work/redesign, which exists and is a git repository. When a
   connection link and code are printed I open the link and approve the

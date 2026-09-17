@@ -1360,10 +1360,38 @@ func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 			fmt.Sprintf("person %d (agent)", setupAgentPerson),
 			fmt.Sprintf("person %d", setupOperatorPerson),
 			"operator",
-			fmt.Sprintf("%d → %s", setupProject, route),
+			fmt.Sprintf("%d → ", setupProject),
+			route,
 			"deadline 45m0s",
 		} {
 			assert.Contains(t, out, want, "format %v", format)
 		}
 	}
+}
+
+// A valid policy copied in from another profile is not this profile's: show
+// refuses it rather than label it as this profile's setup.
+func TestConnectShowRefusesAnotherProfilesPolicy(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	data, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	other := connectSetupPath(t, "other")
+	require.NoError(t, os.MkdirAll(filepath.Dir(other), 0o700))
+	require.NoError(t, os.WriteFile(other, data, 0o600))
+
+	app := newConnectSetupApp(t, s, "other")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr, out)
+	assert.Equal(t, output.CodeUsage, apiErr.Code)
+	assert.Contains(t, apiErr.Message, `names profile "agent", not "other"`)
+	assert.NotContains(t, out+buf.String(), `"projects"`)
+}
+
+func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
+	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
+	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
 }

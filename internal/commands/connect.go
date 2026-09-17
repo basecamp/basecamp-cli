@@ -100,6 +100,12 @@ func runConnectShow(cmd *cobra.Command, app *appctx.App) error {
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
 			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
 	}
+	if f.Profile != name {
+		// A policy copied from another profile's directory is not this
+		// profile's, however valid it is on its own: setup refuses it too.
+		return output.ErrUsageHint(fmt.Sprintf("%s names profile %q, not %q", richtext.SanitizeSingleLine(path), f.Profile, name),
+			"Nothing of it was shown. Remove "+richtext.SanitizeSingleLine(path)+" and run setup again for this profile.")
+	}
 
 	if format := app.Output.EffectiveFormat(); format == output.FormatStyled || format == output.FormatMarkdown {
 		// The generic object renderer drops nested maps, which is where the
@@ -162,7 +168,13 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 	item("Projects", strconv.Itoa(len(ids))+" routed")
 	for _, id := range ids {
 		r := f.Projects[id]
-		line := fmt.Sprintf("%d → %s", id, richtext.SanitizeSingleLine(r.Path))
+		// The path exactly, spaces and all: quoted for a terminal, a code
+		// span for Markdown, so nothing in it renders as formatting.
+		shown := strconv.Quote(r.Path)
+		if markdown {
+			shown = markdownCode(r.Path)
+		}
+		line := fmt.Sprintf("%d → %s", id, shown)
 		if r.Class != "" {
 			line += ", class " + r.Class
 		}
@@ -176,6 +188,22 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 		}
 	}
 	return b.String()
+}
+
+// markdownCode is s as a Markdown code span, fenced with one more backtick
+// than the longest run inside it so no backtick in s can close it.
+func markdownCode(s string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	return fence + " " + s + " " + fence
 }
 
 // connectShowResult is show's data: where the file is, and what it holds.

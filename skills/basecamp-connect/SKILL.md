@@ -82,12 +82,19 @@ agent the person described, stop: do not run setup and do not reconnect. Tell
 the person who the credential is and let them decide. After setup, check
 `data.agent_person_id` matches `person.id` when `me` reported one.
 
-**Shell quoting.** Every value you put into a command goes in single quotes:
-profile names, directories, class labels, anything the person typed. Write a
-single quote inside a value as `'\''`. Single quotes stop `~` expanding, so
-write a directory as an absolute path. Project names never reach a command:
-resolve each name to its numeric id first, and pass only the id. For example
-the directory `/home/me/Work/Q3 $launch` for project 222 is
+**Shell quoting.** Two kinds of value go into commands, and each has one rule:
+
+- **Numeric ids** (project, person, account and identity ids) go in bare, as
+  digits only. Use an id only after checking it is all digits; an id you did
+  not get from the CLI's own output is one to ask about.
+- **Every other value** goes in single quotes: profile names, directories, class
+  labels, anything the person typed. Write a single quote inside a value as
+  `'\''`. Single quotes stop `~` expanding, so write a directory as an absolute
+  path. Fixed words from this skill (`operator`, `spawn`, `90m`) need no quotes.
+
+Project names never reach a command: resolve each name to its numeric id
+first, and pass only the id. For example the directory
+`/home/me/Work/Q3 $launch` for project 222 is
 `--route '222=/home/me/Work/Q3 $launch'`.
 
 **Interactive logins.** `basecamp auth agent connect`, `basecamp auth login` and
@@ -198,7 +205,8 @@ could look up:
 4. **Policy:** `basecamp connect show -P '<profile>' --json` prints connect.json
    as setup recorded it, changing nothing and making no request. It reads the
    file through the same safety checks the connector uses, and refuses a
-   symlink, a file anyone else could have changed, or one that does not parse.
+   symlink, a file anyone else could have changed, one that does not parse, or
+   one that names another profile.
    A `not_found` error means the profile has never been set up. **Never read
    connect.json directly** (no `cat`, no file read): that skips those checks.
    To tell the person which projects are routed, look each id up under the
@@ -268,7 +276,7 @@ pass `--allow <id>` for each.
 
 **5. Confirm, then run setup.** Say back in plain words: the agent, the
 operator, the trust mode, and each project name with its directory. Then run,
-with every value single-quoted:
+quoting values by the Shell quoting rule:
 
 ```bash
 basecamp connect setup -P '<profile>' --operator-profile '<operator-profile>' \
@@ -285,7 +293,7 @@ this skill yet.
 ## Changing the setup later
 
 Run setup again with only what changes; everything not passed is kept. Look
-project names up the same way as on first setup, and quote every value.
+project names up the same way as on first setup, and quote values by the Shell quoting rule.
 
 | To | Run |
 |----|-----|
