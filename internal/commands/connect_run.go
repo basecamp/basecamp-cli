@@ -49,7 +49,7 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn)")
-	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until `basecamp connect release`, and earlier records wait for review")
+	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
 }
 
 // connectStateHome is the directory holding the connector's state root, from

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrDecisionRefused is a redispatch or discard the record's state does not
@@ -121,9 +122,13 @@ type RedispatchResult struct {
 
 // LiveWorker is an attempt's recorded worker process.
 type LiveWorker struct {
-	AttemptID string         `json:"attempt_id"`
-	TaskID    int64          `json:"task_id"`
-	Process   AttemptProcess `json:"process"`
+	AttemptID string `json:"attempt_id"`
+	TaskID    int64  `json:"task_id"`
+	// PID, PGID and StartedAt are the recorded process: with the start time,
+	// the pid is an identity (driver.OwnsWorker).
+	PID       int       `json:"pid"`
+	PGID      int       `json:"pgid"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // Redispatch authorizes a record to run again, or for the first time, and
@@ -202,7 +207,8 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 			out.SupersededTaskID = task.taskID
 		}
 		if task.liveAttempt != "" {
-			out.Worker = &LiveWorker{AttemptID: task.liveAttempt, TaskID: task.taskID, Process: task.process}
+			out.Worker = &LiveWorker{AttemptID: task.liveAttempt, TaskID: task.taskID,
+				PID: task.process.PID, PGID: task.process.PGID, StartedAt: task.process.StartedAt}
 		}
 		to := StateCompleted
 		if task.ended {

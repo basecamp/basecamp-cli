@@ -435,14 +435,14 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	report := connectRedispatchReport{RedispatchResult: res}
 	if res.Worker != nil {
 		stop := stopReplacedWorker(driver.Process{
-			PID: res.Worker.Process.PID, PGID: res.Worker.Process.PGID, StartedAt: res.Worker.Process.StartedAt,
+			PID: res.Worker.PID, PGID: res.Worker.PGID, StartedAt: res.Worker.StartedAt,
 		}, driver.DefaultGrace)
 		report.WorkerSignaled, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
 	}
 	if res.Rerun {
 		verdict, reason, err := rerunPrerequisite(ctx, p, ledger, id)
 		if err != nil {
-			report.RerunSkipped = err.Error()
+			report.RerunSkipped = errorMessage(err)
 		} else {
 			report.Verdict, report.VerdictNote = verdict, reason
 		}

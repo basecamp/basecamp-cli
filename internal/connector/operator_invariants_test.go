@@ -135,7 +135,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	assert.False(t, got.Admitted)
 	assert.Equal(t, launch.TaskID, got.SupersededTaskID)
 	require.NotNil(t, got.Worker, "the live worker is handed back to be terminated")
-	assert.Equal(t, 4242, got.Worker.Process.PGID)
+	assert.Equal(t, 4242, got.Worker.PGID)
 	assert.Equal(t, StateCompleted, stateOf(t, l, 1))
 
 	_, _, err = d.Get(ctx, 2)
