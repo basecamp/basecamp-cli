@@ -51,22 +51,33 @@ func ParseReconciliation(data []byte) (Reconciliation, error) {
 	if rest := bytes.TrimSpace(data[dec.InputOffset():]); len(rest) > 0 {
 		return Reconciliation{}, errors.New("connector: reconciliation file: more than one JSON value")
 	}
+	if err := r.Validate(); err != nil {
+		return Reconciliation{}, err
+	}
+	return r, nil
+}
+
+// Validate refuses a reconciliation this build cannot apply: another version,
+// an entry without an event, a decision that is neither done nor held, or one
+// event decided twice. Import checks it too, so a caller that built the value
+// itself meets the same rules as one that parsed a file.
+func (r Reconciliation) Validate() error {
 	if r.Version != ReconciliationVersion {
-		return Reconciliation{}, fmt.Errorf("connector: reconciliation file version %d; this build reads %d", r.Version, ReconciliationVersion)
+		return fmt.Errorf("connector: reconciliation version %d; this build reads %d", r.Version, ReconciliationVersion)
 	}
 	seen := make(map[int64]bool, len(r.Entries))
 	for i, e := range r.Entries {
 		switch {
 		case e.EventID <= 0:
-			return Reconciliation{}, fmt.Errorf("connector: reconciliation entry %d names no event id", i)
+			return fmt.Errorf("connector: reconciliation entry %d names no event id", i)
 		case e.Decision != DecisionDone && e.Decision != DecisionHeld:
-			return Reconciliation{}, fmt.Errorf("connector: reconciliation entry for event %d has decision %q; use done or held", e.EventID, e.Decision)
+			return fmt.Errorf("connector: reconciliation entry for event %d has decision %q; use done or held", e.EventID, e.Decision)
 		case seen[e.EventID]:
-			return Reconciliation{}, fmt.Errorf("connector: reconciliation file names event %d twice", e.EventID)
+			return fmt.Errorf("connector: reconciliation names event %d twice", e.EventID)
 		}
 		seen[e.EventID] = true
 	}
-	return r, nil
+	return nil
 }
 
 // ImportResult is what an import did.
@@ -95,6 +106,9 @@ var importStep = func(string) {}
 func (l *Ledger) Import(ctx context.Context, r Reconciliation, by string) (ImportResult, error) {
 	if strings.TrimSpace(by) == "" {
 		return ImportResult{}, errors.New("connector: an import records who applied it")
+	}
+	if err := r.Validate(); err != nil {
+		return ImportResult{}, err
 	}
 	var out ImportResult
 	err := retryBusy(func() error {

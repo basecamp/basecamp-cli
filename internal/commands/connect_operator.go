@@ -199,9 +199,10 @@ type connectStatusReport struct {
 type connectLockHolder struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
-	// PIDExists is kill(pid, 0): a process with that pid is there, not
-	// necessarily that connector.
-	PIDExists bool `json:"pid_exists"`
+	// PID is present, absent or unknown — signal 0's answer, where the
+	// platform can give one. Present says a process has that pid, not that it
+	// is that connector.
+	PIDStatus string `json:"pid_status"`
 }
 
 func runConnectStatus(cmd *cobra.Command, shadow bool) error {
@@ -234,7 +235,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
-		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDExists: processAlive(holder.PID)}
+		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID)}
 	}
 	if p.app.Output.EffectiveFormat() == output.FormatStyled {
 		renderConnectStatus(cmd.OutOrStdout(), report)
@@ -266,14 +267,17 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	fmt.Fprintf(w, "%s\n\n", title)
 
 	switch {
-	case r.LockHolder != nil && r.LockHolder.PIDExists:
+	case r.LockHolder == nil:
+		fmt.Fprintf(w, "  Lock file      none beside the ledger\n")
+	case r.LockHolder.PIDStatus == pidPresent:
 		fmt.Fprintf(w, "  Lock file      pid %d since %s, and a process with that pid is there (diagnostic: status takes no lock)\n",
 			r.LockHolder.PID, clean(r.LockHolder.StartedAt))
-	case r.LockHolder != nil:
+	case r.LockHolder.PIDStatus == pidAbsent:
 		fmt.Fprintf(w, "  Lock file      pid %d since %s, and no process has that pid (left behind by a crash, or ended)\n",
 			r.LockHolder.PID, clean(r.LockHolder.StartedAt))
 	default:
-		fmt.Fprintf(w, "  Lock file      none beside the ledger\n")
+		fmt.Fprintf(w, "  Lock file      pid %d since %s; whether that process exists cannot be said here\n",
+			r.LockHolder.PID, clean(r.LockHolder.StartedAt))
 	}
 	if s.Connection != nil {
 		fmt.Fprintf(w, "  Last run       %s at %s", clean(s.Connection.State), stamp(s.Connection.ChangedAt))
@@ -472,7 +476,7 @@ func redispatchSummary(r connectRedispatchReport) string {
 			s += " (" + r.VerdictNote + ")"
 		}
 	case r.RerunSkipped != "":
-		s = fmt.Sprintf("Event %d authorized and still blocked; its prerequisite did not run (%s). Run redispatch again to retry it", r.EventID, r.RerunSkipped)
+		s = fmt.Sprintf("Event %d authorized; its prerequisite did not run here (%s). Read basecamp connect status before redispatching it again: something else may have decided it", r.EventID, r.RerunSkipped)
 	default:
 		s = fmt.Sprintf("Event %d authorized", r.EventID)
 	}

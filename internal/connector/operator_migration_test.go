@@ -403,3 +403,27 @@ func TestPromoteRunAgainFinishesAMoveWithoutItsShadow(t *testing.T) {
 	assert.True(t, got.Already)
 	assertHeld(t, filepath.Join(stateDir, LedgerFile))
 }
+
+// Import validates the reconciliation it is handed, not only the file it was
+// parsed from: a caller that built the value itself meets the same rules.
+func TestImportValidatesWhatItIsHanded(t *testing.T) {
+	ctx := context.Background()
+	for name, r := range map[string]Reconciliation{
+		"another version":  {Version: ReconciliationVersion + 1},
+		"unknown decision": {Version: ReconciliationVersion, Entries: []ReconciliationEntry{{EventID: 1, Decision: "maybe"}}},
+		"no event":         {Version: ReconciliationVersion, Entries: []ReconciliationEntry{{Decision: DecisionDone}}},
+		"one event twice":  {Version: ReconciliationVersion, Entries: []ReconciliationEntry{{EventID: 1, Decision: DecisionDone}, {EventID: 1, Decision: DecisionHeld}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := newTestLedger(t)
+			opAdmit(t, l, 1, "recording:1")
+
+			_, err := l.Import(ctx, r, opBy)
+			require.Error(t, err)
+			assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "nothing was tagged or closed")
+			var tagged int
+			require.NoError(t, l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE review = 1`).Scan(&tagged))
+			assert.Zero(t, tagged)
+		})
+	}
+}
