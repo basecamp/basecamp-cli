@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
@@ -68,7 +69,31 @@ type Worktrees struct {
 	env    []string
 	path   func(root, repository, name string) string
 	log    *slog.Logger
+	now    func() time.Time
+
+	// Off leaves new tasks in their route; see WorktreesOptions.Off.
+	off bool
+
+	mu       sync.Mutex
+	failures map[int64]prepareFailure
 }
+
+// prepareFailure is an event whose worktree could not be made, and when to
+// try again.
+type prepareFailure struct {
+	count int
+	until time.Time
+}
+
+// Prepare's backoff after a failure: doubling from the first, capped.
+const (
+	PrepareBackoff    = time.Minute
+	PrepareBackoffMax = 30 * time.Minute
+)
+
+// ErrPrepareBackoff is a Prepare for an event whose last one failed too
+// recently to try again.
+var ErrPrepareBackoff = errors.New("the last worktree for this event failed; waiting before trying again")
 
 // WorktreesOptions configures Worktrees.
 type WorktreesOptions struct {
@@ -84,6 +109,10 @@ type WorktreesOptions struct {
 	// Path places a task's worktree; DefaultWorktreePath when nil.
 	Path   func(root, repository, name string) string
 	Logger *slog.Logger
+	// Off gives new tasks no worktree: they work in the route itself. The
+	// worktrees made while it was on are still settled and recovered, so
+	// switching worktrees off never strands one.
+	Off bool
 }
 
 var (
@@ -119,7 +148,10 @@ func NewWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 		"GIT_OPTIONAL_LOCKS":  "0",
 		"LC_ALL":              "C",
 	})
-	return &Worktrees{ledger: opts.Ledger, root: opts.Root, git: opts.Git, env: env, path: opts.Path, log: opts.Logger}, nil
+	return &Worktrees{
+		ledger: opts.Ledger, root: opts.Root, git: opts.Git, env: env, path: opts.Path, log: opts.Logger,
+		now: time.Now, off: opts.Off, failures: map[int64]prepareFailure{},
+	}, nil
 }
 
 // DefaultWorktreePath places a worktree under the connector's state
@@ -146,11 +178,39 @@ func safeName(s string) string {
 }
 
 // PerTaskDirs implements PerTaskWorkspaces.
-func (w *Worktrees) PerTaskDirs() bool { return true }
+func (w *Worktrees) PerTaskDirs() bool { return !w.off }
 
 // Prepare implements Workspaces: a new worktree on a new task branch at the
 // route's HEAD, and the route's place inside it.
+//
+// A failure is not retried at every dispatch tick: the event waits
+// PrepareBackoff, doubling up to PrepareBackoffMax, so a repository that
+// cannot take a worktree does not fill the disk or the ledger.
 func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
+	if w.off {
+		return route, nil
+	}
+	w.mu.Lock()
+	failure, failed := w.failures[originatingEventID]
+	w.mu.Unlock()
+	if failed && w.now().Before(failure.until) {
+		return "", fmt.Errorf("connector: event %d: %w", originatingEventID, ErrPrepareBackoff)
+	}
+	workDir, err := w.prepare(ctx, route, originatingEventID)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err != nil {
+		failure.count++
+		delay := PrepareBackoff << min(failure.count-1, 10)
+		failure.until = w.now().Add(min(delay, PrepareBackoffMax))
+		w.failures[originatingEventID] = failure
+		return "", err
+	}
+	delete(w.failures, originatingEventID)
+	return workDir, nil
+}
+
+func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
 	if !filepath.IsAbs(route) {
 		return "", fmt.Errorf("connector: route %q is not absolute", route)
 	}

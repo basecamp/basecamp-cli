@@ -337,6 +337,59 @@ func TestTheRepositorysHooksDoNotRun(t *testing.T) {
 	assert.False(t, exists(marker))
 }
 
+// A worktree that cannot be made is not attempted again at every dispatch
+// tick: each failure leaves a row and maybe a partial checkout.
+func TestAFailedPrepareBacksOff(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
+	clock := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	h.wt.now = func() time.Time { return clock }
+	route := filepath.Join(h.repo, "app")
+	ctx := context.Background()
+
+	_, err := h.wt.Prepare(ctx, route, 70)
+	require.Error(t, err)
+	_, err = h.wt.Prepare(ctx, route, 70)
+	require.ErrorIs(t, err, ErrPrepareBackoff)
+	rows, err := h.ledger.Worktrees(ctx)
+	require.NoError(t, err)
+	assert.Len(t, rows, 1, "the second call made nothing")
+
+	clock = clock.Add(PrepareBackoff)
+	_, err = h.wt.Prepare(ctx, route, 70)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrPrepareBackoff)
+	clock = clock.Add(PrepareBackoff)
+	_, err = h.wt.Prepare(ctx, route, 70)
+	require.ErrorIs(t, err, ErrPrepareBackoff, "the wait doubles")
+
+	h.wt = h.worktrees("")
+	h.wt.now = func() time.Time { return clock }
+	_, err = h.wt.Prepare(ctx, route, 71)
+	require.NoError(t, err, "another event is not held back")
+}
+
+// With worktrees off, a new task works in its route, and a worktree made
+// while they were on is still recovered.
+func TestWorktreesOffStillRecoversWhatWasMade(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, _ := h.prepare(72)
+	h.write(workDir, "wip.txt", "wip\n")
+
+	off, err := NewWorktrees(WorktreesOptions{Ledger: h.ledger, Root: h.root, Lookup: h.lookup, Off: true})
+	require.NoError(t, err)
+	assert.False(t, off.PerTaskDirs())
+	route := filepath.Join(h.repo, "app")
+	dir, err := off.Prepare(ctx, route, 73)
+	require.NoError(t, err)
+	assert.Equal(t, route, dir)
+	require.NoError(t, off.Finish(ctx, route, route))
+
+	require.NoError(t, off.Recover(ctx))
+	assert.Equal(t, RetainedDirty, h.row(workDir).RetainedReason)
+}
+
 // Invariant 6: a content filter the repository's configuration defines does
 // not run when the connector checks out or inspects a worktree.
 func TestConfiguredContentFiltersDoNotRun(t *testing.T) {

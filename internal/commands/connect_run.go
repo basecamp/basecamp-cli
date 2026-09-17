@@ -274,16 +274,15 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
-		var workspaces connector.Workspaces
-		if file.Worktrees {
-			worktreesRoot, err := ensurePrivateChain(stateDir, connectWorktreesDir)
-			if err != nil {
-				return err
-			}
-			workspaces, err = connector.NewWorktrees(connector.WorktreesOptions{Ledger: ledger, Root: worktreesRoot, Logger: logger})
-			if err != nil {
-				return err
-			}
+		// Built with worktrees off too, so the ones made while they were on
+		// are still settled and recovered.
+		worktreesRoot, err := ensurePrivateChain(stateDir, connectWorktreesDir)
+		if err != nil {
+			return err
+		}
+		workspaces, err := connector.NewWorktrees(connector.WorktreesOptions{Ledger: ledger, Root: worktreesRoot, Logger: logger, Off: !file.Worktrees})
+		if err != nil {
+			return err
 		}
 		options := connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
