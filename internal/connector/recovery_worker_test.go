@@ -130,6 +130,17 @@ func (w *fakeWorker) BadMode() bool {
 //     created and never migrated — the connector owns it
 //     (internal/commands/mcp.go).
 func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
+	// Bound or not, the parent is told which: a worker that started and took
+	// no token must not look to the credential check like a run with nothing
+	// to check.
+	err := w.bind(ctx, server)
+	if err != nil {
+		w.log(0, 0, "bind-failed: "+err.Error())
+	}
+	return err
+}
+
+func (w *fakeWorker) bind(ctx context.Context, server driver.MCPServer) error {
 	if server.Name != MCPServerName {
 		return fmt.Errorf("the MCP server is %q, not %q", server.Name, MCPServerName)
 	}
@@ -185,7 +196,14 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 		return err
 	}
 	w.ledger, w.dispatch = l, d
-	return w.watchToken(token)
+	if err := w.watchToken(token); err != nil {
+		return err
+	}
+	// Said only once the token is on disk for the parent's check and the
+	// watch is running: a worker that bound without either would leave the
+	// parent nothing to check.
+	w.log(0, 0, "bound")
+	return nil
 }
 
 // flagValue is the value after name in a command line, empty when it is not

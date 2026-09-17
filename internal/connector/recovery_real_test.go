@@ -35,6 +35,9 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 	}
 	basecampBinary := os.Getenv(harnessRealBasecampEnv)
 	require.NotEmpty(t, basecampBinary, harnessRealBasecampEnv+" names the basecamp binary built from this tree")
+	info, err := os.Stat(basecampBinary)
+	require.NoError(t, err, "the basecamp binary is where %s says", harnessRealBasecampEnv)
+	require.NotZero(t, info.Mode()&0o111, "%s is executable", basecampBinary)
 	rows := []struct {
 		name string
 		kill string
@@ -123,6 +126,9 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 
 					attempts := harnessAttempts(t, l)
 					require.Len(t, attempts, 1, "no second attempt, whatever the worker did")
+					// A real agent ran, or this row proved nothing about one:
+					// the ledger recorded its process.
+					require.NotEmpty(t, pids, "the real agent's process was recorded")
 					assert.Equal(t, StateCompleted, stateOf(t, l, 101))
 					outcome := outcomeOf(t, l, 101)
 					assert.True(t, slices.Contains([]string{string(OutcomeUnknown), string(OutcomeSucceeded), string(OutcomeFailed)}, outcome), "outcome %q", outcome)

@@ -236,6 +236,11 @@ type harnessScenario struct {
 type harness struct {
 	t   *testing.T
 	dir string
+	// watching is the parent's watch for each task token, for the run in
+	// flight; watchStop ends it.
+	watchMu   sync.Mutex
+	watching  map[string]func() []string
+	watchStop chan struct{}
 	// state is the connector's state directory, under this harness's own
 	// XDG_STATE_HOME and named as the connector names it, so a worker's MCP
 	// server resolves it exactly as `basecamp mcp --connect-state` does.
@@ -402,6 +407,7 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	out := &lockedBuffer{}
 	cmd.Stdout, cmd.Stderr = out, out
 	require.NoError(h.t, cmd.Start())
+	h.watchForTokenFiles()
 	return cmd, out
 }
 
@@ -470,6 +476,72 @@ func (h *harness) killAgents() {
 	}
 }
 
+// watchForTokenFiles watches, for the rest of this run, every place a task
+// token must never be written, for every token a worker takes while it runs.
+// The workers watch too, but a worker the connector ends never reports; this
+// watcher is the parent's, and always does.
+func (h *harness) watchForTokenFiles() {
+	h.t.Helper()
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+	if h.watching == nil {
+		h.watching = map[string]func() []string{}
+	}
+	stop := make(chan struct{})
+	h.watchStop = stop
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+			for _, token := range h.knownTokens() {
+				h.watchMu.Lock()
+				if _, ok := h.watching[token]; !ok {
+					h.watching[token] = drivertest.WatchForSecretFiles(token,
+						h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions"))
+				}
+				h.watchMu.Unlock()
+			}
+		}
+	}()
+}
+
+// knownTokens reads the tokens the workers have taken so far, ignoring a
+// directory that does not exist yet.
+func (h *harness) knownTokens() []string {
+	entries, err := os.ReadDir(filepath.Join(h.dir, tokensDir))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name())); err == nil && len(token) > 0 {
+			out = append(out, string(token))
+		}
+	}
+	return out
+}
+
+// stopWatchingForTokenFiles ends the watchers and reports what they saw.
+func (h *harness) stopWatchingForTokenFiles() int {
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+	if h.watchStop != nil {
+		close(h.watchStop)
+		h.watchStop = nil
+	}
+	watched := len(h.watching)
+	for token, stop := range h.watching {
+		for _, found := range stop() {
+			h.t.Errorf("a task token was written to %s while the connector ran", found)
+		}
+		delete(h.watching, token)
+	}
+	return watched
+}
+
 // requireNoTaskTokenLeaked holds every run to the credential rule, for every
 // task token any worker was handed so far: not in an agent's argv or
 // environment, not in anything the connector wrote (its stdout lines, its
@@ -479,22 +551,39 @@ func (h *harness) killAgents() {
 func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 	t := h.t
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(h.dir, tokensDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	require.NoError(t, err)
+	watched := h.stopWatchingForTokenFiles()
+	tokens := h.taskTokens()
 	log := h.agentLog()
+	// A worker that bound to its task took a token, and the harness kept it.
+	// If it did not, this check has nothing to look for, and says so rather
+	// than passing.
+	bound, unbound := 0, 0
 	var places drivertest.Places
 	for _, e := range log {
 		places.Env = append(places.Env, e.Env...)
 		places.Args = append(places.Args, e.Args...)
-		if found, ok := strings.CutPrefix(e.Step, "secret-file:"); ok {
-			t.Errorf("a worker saw a task token written to %s", found)
+		switch {
+		case e.Step == "bound":
+			bound++
+		case strings.HasPrefix(e.Step, "bind-failed:"):
+			unbound++
+		case strings.HasPrefix(e.Step, "secret-file:"):
+			t.Errorf("a worker saw a task token written to %s", strings.TrimPrefix(e.Step, "secret-file:"))
+		case strings.HasPrefix(e.Step, "secret-declared:"):
+			t.Errorf("a worker's MCP server declaration carried the task token in %s", strings.TrimPrefix(e.Step, "secret-declared:"))
 		}
-		if where, ok := strings.CutPrefix(e.Step, "secret-declared:"); ok {
-			t.Errorf("a worker's MCP server declaration carried the task token in %s", where)
-		}
+	}
+	require.Len(t, tokens, bound, "every worker that bound to a task left its token for this check")
+	require.Equal(t, h.workersStarted(), bound+unbound,
+		"every worker that started either took a token or said why it could not")
+	if len(tokens) == 0 {
+		require.Zero(t, watched, "nothing was watched, because no token was taken")
+		// Nothing to check is a fact about the run, not a pass: a run with
+		// no worker (a kill before the spawn, a start that ran nothing) is
+		// the only way here.
+		require.Equal(t, h.workersStarted(), unbound,
+			"a worker that started either took a token or said why it could not")
+		return
 	}
 	places.Texts = append(places.Texts, out.String())
 	for _, name := range []string{linesFile, storeFile, pollsFile, workspaceFile, agentLogFile} {
@@ -502,39 +591,90 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 		require.NoError(t, err)
 		places.Texts = append(places.Texts, string(data))
 	}
-	places.Dirs = []string{h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions")}
-	for _, e := range entries {
-		token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name()))
-		require.NoError(t, err)
-		drivertest.RequireNoSecret(t, string(token), places)
-		// The state directory holds the ledger this test may have open, so
-		// it is read by another process (see scanForSecret).
-		for _, found := range scanForSecret(t, string(token), filepath.Join(h.dir, "state")) {
-			t.Errorf("a task token is in a file under the state directory: %s", found)
+	files := 0
+	for _, token := range tokens {
+		// Env, argv and everything the connector wrote, in this process.
+		drivertest.RequireNoSecret(t, token, places)
+		// Every file under the working, session and state directories, read
+		// by a process of its own, which reports what it could not read. The
+		// state directory holds a ledger this test may have open.
+		found, read := scanForSecret(t, token, h.workDir(), filepath.Join(h.dir, "work-other"),
+			filepath.Join(h.dir, "sessions"), filepath.Join(h.dir, "state"))
+		for _, path := range found {
+			t.Errorf("a task token is in a file: %s", path)
 		}
+		require.Positive(t, read, "the scan read files; a scan that read nothing has cleared nothing")
+		files += read
 	}
+	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on", len(tokens), files, watched)
 }
 
-// scanForSecret lists the files under dirs that contain secret, read by a
-// process of its own. Reading a SQLite database's files by another descriptor
-// in a process that holds the database open drops SQLite's POSIX advisory
-// locks on them; another process closing the database then resets the WAL
-// under the held handle, which reads stale or fails. The secret goes over
-// stdin, never argv.
-func scanForSecret(t *testing.T, secret string, dirs ...string) []string {
+// taskTokens is every task token a worker took, as the workers recorded them.
+func (h *harness) taskTokens() []string {
+	h.t.Helper()
+	entries, err := os.ReadDir(filepath.Join(h.dir, tokensDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	require.NoError(h.t, err)
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name()))
+		require.NoError(h.t, err)
+		require.NotEmpty(h.t, token)
+		out = append(out, string(token))
+	}
+	return out
+}
+
+// workersStarted counts the worker processes that reached their agent, which
+// is every worker that could have been handed a token.
+func (h *harness) workersStarted() int {
+	n := 0
+	for _, e := range h.agentLog() {
+		if e.Step == "start" {
+			n++
+		}
+	}
+	return n
+}
+
+// scanForSecret reads every file under dirs, in a process of its own, and
+// reports what it found and how much it read. A scan that could not read
+// something says so, and the caller fails on it: a check that skips is not a
+// check that passed.
+//
+// A process of its own because reading a SQLite database's files by another
+// descriptor in a process that holds the database open drops SQLite's POSIX
+// advisory locks on them; another process closing the database then resets
+// the WAL under the held handle, which reads stale or fails. The secret goes
+// over stdin, never argv.
+func scanForSecret(t *testing.T, secret string, dirs ...string) (found []string, read int) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), os.Args[0], dirs...)
 	cmd.Env = append(os.Environ(), harnessScanEnv+"=1")
 	cmd.Stdin = strings.NewReader(secret)
 	out, err := cmd.Output()
 	require.NoError(t, err, "the secret scan ran")
-	var found []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			found = append(found, line)
+	read = -1
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		kind, rest, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		switch kind {
+		case "found":
+			found = append(found, rest)
+		case "unreadable":
+			t.Errorf("the token scan could not read %s, so it cleared nothing there", rest)
+		case "read":
+			n, convErr := strconv.Atoi(rest)
+			require.NoError(t, convErr)
+			read = n
 		}
 	}
-	return found
+	require.GreaterOrEqual(t, read, 0, "the scan reported what it read")
+	return found, read
 }
 
 // runSecretScan is the scanning process: the secret on stdin, the directories
@@ -544,18 +684,33 @@ func runSecretScan(dirs []string) int {
 	if err != nil || len(secret) == 0 {
 		return 2
 	}
+	read := 0
 	for _, dir := range dirs {
-		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || !d.Type().IsRegular() {
-				return nil //nolint:nilerr // a file that cannot be read cannot be found to carry the secret either
-			}
-			data, err := os.ReadFile(path)
-			if err == nil && bytes.Contains(data, secret) {
-				fmt.Println(path)
+		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				// A place the scan could not look is not a place it has
+				// cleared: the caller is told, and fails. The walk goes on,
+				// so one unreadable entry does not hide the rest.
+				fmt.Println("unreadable\t" + path + ": " + err.Error())
+				return nil //nolint:nilerr // reported to the caller, which fails on it
+			case d.Type().IsRegular():
+				data, err := os.ReadFile(path)
+				if err != nil {
+					fmt.Println("unreadable\t" + path + ": " + err.Error())
+					return nil //nolint:nilerr // reported to the caller, which fails on it
+				}
+				read++
+				if bytes.Contains(data, secret) {
+					fmt.Println("found\t" + path)
+				}
 			}
 			return nil
-		})
+		}); err != nil {
+			fmt.Println("unreadable\t" + dir + ": " + err.Error())
+		}
 	}
+	fmt.Println("read\t" + strconv.Itoa(read))
 	return 0
 }
 
