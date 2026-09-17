@@ -44,20 +44,48 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	cmd := exec.CommandContext(ctx, exe, args...) //nolint:gosec // this binary, with a validated profile name
 	cmd.Env = driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), connector.MCPServerEnv...), os.LookupEnv, nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// A timeout ends the whole group, not only the leader: exec calls Cancel
-	// before it waits, while the group id is still reserved.
-	cmd.Cancel = func() error { return killUnreapedGroup(cmd) }
+	// The context bounds the MCP calls, not the process: this function alone
+	// ends the process and alone waits on it, so its group is always signaled
+	// while the leader is unreaped and the group id is still this command's.
+	cmd.Cancel = func() error { return nil }
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		c.Status, c.Message = setup.StatusFail, "Cannot start the agent's MCP server: "+setup.ErrorText(err)
+		return c
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		c.Status, c.Message = setup.StatusFail, "Cannot start the agent's MCP server: "+setup.ErrorText(err)
+		return c
+	}
+	if err := cmd.Start(); err != nil {
+		c.Status, c.Message = setup.StatusFail, "Cannot start the agent's MCP server: "+setup.ErrorText(err)
+		return c
+	}
+	leader := cmd.Process.Pid
+	var session *mcp.ClientSession
+	defer func() {
+		if session != nil {
+			_ = session.Close()
+		}
+		// The group, then the leader: nothing else waits on it, so it is not
+		// reaped before this signal, and a descendant goes with it.
+		if leader > 1 {
+			_ = syscall.Kill(-leader, syscall.SIGKILL)
+		}
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = cmd.Wait()
+	}()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "basecamp-connect-doctor", Version: version.Version}, nil)
-	session, err := client.Connect(ctx, &groupTransport{cmd: cmd}, nil)
+	session, err = client.Connect(ctx, &mcp.IOTransport{Reader: stdout, Writer: stdin}, nil)
 	if err != nil {
-		// The client closed the connection, and groupTransport ended the group
-		// before the leader was reaped.
+		session = nil
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server did not complete the handshake: "+setup.ErrorText(err)
 		c.Hint = "Run basecamp mcp -P " + shellQuote(profile) + " and read its stderr."
 		return c
 	}
-	defer func() { _ = session.Close() }()
 	tools := 0
 	for _, err := range session.Tools(ctx, nil) {
 		if err != nil {
@@ -72,40 +100,4 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	}
 	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", profile, tools)
 	return c
-}
-
-// groupTransport is mcp.CommandTransport whose connection ends the command's
-// whole process group when it closes, before the SDK waits on (and so reaps)
-// the leader: a descendant the server started goes with it, and the group id
-// is still this command's when it is signaled.
-type groupTransport struct {
-	cmd *exec.Cmd
-}
-
-func (t *groupTransport) Connect(ctx context.Context) (mcp.Connection, error) {
-	conn, err := (&mcp.CommandTransport{Command: t.cmd}).Connect(ctx)
-	if err != nil {
-		_ = killUnreapedGroup(t.cmd)
-		return nil, err
-	}
-	return &groupConn{Connection: conn, cmd: t.cmd}, nil
-}
-
-type groupConn struct {
-	mcp.Connection
-	cmd *exec.Cmd
-}
-
-func (c *groupConn) Close() error {
-	_ = killUnreapedGroup(c.cmd)
-	return c.Connection.Close()
-}
-
-// killUnreapedGroup signals the command's process group, and only while the
-// leader has not been reaped: after that its id could name another group.
-func killUnreapedGroup(cmd *exec.Cmd) error {
-	if cmd.Process == nil || cmd.Process.Pid <= 1 || cmd.ProcessState != nil {
-		return nil
-	}
-	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
