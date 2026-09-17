@@ -463,7 +463,7 @@ func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution
 		query = `UPDATE outbox SET state = 'abandoned', finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
 		args = []any{now}
 	case ResolveResend:
-		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, not_before = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
+		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, reconcile_failures = 0, reconcile_at = NULL, not_before = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
 		args = []any{now}
 	default:
 		return fmt.Errorf("connector: %q is not a resolution", r.Resolution)

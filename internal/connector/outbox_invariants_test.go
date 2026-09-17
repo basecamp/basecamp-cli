@@ -658,3 +658,29 @@ func TestOutboxFlushHonoursItsDeadline(t *testing.T) {
 	assert.Less(t, time.Since(started), 5*time.Second)
 	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State, "cut off mid-flight: reconciled later, never resent")
 }
+
+// A person's resend starts the request's reconciliation afresh: the failures
+// of the listing before it are not counted against it.
+func TestOutboxAResendStartsReconciliationAfresh(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.listErr = errWire
+	ob := obOutbox(t, ledger, basecamp)
+	for range MaxReconcileFailures {
+		_, _ = ob.reconcileStale(ctx, 0)
+		clock.Advance(MaxReconcileBackoff)
+	}
+	require.Equal(t, IntentIndeterminate, obIntent(t, ledger, in.Key).State)
+
+	require.NoError(t, ledger.ResolveIntent(ctx, in.ID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}))
+	got := obIntent(t, ledger, in.Key)
+	assert.Zero(t, got.ReconcileFailures)
+	assert.Nil(t, got.ReconcileAt)
+
+	basecamp.beforePost = func(Destination, string) error { return errWire }
+	require.NoError(t, ob.Flush(ctx))
+	_, _ = ob.reconcileStale(ctx, 0)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, in.Key).State, "one failed listing is the first of a fresh budget")
+}

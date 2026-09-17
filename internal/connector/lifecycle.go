@@ -33,7 +33,7 @@ const lifecycleSignature = "automatic notice from basecamp connect"
 func renderHoldingReply(kind MessageKind, eventID int64) string {
 	lines := []string{
 		"I can't start on this here yet: this project has no working directory set up for me on the connector's machine, so nothing was run.",
-		"It starts on its own once the project is added to connect.json.",
+		"Once the project is added to connect.json, a person can run it with: basecamp connect redispatch " + strconv.FormatInt(eventID, 10),
 		"",
 		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
 	}

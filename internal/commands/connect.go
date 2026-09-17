@@ -45,7 +45,8 @@ ready. Show prints what setup recorded. Then run the connector on it:
   basecamp connect -P <profile> [--project <id>]... [--shadow]
 
 It runs in the foreground until interrupted. Stdout is a wire of one JSON
-object per line (events seen, verdicts, dispatches; never content), and logs
+object per line (events seen, verdicts, dispatches, lifecycle messages;
+never content), and logs
 go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
 shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
 isolated state directory and dispatches nothing. macOS and Linux only.`,
