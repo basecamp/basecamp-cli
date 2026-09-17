@@ -21,9 +21,9 @@ const (
 	opBy    = "local:tester"
 )
 
-// admitOn writes id seen and commits an admitted verdict on conversation key,
+// opAdmit writes id seen and commits an admitted verdict on conversation key,
 // returning the state the ledger wrote.
-func admitOn(t *testing.T, l *Ledger, id int64, key string) RecordState {
+func opAdmit(t *testing.T, l *Ledger, id int64, key string) RecordState {
 	t.Helper()
 	ctx := context.Background()
 	record := seenRecord(t, l, id)
@@ -58,7 +58,7 @@ func decisionsFor(t *testing.T, l *Ledger, id int64) int {
 func unknownOutcome(t *testing.T, l *Ledger, id int64) Launch {
 	t.Helper()
 	ctx := context.Background()
-	require.Equal(t, StateAdmitted, admitOn(t, l, id, "recording:"+itoa(id)))
+	require.Equal(t, StateAdmitted, opAdmit(t, l, id, "recording:"+itoa(id)))
 	launch := launchOf(t, l, id)
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now()}))
 	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
@@ -102,7 +102,7 @@ func TestRedispatchAdmitsAnUnknownOutcome(t *testing.T) {
 func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	require.Equal(t, StateAdmitted, admitOn(t, l, 1, "recording:1"))
+	require.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:1"))
 	launch := launchOf(t, l, 1)
 	d, err := l.Dispatch(launch.Token, adapterAgentID)
 	require.NoError(t, err)
@@ -123,8 +123,8 @@ func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	require.Equal(t, StateAdmitted, admitOn(t, l, 1, "recording:9"))
-	require.Equal(t, StateQueued, admitOn(t, l, 2, "recording:9"))
+	require.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:9"))
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
 	launch := launchOf(t, l, 1)
 	started := time.Now().Add(-time.Minute).UTC()
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: started}))
@@ -169,13 +169,13 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]func(t *testing.T, l *Ledger){
 		"seen":     func(t *testing.T, l *Ledger) { seenRecord(t, l, 1) },
-		"admitted": func(t *testing.T, l *Ledger) { admitOn(t, l, 1, "recording:1") },
+		"admitted": func(t *testing.T, l *Ledger) { opAdmit(t, l, 1, "recording:1") },
 		"queued": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 7, "recording:1")
-			require.Equal(t, StateQueued, admitOn(t, l, 1, "recording:1"))
+			opAdmit(t, l, 7, "recording:1")
+			require.Equal(t, StateQueued, opAdmit(t, l, 1, "recording:1"))
 		},
 		"dispatched": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			launchOf(t, l, 1)
 		},
 		"discarded": func(t *testing.T, l *Ledger) {
@@ -183,7 +183,7 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 			require.NoError(t, l.SetState(ctx, 1, StateDiscarded, "untrusted_author"))
 		},
 		"succeeded": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(launch.Token, adapterAgentID)
 			require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestRedispatchOfABlockedRecordRerunsItsPrerequisite(t *testing.T) {
 func TestRedispatchAdmitsAHeldRecord(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	res, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Held)
@@ -268,7 +268,7 @@ func TestRedispatchAdmitsAHeldRecord(t *testing.T) {
 func TestRedispatchOfARecordHeldOverAReasonRerunsIt(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
 	_, err = l.db.Exec(`UPDATE events SET reason = 'no_route' WHERE id = 1`)
@@ -293,7 +293,7 @@ func TestInvariant1AReviewTaggedSeenRecordIsHeldNotDispatched(t *testing.T) {
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
 
-	state := admitOn(t, l, 1, "recording:1")
+	state := opAdmit(t, l, 1, "recording:1")
 	assert.Equal(t, StateHeld, state)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1))
 	startable, err := l.StartableRecords(ctx, 10)
@@ -318,7 +318,7 @@ func TestANewGenerationIsNotTagged(t *testing.T) {
 	ctx := context.Background()
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
-	assert.Equal(t, StateAdmitted, admitOn(t, l, 1, "recording:1"))
+	assert.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:1"))
 	_, err = l.Release(ctx, opBy)
 	require.NoError(t, err)
 	launchOf(t, l, 1)
@@ -329,8 +329,8 @@ func TestANewGenerationIsNotTagged(t *testing.T) {
 func TestInvariant1ATaggedSiblingReturnedByATaskIsHeld(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:9")
-	require.Equal(t, StateQueued, admitOn(t, l, 2, "recording:9"))
+	opAdmit(t, l, 1, "recording:9")
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
 	launch := launchOf(t, l, 1)
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
@@ -347,7 +347,7 @@ func TestInvariant1ATaggedSiblingReturnedByATaskIsHeld(t *testing.T) {
 // unauthorized record lands held.
 func TestInvariant1TheDatabaseHoldsATaggedRecord(t *testing.T) {
 	l := newTestLedger(t)
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	_, err := l.db.Exec(`UPDATE events SET state = 'blocked', reason = 'x' WHERE id = 1`)
 	require.NoError(t, err)
 	_, err = l.db.Exec(`UPDATE events SET review = 1 WHERE id = 1`)
@@ -376,7 +376,7 @@ func TestInvariant2AHeldLedgerSurvivesRestartUntilRelease(t *testing.T) {
 	assert.True(t, held)
 	// A record of the new generation, which a person need not review, still
 	// does not launch while the marker stands.
-	assert.Equal(t, StateAdmitted, admitOn(t, l, 1, "recording:1"))
+	assert.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:1"))
 	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Route: opRoute, Driver: "claude"})
 	require.Error(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "the refused launch rolled back")
@@ -424,7 +424,7 @@ func TestHoldingARecordCancelsItsPendingGuard(t *testing.T) {
 	l := newTestLedger(t)
 	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	guards, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentGuardAck}, States: []IntentState{IntentPending}})
 	require.NoError(t, err)
 	require.Len(t, guards, 1)
@@ -478,7 +478,7 @@ func TestDiscard(t *testing.T) {
 	ctx := context.Background()
 	accepted := map[string]func(t *testing.T, l *Ledger){
 		"held": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			_, err := l.SetHold(ctx, opBy, HoldByOperator)
 			require.NoError(t, err)
 		},
@@ -510,13 +510,13 @@ func TestDiscard(t *testing.T) {
 	}
 	refused := map[string]func(t *testing.T, l *Ledger){
 		"seen":     func(t *testing.T, l *Ledger) { seenRecord(t, l, 1) },
-		"admitted": func(t *testing.T, l *Ledger) { admitOn(t, l, 1, "recording:1") },
+		"admitted": func(t *testing.T, l *Ledger) { opAdmit(t, l, 1, "recording:1") },
 		"dispatched": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			launchOf(t, l, 1)
 		},
 		"failed": func(t *testing.T, l *Ledger) {
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(launch.Token, adapterAgentID)
 			require.NoError(t, err)

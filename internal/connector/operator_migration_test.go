@@ -41,7 +41,7 @@ func shadowFixture(t *testing.T) (shadowDir, stateDir string) {
 	l, err := OpenLedger(filepath.Join(shadowDir, LedgerFile))
 	require.NoError(t, err)
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	seenRecord(t, l, 2)
 	seenRecord(t, l, 3)
 	_, err = l.Admission().Commit(ctx, blockedVerdict(3, 0, "read_failed"))
@@ -77,14 +77,14 @@ func TestShadowPromoteYieldsAHeldLedger(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, held)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1))
-	assert.Equal(t, StateHeld, admitOn2(t, l, 2), "a shadow record mid-read becomes held when admitted")
+	assert.Equal(t, StateHeld, admitSeen(t, l, 2), "a shadow record mid-read becomes held when admitted")
 
 	again, err := PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
 	require.NoError(t, err)
 	assert.True(t, again.Already)
 }
 
-func admitOn2(t *testing.T, l *Ledger, id int64) RecordState {
+func admitSeen(t *testing.T, l *Ledger, id int64) RecordState {
 	t.Helper()
 	record := getRecord(t, l, id)
 	v := admittedVerdict(id, record.Revision, "recording:"+strconv.FormatInt(id, 10))
@@ -247,7 +247,7 @@ func assertHeld(t *testing.T, path string) {
 func TestImportTombstonesDoneAndTagsTheRest(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	seenRecord(t, l, 2)
 	seenRecord(t, l, 3)
 	_, err := l.Admission().Commit(ctx, blockedVerdict(3, 0, "read_failed"))
@@ -277,7 +277,7 @@ func TestImportTombstonesDoneAndTagsTheRest(t *testing.T) {
 	fresh, err := l.RecordSeen(ctx, testEvent(99), LanePoll)
 	require.NoError(t, err)
 	assert.False(t, fresh, "an imported tombstone is never new work")
-	assert.Equal(t, StateHeld, admitOn2(t, l, 5), "an unmapped record is tagged too")
+	assert.Equal(t, StateHeld, admitSeen(t, l, 5), "an unmapped record is tagged too")
 }
 
 func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
@@ -288,7 +288,7 @@ func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			l := newTestLedger(t)
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			launchOf(t, l, 1)
 			seenRecord(t, l, 2)
 
@@ -331,7 +331,7 @@ func TestInvariant7ImportSurvivesAKillAtEveryStep(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state", LedgerFile)
 			l, err := OpenLedger(path)
 			require.NoError(t, err)
-			admitOn(t, l, 1, "recording:1")
+			opAdmit(t, l, 1, "recording:1")
 			seenRecord(t, l, 2)
 			require.NoError(t, l.Close())
 			file := `{"version":1,"entries":[{"event_id":2,"decision":"done"},{"event_id":1,"decision":"held"}]}`

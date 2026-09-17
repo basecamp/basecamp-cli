@@ -28,7 +28,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	require.NoError(t, l.NoteConnection(ctx, ConnectionConnected, "streaming"))
 
 	unknownOutcome(t, l, 2)
-	admitOn(t, l, 1, "recording:1")
+	opAdmit(t, l, 1, "recording:1")
 	launch := launchOf(t, l, 1)
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now()}))
 	seenRecord(t, l, 5)
@@ -39,7 +39,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	_, err = l.db.Exec(`UPDATE outbox SET state = 'indeterminate', note = 'two candidates' WHERE event_id = 1`)
 	require.NoError(t, err)
 	l.SetHooks(Hooks{})
-	admitOn(t, l, 3, "recording:3")
+	opAdmit(t, l, 3, "recording:3")
 	seenRecord(t, l, 4)
 	_, err = l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
