@@ -375,20 +375,28 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 
 		next, note := IntentSending, ""
 		if in.Kind == IntentCompletion {
-			// Rendered again from the records: what a person decided between
-			// the settlement and the send is what the notice says.
-			settled, err := settlementFromRecords(ctx, tx, in.AttemptID)
+			// A person can decide an event between the settlement that wrote
+			// the notice and the send. One indexed read says whether anyone
+			// did; only then is the notice rendered again from the records, so
+			// it never asks for what is already done.
+			decided, err := decidedSince(ctx, tx, in.AttemptID)
 			if err != nil {
 				return err
 			}
-			switch body := renderCompletion(in.Destination.Kind, settled); {
-			case !CompletionNeeded(settled):
-				next, note = IntentCanceled, "every event it named was decided"
-			case body != in.Body:
-				if _, err := tx.ExecContext(ctx, `UPDATE outbox SET body = ? WHERE id = ? AND state = 'pending'`, body, in.ID); err != nil {
-					return fmt.Errorf("connector: outbox claim completion %d: %w", in.ID, err)
+			if decided {
+				settled, err := settlementFromRecords(ctx, tx, in.AttemptID)
+				if err != nil {
+					return err
 				}
-				in.Body = body
+				switch body := renderCompletion(in.Destination.Kind, settled); {
+				case !CompletionNeeded(settled):
+					next, note = IntentCanceled, "every event it named was decided"
+				case body != in.Body:
+					if _, err := tx.ExecContext(ctx, `UPDATE outbox SET body = ? WHERE id = ? AND state = 'pending'`, body, in.ID); err != nil {
+						return fmt.Errorf("connector: outbox claim completion %d: %w", in.ID, err)
+					}
+					in.Body = body
+				}
 			}
 		}
 		if in.Kind == IntentHoldingReply {
@@ -888,4 +896,20 @@ func (o *Outbox) line(in Intent) {
 	if err := o.opts.Lines.WriteLine(line); err != nil {
 		o.log.Warn("connector: outbox line", "error", err)
 	}
+}
+
+// decidedSince reports whether any event on an attempt's task has left the
+// state its completion notice was rendered from — a person redispatched or
+// discarded it. It is one indexed read, so the ordinary claim, where nobody
+// decided anything, does not pay for a full re-render.
+func decidedSince(ctx context.Context, tx *sql.Tx, attemptID string) (bool, error) {
+	var decided bool
+	if err := tx.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM task_events te JOIN events e ON e.id = te.event_id
+  WHERE te.task_id = (SELECT task_id FROM attempts WHERE id = ?)
+    AND (e.state NOT IN ('completed', 'blocked') OR e.redispatch_decision IS NOT NULL))`, attemptID).Scan(&decided); err != nil {
+		return false, fmt.Errorf("connector: outbox claim completion for %s: %w", attemptID, err)
+	}
+	return decided, nil
 }
