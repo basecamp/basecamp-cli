@@ -122,3 +122,36 @@ func TestTerminateRecordedLeavesAReusedPidAlone(t *testing.T) {
 	assert.True(t, signaled)
 	_ = cmd.Wait()
 }
+
+func TestTerminateReturnsWhenADescendantLeftTheGroupHoldingTheOutput(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is needed to start a descendant in a new session")
+	}
+	pidFile := filepath.Join(t.TempDir(), "escaped")
+	script := "import os,sys,time\nif os.fork()==0:\n    os.setsid()\n    open(sys.argv[1],'w').write(str(os.getpid()))\n    time.sleep(300)\nelse:\n    time.sleep(300)\n"
+	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+		Command{Path: python, Args: []string{"-c", script, pidFile}, Env: []string{"PATH=/bin:/usr/bin"}})
+	require.NoError(t, err)
+	var escaped int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return false
+		}
+		escaped, err = strconv.Atoi(strings.TrimSpace(string(data)))
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+	t.Cleanup(func() { _ = syscall.Kill(escaped, syscall.SIGKILL) })
+
+	done := make(chan struct{})
+	go func() {
+		w.Terminate(100 * time.Millisecond)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Terminate waited on a descendant outside the worker's group")
+	}
+}

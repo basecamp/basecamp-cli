@@ -24,6 +24,10 @@ const DefaultGrace = 10 * time.Second
 // process. The driver stamps the time just after the fork returns.
 const startTolerance = 3 * time.Second
 
+// pipeWaitDelay bounds how long a worker that has exited is waited on for
+// pipes a stray descendant still holds.
+const pipeWaitDelay = 2 * time.Second
+
 // Worker is a process a spawn driver started: the leader of its own process
 // group, with its stdin and stdout piped and its stderr kept, redacted, for
 // diagnosis. Every spawn driver starts its agent through StartWorker, so the
@@ -66,6 +70,12 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	ec.Dir = c.Dir
 	ec.Env = c.Env
 	ec.SysProcAttr = newProcessGroup()
+	// A descendant that left the group (a daemon that called setsid) can
+	// hold the worker's stdout or stderr open after the worker is gone. Wait
+	// would block on it, and with it Terminate and every shutdown behind
+	// it; past this delay the pipes are closed and the worker counts as
+	// exited.
+	ec.WaitDelay = pipeWaitDelay
 	w := &Worker{cmd: ec, stderr: &tailBuffer{max: 8 << 10}, done: make(chan struct{})}
 	ec.Stderr = w.stderr
 	if w.stdin, err = ec.StdinPipe(); err != nil {
