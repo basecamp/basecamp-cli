@@ -174,7 +174,10 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 }
 
 // SupersedeTask retires a task: its token is refused from then on, and its
-// events are free to join a new task.
+// events are free to join a new task. An event the task never exposed returns
+// to admitted, to be dispatched again once its conversation is free; an event
+// a worker was handed stays dispatched, because that worker may have acted on
+// it, and waits for its settlement or a person's redispatch.
 func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 	return retryBusy(func() error {
 		tx, err := l.db.BeginTx(ctx, nil)
@@ -182,15 +185,48 @@ func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 			return fmt.Errorf("connector: begin supersede: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		now := l.timestamp()
-		if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, now, taskID); err != nil {
-			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
-			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+		if err := l.supersedeTask(ctx, tx, taskID); err != nil {
+			return err
 		}
 		return tx.Commit()
 	})
+}
+
+// supersedeTask is SupersedeTask inside the caller's transaction, so a
+// redispatch can retire the old task and create the new one in one commit.
+func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) error {
+	rows, err := tx.QueryContext(ctx, `SELECT event_id FROM task_events WHERE task_id = ? AND retired_at IS NULL AND delivery = 'admitted'`, taskID)
+	if err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+	var unexposed []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+		}
+		unexposed = append(unexposed, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+
+	now := l.timestamp()
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, now, taskID); err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+	for _, id := range unexposed {
+		// Only a record still dispatched moves: one a person or a later
+		// verdict already moved stays where it was put.
+		if _, err := l.move(ctx, tx, transition{id: id, state: StateAdmitted, from: []RecordState{StateDispatched}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // isConstraint reports a SQLite constraint violation.
@@ -365,7 +401,10 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 	if err != nil {
 		return Instruction{}, false, err
 	}
-	servable := record.State == StateDispatched || record.State == StateCompleted
+	// A completed record is served again only to the worker it was already
+	// exposed to; finished work is never handed out for the first time.
+	servable := record.State == StateDispatched ||
+		(record.State == StateCompleted && te.delivery != DeliveryAdmitted)
 	if !servable || record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 	}

@@ -455,6 +455,54 @@ func TestCreateTaskRefusesARecordWithoutItsInstruction(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrEventOnLiveTask, "a duplicate id is not another task's event")
 }
 
+// Superseding a task returns what it never exposed to admitted and leaves
+// what a worker was handed dispatched, so no record is left dispatched on no
+// task without a worker having seen it.
+func TestSupersedingReturnsUnexposedWork(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+
+	assert.Equal(t, StateDispatched, getRecord(t, f.ledger, 1).State, "a worker saw it")
+	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State, "never exposed, it is work again")
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID), "a repeat is harmless")
+	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State)
+
+	grant, err := f.ledger.CreateTask(ctx, []int64{2})
+	require.NoError(t, err)
+	d, err := f.ledger.Dispatch(ctx, grant.Token, adapterAgentID)
+	require.NoError(t, err)
+	got, ok, err := d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), got.EventID)
+}
+
+// Finished work is never handed out for the first time: a record completed
+// before this worker was exposed to it is refused, and one it completed
+// itself is served again.
+func TestCompletedWorkIsServedOnlyToItsWorker(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
+
+	_, _, err := f.d.Get(ctx, 2)
+	assert.ErrorIs(t, err, ErrNotDispatchable)
+	assert.Equal(t, "admitted", f.row(t, 2).Delivery)
+
+	_, _, err = f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	require.NoError(t, err)
+	got, ok, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, DeliveryCompleted, got.Delivery)
+}
+
 func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
