@@ -125,7 +125,8 @@ CREATE TRIGGER events_held_cancels_guard
 AFTER UPDATE OF state ON events
 WHEN NEW.state = 'held' AND OLD.state <> 'held'
 BEGIN
-  UPDATE outbox SET state = 'canceled', finished_at = NEW.updated_at, note = 'held'
+  UPDATE outbox SET state = 'canceled', note = 'held',
+    finished_at = strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now')
   WHERE intent_key = 'guard_ack:event:' || NEW.id AND state = 'pending';
 END;
 
@@ -202,6 +203,10 @@ BEGIN
     AND id IN (SELECT event_id FROM task_events WHERE task_id = NEW.id);
 END;
 `
+
+// ErrHeld is the hold marker refusing to hand a worker something new. It is
+// not a failure of the task: nothing more is handed over until release.
+var ErrHeld = errors.New("the connector is held")
 
 // Reasons a person's decision writes.
 const (
@@ -407,6 +412,13 @@ func (l *Ledger) Release(ctx context.Context, by string) (ReleaseResult, error) 
 		return nil
 	})
 	return out, err
+}
+
+// isHeld reports whether the hold marker stands, inside a caller's
+// transaction: what a refused write asks before it calls itself a failure.
+func isHeld(ctx context.Context, q rowQuerier) (bool, error) {
+	_, ok, err := readHold(ctx, q)
+	return ok, err
 }
 
 // Held reports whether the hold marker stands. Its signature is

@@ -1028,3 +1028,18 @@ func TestInvariant2AWorkerIsHandedNothingNewUnderTheHold(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok, "released, the follow-up is handed over")
 }
+
+// A hold arriving mid-task is not a failure of that task: the exposure is
+// refused as held, and the dispatcher's follow-up loop stops asking.
+func TestAHoldRefusesAnExposureAsHeldNotAsAFailure(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
+	launch := launchOf(t, l, 1)
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
+	require.ErrorIs(t, err, ErrHeld)
+}

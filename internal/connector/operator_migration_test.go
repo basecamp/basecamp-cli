@@ -233,7 +233,7 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 
 			if stateErr == nil {
 				assertHeld(t, stateLedger)
-			} else if c.preHeld || isHeld(t, shadowLedger) {
+			} else if c.preHeld || ledgerIsHeld(t, shadowLedger) {
 				assertHeld(t, shadowLedger)
 			} else {
 				assertUntouchedShadow(t, shadowDir)
@@ -249,7 +249,7 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 	}
 }
 
-func isHeld(t *testing.T, path string) bool {
+func ledgerIsHeld(t *testing.T, path string) bool {
 	t.Helper()
 	l, err := OpenLedgerReadOnly(context.Background(), path)
 	require.NoError(t, err)
