@@ -599,10 +599,19 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 			richtext.SanitizeSingleLine(hidden.By.Path), why, richtext.SanitizeSingleLine(hidden.Path), richtext.SanitizeSingleLine(closest.Path))
 	}
 	// The global config has no entry for this profile, so there is nothing
-	// to bind — but an entry added there for the same Basecamp is refined
-	// by the ones that do define it, and the account in it holds. That is
-	// the remedy to name first: a repo config is shared, and an operator's
-	// account does not belong in it (nor can they always write /etc).
+	// to bind. An entry added there is refined by the ones that do define
+	// it — and the account in it holds — but only while nothing between
+	// them replaces it. Where something does, the global config is no
+	// remedy at all: a new entry would be replaced the same way.
+	if len(origin.Replaced) > 0 {
+		replacer := origin.Replaced[0].By
+		return fmt.Sprintf("Its entry comes from %s, not the global config, and the entry in %s, for %s, replaces everything farther — an entry added to the global config among them. Add account_id to the profile's entry in %s",
+			richtext.SanitizeSingleLine(closest.Path), richtext.SanitizeSingleLine(replacer.Path),
+			richtext.SanitizeSingleLine(replacer.BaseURL), richtext.SanitizeSingleLine(closest.Path))
+	}
+	// Naming the global config first: a repo config is shared, and an
+	// operator's account does not belong in it (nor can they always
+	// write /etc).
 	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Give it an entry in %s with base_url %s and an account_id — or add account_id to the entry in %s",
 		richtext.SanitizeSingleLine(closest.Path),
 		richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json")),

@@ -100,6 +100,7 @@ func TestConnectAccountNamesTheFileOfAnUnusableAccount(t *testing.T) {
 // The hint names the entry that actually replaced the global one, and why,
 // even when a closer entry has since replaced that one in turn.
 func TestGlobalBindingBlockerNamesTheEntryThatReplacedTheGlobalOne(t *testing.T) {
+	writeGlobalConfig(t, `{}`)
 	global := config.ProfileLayer{Source: config.SourceGlobal, Path: "/g/config.json", BaseURL: "https://3.basecampapi.com"}
 	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "https://3.basecampapi.com/"}
 	local := config.ProfileLayer{Source: config.SourceLocal, Path: "/l/config.json", BaseURL: "http://localhost:3000"}
@@ -119,4 +120,23 @@ func TestGlobalBindingBlockerNamesTheEntryThatReplacedTheGlobalOne(t *testing.T)
 	assert.Equal(t,
 		"Its entry in /l/config.json is for http://localhost:3000, not https://3.basecampapi.com, so it replaces the global config's entry in /g/config.json and any account bound there. Add account_id to the profile's entry in /l/config.json",
 		globalBindingBlocker(origin(local), "agent"), "a replacement for another Basecamp says which")
+}
+
+// Where entries for the profile already replace one another, a global entry
+// would be replaced among them, so it is no remedy and is not offered.
+func TestGlobalBindingBlockerDoesNotOfferAGlobalEntryThatWouldBeReplaced(t *testing.T) {
+	writeGlobalConfig(t, `{}`)
+	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "https://3.basecampapi.com"}
+	local := config.ProfileLayer{Source: config.SourceLocal, Path: "/l/config.json", BaseURL: "http://localhost:3000"}
+	cfg := &config.Config{ProfileOrigins: map[string]*config.ProfileOrigin{
+		"agent": {
+			Replaced: []config.ReplacedProfileLayer{{ProfileLayer: repo, By: local}},
+			Layers:   []config.ProfileLayer{local},
+		},
+	}}
+
+	hint := globalBindingBlocker(cfg, "agent")
+
+	assert.Equal(t, "Its entry comes from /l/config.json, not the global config, and the entry in /l/config.json, for http://localhost:3000, replaces everything farther — an entry added to the global config among them. Add account_id to the profile's entry in /l/config.json", hint)
+	assert.NotContains(t, hint, config.GlobalConfigDir()+"/config.json", "a global entry would be replaced too")
 }
