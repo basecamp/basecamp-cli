@@ -130,6 +130,9 @@ ARG basecamp config set 01 <value>
 ARG basecamp config trust 00 [path]
 ARG basecamp config unset 00 <key>
 ARG basecamp config untrust 00 [path]
+ARG basecamp connect discard 00 <event_id>
+ARG basecamp connect import 00 <file>
+ARG basecamp connect redispatch 00 <event_id>
 ARG basecamp docs archive 00 <id|url>
 ARG basecamp docs doc create 00 <title>
 ARG basecamp docs doc create 01 [content]
@@ -669,8 +672,16 @@ CMD basecamp config trust
 CMD basecamp config unset
 CMD basecamp config untrust
 CMD basecamp connect
+CMD basecamp connect discard
+CMD basecamp connect doctor
+CMD basecamp connect import
+CMD basecamp connect redispatch
+CMD basecamp connect release
 CMD basecamp connect setup
+CMD basecamp connect shadow
+CMD basecamp connect shadow promote
 CMD basecamp connect show
+CMD basecamp connect status
 CMD basecamp docs
 CMD basecamp docs archive
 CMD basecamp docs doc
@@ -5351,6 +5362,7 @@ FLAG basecamp connect --count type=bool
 FLAG basecamp connect --driver type=string
 FLAG basecamp connect --help type=bool
 FLAG basecamp connect --hints type=bool
+FLAG basecamp connect --hold type=bool
 FLAG basecamp connect --ids-only type=bool
 FLAG basecamp connect --in type=string
 FLAG basecamp connect --jq type=string
@@ -5368,6 +5380,111 @@ FLAG basecamp connect --stats type=bool
 FLAG basecamp connect --styled type=bool
 FLAG basecamp connect --todolist type=string
 FLAG basecamp connect --verbose type=count
+FLAG basecamp connect discard --account type=string
+FLAG basecamp connect discard --agent type=bool
+FLAG basecamp connect discard --cache-dir type=string
+FLAG basecamp connect discard --count type=bool
+FLAG basecamp connect discard --help type=bool
+FLAG basecamp connect discard --hints type=bool
+FLAG basecamp connect discard --ids-only type=bool
+FLAG basecamp connect discard --in type=string
+FLAG basecamp connect discard --jq type=string
+FLAG basecamp connect discard --json type=bool
+FLAG basecamp connect discard --markdown type=bool
+FLAG basecamp connect discard --md type=bool
+FLAG basecamp connect discard --no-hints type=bool
+FLAG basecamp connect discard --no-stats type=bool
+FLAG basecamp connect discard --profile type=string
+FLAG basecamp connect discard --project type=string
+FLAG basecamp connect discard --quiet type=bool
+FLAG basecamp connect discard --stats type=bool
+FLAG basecamp connect discard --styled type=bool
+FLAG basecamp connect discard --todolist type=string
+FLAG basecamp connect discard --verbose type=count
+FLAG basecamp connect doctor --account type=string
+FLAG basecamp connect doctor --agent type=bool
+FLAG basecamp connect doctor --cache-dir type=string
+FLAG basecamp connect doctor --count type=bool
+FLAG basecamp connect doctor --help type=bool
+FLAG basecamp connect doctor --hints type=bool
+FLAG basecamp connect doctor --ids-only type=bool
+FLAG basecamp connect doctor --in type=string
+FLAG basecamp connect doctor --jq type=string
+FLAG basecamp connect doctor --json type=bool
+FLAG basecamp connect doctor --markdown type=bool
+FLAG basecamp connect doctor --md type=bool
+FLAG basecamp connect doctor --no-hints type=bool
+FLAG basecamp connect doctor --no-stats type=bool
+FLAG basecamp connect doctor --profile type=string
+FLAG basecamp connect doctor --project type=string
+FLAG basecamp connect doctor --quiet type=bool
+FLAG basecamp connect doctor --stats type=bool
+FLAG basecamp connect doctor --styled type=bool
+FLAG basecamp connect doctor --todolist type=string
+FLAG basecamp connect doctor --verbose type=count
+FLAG basecamp connect import --account type=string
+FLAG basecamp connect import --agent type=bool
+FLAG basecamp connect import --cache-dir type=string
+FLAG basecamp connect import --count type=bool
+FLAG basecamp connect import --help type=bool
+FLAG basecamp connect import --hints type=bool
+FLAG basecamp connect import --ids-only type=bool
+FLAG basecamp connect import --in type=string
+FLAG basecamp connect import --jq type=string
+FLAG basecamp connect import --json type=bool
+FLAG basecamp connect import --markdown type=bool
+FLAG basecamp connect import --md type=bool
+FLAG basecamp connect import --no-hints type=bool
+FLAG basecamp connect import --no-stats type=bool
+FLAG basecamp connect import --profile type=string
+FLAG basecamp connect import --project type=string
+FLAG basecamp connect import --quiet type=bool
+FLAG basecamp connect import --stats type=bool
+FLAG basecamp connect import --styled type=bool
+FLAG basecamp connect import --todolist type=string
+FLAG basecamp connect import --verbose type=count
+FLAG basecamp connect redispatch --account type=string
+FLAG basecamp connect redispatch --agent type=bool
+FLAG basecamp connect redispatch --cache-dir type=string
+FLAG basecamp connect redispatch --count type=bool
+FLAG basecamp connect redispatch --help type=bool
+FLAG basecamp connect redispatch --hints type=bool
+FLAG basecamp connect redispatch --ids-only type=bool
+FLAG basecamp connect redispatch --in type=string
+FLAG basecamp connect redispatch --jq type=string
+FLAG basecamp connect redispatch --json type=bool
+FLAG basecamp connect redispatch --markdown type=bool
+FLAG basecamp connect redispatch --md type=bool
+FLAG basecamp connect redispatch --no-hints type=bool
+FLAG basecamp connect redispatch --no-stats type=bool
+FLAG basecamp connect redispatch --profile type=string
+FLAG basecamp connect redispatch --project type=string
+FLAG basecamp connect redispatch --quiet type=bool
+FLAG basecamp connect redispatch --stats type=bool
+FLAG basecamp connect redispatch --styled type=bool
+FLAG basecamp connect redispatch --todolist type=string
+FLAG basecamp connect redispatch --verbose type=count
+FLAG basecamp connect release --account type=string
+FLAG basecamp connect release --agent type=bool
+FLAG basecamp connect release --cache-dir type=string
+FLAG basecamp connect release --count type=bool
+FLAG basecamp connect release --help type=bool
+FLAG basecamp connect release --hints type=bool
+FLAG basecamp connect release --ids-only type=bool
+FLAG basecamp connect release --in type=string
+FLAG basecamp connect release --jq type=string
+FLAG basecamp connect release --json type=bool
+FLAG basecamp connect release --markdown type=bool
+FLAG basecamp connect release --md type=bool
+FLAG basecamp connect release --no-hints type=bool
+FLAG basecamp connect release --no-stats type=bool
+FLAG basecamp connect release --profile type=string
+FLAG basecamp connect release --project type=string
+FLAG basecamp connect release --quiet type=bool
+FLAG basecamp connect release --stats type=bool
+FLAG basecamp connect release --styled type=bool
+FLAG basecamp connect release --todolist type=string
+FLAG basecamp connect release --verbose type=count
 FLAG basecamp connect setup --account type=string
 FLAG basecamp connect setup --agent type=bool
 FLAG basecamp connect setup --allow type=stringArray
@@ -5404,6 +5521,48 @@ FLAG basecamp connect setup --verbose type=count
 FLAG basecamp connect setup --watch-completions type=stringArray
 FLAG basecamp connect setup --worker type=string
 FLAG basecamp connect setup --worktrees type=bool
+FLAG basecamp connect shadow --account type=string
+FLAG basecamp connect shadow --agent type=bool
+FLAG basecamp connect shadow --cache-dir type=string
+FLAG basecamp connect shadow --count type=bool
+FLAG basecamp connect shadow --help type=bool
+FLAG basecamp connect shadow --hints type=bool
+FLAG basecamp connect shadow --ids-only type=bool
+FLAG basecamp connect shadow --in type=string
+FLAG basecamp connect shadow --jq type=string
+FLAG basecamp connect shadow --json type=bool
+FLAG basecamp connect shadow --markdown type=bool
+FLAG basecamp connect shadow --md type=bool
+FLAG basecamp connect shadow --no-hints type=bool
+FLAG basecamp connect shadow --no-stats type=bool
+FLAG basecamp connect shadow --profile type=string
+FLAG basecamp connect shadow --project type=string
+FLAG basecamp connect shadow --quiet type=bool
+FLAG basecamp connect shadow --stats type=bool
+FLAG basecamp connect shadow --styled type=bool
+FLAG basecamp connect shadow --todolist type=string
+FLAG basecamp connect shadow --verbose type=count
+FLAG basecamp connect shadow promote --account type=string
+FLAG basecamp connect shadow promote --agent type=bool
+FLAG basecamp connect shadow promote --cache-dir type=string
+FLAG basecamp connect shadow promote --count type=bool
+FLAG basecamp connect shadow promote --help type=bool
+FLAG basecamp connect shadow promote --hints type=bool
+FLAG basecamp connect shadow promote --ids-only type=bool
+FLAG basecamp connect shadow promote --in type=string
+FLAG basecamp connect shadow promote --jq type=string
+FLAG basecamp connect shadow promote --json type=bool
+FLAG basecamp connect shadow promote --markdown type=bool
+FLAG basecamp connect shadow promote --md type=bool
+FLAG basecamp connect shadow promote --no-hints type=bool
+FLAG basecamp connect shadow promote --no-stats type=bool
+FLAG basecamp connect shadow promote --profile type=string
+FLAG basecamp connect shadow promote --project type=string
+FLAG basecamp connect shadow promote --quiet type=bool
+FLAG basecamp connect shadow promote --stats type=bool
+FLAG basecamp connect shadow promote --styled type=bool
+FLAG basecamp connect shadow promote --todolist type=string
+FLAG basecamp connect shadow promote --verbose type=count
 FLAG basecamp connect show --account type=string
 FLAG basecamp connect show --agent type=bool
 FLAG basecamp connect show --cache-dir type=string
@@ -5425,6 +5584,28 @@ FLAG basecamp connect show --stats type=bool
 FLAG basecamp connect show --styled type=bool
 FLAG basecamp connect show --todolist type=string
 FLAG basecamp connect show --verbose type=count
+FLAG basecamp connect status --account type=string
+FLAG basecamp connect status --agent type=bool
+FLAG basecamp connect status --cache-dir type=string
+FLAG basecamp connect status --count type=bool
+FLAG basecamp connect status --help type=bool
+FLAG basecamp connect status --hints type=bool
+FLAG basecamp connect status --ids-only type=bool
+FLAG basecamp connect status --in type=string
+FLAG basecamp connect status --jq type=string
+FLAG basecamp connect status --json type=bool
+FLAG basecamp connect status --markdown type=bool
+FLAG basecamp connect status --md type=bool
+FLAG basecamp connect status --no-hints type=bool
+FLAG basecamp connect status --no-stats type=bool
+FLAG basecamp connect status --profile type=string
+FLAG basecamp connect status --project type=string
+FLAG basecamp connect status --quiet type=bool
+FLAG basecamp connect status --shadow type=bool
+FLAG basecamp connect status --stats type=bool
+FLAG basecamp connect status --styled type=bool
+FLAG basecamp connect status --todolist type=string
+FLAG basecamp connect status --verbose type=count
 FLAG basecamp docs --account type=string
 FLAG basecamp docs --agent type=bool
 FLAG basecamp docs --cache-dir type=string
@@ -18604,8 +18785,16 @@ SUB basecamp config trust
 SUB basecamp config unset
 SUB basecamp config untrust
 SUB basecamp connect
+SUB basecamp connect discard
+SUB basecamp connect doctor
+SUB basecamp connect import
+SUB basecamp connect redispatch
+SUB basecamp connect release
 SUB basecamp connect setup
+SUB basecamp connect shadow
+SUB basecamp connect shadow promote
 SUB basecamp connect show
+SUB basecamp connect status
 SUB basecamp docs
 SUB basecamp docs archive
 SUB basecamp docs doc
