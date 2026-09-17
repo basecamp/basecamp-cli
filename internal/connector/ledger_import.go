@@ -46,7 +46,9 @@ func ParseReconciliation(data []byte) (Reconciliation, error) {
 	if err := dec.Decode(&r); err != nil {
 		return Reconciliation{}, fmt.Errorf("connector: reconciliation file: %w", err)
 	}
-	if dec.More() {
+	// Everything after the file's one value, not only another value: a stray
+	// brace is a file that does not say what it looks like it says.
+	if rest := bytes.TrimSpace(data[dec.InputOffset():]); len(rest) > 0 {
 		return Reconciliation{}, errors.New("connector: reconciliation file: more than one JSON value")
 	}
 	if r.Version != ReconciliationVersion {

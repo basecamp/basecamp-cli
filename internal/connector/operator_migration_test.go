@@ -336,12 +336,15 @@ func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
 
 func TestParseReconciliationIsStrict(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown field":  `{"version":1,"entries":[{"event_id":1,"decision":"done","note":"x"}]}`,
-		"other decision": `{"version":1,"entries":[{"event_id":1,"decision":"maybe"}]}`,
-		"duplicate":      `{"version":1,"entries":[{"event_id":1,"decision":"done"},{"event_id":1,"decision":"held"}]}`,
-		"no id":          `{"version":1,"entries":[{"decision":"done"}]}`,
-		"other version":  `{"version":2,"entries":[]}`,
-		"trailing value": `{"version":1,"entries":[]} {}`,
+		"unknown field":    `{"version":1,"entries":[{"event_id":1,"decision":"done","note":"x"}]}`,
+		"other decision":   `{"version":1,"entries":[{"event_id":1,"decision":"maybe"}]}`,
+		"duplicate":        `{"version":1,"entries":[{"event_id":1,"decision":"done"},{"event_id":1,"decision":"held"}]}`,
+		"no id":            `{"version":1,"entries":[{"decision":"done"}]}`,
+		"other version":    `{"version":2,"entries":[]}`,
+		"trailing value":   `{"version":1,"entries":[]} {}`,
+		"trailing brace":   `{"version":1,"entries":[]} }`,
+		"trailing bracket": `{"version":1,"entries":[]} ]`,
+		"trailing text":    `{"version":1,"entries":[]} done`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseReconciliation([]byte(body))

@@ -388,3 +388,27 @@ func TestConnectStatusOnAMissingShadowLedgerPointsAtTheShadowRun(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, usageError(t, err).Hint, "--shadow")
 }
+
+// A token in the environment would decide a record's prerequisite as somebody
+// other than the agent, so redispatch and doctor refuse before the ledger is
+// touched.
+func TestRedispatchAndDoctorRefuseAShadowingToken(t *testing.T) {
+	f := newOperatorFixture(t)
+	l := f.ledger(t, false)
+	require.NoError(t, l.Close())
+	t.Setenv("BASECAMP_TOKEN", "not-a-real-token")
+
+	for _, args := range [][]string{{"redispatch", "2"}, {"doctor"}} {
+		_, err := f.run(t, output.FormatJSON, args...)
+		require.Error(t, err, args[0])
+		assert.Contains(t, err.Error(), "BASECAMP_TOKEN", args[0])
+	}
+	dir, err := connectStatePath(f.file, false)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	var decisions int
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decisions`).Scan(&decisions))
+	assert.Zero(t, decisions, "nothing was decided")
+}

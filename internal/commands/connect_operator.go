@@ -409,6 +409,12 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	if err != nil {
 		return err
 	}
+	// Before the ledger is opened, let alone written: a redispatch may run the
+	// record's prerequisite as the agent, and a token in the environment would
+	// decide that as somebody else.
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return errEnvTokenShadows("a redispatch runs a record's prerequisite as the agent its profile holds, and BASECAMP_TOKEN would override it")
+	}
 	p, err := loadConnectProfile(cmd)
 	if err != nil {
 		return err

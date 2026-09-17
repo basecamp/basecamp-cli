@@ -43,6 +43,9 @@ Nothing is written and nothing is posted.`,
 
 func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return errEnvTokenShadows("doctor checks the agent its profile holds, and BASECAMP_TOKEN would override it")
+	}
 	p, err := loadConnectProfile(cmd)
 	if err != nil {
 		return err
