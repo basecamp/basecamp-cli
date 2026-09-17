@@ -857,3 +857,30 @@ func TestACompletedTurnThatWasCanceledDoesNotWaitForTheCheck(t *testing.T) {
 	require.NoError(t, turn.err)
 	assert.Equal(t, driver.TurnCanceled, turn.result.Stop)
 }
+
+// A cancel with no prompt yet ends the worker at once, whether the prompt ever
+// comes or not.
+func TestACancelWithNoPromptEndsTheWorker(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	require.NoError(t, s.Cancel(context.Background()))
+	waitDone(t, s)
+	result, err := s.Prompt(context.Background(), "Event 1.")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnCanceled, result.Stop, "canceled, not ended, though the worker is gone")
+}
+
+// A refusal Codex logs after a failed turn's event is still counted.
+func TestARefusalLoggedAfterAFailedTurnIsCounted(t *testing.T) {
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`, `{"type":"turn.failed","error":{"message":"x"}}`},
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+		Exit:        1,
+	})
+	_, result, err := h.run(context.Background(), h.config())
+	require.Error(t, err)
+	assert.Len(t, result.Refusals, 1)
+}

@@ -517,18 +517,18 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	case s.prompted:
 		s.mu.Unlock()
 		return driver.PromptResult{}, errOnePrompt
+	case s.cancelEarly:
+		// Cancel came before the prompt and already ended the worker:
+		// nothing is written, and the turn is canceled, even if the worker's
+		// output is over by now.
+		s.prompted = true
+		s.mu.Unlock()
+		return driver.PromptResult{Stop: driver.TurnCanceled}, nil
 	case s.ended:
 		// The worker's output ended while this prompt was on its way in: a
 		// turn installed now would wait for a result nobody is left to write.
 		s.mu.Unlock()
 		return driver.PromptResult{}, driver.ErrSessionEnded
-	case s.cancelEarly:
-		// Cancel came before the prompt: nothing is written, and the worker
-		// is ended.
-		s.prompted = true
-		s.mu.Unlock()
-		go s.worker.Terminate(s.grace)
-		return driver.PromptResult{Stop: driver.TurnCanceled}, nil
 	}
 	s.prompted = true
 	t := &turn{done: make(chan struct{})}
@@ -571,8 +571,10 @@ func (s *session) Cancel(context.Context) error {
 	if t != nil {
 		t.canceled = true
 	} else if !s.prompted {
-		// A cancel that races the prompt it is meant for.
+		// A cancel that races the prompt it is meant for: the worker is ended
+		// now, whether that prompt ever comes or not.
 		s.cancelEarly = true
+		t = &turn{}
 	}
 	s.mu.Unlock()
 	if t == nil {
@@ -939,6 +941,11 @@ func (s *session) turnFailed() {
 	if canceled {
 		s.finishCanceled(t, refusals)
 		return
+	}
+	// As after a completed turn: the stderr tail is whole once Codex exits.
+	select {
+	case <-s.worker.Done():
+	case <-time.After(s.grace):
 	}
 	s.stderrRefusals()
 	refusals = s.refusalsOf(t)
