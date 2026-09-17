@@ -227,6 +227,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	for i, t := range status.Tasks {
 		status.Tasks[i].Worker = recordedWorkerState(t)
+		status.Tasks[i].Taker = recordedTakerState(t)
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
@@ -315,7 +316,8 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))
 	for _, t := range s.Tasks {
-		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  since %s  events %v  in %s\n", t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
+		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v  in %s\n",
+			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
 	}
 	if !s.WorktreesKnown {
 		fmt.Fprintf(w, "  Worktrees      not tracked by this build\n")

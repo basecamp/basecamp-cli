@@ -134,3 +134,21 @@ func TestDoctorsFailedHandshakeLeavesNoDescendant(t *testing.T) {
 	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
 	assert.Eventually(t, func() bool { return !drivertest.Alive(child) }, 3*time.Second, 20*time.Millisecond, "the descendant went with its group")
 }
+
+// Status reports the process the task token went to as it reports the worker:
+// a taker that outlived its worker is the same "one owner" story, seen from
+// the operator's side.
+func TestStatusReportsATakerThatOutlivedItsWorker(t *testing.T) {
+	worker, _ := runningTree(t)
+	live := worker.Process()
+	taker, _ := drivertest.SurvivingWorker(t, t.TempDir())
+	started, takerStarted := live.StartedAt, taker.StartedAt
+	task := connector.TaskStatus{
+		PID: live.PID, PGID: live.PGID, ProcessStartedAt: &started,
+		TakerPID: taker.PID, TakerPGID: taker.PGID, TakerStartedAt: &takerStarted,
+	}
+
+	assert.Equal(t, workerRunning, recordedWorkerState(task))
+	assert.Equal(t, workerHeld, recordedTakerState(task), "its leader is gone and its group still runs")
+	assert.Equal(t, workerNotRecorded, recordedTakerState(connector.TaskStatus{PID: live.PID, PGID: live.PGID, ProcessStartedAt: &started}))
+}

@@ -84,10 +84,21 @@ func stopReplacedWorker(p driver.Process, grace time.Duration) workerStop {
 // recordedWorkerState is status's answer for a live attempt's worker. It
 // signals nothing.
 func recordedWorkerState(t connector.TaskStatus) string {
-	if t.PID <= 0 || t.PGID <= 0 || t.ProcessStartedAt == nil {
+	return recordedProcessState(t.PID, t.PGID, t.ProcessStartedAt)
+}
+
+// recordedTakerState is the same answer for the process the task token went
+// to — a worker's MCP server, which lives in a group of its own, so it can
+// outlive the worker that started it and still hold the task's token.
+func recordedTakerState(t connector.TaskStatus) string {
+	return recordedProcessState(t.TakerPID, t.TakerPGID, t.TakerStartedAt)
+}
+
+func recordedProcessState(pid, pgid int, started *time.Time) string {
+	if pid <= 0 || pgid <= 0 || started == nil {
 		return workerNotRecorded
 	}
-	switch owns, err := driver.OwnsWorker(driver.Process{PID: t.PID, PGID: t.PGID, StartedAt: *t.ProcessStartedAt}); {
+	switch owns, err := driver.OwnsWorker(driver.Process{PID: pid, PGID: pgid, StartedAt: *started}); {
 	case errors.Is(err, driver.ErrGroupOutlivedLeader):
 		return workerHeld
 	case err != nil:

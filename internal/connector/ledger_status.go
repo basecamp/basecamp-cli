@@ -165,9 +165,16 @@ type TaskStatus struct {
 	// ProcessStartedAt is the start time recorded with the pid: with it, the
 	// pid is an identity (driver.OwnsWorker).
 	ProcessStartedAt *time.Time `json:"process_started_at,omitempty"`
-	// Worker is whether the recorded process is still this task's worker, as
-	// the caller established it; the ledger read leaves it empty.
+	// TakerPID, TakerPGID and TakerStartedAt are the process the task token
+	// went to, where one took it: a worker's MCP server, which lives in a
+	// process group of its own.
+	TakerPID       int        `json:"taker_pid,omitempty"`
+	TakerPGID      int        `json:"taker_pgid,omitempty"`
+	TakerStartedAt *time.Time `json:"taker_started_at,omitempty"`
+	// Worker and Taker are whether each recorded process is still this task's,
+	// as the caller established it; the ledger read leaves them empty.
 	Worker     string     `json:"worker,omitempty"`
+	Taker      string     `json:"taker,omitempty"`
 	LaunchedAt time.Time  `json:"launched_at"`
 	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
 	EventIDs   []int64    `json:"event_ids"`
@@ -414,7 +421,8 @@ SELECT
 
 func statusTasks(ctx context.Context, tx *sql.Tx, s *Status) error {
 	rows, err := tx.QueryContext(ctx, `
-SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started, a.launched_at, t.deadline_at
+SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started,
+       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started, a.launched_at, t.deadline_at
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	if err != nil {
@@ -427,18 +435,26 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 			launched string
 			deadline sql.NullString
 			started  sql.NullString
+			taken    sql.NullString
 		)
-		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &t.PGID, &started, &launched, &deadline); err != nil {
+		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &t.PGID, &started,
+			&t.TakerPID, &t.TakerPGID, &taken, &launched, &deadline); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		if started.Valid {
-			at, err := parseStamp(started.String)
+		for _, stamped := range []struct {
+			raw sql.NullString
+			to  **time.Time
+		}{{started, &t.ProcessStartedAt}, {taken, &t.TakerStartedAt}} {
+			if !stamped.raw.Valid {
+				continue
+			}
+			at, err := parseStamp(stamped.raw.String)
 			if err != nil {
 				_ = rows.Close()
 				return err
 			}
-			t.ProcessStartedAt = &at
+			*stamped.to = &at
 		}
 		if t.LaunchedAt, err = parseStamp(launched); err != nil {
 			_ = rows.Close()
