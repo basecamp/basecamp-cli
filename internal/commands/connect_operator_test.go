@@ -307,7 +307,7 @@ func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
 	// A ledger an older binary wrote: its last migration is not recorded.
 	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
-	_, err = db.Exec(`DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)`)
+	_, err = db.ExecContext(context.Background(), `DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
