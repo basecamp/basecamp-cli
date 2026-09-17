@@ -120,10 +120,29 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 			// says nothing about the next one.
 			w.retryAfter = 0
 		}
-		if err := w.wait(ctx, wait); err != nil {
+		if err := w.waitWithin(ctx, wait, loss); err != nil {
 			return err
 		}
 	}
+}
+
+// waitWithin sleeps for wait, but never past the loss's absolute deadline.
+//
+// The 24-hour lifetime bounds the LOSS, not the intervals between its
+// attempts, and a server-directed Retry-After is not bounded by anything: one
+// response asking for thirty hours would otherwise hold the loss open — and
+// its repair worker with it — well past the deadline the connector promises.
+// Woken at the deadline, the caller's next turn around the loop sees it and
+// closes the loss without polling first, which is right: the server asked for
+// a wait this connector no longer has to give.
+func (w *repairWalker) waitWithin(ctx context.Context, wait time.Duration, loss Loss) error {
+	if remaining := loss.DetectedAt.Add(maxLossLifetime).Sub(w.now()); remaining < wait {
+		wait = remaining
+	}
+	if wait <= 0 {
+		return nil
+	}
+	return w.wait(ctx, wait)
 }
 
 // postpone moves a loss's window out by the wait the server asked for.
@@ -164,7 +183,7 @@ func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
 		w.retryAfter = 0
 		w.log.Warn("the last repair attempt was throttled; waiting as the server asked and trying again",
 			"loss_id", loss.ID, "retry_after", wait)
-		if err := w.wait(ctx, wait); err != nil {
+		if err := w.waitWithin(ctx, wait, *loss); err != nil {
 			return err
 		}
 		return w.reconcile(ctx, *loss)

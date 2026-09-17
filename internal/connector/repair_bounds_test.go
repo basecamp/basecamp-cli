@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"testing"
@@ -209,4 +210,42 @@ type alwaysThrottling struct{}
 
 func (alwaysThrottling) Poll(context.Context, eventfeed.Cursor, eventfeed.Filters) (eventfeed.PollPage, error) {
 	return eventfeed.PollPage{}, &eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}
+}
+
+// A throttle is not a failure, and the wait it asks for is the server's to
+// name — but the loss's absolute deadline is this connector's promise, and an
+// uncapped Retry-After would hold the loss open, and its repair worker with
+// it, well past the day it is allowed to live.
+func TestAThrottleCannotHoldALossPastItsAbsoluteDeadline(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	detected := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	clock := &walkClock{at: detected}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, detected, time.Hour, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	// Twenty-three hours in, the server asks for six more.
+	clock.at = detected.Add(23 * time.Hour)
+	var slept []time.Duration
+	polls := &scriptedPolls{errs: []error{
+		&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 6 * time.Hour, Err: errors.New("slow down")},
+	}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		clock.at = clock.at.Add(d)
+		return nil
+	}
+
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	require.NotEmpty(t, slept)
+	for _, d := range slept {
+		assert.LessOrEqual(t, d, time.Hour, "no wait may reach past the loss's last hour")
+	}
+	assert.LessOrEqual(t, clock.at.Sub(detected), maxLossLifetime, "the loss outlived its deadline")
+
+	open, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, open, "the loss closes at its deadline whatever the server asked for")
 }
