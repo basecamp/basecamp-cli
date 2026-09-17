@@ -634,7 +634,7 @@ func TestAFailedPrepareBacksOff(t *testing.T) {
 
 // A route that cannot take a worktree never fills the window the dispatcher
 // starts records from: a healthy route's record still starts.
-func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
+func TestAFailingWorktreeRouteDoesNotStarveTheOthers(t *testing.T) {
 	h := newWorktreeHarness(t)
 	broken := filepath.Join(t.TempDir(), "not-a-repository")
 	require.NoError(t, os.MkdirAll(broken, 0o700))
