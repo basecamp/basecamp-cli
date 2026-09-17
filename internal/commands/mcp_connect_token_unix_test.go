@@ -354,3 +354,36 @@ func TestABadDescriptorNumberIsRefusedAtTheRead(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not open")
 }
+
+// Nothing is read for an invocation that serves nothing: help, a flag the
+// command does not accept, or a state directory that is only whitespace —
+// which the command reads as absent too, so the two never disagree.
+func TestNothingIsReadForAnInvocationThatServesNothing(t *testing.T) {
+	for name, args := range map[string][]string{
+		"help":              {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--help"},
+		"help, short":       {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "-h"},
+		"a flag it refuses": {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--bogus"},
+		"a missing value":   {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--domains"},
+		"blank state":       {"mcp", "--connect-state", "   ", "--connect-token-fd", "3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, found := connectTokenFD(testRootForMCP(t), args)
+			assert.False(t, found)
+		})
+	}
+}
+
+// And the command reads a whitespace state directory as absent as well, so it
+// refuses the descriptor rather than reporting a token that was never read.
+func TestABlankStateDirectoryIsNoStateDirectory(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+	app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
+	fd := tokenPipe(t, "token\n")
+	dev, ino, _ := fdIdentity(t, fd)
+
+	err := executeMCPCommand(t, app, "--connect-state", "   ", "--connect-token-fd", strconv.Itoa(fd))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--connect-token-fd is only for a server started with --connect-state")
+	nowDev, nowIno, open := fdIdentity(t, fd)
+	assert.True(t, open && nowDev == dev && nowIno == ino, "and the descriptor was not touched")
+}

@@ -64,6 +64,11 @@ func TakeConnectTaskToken(root *cobra.Command, args []string) {
 	takenTaskToken.token, takenTaskToken.err = readTaskToken(fd)
 }
 
+// connectStateGiven is the one rule for whether a state directory was given,
+// used by the startup read and by the command, so they never disagree about
+// an invocation.
+func connectStateGiven(state string) bool { return strings.TrimSpace(state) != "" }
+
 // connectTokenFD reports the descriptor to read: this command, serving the
 // connect domain, with a descriptor given. A read-only server serves no
 // connect domain, and a descriptor without a state directory is refused by the
@@ -74,21 +79,33 @@ func connectTokenFD(root *cobra.Command, args []string) (int, bool) {
 		return 0, false
 	}
 
-	// The command's own flags, parsed as the command will parse them. The
-	// root's flags are unknown here and are skipped rather than guessed at.
+	// The command's own flags and the root's, as the command will see them:
+	// the definitions are the command's, so a flag it does not accept fails
+	// here exactly as it will there, and nothing is read for an invocation
+	// cobra is about to refuse.
 	flags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
-	flags.ParseErrorsWhitelist.UnknownFlags = true
 	flags.SetOutput(io.Discard)
-	readOnly := flags.Bool("read-only", false, "")
-	state := flags.String("connect-state", "", "")
-	fd := flags.Int("connect-token-fd", -1, "")
+	flags.AddFlagSet(target.Flags())
+	flags.AddFlagSet(target.Root().PersistentFlags())
+	if flags.Lookup("help") == nil {
+		flags.BoolP("help", "h", false, "")
+	}
 	if err := flags.Parse(rest); err != nil {
 		return 0, false
 	}
-	if *readOnly || strings.TrimSpace(*state) == "" || !flags.Changed("connect-token-fd") {
+	if help, _ := flags.GetBool("help"); help {
+		return 0, false // cobra prints help and serves nothing
+	}
+	if version, err := flags.GetBool("version"); err == nil && version {
 		return 0, false
 	}
-	return *fd, true
+	readOnly, _ := flags.GetBool("read-only")
+	state, _ := flags.GetString("connect-state")
+	fd, err := flags.GetInt("connect-token-fd")
+	if err != nil || readOnly || !connectStateGiven(state) || !flags.Changed("connect-token-fd") {
+		return 0, false
+	}
+	return fd, true
 }
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is
@@ -147,7 +164,7 @@ func NewMCPCmd() *cobra.Command {
 					"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
 			}
 			switch {
-			case connectState == "" && cmd.Flags().Changed("connect-token-fd"):
+			case !connectStateGiven(connectState) && cmd.Flags().Changed("connect-token-fd"):
 				return output.ErrUsage("--connect-token-fd is only for a server started with --connect-state")
 			case connectState != "":
 				if readOnly {
@@ -181,7 +198,7 @@ func NewMCPCmd() *cobra.Command {
 			}
 
 			cfg := mcpserver.Config{ReadOnly: readOnly, Domains: domains}
-			if connectState != "" {
+			if connectStateGiven(connectState) {
 				dispatch, closeLedger, err := openConnectDispatch(cmd.Context(), connectState, app.Config.AccountID, taskToken)
 				if err != nil {
 					return err

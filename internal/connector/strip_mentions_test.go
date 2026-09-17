@@ -10,7 +10,7 @@ import (
 
 // StripMentionsOf is held to agreement with the reader admission decides the
 // trigger with, basecamp.MentionedPersonIDs, over markup built to make two
-// parsers disagree. Three properties, for every input:
+// parsers disagree. Four properties, for every input:
 //
 //  1. no mention of the agent survives;
 //  2. every other person the reader found is still found, in order;

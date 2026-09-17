@@ -498,3 +498,27 @@ func testDeliveryNeedsAPull(t *testing.T) {
 		})
 	}
 }
+
+// A pull and a withdrawal are opposites: one says a worker has the
+// instruction, the other that none ever did. One statement cannot write both,
+// and a BEFORE trigger that read only the row as it was would let it.
+func TestOneWriteCannotBothPullAndWithdraw(t *testing.T) {
+	for name, statement := range map[string]string{
+		"pull and withdraw": `UPDATE task_events SET pulled_at = 'now', withdrawn_at = 'now' WHERE event_id = 1`,
+		"withdraw and pull": `UPDATE task_events SET withdrawn_at = 'now', pulled_at = 'now' WHERE event_id = 1`,
+		"pull and retire":   `UPDATE task_events SET pulled_at = 'now', retired_at = 'now' WHERE event_id = 1`,
+		"pull and move on":  `UPDATE task_events SET pulled_at = 'now', delivery = 'delivered' WHERE event_id = 1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newDispatchFixture(t)
+			_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+			require.NoError(t, err)
+
+			_, err = f.ledger.db.ExecContext(ctx, statement)
+
+			require.Error(t, err)
+			assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
+		})
+	}
+}

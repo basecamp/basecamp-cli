@@ -404,12 +404,20 @@ func recordCheckedFile(file *openLedgerFile, info os.FileInfo) {
 	file.info, file.checked = info, true
 }
 
+// ownedByThisUser and sameOwner read owners; see owner_unix.go.
+//
 // verifySameFile holds a second open to what the first one's check
 // established, without opening anything.
 func verifySameFile(path string, checked os.FileInfo) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("connector: secure the ledger: %w", err)
+	}
+	// The first check established whose file it is. Ownership can change
+	// under an open handle, and a ledger that is no longer this user's own —
+	// or no longer the owner the check passed — is not one to read.
+	if !ownedByThisUser(info) || !sameOwner(info, checked) {
+		return fmt.Errorf("connector: secure the ledger: %s is no longer owned by the user the check passed", path)
 	}
 	if !info.Mode().IsRegular() || !os.SameFile(info, checked) {
 		return fmt.Errorf("connector: secure the ledger: %s: %w", path, ErrLedgerNotTheSameFile)
@@ -648,6 +656,9 @@ WHEN NEW.withdrawn_at IS NOT OLD.withdrawn_at AND (
   OLD.withdrawn_at IS NOT NULL
   OR OLD.delivery <> 'exposed'
   OR OLD.pulled_at IS NOT NULL
+  -- Nor can one statement withdraw and pull, or withdraw and move the row.
+  OR NEW.pulled_at IS NOT NULL
+  OR NEW.delivery <> 'exposed'
   OR NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = OLD.task_id AND tasks.superseded_at IS NOT NULL)
   OR EXISTS (SELECT 1 FROM task_events live WHERE live.event_id = OLD.event_id AND live.retired_at IS NULL))
 BEGIN
@@ -660,7 +671,12 @@ WHEN NEW.pulled_at IS NOT OLD.pulled_at AND (
   OLD.pulled_at IS NOT NULL
   OR OLD.delivery <> 'exposed'
   OR OLD.retired_at IS NOT NULL
-  OR OLD.withdrawn_at IS NOT NULL)
+  OR OLD.withdrawn_at IS NOT NULL
+  -- The same statement cannot both pull and retire or withdraw: these are a
+  -- BEFORE trigger's conditions, so the row being written is read as well.
+  OR NEW.retired_at IS NOT NULL
+  OR NEW.withdrawn_at IS NOT NULL
+  OR NEW.delivery <> 'exposed')
 BEGIN
   SELECT RAISE(ABORT, 'a pull is recorded once, and only on a live exposure');
 END;
@@ -698,6 +714,11 @@ BEGIN
   SELECT RAISE(ABORT, 'a guard only goes from armed to canceled or fired');
 END;
 
+-- What these triggers are for: holding this package's own writes, and those
+-- of a second connector on the same file, to the lifecycle. They are not a
+-- defense against raw SQL. Anyone who can run that already has write access to
+-- the operator's private ledger and could edit or replace the file; the trust
+-- boundary there is file ownership and the private-path check, not a trigger.
 CREATE TRIGGER task_events_join_live_tasks_only
 BEFORE INSERT ON task_events
 WHEN EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id AND superseded_at IS NOT NULL)
