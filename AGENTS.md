@@ -80,10 +80,21 @@ session, stop and run it first.
 *references* still exist in the `.surface` snapshot. It catches stale references, not
 missing coverage, so adding a command breaks none of them.
 
-Removal is only partly caught. `resolve_cmd` walks up to the nearest existing ancestor,
-so dropping a nested subcommand leaves the reference resolving against its parent and the
-check still passes — `basecamp setup <removed>` resolves as `basecamp setup`. Removing a
-top-level command is caught; removing a subcommand is not. Don't lean on CI for this. Update the skill the change actually affects;
+A reference has to resolve exactly, so removing a nested subcommand is caught too:
+`basecamp setup <removed>` no longer passes by falling back to `basecamp setup`. Words
+past a resolved command are allowed only where they cannot name a subcommand — after a
+command that takes positional arguments, and after a leaf that has none — so argument
+values and prose still pass. What `.surface` cannot say is whether a group runs bare
+(`basecamp skill` prints the skill file) or only dispatches (`basecamp profile`), and
+hidden commands are not in `.surface` at all; acknowledge either in
+`.surface-skill-drift` as `CMD <path>`. `make test-skill-drift` runs the check against
+fixtures that hold this behavior.
+
+Hints in Go code are covered by a test rather than by this script:
+`TestHintCommandsResolve` resolves every command named in a hint across
+`internal/commands`, and every command named in any string in `connect.go`, against the
+real command tree. A hint is an instruction an operator is about to run, so it is held to
+the same exactness. Update the skill the change actually affects;
 basecamp-doctor deliberately covers only doctor, setup and auth remediation;
 basecamp-connect covers `basecamp auth agent connect` and `basecamp connect`, and its
 evals run against its own SKILL.md (`make -C skill-evals eval-connect`).

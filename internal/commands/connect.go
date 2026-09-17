@@ -862,8 +862,12 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 	}
 	bound, err := canonicalAccount(p.AccountID)
 	if err != nil {
+		// The account is bound by the command that stores the credential —
+		// there is no command that binds one on its own — so the remedy is
+		// to store it again, which rewrites the entry with an account.
 		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q is not bound to an account", name),
-			"Bind it: basecamp profile set "+shellQuote(name)+" account_id <id>")
+			"Bind it where the credential is stored: basecamp auth agent connect -P "+shellQuote(name)+
+				" takes the agent's own account, and on the bot-user path basecamp auth login -P "+shellQuote(name)+" --account <id> binds the one you name.")
 	}
 	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
 		return "", output.ErrUsageHint(

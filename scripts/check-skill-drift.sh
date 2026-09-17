@@ -29,24 +29,67 @@ is_baselined() {
   [ -f "$BASELINE" ] && grep -qxF "$1" "$BASELINE"
 }
 
-# Resolve a candidate command path to the longest matching CMD in .surface.
-# Prints the match (or nothing). Rejects fallback to bare "basecamp" —
-# every extracted candidate has at least one subcommand word, so matching
-# only the root means none of the subcommands exist.
+# resolve_cmd prints the longest prefix of a candidate that is a CMD in
+# .surface, and nothing when no prefix is one.
 resolve_cmd() {
   local candidate="$1"
   read -ra parts <<< "$candidate"
   for ((i=${#parts[@]}; i>=1; i--)); do
     local try="${parts[*]:0:$i}"
     if grep -qxF "CMD $try" "$SURFACE"; then
-      # Reject bare root — candidate always has subcommand tokens
-      if [ "$try" = "basecamp" ] && [ "${#parts[@]}" -gt 1 ]; then
-        return
-      fi
       echo "$try"
       return
     fi
   done
+}
+
+# verify_cmd decides whether a candidate names a command that exists.
+#
+# Resolving to the nearest existing ancestor is not enough: "basecamp profile
+# set" resolved to "basecamp profile" and passed, though "profile" has no
+# "set" subcommand. So a candidate has to resolve EXACTLY, unless the words
+# past the resolved command can only be argument values or prose — which is
+# the case when the resolved command takes positional arguments (it has ARG
+# entries), or is a leaf that takes none (no SUB entries, so no word after it
+# could ever name a subcommand).
+#
+# What is left is the case the old fallback swallowed: a group that has
+# subcommands, takes no arguments, and is followed by a word that is not one
+# of its subcommands. That word is an invented subcommand, or a reference
+# this check cannot verify. Either way it fails.
+#
+# Prints "<resolved command>|<word it does not have>" and returns 0 when the
+# candidate is verified, 1 when it is not. On a failure the resolved command
+# is the deepest one that does exist — empty when not even the root does.
+verify_cmd() {
+  local candidate="$1" matched
+  read -ra parts <<< "$candidate"
+  matched=$(resolve_cmd "$candidate")
+  if [ -z "$matched" ]; then
+    echo "|${parts[0]}"
+    return 1
+  fi
+
+  read -ra found <<< "$matched"
+  local depth=${#found[@]}
+  if [ "$depth" -eq "${#parts[@]}" ]; then
+    echo "$matched|"
+    return 0
+  fi
+
+  # Leftover words are argument values when the command takes arguments.
+  if grep -qE "^ARG ${matched} [0-9]{2} " "$SURFACE"; then
+    echo "$matched|"
+    return 0
+  fi
+  # Leftover words are prose when the command has no subcommands to name.
+  if ! grep -qE "^SUB ${matched} [a-z]" "$SURFACE"; then
+    echo "$matched|"
+    return 0
+  fi
+
+  echo "${matched}|${parts[$depth]}"
+  return 1
 }
 
 # Check whether a flag exists on a command or any of its subcommands.
@@ -68,14 +111,25 @@ skill_body=$(awk '/^---$/{n++; next} n>=2' "$SKILL")
 # --- Phase 1: Command references ---
 # Extract "basecamp <subcommand>..." patterns, resolve to longest matching CMD.
 while IFS= read -r candidate; do
-  matched=$(resolve_cmd "$candidate")
+  status=0
+  result=$(verify_cmd "$candidate") || status=$?
 
-  if [ -z "$matched" ]; then
-    key="CMD ${candidate}"
+  if [ "$status" -ne 0 ]; then
+    resolved="${result%%|*}"
+    word="${result#*|}"
+    if [ -z "$resolved" ] || [ "$resolved" = "basecamp" ]; then
+      # Nothing past "basecamp" names a command: the whole reference is the
+      # drift, and the whole reference is what a baseline entry names.
+      message="command not in surface: $candidate"
+      key="CMD ${candidate}"
+    else
+      message="cannot verify \"$candidate\": ${resolved} has no subcommand \"${word}\""
+      key="CMD ${resolved} ${word}"
+    fi
     if is_baselined "$key"; then
       : # known drift
     else
-      echo "DRIFT: command not in surface: $candidate"
+      echo "DRIFT: $message"
       new_drift=$((new_drift + 1))
     fi
     errors=$((errors + 1))
@@ -99,8 +153,11 @@ while IFS=: read -r lineno line; do
     continue
   fi
 
-  matched=$(resolve_cmd "$cmd_candidate")
-  [ -z "$matched" ] && continue
+  # A command phase 1 already reported is no base for a flag check.
+  status=0
+  result=$(verify_cmd "$cmd_candidate") || status=$?
+  [ "$status" -ne 0 ] && continue
+  matched="${result%%|*}"
 
   for flag in $(echo "$line" | grep -oE -- '--[a-z][-a-z0-9]*' | sort -u); do
     # Skip cobra built-ins
@@ -128,7 +185,8 @@ if [ $new_drift -gt 0 ]; then
   echo ""
   echo "Found ${new_drift} new skill drift issue(s) (${baselined} baselined)."
   echo "Update ${SKILL} to match the current CLI surface (.surface),"
-  echo "or add entries to ${BASELINE} if the drift is intentional."
+  echo "or add entries to ${BASELINE} if the drift is intentional —"
+  echo "a hidden command is not in .surface, and is baselined as \"CMD <path>\"."
   exit 1
 fi
 

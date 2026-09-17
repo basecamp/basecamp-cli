@@ -383,7 +383,7 @@ check-smoke-coverage: build
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -458,6 +458,11 @@ check-skill-drift:
 	@scripts/check-skill-drift.sh
 	@scripts/check-skill-drift.sh skills/basecamp-doctor/SKILL.md
 	@scripts/check-skill-drift.sh skills/basecamp-connect/SKILL.md
+
+# Verify the skill drift check itself: what it accepts, and what it refuses
+.PHONY: test-skill-drift
+test-skill-drift:
+	@scripts/test-skill-drift.sh
 
 # Verify group commands show help bare (no RunE on parents with subcommands)
 .PHONY: check-bare-groups
@@ -622,6 +627,7 @@ help:
 	@echo "  update-surface  Regenerate committed .surface from the command tree"
 	@echo "  check-surface-diff  Compare CLI surface snapshots (fails on removals)"
 	@echo "  check-skill-drift  Verify skill references match CLI surface"
+	@echo "  test-skill-drift  Run the skill drift check against its own fixtures"
 	@echo ""
 	@echo "Dependencies:"
 	@echo "  update-nix-hash   Recompute Nix vendorHash via Docker"

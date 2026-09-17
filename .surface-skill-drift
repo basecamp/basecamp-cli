@@ -1,6 +1,9 @@
-# Known skill drift — skill references flags that don't exist on the surface command.
+# Known skill drift — references the surface cannot confirm.
 # These are pre-existing mismatches, not regressions. Fix in SKILL.md when convenient.
 # Format: FLAG <command-path> <flag>
+#         CMD <command-path>    — for a command reference the check refuses, which
+#                                 includes a hidden command (never in .surface) and a
+#                                 group that runs bare (.surface cannot say it does)
 FLAG basecamp comments list --in
 FLAG basecamp comments update --in
 FLAG basecamp people --in
