@@ -268,7 +268,10 @@ func runHarnessConnector(dir string) error {
 	}
 
 	mcp := WorkerMCP{Command: filepath.Join(dir, "basecamp"), Profile: "agent", StateDir: stateDir}
-	runFor := 60 * time.Second
+	// Generous: a loaded box (the harness runs its own tests concurrently in
+	// CI, and a mutation sweep runs dozens at once) must fail on what the
+	// ledger says, never on how long the machine took.
+	runFor := 2 * time.Minute
 	if d.Real {
 		// The real `basecamp mcp`, holding a token that reaches no Basecamp:
 		// the worker's basecamp_connect calls are real, its Basecamp calls

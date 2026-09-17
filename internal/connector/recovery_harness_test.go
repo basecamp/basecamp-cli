@@ -377,7 +377,7 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	if r.StateDir == "" {
 		r.StateDir = h.state
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	h.t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRecoveryConnector$", "-test.count=1", "-test.v")
 	cmd.Env = append(os.Environ(),
