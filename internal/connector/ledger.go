@@ -494,6 +494,9 @@ END;
 	// attempts, and how each ended. See ledger_tasks.go for the invariants
 	// these tables hold.
 	migrationTasksAndAttempts,
+	// Migration 7. The outbox every lifecycle message goes through. See
+	// outbox.go for the invariants it holds.
+	migrationOutbox,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
