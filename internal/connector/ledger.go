@@ -296,8 +296,11 @@ END;
 	// counts from it), and retry_at a throttled verdict's server deadline.
 	// The rest is the verdict itself — what dispatch starts a task from, and
 	// what a blocked(no_route) record's holding reply needs. snapshot is the
-	// recording's content as admission read it, and only an admitted record
-	// carries one; nothing else in the ledger is content.
+	// recording's content as admission read it. Only an admitted verdict
+	// writes one, whether the ledger writes it as admitted or as queued; a
+	// record keeps it through dispatch and completion until retention drops
+	// it, and loses it on any move to blocked or discarded. Nothing else in
+	// the ledger is content.
 	//
 	// Nothing has shipped that wrote a version 3 ledger, but a migration is
 	// how the schema changes regardless: the next time something has, this is
@@ -318,7 +321,7 @@ ALTER TABLE events ADD COLUMN class              TEXT    NOT NULL DEFAULT '';
 ALTER TABLE events ADD COLUMN recording_url      TEXT    NOT NULL DEFAULT '';
 ALTER TABLE events ADD COLUMN requester_id       INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE events ADD COLUMN snapshot           BLOB;
-CREATE INDEX events_conversation ON events (conversation_key, state) WHERE conversation_key <> '';
+CREATE INDEX events_conversation ON events (conversation_key, state);
 `,
 }
 

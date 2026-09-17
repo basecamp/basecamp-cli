@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
@@ -71,8 +72,11 @@ func (a Admission) LoadUndecided(ctx context.Context, id int64) (admission.Event
 //     is admission.ErrAlreadyDecided;
 //   - an admitted verdict is written as queued when its conversation is
 //     live, decided inside the transaction: another record on the key is
-//     admitted and not yet dispatched (it becomes the task), dispatched (the
-//     task is running), or queued behind one of those;
+//     admitted and not yet dispatched (it becomes the task) or dispatched
+//     (the task is running). A queued record alone is not a live
+//     conversation: queued records join their task before it closes, and
+//     counting one left behind would queue every later event on the key
+//     with nothing to start a task;
 //   - content is written only with an admitted verdict;
 //   - a throttled verdict keeps its RetryAt.
 func (a Admission) Commit(ctx context.Context, v admission.Verdict) (admission.State, error) {
@@ -111,11 +115,7 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 		// The record being decided is seen or blocked, so it never counts
 		// itself as the conversation's task.
 		var live bool
-		if err := tx.QueryRowContext(ctx, `
-SELECT EXISTS (
-  SELECT 1 FROM events
-  WHERE conversation_key = ? AND state IN (?, ?, ?)
-)`, v.ConversationKey, string(StateAdmitted), string(StateQueued), string(StateDispatched)).Scan(&live); err != nil {
+		if err := tx.QueryRowContext(ctx, liveConversation, v.ConversationKey, string(StateAdmitted), string(StateDispatched)).Scan(&live); err != nil {
 			return "", fmt.Errorf("connector: read conversation of %d: %w", v.EventID, err)
 		}
 		if live {
@@ -123,19 +123,9 @@ SELECT EXISTS (
 		}
 	}
 
-	now := l.timestamp()
-	var retryAt any
-	if state == StateBlocked && !v.RetryAt.IsZero() {
-		retryAt = stamp(v.RetryAt)
-	}
-	var blockedAt assignment
+	var retryAt time.Time
 	if state == StateBlocked {
-		// The retry window counts from the first of a run of blocked
-		// verdicts, so a record re-blocked every ten minutes still ages out
-		// of it. Read as the row was before this write.
-		blockedAt = assignment{column: "blocked_at", expr: "CASE WHEN state = 'blocked' AND blocked_at IS NOT NULL THEN blocked_at ELSE ? END", value: now}
-	} else {
-		blockedAt = assignment{column: "blocked_at", value: nil}
+		retryAt = v.RetryAt
 	}
 	reply := admission.ReplyDestination{}
 	if v.Reply != nil {
@@ -148,10 +138,9 @@ SELECT EXISTS (
 		reason:   string(v.Reason),
 		from:     undecided,
 		revision: &revision,
+		retryAt:  retryAt,
 		set: []assignment{
-			{column: "decided_at", value: now},
-			blockedAt,
-			{column: "retry_at", value: retryAt},
+			{column: "decided_at", value: l.timestamp()},
 			{column: "trigger_name", value: string(v.Trigger)},
 			{column: "acknowledge", value: v.Acknowledge},
 			{column: "conversation_key", value: v.ConversationKey},
@@ -176,6 +165,14 @@ SELECT EXISTS (
 	}
 	return state, nil
 }
+
+// liveConversation asks whether a conversation has a task running or a record
+// about to become one. It is read through events_conversation.
+const liveConversation = `
+SELECT EXISTS (
+  SELECT 1 FROM events
+  WHERE conversation_key = ? AND state IN (?, ?)
+)`
 
 // verdictState checks a verdict is one the ledger can write and maps it to
 // the ledger's state. Queued is the ledger's decision, never a verdict's.

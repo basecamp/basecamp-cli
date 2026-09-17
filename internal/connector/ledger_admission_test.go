@@ -299,14 +299,15 @@ func TestAdmissionQueuesBehindALiveConversation(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, l.SetState(context.Background(), 2, StateDispatched, ""))
 		}, admission.StateQueued},
-		{"a queued record waits on a live task", func(t *testing.T, l *Ledger) {
+		{"a queued record alone is not a task", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
 			_, err = l.Admission().Commit(context.Background(), admittedVerdict(3, 0, key))
 			require.NoError(t, err)
 			require.NoError(t, l.SetState(context.Background(), 2, StateDispatched, ""))
 			require.NoError(t, l.SetState(context.Background(), 2, StateCompleted, ""))
-		}, admission.StateQueued},
+			require.Equal(t, StateQueued, getRecord(t, l, 3).State)
+		}, admission.StateAdmitted},
 		{"a completed task is not live", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
@@ -338,8 +339,6 @@ func TestAdmissionQueuesBehindALiveConversation(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, written)
 			assert.Equal(t, RecordState(tc.want), getRecord(t, ledger, 1).State)
-
-			// Through the committer too, which reports what the ledger wrote.
 		})
 	}
 }
@@ -429,6 +428,99 @@ func TestAdmissionKeepsTheBlockedScheduleInputs(t *testing.T) {
 	d = getRecord(t, ledger, 1).Decision
 	assert.Nil(t, d.BlockedAt)
 	assert.Nil(t, d.RetryAt)
+}
+
+// The blocked schedule's inputs belong to every state write, not only to a
+// verdict: a record moved out of blocked by anything forgets when it was
+// blocked, one moved back in starts a new window, and a record parked on
+// blocked or discarded carries no content.
+func TestEveryMoveKeepsTheBlockedScheduleInputs(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	store := ledger.Admission()
+	t0 := time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)
+	ledger.now = func() time.Time { return t0 }
+	seenRecord(t, ledger, 1)
+	throttled := blockedVerdict(1, 0, admission.ReasonThrottled)
+	throttled.RetryAt = t0.Add(time.Hour)
+	_, err := store.Commit(ctx, throttled)
+	require.NoError(t, err)
+
+	// Out of blocked by a plain state write: no window, no deadline.
+	t1 := t0.Add(72 * time.Hour)
+	ledger.now = func() time.Time { return t1 }
+	require.NoError(t, ledger.SetState(ctx, 1, StateAdmitted, ""))
+	d := getRecord(t, ledger, 1).Decision
+	assert.Nil(t, d.BlockedAt, "a record that left blocked is not blocked")
+	assert.Nil(t, d.RetryAt)
+
+	// Back into blocked after a dispatch: a new window from now, and the
+	// verdict that follows keeps it.
+	require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+	require.NoError(t, ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
+	record := getRecord(t, ledger, 1)
+	require.NotNil(t, record.Decision.BlockedAt)
+	assert.True(t, t1.Equal(*record.Decision.BlockedAt))
+	t2 := t1.Add(10 * time.Minute)
+	ledger.now = func() time.Time { return t2 }
+	_, err = store.Commit(ctx, blockedVerdict(1, record.Revision, admission.ReasonReadFailed))
+	require.NoError(t, err)
+	d = getRecord(t, ledger, 1).Decision
+	require.NotNil(t, d.BlockedAt)
+	_, ok := admission.NextBlockedRetry(admission.ReasonReadFailed, *d.BlockedAt, *d.DecidedAt, time.Time{})
+	assert.True(t, ok, "a record blocked again after a redispatch still gets its timed retries")
+
+	// A deadline is a blocked record's alone.
+	_, err = ledger.move(ctx, ledger.db, transition{id: 1, state: StateBlocked, reason: "read_failed", retryAt: t2})
+	require.NoError(t, err)
+	_, err = ledger.move(ctx, ledger.db, transition{id: 1, state: StateAdmitted, retryAt: t2})
+	require.Error(t, err)
+}
+
+func TestAMoveToBlockedOrDiscardedDropsTheSnapshot(t *testing.T) {
+	for _, target := range []RecordState{StateBlocked, StateDiscarded} {
+		t.Run(string(target), func(t *testing.T) {
+			ledger := newTestLedger(t)
+			ctx := context.Background()
+			seenRecord(t, ledger, 1)
+			_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+			require.NoError(t, err)
+			require.NotEmpty(t, getRecord(t, ledger, 1).Decision.Snapshot)
+
+			require.NoError(t, ledger.SetState(ctx, 1, target, "by_operator"))
+
+			assert.Empty(t, getRecord(t, ledger, 1).Decision.Snapshot)
+		})
+	}
+
+	t.Run("dispatch keeps it", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ctx := context.Background()
+		seenRecord(t, ledger, 1)
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+		require.NoError(t, err)
+		require.NoError(t, ledger.SetState(ctx, 1, StateDispatched, ""))
+		require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
+		assert.NotEmpty(t, getRecord(t, ledger, 1).Decision.Snapshot)
+	})
+}
+
+// The conversation read uses the conversation index rather than scanning
+// every record in a live state.
+func TestTheConversationReadUsesItsIndex(t *testing.T) {
+	ledger := newTestLedger(t)
+	var plan strings.Builder
+	rows, err := ledger.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+liveConversation, "recording:9", "admitted", "dispatched")
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		plan.WriteString(detail + "\n")
+	}
+	require.NoError(t, rows.Err())
+	assert.Contains(t, plan.String(), "events_conversation")
 }
 
 // Two fetchers deciding one event at once: exactly one verdict is written.
@@ -572,13 +664,23 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 	assert.Equal(t, StateQueued, third.State)
 	assert.Contains(t, string(third.Decision.Snapshot), secret, "the queued follow-up keeps its instruction")
 
-	got := strings.Split(strings.TrimSpace(out.String()), "\n")
-	require.Len(t, got, 3)
 	assert.NotContains(t, out.String(), secret, "no content on the wire")
-	var last admission.Line
-	require.NoError(t, json.Unmarshal([]byte(got[2]), &last))
-	assert.Equal(t, int64(3), last.EventID)
-	assert.Equal(t, admission.StateQueued, last.State, "the line reports what the ledger wrote")
+	// Two workers: a verdict is visible in the ledger before its line is
+	// written, so lines arrive in no promised order. What is promised is one
+	// whole line per verdict, reporting the state the ledger wrote.
+	states := map[int64]admission.State{}
+	for _, raw := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var line admission.Line
+		require.NoError(t, json.Unmarshal([]byte(raw), &line), "every line is whole JSON: %q", raw)
+		_, dup := states[line.EventID]
+		require.False(t, dup, "one line per verdict, event %d twice", line.EventID)
+		states[line.EventID] = line.State
+	}
+	assert.Equal(t, map[int64]admission.State{
+		1: admission.StateAdmitted,
+		2: admission.StateAdmitted,
+		3: admission.StateQueued,
+	}, states, "the line reports what the ledger wrote")
 }
 
 func TestRunAdmissionNeedsTheLedgerAndQueue(t *testing.T) {
