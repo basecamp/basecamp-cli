@@ -177,6 +177,18 @@ func runHarnessConnector(dir string) error {
 		guardDelay = time.Hour
 	}
 	hooks := LifecycleHooks(ledger, LifecycleOptions{GuardDelay: guardDelay})
+	// Every task token this connector mints, kept for the parent's
+	// credential check — which then covers a real agent's run as well as a
+	// fake worker's, and a run whose worker never took its token.
+	launched := hooks.TaskLaunched
+	hooks.TaskLaunched = func(ctx context.Context, tx Tx, launch Launch) error {
+		if launched != nil {
+			if err := launched(ctx, tx, launch); err != nil {
+				return err
+			}
+		}
+		return recordTaskToken(dir, launch.AttemptID, launch.Token)
+	}
 	ended := hooks.AttemptEnded
 	hooks.AttemptEnded = func(ctx context.Context, tx Tx, s Settlement) error {
 		if err := ended(ctx, tx, s); err != nil {
@@ -511,6 +523,19 @@ const (
 // harnessReconcileAfter is how old a sending intent must be before it is
 // reconciled: the production minute, shortened so a restart can settle one.
 const harnessReconcileAfter = 200 * time.Millisecond
+
+// recordTaskToken writes a task's token where the parent's credential check
+// reads it. The file is outside every directory that check scans.
+func recordTaskToken(dir, attemptID, token string) error {
+	if token == "" {
+		return errors.New("recovery harness: a launch with no token")
+	}
+	tokens := filepath.Join(dir, tokensDir)
+	if err := os.MkdirAll(tokens, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(tokens, attemptID+".token"), []byte(token), 0o600)
+}
 
 // harnessWorkspaces is the working directory a task gets: the route itself,
 // as the run command's default does. It records every preparation and every

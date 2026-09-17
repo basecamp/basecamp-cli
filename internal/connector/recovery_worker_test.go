@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // The fake worker: what every fake agent does with a prompt, whatever its wire.
@@ -32,8 +31,6 @@ type fakeWorker struct {
 	sc       harnessScenario
 	ledger   *Ledger
 	dispatch *TaskDispatch
-	// stopWatch ends the watch for the task token in files.
-	stopWatch func() []string
 
 	replies map[int64]int64
 }
@@ -74,11 +71,6 @@ func newFakeWorker(dir string) (*fakeWorker, error) {
 }
 
 func (w *fakeWorker) close() {
-	if w.stopWatch != nil {
-		for _, found := range w.stopWatch() {
-			w.log(0, 0, "secret-file:"+found)
-		}
-	}
 	if w.ledger != nil {
 		_ = w.ledger.Close()
 	}
@@ -244,23 +236,22 @@ func (w *fakeWorker) takeToken(ctx context.Context, args []string) (string, erro
 	return token, nil
 }
 
-// watchToken keeps the task token where the parent test can read it back, and
-// watches, for as long as this worker lives, the places the credential rule
-// names: the working directories and the attempt's session directory, where
-// the driver writes what it hands the agent and where a file is removed as
-// soon as the agent has started its servers — so only a watcher can see it.
-// Whatever it finds is logged when the worker ends.
+// watchToken records that this worker took its token, and checks the one
+// thing only the worker can: that the token it was handed is the one the
+// connector minted for its attempt.
 //
-// Not the state directory: this process holds the ledger open, and reading
-// the ledger's own files by another descriptor drops SQLite's POSIX locks on
-// them, after which the connector's close can reset the WAL under this
-// handle. The parent scans the state directory from a process of its own.
+// The watch for a token in a file is the parent's, not this process's. A
+// worker the connector ends by its process group takes any deferred report
+// with it, and the crash rows end workers exactly that way; the parent is
+// never killed, so it always reports. This process also holds the ledger
+// open, and reading the ledger's own files here would drop SQLite's POSIX
+// locks on them.
 func (w *fakeWorker) watchToken(token string) error {
 	tokens := filepath.Join(w.dir, tokensDir)
 	if err := os.MkdirAll(tokens, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(tokens, "task-*.token")
+	f, err := os.CreateTemp(tokens, "taken-*.token")
 	if err != nil {
 		return err
 	}
@@ -268,12 +259,7 @@ func (w *fakeWorker) watchToken(token string) error {
 		_ = f.Close()
 		return err
 	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	w.stopWatch = drivertest.WatchForSecretFiles(token,
-		filepath.Join(w.dir, "work"), filepath.Join(w.dir, "work-other"), filepath.Join(w.dir, "sessions"))
-	return nil
+	return f.Close()
 }
 
 var promptEvent = regexp.MustCompile(`Event (\d+)`)

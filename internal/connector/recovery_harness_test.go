@@ -378,8 +378,9 @@ func (h *harness) run(r harnessRun) {
 	h.wait(cmd, out, r)
 }
 
-func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
-	h.t.Helper()
+// defaults fills a run in the same way for whoever starts it and whoever
+// waits for it.
+func (h *harness) defaults(r harnessRun) harnessRun {
 	if r.Killed && r.Until == "" {
 		// A run that is to die runs until it does.
 		r.Until = "never"
@@ -387,6 +388,12 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	if r.StateDir == "" {
 		r.StateDir = h.state
 	}
+	return r
+}
+
+func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
+	h.t.Helper()
+	r = h.defaults(r)
 	// Longer than any run's own deadline (runHarnessConnector's runFor), so
 	// a connector that overruns fails saying the ledger never got there
 	// rather than being killed by this timeout — which wait would otherwise
@@ -418,12 +425,13 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 
 func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
 	h.t.Helper()
+	r = h.defaults(r)
 	started := time.Now()
 	err := cmd.Wait()
 	// exec.CommandContext kills with SIGKILL as well, and wait must not read
 	// that as the kill a row asked for.
 	require.Less(h.t, time.Since(started), harnessRunCap, "the connector outran the harness's own deadline\n%s", out.String())
-	defer h.requireNoTaskTokenLeaked(out)
+	defer h.requireNoTaskTokenLeaked(out, r.StateDir)
 	if path := os.Getenv("BASECAMP_RECOVERY_DEBUG"); path != "" {
 		// Appended: a test is several runs, and the one that matters is
 		// rarely the last.
@@ -556,7 +564,7 @@ func (h *harness) stopWatchingForTokenFiles() int {
 // log, the lifecycle messages it posted, the polls it made, the workspace
 // records), not in any file under a working directory or the state directory
 // — and no worker saw one appear in those files while it ran.
-func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
+func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	t := h.t
 	t.Helper()
 	watched := h.stopWatchingForTokenFiles()
@@ -581,11 +589,17 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 			t.Errorf("a worker's MCP server declaration carried the task token in %s", strings.TrimPrefix(e.Step, "secret-declared:"))
 		}
 	}
-	require.Len(t, tokens, bound, "every worker that bound to a task left its token for this check")
+	// Every task the connector launched minted a token and is checked here,
+	// whoever its worker was — a fake one, or a real agent through the
+	// bridge, which leaves no agent log at all.
+	require.Len(t, tokens, h.tasksLaunched(stateDir), "every task the connector launched left its token for this check")
 	require.Equal(t, h.workersStarted(), bound+unbound,
-		"every worker that started either took a token or said why it could not")
+		"every worker that started either took its task's token or said why it could not")
+	for _, token := range h.takenTokens() {
+		require.Contains(t, tokens, token, "a worker took a token the connector did not mint for its task")
+	}
 	if len(tokens) == 0 {
-		require.Zero(t, watched, "nothing was watched, because no token was taken")
+		require.Zero(t, watched, "nothing was watched, because no task was launched")
 		// Nothing to check is a fact about the run, not a pass: a run with
 		// no worker (a kill before the spawn, a start that ran nothing) is
 		// the only way here.
@@ -617,22 +631,46 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on", len(tokens), files, watched)
 }
 
-// taskTokens is every task token a worker took, as the workers recorded them.
-func (h *harness) taskTokens() []string {
+// taskTokens is every token the connector minted for a task, as its launch
+// hook recorded it.
+func (h *harness) taskTokens() []string { return h.tokenFiles("*.token", "taken-") }
+
+// takenTokens is every token a fake worker took over the socket.
+func (h *harness) takenTokens() []string { return h.tokenFiles("taken-*.token", "") }
+
+func (h *harness) tokenFiles(pattern, exclude string) []string {
 	h.t.Helper()
-	entries, err := os.ReadDir(filepath.Join(h.dir, tokensDir))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	paths, err := filepath.Glob(filepath.Join(h.dir, tokensDir, pattern))
 	require.NoError(h.t, err)
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name()))
+	var out []string
+	for _, path := range paths {
+		if exclude != "" && strings.HasPrefix(filepath.Base(path), exclude) {
+			continue
+		}
+		token, err := os.ReadFile(path)
 		require.NoError(h.t, err)
 		require.NotEmpty(h.t, token)
 		out = append(out, string(token))
 	}
 	return out
+}
+
+// tasksLaunched is how many tasks the ledger in dir says were launched, each
+// with a token of its own. The ledger is read as it is: a run that made none
+// (a shadow, a crash before the first launch) leaves none to open, and this
+// must not be what creates one.
+func (h *harness) tasksLaunched(dir string) int {
+	h.t.Helper()
+	ctx := context.Background()
+	l, err := OpenLedgerReadOnly(ctx, filepath.Join(dir, LedgerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	require.NoError(h.t, err)
+	defer func() { _ = l.Close() }()
+	var n int
+	require.NoError(h.t, l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&n))
+	return n
 }
 
 // workersStarted counts the worker processes that reached their agent, which
@@ -696,6 +734,11 @@ func runSecretScan(dirs []string) int {
 	for _, dir := range dirs {
 		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				// It was there when the directory was read and gone when the
+				// walk reached it. The parent's watcher is what covers a file
+				// that only exists for a moment.
+				return nil
 			case err != nil:
 				// A place the scan could not look is not a place it has
 				// cleared: the caller is told, and fails. The walk goes on,
@@ -704,7 +747,9 @@ func runSecretScan(dirs []string) int {
 				return nil //nolint:nilerr // reported to the caller, which fails on it
 			case d.Type().IsRegular():
 				data, err := os.ReadFile(path)
-				if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil
+				} else if err != nil {
 					fmt.Println("unreadable\t" + path + ": " + err.Error())
 					return nil //nolint:nilerr // reported to the caller, which fails on it
 				}
