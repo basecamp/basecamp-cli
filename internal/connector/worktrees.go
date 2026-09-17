@@ -34,11 +34,14 @@ import (
 // Each is held by a test in worktrees_test.go.
 //
 //  1. No work is ever deleted by the connector. A worktree is removed only
-//     when it is clean (no modified, untracked or ignored file, no index
-//     entry hiding its edits, no operation in progress, not locked) and every commit it holds — its HEAD and its
-//     task branch — is the base it was made from or is held by a remote
-//     branch or by a local branch that is not another task's. Any error
-//     while deciding that retains it.
+//     when nothing on its disk is anything but a file git tracks, unchanged
+//     (no modified, untracked or ignored file, no directory git has no file
+//     in, nothing inside a submodule's empty directory, no index entry hiding
+//     an edit), no operation is in progress, it is not locked, and every
+//     commit it reaches — HEAD, its task branch, their reflogs, per-worktree
+//     refs — is the base it was made from or is held by a remote branch or by
+//     a local branch that is not another task's. Any error while deciding
+//     that retains it.
 //  2. Git refuses too. The removal itself is `git worktree remove` without
 //     --force, so a modified or untracked file written between the check and
 //     the removal still stops it, and a task branch is deleted only by
@@ -60,8 +63,9 @@ import (
 //     unheld commit is kept on a branch of its own; a HEAD it cannot read is
 //     not forced.
 //  6. Nothing the repository or its configuration names runs: git runs with
-//     hooks, the fsmonitor and every configured content filter disabled, and
-//     a fixed environment.
+//     hooks, the fsmonitor and every content filter its configuration defines
+//     for the directory it runs in disabled (the new worktree's own, for its
+//     checkout), and a fixed environment.
 //
 // Placement goes through Options.Path, one function, because under the
 // sandbox launcher (step 26) the working directory comes from broker-owned
@@ -276,7 +280,13 @@ func (w *Worktrees) add(ctx context.Context, r Worktree) error {
 	if err := setup.EnsurePrivateDir(filepath.Dir(r.Path)); err != nil {
 		return err
 	}
-	_, err := w.gitOut(ctx, r.Repository, "worktree", "add", "-b", r.Branch, "--end-of-options", r.Path, r.BaseCommit)
+	// The checkout runs in the new worktree, so the filters blanked are the
+	// ones its own configuration defines (an include on its branch among
+	// them), not the checkout's the route is in.
+	if _, err := w.gitOut(ctx, r.Repository, "worktree", "add", "--no-checkout", "-b", r.Branch, "--end-of-options", r.Path, r.BaseCommit); err != nil {
+		return err
+	}
+	_, err := w.gitOut(ctx, r.Path, "reset", "--quiet", "--hard", "--end-of-options", r.BaseCommit)
 	return err
 }
 
@@ -544,14 +554,22 @@ func (w *Worktrees) inspect(ctx context.Context, r Worktree) (RetainedReason, st
 			return RetainedUnverified, ""
 		}
 	}
-	// Ignored files count: a fresh checkout has none, so any is something
-	// written during the task (a local config, a report), and git's own
-	// removal would delete it without asking.
+	// What git tracks, and what differs from it.
 	status, err := w.gitRaw(ctx, r.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=none")
 	if err != nil {
 		return RetainedUnverified, ""
 	}
 	if len(status) > 0 {
+		return RetainedDirty, ""
+	}
+	// Everything else on disk. Git does not report every file it would
+	// delete with the worktree (a file inside a submodule's never-initialized
+	// directory, for one), so the rule is on the disk itself: whatever is not
+	// a file git tracks is work.
+	switch untracked, err := w.untrackedOnDisk(ctx, r); {
+	case err != nil:
+		return RetainedUnverified, ""
+	case untracked:
 		return RetainedDirty, ""
 	}
 	// An index entry marked skip-worktree or assume-unchanged hides its edits
@@ -573,14 +591,33 @@ func (w *Worktrees) inspect(ctx context.Context, r Worktree) (RetainedReason, st
 	if err != nil {
 		return RetainedUnverified, ""
 	}
-	tips := []string{head}
 	tip, err := w.branchTip(ctx, r)
 	if err != nil {
 		return RetainedUnverified, ""
 	}
-	if tip != "" && tip != head {
+	// Every commit the worktree or its branch reaches, and that its removal
+	// would forget: HEAD, the branch, what their reflogs remember (a commit
+	// the worker made and then moved away from), and per-worktree refs.
+	tips := []string{head}
+	if tip != "" {
 		tips = append(tips, tip)
 	}
+	lists := [][]string{
+		{r.Path, "reflog", "show", "--format=%H", "HEAD", "--"},
+		{r.Path, "for-each-ref", "--format=%(objectname)", "refs/worktree/"},
+	}
+	if tip != "" {
+		lists = append(lists, []string{r.Repository, "reflog", "show", "--format=%H", "refs/heads/" + r.Branch, "--"})
+	}
+	for _, list := range lists {
+		out, err := w.gitOut(ctx, list[0], list[1:]...)
+		if err != nil {
+			return RetainedUnverified, ""
+		}
+		tips = append(tips, strings.Fields(out)...)
+	}
+	slices.Sort(tips)
+	tips = slices.Compact(tips)
 	for _, commit := range tips {
 		held, err := w.held(ctx, r, commit)
 		if err != nil {
@@ -591,6 +628,72 @@ func (w *Worktrees) inspect(ctx context.Context, r Worktree) (RetainedReason, st
 		}
 	}
 	return "", tip
+}
+
+// untrackedOnDisk reports whether the worktree holds anything on disk that is
+// not a file git tracks: an untracked or ignored file, a directory git has no
+// file in, or anything inside a submodule's directory, which the checkout
+// left empty. Symlinks are not followed.
+func (w *Worktrees) untrackedOnDisk(ctx context.Context, r Worktree) (bool, error) {
+	out, err := w.gitRaw(ctx, r.Path, "ls-files", "--stage", "-z")
+	if err != nil {
+		return false, err
+	}
+	files, gitlinks, dirs := map[string]bool{}, map[string]bool{}, map[string]bool{".": true}
+	for entry := range strings.SplitSeq(string(out), "\x00") {
+		meta, path, ok := strings.Cut(entry, "\t")
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(meta, "160000 ") {
+			gitlinks[path] = true
+		} else {
+			files[path] = true
+		}
+		for dir := filepath.Dir(filepath.FromSlash(path)); dir != "."; dir = filepath.Dir(dir) {
+			dirs[filepath.ToSlash(dir)] = true
+		}
+	}
+	found := errors.New("untracked")
+	err = filepath.WalkDir(r.Path, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(r.Path, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		switch {
+		case rel == ".git" && !d.IsDir():
+			// The worktree's link to its repository.
+			return nil
+		case gitlinks[rel]:
+			if !d.IsDir() {
+				return found
+			}
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				return err
+			}
+			if len(entries) > 0 {
+				return found
+			}
+			return filepath.SkipDir
+		case d.IsDir():
+			if !dirs[rel] {
+				return found
+			}
+			return nil
+		case !files[rel]:
+			return found
+		}
+		return nil
+	})
+	if errors.Is(err, found) {
+		return true, nil
+	}
+	return false, err
 }
 
 // held reports whether a commit is safe to lose from this worktree: it is the
@@ -710,19 +813,21 @@ func (w *Worktrees) gitRaw(ctx context.Context, dir string, args ...string) ([]b
 	if err != nil {
 		return nil, err
 	}
-	full := append(append(guard, "-C", dir), args...)
-	return w.run(ctx, full, args[0])
+	return w.run(ctx, guard, append([]string{"-C", dir}, args...), args[0])
 }
 
-// safeGit is what every git call starts with.
-var safeGit = []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
+// safeGit is the configuration every git call runs with.
+var safeGit = [][2]string{{"core.hooksPath", "/dev/null"}, {"core.fsmonitor", "false"}}
 
 // filterOverrides blanks every content filter git's configuration defines
 // for dir. A checkout runs a path's smudge, clean or process filter, which is
 // a command from configuration a worker in the checkout could have edited;
 // an empty command is no filter. Reading the configuration runs nothing.
-func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([]string, error) {
-	out, err := w.run(ctx, append(slices.Clone(safeGit), "-C", dir, "config", "--name-only", "--get-regexp", `^filter\.`), "config")
+//
+// The overrides travel as GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, not `-c`,
+// which splits at the first "=" and would miss a driver whose name has one.
+func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([][2]string, error) {
+	out, err := w.run(ctx, safeGit, []string{"-C", dir, "config", "--name-only", "--get-regexp", `^filter\.`}, "config")
 	var exitErr *exec.ExitError
 	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
 		// Exit 1 is "no such keys"; anything else leaves filters unknown.
@@ -742,15 +847,20 @@ func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([]string, 
 		name := rest[:i]
 		seen[name] = true
 		for _, cmd := range []string{"clean", "smudge", "process"} {
-			guard = append(guard, "-c", "filter."+name+"."+cmd+"=")
+			guard = append(guard, [2]string{"filter." + name + "." + cmd, ""})
 		}
 	}
 	return guard, nil
 }
 
-func (w *Worktrees) run(ctx context.Context, full []string, what string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, w.git, full...) //nolint:gosec // G204: git with the connector's own arguments
-	cmd.Env = w.env
+func (w *Worktrees) run(ctx context.Context, config [][2]string, args []string, what string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, w.git, args...) //nolint:gosec // G204: git with the connector's own arguments
+	env := slices.Clone(w.env)
+	env = append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(config)))
+	for i, kv := range config {
+		env = append(env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+kv[0], "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+kv[1])
+	}
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

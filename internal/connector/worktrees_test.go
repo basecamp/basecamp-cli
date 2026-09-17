@@ -337,6 +337,67 @@ func TestTheRepositorysHooksDoNotRun(t *testing.T) {
 	assert.False(t, exists(marker))
 }
 
+// Invariant 1, on the disk itself: a file in a submodule's directory, which
+// git neither reports nor refuses to remove, is work.
+func TestWorkInASubmodulesDirectoryIsRetained(t *testing.T) {
+	h := newWorktreeHarness(t)
+	sub := filepath.Join(t.TempDir(), "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o700))
+	h.git(sub, "init", "-q", "-b", "main")
+	h.write(sub, "lib.txt", "lib\n")
+	h.git(sub, "add", ".")
+	h.git(sub, "commit", "-q", "-m", "sub")
+	h.git(h.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "app/vendor")
+	h.git(h.repo, "commit", "-q", "-m", "submodule")
+
+	workDir, _ := h.prepare(14)
+	h.write(workDir, "vendor/notes.txt", "notes\n")
+	row := h.finish(workDir)
+	assert.Equal(t, RetainedDirty, row.RetainedReason)
+	assert.True(t, exists(filepath.Join(workDir, "vendor", "notes.txt")))
+}
+
+// Invariant 1: a commit only the worktree's reflog still reaches is work.
+func TestACommitOnlyTheReflogReachesIsRetained(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(15)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "moved away from")
+	h.git(workDir, "checkout", "-q", row.Branch)
+	row = h.finish(workDir)
+	assert.Equal(t, RetainedUnpushed, row.RetainedReason)
+}
+
+// Invariant 6: a filter whose name git's -c could not carry, or that only
+// the task branch's configuration defines, does not run either.
+func TestFiltersOutOfReachOfAScanStillDoNotRun(t *testing.T) {
+	for name, configure := range map[string]func(h *worktreeHarness, marker string){
+		"name with =": func(h *worktreeHarness, marker string) {
+			h.write(h.repo, ".gitattributes", "*.txt filter=a=b\n")
+			h.git(h.repo, "config", "filter.a=b.smudge", "touch "+marker+"; cat")
+		},
+		"defined on the task branch": func(h *worktreeHarness, marker string) {
+			h.write(h.repo, ".gitattributes", "*.txt filter=probe\n")
+			include := filepath.Join(h.home, "branch-filter.gitconfig")
+			h.write(h.home, "branch-filter.gitconfig", "[filter \"probe\"]\n\tsmudge = touch "+marker+"; cat\n")
+			h.git(h.repo, "config", "includeIf.onbranch:"+BranchPrefix+"**.path", include)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newWorktreeHarness(t)
+			marker := filepath.Join(t.TempDir(), "ran")
+			configure(h, marker)
+			h.write(h.repo, "app/data.txt", "data\n")
+			h.git(h.repo, "add", ".")
+			h.git(h.repo, "commit", "-q", "-m", "attributes")
+			h.prepare(16)
+			assert.False(t, exists(marker), "no filter ran")
+		})
+	}
+}
+
 // A worktree that cannot be made is not attempted again at every dispatch
 // tick: each failure leaves a row and maybe a partial checkout.
 func TestAFailedPrepareBacksOff(t *testing.T) {
