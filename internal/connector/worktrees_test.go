@@ -506,31 +506,24 @@ func TestAnUnpopulatedWorktreeIsNotKept(t *testing.T) {
 	assert.False(t, h.branchExists(rows[0].Branch))
 }
 
-// A worktree whose directory was deleted leaves no record behind in the
-// repository, unless that record still reaches a commit nothing else holds.
-func TestAMissingWorktreeIsForgottenByTheRepositoryToo(t *testing.T) {
-	t.Run("nothing to keep", func(t *testing.T) {
-		h := newWorktreeHarness(t)
-		workDir, row := h.prepare(101)
-		require.NoError(t, os.RemoveAll(row.Path))
-		row = h.finish(workDir)
-		assert.Equal(t, RemovedMissing, row.RemovedBy)
-		assert.NoDirExists(t, row.AdminDir)
-		assert.NotContains(t, h.git(h.repo, "worktree", "list", "--porcelain"), row.Path)
-	})
-	t.Run("a commit only its reflog reaches", func(t *testing.T) {
-		h := newWorktreeHarness(t)
-		workDir, row := h.prepare(102)
-		h.git(workDir, "checkout", "-q", "--detach")
-		h.write(workDir, "c.txt", "c\n")
-		h.git(workDir, "add", "c.txt")
-		h.git(workDir, "commit", "-q", "-m", "reflog only")
-		h.git(workDir, "checkout", "-q", row.Branch)
-		require.NoError(t, os.RemoveAll(row.Path))
-		row = h.finish(workDir)
-		assert.Equal(t, WorktreeRetained, row.State)
-		assert.DirExists(t, row.AdminDir)
-	})
+// A worktree whose directory was deleted is recorded missing, and the
+// repository's own record of it is left for git: it can hold a submodule's
+// only commits, a reflog, or a lock for a directory that is only away.
+func TestAMissingWorktreesRepositoryRecordIsLeftAlone(t *testing.T) {
+	h, _ := submoduleHarness(t)
+	workDir, row := h.prepare(103)
+	h.git(workDir, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+	vendor := filepath.Join(workDir, "vendor")
+	h.write(vendor, "more.txt", "more\n")
+	h.git(vendor, "add", ".")
+	h.git(vendor, "commit", "-q", "-m", "only copy")
+	subGitDir := h.git(vendor, "rev-parse", "--absolute-git-dir")
+	require.NoError(t, os.RemoveAll(row.Path))
+
+	row = h.finish(workDir)
+	assert.Equal(t, RemovedMissing, row.RemovedBy)
+	assert.DirExists(t, row.AdminDir)
+	assert.DirExists(t, subGitDir, "the submodule's only commits survive")
 }
 
 // A worktree someone moved is kept, not forgotten: its files are still
@@ -976,4 +969,22 @@ func TestAFailedAddLeavesNoBranchBehind(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].BranchCreated)
 	assert.False(t, h.branchExists(rows[0].Branch), "the branch it made goes with it")
+}
+
+// A removal the ledger could not record is still reported as a removal, and
+// Finish says it was not recorded, rather than anyone being told it was kept.
+func TestARemovalTheLedgerCouldNotRecordIsNotReportedKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, _ := h.prepare(104)
+	_, err := h.ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_removed BEFORE UPDATE OF state ON worktrees
+WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses'); END`)
+	require.NoError(t, err)
+
+	err = h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir)
+	require.Error(t, err)
+	row := h.row(workDir)
+	assert.Equal(t, WorktreeRemoving, row.State)
+	assert.False(t, exists(row.Path))
+
 }

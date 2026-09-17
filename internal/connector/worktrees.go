@@ -41,7 +41,9 @@ import (
 //     commit it reaches — HEAD, its task branch, their reflogs, per-worktree
 //     refs — is the base it was made from or is held by a remote branch or by
 //     a local branch that is not another task's. Any error while deciding
-//     that retains it.
+//     that retains it. What git keeps for a worktree whose directory is gone
+//     (its record under .git/worktrees, with any submodule git directories
+//     and reflog in it) is git's to prune, never the connector's.
 //  2. Git refuses too. The removal itself is `git worktree remove` without
 //     --force, so a modified or untracked file written between the check and
 //     the removal still stops it, and a task branch is deleted only by
@@ -69,7 +71,8 @@ import (
 //  6. Nothing the repository, its configuration or a worker's files name runs:
 //     no git command looks inside a submodule's directory (the disk is judged
 //     before git is asked anything that could recurse, and status is told to
-//     ignore submodules), and git runs with
+//     ignore submodules; the non-forced removal's own check is the one-call
+//     window invariant 2 names), and git runs with
 //     hooks, the fsmonitor and every content filter its configuration defines
 //     for the directory it runs in disabled (the new worktree's own, for its
 //     checkout), and a fixed environment.
@@ -353,7 +356,9 @@ func (w *Worktrees) Finish(ctx context.Context, _ string, workDir string) error 
 		return err
 	}
 	defer unlock()
-	w.settle(ctx, record, RemovedByConnector)
+	if after := w.settle(ctx, record, RemovedByConnector); after.State == WorktreeRemoving {
+		return fmt.Errorf("connector: worktree %s was removed but not recorded; the next start records it", record.Path)
+	}
 	return nil
 }
 
@@ -465,7 +470,8 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 	switch {
 	case after.State == WorktreeRemoved && after.RemovedBy == RemovedMissing:
 		result.Action = PruneMissing
-	case after.State == WorktreeRemoved:
+	case after.State == WorktreeRemoved, after.State == WorktreeRemoving && !exists(after.Path):
+		// Removing and gone is removed that the ledger could not record yet.
 		result.Action = PruneRemoved
 	case force && after.RetainedReason == RetainedMoved:
 		// There is nothing here to force: the directory is somewhere else.
@@ -519,57 +525,6 @@ func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, RemovedByPruneForced
 	return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept, HeadBranch: headBranch}
-}
-
-// forgetMissing removes the repository's record of a worktree whose directory
-// is gone (<repo>/.git/worktrees/<name>), which git would otherwise keep
-// listing as prunable and the connector could never reconcile once its row is
-// removed. The record holds the worktree's HEAD, reflog and per-worktree refs,
-// so it is removed only when each commit they reach is held elsewhere. It
-// reports whether nothing of the worktree is left to keep.
-func (w *Worktrees) forgetMissing(ctx context.Context, r Worktree) bool {
-	if r.AdminDir == "" {
-		return true
-	}
-	at, err := os.ReadFile(filepath.Join(r.AdminDir, "gitdir"))
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		if _, statErr := os.Lstat(r.AdminDir); errors.Is(statErr, os.ErrNotExist) {
-			return true
-		}
-		return false
-	case err != nil:
-		return false
-	}
-	recorded := strings.TrimSpace(string(at))
-	if !filepath.IsAbs(recorded) {
-		recorded = filepath.Join(r.AdminDir, recorded)
-	}
-	if exists(filepath.Dir(recorded)) {
-		// The record names a directory that is there: a worktree still.
-		return false
-	}
-	var tips []string
-	for _, args := range [][]string{
-		{"reflog", "show", "--format=%H", "HEAD", "--"},
-		{"for-each-ref", "--format=%(objectname)", "refs/worktree/"},
-	} {
-		out, err := w.run(ctx, safeGit, append([]string{"--git-dir", r.AdminDir}, args...), args[0])
-		if err != nil {
-			return false
-		}
-		tips = append(tips, strings.Fields(string(out))...)
-	}
-	if head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"}, "rev-parse"); err == nil {
-		tips = append(tips, strings.TrimSpace(string(head)))
-	}
-	slices.Sort(tips)
-	for _, commit := range slices.Compact(tips) {
-		if held, err := w.held(ctx, r, commit); err != nil || !held {
-			return false
-		}
-	}
-	return os.RemoveAll(r.AdminDir) == nil
 }
 
 // discardUnpopulated removes a worktree whose checkout never happened: its
@@ -651,14 +606,12 @@ func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) 
 func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktree {
 	from := []WorktreeState{r.State}
 	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) && !w.movedElsewhere(ctx, r) {
-		// Nothing on disk. The repository's record of the worktree goes too,
-		// but only when every commit it still reaches is held elsewhere;
-		// otherwise the row stays, for a person.
-		if !w.forgetMissing(ctx, r) {
-			return w.retain(ctx, r, RetainedUnverified, from)
-		}
-		// A branch git made stays unless it still points at the base, which
-		// holds nothing of the task's.
+		// Nothing on disk. The repository's own record of the worktree
+		// (<repo>/.git/worktrees/<name>) is left for git: it may hold a
+		// submodule's git directory, a reflog, or a lock someone set for a
+		// directory that is only away, and `git worktree prune` is the
+		// operator's to run. A branch git made stays unless it still points at
+		// the base, which holds nothing of the task's.
 		w.deleteBranchAt(ctx, r, r.BaseCommit)
 		gone := RemovedMissing
 		if r.State == WorktreeCreating {
@@ -694,7 +647,9 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 	}
 	w.deleteBranchAt(ctx, r, tip)
 	if err := w.ledger.RemovedWorktree(ctx, r.ID, by, WorktreeRemoving); err != nil {
-		w.log.Warn("connector: recording a worktree removed", "path", r.Path, "error", err)
+		// The directory is gone; the row still says removing, and the next
+		// settle records it missing. Nobody is told it was kept.
+		w.log.Warn("connector: a worktree was removed but the ledger could not record it", "path", r.Path, "error", err)
 		return r
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, by
@@ -896,9 +851,18 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, r Worktree) (bool, erro
 		}
 	}
 	found := errors.New("untracked")
+	// Bounded: a tree too big to read in time is not proven clean, and a task
+	// that left one must not hold the connector's shutdown.
+	deadline := time.Now().Add(WalkLimit)
 	err = filepath.WalkDir(r.Path, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return errors.New("connector: the worktree could not be read in time")
 		}
 		rel, err := filepath.Rel(r.Path, path)
 		if err != nil {
@@ -1015,6 +979,10 @@ func (w *Worktrees) deleteBranchIfHeld(ctx context.Context, r Worktree) bool {
 	tip, err = w.branchTip(ctx, r)
 	return err == nil && tip == ""
 }
+
+// WalkLimit bounds how long reading a worktree's files may take before it is
+// kept as unverified.
+const WalkLimit = 2 * time.Minute
 
 // LockWait bounds how long a settling worktree waits for another remover's
 // lock. Longer than a removal takes, short enough that a stuck prune cannot
