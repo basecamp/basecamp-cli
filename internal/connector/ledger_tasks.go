@@ -1201,6 +1201,11 @@ WHERE task_id = ? AND event_id = ? AND outcome = 'unknown' AND reply_id IS NULL 
 	})
 }
 
+// AttemptIDLength is how long an attempt id is: "att_" and 12 random bytes in
+// hex. Anything that has to know whether a path built from one fits (a unix
+// socket's 103 bytes) asks here rather than guessing.
+const AttemptIDLength = 4 + 24
+
 func newAttemptID() (string, error) {
 	raw := make([]byte, 12)
 	if _, err := rand.Read(raw); err != nil {

@@ -585,10 +585,22 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return driver.SessionConfig{}, nil, func() {}, fmt.Errorf("connector: session directory: %w", err)
 	}
-	// The token's one carriage: a one-use socket in this attempt's own
-	// directory, served only to the worker's process group (tokensocket.go).
-	tokens, err := ServeTaskToken(dir, launch.Token, d.opts.TokenWindow)
+	// The token's one carriage: a one-use socket, served only to the worker's
+	// process group (tokensocket.go). It goes in the attempt's own directory
+	// unless a socket path there would be longer than a unix socket takes.
+	socketDir, temporary, err := TokenSocketDir(dir, d.opts.Lookup)
 	if err != nil {
+		_ = os.RemoveAll(dir)
+		return driver.SessionConfig{}, nil, func() {}, err
+	}
+	removeSocketDir := func() {
+		if temporary {
+			_ = os.RemoveAll(socketDir)
+		}
+	}
+	tokens, err := ServeTaskToken(socketDir, launch.Token, d.opts.TokenWindow)
+	if err != nil {
+		removeSocketDir()
 		_ = os.RemoveAll(dir)
 		return driver.SessionConfig{}, nil, func() {}, err
 	}
@@ -614,6 +626,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	}()
 	cleanup := func() {
 		tokens.Close()
+		removeSocketDir()
 		_ = os.RemoveAll(dir)
 	}
 

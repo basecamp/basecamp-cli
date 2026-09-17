@@ -79,9 +79,56 @@ const startWindows = 5
 // TokenSocketName is the socket's name inside the attempt's session directory.
 const TokenSocketName = "token.sock"
 
-// maxSocketPath is the longest unix socket path every supported platform
+// MaxSocketPath is the longest unix socket path every supported platform
 // takes: macOS's sun_path is 104 bytes, Linux's 108, both with a NUL.
-const maxSocketPath = 103
+const MaxSocketPath = 103
+
+// TokenSocketFits reports whether a token socket in dir has a path a unix
+// socket can carry.
+func TokenSocketFits(dir string) bool {
+	return len(filepath.Join(dir, TokenSocketName)) <= MaxSocketPath
+}
+
+// TokenSocketDir is where an attempt's token socket goes: its own session
+// directory when a socket path there fits, and otherwise a private directory
+// of its own in the shortest place this machine offers. A unix socket path is
+// 103 bytes at most, and a long home, a deep XDG_STATE_HOME or large ids can
+// put a session directory past it — which would fail every dispatch rather
+// than one (card 22's review), so the connector moves the socket instead of
+// refusing the task. The directory it makes is the caller's to remove:
+// temporary is true when it made one.
+//
+// Everything else about the socket is unchanged wherever it lands: the
+// directory is owner-only, the socket is 0600, and the peer must still be
+// this user's process in the worker's group or below it.
+func TokenSocketDir(preferred string, lookup func(string) (string, bool)) (dir string, temporary bool, err error) {
+	if TokenSocketFits(preferred) {
+		return preferred, false, nil
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	var bases []string
+	if runtimeDir, ok := lookup("XDG_RUNTIME_DIR"); ok && filepath.IsAbs(runtimeDir) {
+		bases = append(bases, runtimeDir)
+	}
+	bases = append(bases, os.TempDir(), "/tmp")
+	for _, base := range bases {
+		if info, statErr := os.Stat(base); statErr != nil || !info.IsDir() {
+			continue
+		}
+		// MkdirTemp makes it 0700, and the name is short on purpose.
+		made, mkErr := os.MkdirTemp(base, "bct")
+		if mkErr != nil {
+			continue
+		}
+		if TokenSocketFits(made) {
+			return made, true, nil
+		}
+		_ = os.RemoveAll(made)
+	}
+	return "", false, fmt.Errorf("connector: no directory on this machine takes a token socket path of %d bytes or less; %s is too deep", MaxSocketPath, preferred)
+}
 
 // Handoff says what became of a token socket.
 type Handoff string
@@ -149,8 +196,8 @@ func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.
 		return nil, fmt.Errorf("connector: token socket directory %s must be a directory only its owner can enter", dir)
 	}
 	path := filepath.Join(dir, TokenSocketName)
-	if len(path) > maxSocketPath {
-		return nil, fmt.Errorf("connector: token socket path %q is longer than a unix socket allows (%d)", path, maxSocketPath)
+	if len(path) > MaxSocketPath {
+		return nil, fmt.Errorf("connector: token socket path %q is longer than a unix socket allows (%d)", path, MaxSocketPath)
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {

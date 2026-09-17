@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
@@ -126,4 +127,27 @@ func TestConnectSessionFilesLiveOutsideTheStateDirectory(t *testing.T) {
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
+// Card 22's review: a unix socket path is 103 bytes at most, and doctor says
+// so before a dispatch discovers it.
+func TestDoctorWarnsWhenSessionPathsCannotTakeASocket(t *testing.T) {
+	file := setup.New("agent")
+	file.AccountID = "2914079"
+	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
+
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	sessions := connectSessionsPath(file)
+	assert.True(t, connector.TokenSocketFits(filepath.Join(sessions, strings.Repeat("a", connector.AttemptIDLength))),
+		"a per-user runtime directory takes one")
+
+	deep, err := os.MkdirTemp("/tmp", "bcc-doctor-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+	t.Setenv("XDG_RUNTIME_DIR", deep)
+	sessions = connectSessionsPath(file)
+	assert.False(t, connector.TokenSocketFits(filepath.Join(sessions, strings.Repeat("a", connector.AttemptIDLength))),
+		"and a deep one does not, which is what doctor warns about")
 }
