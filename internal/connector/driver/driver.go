@@ -526,6 +526,15 @@ var (
 	// ErrUnsafeMode is an agent that did not confirm the permission mode the
 	// policy asked for (invariant 2). The session is ended.
 	ErrUnsafeMode = errors.New("driver: the agent did not confirm the permission mode asked for")
+	// ErrSessionUnverified is a session that started but is not the one the
+	// connector asked for: an MCP server the agent did not connect, or a
+	// session id that is not the one requested. The driver ends such a
+	// session rather than let a worker run without the tools its dispatch
+	// needs — a worker with no Basecamp tools can neither read its dispatch
+	// nor report it, and would otherwise finish with the mention unanswered
+	// (card 23's finding). A driver's own sentinel for one of these wraps
+	// this one.
+	ErrSessionUnverified = errors.New("driver: the session is not the one the connector asked for")
 	// ErrSessionEnded is a call on a session whose worker is gone.
 	ErrSessionEnded = errors.New("driver: the session has ended")
 )

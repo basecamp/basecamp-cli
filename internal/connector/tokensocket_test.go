@@ -160,3 +160,26 @@ func TestASocketNoWorkerIsEverNamedForExpires(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, HandoffExpired, s.Result())
 }
+
+// Card 23's review: the connector keeps the identity of the process that took
+// the token, because an agent may have started it outside the worker's group.
+func TestTheSocketRemembersWhoTookTheToken(t *testing.T) {
+	s, err := ServeTaskToken(tokenDir(t), socketTestToken, time.Second)
+	require.NoError(t, err)
+	defer s.Close()
+	s.AllowGroup(syscall.Getpgrp())
+
+	_, ok := s.Taker()
+	assert.False(t, ok, "nobody has taken it yet")
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got))
+	require.Equal(t, HandoffDelivered, s.Result())
+
+	taker, ok := s.Taker()
+	require.True(t, ok)
+	assert.Equal(t, os.Getpid(), taker.PID, "this test took it")
+	assert.Equal(t, syscall.Getpgrp(), taker.PGID)
+	assert.False(t, taker.StartedAt.IsZero(), "with the start time that tells it from a later pid")
+}

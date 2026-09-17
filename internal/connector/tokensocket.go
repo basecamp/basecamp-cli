@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // # The task token's carriage to the worker's MCP server
@@ -115,10 +117,14 @@ type TokenSocket struct {
 	stop    chan struct{}
 	close   sync.Once
 
-	// peer, groupOf and parentOf read the kernel; test seams.
+	// peer, groupOf, parentOf and lookup read the kernel; test seams.
 	peer     func(*net.UnixConn) (PeerCredentials, error)
 	groupOf  func(pid int) (int, error)
 	parentOf func(pid int) (int, error)
+	lookup   func(pid int) (driver.Process, error)
+
+	mu    sync.Mutex
+	taker driver.Process
 }
 
 // ServeTaskToken binds the one-use socket for token in dir, which must be the
@@ -158,7 +164,7 @@ func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.
 	s := &TokenSocket{
 		path: path, token: token, listener: listener,
 		group: make(chan int, 1), result: make(chan Handoff, 1), stop: make(chan struct{}),
-		peer: peer, groupOf: groupOf, parentOf: parentOf,
+		peer: peer, groupOf: groupOf, parentOf: parentOf, lookup: driver.LookupProcess,
 	}
 	go s.serve(window)
 	return s, nil
@@ -173,6 +179,17 @@ func (s *TokenSocket) Path() string { return s.path }
 // within the window; a group of 1 or less is never allowed.
 func (s *TokenSocket) AllowGroup(pgid int) {
 	s.setOnce.Do(func() { s.group <- pgid })
+}
+
+// Taker is the process that took the token, once one has. It is the worker's
+// MCP server, which an agent may have started in a process group of its own
+// (Codex does), so the connector keeps its identity: it is a process of the
+// connector's own making, holding the task's token, and the release point
+// ends it along with the worker.
+func (s *TokenSocket) Taker() (driver.Process, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.taker, s.taker.PID > 0
 }
 
 // Close stops serving, if it still is. Idempotent.
@@ -225,6 +242,7 @@ func (s *TokenSocket) serve(window time.Duration) {
 		s.result <- HandoffRefused
 		return
 	}
+	s.rememberTaker(conn)
 	s.result <- HandoffDelivered
 }
 
@@ -269,4 +287,21 @@ func (s *TokenSocket) descendsFrom(pid, ancestor int) bool {
 		pid = parent
 	}
 	return false
+}
+
+// rememberTaker keeps the identity of the process the token went to, so the
+// release point can end it: it is outside the worker's process group whenever
+// the agent started it in one of its own.
+func (s *TokenSocket) rememberTaker(conn *net.UnixConn) {
+	cred, err := s.peer(conn)
+	if err != nil || cred.PID <= 0 {
+		return
+	}
+	taker, err := s.lookup(cred.PID)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.taker = taker
+	s.mu.Unlock()
 }

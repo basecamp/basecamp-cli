@@ -33,8 +33,9 @@ type Places struct {
 	// reset the WAL under the open handle, which then reads stale data or
 	// fails with SQLITE_IOERR_SHORT_READ. Skipping those files by name keeps
 	// this walk from opening them; a database under another name cannot be
-	// recognized without opening it, so such a directory is scanned from a
-	// subprocess.
+	// recognized without opening it, so a caller that keeps one open under a
+	// name of its own runs the scan from a subprocess of its own (card 22
+	// does; this package ships no helper for it).
 	Dirs []string
 }
 

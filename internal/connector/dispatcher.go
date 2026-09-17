@@ -566,7 +566,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
-	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals}
+	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals, tokens: tokens}
 	d.mu.Lock()
 	d.live[launch.AttemptID] = run
 	d.mu.Unlock()
@@ -642,6 +642,46 @@ func (d *Dispatcher) taskLog(r driver.Redaction) *slog.Logger {
 	return slog.New(driver.NewRedactor(r).Handler(d.opts.Logger.Handler()))
 }
 
+// confirmTakerGone is the release point's second confirmation: the process
+// that took the task token from the socket, when the agent started it outside
+// the worker's own process group. It is ended by its own group and confirmed
+// gone like the worker; a process that cannot be confirmed holds the attempt,
+// as any other unconfirmed group does.
+//
+// Its identity lives in this process only: a connector that restarts knows
+// the worker it recorded, not the MCP servers an agent started beside it.
+// Such a bridge exits when its agent's stdout closes, which is what ends it
+// after a crash.
+func (d *Dispatcher) confirmTakerGone(worker driver.Process, run *taskRun) error {
+	if run == nil || run.tokens == nil {
+		return nil
+	}
+	taker, ok := run.tokens.Taker()
+	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
+		// A record that names the connector's own group is a mistake, not a
+		// worker's server: nothing is signaled on it, and nothing is held
+		// for it either.
+		ok = false
+	}
+	if !ok || taker.PGID == worker.PGID {
+		// Nothing took the token, or it took it inside the worker's own
+		// group, which is already confirmed gone.
+		return nil
+	}
+	switch owns, err := driver.OwnsWorker(taker); {
+	case err != nil:
+		return fmt.Errorf("connector: the process that took the task token: %w", err)
+	case !owns:
+		// Gone, or a pid the kernel has given to something else: either way
+		// there is nothing of this attempt's left to end.
+		return nil
+	}
+	if _, err := d.terminateRecorded(taker, d.opts.CancelGrace); err != nil {
+		return fmt.Errorf("connector: end the process that took the task token: %w", err)
+	}
+	return d.confirmGroupGone(taker, d.opts.CancelGrace)
+}
+
 // settleAttempts is how many times ending an attempt is tried before it is
 // left for the next start.
 const settleAttempts = 5
@@ -659,7 +699,14 @@ const settleAttempts = 5
 // may start.
 func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
-	if err := d.confirmGroupGone(worker, d.opts.CancelGrace); err != nil {
+	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
+	if err == nil {
+		// An agent may start the connector's own MCP server in a process
+		// group of its own (Codex does), and that process holds the task's
+		// token: it is confirmed gone here too, by the same rule.
+		err = d.confirmTakerGone(worker, run)
+	}
+	if err != nil {
 		d.hold()
 		if run != nil {
 			d.forget(launch.AttemptID)
@@ -792,6 +839,9 @@ type taskRun struct {
 	record  Record
 	session driver.Session
 	cleanup func()
+	// tokens is the attempt's token socket, which knows the MCP server the
+	// token went to.
+	tokens *TokenSocket
 	// log is the dispatcher's logger under this task's redaction.
 	log *slog.Logger
 
@@ -987,8 +1037,12 @@ func (r *taskRun) answered(result driver.PromptResult, err error) (driver.Prompt
 	switch {
 	case err == nil:
 		return result, "", false
-	case errors.Is(err, driver.ErrUnsafeMode):
-		r.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
+	case errors.Is(err, driver.ErrUnsafeMode), errors.Is(err, driver.ErrSessionUnverified):
+		// A session the driver itself ended because it was not the one asked
+		// for is a failure, not a worker that went away: the connector caused
+		// this end and knows why.
+		r.log.Error("connector: the worker was not the session the connector asked for; stopped",
+			"task_id", r.launch.TaskID, "error", err)
 		return result, StopFailed, true
 	case errors.Is(err, driver.ErrSessionEnded):
 		return result, r.goneStop(), true

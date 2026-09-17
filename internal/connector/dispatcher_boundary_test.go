@@ -43,6 +43,12 @@ func TestOnlyTheReleasePointSettlesAnAttemptOrReleasesItsDirectory(t *testing.T)
 		}
 		assert.NotContains(t, body, "State: string(AttemptEnded)", "%s reports an attempt ended outside the release point", name)
 	}
+	// Both confirmations are the release point's: the worker's own group, and
+	// the process the task token went to, which an agent may have started in
+	// a group of its own.
+	for _, call := range []string{"confirmGroupGone(", "confirmTakerGone("} {
+		assert.Contains(t, functions["release"], call, "the release point does not confirm with %s", call)
+	}
 }
 
 // splitFunctions maps each top-level function or method name in a Go file to

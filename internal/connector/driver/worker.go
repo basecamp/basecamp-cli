@@ -368,6 +368,29 @@ func OwnsWorker(p Process) (bool, error) {
 	return true, nil
 }
 
+// LookupProcess is a live process's identity: its pid, the process group it
+// leads or belongs to, and the start time that tells it from a later process
+// the kernel gave the same pid. A process that is gone — or a zombie, which
+// runs nothing — is os.ErrNotExist.
+//
+// It is how the connector takes the identity of a process it did not start
+// but knows about, such as the MCP server that took a task token from the
+// socket, which an agent may have started in a process group of its own.
+func LookupProcess(pid int) (Process, error) {
+	if pid <= 0 {
+		return Process{}, os.ErrNotExist
+	}
+	started, err := processStartTime(pid)
+	if err != nil {
+		return Process{}, err
+	}
+	pgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		return Process{}, err
+	}
+	return Process{PID: pid, PGID: pgid, StartedAt: started}, nil
+}
+
 // TerminateRecorded ends a worker a previous connector process started, by
 // the process group it recorded, and only while OwnsWorker says that group is
 // still this task's worker: a pid the kernel has since given to something
@@ -463,12 +486,18 @@ func ConfirmGroupGone(p Process, grace time.Duration) error {
 	}
 	_ = signalGroup(p.PGID, syscall.SIGKILL)
 	deadline := time.Now().Add(grace)
-	for {
+	// The wait backs off: each probe of a group that still has members reads
+	// every process's state, and a stubborn worker must not cost a busy host
+	// a full process listing twenty times a second for the whole grace.
+	for wait := 50 * time.Millisecond; ; {
 		err := groupGone(p.PGID)
 		if err == nil || time.Now().After(deadline) {
 			return err
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(wait)
+		if wait < 500*time.Millisecond {
+			wait *= 2
+		}
 	}
 }
 

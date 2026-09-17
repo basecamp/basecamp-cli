@@ -32,11 +32,18 @@ func (*Worker) Terminate(time.Duration)     {}
 // established is never acted on.
 func OwnsWorker(Process) (bool, error) { return false, errUnsupported }
 
-// GroupMembersRemain cannot answer off Unix.
-func GroupMembersRemain(Process) bool { return false }
+// GroupMembersRemain cannot answer off Unix, and what cannot be proven gone
+// is held: it answers that members remain.
+func GroupMembersRemain(Process) bool { return true }
 
 // ConfirmGroupGone cannot answer off Unix.
 func ConfirmGroupGone(Process, time.Duration) error { return errUnsupported }
+
+// OwnProcessGroup cannot answer off Unix.
+func OwnProcessGroup() (int, bool) { return 0, false }
+
+// LookupProcess cannot answer off Unix.
+func LookupProcess(int) (Process, error) { return Process{}, errUnsupported }
 
 // TerminateRecorded does nothing off Unix.
 func TerminateRecorded(Process, time.Duration) (bool, error) { return false, errUnsupported }

@@ -560,9 +560,14 @@ WHERE id = ? AND state = 'launching'`,
 		if err != nil {
 			return fmt.Errorf("connector: mark attempt %s running: %w", attemptID, err)
 		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n == 0 {
+		n, err := res.RowsAffected()
+		if err != nil {
+			// The write is already committed; a driver that cannot say how
+			// many rows it touched is not a reason to count the refusal
+			// again at settlement.
+			return nil //nolint:nilerr // the write is committed; an unreadable row count is not a reason to count it again
+		}
+		if n == 0 {
 			return fmt.Errorf("connector: mark attempt %s running: %w", attemptID, ErrNoLiveAttempt)
 		}
 		return nil
