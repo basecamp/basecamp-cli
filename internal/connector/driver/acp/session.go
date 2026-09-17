@@ -110,6 +110,9 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 	s.conn.claim = s.claim
 	s.conn.onResponse = s.onResponse
 	s.conn.onBusy = s.onBusy
+	s.conn.onOverflow = func() {
+		s.fail(errors.New("acp: the agent has more requests unanswered than this client will hold"))
+	}
 	go func() {
 		if err := s.conn.read(worker.Stdout()); err != nil {
 			// A line past maxLine or a broken pipe: the session cannot go

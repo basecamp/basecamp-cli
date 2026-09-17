@@ -1564,3 +1564,33 @@ func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// An agent that asks faster than its refusals can be written has stopped
+// working with this client: the session ends rather than leaving requests
+// unanswered for ever.
+func TestAnAgentThatOutrunsEvenItsRefusalsEndsTheSession(t *testing.T) {
+	old := maxBusy
+	maxBusy = 2
+	t.Cleanup(func() { maxBusy = old })
+	h := newHarness(t)
+	release := make(chan struct{})
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		<-release
+		return true
+	}
+	t.Cleanup(func() { close(release) })
+	h.turns(turnScript{
+		FloodPermissions: 64,
+		FloodCall:        permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		Stop:             "end_turn",
+	})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unanswered")
+	select {
+	case <-s.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("the worker was not ended")
+	}
+}

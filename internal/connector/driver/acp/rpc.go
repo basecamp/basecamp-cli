@@ -25,8 +25,12 @@ import (
 // A variable so tests need not write one.
 var maxLine = 64 << 20
 
-// maxHandlers bounds the agent requests answered at once.
+// maxHandlers bounds the agent requests answered at once, and maxBusy the
+// refusals waiting to be written. A variable so tests need not send a
+// thousand requests.
 const maxHandlers = 16
+
+var maxBusy = 256
 
 // JSON-RPC error codes the client sends.
 const (
@@ -84,6 +88,8 @@ type conn struct {
 	// onBusy hears a request refused at the handler bound, before its answer
 	// is written, so the refusal is on the record.
 	onBusy func(method string, params json.RawMessage)
+	// onOverflow hears that even the refusals have backed up.
+	onOverflow func()
 	// onRequest runs on its own goroutine per request; it must answer with
 	// reply or replyError.
 	onRequest func(id json.RawMessage, method string, params json.RawMessage, claimed any)
@@ -111,7 +117,7 @@ func newConn(w io.Writer) *conn {
 	c := &conn{
 		w: w, pending: map[int64]chan wireMessage{},
 		handlers: make(chan struct{}, maxHandlers),
-		busy:     make(chan json.RawMessage, maxHandlers),
+		busy:     make(chan json.RawMessage, maxBusy),
 		done:     make(chan struct{}),
 	}
 	go c.answerBusy()
@@ -177,6 +183,11 @@ func (c *conn) read(r io.Reader) error {
 				select {
 				case c.busy <- m.ID:
 				default:
+					// More unanswered requests than any agent asks: it is not
+					// working with this client, and the session ends.
+					if c.onOverflow != nil {
+						c.onOverflow()
+					}
 				}
 				continue
 			}
