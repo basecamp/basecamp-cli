@@ -63,6 +63,9 @@ type scenario struct {
 	// MCPInitAtSessionStart is the init the agent forwards while it is
 	// answering session/new, with these server statuses.
 	MCPInitAtSessionStart map[string]string `json:"mcp_init_at_session_start,omitempty"`
+	// MCPInitSessionID is the session the early init names; the session's own
+	// id when empty.
+	MCPInitSessionID string `json:"mcp_init_session_id,omitempty"`
 	// Hang names a method the agent never answers.
 	Hang      string `json:"hang"`
 	AuthEmail string `json:"auth_email"`
@@ -344,7 +347,11 @@ func (a *fakeAgent) handle(id json.RawMessage, method string, params json.RawMes
 		a.reply(id, map[string]any{"protocolVersion": version, "agentCapabilities": caps, "agentInfo": map[string]any{"name": sc.AgentName, "version": sc.AgentVersion}})
 	case "session/new":
 		if sc.MCPInitAtSessionStart != nil {
-			a.sendMCPInit(a.sessionID(), sc.MCPInitAtSessionStart)
+			named := sc.MCPInitSessionID
+			if named == "" {
+				named = a.sessionID()
+			}
+			a.sendMCPInit(named, sc.MCPInitAtSessionStart)
 		}
 		a.reply(id, a.sessionState())
 	case "session/load", "session/resume":

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +55,9 @@ type session struct {
 	// canceled, and takes the flag with it.
 	canceled bool
 	unsafe   error
+	// earlyInit holds an account of the MCP servers that arrived before the
+	// session's id did, by the id it named.
+	earlyInit map[string]map[string]string
 	// mcpStatus, mcpNames and mcpConfirmed are how the session learns its MCP
 	// servers connected (Adapter.MCPStatus).
 	mcpStatus    MCPStatus
@@ -65,7 +69,7 @@ type session struct {
 	// recorder records each refusal once, as it is made (driver's
 	// "Refusals"); recorded is the tool call ids already recorded.
 	recorder      driver.RefusalRecorder
-	recorded      map[string]bool
+	recorded      map[[sha256.Size]byte]bool
 	replaying     bool
 	updatesClosed bool
 	closed        bool
@@ -126,7 +130,7 @@ func newSession(opts sessionOptions) *session {
 		promptSem: make(chan struct{}, 1),
 		decisions: make(chan struct{}, maxDecisions),
 		tools:     map[string]toolInfo{},
-		recorded:  map[string]bool{},
+		recorded:  map[[sha256.Size]byte]bool{},
 	}
 	s.endUnsafe = func() { worker.Terminate(0) }
 	s.conn = newConn(worker.Stdin())
@@ -288,10 +292,22 @@ func (s *session) newSession(ctx context.Context, cwd string, servers []wireServ
 	if !validSessionID(st.SessionID) {
 		return st, errors.New("acp: session/new answered no usable session id")
 	}
-	s.mu.Lock()
-	s.id = st.SessionID
-	s.mu.Unlock()
+	s.nameSession(st.SessionID)
 	return st, nil
+}
+
+// nameSession is where the session's id becomes known: an account of the MCP
+// servers that arrived before it is applied now, and only the one that named
+// this session.
+func (s *session) nameSession(id string) {
+	s.mu.Lock()
+	s.id = id
+	early := s.earlyInit[id]
+	s.earlyInit = nil
+	s.mu.Unlock()
+	if early != nil {
+		s.reportMCPServers(early, true)
+	}
 }
 
 // loadSession reopens a session by id, by the method the agent advertised
@@ -307,9 +323,9 @@ func (s *session) loadSession(ctx context.Context, caps agentCaps, id, cwd strin
 		return sessionState{}, ErrLoadUnsupported
 	}
 	s.mu.Lock()
-	s.id = id
 	s.replaying = true
 	s.mu.Unlock()
+	s.nameSession(id)
 	defer func() {
 		s.mu.Lock()
 		s.replaying = false
@@ -502,12 +518,11 @@ func (s *session) reportMCPServers(statuses map[string]string, complete bool) {
 	for name, status := range statuses {
 		switch {
 		case !slices.Contains(names, name):
-			if complete {
-				// strictMcpConfig and the Codex preflight are meant to leave
-				// the agent nothing else; the agent's own account says so.
-				s.fail(fmt.Errorf("%w: the agent has a server the session never gave it, %q", ErrMCPServerNotConnected, s.conn.agentText(name)))
-				return
-			}
+			// strictMcpConfig and the Codex preflight are meant to leave the
+			// agent nothing else; a server it names is evidence they did not,
+			// whether this is its whole list or one startup report.
+			s.fail(fmt.Errorf("%w: the agent has a server the session never gave it, %q", ErrMCPServerNotConnected, s.conn.agentText(name)))
+			return
 		case status != "connected":
 			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, s.conn.agentText(status)))
 			return
@@ -1060,14 +1075,29 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 			} `json:"mcp_servers"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(params, &n) != nil || !s.ours(n.SessionID) || n.Message.Type != "system" || n.Message.Subtype != "init" {
+	if json.Unmarshal(params, &n) != nil || n.SessionID == "" || !s.ours(n.SessionID) ||
+		n.Message.Type != "system" || n.Message.Subtype != "init" {
 		return
 	}
 	statuses := map[string]string{}
 	for _, srv := range n.Message.MCPServers {
 		statuses[srv.Name] = srv.Status
 	}
-	s.reportMCPServers(statuses, true)
+	s.mu.Lock()
+	known := s.id != ""
+	if !known {
+		// The session's id is not known yet: this account of the servers is
+		// held until it is, so an init naming another session cannot vouch
+		// for this one.
+		if s.earlyInit == nil {
+			s.earlyInit = map[string]map[string]string{}
+		}
+		s.earlyInit[n.SessionID] = statuses
+	}
+	s.mu.Unlock()
+	if known {
+		s.reportMCPServers(statuses, true)
+	}
 }
 
 // onRequest answers the agent's requests. The client offers no fs and no
@@ -1219,11 +1249,14 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 		id = id[:maxToolCallID]
 	}
 	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(refusalTool(req))}
+	// Once-ness is per the id the agent sent, by digest: two ids cut or
+	// redacted to the same text are still two calls.
+	key := sha256.Sum256([]byte(req.ToolCallID))
 
 	s.mu.Lock()
-	first := !s.recorded[refusal.ToolCallID]
+	first := !s.recorded[key]
 	if first {
-		s.recorded[refusal.ToolCallID] = true
+		s.recorded[key] = true
 	}
 	if t == nil {
 		t = s.turn

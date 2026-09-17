@@ -1576,6 +1576,31 @@ func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
 		_, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
 		require.ErrorIs(t, err, ErrMCPServerNotConnected, "not the closed stream that failure caused")
 	})
+	t.Run("an init naming another session vouches for nothing", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "connected"}
+		h.sc.MCPInitSessionID = "someone-elses-session"
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "this session was never told about its own servers")
+	})
+	t.Run("codex: a startup failure for a server nobody gave it", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp_startup.elsewhere", "kind": "other",
+				"title": "mcp__elsewhere__startup", "status": "failed"})},
+			{SleepMS: 3000},
+		}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+		assert.Contains(t, err.Error(), "never gave it")
+	})
 	t.Run("codex: no failure reported is no failure", func(t *testing.T) {
 		h := newHarness(t)
 		h.turns(turnScript{Stop: "end_turn"})
@@ -1775,15 +1800,20 @@ func TestEveryRefusalIsRecordedOnceAsItIsMade(t *testing.T) {
 		return cfg
 	}
 	call := map[string]any{"toolCallId": "call-1", "kind": "edit"}
+	// Two ids that are cut to the same first bytes are still two calls.
+	long := strings.Repeat("d", maxToolCallID)
 	h.turns(turnScript{Steps: []step{
 		{Permission: permission(t, call, standardOptions()...)},
 		// The same call asked about twice is one refusal.
 		{Permission: permission(t, call, standardOptions()...)},
 		{Permission: permission(t, map[string]any{"toolCallId": "call-2", "kind": "execute"}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": long + "-one", "kind": "edit"}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": long + "-two", "kind": "edit"}, standardOptions()...)},
 	}, Hang: true})
 	s := h.open()
 	go func() { _, _ = s.Prompt(context.Background(), "go") }()
-	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 2 }, 10*time.Second, 20*time.Millisecond,
+	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 4 }, 10*time.Second, 20*time.Millisecond,
 		"each refusal is recorded as it is made, before the turn ends")
-	assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}, {ToolCallID: "call-2", Tool: "execute"}}, recorder.Recorded())
+	recorded := recorder.Recorded()
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}, {ToolCallID: "call-2", Tool: "execute"}}, recorded[:2])
 }
