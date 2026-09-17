@@ -48,9 +48,10 @@ func TestHintCommandsResolve(t *testing.T) {
 
 	for _, dir := range []string{".", "../connector/setup"} {
 		files, funcs := parsePackage(t, fset, dir)
+		sinks := hintSinks(funcs)
 		for name, file := range files {
 			everything := dir == "." && name == "connect.go"
-			for _, lit := range hintLiterals(file, funcs, everything) {
+			for _, lit := range hintLiterals(file, funcs, sinks, everything) {
 				if seen[lit.Pos()] {
 					continue // a helper reached from more than one hint
 				}
@@ -84,6 +85,7 @@ func TestHintCommandsResolve(t *testing.T) {
 		{reference{"connect.go", "basecamp auth login"}, "a Hint field in a composite literal"},
 		{reference{"boost.go", "basecamp boost list"}, "a hint built into a variable"},
 		{reference{"wizard.go", "basecamp auth status"}, "a hint returned by a helper"},
+		{reference{"upgrade_selfupdate.go", "basecamp upgrade"}, "a hint passed through a wrapper"},
 		{reference{"doctor.go", "basecamp upgrade"}, "an assignment to a Hint field"},
 		{reference{"feed.go", "basecamp events poll"}, "a hint-named field"},
 		{reference{"checks.go", "basecamp connect setup"}, "a readiness check's hint"},
@@ -122,6 +124,103 @@ func parsePackage(t *testing.T, fset *token.FileSet, dir string) (map[string]*as
 	return files, funcs
 }
 
+// hintSinks maps every function that takes hint text to the positions of the
+// arguments that carry it: the output constructors, and every package
+// function with a parameter that reaches a hint inside it — written to a
+// hint-named field or variable, or passed on to another sink. A wrapper like
+// errUpgradeFailedHint(msg, hint) is then a sink like ErrUsageHint, and so is
+// a wrapper of it: the search runs until no function gains a parameter.
+func hintSinks(funcs map[string]*ast.FuncDecl) map[string]map[int]bool {
+	sinks := map[string]map[int]bool{
+		"ErrUsageHint":    {1: true},
+		"ErrNotFoundHint": {2: true},
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for name, fn := range funcs {
+			params := map[string]int{}
+			i := 0
+			for _, field := range fn.Type.Params.List {
+				for _, id := range field.Names {
+					params[id.Name] = i
+					i++
+				}
+				if len(field.Names) == 0 {
+					i++
+				}
+			}
+			if len(params) == 0 {
+				continue
+			}
+
+			// reach marks the parameters that are the hint text itself: the
+			// whole expression, or a side of a concatenation. A parameter the
+			// text is only formatted from — `cmd` in cmd.CommandPath() — is
+			// not hint text, and marking it would make every caller's `cmd`
+			// a hint.
+			var reach func(ast.Expr)
+			reach = func(expr ast.Expr) {
+				switch e := expr.(type) {
+				case *ast.ParenExpr:
+					reach(e.X)
+				case *ast.BinaryExpr:
+					if e.Op == token.ADD {
+						reach(e.X)
+						reach(e.Y)
+					}
+				case *ast.Ident:
+					if at, ok := params[e.Name]; ok && !sinks[name][at] {
+						if sinks[name] == nil {
+							sinks[name] = map[int]bool{}
+						}
+						sinks[name][at] = true
+						changed = true
+					}
+				}
+			}
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.KeyValueExpr:
+					if key, ok := node.Key.(*ast.Ident); ok && isHintName(key.Name) {
+						reach(node.Value)
+					}
+				case *ast.AssignStmt:
+					for _, lhs := range node.Lhs {
+						if isHintName(assignedName(lhs)) {
+							for _, rhs := range node.Rhs {
+								reach(rhs)
+							}
+							break
+						}
+					}
+				case *ast.CallExpr:
+					for at := range sinks[calleeName(node)] {
+						if at < len(node.Args) {
+							reach(node.Args[at])
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+	return sinks
+}
+
+// calleeName is the name a call is made through: a function's, or a method's
+// or package member's selector.
+func calleeName(call *ast.CallExpr) string {
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		return fn.Name
+	case *ast.SelectorExpr:
+		return fn.Sel.Name
+	}
+	return ""
+}
+
 // isHintName reports whether an identifier names hint text: Hint,
 // forbiddenHint, agentReadsRefusedHint, hint.
 func isHintName(name string) bool {
@@ -129,56 +228,79 @@ func isHintName(name string) bool {
 }
 
 // hintLiterals returns the string literals in a file that an operator is
-// meant to read: the hint argument of the hint-carrying error constructors,
-// anything written to a hint-named field, variable or constant, and — when
-// everything is wanted — every string literal in the file.
+// meant to read: the hint arguments of every sink (see hintSinks), anything
+// written to a hint-named field, variable or constant, and — when everything
+// is wanted — every string literal in the file.
 //
 // A hint is not always written where it is passed. Some are built into a
-// variable first (boost.go builds one, then appends --event), and some are
-// returned by a helper (wizard.go passes wizardEscapeHint()). So the names a
-// hint expression mentions are followed to their assignments, and the
-// functions it calls are followed into their bodies. Over-reaching there
+// variable first (boost.go builds one, then appends --event), some are
+// returned by a helper (wizard.go passes wizardEscapeHint()), and some are
+// handed to a wrapper (errUpgradeFailedHint). So the names a hint expression
+// mentions are followed to their assignments, the functions it calls are
+// followed into their bodies, and a wrapper's hint argument is a sink. Over-reaching there
 // costs nothing: a literal with no command in it is scanned and passes.
-func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything bool) []*ast.BasicLit {
+func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, sinks map[string]map[int]bool, everything bool) []*ast.BasicLit {
 	var lits []*ast.BasicLit
 	names := map[string]bool{}
 	visited := map[string]bool{}
 
 	// collect takes every string in an expression, notes the local names
-	// whose values it is built from, and follows the functions it calls.
+	// whose values the text is built from, and follows the functions it
+	// calls — including a function literal called in place, and the call a
+	// method chain starts from.
 	//
-	// Only a name that is itself a value counts. `cmd` in cmd.CommandPath()
-	// and `fmt` in fmt.Sprintf are not hint text, and following them would
-	// pull in whole command definitions — help text included — as if they
-	// were hints.
+	// Only a name that is the text itself counts: the whole expression, or a
+	// side of a concatenation. A name passed as an argument is a value the
+	// text is formatted from, not the text — following one runs from
+	// `formatCardTableIDs(cardTables)` to `listProjectCardTables(cmd, ...)`
+	// and on to every command definition assigned to `cmd`, help text
+	// included — and neither is a selector's receiver (`cmd` in
+	// cmd.CommandPath(), `fmt` in fmt.Sprintf).
 	var collect func(ast.Node)
 	collect = func(n ast.Node) {
+		if id, ok := n.(*ast.Ident); ok {
+			names[id.Name] = true
+			return
+		}
 		ast.Inspect(n, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.BasicLit:
 				if node.Kind == token.STRING {
 					lits = append(lits, node)
 				}
-			case *ast.Ident:
-				names[node.Name] = true
-			case *ast.SelectorExpr:
-				return false // a field or a package member, not a local value
-			case *ast.CallExpr:
-				callee := ""
-				switch fn := node.Fun.(type) {
-				case *ast.Ident:
-					callee = fn.Name
-				case *ast.SelectorExpr:
-					callee = fn.Sel.Name
+			case *ast.BinaryExpr:
+				if node.Op == token.ADD {
+					for _, side := range []ast.Expr{node.X, node.Y} {
+						if id, ok := side.(*ast.Ident); ok {
+							names[id.Name] = true
+						}
+					}
 				}
+			case *ast.SelectorExpr:
+				if _, named := node.X.(*ast.Ident); !named {
+					collect(node.X) // newX("basecamp ...").String()
+				}
+				return false
+			case *ast.CallExpr:
+				callee := calleeName(node)
 				if decl, ok := funcs[callee]; ok && !visited[callee] {
 					visited[callee] = true
 					collect(decl.Body)
 				}
-				for _, arg := range node.Args {
-					collect(arg)
+				switch fn := node.Fun.(type) {
+				case *ast.FuncLit:
+					collect(fn.Body) // func() string { ... }()
+				case *ast.SelectorExpr:
+					if _, named := fn.X.(*ast.Ident); !named {
+						collect(fn.X)
+					}
 				}
-				return false // the callee's name is not a value
+				for _, arg := range node.Args {
+					if _, named := arg.(*ast.Ident); !named {
+						collect(arg)
+					}
+				}
+				return false
 			}
 			return true
 		})
@@ -194,15 +316,12 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything boo
 		return lits
 	}
 
-	// Which argument carries the hint, by constructor name.
-	hintArg := map[string]int{"ErrUsageHint": 1, "ErrNotFoundHint": 2}
-
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			if sel, ok := node.Fun.(*ast.SelectorExpr); ok {
-				if i, ok := hintArg[sel.Sel.Name]; ok && len(node.Args) > i {
-					collect(node.Args[i])
+			for at := range sinks[calleeName(node)] {
+				if at < len(node.Args) {
+					collect(node.Args[at])
 				}
 			}
 		case *ast.KeyValueExpr:

@@ -45,6 +45,7 @@ func TestUnboundProfileHintNamesOnlyWhatBinds(t *testing.T) {
 
 	assert.Contains(t, hint, "basecamp auth agent connect -P agent")
 	assert.Contains(t, hint, "add account_id to the profile's entry in "+filepath.Join(config.GlobalConfigDir(), "config.json"))
+	assert.Contains(t, hint, "browser login binds none", "a headless login can bind, so the claim is about the browser")
 	assert.NotContains(t, hint, "auth login", "a browser login binds no account")
 }
 

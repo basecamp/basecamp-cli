@@ -86,7 +86,7 @@ assert_fails() {
   if [ "$status" -eq 0 ]; then
     not_ok "$3 — the check passed: ${out}"
   elif [[ "$out" != *"$2"* ]]; then
-    not_ok "$3 — expected ${2@Q} in: ${out}"
+    not_ok "$3 — expected '$2' in: ${out}"
   else
     ok "$3"
   fi
