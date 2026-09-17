@@ -179,7 +179,7 @@ func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 			}
 			return fmt.Errorf("acp: read %s: %w", file, err)
 		}
-		for _, line := range strings.Split(string(raw), "\n") {
+		for _, line := range strings.Split(strings.TrimPrefix(string(raw), "\ufeff"), "\n") {
 			if mcpServersKey.MatchString(line) {
 				return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
 			}

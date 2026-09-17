@@ -535,6 +535,7 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 		err = answer.wait(&resp)
 	}
 
+	s.drainDecisions()
 	s.mu.Lock()
 	if s.turn == t {
 		s.turn = nil
@@ -563,6 +564,16 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 	}
 	t.result, t.err = result, err
 	close(t.done)
+}
+
+// drainDecisions waits, briefly, for the permissions being decided to be
+// answered, so a refusal made as the turn ends is still on its result
+// (invariant 4).
+func (s *session) drainDecisions() {
+	deadline := time.Now().Add(decisionDrain)
+	for len(s.decisions) > 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // stopOf maps ACP's stop reason to the driver's (invariant 4).
@@ -617,7 +628,18 @@ func (s *session) Cancel(ctx context.Context) error {
 		return nil
 	}
 	sent := make(chan error, 1)
-	go func() { sent <- s.conn.notify("session/cancel", map[string]any{"sessionId": id}) }()
+	go func() {
+		// The turn this cancel was for may have ended while the write waited;
+		// a cancel is never sent for a turn the connector did not mean.
+		s.mu.Lock()
+		current := s.turn
+		s.mu.Unlock()
+		if current != t {
+			sent <- nil
+			return
+		}
+		sent <- s.conn.notify("session/cancel", map[string]any{"sessionId": id})
+	}()
 	select {
 	case err := <-sent:
 		return err
@@ -881,8 +903,8 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		defer func() { <-s.decisions }()
 	default:
 		// More at once than a session has any business asking: refused
-		// without a decision, and without a goroutine of its own waiting.
-		s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+		// without a decision, and recorded as the refusal it is.
+		s.refuse(id, driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}, nil)
 		return
 	}
 
@@ -911,8 +933,9 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 
 	if canceled {
 		// A turn being canceled answers its open requests as canceled, as
-		// ACP asks of a client.
-		s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+		// ACP asks of a client. It is still a call this session did not
+		// allow, so it is recorded as one.
+		s.refuse(id, req, t)
 		return
 	}
 	allow := askable && s.policy.Decide(context.Background(), req).Allow
@@ -930,11 +953,7 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		option = chooseOption(req.Options, false)
 	}
 	if !allow {
-		s.mu.Lock()
-		if t != nil && s.turn == t {
-			t.refusals = append(t.refusals, driver.Refusal{ToolCallID: req.ToolCallID, Tool: refusalTool(req)})
-		}
-		s.mu.Unlock()
+		s.record(req, t)
 	}
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind, Allowed: allow})
 	if option == "" {
@@ -947,6 +966,29 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 // outcomeCanceled is ACP's permission outcome for a request not answered by
 // an option.
 const outcomeCanceled = "cancelled" //nolint:misspell // ACP's wire value
+
+// refuse answers a request the session will not put to the policy at all,
+// with no option of the agent's, and records it as the refusal it is.
+func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *turn) {
+	s.record(req, t)
+	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind})
+	s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+}
+
+// record puts a refusal on the turn it belongs to (invariant 4). A turn given
+// as nil is looked up: a refusal the session made before it read the turn
+// still belongs to the turn in flight.
+func (s *session) record(req driver.PermissionRequest, t *turn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t == nil {
+		t = s.turn
+	}
+	if t == nil || s.turn != t {
+		return
+	}
+	t.refusals = append(t.refusals, driver.Refusal{ToolCallID: req.ToolCallID, Tool: refusalTool(req)})
+}
 
 // chooseOption selects by kind, never by id or label (invariant 3).
 func chooseOption(options []driver.PermissionOption, allow bool) string {
@@ -981,8 +1023,18 @@ type toolInfo struct {
 // maxDecisions bounds the permission requests one session decides at once.
 const maxDecisions = 8
 
-// maxTools bounds the tool calls remembered for one session.
-const maxTools = 1024
+// decisionDrain is how long a turn's end waits for permissions still being
+// decided.
+var decisionDrain = 2 * time.Second
+
+// maxTools bounds the tool calls remembered for one session, maxToolCallID
+// the id of one, and maxLocations the paths it may name: the agent writes all
+// three, and a session's memory is not its to grow.
+const (
+	maxTools      = 1024
+	maxToolCallID = 256
+	maxLocations  = 64
+)
 
 // noteTool merges what u says about its tool call into what the session
 // knows of it, and returns the result. A later message fills in what an
@@ -1002,8 +1054,11 @@ func (s *session) noteTool(u sessionUpdate) toolInfo {
 	}
 	if len(u.Locations) > 0 {
 		info.locations = slices.Clone(u.Locations)
+		if len(info.locations) > maxLocations {
+			info.locations = info.locations[:maxLocations]
+		}
 	}
-	if u.ToolCallID == "" {
+	if u.ToolCallID == "" || len(u.ToolCallID) > maxToolCallID {
 		return info
 	}
 	switch toolStatus(u.Status) {

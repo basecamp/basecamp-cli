@@ -1000,6 +1000,8 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted table path declares them too")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles . demo . mcp_servers . basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "TOML allows space around the dots")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("\ufeff[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a byte order mark does not hide the first line")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
 	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
 	codexHome := filepath.Join(root, "codex-home")
@@ -1090,11 +1092,13 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
 	answered := h.record().Outcomes
 	close(release)
+	var res driver.PromptResult
 	select {
-	case <-answers:
+	case res = <-answers:
 	case <-time.After(20 * time.Second):
 		t.Fatal("the flooded turn never ended")
 	}
+	assert.NotEmpty(t, res.Refusals, "a request refused for want of room is still a refusal on the turn")
 	canceled := 0
 	for _, o := range answered {
 		if len(o) == 0 || string(o) == "null" {
@@ -1173,4 +1177,55 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("no answer reached the agent")
 	}
+}
+
+func TestWhatOneToolCallMayCostTheSession(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	long := strings.Repeat("c", maxToolCallID+1)
+	locations := make([]string, maxLocations*4)
+	for i := range locations {
+		locations[i] = fmt.Sprintf("/work/%d", i)
+	}
+	info := s.noteTool(sessionUpdate{ToolCallID: long, Kind: "edit", Status: "pending", Locations: locations})
+	assert.Len(t, info.locations, maxLocations, "a call names as many paths as the policy will look at, no more")
+	s.mu.Lock()
+	remembered := len(s.tools)
+	s.mu.Unlock()
+	assert.Zero(t, remembered, "an id past what an id can be is not a key to keep")
+
+	for i := range maxTools + 10 {
+		s.noteTool(sessionUpdate{ToolCallID: fmt.Sprintf("call-%d", i), Kind: "edit", Status: "pending"})
+	}
+	s.mu.Lock()
+	remembered = len(s.tools)
+	s.mu.Unlock()
+	assert.Equal(t, maxTools, remembered)
+}
+
+// A permission being decided as the turn ends is still on the turn's result:
+// the agent can answer the prompt before it hears the answer to its request.
+func TestARefusalDecidedAsTheTurnEndsIsOnItsResult(t *testing.T) {
+	h := newHarness(t)
+	deciding := make(chan struct{})
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		close(deciding)
+		time.Sleep(300 * time.Millisecond)
+		return false
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+	})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	select {
+	case <-deciding:
+	default:
+		t.Fatal("the policy was never asked")
+	}
+	assert.Len(t, res.Refusals, 1)
 }

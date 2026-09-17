@@ -84,6 +84,9 @@ type turnScript struct {
 	// FloodPermissions asks for this many permissions at once.
 	FloodPermissions int             `json:"flood_permissions"`
 	FloodCall        json.RawMessage `json:"flood_call,omitempty"`
+	// StopWithoutWaiting answers the prompt without waiting for the
+	// permissions it asked for.
+	StopWithoutWaiting bool `json:"stop_without_waiting"`
 }
 
 type step struct {
@@ -420,7 +423,12 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 				a.flush()
 			}()
 		}
-		wg.Wait()
+		if ts.StopWithoutWaiting {
+			// Long enough for the client to have the request in hand.
+			time.Sleep(150 * time.Millisecond)
+		} else {
+			wg.Wait()
+		}
 		a.flush()
 	}
 	if ts.Hang {
