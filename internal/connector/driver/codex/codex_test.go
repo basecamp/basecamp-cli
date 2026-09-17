@@ -438,6 +438,7 @@ func TestASessionTakesOnePrompt(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Prompt(context.Background(), "Event 4.")
 	require.ErrorIs(t, err, driver.ErrSessionEnded)
+	assert.ErrorIs(t, err, errOnePrompt, "refused as a second prompt, not as a write to a closed pipe")
 	assert.False(t, h.drv.Capabilities().FollowUpPrompts)
 }
 
