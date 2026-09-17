@@ -58,7 +58,7 @@ func decisionsFor(t *testing.T, l *Ledger, id int64) int {
 func unknownOutcome(t *testing.T, l *Ledger, id int64) Launch {
 	t.Helper()
 	ctx := context.Background()
-	require.Equal(t, StateAdmitted, opAdmit(t, l, id, "recording:"+itoa(id)))
+	require.Equal(t, StateAdmitted, opAdmit(t, l, id, "recording:"+strconv.FormatInt(id, 10)))
 	launch := launchOf(t, l, id)
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now()}))
 	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
@@ -66,8 +66,6 @@ func unknownOutcome(t *testing.T, l *Ledger, id int64) Launch {
 	require.Equal(t, StateCompleted, stateOf(t, l, id))
 	return launch
 }
-
-func itoa(id int64) string { return strconv.FormatInt(id, 10) }
 
 // Done when: redispatch of completed(unknown) admits the record, supersedes
 // the task's token and records who authorized it.
@@ -86,9 +84,7 @@ func TestRedispatchAdmitsAnUnknownOutcome(t *testing.T) {
 	var by string
 	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT authorized_by FROM events WHERE id = 1`).Scan(&by))
 	assert.Equal(t, opBy, by)
-	d, err := l.Dispatch(launch.Token, adapterAgentID)
-	require.NoError(t, err)
-	_, _, err = d.Get(ctx, 1)
+	_, err = l.Dispatch(ctx, launch.Token, adapterAgentID)
 	assert.ErrorIs(t, err, ErrTaskTokenRefused, "the replaced task's token is refused")
 
 	startable, err := l.StartableRecords(ctx, 10)
@@ -104,7 +100,7 @@ func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 	ctx := context.Background()
 	require.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:1"))
 	launch := launchOf(t, l, 1)
-	d, err := l.Dispatch(launch.Token, adapterAgentID)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
@@ -128,7 +124,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	launch := launchOf(t, l, 1)
 	started := time.Now().Add(-time.Minute).UTC()
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: started}))
-	d, err := l.Dispatch(launch.Token, adapterAgentID)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
@@ -187,7 +183,7 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 		"succeeded": func(t *testing.T, l *Ledger) {
 			opAdmit(t, l, 1, "recording:1")
 			launch := launchOf(t, l, 1)
-			d, err := l.Dispatch(launch.Token, adapterAgentID)
+			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
 			require.NoError(t, err)
@@ -568,7 +564,7 @@ func TestDiscard(t *testing.T) {
 		"failed": func(t *testing.T, l *Ledger) {
 			opAdmit(t, l, 1, "recording:1")
 			launch := launchOf(t, l, 1)
-			d, err := l.Dispatch(launch.Token, adapterAgentID)
+			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 			require.NoError(t, err)
@@ -629,7 +625,7 @@ func pendingRedispatch(t *testing.T, l *Ledger) Launch {
 	ctx := context.Background()
 	require.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:9"))
 	launch := launchOf(t, l, 1)
-	d, err := l.Dispatch(launch.Token, adapterAgentID)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
