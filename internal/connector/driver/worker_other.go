@@ -43,6 +43,10 @@ func ConfirmGroupGone(Process, time.Duration) error { return errUnsupported }
 // OwnProcessGroup cannot answer off Unix.
 func OwnProcessGroup() (int, bool) { return 0, false }
 
+// ProcessGone cannot answer off Unix, and what cannot be answered is not
+// proven gone.
+func ProcessGone(Process) (bool, error) { return false, errUnsupported }
+
 // LookupProcess cannot answer off Unix.
 func LookupProcess(int) (Process, error) { return Process{}, errUnsupported }
 

@@ -71,11 +71,18 @@ func TestTheTokenGoesToTheWorkersOwnGroupOnly(t *testing.T) {
 // closed would leave the restarted server with no Basecamp tools. Each start
 // is a handoff of its own, with the same peer checks, up to a bound.
 func TestARestartedMCPServerTakesTheTokenAgain(t *testing.T) {
-	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 5*time.Second)
+	// The taker this test reports is a pid that no longer exists, which is
+	// what the socket waits for between handoffs: a server that has gone.
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
+		processGroupOf, parentProcessOf, func(int) (driver.Process, error) {
+			// A pid above the kernel's maximum, in the worker's own group: it
+			// passes the trust rule and is gone the moment it is asked about.
+			return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+		})
 	require.NoError(t, err)
 	defer s.Close()
 	handoffs := make(chan Handoff, MaxTokenHandoffs+2)
-	s.OnHandoff(func(h Handoff, _ driver.Process) { handoffs <- h })
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
 	s.AllowGroup(syscall.Getpgrp())
 
 	for i := range MaxTokenHandoffs {
@@ -85,7 +92,7 @@ func TestARestartedMCPServerTakesTheTokenAgain(t *testing.T) {
 		assert.Equal(t, HandoffDelivered, <-handoffs)
 		taker, ok := s.Taker()
 		require.True(t, ok)
-		assert.Equal(t, os.Getpid(), taker.PID, "the newest server is the one holding the token")
+		assert.Positive(t, taker.PID, "the newest server is the one holding the token")
 	}
 
 	require.True(t, s.Settled(5*time.Second), "the budget is spent and the socket is finished with")
@@ -98,7 +105,8 @@ func TestARestartedMCPServerTakesTheTokenAgain(t *testing.T) {
 // connects after a legitimate restart gets nothing, and ends the socket.
 func TestThePeerCheckAppliesToEveryHandoff(t *testing.T) {
 	// The first connection is the worker's; the second is a process of some
-	// other group, as the kernel reports it.
+	// other group, as the kernel reports it. The taker reported for the first
+	// is a pid that is gone, so the socket arms again at once.
 	var handoffCount atomic.Int64
 	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
 		func(pid int) (int, error) {
@@ -108,11 +116,13 @@ func TestThePeerCheckAppliesToEveryHandoff(t *testing.T) {
 			return processGroupOf(pid)
 		},
 		func(int) (int, error) { return 1, nil },
-		driver.LookupProcess)
+		func(int) (driver.Process, error) {
+			return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+		})
 	require.NoError(t, err)
 	defer s.Close()
 	handoffs := make(chan Handoff, 4)
-	s.OnHandoff(func(h Handoff, _ driver.Process) { handoffs <- h })
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
 	s.AllowGroup(syscall.Getpgrp())
 
 	got, err := fetch(t, s.Path())
@@ -315,4 +325,38 @@ func TestAHandoffInFlightIsFinishedBeforeTheTakerIsRead(t *testing.T) {
 	require.True(t, ok, "and the process that took the token is known by then")
 	assert.Equal(t, os.Getpid(), taker.PID)
 	assert.Equal(t, HandoffDelivered, s.Result())
+}
+
+// Opus r8: after a delivery the socket does not arm again while the process
+// that took the token is still running — a restart is that process ending —
+// so the token is not there for the asking for the rest of the window.
+func TestTheSocketDoesNotArmAgainWhileTheServerHoldingTheTokenLives(t *testing.T) {
+	// The taker reported is this test process, which is very much alive.
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 300*time.Millisecond, peerCredentials,
+		processGroupOf, parentProcessOf, driver.LookupProcess)
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got))
+	require.Equal(t, HandoffDelivered, <-handoffs)
+	taker, ok := s.Taker()
+	require.True(t, ok)
+	require.Equal(t, os.Getpid(), taker.PID)
+
+	// Two windows' worth of asking, while the server that has the token runs.
+	for range 3 {
+		second, _ := fetch(t, s.Path())
+		assert.Empty(t, strings.TrimSpace(second), "nothing is handed out while that server lives")
+	}
+	select {
+	case h := <-handoffs:
+		t.Fatalf("a second handoff was made while the first server was still running: %s", h)
+	default:
+	}
+	assert.False(t, s.Settled(100*time.Millisecond), "and the socket is still this attempt's, waiting")
 }

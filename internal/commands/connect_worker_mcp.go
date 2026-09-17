@@ -71,7 +71,7 @@ func newConnectWorkerMCPCmd() *cobra.Command {
 			return execWorkerMCP(exe, profile, state, token)
 		},
 	}
-	cmd.Flags().StringVar(&socket, "socket", "", "The connector's one-use token socket for this attempt")
+	cmd.Flags().StringVar(&socket, "socket", "", "The connector's token socket for this attempt")
 	cmd.Flags().StringVar(&state, "connect-state", "", "The connector's state directory")
 	return cmd
 }

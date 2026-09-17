@@ -172,6 +172,15 @@ func fakeClaude(scenario string) {
 		if scenario == "die-secret" {
 			os.Exit(3)
 		}
+		if scenario == "two-nameless-refusals" {
+			// Two refusals of the same tool with no call id between them:
+			// two refusals, not one (card 19's Codex accounting).
+			for range 2 {
+				emit(map[string]any{"type": "system", "subtype": "permission_denied", "tool_name": "Bash"})
+			}
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID})
+			continue
+		}
 		if scenario == "denied-twice" {
 			// One refusal the stream announces twice and the result repeats.
 			for range 2 {
@@ -783,6 +792,7 @@ func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
 		{"late-denial", []driver.Refusal{{ToolCallID: "toolu_late", Tool: "Bash"}}},
 		{"deny-then-die", []driver.Refusal{{ToolCallID: "toolu_dead", Tool: "Bash"}}},
 		{"denied-twice", []driver.Refusal{{ToolCallID: "toolu_twice", Tool: "Bash"}}},
+		{"two-nameless-refusals", []driver.Refusal{{Tool: "Bash"}, {Tool: "Bash"}}},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			f := newFixture(t, tc.scenario)

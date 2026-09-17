@@ -98,7 +98,7 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
-// configuration, and the one-use socket that hands over a task token. Never
+// configuration, and the socket that hands over a task token. Never
 // under the state directory or a working directory, which outlive the session
 // and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
 // memory-backed directory made for exactly this, or /tmp where there is none.
