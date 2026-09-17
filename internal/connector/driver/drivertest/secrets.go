@@ -23,7 +23,18 @@ type Places struct {
 	Args []string
 	// Texts are logs, output lines, anything written.
 	Texts []string
-	// Dirs are walked, and every regular file in them read.
+	// Dirs are walked, and every regular file in them read, except SQLite
+	// databases and their journals (see isDatabaseFile).
+	//
+	// A directory holding a database this process has open must not be
+	// scanned from this process at all: SQLite's POSIX locks belong to the
+	// process, and closing any descriptor to the database, its -wal or its
+	// -shm drops every one of them, so another process may checkpoint and
+	// reset the WAL under the open handle, which then reads stale data or
+	// fails with SQLITE_IOERR_SHORT_READ. Skipping those files by name keeps
+	// this walk from opening them; a database under another name cannot be
+	// recognized without opening it, so such a directory is scanned from a
+	// subprocess.
 	Dirs []string
 }
 
@@ -124,7 +135,7 @@ func filesContaining(dirs []string, secret string) []string {
 				// to find; the watch looks again.
 				return nil //nolint:nilerr // a file gone mid-walk is not a finding
 			}
-			if !entry.Type().IsRegular() {
+			if !entry.Type().IsRegular() || isDatabaseFile(entry.Name()) {
 				return nil
 			}
 			data, readErr := root.ReadFile(path)
@@ -136,4 +147,16 @@ func filesContaining(dirs []string, secret string) []string {
 		_ = root.Close()
 	}
 	return found
+}
+
+// isDatabaseFile reports a SQLite database or journal by its name. It is told
+// by name, never by reading its header: opening and closing a descriptor to a
+// database another handle in this process holds drops that handle's locks.
+func isDatabaseFile(name string) bool {
+	for _, suffix := range []string{".db", ".db-wal", ".db-shm", ".db-journal", ".sqlite", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal", ".sqlite3", ".sqlite3-wal", ".sqlite3-shm", ".sqlite3-journal"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
 }
