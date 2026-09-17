@@ -103,7 +103,7 @@ type Status struct {
 }
 
 // ConnectionStatus is the run command's own record of its last run: running
-// once every part started, stopped when it exited. It is not the feed
+// as its parts start, stopped when it exited. It is not the feed
 // socket's state, which intake does not report.
 type ConnectionStatus struct {
 	State     string    `json:"state"`
@@ -400,8 +400,9 @@ func statusQueues(ctx context.Context, tx *sql.Tx, s *Status) error {
 	}
 	return tx.QueryRowContext(ctx, `
 SELECT
-  (SELECT COUNT(*) FROM events WHERE review = 1 AND authorized_at IS NULL AND state IN ('seen', 'blocked', 'dispatched')),
-  (SELECT COUNT(*) FROM events WHERE state = 'blocked' AND authorized_at IS NOT NULL),
+  (SELECT COUNT(*) FROM events WHERE review = 1 AND state IN ('seen', 'blocked', 'dispatched')
+     AND NOT (authorized_at IS NOT NULL AND (state <> 'blocked' OR authorized_at >= blocked_at))),
+  (SELECT COUNT(*) FROM events WHERE state = 'blocked' AND authorized_at >= blocked_at),
   (SELECT COUNT(*) FROM events WHERE redispatch_decision IS NOT NULL)`).Scan(&s.Review, &s.AuthorizedBlocked, &s.RedispatchPending)
 }
 

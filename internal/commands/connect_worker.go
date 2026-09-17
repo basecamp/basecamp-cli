@@ -26,7 +26,8 @@ const (
 
 // workerOps are the driver's one-owner functions stopReplacedWorker uses. A
 // test seam, so the branches that must not signal can be exercised without a
-// real process group whose id nothing reserves.
+// real process group whose id nothing reserves. Production only reads it; a
+// test that replaces it must not run in parallel.
 var workerOps = struct {
 	owns      func(driver.Process) (bool, error)
 	terminate func(driver.Process, time.Duration) (bool, error)

@@ -841,3 +841,47 @@ func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 	require.True(t, ok)
 	assert.NotContains(t, claimed.Body, "redispatch 1")
 }
+
+// An authorization answers for the outcome it was made on. When the attempt it
+// led to ends unknown again, or cannot start, the notice asks again.
+func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
+	for name, second := range map[string]func(t *testing.T, l *Ledger){
+		"unknown again": func(t *testing.T, l *Ledger) {
+			launch := launchOf(t, l, 1)
+			_, err := l.EndAttempt(context.Background(), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+			require.NoError(t, err)
+		},
+		"blocked on its start": func(t *testing.T, l *Ledger) {
+			for range 2 {
+				launch := launchOf(t, l, 1)
+				_, err := l.EndAttempt(context.Background(), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true})
+				require.NoError(t, err)
+			}
+			ids, err := l.AuthorizedBlocked(context.Background(), 10)
+			require.NoError(t, err)
+			assert.Empty(t, ids, "the old authorization does not stand for the new block")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := newTestLedger(t)
+			l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+			ctx := context.Background()
+			first := unknownOutcome(t, l, 1)
+			_, err := l.Redispatch(ctx, 1, opBy)
+			require.NoError(t, err)
+			second(t, l)
+
+			notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
+			require.NoError(t, err)
+			var latest Intent
+			for _, n := range notices {
+				if n.AttemptID != first.AttemptID {
+					latest = n
+					break
+				}
+			}
+			require.NotZero(t, latest.ID)
+			assert.Contains(t, latest.Body, "redispatch 1", "a person is asked again")
+		})
+	}
+}

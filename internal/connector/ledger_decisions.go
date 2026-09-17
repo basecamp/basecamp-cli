@@ -406,12 +406,14 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 	return out, nil
 }
 
-// AuthorizedBlocked lists blocked records a person authorized, oldest first.
+// AuthorizedBlocked lists blocked records a person authorized, oldest first:
+// authorized since the record entered its current run of blocked states, so
+// an authorization that answered an earlier outcome does not count.
 // The redispatch command runs the prerequisite itself; this is for the
 // blocked-record recovery schedule to run it again when that did not settle
 // it (the schedule is plan step 22's, and nothing calls this yet).
 func (l *Ledger) AuthorizedBlocked(ctx context.Context, limit int) ([]int64, error) {
-	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events WHERE state = 'blocked' AND authorized_at IS NOT NULL ORDER BY id LIMIT ?`, limit)
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events WHERE state = 'blocked' AND authorized_at >= blocked_at ORDER BY id LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("connector: authorized blocked records: %w", err)
 	}
