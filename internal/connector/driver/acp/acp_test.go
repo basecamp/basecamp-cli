@@ -2238,3 +2238,26 @@ func TestARefusalReadInNoTurnIsOnNoTurnsResult(t *testing.T) {
 	assert.Equal(t, []driver.Refusal{{ToolCallID: "outside-1", Tool: "Bash"}}, recorder.Recorded(),
 		"and it is still the driver's own record")
 }
+
+// A refusal with no tool call id is counted every time it happens: only an id
+// can say that two refusals are one call.
+func TestRefusalsWithNoToolCallIDAreCountedEveryTime(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	// Three requests naming no call at all, identical in every field.
+	nameless := map[string]any{"kind": "execute"}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, nameless, standardOptions()...)},
+		{Permission: permission(t, nameless, standardOptions()...)},
+		{Permission: permission(t, nameless, standardOptions()...)},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	assert.Len(t, res.Refusals, 3, "three nameless denials are three refusals")
+	assert.Len(t, recorder.Recorded(), 3, "and three records")
+}
