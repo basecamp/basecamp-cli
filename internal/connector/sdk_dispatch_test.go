@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -47,4 +48,23 @@ func TestATruncatedReplyListingIsRefused(t *testing.T) {
 	found, err := replies.AgentReplies(context.Background(), adapterBucketID, string(admission.ReplyComment), 10304028989, time.Time{})
 	require.NoError(t, err)
 	assert.Len(t, found, 3)
+}
+
+// Copilot r4: an agent may add its own environment to the one the connector
+// declared, so the server drops what was not declared before it does anything.
+func TestAWorkerServerKeepsOnlyTheEnvironmentTheConnectorDeclared(t *testing.T) {
+	t.Setenv("HOME", "/home/agent")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+	t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", "test-token-not-real")
+
+	removed := SanitizeWorkerServerEnv()
+	assert.Contains(t, removed, "ANTHROPIC_API_KEY")
+	assert.Contains(t, removed, "CLAUDE_CODE_MESSAGING_TOKEN")
+	_, ok := os.LookupEnv("ANTHROPIC_API_KEY")
+	assert.False(t, ok, "the agent's own credential does not outlive the handshake")
+	_, ok = os.LookupEnv("CLAUDE_CODE_MESSAGING_TOKEN")
+	assert.False(t, ok)
+	assert.Equal(t, "/home/agent", os.Getenv("HOME"), "what the connector declared is kept")
+	assert.Equal(t, "1", os.Getenv("BASECAMP_NO_KEYRING"))
 }

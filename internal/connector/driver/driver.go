@@ -62,13 +62,18 @@ type Driver interface {
 	Name() string
 	// Capabilities says what the driver supports beyond NewSession and Prompt.
 	Capabilities() Capabilities
-	// NewSession starts a worker and opens a session in cfg.Cwd. An error
-	// wrapping ErrNotStarted means no worker process ever existed; any other
-	// error means one may have.
+	// NewSession starts a worker and opens a session in cfg.Cwd.
+	//
+	// An error that wraps ErrNotStarted means no process ever existed, and
+	// the connector may retry the start once. Any other error from a start
+	// that launched a process wraps a *StartError carrying that process, whose
+	// group the driver has already asked to end: the connector confirms it
+	// gone (ConfirmGroupGone) before it settles anything, however long the
+	// driver's own handshake took to fail.
 	NewSession(ctx context.Context, cfg SessionConfig) (Session, error)
 	// LoadSession reopens a session by the id an earlier Session reported,
 	// where Capabilities().LoadSession is true. Its errors read as
-	// NewSession's.
+	// NewSession's, and leave no process behind either.
 	LoadSession(ctx context.Context, cfg SessionConfig, sessionID string) (Session, error)
 }
 
@@ -428,6 +433,28 @@ func (DirectLauncher) Launch(_ context.Context, req LaunchRequest) (Launched, er
 
 // Receipts implements Launcher.
 func (DirectLauncher) Receipts(context.Context, string) ([]Receipt, error) { return nil, nil }
+
+// StartError is a start that failed after it launched a process. The
+// driver has asked the process's group to end; the connector owns confirming
+// it gone before it settles the attempt or releases its directory.
+type StartError struct {
+	Process Process
+	Err     error
+}
+
+func (e *StartError) Error() string {
+	return "driver: the worker started and then failed: " + e.Err.Error()
+}
+func (e *StartError) Unwrap() error { return e.Err }
+
+// StartedProcess is the process a failed start launched, if it launched one.
+func StartedProcess(err error) Process {
+	var started *StartError
+	if errors.As(err, &started) {
+		return started.Process
+	}
+	return Process{}
+}
 
 // DefaultGrace is how long a worker's process group has between SIGTERM and
 // SIGKILL.

@@ -97,6 +97,25 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 	return ensurePrivateChain(stateHome, "basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID))
 }
 
+// connectSessionsDir is where a session's short-lived files go — the MCP
+// configuration that carries a task token until the worker's servers start.
+// Never under the state directory or a working directory, which outlive the
+// session and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
+// memory-backed directory made for exactly this, or the system temporary
+// directory where there is none. Owner-only, and swept when the connector
+// starts.
+func connectSessionsDir(file setup.File) (string, error) {
+	base := os.Getenv("XDG_RUNTIME_DIR")
+	if info, err := os.Stat(base); base == "" || !filepath.IsAbs(base) || err != nil || !info.IsDir() {
+		base = os.TempDir()
+	}
+	dir := filepath.Join(base, "basecamp-connect-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	if err := setup.EnsurePrivateDir(dir); err != nil {
+		return "", fmt.Errorf("the connector's session directory cannot be used: %w", err)
+	}
+	return dir, nil
+}
+
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
 		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
@@ -239,7 +258,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return fmt.Errorf("locate this binary for the worker's MCP server: %w", err)
 		}
-		sessions, err := ensurePrivateChain(stateDir, "sessions")
+		sessions, err := connectSessionsDir(file)
 		if err != nil {
 			return err
 		}
@@ -273,10 +292,18 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			mu.Lock()
 			received = sig
 			mu.Unlock()
-			logger.Info("connector: shutting down", "signal", sig.String())
+			logger.Info("connector: shutting down; workers are being canceled and settled", "signal", sig.String())
 			cancel()
 		case <-runCtx.Done():
+			return
 		}
+		// A second signal is a person who has waited long enough: the
+		// settlement each live attempt is in the middle of may be waiting on
+		// Basecamp, and this leaves it for the next start to recover rather
+		// than making them wait.
+		sig := <-signals
+		logger.Error("connector: stopping now; live attempts are left for the next start to settle", "signal", sig.String())
+		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
@@ -290,8 +317,16 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	runPart := func(part string, fn func(context.Context) error) {
 		wg.Go(func() {
 			err := fn(runCtx)
-			if err != nil && runCtx.Err() == nil {
-				errOnce.Do(func() { firstErr = fmt.Errorf("%s: %w", part, err) })
+			if runCtx.Err() == nil {
+				// Whether it failed or simply returned, this part has stopped
+				// while the rest were still running: the connector is not
+				// doing its job, and must not exit as though it were.
+				errOnce.Do(func() {
+					if err == nil {
+						err = errors.New("stopped on its own")
+					}
+					firstErr = fmt.Errorf("%s: %w", part, err)
+				})
 			}
 			// One part ending ends the connector: intake without admission,
 			// or dispatch without intake, is a connector silently doing half

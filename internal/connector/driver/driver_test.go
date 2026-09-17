@@ -204,3 +204,41 @@ func TestOwnsWorkerAnswersWhetherThisIsStillTheWorker(t *testing.T) {
 	assert.False(t, owns)
 	assert.NoError(t, err, "a session with no process here is nothing to own")
 }
+
+// Copilot r4: only "no such process group" proves a group is gone; a probe
+// that was refused is not absence.
+func TestOnlyNoSuchProcessGroupProvesAbsence(t *testing.T) {
+	assert.NoError(t, groupProbe(4242, syscall.ESRCH), "no such group: gone")
+	assert.ErrorIs(t, groupProbe(4242, nil), ErrGroupOutlivedLeader, "answered: members remain")
+	assert.ErrorIs(t, groupProbe(4242, syscall.EPERM), ErrGroupOutlivedLeader, "refused: not proven gone")
+	assert.ErrorIs(t, groupProbe(4242, syscall.EINVAL), ErrGroupOutlivedLeader, "any other answer: not proven gone")
+}
+
+// openDescriptors counts this process's open file descriptors.
+func openDescriptors(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Skip("no /proc/self/fd here")
+	}
+	return len(entries)
+}
+
+// Copilot via card 22: descriptors have an owner too. A failed start closes
+// what it opened, and a terminated worker's output is released.
+func TestWorkersDoNotLeakDescriptors(t *testing.T) {
+	before := openDescriptors(t)
+	for range 50 {
+		_, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/nonexistent/claude-not-here"})
+		require.ErrorIs(t, err, ErrNotStarted)
+	}
+	assert.Equal(t, before, openDescriptors(t), "fifty failed starts leave no descriptor open")
+
+	for range 5 {
+		w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/bin/true", Env: []string{}})
+		require.NoError(t, err)
+		w.Terminate(time.Second)
+	}
+	assert.Eventually(t, func() bool { return openDescriptors(t) <= before }, 2*pipeWaitDelay+2*time.Second, 50*time.Millisecond,
+		"a terminated worker's pipes are released without anyone else closing them")
+}

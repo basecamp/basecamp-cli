@@ -55,6 +55,124 @@ const pipeWaitDelay = 2 * time.Second
 // Cards that start workers, remove worktrees or settle records use the
 // functions here rather than writing their own.
 //
+// # What a driver promises, and where each promise can still be broken
+//
+// The rule above is about the release point. These are the promises the rest
+// of the boundary makes, each with the paths that can still break it named,
+// so a reader does not have to take "held everywhere" on trust.
+//
+// ## A worker's lifetime
+//
+//   - After a start returns a Session, a process group exists whose leader is
+//     the worker, and the connector owns it: Process() names it, and nobody
+//     else may signal it.
+//   - After a start returns an ERROR, no process of that session exists.
+//     Either none was started, or the driver ended the one it started, whole
+//     group, before returning (Driver.NewSession). ErrNotStarted says more:
+//     none ever existed, so the connector may retry the start once.
+//   - Cancel ends the turn, not the worker, and never blocks on a worker that
+//     has stopped reading its input: it gives up instead, and says so.
+//   - Close ends the session and its group — signal, bounded wait, kill — and
+//     is idempotent. It never waits on the worker's cooperation.
+//   - A worker that goes with a turn in flight is classified by how it went:
+//     one that exited on its own with a non-zero status FAILED, and one that
+//     vanished — signaled by someone else, or gone with no status the
+//     connector observed — is LOST.
+//   - Descriptors have an owner too. A start that fails closes every
+//     descriptor it opened; a terminated worker's output pipe is closed by
+//     the Worker once its reader has had the same bound to drain it that Wait
+//     gives a stray descendant, whether or not the reader closed it.
+//   - After a crash of the connector, the group survives. A later process
+//     identifies it by OwnsWorker (pid AND recorded start time), ends it with
+//     TerminateRecorded, and confirms with ConfirmGroupGone before anything
+//     is settled or released.
+//
+// Where this can still be broken: a descendant that calls setsid leaves the
+// group and no signal reaches it (there is no portable way to see it, and
+// containment is the sandbox launcher's); a driver that returns an error
+// after leaving a process behind breaks the start promise, which is why it is
+// written on the method rather than left to each driver; and on a platform
+// where process start times cannot be read, OwnsWorker refuses to answer and
+// nothing may be settled — the run command refuses to start there at all.
+//
+// ## Credentials
+//
+// Two secrets exist around a worker, and each has one carriage.
+//
+//   - The agent's Basecamp credential stays in the CLI's credential store. It
+//     is never in any environment, argv, file or log the connector writes;
+//     the worker's MCP server, running as the agent's profile, reads it from
+//     that store itself.
+//   - A task token lives from LaunchTask to the end of its task. The ledger
+//     keeps only its hash. It crosses to exactly one process, the worker's
+//     MCP server, and never to the agent process where that can be avoided:
+//     not in the agent's environment, never in argv, never in a log or a
+//     dispatch line, and never in a file under a working directory or the
+//     connector's state directory. The one file that carries it today is the
+//     MCP configuration the agent reads at start, written owner-only under
+//     the per-user runtime directory (never the state or working directory),
+//     removed as soon as the agent reports its servers started and again on
+//     Close, and swept when the connector starts. When `basecamp mcp` takes
+//     the token over an inherited descriptor (#736), that file stops carrying
+//     it at all.
+//   - The agent's own credential (ANTHROPIC_API_KEY, where one is used) is in
+//     the agent's environment because the agent needs it, and nowhere else
+//     the connector writes.
+//
+// drivertest.RequireNoSecret and RequireNoSecretFilesDuring are the checks:
+// the environment, argv, written text, and — watched continuously, so a file
+// that lives milliseconds is still caught — every file under the working and
+// session directories after the agent's servers start.
+//
+// Where this can still be broken: until #736's descriptor carriage lands, the
+// token is in a file for the moments between the MCP configuration being
+// written and the agent's init message; and an agent may copy what it was
+// handed anywhere its tools can write.
+//
+// ## The environment a worker and its MCP servers get
+//
+//   - The connector owns both. SessionConfig.Env is the worker's whole
+//     environment and MCPServer.Env is each server's, and each is an
+//     allowlist the dispatcher built by name (BuildEnv over BaseEnv, plus the
+//     variables a driver names for its own agent).
+//   - No credential of the connector's is in either: the agent's Basecamp
+//     token stays in the connector, and the only secret that crosses is the
+//     task token, in the MCP server's declared environment.
+//   - No secret is ever in argv, which every process on the machine can read.
+//
+// Where this can still be broken: an agent may ADD to the environment it
+// hands its MCP servers — Claude Code passes its own whole environment down,
+// which carries the agent's own credentials — so the declared environment is
+// a floor, not a ceiling. connector.SanitizeWorkerServerEnv is how the
+// connector's own server drops everything it did not declare on arrival,
+// before it authenticates or starts a helper; `basecamp mcp` (#736, which owns
+// that command and is changing how it takes the task token) is where it is
+// called. Until it is, the agent's own credentials reach the connector's MCP
+// server by that inheritance. A third-party MCP server the operator adds to a
+// worker would inherit them regardless; the connector ships none.
+//
+// ## When an attempt may be adopted, settled or released
+//
+//   - Adoption links a reply to an event; it is never evidence that work
+//     finished, and never makes an outcome succeeded. It needs exactly one
+//     reply by the agent at that destination after the event's own
+//     acknowledgement and before any later instruction's, it is never the
+//     worker's own acknowledgement, and a listing the scan limit cut short
+//     adopts nothing.
+//   - An attempt is settled, its directory released and its record made
+//     terminal at one point (Dispatcher.release), and only after the group is
+//     confirmed gone and the ledger has taken the settlement.
+//   - An attempt that cannot be confirmed or cannot be settled stays live and
+//     holds its conversation, its directory and one of the connector's worker
+//     slots, until a person settles it.
+//
+// Where this can still be broken: adoption trusts Basecamp's ordering of
+// replies against this machine's clock for "after the acknowledgement", so a
+// clock far behind the server's could see a reply as later than it was — the
+// exactly-one rule and the acknowledgement exclusion are what keep that from
+// mattering; and a person who writes to the ledger by hand can of course
+// strand anything.
+//
 // Worker is a process a spawn driver started: the leader of its own process
 // group, with its stdin and stdout piped and its stderr kept, redacted, for
 // diagnosis. Every spawn driver starts its agent through StartWorker, so the
@@ -66,9 +184,10 @@ type Worker struct {
 	stdout  *os.File
 	stderr  *tailBuffer
 
-	done     chan struct{}
-	exit     Exit
-	killOnce sync.Once
+	done        chan struct{}
+	exit        Exit
+	killOnce    sync.Once
+	releaseOnce sync.Once
 }
 
 // StartWorker launches cmd through launcher, in scope, as a new process group.
@@ -114,6 +233,9 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	// This one closes only when the reader has everything, or CloseStdout.
 	readEnd, writeEnd, err := os.Pipe()
 	if err != nil {
+		// Descriptors are owned too: a start that fails closes every one it
+		// opened.
+		_ = w.stdin.Close()
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	ec.Stdout = writeEnd
@@ -121,6 +243,7 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	if err := ec.Start(); err != nil {
 		// exec.Cmd.Start returns an error only when no process was created:
 		// a missing binary, a bad directory, a failed fork.
+		_ = w.stdin.Close()
 		_ = readEnd.Close()
 		_ = writeEnd.Close()
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
@@ -202,6 +325,13 @@ func (w *Worker) Terminate(grace time.Duration) {
 		_ = w.cmd.Process.Kill()
 	})
 	<-w.done
+	// The output pipe is the Worker's to release as well. Its reader gets the
+	// same bound Wait gives a stray descendant to finish draining what the
+	// worker wrote before it went, and then the descriptor is closed whether
+	// or not the reader closed it.
+	w.releaseOnce.Do(func() {
+		time.AfterFunc(pipeWaitDelay, w.CloseStdout)
+	})
 }
 
 // ErrGroupOutlivedLeader is a recorded process group whose leader is gone —
@@ -275,18 +405,34 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 // GroupMembersRemain reports whether the process group still has members. It
 // signals nothing: it is the observation the one-owner rule's step 3 and 4
 // rest on, and what a caller asks when it must not disturb the group.
+//
+// A probe that cannot answer — the group exists but is not ours to signal —
+// counts as members remaining, because the rule releases nothing it cannot
+// prove gone.
 func GroupMembersRemain(p Process) bool {
-	return p.PGID > 1 && signalGroup(p.PGID, 0) == nil
+	return p.PGID > 1 && groupGone(p.PGID) != nil
 }
 
-// groupGone reports nil when the recorded group has no members left, and
-// ErrGroupOutlivedLeader when it still has some: a leader that exited does
-// not take its group with it.
+// groupGone reports nil only when the kernel says there is no such process
+// group. Anything else — members left, or a probe that was refused — is not
+// absence, and the rule holds rather than releases.
 func groupGone(pgid int) error {
-	if err := signalGroup(pgid, 0); err == nil {
+	return groupProbe(pgid, signalGroup(pgid, 0))
+}
+
+// groupProbe reads what a zero-signal to a process group said. Only ESRCH —
+// "no such process group" — is proof of absence; a refusal (EPERM, from a
+// group this process may not signal) is a group that is probably there and
+// certainly not proven gone.
+func groupProbe(pgid int, err error) error {
+	switch {
+	case err == nil:
 		return fmt.Errorf("%w: %d", ErrGroupOutlivedLeader, pgid)
+	case errors.Is(err, syscall.ESRCH):
+		return nil
+	default:
+		return fmt.Errorf("%w: %d: %w", ErrGroupOutlivedLeader, pgid, err)
 	}
-	return nil
 }
 
 // ConfirmGroupGone is step 3 of the one-owner rule: it answers whether a
