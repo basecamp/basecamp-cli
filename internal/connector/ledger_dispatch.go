@@ -77,8 +77,13 @@ import (
 //	exposed  → completed  dispatcher settlement (worker gone before ack)
 //	delivered → completed worker (complete_dispatch), dispatcher settlement
 //	exposed  → withdrawn  dispatcher (withdrawExposure): the spawn failed
-//	                      before any worker process existed; the task is
-//	                      superseded first; once, and the row moves no more
+//	                      before any worker process existed. The database
+//	                      holds what it can see: an exposure written at
+//	                      launch that no worker ever pulled (pulled_at, set by
+//	                      a worker's first get_dispatch), on a superseded task,
+//	                      with no live task carrying the event; once, and the
+//	                      row moves no more. That no process existed at all is
+//	                      the driver's report, which the dispatcher acts on.
 //
 // Forward only, and never skipping exposure: nothing a worker was never
 // handed is acknowledged or completed. A row is retired (retired_at)
@@ -373,8 +378,10 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 // originating event exposed at launch. It runs in the caller's transaction,
 // after supersedeTask on the same task. The record goes to admitted, to be
 // retried once, or — after a second failure — to blocked with reason. The
-// database refuses the marker for anything but an exposure on a superseded
-// task, and refuses it twice.
+// database refuses the marker for anything but a launch exposure no worker
+// pulled, on a superseded task, while no live task carries the event, and
+// refuses it twice. So the order is supersede, withdraw, then create the
+// retry task.
 func (l *Ledger) withdrawExposure(ctx context.Context, tx *sql.Tx, taskID, eventID int64, to RecordState, reason string) error {
 	if to != StateAdmitted && to != StateBlocked {
 		return fmt.Errorf("connector: withdraw event %d: a withdrawn event is retried (admitted) or blocked, not %s", eventID, to)
@@ -531,6 +538,7 @@ func (d *TaskDispatch) Get(ctx context.Context, eventID int64) (Instruction, boo
 }
 
 type taskEvent struct {
+	pulled   bool
 	delivery Delivery
 	guard    string
 	ackID    sql.NullInt64
@@ -584,6 +592,16 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		// handed an instruction may act on it whether or not it reports.
 		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = ? WHERE task_id = ? AND event_id = ? AND delivery = 'admitted'`, now, taskID, eventID); err != nil {
 			return Instruction{}, false, fmt.Errorf("connector: expose event %d: %w", eventID, err)
+		}
+		wrote = true
+	}
+	if !te.pulled {
+		// The first pull by a worker is recorded even when the dispatcher
+		// already exposed the event at launch: from here on a worker has the
+		// instruction, and the exposure can no longer be withdrawn as a
+		// spawn that failed before any worker existed.
+		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET pulled_at = ? WHERE task_id = ? AND event_id = ? AND pulled_at IS NULL`, now, taskID, eventID); err != nil {
+			return Instruction{}, false, fmt.Errorf("connector: record the pull of %d: %w", eventID, err)
 		}
 		wrote = true
 	}
@@ -804,8 +822,8 @@ func loadTaskEvent(ctx context.Context, tx *sql.Tx, taskID, eventID int64) (task
 		delivery string
 	)
 	err := tx.QueryRowContext(ctx, `
-SELECT delivery, guard, ack_id, outcome, links, reply_id
-FROM task_events WHERE task_id = ? AND event_id = ?`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID)
+SELECT delivery, guard, ack_id, outcome, links, reply_id, pulled_at IS NOT NULL
+FROM task_events WHERE task_id = ? AND event_id = ?`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID, &te.pulled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return te, fmt.Errorf("connector: event %d: %w", eventID, ErrNotOnTask)
 	}

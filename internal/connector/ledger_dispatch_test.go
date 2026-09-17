@@ -957,12 +957,11 @@ func TestASpawnThatFailedIsRetriedOnceThenBlocked(t *testing.T) {
 	retry, err := f.ledger.createTask(ctx, tx, []int64{1, 2})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
-	d, err := f.ledger.Dispatch(ctx, retry.Token, adapterAgentID)
-	require.NoError(t, err)
-	got, ok, err := d.Get(ctx, 0)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.Equal(t, int64(1), got.EventID, "the retry hands out the originating event again")
+	var onRetry int
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE task_id = ? AND event_id = 1 AND retired_at IS NULL`, retry.ID).Scan(&onRetry))
+	assert.Equal(t, 1, onRetry, "the retry carries the originating event again")
+	assert.Equal(t, StateDispatched, getRecord(t, f.ledger, 1).State)
+	exposeAtLaunch(retry.ID)
 
 	// Second failure: supersede, withdraw, block.
 	tx, err = f.ledger.db.BeginTx(ctx, nil)
@@ -973,4 +972,55 @@ func TestASpawnThatFailedIsRetriedOnceThenBlocked(t *testing.T) {
 	record := getRecord(t, f.ledger, 1)
 	assert.Equal(t, StateBlocked, record.State)
 	assert.Equal(t, "spawn_failed", record.Reason)
+}
+
+// What the database can see of "no worker existed", it holds: a withdrawal is
+// refused once a worker pulled the instruction, and refused while a live task
+// carries the event — so the only order is supersede, withdraw, create.
+func TestAWithdrawalIsRefusedWhenAWorkerCouldHaveTheInstruction(t *testing.T) {
+	t.Run("a worker pulled it", func(t *testing.T) {
+		f := newDispatchFixture(t)
+		ctx := context.Background()
+		_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+		require.NoError(t, err)
+		_, _, err = f.d.Get(ctx, 1)
+		require.NoError(t, err, "the worker pulls an event exposed at launch")
+
+		tx, err := f.ledger.db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+		require.Error(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""))
+	})
+
+	t.Run("a live task already carries it", func(t *testing.T) {
+		f := newDispatchFixture(t)
+		ctx := context.Background()
+		_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
+		require.NoError(t, err)
+
+		tx, err := f.ledger.db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback() }()
+		require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+		_, err = f.ledger.createTask(ctx, tx, []int64{1, 2})
+		require.NoError(t, err)
+		require.Error(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""), "create before withdraw is the wrong order")
+	})
+
+	t.Run("a pull is recorded once, and a repeat writes nothing", func(t *testing.T) {
+		f := newDispatchFixture(t)
+		ctx := context.Background()
+		_, _, err := f.d.Get(ctx, 1)
+		require.NoError(t, err)
+		var first string
+		require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT pulled_at FROM task_events WHERE event_id = 1`).Scan(&first))
+		_, _, err = f.d.Get(ctx, 1)
+		require.NoError(t, err)
+		var again string
+		require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT pulled_at FROM task_events WHERE event_id = 1`).Scan(&again))
+		assert.Equal(t, first, again)
+		_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'later' WHERE event_id = 1`)
+		require.Error(t, err)
+	})
 }

@@ -425,6 +425,7 @@ CREATE TABLE task_events (
   links        TEXT    NOT NULL DEFAULT '[]',
   reply_id     INTEGER,
   retired_at   TEXT,
+  pulled_at    TEXT,
   withdrawn_at TEXT,
   PRIMARY KEY (task_id, event_id)
 );
@@ -437,9 +438,18 @@ BEFORE UPDATE OF withdrawn_at ON task_events
 WHEN NEW.withdrawn_at IS NOT OLD.withdrawn_at AND (
   OLD.withdrawn_at IS NOT NULL
   OR OLD.delivery <> 'exposed'
-  OR NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = OLD.task_id AND tasks.superseded_at IS NOT NULL))
+  OR OLD.pulled_at IS NOT NULL
+  OR NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = OLD.task_id AND tasks.superseded_at IS NOT NULL)
+  OR EXISTS (SELECT 1 FROM task_events live WHERE live.event_id = OLD.event_id AND live.retired_at IS NULL))
 BEGIN
-  SELECT RAISE(ABORT, 'only an exposure on a superseded task is withdrawn, and only once');
+  SELECT RAISE(ABORT, 'only a launch exposure no worker pulled, on a superseded task and no live one, is withdrawn, and only once');
+END;
+
+CREATE TRIGGER task_events_pull_is_recorded_once
+BEFORE UPDATE OF pulled_at ON task_events
+WHEN OLD.pulled_at IS NOT NULL AND NEW.pulled_at IS NOT OLD.pulled_at
+BEGIN
+  SELECT RAISE(ABORT, 'a pull is recorded once');
 END;
 
 CREATE TRIGGER task_events_withdrawn_is_final

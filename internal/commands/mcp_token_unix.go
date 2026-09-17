@@ -28,7 +28,8 @@ import (
 // uses.
 //
 // The read ends at the first newline or at end of file, and is bounded in
-// size and in time, so a write end left open somewhere cannot hang startup.
+// size and in time, so a write end left open somewhere cannot hang startup. A
+// sender writes "token\n", or closes its end after the token.
 func readTaskToken(fd int) (string, error) {
 	switch {
 	case fd < 0:
@@ -44,7 +45,9 @@ func readTaskToken(fd int) (string, error) {
 		return "", output.ErrUsage(fmt.Sprintf("descriptor %d is not a pipe or a socket; the task token is handed over on one, never from a file", fd))
 	}
 	// Non-blocking before it is wrapped, so the runtime polls it and a read
-	// deadline applies.
+	// deadline applies. The flag is on the open file description, so anything
+	// else sharing it would see it too; the connector's bridge execs this
+	// server, so nothing does.
 	if err := unix.SetNonblock(fd, true); err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))
 	}
