@@ -240,6 +240,7 @@ jobs:
           filters: |
             skill:
               - 'skills/basecamp/SKILL.md'
+              - 'skills/basecamp-connect/SKILL.md'
               - 'skill-evals/**'
 
       - name: Set up Ruby

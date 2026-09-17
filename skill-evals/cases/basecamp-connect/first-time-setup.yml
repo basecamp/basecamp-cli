@@ -1,0 +1,38 @@
+task: >-
+  Connect my new agent to this computer and set it up so it works on our
+  Redesign project. When it's set up I'd like it running.
+context: >-
+  Everything you need is here, so don't stop to ask: the agent's profile should
+  be called helper. My own profile is jorge. Only I should be able to drive the
+  agent. Redesign's work lives in /home/me/Work/redesign, which exists and is a
+  git repository. When a connection link and code are printed I open the link
+  and approve the connection.
+tags: [connect]
+mocks:
+  - match: 'auth status'
+    output: '{"ok":false,"code":"api_error","error":"unknown profile \"helper\" (available: jorge)"}'
+  - match: 'profile list'
+    output: '{"ok":true,"data":[{"name":"jorge","account_id":"999","authenticated":true,"base_url":"https://3.basecampapi.com","default":true}],"summary":"1 profile"}'
+  - match: 'auth agent connect'
+    output: '{"ok":true,"data":{"profile":"helper","account_id":"999","agent":"Helper"},"summary":"Connected profile \"helper\" to agent Helper in account 999"}'
+  - match: 'projects list'
+    output: '{"ok":true,"data":[{"id":111,"name":"Marketing"},{"id":222,"name":"Redesign"},{"id":333,"name":"Redesign Archive"}],"summary":"3 projects"}'
+  - match: 'connect setup'
+    output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","profile":"helper","account_id":"999","agent_person_id":4001,"agent_kind":"agent","operator_id":1001,"trust_mode":"operator","routes":1,"written":true,"ready":true,"checks":[{"name":"Token","status":"pass","message":"The profile''s credential yields a token"},{"name":"Identity","status":"pass","message":"Agent person 4001"},{"name":"Scope","status":"pass","message":"Full access: the agent can reply and acknowledge"},{"name":"Operator","status":"pass","message":"Person 1001, Jorge, the identity of profile \"jorge\""},{"name":"Stream ticket","status":"pass","message":"The agent can mint a ticket for the account event feed"},{"name":"Project 222","status":"pass","message":"Readable by the agent, routed to /home/me/Work/redesign"}]},"summary":"connect.json written; 6 passed"}'
+expect_sequence:
+  - match: 'auth agent connect .*(-P|--profile)[ =]helper|auth agent connect (-P|--profile)[ =]helper'
+  - match: 'connect setup'
+accept:
+  - 'connect setup .*(-P|--profile)[ =]helper'
+  - 'connect setup .*--operator-profile[ =]jorge'
+  - 'connect setup .*--route[ =]222=/home/me/Work/redesign'
+reject:
+  - '--with-token'
+  - '--with-client-credentials'
+  - 'connect setup .*--operator[ =]'
+  - 'connect setup .*--route[ =]333='
+  - 'connect setup .*--(trust[ =](allowlist|project)|allow[ =])'
+  - '--expect-identity'
+  - 'connect (run|start|service)'
+accept_response:
+  - '(?i)(not|n.t)\b[^.]{0,60}\b(yet|available|part of|built)'

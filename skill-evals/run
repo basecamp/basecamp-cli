@@ -116,10 +116,12 @@ def run_case(c, model, skill_text, api_key, verbose: false)
   context = c["context"] ? "\n\nContext: #{c["context"]}" : ""
   messages = [{ "role" => "user", "content" => "#{c["task"]}#{context}" }]
   trace = []
+  response = ""
 
   exhausted = false
   MAX_TURNS.times do |turn|
     resp = api_call(model, system, messages, api_key)
+    response = resp["content"].select { |b| b["type"] == "text" }.map { |b| b["text"] }.join("\n")
     tool_uses = resp["content"].select { |b| b["type"] == "tool_use" }
     break if tool_uses.empty?
 
@@ -134,10 +136,10 @@ def run_case(c, model, skill_text, api_key, verbose: false)
     exhausted = true if turn == MAX_TURNS - 1
   end
 
-  [trace, exhausted]
+  [trace, response, exhausted]
 end
 
-def grade(c, trace)
+def grade(c, trace, response = "")
   failures = []
 
   (c["accept"] || []).each do |pat|
@@ -162,6 +164,16 @@ def grade(c, trace)
         failures << "expect_sequence: /#{pat}/ not found after index #{idx}"
       end
     end
+  end
+
+  # The final reply, for cases where what the agent tells the person is the
+  # behavior under test (explaining a failure, say), not only the commands.
+  (c["accept_response"] || []).each do |pat|
+    failures << "accept_response: /#{pat}/ not matched in the final reply" unless Regexp.new(pat).match?(response)
+  end
+
+  (c["reject_response"] || []).each do |pat|
+    failures << "reject_response: /#{pat}/ matched in the final reply" if Regexp.new(pat).match?(response)
   end
 
   if c["max_commands"] && trace.length > c["max_commands"]
@@ -191,10 +203,10 @@ cases.each do |c|
 
   sample_results = opts[:samples].times.map do |i|
     warn "  [#{name}] sample #{i + 1}/#{opts[:samples]}..." if opts[:verbose] && opts[:samples] > 1
-    trace, exhausted = run_case(c, opts[:model], skill_text, api_key, verbose: opts[:verbose])
-    failures = grade(c, trace)
+    trace, response, exhausted = run_case(c, opts[:model], skill_text, api_key, verbose: opts[:verbose])
+    failures = grade(c, trace, response)
     failures << "max_turns: exhausted #{MAX_TURNS} tool rounds without completing" if exhausted
-    { trace: trace, failures: failures, pass: failures.empty? }
+    { trace: trace, response: response, failures: failures, pass: failures.empty? }
   end
 
   passes = sample_results.count { |r| r[:pass] }

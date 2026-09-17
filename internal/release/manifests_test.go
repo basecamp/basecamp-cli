@@ -100,6 +100,7 @@ func TestCodexManifestReferencesExistingPaths(t *testing.T) {
 	for _, skill := range []string{
 		filepath.Join("skills", "basecamp", "SKILL.md"),
 		filepath.Join("skills", "basecamp-doctor", "SKILL.md"),
+		filepath.Join("skills", "basecamp-connect", "SKILL.md"),
 	} {
 		_, err := os.Stat(filepath.Join(root, skill))
 		assert.NoError(t, err, skill)

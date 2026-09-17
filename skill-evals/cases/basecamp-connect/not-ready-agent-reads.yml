@@ -1,0 +1,28 @@
+task: >-
+  Add our Redesign project to my agent's connector. Its work lives in
+  /home/me/Work/redesign. Tell me whether it's ready.
+context: >-
+  The agent's profile is helper, already connected and set up before with me as
+  the operator; my own profile is jorge. The directory exists.
+tags: [connect]
+mocks:
+  - match: 'auth status'
+    output: '{"ok":true,"data":{"profile":"helper","authenticated":true,"oauth_type":"agent","account_id":"999","storage":"keyring"}}'
+  - match: 'profile list'
+    output: '{"ok":true,"data":[{"name":"helper","account_id":"999","authenticated":true},{"name":"jorge","account_id":"999","authenticated":true,"default":true}],"summary":"2 profiles"}'
+  - match: 'projects list'
+    output: '{"ok":true,"data":[{"id":111,"name":"Marketing"},{"id":222,"name":"Redesign"}],"summary":"2 projects"}'
+  - match: 'connect setup'
+    output: '{"ok":false,"code":"not_ready","error":"The connector is not ready, so /home/me/.config/basecamp/connect/helper/connect.json was not written. Project 222: Reading the project was refused (HTTP 403). Basecamp refuses this read to an Agent identity today, and admission makes it for every event: the connector would see mentions and block each one on a read it cannot make","hint":"If the agent is not on this project, add it there. Otherwise: Until Basecamp allows Agent identities these reads, run the connector as a bot user: basecamp connect setup -P <bot-profile> --expect-identity <identity-id>"}'
+accept:
+  - 'connect setup .*--route[ =]222=/home/me/Work/redesign'
+reject:
+  - 'auth agent connect'
+  - 'auth logout'
+  - 'auth login'
+  - '--remove-route'
+  - '--with-token'
+accept_response:
+  - '(?i)bot[- ]user'
+  - '(?i)(member|add(ed)? (the agent )?to|on the project|in the project)'
+  - '(?i)(not|n.t)\W+(been\W+)?(written|changed|saved|added|routed)|nothing\W+(was\W+)?(written|changed)|unchanged'
