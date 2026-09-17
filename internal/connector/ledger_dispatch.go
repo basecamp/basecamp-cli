@@ -47,7 +47,9 @@ import (
 //	admitted    dispatched  dispatcher (CreateTask)                  joins a task
 //	queued      dispatched  dispatcher (CreateTask)                  joins a task
 //	dispatched  dispatched  dispatcher (CreateTask)                  redispatch onto a new task
-//	dispatched  admitted    dispatcher (SupersedeTask, withdrawal)   never handed to a worker
+//	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker
+//	dispatched  admitted    dispatcher (withdrawExposure)            exposed at launch, spawn proven failed: retry
+//	dispatched  blocked     dispatcher (withdrawExposure)            exposed at launch, spawn failed again
 //	dispatched  blocked     dispatcher                               never handed to a worker
 //	dispatched  completed   worker (complete_dispatch), dispatcher   the outcome, reported or settled
 //	admitted    queued      lifecycle bookkeeping                    —
@@ -72,7 +74,11 @@ import (
 //	admitted → exposed    worker (get_dispatch), dispatcher at launch
 //	exposed  → delivered  worker (ack_dispatch)
 //	exposed  → completed  worker (complete_dispatch)
+//	exposed  → completed  dispatcher settlement (worker gone before ack)
 //	delivered → completed worker (complete_dispatch), dispatcher settlement
+//	exposed  → withdrawn  dispatcher (withdrawExposure): the spawn failed
+//	                      before any worker process existed; the task is
+//	                      superseded first; once, and the row moves no more
 //
 // Forward only, and never skipping exposure: nothing a worker was never
 // handed is acknowledged or completed. A row is retired (retired_at)
@@ -93,8 +99,13 @@ import (
 //  3. The token is valid only while its task is live, checked inside every
 //     worker call's own transaction.
 //  4. Nothing leaves dispatched while a worker may still act: a record with a
-//     delivery exposed or delivered, on any task, leaves dispatched only to
-//     completed (move, and the events_handed_work_settles_first trigger).
+//     delivery exposed or delivered, on any task and not withdrawn, leaves
+//     dispatched only to completed (move, and the
+//     events_handed_work_settles_first trigger). The one release is the
+//     spec's automatic retry: an exposure written at launch whose spawn
+//     failed before any worker process existed is withdrawn, and the record
+//     returns to admitted for its one retry, or goes to blocked after a
+//     second failure (withdrawExposure).
 //  5. A worker acts only on its own task's rows, reports only what it was
 //     handed, and a reported outcome stands.
 //  6. A task is made only of instructions a worker can pull, and finished
@@ -353,6 +364,34 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 		if _, err := l.move(ctx, tx, transition{id: id, state: StateAdmitted, from: []RecordState{StateDispatched}}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// withdrawExposure releases an event whose worker never existed: the driver
+// proved the spawn itself failed, after the dispatcher had written the
+// originating event exposed at launch. It runs in the caller's transaction,
+// after supersedeTask on the same task. The record goes to admitted, to be
+// retried once, or — after a second failure — to blocked with reason. The
+// database refuses the marker for anything but an exposure on a superseded
+// task, and refuses it twice.
+func (l *Ledger) withdrawExposure(ctx context.Context, tx *sql.Tx, taskID, eventID int64, to RecordState, reason string) error {
+	if to != StateAdmitted && to != StateBlocked {
+		return fmt.Errorf("connector: withdraw event %d: a withdrawn event is retried (admitted) or blocked, not %s", eventID, to)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = ? WHERE task_id = ? AND event_id = ?`, l.timestamp(), taskID, eventID)
+	if err != nil {
+		return fmt.Errorf("connector: withdraw event %d: %w", eventID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return fmt.Errorf("connector: withdraw event %d: %w", eventID, ErrNotOnTask)
+	}
+	moved, err := l.move(ctx, tx, transition{id: eventID, state: to, reason: reason, from: []RecordState{StateDispatched}})
+	if err != nil {
+		return err
+	}
+	if !moved {
+		return fmt.Errorf("connector: withdraw event %d: another worker still holds it: %w", eventID, ErrHeldByWorker)
 	}
 	return nil
 }

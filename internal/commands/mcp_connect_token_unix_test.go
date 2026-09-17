@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,19 +116,32 @@ func TestMCPCommandLeavesADescriptorThatIsNotAPipeAlone(t *testing.T) {
 	assert.True(t, fdOpen(int(file.Fd())), "a descriptor that is not the token's is not closed")
 }
 
+// Not only in connect mode: any server started with a token in the
+// environment takes it out and refuses to start.
+func TestMCPCommandRefusesATokenInTheEnvironmentWithoutConnectState(t *testing.T) {
+	app, _, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
+	t.Setenv("BASECAMP_CONNECT_TASK_TOKEN", grant.Token)
+
+	err := executeMCPCommand(t, app)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "BASECAMP_CONNECT_TASK_TOKEN")
+	assert.Empty(t, os.Getenv("BASECAMP_CONNECT_TASK_TOKEN"))
+}
+
 func TestMCPCommandRefusesABadTokenDescriptor(t *testing.T) {
 	app, dir, _, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
 	for name, tc := range map[string]struct {
 		args []string
 		want string
 	}{
-		"no descriptor":         {[]string{"--connect-state", dir}, "--connect-token-fd"},
-		"stdin is the MCP wire": {[]string{"--connect-state", dir, "--connect-token-fd", "0"}, "3 or above"},
-		"stdout":                {[]string{"--connect-state", dir, "--connect-token-fd", "1"}, "3 or above"},
-		"not open":              {[]string{"--connect-state", dir, "--connect-token-fd", "987"}, "it is not open"},
-		"descriptor alone":      {[]string{"--connect-token-fd", "5"}, "--connect-state"},
-		"empty":                 {[]string{"--connect-state", dir, "--connect-token-fd", strconv.Itoa(tokenPipe(t, "  \n"))}, "empty"},
-		"too long":              {[]string{"--connect-state", dir, "--connect-token-fd", strconv.Itoa(tokenPipe(t, strings.Repeat("x", maxTaskTokenBytes+1)))}, "not a task token"},
+		"no descriptor":               {[]string{"--connect-state", dir}, "--connect-token-fd"},
+		"stdin is the MCP wire":       {[]string{"--connect-state", dir, "--connect-token-fd", "0"}, "3 or above"},
+		"stdout":                      {[]string{"--connect-state", dir, "--connect-token-fd", "1"}, "3 or above"},
+		"not open":                    {[]string{"--connect-state", dir, "--connect-token-fd", "987"}, "it is not open"},
+		"descriptor alone":            {[]string{"--connect-token-fd", "5"}, "--connect-state"},
+		"a negative descriptor alone": {[]string{"--connect-token-fd", "-1"}, "--connect-state"},
+		"empty":                       {[]string{"--connect-state", dir, "--connect-token-fd", strconv.Itoa(tokenPipe(t, "  \n"))}, "empty"},
+		"too long":                    {[]string{"--connect-state", dir, "--connect-token-fd", strconv.Itoa(tokenPipe(t, strings.Repeat("x", maxTaskTokenBytes+1)))}, "not a task token"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := executeMCPCommand(t, app, tc.args...)
@@ -135,4 +149,37 @@ func TestMCPCommandRefusesABadTokenDescriptor(t *testing.T) {
 			assert.True(t, strings.Contains(err.Error(), tc.want), "%q does not say %q", err.Error(), tc.want)
 		})
 	}
+}
+
+// heldPipe is a token pipe whose write end the test keeps open, as a write
+// end leaked into some other process would be.
+func heldPipe(t *testing.T, written string) int {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+	_, err = w.WriteString(written)
+	require.NoError(t, err)
+	fd, err := syscall.Dup(int(r.Fd()))
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	return fd
+}
+
+// A write end left open somewhere does not hang startup: the token ends at its
+// newline, and a token that never arrives is a refusal within the timeout.
+func TestMCPCommandDoesNotWaitOnAWriteEndLeftOpen(t *testing.T) {
+	app, dir, grant, _ := connectMCPApp(t, "999", unusedUpstream(t).URL)
+
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir, "--connect-token-fd", strconv.Itoa(heldPipe(t, grant.Token+"\n")))
+	assert.Contains(t, toolNames(t, session), "basecamp_connect", "the newline ends the token")
+
+	previous := taskTokenReadTimeout
+	taskTokenReadTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { taskTokenReadTimeout = previous })
+	started := time.Now()
+	err := executeMCPCommand(t, app, "--connect-state", dir, "--connect-token-fd", strconv.Itoa(heldPipe(t, grant.Token)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no task token arrived")
+	assert.Less(t, time.Since(started), 5*time.Second)
 }

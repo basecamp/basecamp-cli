@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -34,6 +33,10 @@ const connectTaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
 // 43 characters; anything near this is not one.
 const maxTaskTokenBytes = 4096
 
+// taskTokenReadTimeout bounds the wait for the token. A write end left open
+// somewhere — leaked into another process — must not hang startup silently.
+var taskTokenReadTimeout = 5 * time.Second
+
 // NewMCPCmd creates the mcp command serving Basecamp over MCP on stdio.
 func NewMCPCmd() *cobra.Command {
 	var readOnly bool
@@ -48,10 +51,17 @@ func NewMCPCmd() *cobra.Command {
 			"projects, todos, cards, messages, and more as tools backed by your signed-in\n" +
 			"account.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
-			"  claude mcp add basecamp -- basecamp mcp",
+			"  claude mcp add basecamp -- basecamp mcp\n\n" +
+			"A worker started by the agent connector also gets the basecamp_connect domain,\n" +
+			"for its one task: --connect-state names the connector's state directory, and\n" +
+			"the task token arrives on an inherited pipe or socket named by\n" +
+			"--connect-token-fd, which is read and closed at startup. That descriptor is the\n" +
+			"only way in: the token is never taken from a flag value, a file or the\n" +
+			"environment, and a token found in $BASECAMP_CONNECT_TASK_TOKEN is refused.",
 		Example: `  basecamp mcp
   basecamp mcp --read-only
-  basecamp mcp --domains projects,todos,cards`,
+  basecamp mcp --domains projects,todos,cards
+  basecamp mcp --connect-state ~/.local/state/basecamp/connect/<account>-<agent> --connect-token-fd 3`,
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
 			"agent_notes": "Long-running server; stdout speaks the MCP wire protocol. Not for interactive use.",
@@ -67,19 +77,21 @@ func NewMCPCmd() *cobra.Command {
 			// anything else runs: authentication can start helper processes,
 			// and a child started then would inherit an open descriptor.
 			var taskToken string
+			// A token in the environment is taken out and refused whatever
+			// the flags: it is not a way in for any server.
+			if _, set := os.LookupEnv(connectTaskTokenEnv); set {
+				_ = os.Unsetenv(connectTaskTokenEnv)
+				return output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
+					"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
+			}
 			switch {
-			case connectState == "" && connectTokenFD >= 0:
+			case connectState == "" && cmd.Flags().Changed("connect-token-fd"):
 				return output.ErrUsage("--connect-token-fd is only for a server started with --connect-state")
 			case connectState != "":
 				if readOnly {
 					// Every connect action records something; refused before
 					// the token or the ledger is touched.
 					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
-				}
-				if _, set := os.LookupEnv(connectTaskTokenEnv); set {
-					_ = os.Unsetenv(connectTaskTokenEnv)
-					return output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
-						"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
 				}
 				token, err := readTaskToken(connectTokenFD)
 				if err != nil {
@@ -154,55 +166,8 @@ func stateDirHint(refusal *connector.StateDirError) string {
 	}
 }
 
-// readTaskToken reads the task token from an inherited descriptor and closes
-// it. The connector hands the token over as the read end of a pipe, so it never
-// exists at a path, in argv or in the environment; once read, the descriptor
-// is gone too, and nothing this process starts can inherit it.
-//
-// Descriptors 0 to 2 are refused: stdin and stdout are the MCP wire and stderr
-// is the log.
-func readTaskToken(fd int) (string, error) {
-	switch {
-	case fd < 0:
-		return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
-	case fd < 3:
-		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be 3 or above", fd))
-	}
-	file := os.NewFile(uintptr(fd), "connect-token")
-	if file == nil {
-		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is not a descriptor", fd))
-	}
-	// Only a pipe or a socket is taken, and anything else is left exactly as
-	// it was — not read, not closed. A regular file would be the token at a
-	// path, and a wrong number could name a descriptor this process already
-	// uses for something else.
-	info, err := file.Stat()
-	if err != nil {
-		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: it is not open", fd))
-	}
-	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
-		return "", output.ErrUsage(fmt.Sprintf("descriptor %d is not a pipe or a socket; the task token is handed over on one, never from a file", fd))
-	}
-	data, readErr := io.ReadAll(io.LimitReader(file, maxTaskTokenBytes+1))
-	closeErr := file.Close()
-	if readErr != nil {
-		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, readErr))
-	}
-	if closeErr != nil {
-		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, closeErr))
-	}
-	if len(data) > maxTaskTokenBytes {
-		return "", output.ErrUsage(fmt.Sprintf("descriptor %d carries more than %d bytes; that is not a task token", fd, maxTaskTokenBytes))
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" {
-		return "", output.ErrUsage(fmt.Sprintf("descriptor %d carried an empty task token", fd))
-	}
-	return token, nil
-}
-
 // openConnectDispatch opens the connector's ledger in stateDir and binds it to
-// the task token in the environment.
+// the task token read from the inherited descriptor (readTaskToken).
 //
 // The directory is the connector's own, named "<account>-<agent person id>",
 // and it must belong to the account this server serves: that is where the

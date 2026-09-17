@@ -24,6 +24,53 @@ func TestDispatchLifecycleTable(t *testing.T) {
 	t.Run("guard", testGuardTransitions)
 	t.Run("worker actions", testWorkerActions)
 	t.Run("task", testTaskTransitions)
+	t.Run("withdrawal", testWithdrawal)
+}
+
+// testWithdrawal: an exposure is withdrawn only on a superseded task, only
+// while exposed, and only once — and then the record is work again.
+func testWithdrawal(t *testing.T) {
+	for _, superseded := range []bool{false, true} {
+		for _, delivery := range deliveries {
+			want := superseded && delivery == DeliveryExposed
+			t.Run(fmt.Sprintf("at %s, superseded %v", delivery, superseded), func(t *testing.T) {
+				f := newDispatchFixture(t)
+				ctx := context.Background()
+				// Staged along the allowed steps, so the triggers are left in
+				// place.
+				for _, step := range deliveries[1 : slices.Index(deliveries, delivery)+1] {
+					_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = ? WHERE event_id = 1`, string(step))
+					require.NoError(t, err)
+				}
+				tx, err := f.ledger.db.BeginTx(ctx, nil)
+				require.NoError(t, err)
+				defer func() { _ = tx.Rollback() }()
+				if superseded {
+					require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+				}
+
+				err = f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, "")
+
+				if !want {
+					require.Error(t, err)
+					return
+				}
+				require.NoError(t, err)
+				require.NoError(t, tx.Commit())
+				assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 1).State, "withdrawn, it is work again")
+
+				tx2, err := f.ledger.db.BeginTx(ctx, nil)
+				require.NoError(t, err)
+				defer func() { _ = tx2.Rollback() }()
+				require.Error(t, f.ledger.withdrawExposure(ctx, tx2, f.grant.ID, 1, StateAdmitted, ""), "once")
+				require.Error(t, f.ledger.withdrawExposure(ctx, tx2, f.grant.ID, 2, StateAdmitted, ""), "a sibling never exposed has nothing to withdraw")
+				_, err = tx2.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'again' WHERE event_id = 1`)
+				require.Error(t, err, "once, whoever writes")
+				_, err = tx2.ExecContext(ctx, `UPDATE task_events SET delivery = 'delivered' WHERE event_id = 1`)
+				require.Error(t, err, "a withdrawn exposure moves no more")
+			})
+		}
+	}
 }
 
 var allRecordStates = []RecordState{StateSeen, StateAdmitted, StateQueued, StateBlocked, StateDispatched, StateCompleted, StateDiscarded}

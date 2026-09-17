@@ -425,15 +425,34 @@ CREATE TABLE task_events (
   links        TEXT    NOT NULL DEFAULT '[]',
   reply_id     INTEGER,
   retired_at   TEXT,
+  withdrawn_at TEXT,
   PRIMARY KEY (task_id, event_id)
 );
 
 CREATE UNIQUE INDEX task_events_one_live_task ON task_events (event_id) WHERE retired_at IS NULL;
+CREATE INDEX task_events_event ON task_events (event_id, delivery);
+
+CREATE TRIGGER task_events_withdrawal_is_for_a_failed_spawn
+BEFORE UPDATE OF withdrawn_at ON task_events
+WHEN NEW.withdrawn_at IS NOT OLD.withdrawn_at AND (
+  OLD.withdrawn_at IS NOT NULL
+  OR OLD.delivery <> 'exposed'
+  OR NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = OLD.task_id AND tasks.superseded_at IS NOT NULL))
+BEGIN
+  SELECT RAISE(ABORT, 'only an exposure on a superseded task is withdrawn, and only once');
+END;
+
+CREATE TRIGGER task_events_withdrawn_is_final
+BEFORE UPDATE OF delivery ON task_events
+WHEN OLD.withdrawn_at IS NOT NULL AND NEW.delivery <> OLD.delivery
+BEGIN
+  SELECT RAISE(ABORT, 'a withdrawn exposure does not move');
+END;
 
 CREATE TRIGGER events_handed_work_settles_first
 BEFORE UPDATE OF state ON events
 WHEN OLD.state = 'dispatched' AND NEW.state NOT IN ('dispatched', 'completed')
-  AND EXISTS (SELECT 1 FROM task_events WHERE event_id = OLD.id AND delivery IN ('exposed', 'delivered'))
+  AND EXISTS (SELECT 1 FROM task_events WHERE event_id = OLD.id AND delivery IN ('exposed', 'delivered') AND withdrawn_at IS NULL)
 BEGIN
   SELECT RAISE(ABORT, 'a worker was handed this event; it leaves dispatched only when completed');
 END;

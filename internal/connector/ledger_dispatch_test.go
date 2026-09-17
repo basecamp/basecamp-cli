@@ -932,3 +932,45 @@ func TestReportsDoNotHoldTheLedgerWhileTheyBuildTheirReceipt(t *testing.T) {
 	}
 	assert.Equal(t, 4, writes)
 }
+
+// The spec's automatic retry, as a transition table of its own: the
+// dispatcher writes the originating event exposed at launch; the spawn is
+// proven to have failed before any worker process existed; the exposure is
+// withdrawn and the event launched again, once — and after a second failure it
+// is blocked. Without the withdrawal marker, an exposure holds the record in
+// dispatched and neither the retry nor the block is possible.
+func TestASpawnThatFailedIsRetriedOnceThenBlocked(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	exposeAtLaunch := func(taskID int64) {
+		t.Helper()
+		_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE task_id = ? AND event_id = 1`, taskID)
+		require.NoError(t, err)
+	}
+	exposeAtLaunch(f.grant.ID)
+
+	// First failure: supersede, withdraw, launch again — one transaction.
+	tx, err := f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+	require.NoError(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""))
+	retry, err := f.ledger.createTask(ctx, tx, []int64{1, 2})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	d, err := f.ledger.Dispatch(ctx, retry.Token, adapterAgentID)
+	require.NoError(t, err)
+	got, ok, err := d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(1), got.EventID, "the retry hands out the originating event again")
+
+	// Second failure: supersede, withdraw, block.
+	tx, err = f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.supersedeTask(ctx, tx, retry.ID))
+	require.NoError(t, f.ledger.withdrawExposure(ctx, tx, retry.ID, 1, StateBlocked, "spawn_failed"))
+	require.NoError(t, tx.Commit())
+	record := getRecord(t, f.ledger, 1)
+	assert.Equal(t, StateBlocked, record.State)
+	assert.Equal(t, "spawn_failed", record.Reason)
+}

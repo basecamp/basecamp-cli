@@ -217,8 +217,10 @@ var lifecycle = map[RecordState][]RecordState{
 	StateAdmitted: {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
 	StateQueued:   {StateDispatched, StateBlocked, StateDiscarded},
 	StateBlocked:  {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
-	// A dispatched record whose worker never started has its exposure
-	// withdrawn and returns to admitted. It is never discarded: a dispatched
+	// A dispatched record whose spawn failed before any worker process
+	// existed has its exposure withdrawn (task_events.withdrawn_at) and
+	// returns to admitted; one a worker was handed otherwise leaves only to
+	// completed (the dispatch lifecycle, ledger_dispatch.go). It is never discarded: a dispatched
 	// event ends completed, with an outcome, even when the outcome is
 	// unknown.
 	StateDispatched: {StateCompleted, StateBlocked, StateAdmitted},
@@ -391,9 +393,11 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 }
 
 // heldByWorker is true of a dispatched events row a worker was handed and
-// has not reported on: a delivery exposed or delivered, on any task.
+// has not reported on: a delivery exposed or delivered, on any task, and not
+// withdrawn because the spawn failed before any worker existed.
 const heldByWorker = `state = 'dispatched' AND EXISTS (
-  SELECT 1 FROM task_events WHERE task_events.event_id = events.id AND delivery IN ('exposed', 'delivered'))`
+  SELECT 1 FROM task_events WHERE task_events.event_id = events.id
+    AND delivery IN ('exposed', 'delivered') AND withdrawn_at IS NULL)`
 
 // ErrHeldByWorker is a move out of dispatched for an event a worker was
 // handed and has not reported on. Only its outcome moves it.
