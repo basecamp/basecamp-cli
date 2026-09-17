@@ -374,9 +374,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
-	if err := ledger.NoteConnection(ctx, connector.ConnectionStarting, ""); err != nil {
-		return err
-	}
 	defer func() {
 		// Whatever ended the run, status says it is not running any more.
 		_ = ledger.NoteConnection(context.WithoutCancel(ctx), connector.ConnectionStopped, "")
@@ -422,6 +419,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil && runCtx.Err() == nil {
 			return err
 		}
+	}
+	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
+		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {

@@ -98,23 +98,17 @@ func TestRedispatchDoesNotCallAnUnrecordedWorkerGone(t *testing.T) {
 }
 
 // A worker whose recorded group holds nothing is not called stopped while it
-// still runs.
+// still runs. Faked: a real member-less group id is not one a test can hold
+// reserved, and signaling a freed id could reach someone else's group.
 func TestRedispatchDoesNotCallAWorkerOutsideItsGroupStopped(t *testing.T) {
-	worker, _ := runningTree(t)
-	p := worker.Process()
-	// A group with no members: one this test started and has already reaped,
-	// never an arbitrary number that could name someone else's group.
-	gone, err := driver.StartWorker(context.Background(), nil, driver.Scope{WorkDir: t.TempDir()},
-		driver.Command{Path: "/bin/sh", Args: []string{"-c", "exit 0"}, Env: []string{"PATH=/bin:/usr/bin"}})
-	if err != nil {
-		t.Fatalf("start a short worker: %v", err)
-	}
-	<-gone.Done()
-	if driver.GroupMembersRemain(gone.Process()) {
-		t.Skip("the short worker's group is still in use")
-	}
-	p.PGID = gone.Process().PGID
-	got := stopReplacedWorker(p, 200*time.Millisecond)
-	assert.NotEqual(t, workerStopped, got.state, got.note)
-	assert.True(t, drivertest.Alive(p.PID))
+	orig := workerOps
+	t.Cleanup(func() { workerOps = orig })
+	var signaled bool
+	workerOps.owns = func(driver.Process) (bool, error) { return true, nil } // the leader runs on
+	workerOps.terminate = func(driver.Process, time.Duration) (bool, error) { signaled = true; return false, nil }
+	workerOps.confirm = func(driver.Process, time.Duration) error { return nil } // its group is empty
+
+	got := stopReplacedWorker(driver.Process{PID: 4242, PGID: 4243, StartedAt: time.Now()}, time.Second)
+	assert.True(t, signaled)
+	assert.Equal(t, workerUnverified, got.state, got.note)
 }

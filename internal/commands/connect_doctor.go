@@ -30,7 +30,9 @@ func newConnectDoctorCmd() *cobra.Command {
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
 identity, the stream ticket mint, the account feed, the ledger (its gaps, open
 losses, hold and messages waiting for a person), the worker binary the driver
-runs, and a handshake with the agent's MCP server as a worker would start it.
+runs, and a handshake with the agent's Basecamp MCP server, started with a
+worker's environment (without the basecamp_connect domain, which only a
+dispatched task's token opens).
 
 Nothing is written and nothing is posted.`,
 		Example: `  basecamp connect doctor -P agent`,

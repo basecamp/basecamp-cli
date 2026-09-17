@@ -264,7 +264,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		fmt.Fprintf(w, "  Running        no\n")
 	}
 	if s.Connection != nil {
-		fmt.Fprintf(w, "  Connection     %s at %s", clean(s.Connection.State), stamp(s.Connection.ChangedAt))
+		fmt.Fprintf(w, "  Last run       %s at %s", clean(s.Connection.State), stamp(s.Connection.ChangedAt))
 		if s.Connection.Detail != "" {
 			fmt.Fprintf(w, " (%s)", clean(s.Connection.Detail))
 		}
@@ -390,7 +390,8 @@ type connectRedispatchReport struct {
 	// signaled.
 	WorkerStopped bool `json:"worker_stopped,omitempty"`
 	// WorkerState is what became of it: stopped, gone, held (its group still
-	// runs and was not proven this task's to signal) or unverified.
+	// runs and was not proven this task's to signal), unverified, or
+	// not_recorded (the attempt had no worker process recorded yet).
 	WorkerState string `json:"worker_state,omitempty"`
 	WorkerNote  string `json:"worker_note,omitempty"`
 	// Verdict is what running the prerequisite again decided.

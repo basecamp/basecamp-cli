@@ -909,7 +909,7 @@ SELECT EXISTS (
   SELECT 1 FROM task_events te JOIN events e ON e.id = te.event_id
   WHERE te.task_id = (SELECT task_id FROM attempts WHERE id = ?1)
     AND (te.delivery = 'completed' OR (te.withdrawn_at IS NOT NULL AND te.exposed_attempt_id = ?1))
-    AND (e.state NOT IN ('completed', 'blocked') OR e.redispatch_decision IS NOT NULL))`, attemptID).Scan(&decided); err != nil {
+    AND (e.state NOT IN ('completed', 'blocked') OR e.redispatch_decision IS NOT NULL OR e.authorized_at IS NOT NULL))`, attemptID).Scan(&decided); err != nil {
 		return false, fmt.Errorf("connector: outbox claim completion for %s: %w", attemptID, err)
 	}
 	return decided, nil

@@ -448,11 +448,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 // Connection states the run command reports for status.
 const (
-	ConnectionStarting  = "starting"
-	ConnectionConnected = "connected"
-	ConnectionReconnect = "reconnecting"
-	ConnectionPaused    = "paused"
-	ConnectionStopped   = "stopped"
+	// ConnectionRunning is a connector whose parts — intake, admission,
+	// dispatch, outbox — have all started. It says nothing finer about the
+	// feed's socket, which intake does not report.
+	ConnectionRunning = "running"
+	// ConnectionStopped is a connector that has exited, however it ended.
+	ConnectionStopped = "stopped"
 )
 
 // NoteConnection records the running connector's connection state, for

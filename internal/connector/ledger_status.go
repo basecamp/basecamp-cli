@@ -74,7 +74,7 @@ const StatusLimit = 20
 // (invariant 8).
 type Status struct {
 	SchemaVersion int `json:"schema_version"`
-	// Connection is the running connector's last report, if it made one.
+	// Connection is the last run's own record, if one ran on this build.
 	Connection *ConnectionStatus `json:"connection,omitempty"`
 	// Hold is the standing hold marker.
 	Hold       *HoldStatus `json:"hold,omitempty"`
@@ -102,7 +102,9 @@ type Status struct {
 	Dispatches     []DispatchStatus `json:"dispatches"`
 }
 
-// ConnectionStatus is the connector's own report of its feed connection.
+// ConnectionStatus is the run command's own record of its last run: running
+// once every part started, stopped when it exited. It is not the feed
+// socket's state, which intake does not report.
 type ConnectionStatus struct {
 	State     string    `json:"state"`
 	PID       int       `json:"pid"`

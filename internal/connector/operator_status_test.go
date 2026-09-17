@@ -25,7 +25,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	const position = "signed-position-not-real-7f3a"
 	require.NoError(t, l.Save(ctx, testKey(), position))
 	require.NoError(t, l.NotePollServed(ctx, testKey(), 41))
-	require.NoError(t, l.NoteConnection(ctx, ConnectionConnected, "streaming"))
+	require.NoError(t, l.NoteConnection(ctx, ConnectionRunning, ""))
 
 	unknownOutcome(t, l, 2)
 	opAdmit(t, l, 1, "recording:1")
@@ -60,7 +60,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	require.NotNil(t, s.Hold)
 	assert.Equal(t, "hold", s.Hold.Cause)
 	require.NotNil(t, s.Connection)
-	assert.Equal(t, ConnectionConnected, s.Connection.State)
+	assert.Equal(t, ConnectionRunning, s.Connection.State)
 	require.Len(t, s.Positions, 1)
 	assert.True(t, s.Positions[0].HasPosition)
 	assert.Equal(t, int64(41), s.Positions[0].LastPollServedID)

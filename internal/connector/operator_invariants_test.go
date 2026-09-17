@@ -814,3 +814,30 @@ func TestInvariant2ATaskTakesNoFollowUpUnderTheHold(t *testing.T) {
 	assert.Empty(t, joined)
 	assert.Equal(t, StateQueued, stateOf(t, l, 2))
 }
+
+// A record a person authorized is decided too, though it stays blocked until
+// its prerequisite runs: the notice claimed meanwhile asks nothing more.
+func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	for range 2 {
+		launch := launchOf(t, l, 1)
+		_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true})
+		require.NoError(t, err)
+	}
+	require.Equal(t, StateBlocked, stateOf(t, l, 1))
+	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
+	require.NoError(t, err)
+	require.Len(t, notices, 1)
+	require.Contains(t, notices[0].Body, "redispatch 1")
+
+	got, err := l.Redispatch(ctx, 1, opBy)
+	require.NoError(t, err)
+	require.True(t, got.Rerun)
+	claimed, ok, err := l.claimIntent(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.NotContains(t, claimed.Body, "redispatch 1")
+}
