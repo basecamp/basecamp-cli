@@ -1377,3 +1377,31 @@ func TestOutboxAWorkersMessageIsMatchedByKindToo(t *testing.T) {
 	require.Equal(t, IntentSent, got.State, "a comment id is not a boost id")
 	assert.Equal(t, boost, *got.ReceiptID)
 }
+
+// A still-running notice says the worker is still working. If its attempt has
+// ended before the notice goes out, it is not sent: the connector's last word
+// on finished work is never "still working on this".
+func TestOutboxAStillRunningNoticeIsNotPostedAfterTheAttemptEnded(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	_, err := ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+
+	// The worker finishes and reports before the notice is sent, so the
+	// settlement calls for no completion notice either.
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: id64(4242)})
+	require.NoError(t, err)
+	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopFinished})
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Zero(t, basecamp.postCount(), "nothing says the worker is still working")
+	got := obIntent(t, ledger, stillRunningKey(l.AttemptID, 1))
+	assert.Equal(t, IntentCanceled, got.State)
+	assert.Equal(t, "the attempt ended before the notice went out", got.Note)
+}

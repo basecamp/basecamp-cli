@@ -391,6 +391,22 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 				next, note = IntentCanceled, "no longer called for"
 			}
 		}
+		if in.Kind == IntentStillRunning {
+			// The notice says the worker is still working. If its attempt has
+			// ended in the meantime — a slow send, a listing in front of it, a
+			// restart — that is no longer true, and the completion notice, if
+			// the settlement called for one, is the connector's last word.
+			var live bool
+			switch err := tx.QueryRowContext(ctx, `SELECT state <> 'ended' FROM attempts WHERE id = ?`, in.AttemptID).Scan(&live); {
+			case errors.Is(err, sql.ErrNoRows):
+				live = false
+			case err != nil:
+				return fmt.Errorf("connector: outbox claim still-running %d: %w", in.ID, err)
+			}
+			if !live {
+				next, note = IntentCanceled, "the attempt ended before the notice went out"
+			}
+		}
 		if in.Kind == IntentGuardAck {
 			var stillCalledFor bool
 			switch err := tx.QueryRowContext(ctx, `
