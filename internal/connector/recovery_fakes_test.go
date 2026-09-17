@@ -52,6 +52,13 @@ func todoEvent(id, recording int64) eventfeed.Event {
 	}
 }
 
+// otherTodoEvent is todoEvent in the second routed project.
+func otherTodoEvent(id, recording int64) eventfeed.Event {
+	e := todoEvent(id, recording)
+	e.BucketID = harnessOtherBucket
+	return e
+}
+
 // publish adds events to the fake account's feed.
 func (h *harness) publish(entries ...feedEntry) {
 	h.t.Helper()

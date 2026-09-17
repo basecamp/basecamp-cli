@@ -113,6 +113,13 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 		return errors.New("the MCP server has no --connect-state")
 	}
 	stateDir := server.Args[i+1]
+	// The server resolves the directory against its own state home, which
+	// is the environment the driver declared for it, not this agent's.
+	if home, ok := server.Env["XDG_STATE_HOME"]; ok {
+		if err := os.Setenv("XDG_STATE_HOME", home); err != nil {
+			return err
+		}
+	}
 	agentID, err := ResolveStateDir(stateDir, harnessAccount)
 	if err != nil {
 		return err
@@ -286,9 +293,15 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 // parent, and an orphan's parent is the subreaper, which may be pid 1. A pid
 // this harness did not record is never signaled.
 func (w *fakeWorker) killConnector(ctx context.Context) error {
-	pid, err := harnessConnectorPID(w.dir)
+	running, err := harnessConnector(w.dir)
 	if err != nil {
 		return err
+	}
+	pid := running.PID
+	// Only while it is still the process that wrote the file: a pid is not an
+	// identity.
+	if owns, err := driver.OwnsWorker(running); err != nil || !owns {
+		return fmt.Errorf("the connector's pid %d is no longer the connector (%v)", pid, err)
 	}
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		return fmt.Errorf("kill the connector (pid %d): %w", pid, err)
@@ -296,22 +309,25 @@ func (w *fakeWorker) killConnector(ctx context.Context) error {
 	return waitFor(ctx, func() (bool, error) { return processGone(pid), nil })
 }
 
-// harnessConnectorPID reads the pid the connector wrote when it started.
-func harnessConnectorPID(dir string) (int, error) {
+// harnessConnector reads the identity the connector wrote when it started.
+func harnessConnector(dir string) (driver.Process, error) {
 	data, err := os.ReadFile(filepath.Join(dir, connectorFile))
 	if err != nil {
-		return 0, err
+		return driver.Process{}, err
 	}
 	var running struct {
-		PID int `json:"pid"`
+		PID       int       `json:"pid"`
+		StartedAt time.Time `json:"started_at"`
 	}
 	if err := json.Unmarshal(data, &running); err != nil {
-		return 0, err
+		return driver.Process{}, err
 	}
-	if running.PID <= 1 {
-		return 0, fmt.Errorf("the connector recorded pid %d, which is nothing this harness may signal", running.PID)
+	if running.PID <= 1 || running.StartedAt.IsZero() {
+		return driver.Process{}, fmt.Errorf("the connector recorded pid %d, which is nothing this harness may signal", running.PID)
 	}
-	return running.PID, nil
+	// The group is only asked about when the process is gone; the kill is of
+	// the pid alone.
+	return driver.Process{PID: running.PID, PGID: running.PID, StartedAt: running.StartedAt}, nil
 }
 
 func waitFor(ctx context.Context, cond func() (bool, error)) error {

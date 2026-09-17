@@ -147,6 +147,9 @@ type crashRow struct {
 	indeterminate int
 	// race marks the rows that also run under the race detector.
 	race bool
+	// noDispatch kills a connector running without its dispatcher, so the
+	// record is left admitted rather than racing a launch.
+	noDispatch bool
 }
 
 var crashRows = []crashRow{
@@ -154,15 +157,15 @@ var crashRows = []crashRow{
 		handed: 1, outcome: OutcomeSucceeded, stop: StopFinished},
 	{name: "seen, the verdict not committed", kill: "tx:verdict", plan: completedWork,
 		handed: 1, outcome: OutcomeSucceeded, stop: StopFinished},
-	{name: "admitted", kill: "line:event:admitted", plan: completedWork,
+	{name: "admitted", kill: "line:event:admitted", plan: completedWork, noDispatch: true,
 		handed: 1, outcome: OutcomeSucceeded, stop: StopFinished},
 	{name: "dispatched, attempt running before the prompt", kill: "line:dispatch:running", plan: completedWork,
 		handed: 0, outcome: OutcomeUnknown, stop: StopLost, notices: 1},
-	{name: "exposed by get_dispatch", plan: []string{"get", "kill", "linger"},
+	{name: "exposed by get_dispatch", plan: []string{"get", "grandchild", "kill", "linger"},
 		handed: 1, outcome: OutcomeUnknown, stop: StopLost, notices: 1, race: true},
-	{name: "delivered by ack_dispatch", plan: []string{"get", "ack", "kill", "linger"},
+	{name: "delivered by ack_dispatch", plan: []string{"get", "ack", "grandchild", "kill", "linger"},
 		handed: 1, outcome: OutcomeUnknown, stop: StopLost, notices: 1},
-	{name: "completed by complete_dispatch", plan: []string{"get", "ack", "reply", "complete", "kill", "linger"},
+	{name: "completed by complete_dispatch", plan: []string{"get", "ack", "reply", "complete", "grandchild", "kill", "linger"},
 		handed: 1, outcome: OutcomeSucceeded, stop: StopLost},
 	{name: "worker gone, settlement not committed", kill: "tx:attempt-ended", plan: completedWork,
 		handed: 1, outcome: OutcomeSucceeded, stop: StopLost},
@@ -184,7 +187,7 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 				raceSubset(t, row.race)
 				h := newHarness(t, d, harnessScenario{Plans: map[string][]string{"101#1": row.plan}})
 				h.publish(feedEntry{Event: todoEvent(101, 5001)})
-				h.run(harnessRun{Kill: row.kill, Killed: true})
+				h.run(harnessRun{Kill: row.kill, Killed: true, NoDispatch: row.noDispatch})
 				if kind, ok := strings.CutPrefix(row.kill, "line:"); ok {
 					lines := h.lines()
 					require.NotEmpty(t, lines)
@@ -202,10 +205,16 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 					}
 				}
 
+				children := h.children()
 				h.run(harnessRun{})
 				h.assertRecovered(row)
 				for _, pid := range lingering {
 					assert.True(t, processGone(pid), "the restart ended the worker the crash left, pid %d", pid)
+				}
+				// The worker's own child too: it is ended as a group, not as
+				// a pid.
+				for _, child := range children {
+					assert.True(t, processGone(child.PID), "the restart ended the worker's child, pid %d", child.PID)
 				}
 
 				// A second restart finds nothing to do and sends nothing.
@@ -449,7 +458,8 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 }
 
 // measuredTokenizerRatio is how far estimateTokens undercounts a real
-// tokenizer on the dispatch prompt. It is a one-off measurement, not something
+// tokenizer on the dispatch prompt, measured with Claude's; other agents'
+// tokenizers are not measured. It is a one-off measurement, not something
 // this test can re-derive: Claude Opus 5 counted the production-sized prompt
 // below at 322 tokens where the estimate says 230 — Claude Code's reported
 // input usage for the prompt, minus the same session with a one-character
@@ -511,8 +521,14 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 
 // An attempt whose worker the connector cannot identify is held, not settled:
 // it stays live in the ledger, its conversation and its working directory
-// stay its own, and no restart runs anything for it. A crash between the
-// spawn and the write of the worker's pid is that case.
+// stay its own, and no restart runs anything for it — while the dispatcher
+// goes on running work that does not need them.
+//
+// The crash here is at launching, just after the attempt is written and
+// before the driver is asked for anything. No process exists, but the ledger
+// cannot know that: from the ledger it is the same as a crash between the
+// spawn and the write of the worker's pid, which is the case the rule is for.
+// That window itself cannot be hit deterministically from outside.
 func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
 		raceSubset(t, false)
@@ -525,18 +541,23 @@ func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 		require.Len(t, attempts, 1)
 		assert.Equal(t, string(AttemptLaunching), attempts[0].State, "killed before the worker's process was recorded")
 
-		// However often it restarts.
-		for range 2 {
-			h.runUntilLog(harnessRun{}, "cannot be identified")
+		// However often it restarts. Each restart runs until work in the
+		// other project has been dispatched and finished: proof that its
+		// recovery returned and its dispatcher went on, not merely that it
+		// logged a decision.
+		for i, other := range []int64{102, 103} {
+			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
+			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
+			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other))
 		}
 		assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record stays live: nobody may act on it but a person")
 		assert.Equal(t, 0, h.handed(101), "no worker was ever given the event")
 		attempts = harnessAttempts(t, l)
-		require.Len(t, attempts, 1, "no attempt is started around the one that is held")
+		require.Len(t, attempts, 3, "the held attempt, and one for each event in the other project")
 		assert.Equal(t, string(AttemptLaunching), attempts[0].State)
 		assert.Empty(t, attempts[0].StopReason)
-		assert.False(t, h.released(), "the task's working directory is not released either")
-		assert.Empty(t, h.connectorPosts(), "an attempt that is still live has no completion to post")
+		assert.False(t, h.releasedDir(h.workDir()), "the held task's working directory is not released")
+		assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
 	})
 }
 
@@ -594,8 +615,9 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 // One owner, one release point: a worker's tree that outlives it keeps its
 // attempt live, its record non-terminal and its working directory unreleased,
 // through any number of restarts, because recovery holds an attempt whose
-// worker it cannot verify rather than settling around it. Once the tree is
-// gone, the next restart settles the attempt and releases the directory.
+// worker it cannot verify rather than settling around it — while it goes on
+// running work that does not need that directory. Once the tree is gone, the
+// next restart settles the attempt and releases the directory.
 func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
 		raceSubset(t, false)
@@ -603,14 +625,9 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		h.publish(feedEntry{Event: todoEvent(101, 5001)})
 		h.run(harnessRun{Killed: true})
 
-		var grandchild int
-		for _, e := range h.agentLog() {
-			if e.Step == "grandchild" && e.Child > 0 {
-				grandchild = e.Child
-			}
-		}
-		require.Positive(t, grandchild, "the worker started its grandchild")
-		t.Cleanup(func() { _ = syscall.Kill(grandchild, syscall.SIGKILL) })
+		children := h.children()
+		require.Len(t, children, 1, "the worker started its grandchild")
+		grandchild := children[0]
 		l := h.ledger()
 		attempts := recordedAttempts(t, l)
 		require.Len(t, attempts, 1)
@@ -618,34 +635,49 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(worker.PID), nil }), "the worker itself exited")
-		require.True(t, drivertest.Alive(grandchild))
+		require.False(t, processGone(grandchild.PID), "its grandchild did not")
 		drivertest.RequireGroupHeld(t, worker)
 
-		for range 2 {
-			h.runUntilLog(harnessRun{}, "could not verify whether a previous worker still runs")
-			attempts = recordedAttempts(t, l)
-			require.Len(t, attempts, 1, "nothing is started around a held attempt")
-			assert.NotEqual(t, string(AttemptEnded), attempts[0].state, "the attempt stays live while its tree runs")
+		for i, other := range []int64{102, 103} {
+			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
+			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
+			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other), "work that does not need the held directory still runs")
+
+			assert.Equal(t, string(AttemptRunning), attemptState(t, l, attempts[0].id), "the attempt stays live while its tree runs")
 			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
-			assert.False(t, h.released(), "the working directory is not released")
-			assert.Empty(t, h.connectorPosts(), "an attempt that is still live has no completion to post")
-			assert.True(t, drivertest.Alive(grandchild), "recovery does not signal a group whose leader it cannot verify")
+			assert.False(t, h.releasedDir(h.workDir()), "the working directory is not released")
+			assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
+			assert.False(t, processGone(grandchild.PID), "recovery does not signal a group whose leader it cannot verify")
 			_, err := driver.OwnsWorker(worker)
 			assert.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
 		}
 
 		// The tree ends; the next restart may settle and release.
-		require.NoError(t, syscall.Kill(grandchild, syscall.SIGKILL))
-		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(grandchild), nil }))
+		killRecorded(t, grandchild)
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(grandchild.PID), nil }))
 		h.run(harnessRun{})
-		attempts = recordedAttempts(t, l)
-		require.Len(t, attempts, 1)
-		assert.Equal(t, string(AttemptEnded), attempts[0].state)
+		assert.Equal(t, string(AttemptEnded), attemptState(t, l, attempts[0].id))
 		assert.Equal(t, StateCompleted, stateOf(t, l, 101))
 		assert.Equal(t, string(OutcomeUnknown), outcomeOf(t, l, 101))
-		assert.True(t, h.released(), "released once the tree is gone")
+		assert.True(t, h.releasedDir(h.workDir()), "released once the tree is gone")
 		assert.Len(t, h.notices(101), 1)
 		assert.Equal(t, 1, h.handed(101), "and never run again")
 		h.assertNoWorkerOutlivedItsRecord()
 	})
+}
+
+func attemptState(t *testing.T, l *Ledger, id string) string {
+	t.Helper()
+	var state string
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT state FROM attempts WHERE id = ?`, id).Scan(&state))
+	return state
+}
+
+// killRecorded SIGKILLs a process the harness recorded, only while it is still
+// that process.
+func killRecorded(t *testing.T, p driver.Process) {
+	t.Helper()
+	if owns, err := driver.OwnsWorker(driver.Process{PID: p.PID, PGID: p.PID, StartedAt: p.StartedAt}); err == nil && owns {
+		require.NoError(t, syscall.Kill(p.PID, syscall.SIGKILL))
+	}
 }

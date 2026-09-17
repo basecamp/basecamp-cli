@@ -141,16 +141,17 @@ func raceSubset(t *testing.T, representative bool) {
 
 // Environment of the harness's processes.
 const (
-	harnessConnectorEnv = "BASECAMP_RECOVERY_CONNECTOR"
-	harnessAgentEnv     = "BASECAMP_RECOVERY_AGENT"
-	harnessDirEnv       = "BASECAMP_RECOVERY_DIR"
-	harnessKillEnv      = "BASECAMP_RECOVERY_KILL"
-	harnessUntilEnv     = "BASECAMP_RECOVERY_UNTIL"
-	harnessSpawnFailEnv = "BASECAMP_RECOVERY_SPAWN_FAIL"
-	harnessFiltersEnv   = "BASECAMP_RECOVERY_FILTERS"
-	harnessStateEnv     = "BASECAMP_RECOVERY_STATE"
-	harnessShadowEnv    = "BASECAMP_RECOVERY_SHADOW"
-	harnessFaultEnv     = "BASECAMP_RECOVERY_FAULT"
+	harnessConnectorEnv  = "BASECAMP_RECOVERY_CONNECTOR"
+	harnessAgentEnv      = "BASECAMP_RECOVERY_AGENT"
+	harnessDirEnv        = "BASECAMP_RECOVERY_DIR"
+	harnessKillEnv       = "BASECAMP_RECOVERY_KILL"
+	harnessUntilEnv      = "BASECAMP_RECOVERY_UNTIL"
+	harnessSpawnFailEnv  = "BASECAMP_RECOVERY_SPAWN_FAIL"
+	harnessFiltersEnv    = "BASECAMP_RECOVERY_FILTERS"
+	harnessStateEnv      = "BASECAMP_RECOVERY_STATE"
+	harnessShadowEnv     = "BASECAMP_RECOVERY_SHADOW"
+	harnessFaultEnv      = "BASECAMP_RECOVERY_FAULT"
+	harnessNoDispatchEnv = "BASECAMP_RECOVERY_NO_DISPATCH"
 	// harnessRealEnv opts into the run against the real agent binaries, and
 	// harnessRealBasecampEnv names the basecamp binary built from this tree
 	// whose `mcp` the real workers start.
@@ -184,12 +185,14 @@ func runFakeAgent(name string) int {
 
 // Scenario constants: one account, one agent, one operator, one routed project.
 const (
-	harnessAccount   = "2914079"
-	harnessAgent     = adapterAgentID
-	harnessOperator  = adapterOperatorID
-	harnessBucket    = adapterBucketID
-	harnessOrigin    = "https://3.basecampapi.com"
-	harnessNamespace = "basecamp-connect-recovery"
+	harnessAccount  = "2914079"
+	harnessAgent    = adapterAgentID
+	harnessOperator = adapterOperatorID
+	harnessBucket   = adapterBucketID
+	// harnessOtherBucket is a second routed project with its own directory.
+	harnessOtherBucket = int64(48929974)
+	harnessOrigin      = "https://3.basecampapi.com"
+	harnessNamespace   = "basecamp-connect-recovery"
 )
 
 // harnessScenario is what every process of one harness reads: the connector,
@@ -239,6 +242,7 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	require.NoError(t, os.Chmod(dir, 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sessions"), 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "work-other"), 0o700))
 	sc.Driver = d.Name
 	h := &harness{t: t, dir: dir, state: harnessStateDir(t, dir), driver: d, sc: sc}
 	h.writeScenario()
@@ -318,8 +322,8 @@ type harnessRun struct {
 	// Killed says the run is expected to die by SIGKILL, from the connector
 	// itself or from the fake agent.
 	Killed bool
-	// StateDir is the connector's state directory; the harness directory
-	// when empty.
+	// StateDir is the connector's state directory; the harness's own
+	// (harness.state) when empty.
 	StateDir string
 	// Fault is a standing misbehavior of the fake Basecamp for the run:
 	// "stall-catch-up" holds the feed's first poll until the socket has
@@ -327,6 +331,10 @@ type harnessRun struct {
 	Fault string
 	// Env is added to the connector's environment.
 	Env []string
+	// NoDispatch runs intake, admission and hooks but no dispatcher or
+	// outbox: a connector that dies after admitting, before its dispatcher
+	// could have seen the record, without racing one that might.
+	NoDispatch bool
 	// Shadow runs intake and admission only, and installs no hooks: a
 	// `--shadow` run.
 	Shadow bool
@@ -362,6 +370,7 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 		"XDG_STATE_HOME="+filepath.Join(h.dir, "state"),
 		harnessShadowEnv+"="+strconv.FormatBool(r.Shadow),
 		harnessFaultEnv+"="+r.Fault,
+		harnessNoDispatchEnv+"="+strconv.FormatBool(r.NoDispatch),
 	)
 	cmd.Env = append(cmd.Env, r.Env...)
 	out := &lockedBuffer{}
@@ -435,6 +444,13 @@ func (h *harness) killAgents() {
 		}
 		_, _ = driver.TerminateRecorded(driver.Process{PID: entry.PID, PGID: entry.PGID, StartedAt: entry.StartedAt}, time.Second)
 	}
+	// A worker's own children, which a group signal cannot reach once the
+	// worker that led the group is gone.
+	for _, child := range h.children() {
+		if owns, err := driver.OwnsWorker(driver.Process{PID: child.PID, PGID: child.PID, StartedAt: child.StartedAt}); err == nil && owns {
+			_ = syscall.Kill(child.PID, syscall.SIGKILL)
+		}
+	}
 }
 
 // workspaces is every preparation and release of a task's working directory.
@@ -452,15 +468,30 @@ func (h *harness) workspaces() []workspaceEvent {
 	return out
 }
 
-// released says a task's working directory was handed back, which the
+// releasedDir says a task's working directory was handed back, which the
 // one-owner rule allows only once its worker's process group is gone.
-func (h *harness) released() bool {
+func (h *harness) releasedDir(dir string) bool {
 	for _, e := range h.workspaces() {
-		if e.Step == "finish" {
+		if e.Step == "finish" && e.WorkDir == dir {
 			return true
 		}
 	}
 	return false
+}
+
+// workDir is the first routed project's working directory.
+func (h *harness) workDir() string { return filepath.Join(h.dir, "work") }
+
+// children is every process a fake worker started of its own, with the time
+// it started, so it can be signaled only while it is still that process.
+func (h *harness) children() []driver.Process {
+	var out []driver.Process
+	for _, e := range h.agentLog() {
+		if e.Step == "grandchild" && e.Child > 0 {
+			out = append(out, driver.Process{PID: e.Child, PGID: e.PGID, StartedAt: e.StartedAt})
+		}
+	}
+	return out
 }
 
 // ledger opens the harness's ledger. The connector need not be stopped.

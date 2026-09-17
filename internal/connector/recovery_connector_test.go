@@ -249,8 +249,13 @@ func runHarnessConnector(dir string) error {
 	}
 	intake.repairSweep = 50 * time.Millisecond
 
+	// Two routed projects, each its own working directory, so a test can show
+	// the dispatcher still runs work in one while the other's is held.
 	work := filepath.Join(dir, "work")
-	routes := map[int64]admission.Route{harnessBucket: {Path: work, Class: "internal"}}
+	routes := map[int64]admission.Route{
+		harnessBucket:      {Path: work, Class: "internal"},
+		harnessOtherBucket: {Path: filepath.Join(dir, "work-other"), Class: "internal"},
+	}
 	reads := storeReads{dir: dir, gate: sc.ReadGate, kill: kill}
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID:  harnessAgent,
@@ -275,13 +280,19 @@ func runHarnessConnector(dir string) error {
 	worker := &failingSpawns{Driver: working, broken: d.New(filepath.Join(dir, "no-such-agent")), failures: failures}
 	dispatcher, err := NewDispatcher(DispatcherOptions{
 		Ledger: ledger, Driver: worker,
-		Routes:             func() map[int64]admission.Route { return routes },
-		Concurrency:        2,
-		Deadline:           time.Hour,
-		MCP:                mcp,
-		PrivateDir:         filepath.Join(dir, "sessions"),
-		Replies:            storeReplies{dir: dir},
+		Routes:      func() map[int64]admission.Route { return routes },
+		Concurrency: 2,
+		Deadline:    time.Hour,
+		MCP:         mcp,
+		PrivateDir:  filepath.Join(dir, "sessions"),
+		// As the run command wires it: the agent's replies, lifecycle
+		// messages filtered out by the ledger.
+		Replies: LifecycleFilteredReplies{Lister: storePoster{dir: dir, kill: &killSpec{}}, Ledger: ledger},
+		// Not in the run command, which passes none: a task works in its
+		// route either way. The harness's records when a directory is
+		// prepared and released, for the one-owner rule's assertions.
 		Workspaces:         &harnessWorkspaces{dir: dir},
+		StillRunning:       DefaultStillRunning,
 		IsLifecycleMessage: IsLifecycleMessageIn(ledger),
 		Lines:              lines,
 		Logger:             logger,
@@ -352,9 +363,17 @@ func runHarnessConnector(dir string) error {
 	part("admission", func(ctx context.Context) error {
 		return RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
 	})
-	if !shadow {
+	dispatching := !shadow && os.Getenv(harnessNoDispatchEnv) != "true"
+	if dispatching {
 		part("dispatch", dispatcher.Run)
 		part("outbox", outbox.Run)
+	}
+	if !shadow {
+		// As the run command does, so status sees a connector come and go.
+		if err := ledger.NoteConnection(ctx, ConnectionStarting, ""); err != nil {
+			return err
+		}
+		defer func() { _ = ledger.NoteConnection(context.Background(), ConnectionStopped, "") }()
 	}
 
 	until := os.Getenv(harnessUntilEnv)
@@ -386,7 +405,7 @@ func runHarnessConnector(dir string) error {
 	wg.Wait()
 	flushCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if !shadow {
+	if dispatching {
 		if err := outbox.Flush(flushCtx); err != nil {
 			return err
 		}
