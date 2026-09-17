@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -27,16 +28,22 @@ func newConnectWorktreesCmd() *cobra.Command {
 		Short: "List and prune the git worktrees the connector kept",
 		Long: `With worktrees on (connect setup --worktrees), each task works in a git
 worktree of its own, on a basecamp-connect/ branch. When the task ends the
-worktree is removed only if nothing in it could be lost: no modified or
-untracked file, no merge or rebase in progress, not locked, and every commit
-it made pushed or merged. Otherwise it is kept, and listed here.`,
+worktree is removed only if nothing in it could be lost: nothing on its disk
+but the files git tracks, unchanged, no merge or rebase in progress, not
+locked, and every commit it reaches pushed or merged. Otherwise it is kept,
+and listed here.
+
+A Codex worker cannot commit — a worktree's git data is outside the directory
+its sandbox may write — so with Codex every task that edits anything leaves a
+kept worktree for you.`,
 	}
 	cmd.AddCommand(newConnectWorktreesListCmd(), newConnectWorktreesPruneCmd())
 	return cmd
 }
 
 func newConnectWorktreesListCmd() *cobra.Command {
-	return &cobra.Command{
+	var shadow bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List the worktrees kept for you to deal with",
 		Long: `List the worktrees the connector kept, with why: dirty (uncommitted work),
@@ -46,7 +53,7 @@ could not be read).`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app := appctx.FromContext(cmd.Context())
-			wt, closeLedger, err := openConnectWorktrees(app)
+			wt, closeLedger, err := openConnectWorktrees(app, shadow)
 			if err != nil {
 				return err
 			}
@@ -62,10 +69,15 @@ could not be read).`,
 			return app.OK(out, output.WithSummary(fmt.Sprintf("%d worktree(s) kept", len(out))))
 		},
 	}
+	cmd.Flags().BoolVar(&shadow, "shadow", false, "Read the shadow connector's state instead")
+	return cmd
 }
 
 func newConnectWorktreesPruneCmd() *cobra.Command {
-	var force []string
+	var (
+		force  []string
+		shadow bool
+	)
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Remove the kept worktrees you have dealt with",
@@ -90,7 +102,7 @@ first. Worktrees of tasks still running are never touched.`,
 				}
 				force[i] = filepath.Clean(p)
 			}
-			wt, closeLedger, err := openConnectWorktrees(app)
+			wt, closeLedger, err := openConnectWorktrees(app, shadow)
 			if err != nil {
 				return err
 			}
@@ -116,6 +128,7 @@ first. Worktrees of tasks still running are never touched.`,
 		},
 	}
 	cmd.Flags().StringArrayVar(&force, "force", nil, "Remove this kept worktree even with work in it (repeatable; an absolute path from worktrees list)")
+	cmd.Flags().BoolVar(&shadow, "shadow", false, "Read the shadow connector's state instead")
 	return cmd
 }
 
@@ -150,8 +163,9 @@ func viewWorktree(w connector.Worktree) worktreeView {
 }
 
 // openConnectWorktrees opens the ledger of the connector the active profile
-// is set up as, without creating one.
-func openConnectWorktrees(app *appctx.App) (*connector.Worktrees, func(), error) {
+// is set up as: the one it has, never a new one, and never a schema this
+// binary would migrate under a connector that is running.
+func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, func(), error) {
 	if app == nil {
 		return nil, nil, errors.New("app not initialized")
 	}
@@ -170,7 +184,9 @@ func openConnectWorktrees(app *appctx.App) (*connector.Worktrees, func(), error)
 	case err != nil:
 		return nil, nil, output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
-	stateDir, err := connectStateDir(file, false)
+	// Named, not created: reading what a connector left must not make a
+	// state directory for a connector that never ran.
+	stateDir, err := connectStateDirPath(file, shadow)
 	if err != nil {
 		return nil, nil, output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
@@ -181,7 +197,7 @@ func openConnectWorktrees(app *appctx.App) (*connector.Worktrees, func(), error)
 		}
 		return nil, nil, err
 	}
-	ledger, err := connector.OpenLedger(ledgerPath)
+	ledger, err := connector.OpenExistingLedger(context.Background(), ledgerPath)
 	if err != nil {
 		return nil, nil, err
 	}

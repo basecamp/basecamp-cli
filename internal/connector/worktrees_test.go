@@ -128,11 +128,6 @@ func (h *worktreeHarness) branchExists(branch string) bool {
 	return h.git(h.repo, "for-each-ref", "refs/heads/"+branch) != ""
 }
 
-func exists(path string) bool {
-	_, err := os.Lstat(path)
-	return err == nil
-}
-
 func TestPrepareMakesAWorktreeOnATaskBranchOutsideTheCheckout(t *testing.T) {
 	h := newWorktreeHarness(t)
 	workDir, row := h.prepare(17)
@@ -396,6 +391,35 @@ func TestFiltersOutOfReachOfAScanStillDoNotRun(t *testing.T) {
 			assert.False(t, exists(marker), "no filter ran")
 		})
 	}
+}
+
+// A worktree someone moved is kept, not forgotten: its files are still
+// somewhere, and the connector cannot judge them where it cannot find them.
+func TestAMovedWorktreeIsKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(90)
+	moved := filepath.Join(t.TempDir(), "moved")
+	h.git(h.repo, "worktree", "move", row.Path, moved)
+	require.False(t, exists(workDir))
+
+	row = h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, row.State)
+	assert.Equal(t, RetainedUnverified, row.RetainedReason)
+	assert.True(t, h.branchExists(row.Branch), "the branch the moved worktree has checked out")
+	assert.FileExists(t, filepath.Join(moved, "app", "README"))
+}
+
+// A worktree moved and then deleted is gone, not kept forever.
+func TestAMovedWorktreeThatIsThenDeletedIsGone(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(91)
+	moved := filepath.Join(t.TempDir(), "moved")
+	h.git(h.repo, "worktree", "move", row.Path, moved)
+	require.NoError(t, os.RemoveAll(moved))
+
+	row = h.finish(workDir)
+	assert.Equal(t, WorktreeRemoved, row.State)
+	assert.Equal(t, RemovedMissing, row.RemovedBy)
 }
 
 // Invariant 1: a task branch the connector did not create is never deleted,

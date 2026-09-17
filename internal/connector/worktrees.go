@@ -59,9 +59,10 @@ import (
 //     remove one worktree twice, and prune touches only retained worktrees.
 //  5. Prune refuses work. A retained worktree still holding work is removed
 //     only when the operator names it with --force, and even then its branch
-//     is kept unless its commits are held elsewhere, and a detached HEAD's
-//     unheld commit is kept on a branch of its own; a HEAD it cannot read is
-//     not forced.
+//     is kept unless its commits are held elsewhere, and the commit HEAD is
+//     on is kept on a branch of its own when nothing else holds it; a HEAD it
+//     cannot read is not forced. What a force does discard is a commit only
+//     the worktree's own reflog or a per-worktree ref still reaches.
 //  6. Nothing the repository or its configuration names runs: git runs with
 //     hooks, the fsmonitor and every content filter its configuration defines
 //     for the directory it runs in disabled (the new worktree's own, for its
@@ -479,10 +480,15 @@ func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) 
 		return "", err
 	}
 	// Anchored even when HEAD is the task branch's own tip: another process
-	// can move that branch between this check and the removal.
-	branch := r.Branch + "-head"
+	// can move that branch between this check and the removal. The commit is
+	// in the name, so an anchor a failed force left is the anchor this one
+	// wants, not a branch in the way.
+	branch := r.Branch + "-head-" + head[:min(12, len(head))]
 	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "--end-of-options", "refs/heads/"+branch, head, ""); err != nil {
-		return "", err
+		at, atErr := w.gitOut(ctx, r.Repository, "rev-parse", "--verify", "--end-of-options", "refs/heads/"+branch)
+		if atErr != nil || at != head {
+			return "", err
+		}
 	}
 	return branch, nil
 }
@@ -491,7 +497,7 @@ func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) 
 // The caller holds the lock. It returns the row as it now stands.
 func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktree {
 	from := []WorktreeState{r.State}
-	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) && !w.movedElsewhere(ctx, r) {
 		// Nothing on disk. A branch git made stays unless it still points at
 		// the base, which holds nothing of the task's.
 		w.deleteBranchAt(ctx, r, r.BaseCommit)
@@ -507,6 +513,10 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 		return r
 	}
 
+	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
+		// Moved out from under the connector: its files are still someone's.
+		return w.retain(ctx, r, RetainedUnverified, from)
+	}
 	reason, tip := w.inspect(ctx, r)
 	if reason != "" {
 		return w.retain(ctx, r, reason, from)
@@ -528,6 +538,35 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, by
 	return r
+}
+
+// movedElsewhere reports whether the repository still has a worktree on this
+// row's branch somewhere else: someone moved it, and its files are work the
+// connector neither judges nor forgets, so the row is kept.
+func (w *Worktrees) movedElsewhere(ctx context.Context, r Worktree) bool {
+	out, err := w.gitRaw(ctx, r.Repository, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		// Unknown: treat the row as still somewhere, which retains it.
+		return true
+	}
+	var current string
+	for field := range strings.SplitSeq(string(out), "\x00") {
+		switch {
+		case strings.HasPrefix(field, "worktree "):
+			current = strings.TrimPrefix(field, "worktree ")
+		case field == "branch refs/heads/"+r.Branch:
+			if !samePath(current, r.Path) && exists(current) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// exists reports whether a path is there at all.
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
 }
 
 func (w *Worktrees) retain(ctx context.Context, r Worktree, reason RetainedReason, from []WorktreeState) Worktree {
@@ -789,8 +828,17 @@ func (w *Worktrees) deleteBranchIfHeld(ctx context.Context, r Worktree) bool {
 	return err == nil && tip == ""
 }
 
-// lock takes the worktrees lock (invariant 4), waiting for another holder.
+// LockWait bounds how long a settling worktree waits for another remover's
+// lock. Longer than a removal takes, short enough that a stuck prune cannot
+// hold a task's end, and so the connector's shutdown, open: the row is
+// reconciled on the next start instead.
+const LockWait = 2 * time.Minute
+
+// lock takes the worktrees lock (invariant 4), waiting up to LockWait for
+// another holder.
 func (w *Worktrees) lock(ctx context.Context) (func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, LockWait)
+	defer cancel()
 	if err := os.MkdirAll(w.root, 0o700); err != nil {
 		return nil, err
 	}

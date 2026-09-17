@@ -88,13 +88,29 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	group := "connect"
+	group, dir := connectStateParts(file, shadow)
+	return ensurePrivateChain(stateHome, "basecamp", group, dir)
+}
+
+// connectStateDirPath is the same directory, named and not created: what
+// reads a connector's state resolves.
+func connectStateDirPath(file setup.File, shadow bool) (string, error) {
+	stateHome, err := connectStateHome()
+	if err != nil {
+		return "", err
+	}
+	group, dir := connectStateParts(file, shadow)
+	return filepath.Join(stateHome, "basecamp", group, dir), nil
+}
+
+func connectStateParts(file setup.File, shadow bool) (group, dir string) {
+	group = "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return ensurePrivateChain(stateHome, "basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	return group, connector.StateDirName(file.AccountID, file.Agent.PersonID)
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP

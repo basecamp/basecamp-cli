@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -32,7 +33,19 @@ func worktreesCmdEnv(t *testing.T) (*appctx.App, *bytes.Buffer, connector.Worktr
 	file.AccountID = "2914079"
 	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
 	file.Trust.OperatorID = 26909558
-	file.Projects[48699913] = admission.Route{Path: root}
+	repo := filepath.Join(root, "repo")
+	require.NoError(t, os.MkdirAll(repo, 0o700))
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.CommandContext(context.Background(), "git", append([]string{"-c", "user.name=T", "-c", "user.email=t@example.invalid"}, args...)...)
+		cmd.Dir = repo
+		cmd.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH")}
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+	}
+	file.Projects[48699913] = admission.Route{Path: repo}
 	path, err := setup.Path(config.GlobalConfigDir(), "agent")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
@@ -46,7 +59,7 @@ func worktreesCmdEnv(t *testing.T) (*appctx.App, *bytes.Buffer, connector.Worktr
 	require.NoError(t, err)
 	defer func() { _ = ledger.Close() }()
 	w := connector.Worktree{
-		Path: filepath.Join(stateDir, "worktrees", "app-00000000", "7-abcdef"), Route: root, Repository: root,
+		Path: filepath.Join(stateDir, "worktrees", "app-00000000", "7-abcdef"), Route: repo, Repository: repo,
 		Branch: connector.BranchPrefix + "7-abcdef", BaseCommit: "0123456789abcdef0123456789abcdef01234567", OriginatingEventID: 7,
 	}
 	w.WorkDir = w.Path

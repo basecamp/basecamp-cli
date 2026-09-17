@@ -48,7 +48,10 @@
 // writes only inside the working directory, no network, no /tmp) with
 // approvals set to never, so whatever the sandbox would refuse is refused
 // without asking anyone. That is still policy, not containment: the sandbox
-// is Codex's, not the connector's. Codex's sandbox reads the whole
+// is Codex's, not the connector's. One consequence is worth knowing: a
+// worktree's git data lives outside the working directory, so a Codex worker
+// cannot commit, and a Codex task that edits anything ends with its worktree
+// kept. Codex's sandbox reads the whole
 // filesystem, so a model in one session can read what the connector's state
 // directory holds while it is there, another session's MCP environment file
 // between its writing and its server's start among it.
@@ -187,14 +190,14 @@ func Args(cfg driver.SessionConfig, resumeID string, envFiles map[string]string,
 	}
 	rules := cfg.Policy.Rules()
 	if rules.Mode != driver.ModeEditsInWorkDir {
-		return nil, fmt.Errorf("codex: no Codex sandbox for policy mode %q", rules.Mode)
+		return nil, fmt.Errorf("%w: codex: no Codex sandbox for policy mode %q", driver.ErrUnusable, rules.Mode)
 	}
 	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
-		return nil, fmt.Errorf("codex: the policy's working directory %q is not the session's %q", rules.WorkDir, cfg.Cwd)
+		return nil, fmt.Errorf("%w: codex: the policy's working directory %q is not the session's %q", driver.ErrUnusable, rules.WorkDir, cfg.Cwd)
 	}
 	for _, kind := range rules.AllowKinds {
 		if !slices.Contains(allowedKinds, kind) {
-			return nil, fmt.Errorf("codex: no Codex policy allows kind %q and nothing else", kind)
+			return nil, fmt.Errorf("%w: codex: no Codex policy allows kind %q and nothing else", driver.ErrUnusable, kind)
 		}
 	}
 
@@ -204,6 +207,9 @@ func Args(cfg driver.SessionConfig, resumeID string, envFiles map[string]string,
 	}
 	args = append(args,
 		"--json",
+		// A -c key Codex does not know is ignored in silence, and the flags
+		// below are what invariant 1 rests on.
+		"--strict-config",
 		// The host's config.toml (its MCP servers, profiles, hooks, trust)
 		// and its execpolicy rules are not this session's.
 		"--ignore-user-config",
@@ -231,10 +237,10 @@ func Args(cfg driver.SessionConfig, resumeID string, envFiles map[string]string,
 	}
 	for _, s := range cfg.MCPServers {
 		if !validServerName.MatchString(s.Name) {
-			return nil, fmt.Errorf("codex: MCP server name %q is not one Codex's config can key", s.Name)
+			return nil, fmt.Errorf("%w: codex: MCP server name %q is not one Codex's config can key", driver.ErrUnusable, s.Name)
 		}
 		if s.Command == "" {
-			return nil, fmt.Errorf("codex: MCP server %q has no command", s.Name)
+			return nil, fmt.Errorf("%w: codex: MCP server %q has no command", driver.ErrUnusable, s.Name)
 		}
 		file, ok := envFiles[s.Name]
 		if !ok || !filepath.IsAbs(file) {
@@ -572,7 +578,15 @@ func (s *session) Close() error {
 	case <-time.After(s.grace):
 	}
 	s.worker.Terminate(s.grace)
-	<-s.readerEnd
+	select {
+	case <-s.readerEnd:
+	case <-time.After(s.grace):
+		// The worker is gone and a descendant outside its group still holds
+		// the output: stop reading it, rather than hold the attempt, its
+		// working directory and the connector's shutdown open forever.
+		s.worker.CloseStdout()
+		<-s.readerEnd
+	}
 	for _, f := range s.envFiles {
 		_ = os.Remove(f)
 	}
@@ -616,6 +630,8 @@ func (s *session) read() {
 			case canceled:
 				s.finishCanceled(t, refusals)
 			default:
+				s.stderrRefusals()
+				refusals = s.refusalsOf(t)
 				err := s.failedVerification()
 				if err == nil {
 					err = driver.ErrSessionEnded
@@ -883,12 +899,21 @@ func (s *session) turnFailed() {
 		s.finishCanceled(t, refusals)
 		return
 	}
+	s.stderrRefusals()
+	refusals = s.refusalsOf(t)
 	if err := s.failedVerification(); err != nil {
 		s.finish(t, driver.PromptResult{Refusals: refusals}, err)
 		s.worker.Terminate(0)
 		return
 	}
 	s.finish(t, driver.PromptResult{Refusals: refusals}, errors.New("codex: the turn failed"))
+}
+
+// refusalsOf is a turn's refusals so far.
+func (s *session) refusalsOf(t *turn) []driver.Refusal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(t.refusals)
 }
 
 // stderrRefusals counts the refusals Codex logs but does not put on its JSON

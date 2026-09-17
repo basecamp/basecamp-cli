@@ -662,3 +662,20 @@ func TestACanceledTurnReportsAFailedPolicyCheck(t *testing.T) {
 		})
 	}
 }
+
+// Invariant 5: Close does not wait forever on a descendant that left the
+// worker's process group and still holds its output.
+func TestCloseDoesNotWaitForAnEscapedChild(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Escape: true, Events: []string{turnCompleted()}})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	_, err = s.Prompt(context.Background(), "Event 1.")
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() { _ = s.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Close waited on an escaped child")
+	}
+}

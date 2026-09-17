@@ -42,6 +42,9 @@ type scenario struct {
 	RunMCP bool `json:"run_mcp"`
 	// Child starts a child process in the fake's group and records its pid.
 	Child bool `json:"child"`
+	// Escape leaves a process of its own, outside the fake's process group,
+	// holding the fake's stdout.
+	Escape bool `json:"escape"`
 	// Hang waits to be killed after the events.
 	Hang bool `json:"hang"`
 	// Exit is the exit status.
@@ -49,14 +52,15 @@ type scenario struct {
 }
 
 type observed struct {
-	Args      []string          `json:"args"`
-	Env       []string          `json:"env"`
-	Cwd       string            `json:"cwd"`
-	Prompt    string            `json:"prompt"`
-	EnvFile   map[string]string `json:"env_file_modes"`
-	MCPExit   int               `json:"mcp_exit"`
-	ChildPID  int               `json:"child_pid"`
-	FileAfter bool              `json:"env_file_after_server"`
+	Args       []string          `json:"args"`
+	Env        []string          `json:"env"`
+	Cwd        string            `json:"cwd"`
+	Prompt     string            `json:"prompt"`
+	EnvFile    map[string]string `json:"env_file_modes"`
+	MCPExit    int               `json:"mcp_exit"`
+	ChildPID   int               `json:"child_pid"`
+	EscapedPID int               `json:"escaped_pid"`
+	FileAfter  bool              `json:"env_file_after_server"`
 }
 
 func fakeCodex() int {
@@ -107,6 +111,15 @@ func fakeCodex() int {
 		save()
 	}
 
+	if sc.Escape {
+		// setsid puts it in a group of its own, and it inherits stdout.
+		escaped := exec.CommandContext(context.Background(), "setsid", "sleep", "120")
+		escaped.Stdout = os.Stdout
+		if err := escaped.Start(); err == nil {
+			obs.EscapedPID = escaped.Process.Pid
+			save()
+		}
+	}
 	if sc.Child {
 		child := exec.CommandContext(context.Background(), "sleep", "300")
 		if err := child.Start(); err == nil {
