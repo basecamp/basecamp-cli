@@ -121,7 +121,12 @@ func runConnectShow(app *appctx.App) error {
 // or as a code span in Markdown, so nothing in one renders as formatting or
 // reaches a terminal as a control byte.
 func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any {
-	exact := strconv.Quote
+	exact := func(s string) string {
+		// strconv.Quote escapes controls and backslashes; "<" is escaped too,
+		// or the renderer would take a path holding "<b>" for HTML and
+		// rewrite it.
+		return strings.ReplaceAll(strconv.Quote(s), "<", `\x3c`)
+	}
 	if markdown {
 		exact = func(s string) string { return markdownCode(escapeControls(s)) }
 	}
@@ -148,7 +153,7 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
 		"workers":  fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees),
-		"routes":   strconv.Itoa(len(f.Projects)),
+		"projects": strconv.Itoa(len(f.Projects)) + " routed",
 	}
 	for id, r := range f.Projects {
 		route := exact(r.Path)
@@ -158,18 +163,23 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		if r.WatchCompletions {
 			route += ", watches completions"
 		}
-		d[fmt.Sprintf("project_%d", id)] = route
+		d[fmt.Sprintf("route_%d", id)] = route
 	}
 	return d
 }
 
-// escapeControls writes every control or non-printable rune in s, and the
-// backslash, as a Go escape (\x1b, \u009b, \\), so a path can reach a
+// escapeControls writes every control or non-printable rune in s, the
+// backslash and "<" (which the renderer would read as HTML) as a Go escape
+// (\x1b, \u009b, \\, \x3c), so a path can reach a
 // terminal or a pager without a single control byte and still reads exactly:
 // an escape in the output never stands for text the path already held.
 func escapeControls(s string) string {
 	var b strings.Builder
 	for _, r := range s {
+		if r == '<' {
+			b.WriteString(`\x3c`)
+			continue
+		}
 		if r == '\\' || unicode.IsControl(r) || !unicode.IsPrint(r) {
 			q := strconv.QuoteRune(r)
 			b.WriteString(q[1 : len(q)-1])

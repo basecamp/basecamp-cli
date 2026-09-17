@@ -16,6 +16,7 @@ mocks:
   - match: 'connect setup'
     output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","profile":"helper","account_id":"999","agent_person_id":4001,"agent_kind":"agent","operator_id":1001,"trust_mode":"operator","routes":2,"written":true,"ready":true,"checks":[{"name":"Project 222","status":"pass","message":"Readable by the agent, routed to /home/me/Work/Q3 $launch"}]},"summary":"connect.json written; all passed"}'
 accept:
+  - 'connect setup .*(-P|--profile)[ =]''?helper\b'
   - 'connect setup .*--route[ =](''222=/home/me/Work/Q3 \$launch''|222=''/home/me/Work/Q3 \$launch'')'
 reject:
   # The name never reaches a command; only its id does.

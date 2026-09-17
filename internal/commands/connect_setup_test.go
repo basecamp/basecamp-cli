@@ -1362,7 +1362,7 @@ func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 			fmt.Sprintf("person %d (agent)", setupAgentPerson),
 			fmt.Sprintf("person %d", setupOperatorPerson),
 			"operator",
-			fmt.Sprintf("Project %d", setupProject),
+			fmt.Sprintf("Route %d", setupProject),
 			route,
 			"deadline 45m0s",
 		} {
@@ -1403,7 +1403,7 @@ func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
 	f.Trust.OperatorID = 1001
 	f.Projects[222] = admission.Route{Path: path}
 	for _, markdown := range []bool{false, true} {
-		route := connectShowDisplay("/x/connect.json", f, markdown)["project_222"].(string)
+		route := connectShowDisplay("/x/connect.json", f, markdown)["route_222"].(string)
 		assert.NotContains(t, route, "\x1b", "markdown %v", markdown)
 		assert.NotContains(t, route, "\u009b", "markdown %v", markdown)
 		assert.Contains(t, route, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
@@ -1417,6 +1417,29 @@ func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
 	f := setup.New("agent")
 	file := connectShowDisplay("/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)["file"]
 	assert.Equal(t, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``", file)
+}
+
+// A route path holding what looks like HTML or Markdown survives the real
+// renderers: nothing in it is converted, dropped or rendered.
+func TestConnectShowKeepsAPathThatLooksLikeMarkup(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	dir := filepath.Join(t.TempDir(), "Q3 <b>bold<i> [x](y) `tick`")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--route", fmt.Sprintf("%d=%s", setupProject, dir))
+	require.NoError(t, err, out)
+
+	for format, want := range map[output.Format]string{
+		output.FormatStyled:   `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
+		output.FormatMarkdown: `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
+	} {
+		app := newConnectSetupApp(t, s, "agent")
+		var buf bytes.Buffer
+		app.Output = output.New(output.Options{Format: format, Writer: &buf})
+		out, err := runConnectShowCmd(t, app)
+		require.NoError(t, err, out)
+		assert.Contains(t, buf.String(), want, "format %v", format)
+	}
 }
 
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
