@@ -850,7 +850,7 @@ func TestOutboxARefusedRequestSaysNoMessageExists(t *testing.T) {
 	ob := obOutbox(t, ledger, basecamp)
 	require.NoError(t, ob.Flush(ctx))
 	got := obIntent(t, ledger, holdingKey(1))
-	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Equal(t, IntentCanceled, got.State, "refused is not uncertain: nothing was created")
 	assert.Equal(t, "the request was refused; no message was created", got.Note)
 	assert.Zero(t, basecamp.lists, "nothing to look for")
 	require.NoError(t, ob.Flush(ctx))
@@ -900,4 +900,28 @@ func TestOutboxAnIntentWithNoRecordIsCanceled(t *testing.T) {
 	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 	assert.Equal(t, IntentCanceled, obIntent(t, ledger, holdingKey(1)).State)
 	assert.Zero(t, basecamp.postCount())
+}
+
+// A guard Basecamp refused acknowledged nothing, so the worker is not told it
+// did: the guard stands down and the worker acknowledges in its own words.
+func TestOutboxARefusedGuardStandsDownAgain(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	// The task is already live, so its task event carries the armed guard the
+	// claim marks fired.
+	l := obLaunch(t, ledger, 1)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+	clock.Advance(DefaultGuardDelay)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Equal(t, IntentCanceled, obIntent(t, ledger, guardKey(1)).State)
+
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	instruction, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.True(t, instruction.Acknowledge)
+	assert.False(t, instruction.GuardAcknowledged, "the worker acknowledges, since nobody did")
 }

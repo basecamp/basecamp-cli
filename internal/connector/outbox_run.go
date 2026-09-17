@@ -244,9 +244,11 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 	receipt, postErr := o.opts.Poster.Post(postCtx, intent.Destination, intent.Body)
 	cancel()
 	if errors.Is(postErr, ErrNotPosted) {
-		// Basecamp refused the request, so no message exists to find. There
-		// is nothing to reconcile and nothing to resend without a person.
-		settled, err := o.ledger.settleReconciled(context.WithoutCancel(ctx), intent.ID, 0, "the request was refused; no message was created")
+		// Basecamp refused the request, so no message exists to find: nothing
+		// to reconcile, and a guard that stands down again rather than
+		// telling a worker the connector acknowledged something that was
+		// never posted.
+		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, "the request was refused; no message was created")
 		if err != nil {
 			o.log.Warn("connector: settling a refused lifecycle message", "intent_id", intent.ID, "error", err)
 			return intent.ID, nil

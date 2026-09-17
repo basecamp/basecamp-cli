@@ -40,8 +40,10 @@ import (
 //  6. A receipt belongs to exactly one intent, and once written it never
 //     changes. A unique index and a trigger.
 //  7. States move along the lifecycle's edges only: pending → sending |
-//     canceled; sending → sent | indeterminate; indeterminate → sent |
-//     abandoned | pending, the last three only by a person.
+//     canceled; sending → sent | indeterminate, or canceled when Basecamp
+//     answered the request by refusing it, which creates nothing; and
+//     indeterminate → sent | abandoned | pending, those three only by a
+//     person.
 //  8. get_dispatch cancels the guard: a trigger moves the guard intent from
 //     pending to canceled in get_dispatch's own transaction, and a guard that
 //     already went out marks every task event it answers for as fired, so a
@@ -84,7 +86,7 @@ CREATE TRIGGER outbox_state_edges
 BEFORE UPDATE OF state ON outbox
 WHEN NEW.state <> OLD.state AND NOT (
      (OLD.state = 'pending'       AND NEW.state IN ('sending', 'canceled'))
-  OR (OLD.state = 'sending'       AND NEW.state IN ('sent', 'indeterminate'))
+  OR (OLD.state = 'sending'       AND NEW.state IN ('sent', 'indeterminate', 'canceled'))
   OR (OLD.state = 'indeterminate' AND NEW.state IN ('sent', 'abandoned', 'pending'))
 )
 BEGIN
@@ -149,8 +151,9 @@ const (
 	// IntentIndeterminate could not be reconciled unambiguously. It is never
 	// sent again automatically; a person decides.
 	IntentIndeterminate IntentState = "indeterminate"
-	// IntentCanceled was never sent because nothing called for it any more:
-	// a guard get_dispatch canceled, say.
+	// IntentCanceled was never sent: nothing called for it any more (a guard
+	// get_dispatch canceled), or Basecamp refused the request, which creates
+	// nothing.
 	IntentCanceled IntentState = "canceled"
 	// IntentAbandoned is an indeterminate intent a person decided not to
 	// send.
@@ -491,6 +494,40 @@ func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution
 		}
 		return nil
 	})
+}
+
+// refuse settles a sending intent Basecamp refused. The request created
+// nothing, so unlike an uncertain send this one stands the guard down again:
+// the worker is not told the connector acknowledged something that does not
+// exist, and no later task event is written fired for it.
+func (l *Ledger) refuse(ctx context.Context, in Intent, note string) (Intent, error) {
+	err := retryBusy(func() error {
+		tx, err := l.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("connector: begin refusal of %d: %w", in.ID, err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(ctx, `UPDATE outbox SET state = 'canceled', finished_at = ?, note = ? WHERE id = ? AND state = 'sending'`,
+			l.timestamp(), note, in.ID)
+		if err != nil {
+			return fmt.Errorf("connector: refuse intent %d: %w", in.ID, err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return fmt.Errorf("connector: refuse intent %d: it is not sending", in.ID)
+		}
+		if in.Kind == IntentGuardAck {
+			if _, err := tx.ExecContext(ctx, `UPDATE task_events SET guard = 'armed' WHERE event_id = ? AND guard = 'fired'`, in.EventID); err != nil {
+				return fmt.Errorf("connector: stand the guard on %d down: %w", in.EventID, err)
+			}
+		}
+		return tx.Commit()
+	})
+	if err != nil {
+		return Intent{}, err
+	}
+	return l.Intent(ctx, in.ID)
 }
 
 func isUniqueViolation(err error) bool {
