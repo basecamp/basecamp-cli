@@ -259,7 +259,7 @@ func TestAPanickingPauseCallbackLeavesNoPhantomBacklog(t *testing.T) {
 	require.NoError(t, err)
 
 	var logs bytes.Buffer
-	queue.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	queue.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
 	var pauses, resumes atomic.Int32
 	queue.OnPause = func(int) {
 		if pauses.Add(1) == 1 {

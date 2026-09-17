@@ -68,8 +68,28 @@ type Queue struct {
 	// it stops. The feed is not being consumed in between.
 	OnPause  func(depth int)
 	OnResume func(depth int)
-	// Logger reports a callback that panicked. Optional; silent when unset.
-	Logger *slog.Logger
+	// log reports a callback that panicked. Held under edges: a queue can be
+	// adopted by intake while another component is already using it, and a
+	// field written by one and read by the other is a race.
+	log *slog.Logger
+}
+
+// SetLogger sets where a callback that panicked is reported. Safe to call
+// while the queue is in use.
+func (q *Queue) SetLogger(log *slog.Logger) {
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	q.log = log
+}
+
+// adoptLogger sets log only if nobody has set one, as one step: a check and a
+// set taken apart would let two adopters both find it unset.
+func (q *Queue) adoptLogger(log *slog.Logger) {
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	if q.log == nil {
+		q.log = log
+	}
 }
 
 // NewQueue builds a queue that warns at warnAt and pauses the feed at pauseAt.
@@ -290,9 +310,13 @@ func (q *Queue) fire(edge queueEdge) {
 	}
 }
 
+// logger is read under edges, so it must never be called holding them. Its one
+// caller, fire, runs with the lock released.
 func (q *Queue) logger() *slog.Logger {
-	if q.Logger != nil {
-		return q.Logger
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	if q.log != nil {
+		return q.log
 	}
 	return slog.New(slog.DiscardHandler)
 }

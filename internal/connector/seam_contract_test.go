@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -199,4 +200,51 @@ func TestIntakeGivesTheQueueItsLogger(t *testing.T) {
 	require.NoError(t, queue.Offer(context.Background(), 1))
 
 	assert.Contains(t, logs.String(), "a backlog callback panicked")
+}
+
+// A queue can already be in use when intake adopts it — admission takes from
+// the same queue — so adopting its logger must not race the callback path that
+// reads it.
+func TestAdoptingAQueueInUseDoesNotRace(t *testing.T) {
+	queue, err := NewQueue(1, 1000)
+	require.NoError(t, err)
+	queue.OnWarn = func(int) { panic("a callback panics") }
+	queue.OnRecover = func(int) { panic("a callback panics") }
+	ledger := newTestLedger(t)
+
+	ctx := context.Background()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	// The queue is in use, and every crossing reads its logger, for the
+	// whole time intake is adopting it.
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := queue.Offer(ctx, 1); err != nil {
+				return
+			}
+			if _, err := queue.Take(ctx); err != nil {
+				return
+			}
+		}
+	})
+	for range 20 {
+		_, err := New(Options{
+			Origin:            "https://3.basecampapi.com",
+			AccountID:         "2914079",
+			ConsumerNamespace: "connector-test",
+			Ledger:            ledger,
+			Queue:             queue,
+			Minter:            stubMinter{},
+			Polls:             &scriptedPolls{},
+			Logger:            slog.New(slog.DiscardHandler),
+		})
+		require.NoError(t, err)
+	}
+	close(stop)
+	wg.Wait()
 }
