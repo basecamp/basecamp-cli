@@ -829,3 +829,25 @@ func TestARefusalLoggedAfterAFailedTurnIsCounted(t *testing.T) {
 	require.Error(t, err)
 	assert.Len(t, result.Refusals, 1)
 }
+
+// Prompt honors its context even while its write is blocked on a worker that
+// stopped reading.
+func TestAPromptBlockedWritingHonorsItsContext(t *testing.T) {
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Deaf: true, Hang: true})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	returned := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(ctx, strings.Repeat("Event 1. ", 200_000))
+		returned <- err
+	}()
+	select {
+	case err := <-returned:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(20 * time.Second):
+		t.Fatal("a blocked write held Prompt past its context")
+	}
+}

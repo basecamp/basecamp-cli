@@ -478,13 +478,19 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	s.turn = t
 	s.mu.Unlock()
 
-	s.writing <- struct{}{}
-	_, err := io.WriteString(s.worker.Stdin(), prompt)
-	if closeErr := s.worker.Stdin().Close(); err == nil {
-		err = closeErr
-	}
-	<-s.writing
-	if err != nil {
+	// The write runs apart: a worker that stops reading blocks it, and a ctx
+	// that ends must still end the wait (driver.Session's contract), while the
+	// turn itself is ended by Cancel or Close.
+	go func() {
+		s.writing <- struct{}{}
+		_, err := io.WriteString(s.worker.Stdin(), prompt)
+		if closeErr := s.worker.Stdin().Close(); err == nil {
+			err = closeErr
+		}
+		<-s.writing
+		if err == nil {
+			return
+		}
 		// A cancel that closed the worker's stdin is what made the write
 		// fail: the turn is canceled, not a session that ended on its own.
 		s.mu.Lock()
@@ -495,7 +501,7 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		} else {
 			s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
 		}
-	}
+	}()
 	select {
 	case <-t.done:
 		return t.result, t.err

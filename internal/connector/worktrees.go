@@ -978,6 +978,14 @@ func (w *Worktrees) recordHoldsNothing(ctx context.Context, r Worktree) bool {
 	} else if err != nil {
 		return false
 	}
+	// A submodule's git data in the record is its own commits, which no ref
+	// here reaches: the row is kept.
+	switch entries, err := os.ReadDir(filepath.Join(r.AdminDir, "modules")); {
+	case err == nil && len(entries) > 0:
+		return false
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		return false
+	}
 	var tips []string
 	for _, args := range [][]string{
 		{"reflog", "show", "--format=%H", "HEAD", "--"},

@@ -508,7 +508,7 @@ func TestAMissingWorktreesRepositoryRecordIsLeftAlone(t *testing.T) {
 	require.NoError(t, os.RemoveAll(row.Path))
 
 	row = h.finish(workDir)
-	assert.Equal(t, RemovedMissing, row.RemovedBy)
+	assert.Equal(t, WorktreeRetained, row.State, "a record holding a submodule's commits keeps the row")
 	assert.DirExists(t, row.AdminDir)
 	assert.DirExists(t, subGitDir, "the submodule's only commits survive")
 }
