@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/auth"
 )
 
 // TestRecoveryAgainstRealAgents runs the kill points the connector itself can
