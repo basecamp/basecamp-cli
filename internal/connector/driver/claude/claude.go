@@ -194,6 +194,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 		mcpNames:  serverNames(cfg.MCPServers),
 		grace:     d.opts.CloseGrace,
 		updates:   make(chan driver.Update, 256),
+		slot:      make(chan struct{}, 1),
 		readerEnd: make(chan struct{}),
 	}
 	go s.read()
@@ -305,7 +306,13 @@ type session struct {
 	turn     *turn
 	verified bool
 	closed   bool
-	writeMu  sync.Mutex
+	// slot is the right to write to the worker, held across registering a
+	// turn and sending its prompt so an interrupt cannot reach a turn other
+	// than the one it was asked for. A channel, not a mutex, because a
+	// worker that stops reading its input makes a write block, and a caller
+	// waiting for the slot must be able to give up: Cancel takes it with a
+	// deadline, and Close does not take it at all.
+	slot chan struct{}
 }
 
 // turn is a prompt in flight.
@@ -330,12 +337,21 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	// The turn is registered and its message written under the write lock,
 	// so a Cancel that sees the turn writes its interrupt after the prompt,
 	// never before it, where it would interrupt nothing.
-	s.writeMu.Lock()
+	if err := s.takeSlot(ctx, 0); err != nil {
+		// A session that ended for a reason answers with that reason.
+		s.mu.Lock()
+		ended := s.ended
+		s.mu.Unlock()
+		if ended != nil {
+			return driver.PromptResult{}, ended
+		}
+		return driver.PromptResult{}, err
+	}
 	s.mu.Lock()
 	if s.closed || s.ended != nil {
 		ended := s.ended
 		s.mu.Unlock()
-		s.writeMu.Unlock()
+		s.releaseSlot()
 		if ended != nil {
 			return driver.PromptResult{}, ended
 		}
@@ -343,7 +359,7 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}
 	if s.turn != nil {
 		s.mu.Unlock()
-		s.writeMu.Unlock()
+		s.releaseSlot()
 		return driver.PromptResult{}, errors.New("claude: a turn is already in flight")
 	}
 	t := &turn{done: make(chan struct{})}
@@ -356,13 +372,13 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		s.beforePromptWrite()
 	}
 	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}}
-	err := s.writeLocked(msg)
+	err := s.writeHeld(msg)
 	if pending && err == nil {
-		// The interrupt follows the prompt it cancels, still under the write
-		// lock, so nothing can come between them.
-		err = s.writeLocked(interruptRequest())
+		// The interrupt follows the prompt it cancels, still holding the
+		// slot, so nothing can come between them.
+		err = s.writeHeld(interruptRequest())
 	}
-	s.writeMu.Unlock()
+	s.releaseSlot()
 	if err != nil {
 		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
 	}
@@ -381,9 +397,18 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 // takes them, so the turn it interrupts is the turn it observed: no prompt
 // can register and be written in between and take the interrupt meant for
 // another turn.
-func (s *session) Cancel(context.Context) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+func (s *session) Cancel(ctx context.Context) error {
+	if err := s.takeSlot(ctx, s.grace); err != nil {
+		// The worker is not reading its input; the connector's next step is
+		// to close the session, which ends it whatever it is doing.
+		s.mu.Lock()
+		if s.turn != nil {
+			s.turn.canceled = true
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("claude: the agent is not reading its input: %w", err)
+	}
+	defer s.releaseSlot()
 	s.mu.Lock()
 	t := s.turn
 	if t != nil {
@@ -400,7 +425,7 @@ func (s *session) Cancel(context.Context) error {
 	if s.beforeCancelWrite != nil {
 		s.beforeCancelWrite()
 	}
-	return s.writeLocked(interruptRequest())
+	return s.writeHeld(interruptRequest())
 }
 
 // interruptRequest is Claude Code's interrupt control request. A request id
@@ -418,9 +443,9 @@ func (s *session) Close() error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.writeMu.Lock()
+	// Closed without the slot on purpose: a write blocked on a worker that
+	// stopped reading ends with a broken pipe rather than holding Close.
 	_ = s.worker.Stdin().Close()
-	s.writeMu.Unlock()
 	select {
 	case <-s.worker.Done():
 	case <-time.After(s.grace):
@@ -444,13 +469,30 @@ func (s *session) removeMCPConfig() {
 	}
 }
 
-func (s *session) write(v any) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.writeLocked(v)
+// takeSlot waits for the right to write. A zero wait waits for ctx alone.
+func (s *session) takeSlot(ctx context.Context, wait time.Duration) error {
+	var deadline <-chan time.Time
+	if wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		deadline = timer.C
+	}
+	select {
+	case s.slot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-deadline:
+		return context.DeadlineExceeded
+	case <-s.worker.Done():
+		return driver.ErrSessionEnded
+	}
 }
 
-func (s *session) writeLocked(v any) error {
+func (s *session) releaseSlot() { <-s.slot }
+
+// writeHeld writes one message; the caller holds the slot.
+func (s *session) writeHeld(v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err

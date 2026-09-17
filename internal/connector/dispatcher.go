@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,6 +82,15 @@ type Workspaces interface {
 type PerTaskWorkspaces interface {
 	Workspaces
 	PerTaskDirs() bool
+}
+
+// WaitingWorkspaces is a Workspaces that knows some routes cannot take a
+// task now — a repository whose worktree could not be made, say. The
+// dispatcher leaves those routes out of the startable query, so records it
+// could not start on them never fill the window ahead of other routes.
+type WaitingWorkspaces interface {
+	Workspaces
+	RoutesWaiting() []string
 }
 
 // RecoveringWorkspaces is a Workspaces with state of its own to reconcile on
@@ -323,6 +333,13 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 	return nil
 }
 
+// heldCount is how many attempts are held; for tests and status.
+func (d *Dispatcher) heldCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.held
+}
+
 // hold counts an attempt recovery left live: its worker may still exist, so
 // it holds one of the connector's worker slots until a person settles it.
 func (d *Dispatcher) hold() {
@@ -377,8 +394,19 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	// Invariant 2, in the query: only records whose route connect.json
 	// approves now, in the projects this run hears, and on a directory no live
 	// task holds. A record the dispatcher cannot start never fills the window.
+	startable := approved
+	if w, ok := d.opts.Workspaces.(WaitingWorkspaces); ok {
+		if waiting := w.RoutesWaiting(); len(waiting) > 0 {
+			startable = make(map[int64]string, len(approved))
+			for bucket, route := range approved {
+				if !slices.Contains(waiting, route) {
+					startable[bucket] = route
+				}
+			}
+		}
+	}
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
-		Routes: approved, RouteHeld: !d.perTaskDirs(), Limit: d.opts.Concurrency * 4,
+		Routes: startable, RouteHeld: !d.perTaskDirs(), Limit: d.opts.Concurrency * 4,
 	})
 	if err != nil {
 		return err
@@ -503,10 +531,9 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		unusable := errors.Is(err, driver.ErrUnusable)
 		d.log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
 			"no_process", spawnFailed, "unusable", unusable, "error", driver.Redact(err.Error()))
-		// A driver returns an error from NewSession only when it left no
-		// process behind (driver invariant 4), so there is no group to
-		// confirm; the release point still owns the settlement.
-		d.release(settleCtx, launch, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		// A start that launched a process says so (driver.StartError); the
+		// release point confirms that group gone before anything is settled.
+		d.release(settleCtx, launch, driver.StartedProcess(err), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return false, nil
 	}
@@ -587,6 +614,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		}
 		d.log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
+		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
 	}
 	settlement, err := d.settle(ctx, end)
@@ -597,9 +625,13 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		}
 		d.log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
+		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
 	}
-	d.adopt(ctx, settlement)
+	// Adoption is a read of Basecamp, bounded but slow, and nothing waits on
+	// it: the settlement is already written, and the link it may add is not
+	// what the next dispatch depends on.
+	d.wg.Go(func() { d.adopt(ctx, settlement) })
 	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
 	if run != nil {
@@ -747,6 +779,15 @@ func (r *taskRun) supervise(ctx context.Context) {
 	refusals := r.refusals
 	r.mu.Unlock()
 
+	if stop != StopFinished {
+		if tail, ok := r.session.(interface{ StderrTail() string }); ok {
+			if text := strings.TrimSpace(tail.StderrTail()); text != "" {
+				d.log.Warn("connector: the worker's last output", "attempt_id", r.launch.AttemptID,
+					"stop_reason", string(stop), "stderr", richtext.SanitizeSingleLine(lastLine(text)))
+			}
+		}
+	}
+
 	// Through the one release point: it confirms the worker's group is gone
 	// before the attempt is settled or its directory released.
 	d.release(settleCtx, r.launch, r.session.Process(), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, Refusals: refusals}, r)
@@ -863,7 +904,7 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 				return r.answered(a.result, a.err)
 			case <-time.After(time.Second):
 			}
-			return driver.PromptResult{}, StopLost, true
+			return driver.PromptResult{}, r.goneStop(), true
 		case <-deadline:
 			return stopFor(StopDeadline)
 		case <-ctx.Done():
@@ -877,9 +918,11 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 }
 
 // answered reads a finished prompt: its refusals are counted whatever it
-// says, and an error is classified — an unsafe session the driver ended is a
-// failure, a worker gone is lost, and anything else waits briefly to see
-// which of the two it was (invariant 4).
+// says, and an error is classified (invariant 4). An unsafe session the driver
+// ended is failed. A worker that is gone is classified by how it went: one
+// that exited on its own with a non-zero status failed, and one that vanished
+// — signaled by someone else, or gone with no status the connector saw — is
+// lost. Any other error waits briefly to see whether the worker is gone.
 func (r *taskRun) answered(result driver.PromptResult, err error) (driver.PromptResult, StopReason, bool) {
 	r.addRefusals(len(result.Refusals))
 	switch {
@@ -889,15 +932,29 @@ func (r *taskRun) answered(result driver.PromptResult, err error) (driver.Prompt
 		r.d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
 		return result, StopFailed, true
 	case errors.Is(err, driver.ErrSessionEnded):
-		return result, StopLost, true
+		return result, r.goneStop(), true
 	}
 	r.d.log.Warn("connector: prompt failed", "task_id", r.launch.TaskID, "error", driver.Redact(err.Error()))
 	select {
 	case <-r.session.Done():
-		return result, StopLost, true
+		return result, r.goneStop(), true
 	case <-time.After(time.Second):
 	}
 	return result, StopFailed, true
+}
+
+// goneStop is the stop reason for a worker that went with a turn in flight:
+// failed when it exited on its own with a non-zero status, lost otherwise.
+func (r *taskRun) goneStop() StopReason {
+	select {
+	case <-r.session.Done():
+	case <-time.After(time.Second):
+		return StopLost
+	}
+	if exit := r.session.Exit(); exit.Code > 0 && !exit.Signaled && exit.Err == nil {
+		return StopFailed
+	}
+	return StopLost
 }
 
 // authorized reports whether connect.json still approves this task's
@@ -974,6 +1031,18 @@ func promptURL(raw string) string {
 		}
 	}
 	return u.Scheme + "://" + u.Host + u.Path
+}
+
+// lastLine is the final line of a worker's output, which is where a program
+// that could not start says why.
+func lastLine(text string) string {
+	if i := strings.LastIndexByte(text, '\n'); i >= 0 {
+		text = text[i+1:]
+	}
+	if len(text) > 300 {
+		text = text[len(text)-300:]
+	}
+	return text
 }
 
 func isPathRune(r rune) bool {

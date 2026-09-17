@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,4 +104,26 @@ func TestConnectDispatcherGetsTheRunsScopeAndSettings(t *testing.T) {
 	assert.Equal(t, "agent", opts.MCP.Profile)
 	assert.Equal(t, "/state/2914079-1", opts.MCP.StateDir)
 	assert.Equal(t, "/state/2914079-1/sessions", opts.PrivateDir)
+}
+
+// The credential rule: a file that carries a task token lives outside the
+// state directory and every working directory.
+func TestConnectSessionFilesLiveOutsideTheStateDirectory(t *testing.T) {
+	runtime := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtime)
+	t.Setenv("XDG_STATE_HOME", state)
+	file := setup.New("agent")
+	file.AccountID = "2914079"
+	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
+
+	dir, err := connectSessionsDir(file)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(dir, runtime+string(filepath.Separator)))
+	stateDir, err := connectStateDir(file, false)
+	require.NoError(t, err)
+	assert.False(t, strings.HasPrefix(dir, stateDir), "not under the state directory")
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }

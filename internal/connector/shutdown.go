@@ -30,11 +30,16 @@ func ExitCodeForSignal(sig os.Signal) int {
 	}
 }
 
-// NotifyShutdown returns a channel carrying the first shutdown signal, and a
-// stop function. Separated from the exit-code mapping so the mapping can be
-// tested without sending real signals to the test binary.
+// NotifyShutdown returns a channel carrying shutdown signals, and a stop
+// function. Separated from the exit-code mapping so the mapping can be tested
+// without sending real signals to the test binary.
+//
+// The channel holds two: the first asks for an orderly shutdown, and the
+// second is a person who has waited long enough. A caller that takes only the
+// first leaves the second in the buffer, where it would be dropped rather
+// than heard, which is why the buffer is two and the run reads both.
 func NotifyShutdown() (<-chan os.Signal, func()) {
-	ch := make(chan os.Signal, 1)
+	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	return ch, func() { signal.Stop(ch) }
 }

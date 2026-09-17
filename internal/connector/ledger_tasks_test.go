@@ -454,3 +454,24 @@ func TestAnAcknowledgementIsNeverAdoptedAsTheReply(t *testing.T) {
 	_, ok := AdoptableReply(c, []AgentReply{{ID: 7, CreatedAt: acked.Add(time.Second)}}, nil)
 	assert.False(t, ok)
 }
+
+// Review r4: a record something else moved is settled where it was put; the
+// whole settlement must not fail, or the attempt is stranded for good.
+func TestSettlementWorksAroundARecordSomethingElseMoved(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	var moved []int64
+	ledger.SetHooks(Hooks{RecordMoved: func(eventID int64, _ RecordState) { moved = append(moved, eventID) }})
+	// A person discards the record while its worker is running.
+	require.NoError(t, ledger.SetState(ctx, 1, StateBlocked, "by_operator"))
+
+	settlement, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopLost})
+	require.NoError(t, err, "the attempt is settled, not stranded")
+	assert.Equal(t, []int64{1}, moved)
+	assert.Equal(t, "ended", readAttempt(t, ledger, l.AttemptID).State)
+	require.Len(t, settlement.Events, 1)
+	assert.False(t, settlement.Events[0].Reported)
+	assert.Equal(t, StateBlocked, getRecord(t, ledger, 1).State, "left where it was put")
+}

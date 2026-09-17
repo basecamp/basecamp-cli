@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -256,7 +257,8 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	fake := newFakeDriver()
 	var cfg driver.SessionConfig
 	fake.onStart = func(c driver.SessionConfig) { cfg = c }
-	h := newDispatchHarness(t, fake, nil)
+	lines := &safeBuffer{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Lines = ndjson.NewWriter(lines) })
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
 	h.attemptsEnded(t, 1)
@@ -282,33 +284,19 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	assert.False(t, hostToken)
 	assert.Equal(t, testRoute, cfg.Cwd)
 	assert.Equal(t, testRoute, cfg.Policy.Rules().WorkDir)
+	drivertest.RequireNoSecret(t, token, drivertest.Places{
+		Env: cfg.Env, Args: append([]string{prompt}, cfg.MCPServers[0].Args...),
+		Texts: []string{lines.String()}, Dirs: []string{h.d.opts.PrivateDir},
+	})
 }
 
-// estimateTokens is a deliberately pessimistic count: every run of letters or
-// digits, every other non-space character, and one extra per eight characters
-// of a long run.
+// estimateTokens is an upper bound on a tokenizer's count, not a guess at it.
+// English prose runs about four characters a token, and the worst case a real
+// tokenizer reaches on text like this — ids, punctuation, tool names — is
+// about two. Card 22 measured a 899-byte prompt at 322 tokens with the real
+// tokenizer, which this bounds at 450.
 func estimateTokens(s string) int {
-	n := 0
-	run := 0
-	flush := func() {
-		if run > 0 {
-			n += 1 + run/8
-		}
-		run = 0
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			run++
-		case r == ' ' || r == '\n':
-			flush()
-		default:
-			flush()
-			n++
-		}
-	}
-	flush()
-	return n
+	return (len(s) + 1) / 2
 }
 
 func TestASpawnFailureIsRetriedOnceByTheDispatcher(t *testing.T) {
@@ -1029,4 +1017,87 @@ func liveRuns(h *dispatchHarness) int {
 	h.d.mu.Lock()
 	defer h.d.mu.Unlock()
 	return len(h.d.live)
+}
+
+// Card 23: a start whose handshake failed after it launched a process
+// releases nothing until that group is confirmed gone.
+func TestAStartThatFailedAfterLaunchingReleasesNothingWhileItsGroupLives(t *testing.T) {
+	work := t.TempDir()
+	worker, grandchild := drivertest.SurvivingWorker(t, work)
+
+	fake := newFakeDriver()
+	fake.startErr = []error{&driver.StartError{Process: worker, Err: errors.New("handshake timed out")}}
+	ws := &fakeWorkspaces{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Workspaces = ws; o.CancelGrace = 100 * time.Millisecond })
+	h.d.confirmGroupGone = func(p driver.Process, _ time.Duration) error {
+		if driver.GroupMembersRemain(p) {
+			return driver.ErrGroupOutlivedLeader
+		}
+		return nil
+	}
+	h.routes[adapterBucketID] = admission.Route{Path: work}
+	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
+	h.run(t)
+
+	require.Eventually(t, func() bool {
+		attempts, err := h.ledger.LiveAttempts(context.Background())
+		return err == nil && len(attempts) == 1 && liveRuns(h) == 0 && h.d.heldCount() == 1
+	}, 5*time.Second, 20*time.Millisecond)
+	assert.True(t, drivertest.Alive(grandchild))
+	assert.Zero(t, ws.finishedCount(), "the directory is not released")
+	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State, "the record is not terminal")
+}
+
+// Card 19: how a worker went decides its stop. Exiting on its own with a
+// non-zero status is failed; vanishing is lost.
+func TestAWorkerThatExitsNonZeroMidTurnFailedAndOneThatVanishedIsLost(t *testing.T) {
+	for name, tc := range map[string]struct {
+		exit driver.Exit
+		want string
+	}{
+		"exited 2 on its own":      {driver.Exit{Code: 2}, "failed"},
+		"killed by someone else":   {driver.Exit{Code: -1, Signaled: true}, "lost"},
+		"gone with no status seen": {driver.Exit{Code: -1, Err: errors.New("wait failed")}, "lost"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := newFakeDriver()
+			fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+				s.exitWith(tc.exit)
+				return driver.PromptResult{}, driver.ErrSessionEnded
+			}
+			h := newDispatchHarness(t, fake, nil)
+			admitOn(t, h.ledger, 1, "recording:1")
+			h.run(t)
+			assert.Equal(t, tc.want, h.attemptsEnded(t, 1)[0].StopReason)
+		})
+	}
+}
+
+type waitingWorkspaces struct {
+	fakeWorkspaces
+	waiting []string
+}
+
+func (w *waitingWorkspaces) Prepare(_ context.Context, route string, _ int64) (string, error) {
+	if slices.Contains(w.waiting, route) {
+		return "", errors.New("the repository cannot take a worktree")
+	}
+	return route, nil
+}
+
+func (w *waitingWorkspaces) RoutesWaiting() []string { return w.waiting }
+
+// Card 19: a route that cannot take a task must not starve the others.
+func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
+	fake := newFakeDriver()
+	ws := &waitingWorkspaces{waiting: []string{"/work/broken"}}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Workspaces = ws })
+	h.routes[700] = admission.Route{Path: "/work/broken"}
+	for i := int64(1); i <= 12; i++ {
+		admitRouted(t, h.ledger, i, 700, "recording:broken"+strconv.FormatInt(i, 10), "/work/broken")
+	}
+	admitRouted(t, h.ledger, 50, adapterBucketID, "recording:ok", testRoute)
+	h.run(t)
+	s := nextSession(t, fake)
+	assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
 }

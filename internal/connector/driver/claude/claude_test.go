@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // The test binary doubles as a fake claude: run with FAKE_CLAUDE set, it
@@ -66,8 +67,12 @@ func fakeClaude(scenario string) {
 		}
 	}
 	writeReport := func() {
+		// Written whole and renamed into place: a test reading the report
+		// while it is rewritten must never see half of it.
 		data, _ := json.Marshal(report)
-		_ = os.WriteFile(os.Getenv("FAKE_CLAUDE_REPORT"), data, 0o600)
+		path := os.Getenv("FAKE_CLAUDE_REPORT")
+		_ = os.WriteFile(path+".tmp", data, 0o600)
+		_ = os.Rename(path+".tmp", path)
 	}
 	writeReport()
 
@@ -90,6 +95,10 @@ func fakeClaude(scenario string) {
 		status = "failed"
 	}
 
+	if scenario == "deaf" {
+		// Reads nothing, ever: the pipe fills and a write blocks.
+		select {}
+	}
 	if scenario == "badmode-eager" {
 		// An init before any prompt, in a mode the policy did not ask for.
 		emit(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID, "permissionMode": "bypassPermissions", "mcp_servers": []any{}})
@@ -218,11 +227,19 @@ func newFixture(t *testing.T, scenario string) fixture {
 
 func (f fixture) readReport(t *testing.T) fakeReport {
 	t.Helper()
+	r, err := f.report_()
+	require.NoError(t, err)
+	return r
+}
+
+// report_ reads the report without failing the test, for polling.
+func (f fixture) report_() (fakeReport, error) {
 	var r fakeReport
 	data, err := os.ReadFile(f.report)
-	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(data, &r))
-	return r
+	if err != nil {
+		return r, err
+	}
+	return r, json.Unmarshal(data, &r)
 }
 
 type policy struct{ workDir string }
@@ -288,11 +305,16 @@ func TestASessionRunsAVerifiedTurnAndRecordsRefusals(t *testing.T) {
 	assert.Equal(t, []driver.Refusal{{ToolCallID: "toolu_1", Tool: "Bash"}}, result.Refusals)
 	assert.Equal(t, int64(12), result.Usage.InputTokens)
 
-	// A follow-up in the same session.
-	result, err = s.Prompt(context.Background(), "again")
-	require.NoError(t, err)
-	assert.Equal(t, driver.TurnEndTurn, result.Stop)
-	require.NoError(t, s.Close())
+	// The credential rule, from the moment the MCP servers started: no file
+	// under the working directory or the session's own directory carries the
+	// task token, however briefly, through a follow-up and the close.
+	drivertest.RequireNoSecretFilesDuring(t, "test-token-not-real", []string{f.cfg.Cwd, f.cfg.PrivateDir}, func() {
+		// A follow-up in the same session.
+		result, err = s.Prompt(context.Background(), "again")
+		require.NoError(t, err)
+		assert.Equal(t, driver.TurnEndTurn, result.Stop)
+		require.NoError(t, s.Close())
+	})
 	<-done
 
 	for _, u := range updates {
@@ -303,6 +325,8 @@ func TestASessionRunsAVerifiedTurnAndRecordsRefusals(t *testing.T) {
 	assert.True(t, slices.ContainsFunc(updates, func(u driver.Update) bool { return u.Kind == driver.UpdatePermission && !u.Allowed }))
 
 	r := f.readReport(t)
+	// The token is in neither the agent's own environment nor its argv.
+	drivertest.RequireNoSecret(t, "test-token-not-real", drivertest.Places{Env: r.Env, Args: r.Args, Dirs: []string{f.cfg.Cwd}})
 	assert.NotContains(t, strings.Join(r.Env, "\n"), "CONNECTOR_CANARY_NOT_REAL")
 	assert.Contains(t, r.Env, "ANTHROPIC_API_KEY=test-key-not-real", "the driver's own named variables are added")
 	assert.Equal(t, os.FileMode(0o600), r.MCPMode)
@@ -366,7 +390,10 @@ func TestOnlyAnAskedForCancelReadsAsCanceled(t *testing.T) {
 		time.Sleep(300 * time.Millisecond)
 		// A cancel written by someone else, not through Cancel.
 		ss := s.(*session)
-		_ = ss.write(map[string]any{"type": "control_request", "request_id": "x", "request": map[string]any{"subtype": "interrupt"}})
+		if err := ss.takeSlot(context.Background(), time.Second); err == nil {
+			_ = ss.writeHeld(map[string]any{"type": "control_request", "request_id": "x", "request": map[string]any{"subtype": "interrupt"}})
+			ss.releaseSlot()
+		}
 	}()
 	result, err := s.Prompt(context.Background(), "hello")
 	assert.Error(t, err)
@@ -526,11 +553,15 @@ func TestACancelNeverInterruptsALaterTurn(t *testing.T) {
 		t := ss.turn
 		ss.mu.Unlock()
 		ss.finish(t, driver.PromptResult{Stop: driver.TurnEndTurn}, nil)
+		asking := make(chan struct{})
 		go func() {
+			close(asking)
 			result, _ := s.Prompt(context.Background(), "two")
 			second <- result
 		}()
-		time.Sleep(300 * time.Millisecond)
+		// The second prompt is asking to write; whether it may is what this
+		// test is about, and nothing here waits on a clock to find out.
+		<-asking
 	}
 	require.NoError(t, s.Cancel(context.Background()))
 	<-first
@@ -539,7 +570,12 @@ func TestACancelNeverInterruptsALaterTurn(t *testing.T) {
 	case <-second:
 	case <-time.After(5 * time.Second):
 	}
-	assert.Equal(t, "user control_request user ", f.readReport(t).Extra["wire"],
+	// The fake writes its record after it reads each line, so the wire is
+	// read until it settles rather than sampled once.
+	require.Eventually(t, func() bool {
+		r, err := f.report_()
+		return err == nil && r.Extra["wire"] == "user control_request user "
+	}, 10*time.Second, 50*time.Millisecond,
 		"the interrupt follows the turn it was asked for, and never the prompt that came after it")
 }
 
@@ -558,4 +594,39 @@ func TestAnUnsafeModeBeforeTheFirstTurnIsStillUnsafe(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	_, err := s.Prompt(context.Background(), "hello")
 	assert.ErrorIs(t, err, driver.ErrUnsafeMode, "the reason the session ended, not a bare session-ended")
+}
+
+// Card 23's review: a worker that stops reading its input must not be able to
+// hold a cancel or a close.
+func ss(s driver.Session) *session { return s.(*session) }
+
+func TestAnAgentThatStopsReadingCannotHoldCancelOrClose(t *testing.T) {
+	f := newFixture(t, "deaf")
+	f.driver.opts.CloseGrace = 300 * time.Millisecond
+	s := start(t, f)
+	// Enough to fill the pipe, so the write blocks on a worker that reads
+	// nothing.
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("x", 1<<20)) }()
+	// Wait for that prompt to hold the write slot, rather than for a clock.
+	require.Eventually(t, func() bool { return len(ss(s).slot) == 1 }, 10*time.Second, 5*time.Millisecond)
+
+	canceled := make(chan error, 1)
+	go func() { canceled <- s.Cancel(context.Background()) }()
+	select {
+	case err := <-canceled:
+		assert.Error(t, err, "the cancel gives up rather than waiting on a worker that is not reading")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Cancel waited on a worker that stopped reading")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited on a worker that stopped reading")
+	}
 }
