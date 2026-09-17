@@ -1448,3 +1448,27 @@ func TestOutboxALedgerFailureWhileSendingIsNotHiddenByAnEndingBound(t *testing.T
 	}
 	require.Error(t, obOutbox(t, ledger, basecamp).Start(startCtx))
 }
+
+// A canceled intent posted nothing, so its words do not hide a worker's reply
+// that happens to read the same.
+func TestOutboxACanceledNoticeDoesNotHideAReply(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	in := obIntent(t, ledger, holdingKey(1))
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	require.Equal(t, IntentCanceled, obIntent(t, ledger, in.Key).State)
+
+	// A worker's reply that reads exactly like the notice nobody posted.
+	since := clock.Now().Add(-time.Minute)
+	reply := basecamp.add(in.Destination, adapterAgentID, in.Body)
+	listed, err := LifecycleFilteredReplies{Lister: basecamp, Ledger: ledger}.
+		AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "nothing of ours is there to hide it")
+	assert.Equal(t, reply, listed[0].ID)
+}

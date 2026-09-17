@@ -847,23 +847,30 @@ func (r LifecycleFilteredReplies) AgentReplies(ctx context.Context, bucketID int
 	if err := retryBusy(func() error {
 		clear(receipts)
 		clear(unreceipted)
+		// A receipt names the connector's message whatever state its intent
+		// is in. A body stands in for a message only while one may exist
+		// unreceipted: a canceled intent posted nothing, so its words are the
+		// worker's if they appear.
 		rows, err := r.Ledger.db.QueryContext(ctx, `
-SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
+SELECT receipt_id, body, state IN ('pending', 'sending', 'indeterminate', 'abandoned')
+FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var (
-				receipt sql.NullInt64
-				body    string
+				receipt   sql.NullInt64
+				body      string
+				unsettled bool
 			)
-			if err := rows.Scan(&receipt, &body); err != nil {
+			if err := rows.Scan(&receipt, &body, &unsettled); err != nil {
 				return err
 			}
-			if receipt.Valid {
+			switch {
+			case receipt.Valid:
 				receipts[receipt.Int64] = true
-			} else {
+			case unsettled:
 				unreceipted[MessageText(body)] = true
 			}
 		}
