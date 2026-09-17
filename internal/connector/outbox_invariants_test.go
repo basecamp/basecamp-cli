@@ -1425,3 +1425,26 @@ func TestOutboxAStillRunningNoticeWithNoAttemptIsCanceled(t *testing.T) {
 	assert.Zero(t, basecamp.postCount())
 	assert.Equal(t, IntentCanceled, obIntent(t, ledger, stillRunningKey(l.AttemptID, 1)).State)
 }
+
+// A ledger failure while sending stops the start even when the start's bound
+// runs out in the same breath.
+func TestOutboxALedgerFailureWhileSendingIsNotHiddenByAnEndingBound(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(id, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	_, err := ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_receipt BEFORE UPDATE OF receipt_id ON outbox WHEN NEW.receipt_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.afterPost = func(Destination, int64) error {
+		cancel() // the start's bound runs out as the request is answered
+		return nil
+	}
+	require.Error(t, obOutbox(t, ledger, basecamp).Start(startCtx))
+}

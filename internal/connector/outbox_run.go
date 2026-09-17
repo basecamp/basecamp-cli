@@ -200,7 +200,9 @@ func (o *Outbox) Start(ctx context.Context) error {
 		}
 		o.log.Warn("connector: a lifecycle message's listing failed on start; it is tried again", "error", err)
 	}
-	if err := o.flushSome(ctx, 0, true); err != nil && ctx.Err() == nil {
+	if err := o.flushSome(ctx, 0, true); err != nil && (errors.Is(err, errLedger) || ctx.Err() == nil) {
+		// A ledger failure stops the start whenever it happened, even if the
+		// bound ran out in the same breath.
 		return fmt.Errorf("connector: send lifecycle messages on start: %w", err)
 	}
 	return nil
@@ -302,7 +304,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 			// settle, finding nothing; or it was written and could not be read
 			// back. Either way it is an error wherever it happens, so a start
 			// stops on it.
-			return intent.ID, false, fmt.Errorf("connector: record or read back the refusal of lifecycle message %d: %w", intent.ID, err)
+			return intent.ID, false, fmt.Errorf("%w: record or read back the refusal of lifecycle message %d: %w", errLedger, intent.ID, err)
 		}
 		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		o.line(settled)
@@ -328,7 +330,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 		// reconciliation will find the message by its body, or it was written
 		// and could not be read back. The ledger failed either way: that is an
 		// error wherever it happens, so a start stops on it.
-		return intent.ID, false, fmt.Errorf("connector: record or read back the receipt of lifecycle message %d: %w", intent.ID, err)
+		return intent.ID, false, fmt.Errorf("%w: record or read back the receipt of lifecycle message %d: %w", errLedger, intent.ID, err)
 	}
 	o.line(recorded)
 	return intent.ID, false, nil
