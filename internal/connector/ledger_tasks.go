@@ -187,9 +187,6 @@ type Hooks struct {
 	AttemptEnded func(ctx context.Context, tx Tx, s Settlement) error
 	// StillRunning runs in StillRunning's transaction.
 	StillRunning func(ctx context.Context, tx Tx, tick StillRunningTick) error
-	// RecordMoved is called when settlement finds a record somewhere the
-	// task did not put it, and settles around it rather than failing.
-	RecordMoved func(eventID int64, state RecordState)
 }
 
 // SetHooks installs hooks. Not safe concurrently with ledger use.
@@ -606,14 +603,6 @@ type Settlement struct {
 	Events             []SettledEvent
 }
 
-// logMoved is where a settlement notes a record it found somewhere else. It
-// hangs off Hooks so the ledger keeps no logger of its own.
-func (h Hooks) logMoved(eventID int64, state RecordState) {
-	if h.RecordMoved != nil {
-		h.RecordMoved(eventID, state)
-	}
-}
-
 // SettledEvent is one event's state after its task ended.
 type SettledEvent struct {
 	EventID int64
@@ -733,18 +722,10 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 				return Settlement{}, err
 			}
 			if !moved {
-				// A record something else already moved — a person's discard,
-				// a later verdict — is settled where it was put. Refusing the
-				// whole transaction would strand the attempt, its token and
-				// its directory for good.
-				record, err := loadRecord(ctx, tx, r.eventID)
-				if err != nil {
-					return Settlement{}, err
-				}
-				se.Outcome, se.Reported = Outcome(r.outcome), false
-				settlement.Events = append(settlement.Events, se)
-				l.hooks.logMoved(r.eventID, record.State)
-				continue
+				// #736's invariant 4: a record a worker was handed leaves
+				// dispatched only to completed, so nothing else can have moved
+				// it. Reaching here is a ledger someone wrote by hand.
+				return Settlement{}, fmt.Errorf("connector: settle event %d: %w", r.eventID, ErrNotDispatchable)
 			}
 			if _, err := tx.ExecContext(ctx, `
 UPDATE task_events SET delivery = 'completed', completed_at = ?, outcome = ? WHERE task_id = ? AND event_id = ?`,
