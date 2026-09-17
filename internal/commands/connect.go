@@ -866,15 +866,19 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 		// An entry that names an account nothing can use is not an unbound
 		// profile: say what is wrong with the account it does name.
 		if p.AccountID != "" {
+			where := "the config file that defines the profile"
+			if path := profileFieldFile(app.Config, name, "account_id"); path != "" {
+				where = "the profile's entry in " + richtext.SanitizeSingleLine(path)
+			}
 			return "", output.ErrUsageHint(
 				fmt.Sprintf("Profile %q names account %q, which is not an account ID", name, p.AccountID),
-				"Correct account_id in the config file that defines the profile.")
+				"Correct account_id in "+where+".")
 		}
-		return "", unboundProfileError(name)
+		return "", unboundProfileError(app.Config, name)
 	}
 	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
 		return "", output.ErrUsageHint(
-			fmt.Sprintf("Profile %q is bound to account %s, and this command named account %s", name, bound, app.Config.AccountID),
+			fmt.Sprintf("Profile %q is bound to account %s%s, and this command named account %s", name, bound, boundIn(app.Config, name), app.Config.AccountID),
 			"Setup works in the profile's own account. Drop --account (or BASECAMP_ACCOUNT_ID).")
 	}
 	return bound, nil
@@ -891,25 +895,13 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 // bot that already has its credential the account goes into its config entry
 // by hand rather than through another login.
 //
-// Even `auth agent connect` refuses an accountless entry that is not the
-// global config's, because the entry it would write stays shadowed by the
-// system, repo or local config that defines it. For that profile the only
-// remedy is the file the entry comes from.
-func unboundProfileError(name string) error {
+// Those commands all write the global config's entry, which does not bind
+// every profile: globalBindingBlocker, the question they ask themselves,
+// says when it would not, and names the file to change instead.
+func unboundProfileError(cfg *config.Config, name string) error {
 	message := fmt.Sprintf("Profile %q is not bound to an account", name)
-	// The same question `auth agent connect` asks itself, so the hint is
-	// right whenever that command is: it takes an unbound global entry as
-	// its own to write. Where that reading is wrong — a trusted repo or
-	// local config defining the same accountless profile, which keeps
-	// shadowing the global entry after it is written — it is wrong for the
-	// command too, and telling them apart needs per-profile provenance the
-	// config layer does not keep.
-	//
-	// A global config that cannot be read is no reason to fail here: the
-	// command named below reports that itself, in full.
-	if unbound, err := globalProfileIsUnbound(name); err == nil && !unbound {
-		return output.ErrUsageHint(message,
-			"The entry is not the global config's, so no command can bind it. Add account_id to the config file that defines it.")
+	if blocker := globalBindingBlocker(cfg, name); blocker != "" {
+		return output.ErrUsageHint(message, blocker+".")
 	}
 	global := filepath.Join(config.GlobalConfigDir(), "config.json")
 	return output.ErrUsageHint(message,

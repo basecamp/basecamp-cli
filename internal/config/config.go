@@ -52,6 +52,76 @@ type Config struct {
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
+
+	// ProfileOrigins records, per profile name, the config files its entry
+	// in Profiles was made from. Set by the file layers only: a profile an
+	// invocation adds to Profiles in memory has none.
+	ProfileOrigins map[string]*ProfileOrigin `json:"-"`
+}
+
+// ProfileLayer is one config file's entry for a profile.
+type ProfileLayer struct {
+	Source  Source
+	Path    string
+	BaseURL string
+}
+
+// ProfileOrigin is where a profile's effective entry came from. See
+// mergeProfile for how entries from different files combine.
+type ProfileOrigin struct {
+	// Layers are the files whose entries make up the profile, farthest
+	// first: the first defines it, and each later one refines it.
+	Layers []ProfileLayer
+
+	// Fields maps each field set on the profile, by its JSON key, to the
+	// path of the file that set it.
+	Fields map[string]string
+
+	// Replaced are the entries a closer one replaced whole, farthest
+	// first, each with the entry that replaced it. Nothing of them
+	// applies.
+	Replaced []ReplacedProfileLayer
+}
+
+// ReplacedProfileLayer is a file's entry for a profile that a closer entry
+// replaced whole, and the entry that replaced it.
+type ReplacedProfileLayer struct {
+	ProfileLayer
+
+	// By is the entry that replaced it: for another Basecamp, or for
+	// another account on the same one.
+	By ProfileLayer
+}
+
+// Includes reports whether a file of the given source contributes to the
+// profile.
+func (o *ProfileOrigin) Includes(source Source) bool {
+	for _, l := range o.Layers {
+		if l.Source == source {
+			return true
+		}
+	}
+	return false
+}
+
+// ReplacedLayer returns the replaced entry from a file of the given source,
+// nil when no such entry was replaced.
+func (o *ProfileOrigin) ReplacedLayer(source Source) *ReplacedProfileLayer {
+	for i := len(o.Replaced) - 1; i >= 0; i-- {
+		if o.Replaced[i].Source == source {
+			return &o.Replaced[i]
+		}
+	}
+	return nil
+}
+
+// Closest is the closest file contributing to the profile: the one whose
+// fields win.
+func (o *ProfileOrigin) Closest() ProfileLayer {
+	if len(o.Layers) == 0 {
+		return ProfileLayer{}
+	}
+	return o.Layers[len(o.Layers)-1]
 }
 
 // IsExperimental returns true if the named experimental feature is enabled.
@@ -333,39 +403,120 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		if untrusted {
 			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
 		} else {
-			if cfg.Profiles == nil {
-				cfg.Profiles = make(map[string]*ProfileConfig)
-			}
 			for name, profileData := range v {
 				if profileMap, ok := profileData.(map[string]any); ok {
-					profileCfg := &ProfileConfig{}
-					if baseURL, ok := profileMap["base_url"].(string); ok && baseURL != "" {
-						profileCfg.BaseURL = baseURL
-					} else {
-						// Skip profiles with empty or missing base_url
-						continue
-					}
-					if accountID := getStringOrNumber(profileMap, "account_id"); accountID != "" {
-						profileCfg.AccountID = accountID
-					}
-					if projectID := getStringOrNumber(profileMap, "project_id"); projectID != "" {
-						profileCfg.ProjectID = projectID
-					}
-					if todolistID := getStringOrNumber(profileMap, "todolist_id"); todolistID != "" {
-						profileCfg.TodolistID = todolistID
-					}
-					if scope, ok := profileMap["scope"].(string); ok {
-						profileCfg.Scope = scope
-					}
-					if clientID, ok := profileMap["client_id"].(string); ok {
-						profileCfg.ClientID = clientID
-					}
-					cfg.Profiles[name] = profileCfg
+					mergeProfile(cfg, name, profileMap, ProfileLayer{Source: source, Path: path})
 				}
 			}
+			// An aggregate: the last file that contributed any profile.
+			// Which file each profile and field came from is recorded in
+			// ProfileOrigins, and nothing is decided from this.
 			cfg.Sources["profiles"] = string(source)
 		}
 	}
+}
+
+// mergeProfile layers one config file's entry for a profile over the entry
+// the farther files made of it. This is the one place profile entries from
+// different files meet, and the rule is:
+//
+//   - An entry with no base_url is skipped, as if the file did not name the
+//     profile.
+//   - An entry for the same Basecamp as the one it layers over — the same
+//     base_url, normalized — refines it field by field. A field the closer
+//     entry sets wins; a field it leaves unset keeps the farther file's
+//     value. So a trusted repo or local config that names a profile's
+//     project does not hide the account the global config binds it to,
+//     just as an unset top-level key never hides a farther file's.
+//   - An entry for a different Basecamp, or for a different account on the
+//     same one (both name an account_id, and they differ), replaces the
+//     farther one whole. A project, todolist or client from one account
+//     means nothing in another, so nothing is carried across; the replaced
+//     files are kept in the origin, since an account bound there no longer
+//     applies.
+//
+// Unset means absent: for the IDs also empty (as for the top-level IDs),
+// while a present scope or client_id sets the field even when empty.
+//
+// One field is dropped rather than kept: a todolist belongs to a project, so
+// an entry that names another project and no todolist inherits none.
+//
+// Every field set records the file that set it, in cfg.ProfileOrigins.
+func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileLayer) {
+	baseURL, _ := entry["base_url"].(string)
+	if baseURL == "" {
+		return
+	}
+	layer.BaseURL = baseURL
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]*ProfileConfig)
+	}
+	if cfg.ProfileOrigins == nil {
+		cfg.ProfileOrigins = make(map[string]*ProfileOrigin)
+	}
+
+	p, origin := cfg.Profiles[name], cfg.ProfileOrigins[name]
+	account := getStringOrNumber(entry, "account_id")
+	otherAccount := p != nil && p.AccountID != "" && account != "" && !sameID(p.AccountID, account)
+	if p == nil || origin == nil || otherAccount || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
+		replaced := []ReplacedProfileLayer(nil)
+		if p != nil && origin != nil {
+			replaced = append(replaced, origin.Replaced...)
+			for _, l := range origin.Layers {
+				replaced = append(replaced, ReplacedProfileLayer{ProfileLayer: l, By: layer})
+			}
+		}
+		p = &ProfileConfig{}
+		origin = &ProfileOrigin{Replaced: replaced, Fields: make(map[string]string)}
+		cfg.Profiles[name] = p
+		cfg.ProfileOrigins[name] = origin
+	}
+	origin.Layers = append(origin.Layers, layer)
+
+	set := func(field string, dst *string, value string) {
+		*dst = value
+		origin.Fields[field] = layer.Path
+	}
+	set("base_url", &p.BaseURL, baseURL)
+	if account != "" {
+		set("account_id", &p.AccountID, account)
+	}
+	if v := getStringOrNumber(entry, "project_id"); v != "" {
+		if !sameID(p.ProjectID, v) && p.TodolistID != "" {
+			// The inherited todolist is in the project being replaced.
+			p.TodolistID = ""
+			delete(origin.Fields, "todolist_id")
+		}
+		set("project_id", &p.ProjectID, v)
+	}
+	if v := getStringOrNumber(entry, "todolist_id"); v != "" {
+		set("todolist_id", &p.TodolistID, v)
+	}
+	if v, ok := entry["scope"].(string); ok {
+		set("scope", &p.Scope, v)
+	}
+	if v, ok := entry["client_id"].(string); ok {
+		set("client_id", &p.ClientID, v)
+	}
+}
+
+// sameID reports whether two IDs name the same record: equal as decimal
+// numbers, so "0999" is "999", however many digits they run to — the
+// comparison the commands and the name resolver make. A value that is not
+// all digits is the same only as its exact spelling.
+func sameID(a, b string) bool {
+	if a == b {
+		return true
+	}
+	canonical := func(id string) (string, bool) {
+		if id == "" || strings.TrimLeft(id, "0123456789") != "" {
+			return "", false
+		}
+		return strings.TrimLeft(id, "0"), true
+	}
+	ca, okA := canonical(a)
+	cb, okB := canonical(b)
+	return okA && okB && ca == cb
 }
 
 // LoadFromEnv loads configuration from environment variables.

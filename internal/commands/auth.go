@@ -853,13 +853,15 @@ func resolveHeadlessProfile(app *appctx.App, login headlessLogin) (*profileTarge
 			return nil, err
 		}
 	}
-	globalUnbound := false
+	blocker := ""
 	if existing != nil && existing.AccountID == "" {
-		unbound, err := globalProfileIsUnbound(name)
-		if err != nil {
+		// Binding rewrites the global config file: a file the writers would
+		// refuse is reported as itself, before anything is said about which
+		// file defines the profile, and before the secret is consumed.
+		if err := globalConfigTakesProfiles(); err != nil {
 			return nil, err
 		}
-		globalUnbound = unbound
+		blocker = globalBindingBlocker(app.Config, name)
 	}
 
 	target := &profileTarget{name: name, account: account, existing: existing}
@@ -870,16 +872,15 @@ func resolveHeadlessProfile(app *appctx.App, login headlessLogin) (*profileTarge
 	case existing == nil:
 		target.created = &config.ProfileConfig{BaseURL: app.Config.BaseURL, AccountID: account}
 		target.existing = nil
+	case blocker != "":
+		// Binding writes the global config's entry, and for this profile
+		// that would not take effect. Refused before --account is asked
+		// for, which would only lead to this refusal.
+		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account, and a login cannot bind one", name),
+			blocker+", then rerun "+login.rerun+".")
 	case existing.AccountID == "" && !accountGivenExplicitly(app):
 		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account", name),
 			"Pass --account <id> to bind it alongside "+login.credential+".")
-	case existing.AccountID == "" && !globalUnbound:
-		// Binding rewrites the global config file. The effective profile
-		// is accountless, so if the global entry is missing or already
-		// carries an account, the accountless one came from a system, repo
-		// or local config and would keep shadowing whatever is written.
-		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is not the global config's entry", name),
-			"Add account_id to the config file that defines it, then rerun "+login.rerun+".")
 	case existing.AccountID == "":
 		target.bind = true
 	}
@@ -1165,7 +1166,7 @@ func requireProfileBinding(app *appctx.App, name string, existing *config.Profil
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to %s, not %s", name, existing.BaseURL, app.Config.BaseURL),
 			"Use a different profile, or drop the BASECAMP_BASE_URL override.")
 	case existing.AccountID != "" && app.Config.AccountID != "" && !accountIDsEqual(app.Config.AccountID, existing.AccountID):
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s, not %s", name, existing.AccountID, app.Config.AccountID),
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q is bound to account %s%s, not %s", name, existing.AccountID, boundIn(app.Config, name), app.Config.AccountID),
 			"Use a different profile, or drop the --account / BASECAMP_ACCOUNT_ID override.")
 	}
 	return nil
