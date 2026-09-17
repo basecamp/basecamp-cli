@@ -824,6 +824,8 @@ func TestStripMentionsOf(t *testing.T) {
 		"a stray < before it":            {"<" + agent + "hi " + other, "< hi " + other},
 		"self-closing, then a stray close": {selfClosing + " please deploy</p><p>thanks</p></bc-attachment> tail",
 			" " + " please deploy</p><p>thanks</p></bc-attachment> tail"},
+		"unclosed, then a stray close": {unclosed + " please deploy</p><p>thanks</p></bc-attachment> tail",
+			" " + " please deploy</p><p>thanks</p></bc-attachment> tail"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))
@@ -1081,4 +1083,32 @@ WHERE id = ?`, id)
 	grant, err := ledger.CreateTask(ctx, []int64{id})
 	require.NoError(t, err)
 	return grant
+}
+
+// createTask writes nothing when it refuses: the caller's transaction is as
+// it found it, whatever the caller does with it next.
+func TestCreateTaskWritesNothingWhenItRefuses(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	seenRecord(t, f.ledger, 3)
+	_, err := f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:3"))
+	require.NoError(t, err)
+	dispatchForTest(t, f.ledger, 3)
+	require.NoError(t, f.ledger.SetState(ctx, 3, StateCompleted, ""), "settled, and its snapshot is still there")
+
+	var tasksBefore, rowsBefore int
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&tasksBefore))
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events`).Scan(&rowsBefore))
+
+	tx, err := f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = f.ledger.createTask(ctx, tx, []int64{3})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "completed")
+	var tasksAfter, rowsAfter int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&tasksAfter))
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events`).Scan(&rowsAfter))
+	require.NoError(t, tx.Rollback())
+	assert.Equal(t, tasksBefore, tasksAfter, "no task row")
+	assert.Equal(t, rowsBefore, rowsAfter, "no task event row")
 }

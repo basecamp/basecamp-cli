@@ -257,12 +257,18 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	// it found it, whatever the caller then does with it.
 	guards := make([]string, 0, len(eventIDs))
 	for _, id := range eventIDs {
-		var acknowledge, hasInstruction int
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction); {
+		var (
+			acknowledge, hasInstruction int
+			state                       string
+		)
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL, state FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		if s := RecordState(state); s != StateAdmitted && s != StateQueued && s != StateDispatched {
+			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only admitted, queued or redispatched work joins a task", id, state)
 		}
 		var onLive bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM task_events WHERE event_id = ? AND retired_at IS NULL)`, id).Scan(&onLive); err != nil {
@@ -332,14 +338,14 @@ LIMIT 1`, args...).Scan(&busy); {
 	for _, id := range eventIDs {
 		// Admitted or queued work joins a task; a dispatched record whose
 		// task was superseded joins its replacement.
+		// The pre-pass read this state; the move is what makes it so under a
+		// concurrent writer, and refuses if it changed underneath.
 		moved, err := l.move(ctx, tx, transition{id: id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued, StateDispatched}})
 		if err != nil {
 			return TaskGrant{}, err
 		}
 		if !moved {
-			var state string
-			_ = tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, id).Scan(&state)
-			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only admitted, queued or redispatched work joins a task", id, state)
+			return TaskGrant{}, fmt.Errorf("connector: task event %d changed state while its task was being written", id)
 		}
 	}
 	return TaskGrant{ID: taskID, Token: token}, nil
@@ -1011,22 +1017,51 @@ func stripOnce(text string, personID int64) (string, [][2]int) {
 }
 
 // mentionEnd is where the mention whose start tag ends at from ends: after the
-// first </bc-attachment>, or at from when another attachment starts first or
-// none closes.
+// first </bc-attachment>, or at from when another attachment starts first,
+// some other element closes first, or none closes.
 func mentionEnd(text string, from int) int {
+	var open []string
 	for at := from; ; {
 		t, ok := nextMarkup(text, at)
 		if !ok {
 			return from
 		}
-		if strings.EqualFold(t.name, "bc-attachment") {
+		switch {
+		case strings.EqualFold(t.name, "bc-attachment"):
 			if t.isEnd {
 				return t.end
 			}
+			// Another attachment starts: this one was never closed.
 			return from
+		case t.isEnd:
+			// An end tag for something opened inside the mention — a
+			// mention's own figure closes its parts — is part of it. One that
+			// closes nothing opened here belongs to an element around the
+			// mention, so the closing tag further on is not this mention's:
+			// the start tag stands alone rather than swallowing what follows.
+			depth := len(open) - 1
+			for depth >= 0 && !strings.EqualFold(open[depth], t.name) {
+				depth--
+			}
+			if depth < 0 {
+				return from
+			}
+			open = open[:depth]
+		case !isVoidElement(t.name):
+			open = append(open, t.name)
 		}
 		at = t.end
 	}
+}
+
+// isVoidElement reports the elements of Basecamp's rich text that have no end
+// tag, so an unclosed one of them does not look like something still open.
+func isVoidElement(name string) bool {
+	switch strings.ToLower(name) {
+	case "br", "hr", "img", "source", "input", "meta", "link":
+		return true
+	}
+	return false
 }
 
 // markup is one start or end tag the walk found: where it starts and ends,

@@ -73,9 +73,11 @@ const (
 // before?" surviving the crash.
 type Ledger struct {
 	db *sql.DB
-	// path is the file, absolute: what this process holds open (ErrLedgerInUse).
-	path string
-	now  func() time.Time
+	// file is this process's entry for the ledger file, shared with every
+	// other Ledger open on it; closed releases it once.
+	file   *openLedgerFile
+	closed sync.Once
+	now    func() time.Time
 }
 
 // OpenLedger opens (creating if absent) the ledger at path and brings its
@@ -139,21 +141,25 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 	// The descriptor check runs for the first Ledger on this file and never
 	// while another one is open: its close would drop that one's locks.
 	file := claimLedger(abs)
+	if file.key != abs {
+		releaseLedger(file)
+		return nil, fmt.Errorf("connector: %s and %s are one file: %w", abs, file.key, ErrLedgerUnderAnotherName)
+	}
 	if err := checkLedgerFile(file, path, abs, owner); err != nil {
-		releaseLedger(abs)
+		releaseLedger(file)
 		return nil, err
 	}
 
 	db, err := sql.Open("sqlite", ledgerDSN(path, owner))
 	if err != nil {
-		releaseLedger(abs)
+		releaseLedger(file)
 		return nil, fmt.Errorf("connector: open ledger: %w", err)
 	}
 	// One writer. SQLite serializes writers anyway, and a pool merely turns
 	// that serialization into SQLITE_BUSY under load.
 	db.SetMaxOpenConns(1)
 
-	l := &Ledger{db: db, path: abs, now: time.Now}
+	l := &Ledger{db: db, file: file, now: time.Now}
 	if owner {
 		if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
 			_ = l.Close()
@@ -262,10 +268,11 @@ func securePath(path string, create bool) error {
 	return nil
 }
 
-// Close releases the ledger's handle and lets this process open the file
-// again.
+// Close releases the ledger's handle. A second Close is harmless: the file is
+// released once, so a defensive extra call cannot take the entry away from
+// another Ledger still holding the same file.
 func (l *Ledger) Close() error {
-	releaseLedger(l.path)
+	l.closed.Do(func() { releaseLedger(l.file) })
 	return l.db.Close()
 }
 
@@ -284,12 +291,22 @@ func (l *Ledger) Close() error {
 // file the check passed.
 var ErrLedgerNotTheSameFile = errors.New("the ledger path no longer names the file this process checked")
 
+// ErrLedgerUnderAnotherName is an open of a file this process already has
+// open under a different path — a hardlink, or a route through a symlink.
+// SQLite names its write-ahead log and shared-memory files after the path it
+// was given, so one file opened under two names is two different logs for one
+// database. It is refused here, before the check that would open the file and
+// drop the live handle's locks.
+var ErrLedgerUnderAnotherName = errors.New("this process already has this ledger open under another name")
+
 var openLedgers struct {
 	sync.Mutex
 	files map[string]*openLedgerFile
 }
 
 type openLedgerFile struct {
+	// key is this entry's key in the map, so it can be released by entry.
+	key  string
 	refs int
 	// mu serializes the check itself, so opens that race each other on a
 	// fresh file do not verify against a check that has not run yet.
@@ -304,6 +321,10 @@ var securePathRuns atomic.Int64
 
 // claimLedger records this process opening path and returns that file's
 // entry, whose lock the caller takes to check it.
+//
+// The entry is found by what the path names, not by how it is spelled: a
+// hardlink, a symlink or another route to the same file must meet the same
+// entry, because the check this guards opens and closes the file itself.
 func claimLedger(path string) *openLedgerFile {
 	openLedgers.Lock()
 	defer openLedgers.Unlock()
@@ -312,22 +333,28 @@ func claimLedger(path string) *openLedgerFile {
 	}
 	file := openLedgers.files[path]
 	if file == nil {
-		file = &openLedgerFile{}
+		if info, err := os.Lstat(path); err == nil {
+			for _, open := range openLedgers.files {
+				if open.info != nil && os.SameFile(open.info, info) {
+					file = open
+					break
+				}
+			}
+		}
+	}
+	if file == nil {
+		file = &openLedgerFile{key: path}
 		openLedgers.files[path] = file
 	}
 	file.refs++
 	return file
 }
 
-func releaseLedger(path string) {
+func releaseLedger(file *openLedgerFile) {
 	openLedgers.Lock()
 	defer openLedgers.Unlock()
-	file := openLedgers.files[path]
-	if file == nil {
-		return
-	}
 	if file.refs--; file.refs <= 0 {
-		delete(openLedgers.files, path)
+		delete(openLedgers.files, file.key)
 	}
 }
 

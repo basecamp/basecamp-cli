@@ -281,3 +281,51 @@ func TestASecondLedgerOnALiveFileNeitherOpensNorDisturbsIt(t *testing.T) {
 	_, err = OpenLedger(path)
 	assert.ErrorIs(t, err, ErrLedgerNotTheSameFile)
 }
+
+// The one-check-per-file rule is about the file, not the name: a hardlink or
+// another route to a file this process has open is recognized as that file,
+// before the check that would open it.
+func TestASecondNameForALiveLedgerIsRefusedWithoutOpeningIt(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	checks := securePathRuns.Load()
+
+	link := filepath.Join(dir, "hard.db")
+	require.NoError(t, os.Link(path, link))
+	_, err = OpenExistingLedger(context.Background(), link)
+
+	// Refused, because SQLite names its write-ahead log after the path and
+	// one file under two names is two logs — and refused before the check
+	// that opens the file, which would have dropped the live handle's locks.
+	require.ErrorIs(t, err, ErrLedgerUnderAnotherName)
+	assert.Equal(t, checks, securePathRuns.Load())
+	_, err = first.RecordSeen(context.Background(), testEvent(1), LanePoll)
+	require.NoError(t, err, "the live handle is untouched")
+	_, ok, err := first.Get(context.Background(), 1)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// Close releases the file once: a defensive second Close must not take the
+// entry away from another Ledger still holding it.
+func TestClosingALedgerTwiceReleasesItOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	second, err := OpenLedger(path)
+	require.NoError(t, err)
+	require.NoError(t, second.Close())
+	require.NoError(t, second.Close())
+	checks := securePathRuns.Load()
+
+	third, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer third.Close()
+
+	assert.Equal(t, checks, securePathRuns.Load(), "the first handle still holds the file")
+}
