@@ -364,13 +364,28 @@ func checkPolicyPermission(t *testing.T, e compatEnv) {
 	}
 	defer s.Close()
 
-	res, err := s.Prompt(turnCtx(t), "Create a file at the absolute path "+refused+" containing the single word NO. Then stop.")
-	policy.log(t)
-	if err != nil {
-		t.Fatalf("refused phase: %v", err)
-	}
-	if _, err := os.Stat(refused); err == nil {
-		t.Fatalf("the policy refused, and the file was written anyway")
+	// A live model may decline to attempt the write at all, which asks the
+	// policy nothing and proves nothing; the attempt is what is under test,
+	// so it is asked for again before the check gives a verdict.
+	var res driver.PromptResult
+	for attempt := range 2 {
+		ask := "Create a file at the absolute path " + refused + " containing the single word NO. Then stop."
+		if attempt > 0 {
+			ask = "Try again, and actually attempt the write this time: create a file at the absolute path " + refused +
+				" containing the single word NO, then stop. If a permission is refused, stop there."
+		}
+		res, err = s.Prompt(turnCtx(t), ask)
+		policy.log(t)
+		if err != nil {
+			t.Fatalf("refused phase: %v", err)
+		}
+		if _, err := os.Stat(refused); err == nil {
+			t.Fatalf("the policy refused, and the file was written anyway")
+		}
+		if len(res.Refusals) > 0 {
+			break
+		}
+		t.Logf("refused phase attempt %d: the agent asked nothing (stop %s)", attempt+1, res.Stop)
 	}
 	if len(res.Refusals) == 0 {
 		t.Fatalf("the agent never asked, or the refusal was not recorded (stop %s)", res.Stop)
