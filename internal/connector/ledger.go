@@ -494,6 +494,9 @@ END;
 	// attempts, and how each ended. See ledger_tasks.go for the invariants
 	// these tables hold.
 	migrationTasksAndAttempts,
+	// Migration 8 in the column's order (card 20's outbox is 7): the git
+	// worktrees tasks work in, and the ones kept. See ledger_worktrees.go.
+	migrationWorktrees,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
