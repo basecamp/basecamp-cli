@@ -14,15 +14,17 @@ import (
 // The MCP isolation boundary
 //
 // A session runs on the MCP servers it was given and on no others, and each
-// of those runs in the environment it was given and no other. Three places
-// hold that line:
+// of those runs on the environment it was given. Three places hold that
+// line:
 //
 //  1. What is declared. wireServers turns SessionConfig.MCPServers into the
 //     session/new mcpServers[], each with its whole environment written out:
 //     some adapters pass their own environment down to a server and some
-//     pass almost nothing, so nothing a server needs is left to inheritance
-//     and nothing of the connector's own environment is inherited either
-//     (invariant 1). A server without an absolute command is ErrUnusable.
+//     pass almost nothing, so nothing a server needs is left to inheritance.
+//     What a server may inherit is bounded by what the adapter itself was
+//     given, which is an allowlist (invariant 1, held in Driver.open). A
+//     server without a name or an absolute command is ErrUnusable, and so is
+//     an environment name that is not one.
 //
 //  2. What the adapter must not add. The adapter is configured so it can
 //     load no MCP server of the host's: claude-agent-acp is given

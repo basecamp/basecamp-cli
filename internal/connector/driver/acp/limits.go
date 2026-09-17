@@ -14,8 +14,8 @@ import "time"
 //     the session. agentText cuts the text of an error before it is
 //     sanitized (rpc.go) and again after, to 120 runes.
 //   - Per session: maxTools tool calls remembered, maxRecorded refusals
-//     remembered as recorded, and the updates channel (256, session.go) which
-//     drops rather than blocks when a consumer lags.
+//     remembered as recorded, and updatesBuffer updates for a consumer that
+//     has not read them, which are dropped rather than blocking it.
 //   - Per turn: maxRefusals refusals kept on a result.
 //   - Per tool call: maxToolCallID bytes of id and maxLocations paths.
 //   - Per option list: maxOptionDepth of nesting.
@@ -39,6 +39,12 @@ var (
 	maxHandlers = 16
 	maxBusy     = 256
 )
+
+// updatesBuffer is how many updates wait for a consumer that has not read
+// them. An update is progress, not a record: past this the oldest are the
+// ones that no longer matter, so emit drops rather than let an agent's pace
+// be set by a reader's.
+const updatesBuffer = 256
 
 // maxOptionDepth bounds how deeply a select option's groups may nest: the
 // agent writes that JSON, and a deep one would otherwise recurse until the

@@ -30,7 +30,9 @@ import (
 //     session/new. It routes nothing; it is a guard.
 //   - options[].kind, matched against ACP's kinds. An option id is carried
 //     back to the agent as an opaque value and is never what selects.
-//   - toolCall.toolCallId, as an opaque, bounded key for the call.
+//   - toolCall.toolCallId, as an opaque key for the call, cut to
+//     maxToolCallID wherever it is kept or shown (the session's tool calls,
+//     an update, a refusal) and digested where once-ness is decided.
 //
 // What is not, because an adapter can write anything: the option ids and
 // labels (so the answer is chosen by kind — allow_once, never allow_always,

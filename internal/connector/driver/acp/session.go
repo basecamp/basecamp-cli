@@ -127,7 +127,7 @@ func newSession(opts sessionOptions) *session {
 		mcpStatus: opts.MCPStatus,
 		mcpNames:  opts.MCPNames,
 		recorder:  opts.Refusals,
-		updates:   make(chan driver.Update, 256),
+		updates:   make(chan driver.Update, updatesBuffer),
 		readerEnd: make(chan struct{}),
 		modeSeen:  make(chan struct{}),
 		promptSem: make(chan struct{}, 1),
