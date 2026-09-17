@@ -93,3 +93,19 @@ func TestConnectAccountNamesTheFileOfAnUnusableAccount(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "Correct account_id in the profile's entry in "+local+".", hintOf(t, err))
 }
+
+// The file that hid the global entry is the first after it on another
+// Basecamp, even when a closer entry is back on the global entry's Basecamp
+// and replaced that file in turn.
+func TestGlobalBindingBlockerNamesTheFileThatReplacedTheGlobalEntry(t *testing.T) {
+	global := config.ProfileLayer{Source: config.SourceGlobal, Path: "/g/config.json", BaseURL: "https://3.basecampapi.com"}
+	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "http://localhost:3000"}
+	local := config.ProfileLayer{Source: config.SourceLocal, Path: "/l/config.json", BaseURL: "https://3.basecampapi.com/"}
+	cfg := &config.Config{ProfileOrigins: map[string]*config.ProfileOrigin{
+		"agent": {Replaced: []config.ProfileLayer{global, repo}, Layers: []config.ProfileLayer{local}},
+	}}
+
+	assert.Equal(t,
+		"Its entry in /r/config.json is for http://localhost:3000, not https://3.basecampapi.com, so it replaces the global config's entry in /g/config.json and any account bound there. Add account_id to the profile's entry in /l/config.json",
+		globalBindingBlocker(cfg, "agent"))
+}

@@ -581,12 +581,31 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 	}
 	closest := richtext.SanitizeSingleLine(origin.Closest().Path)
 	if hidden := origin.ReplacedLayer(config.SourceGlobal); hidden != nil {
-		replacer := origin.Layers[0]
+		replacer := firstEntryForAnotherBasecamp(origin, *hidden)
 		return fmt.Sprintf("Its entry in %s is for %s, not %s, so it replaces the global config's entry in %s and any account bound there. Add account_id to the profile's entry in %s",
 			richtext.SanitizeSingleLine(replacer.Path), richtext.SanitizeSingleLine(replacer.BaseURL),
 			richtext.SanitizeSingleLine(hidden.BaseURL), richtext.SanitizeSingleLine(hidden.Path), closest)
 	}
 	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Add account_id to the profile's entry there", closest)
+}
+
+// firstEntryForAnotherBasecamp is the entry that replaced hidden for being
+// on another Basecamp: the first, after it, whose base_url differs. A later
+// entry can be back on hidden's Basecamp, having replaced the one that did.
+// An entry that replaced it for naming another account sets one, and a
+// profile with no account has none of those left; Layers[0] is the fallback.
+func firstEntryForAnotherBasecamp(origin *config.ProfileOrigin, hidden config.ProfileLayer) config.ProfileLayer {
+	after := false
+	for _, l := range append(append([]config.ProfileLayer(nil), origin.Replaced...), origin.Layers...) {
+		if l == hidden {
+			after = true
+			continue
+		}
+		if after && config.NormalizeBaseURL(l.BaseURL) != config.NormalizeBaseURL(hidden.BaseURL) {
+			return l
+		}
+	}
+	return origin.Layers[0]
 }
 
 // bindProfileAccount sets the account on an existing profile entry in the

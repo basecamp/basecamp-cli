@@ -24,7 +24,10 @@ func trustedLocalConfig(t *testing.T, contents string) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	dir := t.TempDir()
+	// Resolved, as the config loader resolves the working directory, so
+	// the path is the one hints name where the temp dir is a symlink.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	path := filepath.Join(dir, ".basecamp", "config.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))

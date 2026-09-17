@@ -1366,3 +1366,29 @@ func TestProfileEntryWithoutABaseURLIsSkipped(t *testing.T) {
 	assert.Equal(t, []ProfileLayer{{Source: SourceGlobal, Path: paths[0], BaseURL: "https://3.basecampapi.com"}}, cfg.ProfileOrigins["bot"].Layers)
 	assert.NotContains(t, cfg.Profiles, "orphan")
 }
+
+// A closer entry that names another account on the same Basecamp is another
+// identity: the farther entry's project, todolist and client belong to the
+// farther account and are not carried across.
+func TestProfileEntryForAnotherAccountReplacesTheEntryWhole(t *testing.T) {
+	cfg, paths := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999","project_id":"1","todolist_id":"2","client_id":"c"}}}`},
+		profileLayer{SourceRepo, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":555}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"555","project_id":"42"}}}`},
+	)
+
+	assert.Equal(t, &ProfileConfig{BaseURL: "https://3.basecampapi.com", AccountID: "555", ProjectID: "42"}, cfg.Profiles["bot"])
+	origin := cfg.ProfileOrigins["bot"]
+	assert.Equal(t, paths[0], origin.ReplacedLayer(SourceGlobal).Path)
+	assert.Equal(t, []string{paths[1], paths[2]}, []string{origin.Layers[0].Path, origin.Layers[1].Path}, "the same account refines")
+}
+
+// A closer entry that binds an unbound farther one refines it.
+func TestProfileEntryBindingAnUnboundOneRefinesIt(t *testing.T) {
+	cfg, _ := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"1"}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"555"}}}`},
+	)
+
+	assert.Equal(t, &ProfileConfig{BaseURL: "https://3.basecampapi.com", AccountID: "555", ProjectID: "1"}, cfg.Profiles["bot"])
+}

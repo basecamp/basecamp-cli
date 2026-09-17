@@ -413,10 +413,12 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 //     value. So a trusted repo or local config that names a profile's
 //     project does not hide the account the global config binds it to,
 //     just as an unset top-level key never hides a farther file's.
-//   - An entry for a different Basecamp replaces the farther one whole. IDs
-//     and a client from one Basecamp mean nothing on another, so nothing is
-//     carried across; the replaced files are kept in the origin, since an
-//     account bound there no longer applies.
+//   - An entry for a different Basecamp, or for a different account on the
+//     same one (both name an account_id, and they differ), replaces the
+//     farther one whole. A project, todolist or client from one account
+//     means nothing in another, so nothing is carried across; the replaced
+//     files are kept in the origin, since an account bound there no longer
+//     applies.
 //
 // Unset means absent: for the IDs also empty (as for the top-level IDs),
 // while a present scope or client_id sets the field even when empty.
@@ -436,7 +438,9 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 	}
 
 	p, origin := cfg.Profiles[name], cfg.ProfileOrigins[name]
-	if p == nil || origin == nil || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
+	account := getStringOrNumber(entry, "account_id")
+	otherAccount := p != nil && p.AccountID != "" && account != "" && p.AccountID != account
+	if p == nil || origin == nil || otherAccount || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
 		replaced := []ProfileLayer(nil)
 		if p != nil && origin != nil {
 			replaced = append(append(replaced, origin.Replaced...), origin.Layers...)
@@ -453,8 +457,8 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 		origin.Fields[field] = layer.Path
 	}
 	set("base_url", &p.BaseURL, baseURL)
-	if v := getStringOrNumber(entry, "account_id"); v != "" {
-		set("account_id", &p.AccountID, v)
+	if account != "" {
+		set("account_id", &p.AccountID, account)
 	}
 	if v := getStringOrNumber(entry, "project_id"); v != "" {
 		set("project_id", &p.ProjectID, v)
