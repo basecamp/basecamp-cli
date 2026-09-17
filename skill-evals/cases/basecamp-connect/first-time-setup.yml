@@ -38,7 +38,8 @@ accept:
 reject:
   - '--with-token'
   - '--with-client-credentials'
-  - 'auth agent connect.*(--json|--agent|--quiet|-j\b|-q\b)'
+  # Every machine-output mode the interactive connection refuses.
+  - 'auth agent connect.*(--json|--agent|--quiet|--ids-only|--count|--jq|-j\b|-q\b)'
   - 'connect setup .*--operator[ =]'
   - 'connect setup .*--route[ =]''?333='
   - 'connect setup .*--(trust[ =]''?(allowlist|project)|allow[ =])'
