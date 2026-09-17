@@ -50,10 +50,6 @@ func setupMCPTestApp(t *testing.T, accountID, baseURL string) *appctx.App {
 
 func executeMCPCommand(t *testing.T, app *appctx.App, args ...string) error {
 	t.Helper()
-	// As cli.Execute does, before the command tree runs at all.
-	connectTokenEnvRefused = false
-	PrepareConnectToken(append([]string{"mcp"}, args...))
-	t.Cleanup(func() { connectTokenEnvRefused = false })
 	cmd := NewMCPCmd()
 	cmd.SetArgs(args)
 	cmd.SetContext(appctx.WithApp(context.Background(), app))

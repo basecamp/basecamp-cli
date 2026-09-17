@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/mcpserver"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/sysfd"
 )
 
 // mcpTransport is a seam so tests can drive the server over in-memory
@@ -29,67 +27,23 @@ import (
 var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{} }
 
 // connectTaskTokenEnv is where an earlier draft of the connector put a
-// worker's task token. It is not a way in: a token found there is removed and
-// the server refuses to start, so nothing is led to hand it over that way.
+// worker's task token. It is not a way in: the command refuses to serve when
+// a token is found there, so nothing is led to hand it over that way.
 const connectTaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
 
-// connectTokenEnvRefused records that a task token was found in the
-// environment at startup. It is taken out there and refused when the server
-// would serve the connect domain: the environment is not a way in.
-var connectTokenEnvRefused bool
-
-// PrepareConnectToken makes a connector-started worker's task token safe to
-// read later, and takes any stale token out of the environment. It runs before
-// the command tree is built, and it reads nothing.
-//
-// The hazard it closes is inheritance: the root command's persistent hooks
-// load configuration, tighten directories and may start a background update
-// check, and a child started then would inherit an open descriptor. Marking
-// the descriptor close-on-exec ends that, without consuming it — so the token
-// is still there to be read by the command itself, once cobra has decided the
-// invocation is one that serves. Reading it here instead would drain a
-// one-shot pipe for every invocation cobra goes on to refuse.
-//
-// The scan is deliberately loose, because what it does is harmless: a
-// descriptor that is not a token pipe is no worse for being close-on-exec in
-// a process that is about to serve MCP on stdio, and one that is not ours is
-// not touched, since the flag has to be there to be found.
-func PrepareConnectToken(args []string) {
-	if _, set := os.LookupEnv(connectTaskTokenEnv); set {
-		_ = os.Unsetenv(connectTaskTokenEnv)
-		connectTokenEnvRefused = true
+// connectTokenDescriptor reads the descriptor the task token arrives on.
+// Which descriptors are acceptable for a token is readTaskToken's business;
+// this answers only whether one was named at all, and whether the value is a
+// descriptor this process could act on.
+func connectTokenDescriptor(value string) (sysfd.Descriptor, error) {
+	if strings.TrimSpace(value) == "" {
+		return 0, output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
 	}
-	if fd, ok := connectTokenFDArg(args); ok {
-		markCloseOnExec(fd)
+	descriptor, err := sysfd.Parse(value)
+	if err != nil {
+		return 0, output.ErrUsage(fmt.Sprintf("--connect-token-fd: %v", err))
 	}
-}
-
-// connectTokenFDArg finds a --connect-token-fd value in the arguments of an
-// mcp command. It decides nothing about the invocation: the command's own flag
-// parsing does that, and this only says which descriptor to keep from a child.
-func connectTokenFDArg(args []string) (int, bool) {
-	if !slices.Contains(args, "mcp") {
-		return 0, false
-	}
-	for i, arg := range args {
-		value, isFlag := strings.CutPrefix(arg, "--connect-token-fd")
-		switch {
-		case !isFlag:
-			continue
-		case strings.HasPrefix(value, "="):
-			value = value[1:]
-		case value != "":
-			continue
-		case i+1 < len(args):
-			value = args[i+1]
-		default:
-			continue
-		}
-		if fd, err := strconv.ParseInt(value, 0, 64); err == nil && fd >= 3 && fd <= math.MaxInt32 {
-			return int(fd), true
-		}
-	}
-	return 0, false
+	return descriptor, nil
 }
 
 // connectStateGiven is the one rule for whether a state directory was given,
@@ -109,7 +63,7 @@ func NewMCPCmd() *cobra.Command {
 	var readOnly bool
 	var domains []string
 	var connectState string
-	var connectTokenFD int
+	var connectTokenFD string
 
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -141,13 +95,16 @@ func NewMCPCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 
 			// The task token is read, and its descriptor closed, before
-			// anything else runs: authentication can start helper processes,
-			// and a child started then would inherit an open descriptor.
+			// anything else in this command runs: authentication can start
+			// helper processes, and this leaves them nothing to inherit even
+			// if a descriptor arrived without the close-on-exec flag startup
+			// put on it.
 			var taskToken string
-			// A token in the environment was taken out at startup, before the
-			// hooks that could have passed it to a child. It is refused here:
-			// the environment is not a way in for any server.
-			if connectTokenEnvRefused {
+			// The environment is not a way in for any server: refused, and
+			// taken out of this process's environment as well, so nothing it
+			// might still start could read it there.
+			if _, set := os.LookupEnv(connectTaskTokenEnv); set {
+				_ = os.Unsetenv(connectTaskTokenEnv)
 				return output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
 					"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
 			}
@@ -160,10 +117,15 @@ func NewMCPCmd() *cobra.Command {
 					// the token or the ledger is touched.
 					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
 				}
-				// Read here, once cobra has accepted the invocation: the
-				// descriptor has been close-on-exec since startup, so nothing
-				// the hooks started could have inherited it.
-				token, err := readTaskToken(connectTokenFD)
+				// Read here, once cobra has accepted the invocation, so a
+				// one-shot pipe is not drained for a run that never serves.
+				// The descriptor has been close-on-exec since the program's
+				// first line, so nothing started in between inherited it.
+				descriptor, err := connectTokenDescriptor(connectTokenFD)
+				if err != nil {
+					return err
+				}
+				token, err := readTaskToken(descriptor)
 				if err != nil {
 					return err
 				}
@@ -221,7 +183,7 @@ func NewMCPCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Serve only read-only actions")
 	cmd.Flags().StringSliceVar(&domains, "domains", nil, "Narrow to specific domains (comma-separated; default all)")
 	cmd.Flags().StringVar(&connectState, "connect-state", "", "Serve the basecamp_connect domain from this connector state directory, for the task whose token arrives on --connect-token-fd")
-	cmd.Flags().IntVar(&connectTokenFD, "connect-token-fd", -1, "Read the task token from this inherited file descriptor (3 or above), then close it")
+	cmd.Flags().StringVar(&connectTokenFD, "connect-token-fd", "", "Read the task token from this inherited file descriptor (3 or above), then close it")
 
 	return cmd
 }

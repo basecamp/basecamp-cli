@@ -14,15 +14,20 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/sysfd"
 )
+
+// firstTokenFD is the lowest descriptor a task token may arrive on: below it
+// are stdin and stdout, which are the MCP wire, and stderr, which is the log.
+const firstTokenFD = 3
 
 // readTaskToken reads the task token from an inherited descriptor and closes
 // it. The connector hands the token over as the read end of a pipe, so it never
 // exists at a path, in argv or in the environment; once read, the descriptor
 // is gone too, and nothing this process starts can inherit it.
 //
-// Descriptors 0 to 2 are refused: stdin and stdout are the MCP wire and stderr
-// is the log. Only a pipe or a socket is taken, and anything else is left
+// Descriptors below firstTokenFD are refused. Only a pipe or a socket is
+// taken, and anything else is left
 // exactly as it was — not read, not closed: a regular file would be the token
 // at a path, and a wrong number could name a descriptor this process already
 // uses.
@@ -30,12 +35,10 @@ import (
 // The read ends at the first newline or at end of file, and is bounded in
 // size and in time, so a write end left open somewhere cannot hang startup. A
 // sender writes "token\n", or closes its end after the token.
-func readTaskToken(fd int) (string, error) {
-	switch {
-	case fd < 0:
-		return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
-	case fd < 3:
-		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be 3 or above", fd))
+func readTaskToken(descriptor sysfd.Descriptor) (string, error) {
+	fd := descriptor.Int()
+	if fd < firstTokenFD {
+		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be %d or above", fd, firstTokenFD))
 	}
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
@@ -55,7 +58,7 @@ func readTaskToken(fd int) (string, error) {
 		_ = unix.Close(fd)
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))
 	}
-	file := os.NewFile(uintptr(fd), "connect-token")
+	file := os.NewFile(descriptor.Uintptr(), "connect-token")
 	defer file.Close()
 	if err := file.SetReadDeadline(time.Now().Add(taskTokenReadTimeout)); err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))

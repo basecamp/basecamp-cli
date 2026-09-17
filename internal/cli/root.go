@@ -303,6 +303,13 @@ func postRunNoticesEnabled(app *appctx.App) bool {
 
 // Execute runs the root command.
 func Execute() {
+	// Before anything else: a descriptor this process inherited belongs to
+	// this process, not to the children it starts. The root command's
+	// persistent hooks load configuration, tighten directories and may check
+	// for an update before any command's own RunE runs, and a connector-
+	// started worker arrives holding its task token on an inherited pipe.
+	sealInheritedDescriptors()
+
 	cmd := NewRootCmd()
 
 	// Add subcommands
@@ -376,15 +383,6 @@ func Execute() {
 	cmd.AddCommand(commands.NewAgentHookCmd())
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewConnectCmd())
-
-	// Before anything else: a connector-started worker's task token arrives on
-	// an inherited descriptor, and the root command's persistent hooks — config
-	// hardening, profile loading, the update check — run before any command's
-	// own RunE and may start a process that would inherit it. This keeps the
-	// descriptor from those children and takes a stale token out of the
-	// environment; the token itself is read by the command, once cobra has
-	// accepted the invocation.
-	commands.PrepareConnectToken(os.Args[1:])
 
 	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
 	// everywhere a command doesn't explicitly accept it — except cobra's

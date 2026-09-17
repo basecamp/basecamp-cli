@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,6 +100,7 @@ func TestMCPCommandRefusesATokenInTheEnvironment(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--connect-token-fd")
 	assert.Empty(t, os.Getenv("BASECAMP_CONNECT_TASK_TOKEN"))
+	assert.True(t, fdOpen(fd), "and the descriptor it never got to was left alone")
 }
 
 // A descriptor that is not a pipe or a socket is refused and left alone: a
@@ -140,6 +139,9 @@ func TestMCPCommandRefusesABadTokenDescriptor(t *testing.T) {
 		want string
 	}{
 		"no descriptor":               {[]string{"--connect-state", dir}, "--connect-token-fd"},
+		"a blank descriptor":          {[]string{"--connect-state", dir, "--connect-token-fd", "   "}, "--connect-token-fd"},
+		"not a number":                {[]string{"--connect-state", dir, "--connect-token-fd", "three"}, "not a file descriptor"},
+		"past what int can hold":      {[]string{"--connect-state", dir, "--connect-token-fd", "2147483648"}, "out of range"},
 		"stdin is the MCP wire":       {[]string{"--connect-state", dir, "--connect-token-fd", "0"}, "3 or above"},
 		"stdout":                      {[]string{"--connect-state", dir, "--connect-token-fd", "1"}, "3 or above"},
 		"not open":                    {[]string{"--connect-state", dir, "--connect-token-fd", "987"}, "it is not open"},
@@ -211,60 +213,4 @@ func TestABlankStateDirectoryIsNoStateDirectory(t *testing.T) {
 	assert.Contains(t, err.Error(), "--connect-token-fd is only for a server started with --connect-state")
 	nowDev, nowIno, open := fdIdentity(t, fd)
 	assert.True(t, open && nowDev == dev && nowIno == ino, "and the descriptor was not touched")
-}
-
-// Startup keeps the token descriptor out of anything the process starts, and
-// reads nothing: the command reads it once cobra has accepted the invocation,
-// so a one-shot pipe is never drained for a run that never serves.
-func TestPrepareConnectTokenMarksTheDescriptorCloseOnExec(t *testing.T) {
-	fd := tokenPipe(t, "a-task-token\n")
-	before, err := fcntlGetFD(fd)
-	require.NoError(t, err)
-	require.Zero(t, before&unix.FD_CLOEXEC, "inherited descriptors arrive without it")
-
-	PrepareConnectToken([]string{"mcp", "--connect-state", "/x", "--connect-token-fd", strconv.Itoa(fd)})
-
-	after, err := fcntlGetFD(fd)
-	require.NoError(t, err)
-	assert.NotZero(t, after&unix.FD_CLOEXEC, "no child of this process inherits it")
-	assert.True(t, fdOpen(fd), "and it is still there for the command to read")
-}
-
-func TestPrepareConnectTokenLooksOnlyWhereItShould(t *testing.T) {
-	fd := tokenPipe(t, "token\n")
-	for name, args := range map[string][]string{
-		"another command": {"search", "--connect-token-fd", strconv.Itoa(fd)},
-		"no flag":         {"mcp", "--connect-state", "/x"},
-		"standard input":  {"mcp", "--connect-token-fd", "0"},
-		"not a number":    {"mcp", "--connect-token-fd", "three"},
-		"nothing after":   {"mcp", "--connect-token-fd"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, found := connectTokenFDArg(args)
-			assert.False(t, found)
-		})
-	}
-	for name, args := range map[string][]string{
-		"a value of its own": {"mcp", "--connect-token-fd", strconv.Itoa(fd)},
-		"joined with an =":   {"mcp", "--connect-token-fd=" + strconv.Itoa(fd)},
-		"after a root flag":  {"--json", "mcp", "--connect-token-fd", strconv.Itoa(fd)},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, found := connectTokenFDArg(args)
-			require.True(t, found)
-			assert.Equal(t, fd, got)
-		})
-	}
-}
-
-// A stale token in the environment is taken out at startup, before the hooks
-// that could pass it to a child, and the command then refuses to serve.
-func TestPrepareConnectTokenTakesAStaleEnvironmentTokenOut(t *testing.T) {
-	t.Setenv("BASECAMP_CONNECT_TASK_TOKEN", "stale")
-	t.Cleanup(func() { connectTokenEnvRefused = false })
-
-	PrepareConnectToken([]string{"mcp", "--connect-state", "/x"})
-
-	assert.Empty(t, os.Getenv("BASECAMP_CONNECT_TASK_TOKEN"))
-	assert.True(t, connectTokenEnvRefused)
 }
