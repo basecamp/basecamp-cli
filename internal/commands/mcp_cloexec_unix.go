@@ -8,7 +8,8 @@ import "golang.org/x/sys/unix"
 // a descriptor that is not open, or not ours, is nothing to protect, and the
 // command refuses it when it tries to read the token from it.
 func markCloseOnExec(fd int) {
-	if flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0); err == nil {
-		_, _ = unix.FcntlInt(uintptr(fd), unix.F_SETFD, flags|unix.FD_CLOEXEC)
+	handle := uintptr(fd) //nolint:gosec // G115: connectTokenFDArg only reports a descriptor in [3, math.MaxInt32], so this cannot wrap
+	if flags, err := unix.FcntlInt(handle, unix.F_GETFD, 0); err == nil {
+		_, _ = unix.FcntlInt(handle, unix.F_SETFD, flags|unix.FD_CLOEXEC)
 	}
 }
