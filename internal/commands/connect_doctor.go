@@ -20,7 +20,9 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
-// mcpHandshakeTimeout bounds doctor's MCP handshake.
+// mcpHandshakeTimeout bounds doctor's MCP handshake. A var so a test can
+// shorten it; production only reads it, and a test that changes it must not
+// run in parallel.
 var mcpHandshakeTimeout = 30 * time.Second
 
 func newConnectDoctorCmd() *cobra.Command {

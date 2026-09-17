@@ -439,13 +439,16 @@ to reconnect the agent's profile rotates its secret and needs the person's
 consent, and one that says to run or stop the connector is the person's to do,
 since starting it is not part of this skill.
 
-## Not built yet
+## Not this skill's to do yet
 
-These come with card 24 and do not exist in the CLI yet, so do not try them or
-look for flags for them:
+These come with card 24. Do not start, supervise or watch the connector from
+here, and do not look for flags for it:
 
-- supervising the connector from this skill, and reading its pointer lines;
-- a `service install` subcommand that keeps it running under systemd or launchd;
+- starting and supervising the connector, and reading the NDJSON pointer lines
+  it writes while it runs (the command writes them today; using them is not
+  this skill's yet);
+- a `service install` subcommand that keeps it running under systemd or
+  launchd, which does not exist in the CLI;
 - the Claude Code and Codex plugins that start it.
 
 When the person asks to start the connector, say plainly that setup is done (or
