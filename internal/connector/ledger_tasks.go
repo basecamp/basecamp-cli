@@ -931,7 +931,7 @@ GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
 // discards it.
 func (l *Ledger) StrandedRecords(ctx context.Context, approved map[int64]string) (int, error) {
 	var where strings.Builder
-	var args []any
+	args := make([]any, 0, 2*len(approved))
 	for bucket, route := range approved {
 		where.WriteString(" AND NOT (e.bucket_id = ? AND e.route = ?)")
 		args = append(args, bucket, route)
