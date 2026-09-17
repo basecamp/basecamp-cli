@@ -3,12 +3,15 @@ package connector
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -146,8 +149,12 @@ type dispatchHarness struct {
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
 	t.Helper()
 	h := &dispatchHarness{ledger: newTestLedger(t), fake: fake, routes: map[int64]admission.Route{adapterBucketID: {Path: testRoute}}}
-	private := filepath.Join(t.TempDir(), "sessions")
-	require.NoError(t, os.Mkdir(private, 0o700))
+	// Session directories hold a unix socket, whose path the kernel keeps
+	// short; a test's own temporary directory can be too long for one.
+	private, err := os.MkdirTemp("/tmp", "bcc-test-")
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(private, 0o700))
+	t.Cleanup(func() { _ = os.RemoveAll(private) })
 	opts := DispatcherOptions{
 		Ledger: h.ledger,
 		Driver: fake,
@@ -255,10 +262,39 @@ func TestTheDriverIsAskedOnlyAfterTheLedgerSaysLaunching(t *testing.T) {
 // Dispatcher invariant 3.
 func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	fake := newFakeDriver()
+	// The worker's group is this test's own, so this process may take the
+	// token from the socket the way the worker's MCP server would.
+	fake.process = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
 	var cfg driver.SessionConfig
+	token := make(chan string, 1)
+	fake.turn = func(s *fakeSession, n int, _ string) (driver.PromptResult, error) {
+		if n == 1 {
+			socket := cfg.MCPServers[0].Args[len(cfg.MCPServers[0].Args)-1]
+			conn, err := net.DialTimeout("unix", socket, 2*time.Second)
+			if err == nil {
+				data, _ := io.ReadAll(conn)
+				_ = conn.Close()
+				token <- strings.TrimSpace(string(data))
+			} else {
+				token <- ""
+			}
+		}
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
 	fake.onStart = func(c driver.SessionConfig) { cfg = c }
 	lines := &safeBuffer{}
-	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Lines = ndjson.NewWriter(lines) })
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Lines = ndjson.NewWriter(lines)
+		// Unix socket paths are short.
+		dir, err := os.MkdirTemp("/tmp", "bc-sess-")
+		require.NoError(t, err)
+		require.NoError(t, os.Chmod(dir, 0o700))
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		o.PrivateDir = dir
+	})
+	// The "worker's group" is this test's own: confirming it gone would kill
+	// the test.
+	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return nil }
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
 	h.attemptsEnded(t, 1)
@@ -270,13 +306,12 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	assert.Contains(t, prompt, "https://app.basecamp.com/2914079/buckets/48699913/recordings/10304028972")
 	assert.Less(t, estimateTokens(prompt), MaxPromptTokens)
 
+	// The token reaches the worker's MCP server only over its one-use socket.
+	secret := <-token
+	require.NotEmpty(t, secret, "the worker's own group was handed the token")
 	require.Len(t, cfg.MCPServers, 1)
-	token := cfg.MCPServers[0].Env[TaskTokenEnv]
-	require.NotEmpty(t, token)
-	assert.NotContains(t, prompt, token)
-	assert.NotContains(t, strings.Join(cfg.MCPServers[0].Args, " "), token, "no token in argv")
+	assert.Equal(t, []string{"connect", "worker-mcp"}, cfg.MCPServers[0].Args[:2], "the agent starts the connector's bridge")
 	for _, kv := range cfg.Env {
-		assert.NotContains(t, kv, token, "the worker's own environment has no token")
 		assert.False(t, strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_TOKEN="), "the host's tokens stay the host's")
 		assert.False(t, strings.HasPrefix(kv, "BASECAMP_TOKEN="))
 	}
@@ -284,9 +319,15 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	assert.False(t, hostToken)
 	assert.Equal(t, testRoute, cfg.Cwd)
 	assert.Equal(t, testRoute, cfg.Policy.Rules().WorkDir)
-	drivertest.RequireNoSecret(t, token, drivertest.Places{
-		Env: cfg.Env, Args: append([]string{prompt}, cfg.MCPServers[0].Args...),
-		Texts: []string{lines.String()}, Dirs: []string{h.d.opts.PrivateDir},
+	serverEnv := make([]string, 0, len(cfg.MCPServers[0].Env))
+	for k, v := range cfg.MCPServers[0].Env {
+		serverEnv = append(serverEnv, k+"="+v)
+	}
+	drivertest.RequireNoSecret(t, secret, drivertest.Places{
+		Env:   append(cfg.Env, serverEnv...),
+		Args:  append([]string{prompt}, cfg.MCPServers[0].Args...),
+		Texts: []string{lines.String()},
+		Dirs:  []string{h.d.opts.PrivateDir},
 	})
 }
 

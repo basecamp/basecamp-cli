@@ -62,10 +62,6 @@ const (
 // tools are mcp__basecamp__*.
 const MCPServerName = "basecamp"
 
-// TaskTokenEnv is the environment variable the worker's MCP server reads its
-// task token from.
-const TaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
-
 // Workspaces decides the directory a task works in from its approved route.
 // The default works in the route itself.
 type Workspaces interface {
@@ -114,6 +110,9 @@ type DispatcherOptions struct {
 	Driver driver.Driver
 	// Routes is connect.json's current routes by project.
 	Routes func() map[int64]admission.Route
+	// TokenWindow is how long a task token's socket waits for the worker's
+	// MCP server; DefaultTokenWindow when zero.
+	TokenWindow time.Duration
 	// Buckets is the --project scope; empty means every routed project.
 	Buckets []int64
 	// Concurrency is the most live tasks; setup's default when zero.
@@ -230,6 +229,9 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 	}
 	if opts.Tick <= 0 {
 		opts.Tick = DefaultDispatchTick
+	}
+	if opts.TokenWindow <= 0 {
+		opts.TokenWindow = DefaultTokenWindow
 	}
 	if opts.CancelGrace <= 0 {
 		opts.CancelGrace = DefaultCancelGrace
@@ -515,7 +517,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 
 	// Settling must outlive a shutdown that interrupts the start.
 	settleCtx := context.WithoutCancel(ctx)
-	cfg, cleanup, err := d.sessionConfig(launch, record)
+	cfg, tokens, cleanup, err := d.sessionConfig(launch, record)
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		d.log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
@@ -538,6 +540,8 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		return false, nil
 	}
 	p := session.Process()
+	// The token goes only to this worker's own process group.
+	tokens.AllowGroup(p.PGID)
 	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
 		_ = session.Close()
 		cleanup()
@@ -559,23 +563,39 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 }
 
 // sessionConfig builds what the driver is given (invariant 3).
-func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.SessionConfig, func(), error) {
+func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.SessionConfig, *TokenSocket, func(), error) {
 	dir := filepath.Join(d.opts.PrivateDir, launch.AttemptID)
 	if err := os.Mkdir(dir, 0o700); err != nil {
-		return driver.SessionConfig{}, func() {}, fmt.Errorf("connector: session directory: %w", err)
+		return driver.SessionConfig{}, nil, func() {}, fmt.Errorf("connector: session directory: %w", err)
 	}
-	cleanup := func() { _ = os.RemoveAll(dir) }
+	// The token's one carriage: a one-use socket in this attempt's own
+	// directory, served only to the worker's process group (tokensocket.go).
+	tokens, err := ServeTaskToken(dir, launch.Token, d.opts.TokenWindow)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return driver.SessionConfig{}, nil, func() {}, err
+	}
+	attemptID, log := launch.AttemptID, d.log
+	go func() {
+		if handoff := tokens.Result(); handoff != HandoffDelivered {
+			log.Warn("connector: the worker's MCP server did not take its task token", "attempt_id", attemptID, "handoff", string(handoff))
+		}
+	}()
+	cleanup := func() {
+		tokens.Close()
+		_ = os.RemoveAll(dir)
+	}
 
-	serverEnv := driver.EnvMap(driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), append(MCPServerEnv, d.opts.MCP.Env...)...), d.opts.Lookup,
-		map[string]string{TaskTokenEnv: launch.Token}))
+	serverEnv := driver.EnvMap(driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), append(MCPServerEnv, d.opts.MCP.Env...)...), d.opts.Lookup, nil))
 	return driver.SessionConfig{
 		Cwd: launch.WorkDir,
 		Env: driver.BuildEnv(driver.BaseEnv, d.opts.Lookup, nil),
 		MCPServers: []driver.MCPServer{{
 			Name:    MCPServerName,
 			Command: d.opts.MCP.Command,
-			Args:    []string{"mcp", "--profile", d.opts.MCP.Profile, "--connect-state", d.opts.MCP.StateDir},
-			Env:     serverEnv,
+			Args: []string{"connect", "worker-mcp", "--profile", d.opts.MCP.Profile,
+				"--connect-state", d.opts.MCP.StateDir, "--socket", tokens.Path()},
+			Env: serverEnv,
 		}},
 		Policy:   d.opts.Policy(launch.WorkDir),
 		Launcher: d.opts.Launcher,
@@ -588,7 +608,7 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 			WorkDir: launch.WorkDir, Class: record.Decision.Class,
 		},
 		PrivateDir: dir,
-	}, cleanup, nil
+	}, tokens, cleanup, nil
 }
 
 // settleAttempts is how many times ending an attempt is tried before it is

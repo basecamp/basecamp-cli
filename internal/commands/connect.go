@@ -63,6 +63,7 @@ isolated state directory and dispatches nothing. macOS and Linux only.`,
 	}
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd())
+	cmd.AddCommand(newConnectWorkerMCPCmd())
 	cmd.AddCommand(newConnectShowCmd())
 	return cmd
 }
