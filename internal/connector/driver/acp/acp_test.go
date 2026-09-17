@@ -1132,6 +1132,8 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 	t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
 
 	c := newConn(toAgent)
+	var busy atomic.Int32
+	c.onBusy = func(string, json.RawMessage) { busy.Add(1) }
 	release := make(chan struct{})
 	var inFlight, peak atomic.Int32
 	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage) {
@@ -1174,6 +1176,7 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 	select {
 	case refused := <-answers:
 		assert.Positive(t, refused, "what does not fit is refused as it is read")
+		assert.GreaterOrEqual(t, int(busy.Load()), refused, "and every one of those refusals is heard by the session")
 	case <-time.After(10 * time.Second):
 		t.Fatal("no answer reached the agent")
 	}
@@ -1228,4 +1231,74 @@ func TestARefusalDecidedAsTheTurnEndsIsOnItsResult(t *testing.T) {
 		t.Fatal("the policy was never asked")
 	}
 	assert.Len(t, res.Refusals, 1)
+}
+
+// A handshake that fails after the adapter started leaves nothing of its
+// process group behind by the time NewSession returns: the caller settles the
+// attempt on that error.
+func TestAFailedHandshakeLeavesNoGroupBehind(t *testing.T) {
+	// Several runs: the window this closes is a matter of milliseconds.
+	for run := range 5 {
+		h := newHarness(t)
+		h.sc.SpawnChild, h.sc.IgnoreTerminate = true, true
+		h.sc.Hang = "initialize"
+		d := h.driver()
+		d.opts.HandshakeTimeout = 500 * time.Millisecond
+		d.opts.CloseGrace = 2 * time.Second
+		_, err := d.NewSession(context.Background(), h.config())
+		require.Error(t, err)
+		rec := h.record()
+		require.NotZero(t, rec.ChildPID)
+		assert.True(t, gone(rec.ChildPID) && gone(rec.PID),
+			"run %d: the adapter's group is gone when NewSession returns, not a moment later", run)
+	}
+}
+
+func TestARefusalRecordIsBounded(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	tr := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = tr
+	s.mu.Unlock()
+	for range maxRefusals + 50 {
+		s.record(driver.PermissionRequest{ToolCallID: strings.Repeat("x", 4*maxToolCallID), Kind: driver.ToolEdit}, tr)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Len(t, tr.refusals, maxRefusals)
+	assert.Len(t, tr.refusals[0].ToolCallID, maxToolCallID)
+	s.turn = nil
+}
+
+// A cancel that arrives once the agent has answered the prompt, while the
+// session still waits on a decision, is not sent: that turn is over.
+func TestACancelAfterTheAgentAnsweredIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	deciding := make(chan struct{})
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		close(deciding)
+		time.Sleep(600 * time.Millisecond)
+		return false
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+	})
+	s := h.open()
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		assert.NoError(t, err)
+		answers <- res
+	}()
+	<-deciding
+	// The agent answers the prompt 150ms after asking; the decision takes 600.
+	time.Sleep(350 * time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	res := <-answers
+	assert.Equal(t, driver.TurnEndTurn, res.Stop)
+	assert.NotContains(t, h.record().Methods, "session/cancel")
 }

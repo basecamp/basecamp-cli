@@ -78,6 +78,9 @@ type conn struct {
 	// onNotification runs on the reading goroutine, in wire order, so a mode
 	// update is applied before the response that follows it is delivered.
 	onNotification func(method string, params json.RawMessage)
+	// onBusy hears a request refused at the handler bound, before its answer
+	// is written, so the refusal is on the record.
+	onBusy func(method string, params json.RawMessage)
 	// onRequest runs on its own goroutine per request; it must answer with
 	// reply or replyError.
 	onRequest func(id json.RawMessage, method string, params json.RawMessage)
@@ -139,6 +142,9 @@ func (c *conn) read(r io.Reader) error {
 			case c.handlers <- struct{}{}:
 			default:
 				// Already answering as many as this client answers at once.
+				if c.onBusy != nil {
+					c.onBusy(m.Method, m.Params)
+				}
 				c.replyError(m.ID, codeBusy, "too many requests at once")
 				continue
 			}
@@ -270,8 +276,24 @@ func (c *conn) abandon(p *pendingCall) {
 	}
 }
 
-func (c *conn) notify(method string, params any) error {
-	return c.send(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+// notifyIf writes a notification only if still() holds once the write lock is
+// taken: a notification that waited behind a stuck write is dropped if what
+// it was about has ended while it waited.
+func (c *conn) notifyIf(still func() bool, method string, params any) error {
+	data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	if err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if !still() {
+		return nil
+	}
+	if c.trace != nil {
+		c.trace("->", data)
+	}
+	_, err = c.w.Write(append(data, '\n'))
+	return err
 }
 
 func (c *conn) reply(id json.RawMessage, result any) {

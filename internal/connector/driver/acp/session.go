@@ -67,6 +67,9 @@ type session struct {
 // turn is a prompt in flight.
 type turn struct {
 	done chan struct{}
+	// settling is set once the agent has answered the prompt: nothing more is
+	// sent for this turn.
+	settling bool
 	// call is the turn's session/prompt, registered before it is sent.
 	call     *pendingCall
 	canceled bool
@@ -95,6 +98,7 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 	s.conn.trace = trace
 	s.conn.onNotification = s.onNotification
 	s.conn.onRequest = s.onRequest
+	s.conn.onBusy = s.onBusy
 	go func() {
 		if err := s.conn.read(worker.Stdout()); err != nil {
 			// A line past maxLine or a broken pipe: the session cannot go
@@ -508,7 +512,9 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	canceled := t.canceled
 	<-s.promptSem
 	if canceled && err == nil {
-		go func() { _ = s.conn.notify("session/cancel", map[string]any{"sessionId": id}) }()
+		go func() {
+			_ = s.conn.notifyIf(func() bool { return s.inFlight(t) }, "session/cancel", map[string]any{"sessionId": id})
+		}()
 	}
 	go s.finishTurn(t, answer, err)
 
@@ -534,6 +540,9 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 	if err == nil {
 		err = answer.wait(&resp)
 	}
+	s.mu.Lock()
+	t.settling = true
+	s.mu.Unlock()
 
 	s.drainDecisions()
 	s.mu.Lock()
@@ -630,15 +639,9 @@ func (s *session) Cancel(ctx context.Context) error {
 	sent := make(chan error, 1)
 	go func() {
 		// The turn this cancel was for may have ended while the write waited;
-		// a cancel is never sent for a turn the connector did not mean.
-		s.mu.Lock()
-		current := s.turn
-		s.mu.Unlock()
-		if current != t {
-			sent <- nil
-			return
-		}
-		sent <- s.conn.notify("session/cancel", map[string]any{"sessionId": id})
+		// it is checked again once the write is ours, so a cancel is never
+		// sent for a turn the connector did not mean.
+		sent <- s.conn.notifyIf(func() bool { return s.inFlight(t) }, "session/cancel", map[string]any{"sessionId": id})
 	}()
 	select {
 	case err := <-sent:
@@ -967,6 +970,29 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 // an option.
 const outcomeCanceled = "cancelled" //nolint:misspell // ACP's wire value
 
+// inFlight reports whether t is still the turn the agent is working on.
+func (s *session) inFlight(t *turn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turn == t && !t.settling
+}
+
+// onBusy records a permission request refused at the connection's handler
+// bound as the refusal it is.
+func (s *session) onBusy(method string, params json.RawMessage) {
+	if method != "session/request_permission" {
+		return
+	}
+	var p struct {
+		ToolCall json.RawMessage `json:"toolCall"`
+	}
+	_ = json.Unmarshal(params, &p)
+	call, _ := decodeUpdate(p.ToolCall)
+	req := driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}
+	s.record(req, nil)
+	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind})
+}
+
 // refuse answers a request the session will not put to the policy at all,
 // with no option of the agent's, and records it as the refusal it is.
 func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *turn) {
@@ -984,10 +1010,14 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 	if t == nil {
 		t = s.turn
 	}
-	if t == nil || s.turn != t {
+	if t == nil || s.turn != t || len(t.refusals) >= maxRefusals {
 		return
 	}
-	t.refusals = append(t.refusals, driver.Refusal{ToolCallID: req.ToolCallID, Tool: refusalTool(req)})
+	id := req.ToolCallID
+	if len(id) > maxToolCallID {
+		id = id[:maxToolCallID]
+	}
+	t.refusals = append(t.refusals, driver.Refusal{ToolCallID: id, Tool: refusalTool(req)})
 }
 
 // chooseOption selects by kind, never by id or label (invariant 3).
@@ -1031,6 +1061,9 @@ var decisionDrain = 2 * time.Second
 // the id of one, and maxLocations the paths it may name: the agent writes all
 // three, and a session's memory is not its to grow.
 const (
+	// maxRefusals bounds the refusals one turn records; past it, a refusal is
+	// still an update.
+	maxRefusals   = 1024
 	maxTools      = 1024
 	maxToolCallID = 256
 	maxLocations  = 64

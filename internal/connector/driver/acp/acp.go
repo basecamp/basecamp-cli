@@ -213,6 +213,13 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		if ctxErr := hctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
 			err = fmt.Errorf("%w (%w)", err, ctxErr)
 		}
+		// The one-owner rule's step 3: the adapter may have started the
+		// agent and its MCP servers before the handshake failed, and the
+		// caller settles this attempt on the error. A group that is not
+		// confirmed gone says so (driver.ErrGroupOutlivedLeader).
+		if gone := driver.ConfirmGroupGone(worker.Process(), d.opts.CloseGrace); gone != nil {
+			err = fmt.Errorf("%w; %w", err, gone)
+		}
 		return nil, fmt.Errorf("%w%s", err, s.stderrNote())
 	}
 	return s, nil
