@@ -147,6 +147,27 @@ func EnsurePrivateFile(path string) error {
 	return checkPrivateReadableFile(f, path)
 }
 
+// CheckPrivateDir holds a directory to the rules a private file's directory
+// must meet — every ancestor this user's own and unwritable by anyone else,
+// and the directory itself private — without opening anything inside it.
+//
+// It exists for a second open of a file this process already holds: the file
+// must not be opened again (POSIX drops a process's locks on any close of it),
+// but the path it is reached through can still be vetted.
+func CheckPrivateDir(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if err := checkAncestors(filepath.Dir(abs)); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(abs); err != nil {
+		return fmt.Errorf("inspect %s: %w", abs, err)
+	}
+	return checkPrivateDir(abs)
+}
+
 // CheckPrivateFile holds an existing file to EnsurePrivateFile's rules without
 // creating anything: every directory on the way must be this user's alone, the
 // file must not be a symlink, and — inspected through the open descriptor — it

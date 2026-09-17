@@ -425,12 +425,20 @@ func verifySameFile(path string, checked os.FileInfo) error {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf("connector: secure the ledger: %s can be read by other users (mode %04o)", path, perm)
 	}
-	dir, err := os.Lstat(filepath.Dir(path))
+	// The whole chain, not only the last directory: a path later redirected
+	// through a writable or foreign-owned ancestor is not the path the first
+	// check passed. Directories are vetted without opening the ledger, which
+	// is the one thing this path must not do.
+	dir := filepath.Dir(path)
+	if err := setup.CheckPrivateDir(dir); err != nil {
+		return fmt.Errorf("connector: secure the ledger: %w", err)
+	}
+	info, err = os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("connector: inspect ledger directory: %w", err)
 	}
-	if perm := dir.Mode().Perm(); perm&0o077 != 0 {
-		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", filepath.Dir(path), perm)
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", dir, perm)
 	}
 	return nil
 }
