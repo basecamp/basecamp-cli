@@ -19,6 +19,7 @@ ALLOWLIST=(
   NewAssignmentsCmd     # shortcut: shows assignments
   NewNotificationsCmd   # shortcut: lists notifications
   NewEventsCmd          # shortcut: one recording's history, plus the account feed's subcommands
+  NewConnectCmd         # runs the connector; setup is its subcommand
 )
 
 is_allowed() {

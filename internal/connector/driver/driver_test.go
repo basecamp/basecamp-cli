@@ -1,0 +1,124 @@
+//go:build unix
+
+package driver
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func lookupFrom(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
+func TestBuildEnvTakesExactNamesOnly(t *testing.T) {
+	host := map[string]string{
+		"HOME": "/home/x", "PATH": "/bin", "CLAUDE_CODE_MESSAGING_TOKEN": "test-token-not-real",
+		"BASECAMP_TOKEN": "test-token-not-real", "HOMEBREW_PREFIX": "/opt",
+	}
+	env := BuildEnv(BaseEnv, lookupFrom(host), map[string]string{"PATH": "/usr/bin", "EXTRA": "1", "BAD=NAME": "x"})
+	assert.Equal(t, []string{"EXTRA=1", "HOME=/home/x", "PATH=/usr/bin"}, env)
+}
+
+func TestRedactHidesEmailsAndCredentialShapes(t *testing.T) {
+	out := Redact("logged in as someone@example.com with Bearer abc.def-ghi and " + strings.Repeat("x", 48))
+	assert.NotContains(t, out, "someone@example.com")
+	assert.NotContains(t, out, "abc.def-ghi")
+	assert.NotContains(t, out, strings.Repeat("x", 48))
+}
+
+func TestStartWorkerNeverInheritsTheConnectorsEnvironment(t *testing.T) {
+	t.Setenv("CONNECTOR_CANARY_NOT_REAL", "leaked")
+	out := filepath.Join(t.TempDir(), "env.txt")
+	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+		Command{Path: "/bin/sh", Args: []string{"-c", "env > " + out}, Env: []string{"ONLY=this"}})
+	require.NoError(t, err)
+	<-w.Done()
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "CONNECTOR_CANARY_NOT_REAL")
+	assert.Contains(t, string(data), "ONLY=this")
+
+	// A nil Env is not "inherit".
+	w, err = StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+		Command{Path: "/bin/sh", Args: []string{"-c", "env > " + out}})
+	require.NoError(t, err)
+	<-w.Done()
+	data, err = os.ReadFile(out)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "CONNECTOR_CANARY_NOT_REAL")
+}
+
+type refusingLauncher struct{}
+
+func (refusingLauncher) Launch(context.Context, LaunchRequest) (Launched, error) {
+	return Launched{}, errors.New("scope refused")
+}
+func (refusingLauncher) Receipts(context.Context, string) ([]Receipt, error) { return nil, nil }
+
+func TestAStartThatRanNothingIsErrNotStarted(t *testing.T) {
+	_, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/nonexistent/claude-not-here"})
+	assert.ErrorIs(t, err, ErrNotStarted)
+	_, err = StartWorker(context.Background(), refusingLauncher{}, Scope{WorkDir: t.TempDir()}, Command{Path: "/bin/true"})
+	assert.ErrorIs(t, err, ErrNotStarted)
+	_, err = StartWorker(context.Background(), nil, Scope{}, Command{Path: "/bin/true"})
+	assert.ErrorIs(t, err, ErrNotStarted, "the direct launcher needs the record's directory")
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+// startWithChild starts a shell that starts a long child, and returns the
+// worker and the child's pid.
+func startWithChild(t *testing.T) (*Worker, int) {
+	t.Helper()
+	pidFile := filepath.Join(t.TempDir(), "child")
+	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+		Command{Path: "/bin/sh", Args: []string{"-c", "sleep 300 & echo $! > " + pidFile + "; wait"}, Env: []string{"PATH=/bin:/usr/bin"}})
+	require.NoError(t, err)
+	var child int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(pidFile)
+		if err != nil || len(strings.TrimSpace(string(data))) == 0 {
+			return false
+		}
+		child, err = strconv.Atoi(strings.TrimSpace(string(data)))
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+	return w, child
+}
+
+func TestTerminateEndsTheWholeProcessGroup(t *testing.T) {
+	w, child := startWithChild(t)
+	assert.Equal(t, w.Process().PID, w.Process().PGID)
+	w.Terminate(time.Second)
+	assert.Eventually(t, func() bool { return !alive(child) }, 5*time.Second, 20*time.Millisecond, "the worker's own children go with it")
+}
+
+func TestTerminateRecordedLeavesAReusedPidAlone(t *testing.T) {
+	cmd := exec.CommandContext(context.Background(), "/bin/sleep", "300")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	started := time.Now()
+
+	signaled, err := TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started.Add(-time.Hour)}, time.Second)
+	require.NoError(t, err)
+	assert.False(t, signaled, "a recorded start time that does not match is another process")
+	assert.True(t, alive(cmd.Process.Pid))
+
+	signaled, err = TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started}, 2*time.Second)
+	require.NoError(t, err)
+	assert.True(t, signaled)
+	_ = cmd.Wait()
+}
