@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -24,17 +25,21 @@ import (
 // transports instead of the process's stdin/stdout.
 var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{} }
 
-// connectTaskTokenEnv carries a connector-started worker's task token. The
-// token binds the basecamp_connect domain to one task, so it is taken from the
-// environment the connector sets for the server and never from a flag, which
-// any process on the machine can read from the command line.
+// connectTaskTokenEnv is where an earlier draft of the connector put a
+// worker's task token. It is not a way in: a token found there is removed and
+// the server refuses to start, so nothing is led to hand it over that way.
 const connectTaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
+
+// maxTaskTokenBytes bounds what is read from the token descriptor. A token is
+// 43 characters; anything near this is not one.
+const maxTaskTokenBytes = 4096
 
 // NewMCPCmd creates the mcp command serving Basecamp over MCP on stdio.
 func NewMCPCmd() *cobra.Command {
 	var readOnly bool
 	var domains []string
 	var connectState string
+	var connectTokenFD int
 
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -58,17 +63,29 @@ func NewMCPCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// The task token is taken out of the environment before anything
-			// else runs: authentication can start helper processes, and a
-			// child started then would inherit it.
+			// The task token is read, and its descriptor closed, before
+			// anything else runs: authentication can start helper processes,
+			// and a child started then would inherit an open descriptor.
 			var taskToken string
-			if connectState != "" {
+			switch {
+			case connectState == "" && connectTokenFD >= 0:
+				return output.ErrUsage("--connect-token-fd is only for a server started with --connect-state")
+			case connectState != "":
 				if readOnly {
 					// Every connect action records something; refused before
 					// the token or the ledger is touched.
 					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
 				}
-				taskToken = takeConnectTaskToken()
+				if _, set := os.LookupEnv(connectTaskTokenEnv); set {
+					_ = os.Unsetenv(connectTaskTokenEnv)
+					return output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
+						"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
+				}
+				token, err := readTaskToken(connectTokenFD)
+				if err != nil {
+					return err
+				}
+				taskToken = token
 			}
 
 			// CheckAuthenticated, not IsAuthenticated: this refuses to
@@ -121,7 +138,8 @@ func NewMCPCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Serve only read-only actions")
 	cmd.Flags().StringSliceVar(&domains, "domains", nil, "Narrow to specific domains (comma-separated; default all)")
-	cmd.Flags().StringVar(&connectState, "connect-state", "", "Serve the basecamp_connect domain from this connector state directory, for the task named by $"+connectTaskTokenEnv)
+	cmd.Flags().StringVar(&connectState, "connect-state", "", "Serve the basecamp_connect domain from this connector state directory, for the task whose token arrives on --connect-token-fd")
+	cmd.Flags().IntVar(&connectTokenFD, "connect-token-fd", -1, "Read the task token from this inherited file descriptor (3 or above), then close it")
 
 	return cmd
 }
@@ -136,14 +154,51 @@ func stateDirHint(refusal *connector.StateDirError) string {
 	}
 }
 
-// takeConnectTaskToken reads the task token and removes it from the
-// environment, so nothing this process starts inherits it. That clears it from
-// what the process hands on, not from its own /proc environ, which only this
-// user can read.
-func takeConnectTaskToken() string {
-	token := os.Getenv(connectTaskTokenEnv)
-	_ = os.Unsetenv(connectTaskTokenEnv)
-	return token
+// readTaskToken reads the task token from an inherited descriptor and closes
+// it. The connector hands the token over as the read end of a pipe, so it never
+// exists at a path, in argv or in the environment; once read, the descriptor
+// is gone too, and nothing this process starts can inherit it.
+//
+// Descriptors 0 to 2 are refused: stdin and stdout are the MCP wire and stderr
+// is the log.
+func readTaskToken(fd int) (string, error) {
+	switch {
+	case fd < 0:
+		return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
+	case fd < 3:
+		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be 3 or above", fd))
+	}
+	file := os.NewFile(uintptr(fd), "connect-token")
+	if file == nil {
+		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is not a descriptor", fd))
+	}
+	// Only a pipe or a socket is taken, and anything else is left exactly as
+	// it was — not read, not closed. A regular file would be the token at a
+	// path, and a wrong number could name a descriptor this process already
+	// uses for something else.
+	info, err := file.Stat()
+	if err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: it is not open", fd))
+	}
+	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
+		return "", output.ErrUsage(fmt.Sprintf("descriptor %d is not a pipe or a socket; the task token is handed over on one, never from a file", fd))
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, maxTaskTokenBytes+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, readErr))
+	}
+	if closeErr != nil {
+		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, closeErr))
+	}
+	if len(data) > maxTaskTokenBytes {
+		return "", output.ErrUsage(fmt.Sprintf("descriptor %d carries more than %d bytes; that is not a task token", fd, maxTaskTokenBytes))
+	}
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", output.ErrUsage(fmt.Sprintf("descriptor %d carried an empty task token", fd))
+	}
+	return token, nil
 }
 
 // openConnectDispatch opens the connector's ledger in stateDir and binds it to
@@ -155,9 +210,6 @@ func takeConnectTaskToken() string {
 // than served. The ledger must already exist — a worker's server reads the
 // connector's ledger, it never starts one.
 func openConnectDispatch(ctx context.Context, stateDir, accountID, token string) (*connector.TaskDispatch, func(), error) {
-	if strings.TrimSpace(token) == "" {
-		return nil, nil, output.ErrUsage("--connect-state needs the task token in $" + connectTaskTokenEnv + "; the connector sets it when it starts a worker")
-	}
 
 	agentID, err := connector.ResolveStateDir(stateDir, accountID)
 	if err != nil {
@@ -183,7 +235,7 @@ func openConnectDispatch(ctx context.Context, stateDir, accountID, token string)
 	if err != nil {
 		_ = ledger.Close()
 		if errors.Is(err, connector.ErrTaskTokenRefused) {
-			return nil, nil, output.ErrUsage("$" + connectTaskTokenEnv + " names no current task in " + stateDir)
+			return nil, nil, output.ErrUsage("the task token names no current task in " + stateDir)
 		}
 		return nil, nil, err
 	}

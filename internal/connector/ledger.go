@@ -392,7 +392,10 @@ CREATE INDEX events_conversation ON events (conversation_key, state);
 	// delivery is admitted → exposed → delivered → completed and never goes
 	// back, held by the trigger as the events lifecycle is. guard is the
 	// thirty-second acknowledgement guard: '' where none applies, armed until
-	// get_dispatch cancels it or the connector fires it.
+	// get_dispatch cancels it or the connector fires it, and settled once.
+	// A record a worker was handed leaves dispatched only to completed. The
+	// whole lifecycle these enforce is written down at the top of
+	// ledger_dispatch.go.
 	//
 	// An event is on at most one live task. retired_at is set on every row of
 	// a task when it is superseded, and the unique index over the rows not
@@ -427,12 +430,34 @@ CREATE TABLE task_events (
 
 CREATE UNIQUE INDEX task_events_one_live_task ON task_events (event_id) WHERE retired_at IS NULL;
 
+CREATE TRIGGER events_handed_work_settles_first
+BEFORE UPDATE OF state ON events
+WHEN OLD.state = 'dispatched' AND NEW.state NOT IN ('dispatched', 'completed')
+  AND EXISTS (SELECT 1 FROM task_events WHERE event_id = OLD.id AND delivery IN ('exposed', 'delivered'))
+BEGIN
+  SELECT RAISE(ABORT, 'a worker was handed this event; it leaves dispatched only when completed');
+END;
+
+CREATE TRIGGER task_events_guard_settles_once
+BEFORE UPDATE OF guard ON task_events
+WHEN NEW.guard <> OLD.guard AND NOT (OLD.guard = 'armed' AND NEW.guard IN ('canceled', 'fired'))
+BEGIN
+  SELECT RAISE(ABORT, 'a guard only goes from armed to canceled or fired');
+END;
+
 CREATE TRIGGER task_events_delivery_moves_forward
 BEFORE UPDATE OF delivery ON task_events
 WHEN (CASE NEW.delivery WHEN 'admitted' THEN 0 WHEN 'exposed' THEN 1 WHEN 'delivered' THEN 2 ELSE 3 END)
    < (CASE OLD.delivery WHEN 'admitted' THEN 0 WHEN 'exposed' THEN 1 WHEN 'delivered' THEN 2 ELSE 3 END)
 BEGIN
   SELECT RAISE(ABORT, 'a delivery state never goes back');
+END;
+
+CREATE TRIGGER task_events_exposure_comes_first
+BEFORE UPDATE OF delivery ON task_events
+WHEN OLD.delivery = 'admitted' AND NEW.delivery IN ('delivered', 'completed')
+BEGIN
+  SELECT RAISE(ABORT, 'nothing a worker was never handed is acknowledged or completed');
 END;
 `,
 }

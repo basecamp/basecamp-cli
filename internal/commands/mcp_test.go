@@ -113,15 +113,32 @@ func runMCPCommandWithApp(t *testing.T, app *appctx.App, args ...string) *mcp.Cl
 
 	done := make(chan error, 1)
 	go func() { done <- executeMCPCommand(t, app, args...) }()
-	t.Cleanup(func() {
-		require.NoError(t, <-done, "basecamp mcp exited with error")
-	})
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
-	session, err := client.Connect(context.Background(), clientTransport, nil)
-	require.NoError(t, err, "MCP initialize failed")
-	t.Cleanup(func() { _ = session.Close() })
-	return session
+	// Raced against the command: one that refuses to start exits without
+	// serving, and a client connect waiting on it would never return.
+	type connected struct {
+		session *mcp.ClientSession
+		err     error
+	}
+	connecting := make(chan connected, 1)
+	go func() {
+		client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+		session, err := client.Connect(context.Background(), clientTransport, nil)
+		connecting <- connected{session, err}
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "basecamp mcp refused to start")
+		t.Fatal("basecamp mcp exited before serving")
+		return nil
+	case c := <-connecting:
+		require.NoError(t, c.err, "MCP initialize failed")
+		t.Cleanup(func() {
+			require.NoError(t, <-done, "basecamp mcp exited with error")
+		})
+		t.Cleanup(func() { _ = c.session.Close() })
+		return c.session
+	}
 }
 
 func TestMCPCommandServesMCP(t *testing.T) {

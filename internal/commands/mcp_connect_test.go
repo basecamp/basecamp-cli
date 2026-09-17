@@ -1,3 +1,5 @@
+//go:build unix
+
 package commands
 
 import (
@@ -7,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -93,11 +96,9 @@ func connectMCPApp(t *testing.T, accountID, baseURL string) (*appctx.App, string
 // server started without the token does not expose it.
 func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
 	app, dir, grant, ledger := connectMCPApp(t, "999", unusedUpstream(t).URL)
-	t.Setenv(connectTaskTokenEnv, grant.Token)
 
-	session := runMCPCommandWithApp(t, app, "--connect-state", dir)
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir, "--connect-token-fd", strconv.Itoa(tokenPipe(t, grant.Token)))
 	assert.Contains(t, toolNames(t, session), "basecamp_connect")
-	assert.Empty(t, os.Getenv(connectTaskTokenEnv), "the token does not outlive startup in the environment")
 
 	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "basecamp_connect", Arguments: map[string]any{"action": "get_dispatch"},
@@ -126,41 +127,44 @@ func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
 
 func TestMCPCommandMatchesTheAccountAsANumber(t *testing.T) {
 	app, dir, grant, _ := connectMCPApp(t, "0999", unusedUpstream(t).URL)
-	t.Setenv(connectTaskTokenEnv, grant.Token)
 
-	session := runMCPCommandWithApp(t, app, "--connect-state", dir+"/")
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir+"/", "--connect-token-fd", strconv.Itoa(tokenPipe(t, grant.Token)))
 	assert.Contains(t, toolNames(t, session), "basecamp_connect")
 }
 
-// Authentication can start helper processes, so the token is out of the
-// environment before it runs — even when it then fails.
+// Authentication can start helper processes, so the token is read and its
+// descriptor closed before it runs — even when it then fails.
 func TestMCPCommandTakesTheTokenBeforeAuthenticating(t *testing.T) {
 	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
 	t.Setenv("BASECAMP_TOKEN", "")
-	t.Setenv(connectTaskTokenEnv, grant.Token)
+	fd := tokenPipe(t, grant.Token)
+	dev, ino, _ := fdIdentity(t, fd)
 
-	err := executeMCPCommand(t, app, "--connect-state", dir)
+	err := executeMCPCommand(t, app, "--connect-state", dir, "--connect-token-fd", strconv.Itoa(fd))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Not authenticated")
-	assert.Empty(t, os.Getenv(connectTaskTokenEnv))
+	if nowDev, nowIno, open := fdIdentity(t, fd); open {
+		assert.False(t, nowDev == dev && nowIno == ino, "the token descriptor was closed before authentication")
+	}
 }
 
 func TestMCPCommandRefusesReadOnlyBeforeTouchingTheToken(t *testing.T) {
 	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
-	t.Setenv(connectTaskTokenEnv, grant.Token)
+	fd := tokenPipe(t, grant.Token)
+	dev, ino, _ := fdIdentity(t, fd)
 
-	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only")
+	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only", "--connect-token-fd", strconv.Itoa(fd))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "read-only")
-	assert.Equal(t, grant.Token, os.Getenv(connectTaskTokenEnv))
+	nowDev, nowIno, open := fdIdentity(t, fd)
+	assert.True(t, open && nowDev == dev && nowIno == ino, "the descriptor was not touched")
 }
 
 func TestMCPCommandWithoutConnectStateHasNoConnectDomain(t *testing.T) {
-	app, _, grant, _ := connectMCPApp(t, "999", unusedUpstream(t).URL)
-	t.Setenv(connectTaskTokenEnv, grant.Token)
+	app, _, _, _ := connectMCPApp(t, "999", unusedUpstream(t).URL)
 
 	session := runMCPCommandWithApp(t, app)
-	assert.NotContains(t, toolNames(t, session), "basecamp_connect", "a token alone serves nothing")
+	assert.NotContains(t, toolNames(t, session), "basecamp_connect")
 }
 
 func TestMCPCommandRefusesABadConnectState(t *testing.T) {
@@ -183,7 +187,7 @@ func TestMCPCommandRefusesABadConnectState(t *testing.T) {
 	for name, tc := range map[string]struct {
 		dir, token, want string
 	}{
-		"no token":        {dir, "", connectTaskTokenEnv},
+		"no token":        {dir, "", "--connect-token-fd"},
 		"another account": {otherAccount, grant.Token, "belongs to account 1000"},
 		"not a state dir": {notAStateDir, grant.Token, "not named <account>-<agent person id>"},
 		"named for an agent that is not a number": {mkdir(filepath.Join(root, "999-abc")), grant.Token, "not named"},
@@ -192,8 +196,11 @@ func TestMCPCommandRefusesABadConnectState(t *testing.T) {
 		"a token for no task":                     {dir, "not-a-task-token", "names no current task"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv(connectTaskTokenEnv, tc.token)
-			err := executeMCPCommand(t, app, "--connect-state", tc.dir)
+			args := []string{"--connect-state", tc.dir}
+			if tc.token != "" {
+				args = append(args, "--connect-token-fd", strconv.Itoa(tokenPipe(t, tc.token)))
+			}
+			err := executeMCPCommand(t, app, args...)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})

@@ -367,6 +367,11 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 		args = append(args, *t.revision)
 	}
 	query.WriteString(" AND state IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + ")")
+	if t.state != StateDispatched && t.state != StateCompleted {
+		// Invariant 4 of the dispatch lifecycle (ledger_dispatch.go): a
+		// record a worker was handed leaves dispatched only to completed.
+		query.WriteString(" AND NOT (" + heldByWorker + ")")
+	}
 	for _, from := range froms {
 		args = append(args, from)
 	}
@@ -385,6 +390,15 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 	return affected > 0, nil
 }
 
+// heldByWorker is true of a dispatched events row a worker was handed and
+// has not reported on: a delivery exposed or delivered, on any task.
+const heldByWorker = `state = 'dispatched' AND EXISTS (
+  SELECT 1 FROM task_events WHERE task_events.event_id = events.id AND delivery IN ('exposed', 'delivered'))`
+
+// ErrHeldByWorker is a move out of dispatched for an event a worker was
+// handed and has not reported on. Only its outcome moves it.
+var ErrHeldByWorker = errors.New("a worker was handed this event; it leaves dispatched only when completed")
+
 // explainRefusal says why an update changed nothing: there is no such record,
 // or the record is somewhere the lifecycle cannot leave for state.
 //
@@ -398,6 +412,12 @@ func (l *Ledger) explainRefusal(ctx context.Context, id int64, state RecordState
 		return fmt.Errorf("connector: set state of %d: %w", id, ErrNoSuchRecord)
 	case err != nil:
 		return fmt.Errorf("connector: set state of %d: %w", id, err)
+	}
+	if RecordState(current) == StateDispatched && state != StateDispatched && state != StateCompleted {
+		var held bool
+		if err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE id = ? AND `+heldByWorker+`)`, id).Scan(&held); err == nil && held {
+			return fmt.Errorf("connector: set state of %d: %w", id, ErrHeldByWorker)
+		}
 	}
 	return fmt.Errorf("connector: set state of %d: %s to %s is %w", id, current, state, ErrNotATransition)
 }

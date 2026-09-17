@@ -25,6 +25,89 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
+// The dispatch lifecycle, as one state machine.
+//
+// Three things have state here, and a fourth is the guard on one of them.
+// This comment is the contract; lifecycle (ledger_events.go), move, the
+// schema's triggers and index, and the functions below enforce exactly it,
+// and TestDispatchLifecycleTable tries every transition against it.
+//
+// # Record (events.state)
+//
+//	from        to          who                                      rule
+//	seen        admitted    admission                                verdict, conversation not live
+//	seen        queued      admission                                verdict, conversation live
+//	seen        blocked     admission                                verdict
+//	seen        discarded   admission                                verdict
+//	blocked     admitted    admission                                re-decided
+//	blocked     queued      admission                                re-decided, conversation live
+//	blocked     blocked     admission                                re-decided, still blocked
+//	blocked     discarded   admission, operator                      verdict, or discard
+//	blocked     dispatched  lifecycle bookkeeping                    —
+//	admitted    dispatched  dispatcher (CreateTask)                  joins a task
+//	queued      dispatched  dispatcher (CreateTask)                  joins a task
+//	dispatched  dispatched  dispatcher (CreateTask)                  redispatch onto a new task
+//	dispatched  admitted    dispatcher (SupersedeTask, withdrawal)   never handed to a worker
+//	dispatched  blocked     dispatcher                               never handed to a worker
+//	dispatched  completed   worker (complete_dispatch), dispatcher   the outcome, reported or settled
+//	admitted    queued      lifecycle bookkeeping                    —
+//	admitted    blocked     lifecycle bookkeeping                    —
+//	admitted    discarded   operator                                 discard
+//	queued      blocked     lifecycle bookkeeping                    —
+//	queued      discarded   operator                                 discard
+//	completed   —           nobody                                   terminal
+//	discarded   —           nobody                                   terminal
+//
+// Writing the state a record already has is a repeat and always allowed. Any
+// pair not in the table is refused.
+//
+// # Task (tasks)
+//
+//	live        created by the dispatcher (CreateTask); its token is valid
+//	superseded  by the dispatcher or an operator's redispatch (SupersedeTask);
+//	            its token is refused; terminal
+//
+// # Delivery (task_events.delivery), per event on a task
+//
+//	admitted → exposed    worker (get_dispatch), dispatcher at launch
+//	exposed  → delivered  worker (ack_dispatch)
+//	exposed  → completed  worker (complete_dispatch)
+//	delivered → completed worker (complete_dispatch), dispatcher settlement
+//
+// Forward only, and never skipping exposure: nothing a worker was never
+// handed is acknowledged or completed. A row is retired (retired_at)
+// when its task is superseded; a worker can touch only its live task's rows.
+//
+// # Guard (task_events.guard)
+//
+//	armed → canceled  worker (get_dispatch)
+//	armed → fired     connector's thirty-second acknowledgement
+//
+// '' (none) and armed are only ever written when the row is created.
+//
+// # Invariants
+//
+//  1. One live task per event: task_events_one_live_task.
+//  2. One task per conversation: an event joins a task only if every
+//     dispatched record on its conversation joins the same task (createTask).
+//  3. The token is valid only while its task is live, checked inside every
+//     worker call's own transaction.
+//  4. Nothing leaves dispatched while a worker may still act: a record with a
+//     delivery exposed or delivered, on any task, leaves dispatched only to
+//     completed (move, and the events_handed_work_settles_first trigger).
+//  5. A worker acts only on its own task's rows, reports only what it was
+//     handed, and a reported outcome stands.
+//  6. A task is made only of instructions a worker can pull, and finished
+//     work is never handed out for the first time.
+//  7. Superseding retires the task's rows and returns only what it never
+//     exposed to admitted; what a worker was handed stays dispatched (4) and
+//     waits for its outcome or a redispatch, which supersedes and creates in
+//     one transaction (supersedeTask and createTask take the caller's).
+//  8. Completed and discarded are terminal (events_terminal_is_terminal).
+//
+// Every transaction takes the write lock as it opens (_txlock=immediate), and
+// each call ends it as soon as its ledger work is done.
+
 // Delivery is an event's delivery state on a task. It moves forward only.
 type Delivery string
 
@@ -246,6 +329,12 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 			return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
 		}
 		unexposed = append(unexposed, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		// Retiring the task on a partial list would leave the rest dispatched
+		// on no live task, never exposed and never returned.
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
 	}
 	if err := rows.Close(); err != nil {
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
@@ -637,6 +726,12 @@ func (d *TaskDispatch) report(ctx context.Context, eventID int64, apply func(con
 		if err := tx.Commit(); err != nil {
 			return Receipt{}, fmt.Errorf("connector: commit report on %d: %w", eventID, err)
 		}
+	} else if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return Receipt{}, fmt.Errorf("connector: end report on %d: %w", eventID, err)
+	}
+	// The ledger is free before the receipt is built, as in get.
+	if d.afterTx != nil {
+		d.afterTx()
 	}
 	receipt := Receipt{EventID: eventID, Delivery: te.delivery, Outcome: Outcome(te.outcome)}
 	if te.ackID.Valid {

@@ -617,14 +617,15 @@ func TestTheEarliestSkipsAnEventThatLeftThePath(t *testing.T) {
 	assert.Equal(t, int64(2), got.EventID)
 }
 
-// A worker's report is what it did: it is recorded even when the record has
-// moved since, and only a dispatched record is completed by it.
-func TestAReportIsRecordedWhateverHappenedToTheRecord(t *testing.T) {
+// A worker's report is what it did: a record the dispatcher settled as
+// completed while the worker was still going keeps its settlement, and the
+// report the worker then sends is recorded against it.
+func TestAReportIsRecordedAfterSettlement(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
 	_, _, err := f.d.Get(ctx, 2)
 	require.NoError(t, err)
-	require.NoError(t, f.ledger.SetState(ctx, 2, StateAdmitted, ""))
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
 
 	_, err = f.d.Ack(ctx, 2, nil)
 	require.NoError(t, err)
@@ -632,7 +633,36 @@ func TestAReportIsRecordedWhateverHappenedToTheRecord(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryCompleted, receipt.Delivery)
 	assert.Equal(t, OutcomeFailed, receipt.Outcome)
-	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State)
+	assert.Equal(t, StateCompleted, getRecord(t, f.ledger, 2).State)
+}
+
+// Invariant 4: nothing leaves dispatched while a worker may still act on it.
+// A handed record cannot be withdrawn, blocked or requeued — not through the
+// ledger's write, and not around it — so its conversation stays busy and no
+// sibling starts a second task until its outcome is in.
+func TestAHandedRecordLeavesDispatchedOnlyWhenCompleted(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID), "superseding does not release what a worker holds")
+
+	for _, to := range []struct {
+		state  RecordState
+		reason string
+	}{{StateAdmitted, ""}, {StateBlocked, "read_failed"}} {
+		err := f.ledger.SetState(ctx, 1, to.state, to.reason)
+		require.ErrorIs(t, err, ErrHeldByWorker, "to %s", to.state)
+		_, err = f.ledger.db.ExecContext(ctx, `UPDATE events SET state = ? WHERE id = 1`, string(to.state))
+		require.Error(t, err, "the database refuses it too")
+	}
+	assert.Equal(t, StateDispatched, getRecord(t, f.ledger, 1).State)
+	_, err = f.ledger.CreateTask(ctx, []int64{2})
+	require.ErrorIs(t, err, ErrConversationBusy, "the sibling waits for the handed event")
+
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+	_, err = f.ledger.CreateTask(ctx, []int64{2})
+	require.NoError(t, err)
 }
 
 // A worker's open never leaves a ledger behind where there was none: not
@@ -872,4 +902,33 @@ func TestGetDispatchDoesNotHoldTheLedgerWhileItBuildsItsAnswer(t *testing.T) {
 	_, _, err = f.d.Get(ctx, 1)
 	require.NoError(t, err)
 	assert.Equal(t, 2, writes)
+}
+
+// Acknowledgements and completions free the ledger before building their
+// receipt too — on the retry that writes nothing as much as on the first.
+func TestReportsDoNotHoldTheLedgerWhileTheyBuildTheirReceipt(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	other, err := OpenExistingLedger(ctx, f.path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = other.Close() })
+	_, _, err = f.d.Get(ctx, 1)
+	require.NoError(t, err)
+
+	writes := 0
+	f.d.afterTx = func() {
+		writes++
+		fresh, err := other.RecordSeen(ctx, testEvent(int64(200+writes)), LanePoll)
+		require.NoError(t, err)
+		require.True(t, fresh)
+	}
+	for range 2 {
+		_, err = f.d.Ack(ctx, 1, nil)
+		require.NoError(t, err)
+	}
+	for range 2 {
+		_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 4, writes)
 }

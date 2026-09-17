@@ -11043,6 +11043,7 @@ FLAG basecamp mcp --account type=string
 FLAG basecamp mcp --agent type=bool
 FLAG basecamp mcp --cache-dir type=string
 FLAG basecamp mcp --connect-state type=string
+FLAG basecamp mcp --connect-token-fd type=int
 FLAG basecamp mcp --count type=bool
 FLAG basecamp mcp --domains type=stringSlice
 FLAG basecamp mcp --help type=bool
