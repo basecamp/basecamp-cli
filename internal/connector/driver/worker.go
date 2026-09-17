@@ -44,8 +44,10 @@ const pipeWaitDelay = 2 * time.Second
 //  5. A restart reaps by the same rule (TerminateRecorded, then the same
 //     confirmation), and asks OwnsWorker first: a pid is not an identity, so
 //     ownership is the pid AND the start time recorded with it. Everything
-//     that acts on a recorded worker — recovery, status, redispatch, discard,
-//     hold — asks OwnsWorker rather than testing a pid of its own.
+//     that acts on a recorded worker asks OwnsWorker rather than testing a
+//     pid of its own: in this card, recovery (through TerminateRecorded) and
+//     the release point's second confirmation; any later one — status,
+//     redispatch, discard, hold — the same way.
 //
 // The one thing this cannot cover is a descendant that leaves the group by
 // calling setsid: it is outside every group signal, and the connector can
