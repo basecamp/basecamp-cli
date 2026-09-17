@@ -747,6 +747,11 @@ func (d *TaskDispatch) Ack(ctx context.Context, eventID int64, ackID *int64) (Re
 			if ackID != nil && te.ackID.Valid && te.ackID.Int64 != *ackID {
 				return false, fmt.Errorf("connector: event %d acknowledged as %d: %w", eventID, te.ackID.Int64, ErrReportConflict)
 			}
+			if ackID != nil && !te.ackID.Valid && te.delivery == DeliveryCompleted {
+				// The outcome stands, and so does what was reported with it:
+				// an acknowledgement arriving after it is not written.
+				return false, fmt.Errorf("connector: event %d is completed: %w", eventID, ErrReportConflict)
+			}
 			if te.delivery != DeliveryExposed && (ackID == nil || te.ackID.Valid) {
 				return false, nil
 			}

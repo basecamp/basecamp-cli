@@ -61,32 +61,44 @@ func TakeConnectTaskToken(args []string) {
 }
 
 // connectTokenFDArg finds --connect-token-fd in the raw arguments of an mcp
-// command. Anything malformed is left to Cobra and the command to report.
+// command, reading it exactly as pflag will when the command runs: any base
+// Go accepts, the last occurrence winning, and nothing after a bare "--",
+// which is no longer a flag. The two must agree, or a spelling one of them
+// accepts and the other does not would read one descriptor and serve from
+// another. TestTheTokenPreScanAgreesWithTheFlagParser holds them together.
+//
+// Anything malformed is left to Cobra and the command to report.
 func connectTokenFDArg(args []string) (int, bool) {
 	if !slices.Contains(args, "mcp") {
 		return 0, false
 	}
-	for i, arg := range args {
-		value, found := strings.CutPrefix(arg, "--connect-token-fd")
+	fd, found := 0, false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		value, isFlag := strings.CutPrefix(arg, "--connect-token-fd")
 		switch {
-		case !found:
+		case !isFlag:
 			continue
 		case strings.HasPrefix(value, "="):
 			value = value[1:]
 		case value != "":
 			continue // a longer flag that merely starts the same way
 		case i+1 < len(args):
-			value = args[i+1]
+			i++
+			value = args[i]
 		default:
 			return 0, false
 		}
-		fd, err := strconv.Atoi(value)
+		parsed, err := strconv.ParseInt(value, 0, 64)
 		if err != nil {
 			return 0, false
 		}
-		return fd, true
+		fd, found = int(parsed), true
 	}
-	return 0, false
+	return fd, found
 }
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is
@@ -235,13 +247,17 @@ func stateDirHint(refusal *connector.StateDirError) string {
 // than served. The ledger must already exist — a worker's server reads the
 // connector's ledger, it never starts one.
 // connectTaskToken is what TakeConnectTaskToken read before the command tree
-// ran, or — when nothing did, as in a test that builds this command by hand —
-// the read done here.
+// ran. Nothing reads the descriptor here: by now the persistent hooks have
+// run, and a descriptor still open through them is one a child could have
+// inherited. A server whose token was not taken at startup does not start.
 func connectTaskToken(fd int) (string, error) {
 	if takenTaskToken.taken {
 		return takenTaskToken.token, takenTaskToken.err
 	}
-	return readTaskToken(fd)
+	if fd >= 0 {
+		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d was not read at startup; the token descriptor is read before anything else runs", fd))
+	}
+	return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
 }
 
 func openConnectDispatch(ctx context.Context, stateDir, accountID, token string) (*connector.TaskDispatch, func(), error) {
