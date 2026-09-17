@@ -379,6 +379,9 @@ func TestInvariant2AHeldLedgerSurvivesRestartUntilRelease(t *testing.T) {
 	// A record of the new generation, which a person need not review, still
 	// does not launch while the marker stands.
 	assert.Equal(t, StateAdmitted, opAdmit(t, l, 1, "recording:1"))
+	startable, err := l.StartableRecords(ctx, 10)
+	require.NoError(t, err)
+	assert.Empty(t, startable, "the dispatcher is offered nothing while the hold stands")
 	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Route: opRoute, Driver: "claude"})
 	require.Error(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "the refused launch rolled back")
