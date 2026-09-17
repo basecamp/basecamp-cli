@@ -111,8 +111,9 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 				cmd.Env = append(cmd.Env, obKillMarkerEnv+"="+marker)
 			}
 			require.NoError(t, cmd.Start())
-			pid := cmd.Process.Pid
-			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL); _ = cmd.Wait() })
+			// Signaled through os.Process, which refuses a process already
+			// reaped: the pid is never signaled after it could be reused.
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 
 			deadline := time.After(30 * time.Second)
 			if tc.landed {
@@ -135,7 +136,7 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 			}
 			// The helper is between its durable sending row and a receipt.
 			require.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State)
-			require.NoError(t, syscall.Kill(pid, syscall.SIGKILL))
+			require.NoError(t, cmd.Process.Signal(syscall.SIGKILL))
 			waitErr := cmd.Wait()
 			var exitErr *exec.ExitError
 			require.ErrorAs(t, waitErr, &exitErr)

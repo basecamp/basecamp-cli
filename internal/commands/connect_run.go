@@ -128,6 +128,10 @@ func connectSessionsPath(file setup.File) string {
 // time stays pending in the outbox and goes out on the next start.
 const connectShutdownFlush = 15 * time.Second
 
+// connectStartBound bounds how long a starting connector spends settling the
+// lifecycle messages a previous process left, before intake and dispatch run.
+const connectStartBound = 2 * time.Minute
+
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
 		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
@@ -369,9 +373,15 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if outbox != nil {
 		// On start, before anything transitions: settle what a previous
 		// process left sending and send what is due, so no stale notice
-		// waits behind new work.
-		if err := outbox.Start(runCtx); err != nil && runCtx.Err() == nil {
-			logger.Warn("connector: lifecycle messages on start", "error", err)
+		// waits behind new work. Bounded, so a slow Basecamp delays the
+		// connector's start rather than stopping it; what is left, Run
+		// carries on with. A ledger that cannot settle an intent stops the
+		// start.
+		startCtx, stopStart := context.WithTimeout(runCtx, connectStartBound)
+		err := outbox.Start(startCtx)
+		stopStart()
+		if err != nil && runCtx.Err() == nil {
+			return err
 		}
 	}
 	runPart("intake", intake.Run)

@@ -25,6 +25,10 @@ type Poster interface {
 	List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error)
 }
 
+// errBackedOff marks a listing failure whose backoff was recorded: the intent
+// is tried again later, and nothing about the ledger is wrong.
+var errBackedOff = errors.New("listing failed; backed off")
+
 // ErrNotPosted is a request Basecamp answered by refusing it: the message was
 // not created, so there is nothing to find and nothing to resend without a
 // person.
@@ -146,7 +150,7 @@ func (o *Outbox) Run(ctx context.Context) error {
 	ticker := time.NewTicker(o.opts.Tick)
 	defer ticker.Stop()
 	for {
-		if err := o.flushSome(ctx, RunBatch); err != nil && ctx.Err() == nil {
+		if err := o.flushSome(ctx, RunBatch, false); err != nil && ctx.Err() == nil {
 			o.log.Warn("connector: outbox", "error", err)
 		}
 		if ctx.Err() != nil {
@@ -165,18 +169,35 @@ func (o *Outbox) Run(ctx context.Context) error {
 
 // Start is the outbox's part of a connector's start, run before anything else
 // transitions: every sending intent a previous process left is reconciled,
-// then every due pending intent is sent. It honors the one wait start-up
-// cannot skip: an intent that went sending less than ReconcileAfter ago — a
-// process that died seconds before this one started — may still be landing,
-// and listing it now could only make it indeterminate for want of patience.
-// Run reconciles it once it comes of age. Everything older, which after any
-// ordinary restart is everything, is settled before Start returns.
+// then due pending intents are sent.
+//
+// An error Start returns is one the connector must not start past: the ledger
+// could not read or settle an intent. Everything else is left to Run, which
+// carries on from where Start stopped:
+//   - a listing that failed has backed its intent off;
+//   - a send that may or may not have landed ends the start's sending, since
+//     the next is likely to meet the same Basecamp;
+//   - a ctx that ends — a bound the caller sets, or shutdown — ends Start.
+//
+// One wait a start cannot skip: an intent that went sending less than
+// ReconcileAfter ago may still be landing, and listing it now could only make
+// it indeterminate for want of patience. A supervisor that restarts a crashed
+// connector within the minute meets exactly this case; Run reconciles the
+// intent once it comes of age.
 func (o *Outbox) Start(ctx context.Context) error {
-	if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil && ctx.Err() == nil {
-		// A listing that failed has backed its intent off; Run tries again.
-		o.log.Warn("connector: reconciling lifecycle messages on start", "error", err)
+	if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil {
+		switch {
+		case ctx.Err() != nil:
+			return nil
+		case !errors.Is(err, errBackedOff):
+			return fmt.Errorf("connector: reconcile lifecycle messages on start: %w", err)
+		}
+		o.log.Warn("connector: a lifecycle message's listing failed on start; it is tried again", "error", err)
 	}
-	return o.Flush(ctx)
+	if err := o.flushSome(ctx, 0, true); err != nil && ctx.Err() == nil {
+		return fmt.Errorf("connector: send lifecycle messages on start: %w", err)
+	}
+	return nil
 }
 
 // Recover reconciles every sending intent whose listing is due, whatever its
@@ -191,13 +212,13 @@ func (o *Outbox) Recover(ctx context.Context) error {
 // Flush sends every intent that is due, one at a time, and returns when none
 // is left or ctx ends. One flush claims an intent at most once: an intent a
 // person sent back to pending while the flush drains waits for the next one.
-func (o *Outbox) Flush(ctx context.Context) error { return o.flushSome(ctx, 0) }
+func (o *Outbox) Flush(ctx context.Context) error { return o.flushSome(ctx, 0, false) }
 
 // flushSome sends at most limit intents, or every due one when limit is zero.
 // The running connector sends in batches so that a queue arriving as fast as
 // it can be posted cannot starve reconciliation; only the shutdown flush
 // drains.
-func (o *Outbox) flushSome(ctx context.Context, limit int) error {
+func (o *Outbox) flushSome(ctx context.Context, limit int, stopWhenUncertain bool) error {
 	claimed := map[int64]bool{}
 	for ctx.Err() == nil {
 		if limit > 0 && len(claimed) >= limit {
@@ -218,11 +239,11 @@ func (o *Outbox) flushSome(ctx context.Context, limit int) error {
 			// goes out on the next start.
 			return nil
 		}
-		id, err := o.sendNext(ctx, claimed)
+		id, uncertain, err := o.sendNext(ctx, claimed)
 		if err != nil {
 			return err
 		}
-		if id == 0 {
+		if id == 0 || (uncertain && stopWhenUncertain) {
 			return nil
 		}
 	}
@@ -231,7 +252,7 @@ func (o *Outbox) flushSome(ctx context.Context, limit int) error {
 
 // sendNext claims the oldest due intent and sends it. It returns the id it
 // claimed, zero when none was due.
-func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, error) {
+func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	skip := make([]int64, 0, len(claimed))
@@ -240,18 +261,18 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 	}
 	intent, ok, err := o.ledger.claimIntent(ctx, skip...)
 	if err != nil || !ok {
-		return 0, err
+		return 0, false, err
 	}
 	if claimed[intent.ID] {
 		// Unreachable while the claim's query skips these ids; kept so a
 		// broken query stops the flush rather than sending twice.
-		return 0, fmt.Errorf("connector: outbox intent %d was claimed twice in one flush; not sending it again", intent.ID)
+		return 0, false, fmt.Errorf("connector: outbox intent %d was claimed twice in one flush; not sending it again", intent.ID)
 	}
 	claimed[intent.ID] = true
 	o.line(intent)
 	if intent.State != IntentSending {
 		// Claiming canceled it.
-		return intent.ID, nil
+		return intent.ID, false, nil
 	}
 
 	// Invariant 3: the sending row is committed; only now is a request made.
@@ -273,11 +294,11 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, RefusedNote)
 		if err != nil {
 			o.log.Warn("connector: settling a refused lifecycle message", "intent_id", intent.ID, "error", err)
-			return intent.ID, nil
+			return intent.ID, false, nil
 		}
 		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		o.line(settled)
-		return intent.ID, nil
+		return intent.ID, false, nil
 	}
 	if postErr != nil {
 		// The request may have reached Basecamp. The intent stays sending and
@@ -287,20 +308,20 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 		o.ledger.deferReconcile(context.WithoutCancel(ctx), intent.ID, o.opts.ReconcileAfter)
 		o.log.Warn("connector: a lifecycle message may not have been posted; it will be reconciled, not resent",
 			"intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
-		return intent.ID, nil
+		return intent.ID, true, nil
 	}
 	if receipt <= 0 {
 		o.log.Warn("connector: a lifecycle message was posted without an id; it will be reconciled", "intent_id", intent.ID)
-		return intent.ID, nil
+		return intent.ID, true, nil
 	}
 	recorded, err := o.ledger.recordReceipt(context.WithoutCancel(ctx), intent.ID, receipt)
 	if err != nil {
 		// The message exists; reconciliation finds it by its body.
 		o.log.Warn("connector: could not record a lifecycle message's receipt; it will be reconciled", "intent_id", intent.ID, "error", err)
-		return intent.ID, nil
+		return intent.ID, false, nil
 	}
 	o.line(recorded)
-	return intent.ID, nil
+	return intent.ID, false, nil
 }
 
 // claimIntent moves the oldest due pending intent to sending and commits, or,
@@ -446,7 +467,7 @@ func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int
 	now := o.ledger.now()
 	cutoff := now.Add(-age)
 	settled, listed := 0, 0
-	var firstErr error
+	var firstErr, hardErr error
 	for i := len(intents) - 1; i >= 0; i-- {
 		if limit > 0 && listed >= limit {
 			break
@@ -465,11 +486,17 @@ func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int
 			if firstErr == nil {
 				firstErr = err
 			}
+			if hardErr == nil && !errors.Is(err, errBackedOff) && ctx.Err() == nil {
+				hardErr = err
+			}
 			continue
 		}
 		if done {
 			settled++
 		}
+	}
+	if hardErr != nil {
+		return settled, hardErr
 	}
 	return settled, firstErr
 }
@@ -502,7 +529,7 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 			o.line(updated)
 			return true, nil
 		}
-		return false, err
+		return false, fmt.Errorf("%w: %w", errBackedOff, err)
 	}
 	candidate, note, err := o.ledger.adoptable(ctx, in, listed)
 	if err != nil {

@@ -62,7 +62,9 @@ import (
 //     sends a batch, then lists at most one due destination; each listing is
 //     bounded in time; each failure backs its intent off, doubling, and the
 //     intent is indeterminate after MaxReconcileFailures, with that count
-//     recorded.
+//     recorded. Start is the exception by design: it reconciles everything
+//     due before it sends, within the bound its caller sets, and stops
+//     sending at the first send that may not have landed.
 const migrationOutbox = `
 CREATE TABLE outbox (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

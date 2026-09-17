@@ -1122,3 +1122,93 @@ func TestOutboxStartSettlesWhatAPreviousProcessLeftBeforeSending(t *testing.T) {
 	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(3)).State, "what was due went out on start")
 	assert.Equal(t, []string{"list", "post"}, basecamp.calls, "reconcile, then send")
 }
+
+// A ledger that cannot settle what a previous process left stops the start:
+// nothing is sent past an intent that could not be reconciled.
+func TestOutboxStartStopsOnALedgerThatCannotReconcile(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	stale := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.add(stale.Destination, adapterAgentID, stale.Body)
+	clock.Advance(10 * time.Minute)
+	seenRecord(t, ledger, 2)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(2, 0, obCommentReply))
+	require.NoError(t, err)
+
+	// Adoption reads task_events; the ledger now cannot.
+	_, err = ledger.db.ExecContext(ctx, `ALTER TABLE task_events RENAME TO task_events_gone`)
+	require.NoError(t, err)
+
+	require.Error(t, obOutbox(t, ledger, basecamp).Start(ctx))
+	assert.Zero(t, basecamp.postCount(), "nothing sent past it")
+	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(2)).State)
+}
+
+// A listing that failed and backed off is not a reason to stop starting:
+// Run tries it again, and what is due goes out now.
+func TestOutboxStartCarriesOnPastABackedOffListing(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	stale := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	clock.Advance(10 * time.Minute)
+	seenRecord(t, ledger, 2)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(2, 0, obCommentReply))
+	require.NoError(t, err)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.listErr = errWire
+
+	require.NoError(t, obOutbox(t, ledger, basecamp).Start(ctx))
+	got := obIntent(t, ledger, stale.Key)
+	assert.Equal(t, IntentSending, got.State)
+	assert.NotNil(t, got.ReconcileAt, "backed off")
+	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(2)).State)
+}
+
+// The start's sending stops at the first send that may not have landed: the
+// next is likely to meet the same Basecamp, and the connector's start should
+// not wait out a timeout per notice. Run carries on.
+func TestOutboxStartStopsSendingAtTheFirstUncertainSend(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2, 3} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(id, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return context.DeadlineExceeded }
+
+	require.NoError(t, obOutbox(t, ledger, basecamp).Start(ctx))
+	assert.Equal(t, 1, basecamp.postCount())
+	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(3)).State)
+}
+
+// failingAt fails listings at one destination only.
+type failingAt struct {
+	*fakeBasecamp
+	recording int64
+}
+
+func (f failingAt) List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
+	if dest.RecordingID == f.recording {
+		return nil, errWire
+	}
+	return f.fakeBasecamp.List(ctx, dest, since)
+}
+
+// A hard failure is not hidden behind a listing that merely backed off
+// earlier in the same pass.
+func TestOutboxStartSeesAHardErrorAfterABackedOffListing(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	second := sendingHolding(t, ledger, 2, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 902})
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.add(second.Destination, adapterAgentID, second.Body)
+	clock.Advance(10 * time.Minute)
+	_, err := ledger.db.ExecContext(ctx, `ALTER TABLE task_events RENAME TO task_events_gone`)
+	require.NoError(t, err)
+
+	require.Error(t, obOutbox(t, ledger, failingAt{basecamp, 901}).Start(ctx))
+}
