@@ -37,7 +37,9 @@ runs, and a handshake with the agent's Basecamp MCP server, started with a
 worker's environment (without the basecamp_connect domain, which only a
 dispatched task's token opens).
 
-Nothing is written and nothing is posted.`,
+It writes nothing to the connector's ledger and posts nothing to Basecamp.
+Renewing the profile's own credential, which every command does when its token
+is due, may still write the credential store.`,
 		Example: `  basecamp connect doctor -P agent`,
 		Args:    cobra.NoArgs,
 		RunE:    runConnectDoctor,

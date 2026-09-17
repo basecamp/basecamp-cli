@@ -416,7 +416,8 @@ that record or that step.
   Read-only and safe while the connector runs. It shows no content.
 - `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
   poll, the ledger, the worker binary, and a handshake with the agent's MCP
-  server. Nothing is written or posted.
+  server. It writes nothing to the ledger and posts nothing to Basecamp,
+  though it may renew the profile's credential as any command does.
 - `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
   run again or for the first time. Accepted for an unknown or failed outcome
   (one whose task is still running waits for that task to end), a blocked

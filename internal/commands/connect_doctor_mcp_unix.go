@@ -98,6 +98,6 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server lists no tools"
 		return c
 	}
-	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", profile, tools)
+	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", shellQuote(profile), tools)
 	return c
 }
