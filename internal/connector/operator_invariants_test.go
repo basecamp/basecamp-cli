@@ -969,4 +969,7 @@ func TestADiscardWithdrawsARedispatchWaitingForItsTask(t *testing.T) {
 	record := getRecord(t, l, 1)
 	assert.Equal(t, StateDiscarded, record.State, "the task's end does not reopen what a person closed")
 	assert.Equal(t, ReasonByOperator, record.Reason)
+	var waiting bool
+	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT redispatch_decision IS NOT NULL FROM events WHERE id = 1`).Scan(&waiting))
+	assert.False(t, waiting, "the authorization went with the record")
 }
