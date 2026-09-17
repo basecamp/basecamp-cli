@@ -453,8 +453,10 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 func redispatchSummary(r connectRedispatchReport) string {
 	var s string
 	switch {
-	case r.Pending:
+	case r.Pending && r.SupersededTaskID > 0:
 		s = fmt.Sprintf("Event %d authorized; admitted when its task %d ends", r.EventID, r.SupersededTaskID)
+	case r.Pending:
+		s = fmt.Sprintf("Event %d authorized; admitted when the task it is on ends", r.EventID)
 	case r.Admitted:
 		s = fmt.Sprintf("Event %d admitted", r.EventID)
 	case r.Verdict != "":

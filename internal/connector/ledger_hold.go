@@ -124,7 +124,7 @@ CREATE TRIGGER events_held_cancels_guard
 AFTER UPDATE OF state ON events
 WHEN NEW.state = 'held' AND OLD.state <> 'held'
 BEGIN
-  UPDATE outbox SET state = 'canceled', note = 'held'
+  UPDATE outbox SET state = 'canceled', finished_at = NEW.updated_at, note = 'held'
   WHERE intent_key = 'guard_ack:event:' || NEW.id AND state = 'pending';
 END;
 

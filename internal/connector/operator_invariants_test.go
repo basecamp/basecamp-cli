@@ -973,3 +973,21 @@ func TestADiscardWithdrawsARedispatchWaitingForItsTask(t *testing.T) {
 	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT redispatch_decision IS NOT NULL FROM events WHERE id = 1`).Scan(&waiting))
 	assert.False(t, waiting, "the authorization went with the record")
 }
+
+// A canceled guard is finished like every other intent the ledger closes.
+func TestAHeldRecordsCanceledGuardIsFinished(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	guards, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentGuardAck}})
+	require.NoError(t, err)
+	require.Len(t, guards, 1)
+
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	guard, err := l.Intent(ctx, guards[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, IntentCanceled, guard.State)
+	assert.NotNil(t, guard.FinishedAt, "a canceled intent says when it was finished")
+}
