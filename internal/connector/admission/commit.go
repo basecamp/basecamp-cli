@@ -13,7 +13,7 @@ import (
 var ErrAlreadyDecided = errors.New("admission: event already decided")
 
 // Ledger is the durable half of a verdict. Intake's SQLite ledger implements
-// it once basecamp-cli PR 729 merges; until then only tests do.
+// it (internal/connector, Ledger.Admission).
 type Ledger interface {
 	// Commit writes v onto its event's record in one transaction and returns
 	// the state it wrote. Within that transaction it must:

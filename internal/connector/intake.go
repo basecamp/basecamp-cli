@@ -855,9 +855,9 @@ func (in *Intake) sweepStranded(ctx context.Context) {
 // so that a crash can never lose the pointer — but that ordering means a
 // failure after the commit leaves an event the ledger's own dedupe will
 // suppress on every retry. Nothing may be left in that state, so a start
-// offers every record nothing has judged yet. Offering one twice costs
-// nothing: the queue carries ids, and admission moves a record out of seen
-// before it acts.
+// offers every record nothing has judged yet. Offering one twice costs at
+// most a second decision, never a second verdict: the queue carries ids, and
+// admission's commit applies only at the revision its decision loaded.
 //
 // The pointer line is NOT written again here. A record that got no line when
 // it was recorded — the write that failed — never gets one, and the work still

@@ -15,8 +15,8 @@ import (
 // DefaultWorkers is the admission fetcher pool size.
 const DefaultWorkers = 4
 
-// IDSource hands over the next event id to admit. Intake's Queue (basecamp-cli
-// PR 729, internal/connector) satisfies it.
+// IDSource hands over the next event id to admit. Intake's Queue
+// (internal/connector) satisfies it.
 type IDSource interface {
 	Take(ctx context.Context) (int64, error)
 }
@@ -27,8 +27,8 @@ type IDSource interface {
 // false when the id is unknown or the record is past deciding, so it is
 // skipped rather than decided twice.
 //
-// This is the seam where intake hands admission an event: the adapter over
-// intake's Ledger.Get lands once PR 729 merges.
+// This is the seam where intake hands admission an event; intake's ledger
+// implements it (internal/connector, Ledger.Admission).
 type Records interface {
 	LoadUndecided(ctx context.Context, id int64) (ev Event, ok bool, err error)
 }
