@@ -269,13 +269,12 @@ func completionIntent(ctx context.Context, tx Tx, now time.Time, s Settlement) e
 	if err != nil {
 		return err
 	}
-	if !CompletionNeeded(settled) {
-		return nil
-	}
 	dest, ok, err := originDestination(ctx, tx, settled.TaskID)
 	if err != nil || !ok {
 		return err
 	}
+	// A settlement that calls for no notice renders nothing, and nothing is
+	// written.
 	err = writeIntent(ctx, tx, now, newIntent{
 		key:         completionKey(settled.AttemptID),
 		kind:        IntentCompletion,
