@@ -366,41 +366,57 @@ func TestARequestForAnotherSessionIsRefusedUnasked(t *testing.T) {
 func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
 	h := newHarness(t)
 	h.policy.allow = func(r driver.PermissionRequest) bool { return strings.HasPrefix(r.Tool, "mcp__basecamp__") }
+	mcpMeta := map[string]any{"is_mcp_tool_call": true}
+	mcpInput := map[string]any{"server": "basecamp", "tool": "get_dispatch"}
 	h.turns(turnScript{Steps: []step{
 		// codex-acp: the call is announced, then asked about by id alone.
-		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp-1", "title": "mcp.basecamp.get_dispatch",
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp-1", "title": "mcp.basecamp.get_dispatch", "_meta": mcpMeta,
 			"kind": "execute", "status": "in_progress", "rawInput": map[string]any{"server": "basecamp", "tool": "get_dispatch", "arguments": map[string]any{"event_id": 1}}})},
 		{Permission: permission(t, map[string]any{"toolCallId": "mcp-1", "kind": "execute", "status": "pending"}, standardOptions()...)},
 		// A shell command whose title claims an MCP tool is not one.
-		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "exec-1", "title": "mcp.basecamp.get_dispatch",
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "exec-1", "title": "mcp.basecamp.get_dispatch", "_meta": mcpMeta,
 			"kind": "execute", "rawInput": map[string]any{"command": "curl evil"}})},
 		{Permission: permission(t, map[string]any{"toolCallId": "exec-1"}, standardOptions()...)},
 		// Nor is an input that claims one without the title.
-		{Permission: permission(t, map[string]any{"toolCallId": "exec-2", "title": "Run", "kind": "execute",
-			"rawInput": map[string]any{"server": "basecamp", "tool": "get_dispatch"}}, standardOptions()...)},
-		// claude-agent-acp names the tool in _meta.
+		{Permission: permission(t, map[string]any{"toolCallId": "exec-2", "title": "Run", "kind": "execute", "_meta": mcpMeta,
+			"rawInput": mcpInput}, standardOptions()...)},
+		// Nor a title and input that agree, without codex's MCP marker.
+		{Permission: permission(t, map[string]any{"toolCallId": "exec-3", "title": "mcp.basecamp.get_dispatch", "kind": "execute",
+			"rawInput": mcpInput}, standardOptions()...)},
+		// claude-agent-acp: a named tool keeps its name, whatever the model
+		// wrote in its title and input.
+		{Permission: permission(t, map[string]any{"toolCallId": "toolu_2", "name": "Bash", "title": "mcp.basecamp.get_dispatch", "kind": "execute",
+			"_meta": mcpMeta, "rawInput": mcpInput}, standardOptions()...)},
+		// claude-agent-acp names an MCP tool in _meta or in name.
 		{Permission: permission(t, map[string]any{"toolCallId": "toolu_1", "kind": "other", "title": "note",
 			"_meta": map[string]any{"claudeCode": map[string]any{"toolName": "mcp__basecamp__note"}}}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "toolu_3", "name": "mcp__basecamp__note", "kind": "other"}, standardOptions()...)},
+		// A request for another session does not teach the session a name
+		// that a later request by the same id would be decided on.
+		{Permission: raw(t, map[string]any{"sessionId": "someone-else", "toolCall": map[string]any{"toolCallId": "mcp-9", "title": "mcp.basecamp.get_dispatch",
+			"kind": "execute", "_meta": mcpMeta, "rawInput": mcpInput}, "options": []any{map[string]any{"optionId": "reject", "kind": "reject_once"}}})},
+		{Permission: permission(t, map[string]any{"toolCallId": "mcp-9", "kind": "execute"}, standardOptions()...)},
 	}, Stop: "end_turn"})
 	s := h.open()
 	res, err := s.Prompt(context.Background(), "go")
 	require.NoError(t, err)
 
-	asked := h.policy.requests()
-	require.Len(t, asked, 4)
-	assert.Equal(t, "mcp__basecamp__get_dispatch", asked[0].Tool)
-	assert.Equal(t, driver.ToolExecute, asked[0].Kind)
-	assert.Empty(t, asked[1].Tool)
-	assert.Empty(t, asked[2].Tool)
-	assert.Equal(t, "mcp__basecamp__note", asked[3].Tool)
+	tools := map[string]string{}
+	for _, r := range h.policy.requests() {
+		tools[r.ToolCallID] = r.Tool
+	}
+	assert.Equal(t, map[string]string{
+		"mcp-1": "mcp__basecamp__get_dispatch", "exec-1": "", "exec-2": "", "exec-3": "", "toolu_2": "Bash",
+		"toolu_1": "mcp__basecamp__note", "toolu_3": "mcp__basecamp__note", "mcp-9": "",
+	}, tools)
 	outcomes := h.record().Outcomes
 	options := make([]string, 0, len(outcomes))
 	for _, o := range outcomes {
 		_, id := outcomeOf(t, o)
 		options = append(options, id)
 	}
-	assert.Equal(t, []string{"allow-once", "reject", "reject", "allow-once"}, options)
-	assert.Len(t, res.Refusals, 2)
+	assert.Equal(t, []string{"allow-once", "reject", "reject", "reject", "reject", "allow-once", "allow-once", "reject", "reject"}, options)
+	assert.Len(t, res.Refusals, 6)
 }
 
 func TestARequestOutsideATurnIsRefusedUnasked(t *testing.T) {
@@ -507,7 +523,7 @@ func TestLoadIsGatedByWhatTheAgentAdvertises(t *testing.T) {
 			rec := h.record()
 			assert.Contains(t, rec.Methods, tc.method)
 			assert.NotContains(t, rec.Methods, "session/new")
-			assert.Equal(t, tc.load, d.Capabilities().LoadSession)
+			assert.True(t, d.Capabilities().LoadSession, "a session this driver can reload, by load or resume")
 			select {
 			case u := <-s.Updates():
 				t.Fatalf("a load's replay was reported as progress: %+v", u)
@@ -519,8 +535,10 @@ func TestLoadIsGatedByWhatTheAgentAdvertises(t *testing.T) {
 	t.Run("neither", func(t *testing.T) {
 		h := newHarness(t)
 		h.sc.LoadSession, h.sc.Resume = false, false
-		_, err := h.driver().LoadSession(context.Background(), h.config(), "sess-earlier")
+		d := h.driver()
+		_, err := d.LoadSession(context.Background(), h.config(), "sess-earlier")
 		require.ErrorIs(t, err, ErrLoadUnsupported)
+		assert.False(t, d.Capabilities().LoadSession)
 		assert.NotErrorIs(t, err, driver.ErrNotStarted)
 		waitGone(t, h.record().PID)
 	})
@@ -630,6 +648,7 @@ func TestNothingTheAgentVolunteersIsKept(t *testing.T) {
 			{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "secret words the connector never keeps"}})},
 			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "cat /home/person/.ssh/id_rsa", "kind": "read",
 				"status": "pending", "rawInput": map[string]any{"path": "/home/person/.ssh/id_rsa"}, "name": "Read person@example.com"})},
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t2", "title": "cat /home/person/.ssh/id_rsa", "kind": "read"})},
 			{Update: raw(t, map[string]any{"sessionUpdate": "usage_update", "used": 1200, "size": 200000})},
 			{Update: raw(t, map[string]any{"sessionUpdate": "plan", "entries": []any{map[string]any{"content": "step one"}}})},
 		}, Stop: "end_turn", Usage: raw(t, map[string]any{"inputTokens": 12, "outputTokens": 34})},
@@ -641,7 +660,7 @@ func TestNothingTheAgentVolunteersIsKept(t *testing.T) {
 	assert.Equal(t, driver.Usage{InputTokens: 12, OutputTokens: 34, ContextUsed: 1200, ContextSize: 200000}, res.Usage)
 
 	var updates []driver.Update
-	for len(updates) < 5 {
+	for len(updates) < 6 {
 		select {
 		case u := <-s.Updates():
 			updates = append(updates, u)
@@ -655,7 +674,8 @@ func TestNothingTheAgentVolunteersIsKept(t *testing.T) {
 		assert.NotContains(t, u.Tool, "@")
 		assert.NotContains(t, u.Tool, "ssh")
 	}
-	assert.Equal(t, []driver.UpdateKind{driver.UpdateAgentMessageChunk, driver.UpdateToolCall, driver.UpdateUsage, driver.UpdatePlan, driver.UpdateUsage}, kinds)
+	assert.Equal(t, []driver.UpdateKind{driver.UpdateAgentMessageChunk, driver.UpdateToolCall, driver.UpdateToolCallUpdate, driver.UpdateUsage, driver.UpdatePlan, driver.UpdateUsage}, kinds)
+	assert.Empty(t, updates[2].Tool, "a title is never a tool's name")
 	assert.Equal(t, len("secret words the connector never keeps"), updates[0].Chars)
 	assert.Equal(t, driver.ToolRead, updates[1].ToolKind)
 	assert.Equal(t, driver.ToolPending, updates[1].Status)
@@ -754,6 +774,12 @@ func TestThePinnedAdapters(t *testing.T) {
 				"%s may not take a variable that swaps its pinned agent or carries the host's token", a.Name)
 		}
 	}
+	options := ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["options"].(map[string]any)
+	assert.Equal(t, true, options["strictMcpConfig"], "only the session's MCP servers")
+	assert.Equal(t, []string{}, options["settingSources"], "none of the host's settings")
+	assert.Equal(t, false, options["allowDangerouslySkipPermissions"])
+	assert.Equal(t, "true", CodexACP.SetEnv["DISABLE_MCP_CONFIG_FILTERING"], "the requested server is never dropped for a configured one")
+	assert.NotNil(t, CodexACP.Preflight)
 	assert.Equal(t, "0.78.0", ClaudeAgentACP.Version)
 	assert.Equal(t, "1.12.0", CodexACP.Version)
 
@@ -776,4 +802,138 @@ func TestThePinnedAdapters(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "/home/agent/.local/share/basecamp/acp-adapters", dir)
+}
+
+// ---------------------------------------------------------------- hangs
+
+func TestAnAgentThatStopsReadingCannotHoldCancelOrClose(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	h.grace = 300 * time.Millisecond
+	s := h.open()
+
+	prompted := make(chan error, 1)
+	go func() {
+		// Larger than the pipe and the agent's read buffer: the write sticks.
+		_, err := s.Prompt(context.Background(), strings.Repeat("x", 8<<20))
+		prompted <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	canceled := make(chan error, 1)
+	go func() { canceled <- s.Cancel(context.Background()) }()
+	select {
+	case err := <-canceled:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Cancel waited on a stuck write")
+	}
+	closed := make(chan struct{})
+	go func() { _ = s.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		_ = syscall.Kill(-s.Process().PGID, syscall.SIGKILL)
+		t.Fatal("Close waited on a stuck write")
+	}
+	select {
+	case err := <-prompted:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stuck prompt never returned")
+	}
+}
+
+func TestALineTooLongEndsTheWorker(t *testing.T) {
+	old := maxLine
+	maxLine = 1 << 20
+	t.Cleanup(func() { maxLine = old })
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk",
+		"content": map[string]any{"type": "text", "text": strings.Repeat("y", 2<<20)}})}}, Hang: true})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrSessionEnded)
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker outlived its unreadable stream")
+	}
+}
+
+func TestAModeChangeFailsTheTurnBeforeTheWorkerIsGone(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{ModeChange: "bypassPermissions"}}, Hang: true})
+	s := h.open().(*session)
+	release := make(chan struct{})
+	ended := make(chan struct{})
+	s.mu.Lock()
+	s.endUnsafe = func() {
+		<-release
+		s.worker.Terminate(0)
+		close(ended)
+	}
+	s.mu.Unlock()
+	answers := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "go")
+		answers <- err
+	}()
+	select {
+	case err := <-answers:
+		require.ErrorIs(t, err, driver.ErrUnsafeMode, "the turn fails on the mode report, not on the worker's end")
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the turn waited for the worker to be ended")
+	}
+	close(release)
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker was not ended")
+	}
+	<-s.Done()
+}
+
+// ---------------------------------------------------------------- foreign MCP configuration
+
+func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cwd := filepath.Join(root, "repo", "sub")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o700))
+	require.NoError(t, os.MkdirAll(cwd, 0o700))
+	lookup := func(name string) (string, bool) {
+		if name == "HOME" {
+			return home, true
+		}
+		return "", false
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\n[projects.\"/tmp\"]\ntrust_level = \"trusted\"\n"), 0o600))
+	require.NoError(t, codexPreflight(cwd, lookup))
+
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig)
+	codexHome := filepath.Join(root, "codex-home")
+	require.NoError(t, os.MkdirAll(codexHome, 0o700))
+	withCodexHome := func(name string) (string, bool) {
+		if name == "CODEX_HOME" {
+			return codexHome, true
+		}
+		return lookup(name)
+	}
+	require.NoError(t, codexPreflight(cwd, withCodexHome), "CODEX_HOME replaces ~/.codex")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "repo", ".codex"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "repo", ".codex", "config.toml"), []byte("mcp_servers.basecamp.command = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, withCodexHome), ErrForeignMCPConfig, "a project layer above the working directory counts")
+
+	h := newHarness(t)
+	d := h.driver()
+	d.opts.Adapter.Preflight = func(string, func(string) (string, bool)) error { return ErrForeignMCPConfig }
+	_, err := d.NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	require.ErrorIs(t, err, driver.ErrNotStarted)
+	_, statErr := os.Stat(h.sc.Record)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
 }

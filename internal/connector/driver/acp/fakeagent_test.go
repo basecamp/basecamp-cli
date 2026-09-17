@@ -53,6 +53,9 @@ type scenario struct {
 	// Turns script each prompt in order; the last repeats.
 	Turns []turnScript `json:"turns"`
 
+	// StopReadingAfter names a method after which the agent reads no more
+	// input.
+	StopReadingAfter string `json:"stop_reading_after"`
 	// Hang names a method the agent never answers.
 	Hang            string `json:"hang"`
 	AuthEmail       string `json:"auth_email"`
@@ -166,6 +169,9 @@ func runFakeAgent(path string) {
 		a.mu.Unlock()
 		a.flush()
 		go a.handle(m.ID, m.Method, m.Params)
+		if m.Method == sc.StopReadingAfter {
+			select {}
+		}
 	}
 	if sc.IgnoreStdinEOF {
 		select {}

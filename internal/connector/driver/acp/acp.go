@@ -184,6 +184,11 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
 	}
+	if d.opts.Adapter.Preflight != nil {
+		if err := d.opts.Adapter.Preflight(cfg.Cwd, d.opts.Lookup); err != nil {
+			return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+		}
+	}
 
 	env := mergeEnv(cfg.Env, driver.BuildEnv(d.opts.Adapter.Env, d.opts.Lookup, nil))
 	env = setEnv(env, d.opts.Adapter.SetEnv)
@@ -212,7 +217,7 @@ func (s *session) handshake(ctx context.Context, d *Driver, cfg driver.SessionCo
 	if err != nil {
 		return err
 	}
-	if caps.LoadSession {
+	if caps.LoadSession || caps.Resume {
 		d.loadSession.Store(2)
 	} else {
 		d.loadSession.Store(1)

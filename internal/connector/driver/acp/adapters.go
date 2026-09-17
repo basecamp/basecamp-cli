@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/claude"
@@ -45,6 +47,10 @@ type Adapter struct {
 	// LoadSession is what the pinned version advertises, until a session
 	// reports what the installed one does.
 	LoadSession bool
+	// Preflight refuses, before anything starts, a session the adapter would
+	// run with configuration the connector cannot switch off: nil when there is
+	// none to check.
+	Preflight func(cwd string, lookup func(string) (string, bool)) error
 }
 
 // ClaudeAgentACP is Claude Code over ACP.
@@ -52,8 +58,11 @@ type Adapter struct {
 // Its asking mode is "default" (the adapter's "Manual": ask before every
 // change, inside the working directory too). Its session _meta turns off the
 // host's Claude Code settings, which would otherwise bring the host's
-// defaultMode, allow rules and hooks into the session, and takes
-// bypassPermissions out of the session's mode catalog altogether.
+// defaultMode, allow rules and hooks into the session; takes
+// bypassPermissions out of the session's mode catalog altogether; and makes
+// the session's mcpServers the only MCP servers it has (strictMcpConfig), so
+// a user-scope or project .mcp.json server, one named basecamp among them,
+// never loads beside or instead of the connector's.
 var ClaudeAgentACP = Adapter{
 	Name:    "claude-agent-acp",
 	Package: "@agentclientprotocol/claude-agent-acp",
@@ -67,6 +76,7 @@ var ClaudeAgentACP = Adapter{
 			"options": map[string]any{
 				"settingSources":                  []string{},
 				"allowDangerouslySkipPermissions": false,
+				"strictMcpConfig":                 true,
 			},
 		},
 	},
@@ -96,11 +106,68 @@ var CodexACP = Adapter{
 	Package: "@agentclientprotocol/codex-acp",
 	Version: "1.12.0",
 	Env:     []string{"CODEX_HOME", "OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"},
-	SetEnv:  map[string]string{"CODEX_CONFIG": codexConfig, "INITIAL_AGENT_MODE": "read-only"},
+	SetEnv: map[string]string{
+		"CODEX_CONFIG":       codexConfig,
+		"INITIAL_AGENT_MODE": "read-only",
+		// Without it, codex-acp drops a requested MCP server whose name any
+		// config layer already uses, and the agent gets that one instead.
+		"DISABLE_MCP_CONFIG_FILTERING": "true",
+	},
+	Preflight: codexPreflight,
 	Modes: map[driver.PermissionMode]string{
 		driver.ModeEditsInWorkDir: "read-only",
 	},
 	LoadSession: true,
+}
+
+// ErrForeignMCPConfig is agent configuration that declares MCP servers of its
+// own, which the connector cannot keep out of a session.
+var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MCP servers of its own")
+
+// mcpServersKey finds a TOML line that declares MCP servers: a table header
+// or a dotted or bare key naming mcp_servers, at any depth.
+var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?([A-Za-z0-9_"'.\-]+\.)?"?mcp_servers"?\s*[.\]=]`)
+
+// codexPreflight refuses a session when a Codex config layer declares MCP
+// servers: the user's ($CODEX_HOME, or ~/.codex), the system's, or a
+// project's .codex/config.toml in the working directory or above it. Codex
+// merges every layer into the session, and a server declared there would run
+// beside the connector's, or, named basecamp, in place of it with every tool
+// allowed. It reads for the key, not the TOML: a false alarm refuses a
+// session; a miss would not.
+func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
+	var files []string
+	home := ""
+	if v, ok := lookup("CODEX_HOME"); ok && filepath.IsAbs(v) {
+		home = v
+	} else if v, ok := lookup("HOME"); ok && filepath.IsAbs(v) {
+		home = filepath.Join(v, ".codex")
+	}
+	if home != "" {
+		files = append(files, filepath.Join(home, "config.toml"), filepath.Join(home, "managed_config.toml"))
+	}
+	files = append(files, "/etc/codex/config.toml", "/etc/codex/managed_config.toml")
+	for dir := filepath.Clean(cwd); ; dir = filepath.Dir(dir) {
+		files = append(files, filepath.Join(dir, ".codex", "config.toml"))
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(file) //nolint:gosec // G304: codex's own config locations
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+				continue
+			}
+			return fmt.Errorf("acp: read %s: %w", file, err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			if mcpServersKey.MatchString(line) {
+				return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
+			}
+		}
+	}
+	return nil
 }
 
 // codexConfig is the thread config codex-acp layers onto every session. The

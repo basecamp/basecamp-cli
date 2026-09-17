@@ -132,7 +132,9 @@ qa-report:
 
 # The connector's acp driver runs pinned ACP adapters, installed here once by
 # an operator and never downloaded at dispatch time.
-ACP_ADAPTERS_DIR ?= $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/basecamp/acp-adapters
+# Where basecamp connect looks by default: an absolute $XDG_DATA_HOME, else
+# ~/.local/share (a relative XDG_DATA_HOME is ignored there too).
+ACP_ADAPTERS_DIR ?= $(if $(filter /%,$(XDG_DATA_HOME)),$(XDG_DATA_HOME),$(HOME)/.local/share)/basecamp/acp-adapters
 
 # Install the pinned ACP adapters (internal/connector/driver/acp/adapters)
 .PHONY: acp-adapters
@@ -141,8 +143,9 @@ acp-adapters:
 	cp internal/connector/driver/acp/adapters/package.json internal/connector/driver/acp/adapters/package-lock.json "$(ACP_ADAPTERS_DIR)/"
 	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund
 
-# The ACP adapter-compatibility test: four checks through the acp driver
-# against each installed adapter. Sends real prompts (model quota); skipped
+# The ACP adapter-compatibility test: six checks through the acp driver
+# against each installed adapter (the spike's four, the worker shell's
+# environment, and a decoy MCP server in the working directory). Sends real prompts (model quota); skipped
 # for an adapter that is not installed. ACP_TRANSCRIPTS=<dir> keeps redacted
 # JSON-RPC transcripts.
 .PHONY: test-acp-compat

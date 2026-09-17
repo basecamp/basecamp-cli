@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,9 +27,11 @@ type session struct {
 	updates   chan driver.Update
 	readerEnd chan struct{}
 
-	// promptMu orders a prompt's request and a cancel's notification on the
-	// wire, so a cancel never reaches the agent before the prompt it ends.
-	promptMu sync.Mutex
+	// promptSem orders a prompt's request and a cancel's notification on the
+	// wire, so a cancel never reaches the agent before the prompt it ends. A
+	// channel, not a mutex, so a cancel can give up waiting on a prompt whose
+	// write is stuck.
+	promptSem chan struct{}
 
 	mu            sync.Mutex
 	id            string
@@ -46,11 +49,16 @@ type session struct {
 	tools map[string]toolInfo
 
 	closeOnce sync.Once
+	// endUnsafe ends the worker of a session found outside its asking mode;
+	// the worker's Terminate, replaced only by this package's tests.
+	endUnsafe func()
 }
 
 // turn is a prompt in flight.
 type turn struct {
-	done     chan struct{}
+	done chan struct{}
+	// call is the turn's session/prompt, registered before it is sent.
+	call     *pendingCall
 	canceled bool
 	refusals []driver.Refusal
 	result   driver.PromptResult
@@ -68,14 +76,22 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 		updates:   make(chan driver.Update, 256),
 		readerEnd: make(chan struct{}),
 		modeSeen:  make(chan struct{}),
+		promptSem: make(chan struct{}, 1),
 		tools:     map[string]toolInfo{},
 	}
+	s.endUnsafe = func() { worker.Terminate(0) }
 	s.conn = newConn(worker.Stdin())
 	s.conn.trace = trace
 	s.conn.onNotification = s.onNotification
 	s.conn.onRequest = s.onRequest
 	go func() {
-		s.conn.read(worker.Stdout())
+		if err := s.conn.read(worker.Stdout()); err != nil {
+			// A line past maxLine or a broken pipe: the session cannot go
+			// on, so its worker does not either.
+			s.worker.Terminate(0)
+		}
+		// Drain what is left so the agent never blocks on a full pipe.
+		_, _ = io.Copy(io.Discard, worker.Stdout())
 		s.mu.Lock()
 		s.updatesClosed = true
 		close(s.updates)
@@ -344,9 +360,19 @@ func (s *session) reportMode(id string) {
 	if unsafe {
 		s.unsafe = fmt.Errorf("%w: the agent left mode %q for %q", driver.ErrUnsafeMode, s.askMode, agentText(id))
 	}
+	t := s.turn
+	end := s.endUnsafe
 	s.mu.Unlock()
 	if unsafe {
-		go s.worker.Terminate(0)
+		// The turn is failed first and the worker ended after, so whoever
+		// waits on both hears ErrUnsafeMode before the worker is gone.
+		go func() {
+			if t != nil {
+				s.conn.abandon(t.call)
+				<-t.done
+			}
+			end()
+		}()
 	}
 }
 
@@ -395,7 +421,7 @@ func optionValues(raw json.RawMessage) []string {
 
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
-	s.promptMu.Lock()
+	s.promptSem <- struct{}{}
 	s.mu.Lock()
 	var refuse error
 	switch {
@@ -410,19 +436,20 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}
 	if refuse != nil {
 		s.mu.Unlock()
-		s.promptMu.Unlock()
+		<-s.promptSem
 		return driver.PromptResult{}, refuse
 	}
-	t := &turn{done: make(chan struct{})}
+	t := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
 	s.turn = t
 	id := s.id
 	s.mu.Unlock()
 
-	answer, err := s.conn.start("session/prompt", map[string]any{
+	answer := t.call
+	err := s.conn.sendCall(answer, map[string]any{
 		"sessionId": id,
 		"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
 	})
-	s.promptMu.Unlock()
+	<-s.promptSem
 	go s.finishTurn(t, answer, err)
 
 	select {
@@ -497,9 +524,21 @@ func stopOf(reason string, canceled bool, refusals int) (driver.TurnStop, error)
 }
 
 // Cancel implements driver.Session: session/cancel for the turn in flight.
-func (s *session) Cancel(context.Context) error {
-	s.promptMu.Lock()
-	defer s.promptMu.Unlock()
+//
+// A cancel waits at most for ctx or the close grace, whichever ends first,
+// both for the prompt's own write and for its notification's, so an agent that
+// has stopped reading its input cannot hold the caller.
+func (s *session) Cancel(ctx context.Context) error {
+	grace := time.NewTimer(s.grace)
+	defer grace.Stop()
+	stuck := errors.New("acp: the agent is not reading its input; the cancel could not be sent")
+	select {
+	case s.promptSem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-grace.C:
+		return stuck
+	}
 	s.mu.Lock()
 	t := s.turn
 	if t != nil {
@@ -507,10 +546,22 @@ func (s *session) Cancel(context.Context) error {
 	}
 	id := s.id
 	s.mu.Unlock()
+	// The prompt this cancel ends is on the wire; a later prompt cannot start
+	// while its turn is in flight.
+	<-s.promptSem
 	if t == nil {
 		return nil
 	}
-	return s.conn.notify("session/cancel", map[string]any{"sessionId": id})
+	sent := make(chan error, 1)
+	go func() { sent <- s.conn.notify("session/cancel", map[string]any{"sessionId": id}) }()
+	select {
+	case err := <-sent:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-grace.C:
+		return stuck
+	}
 }
 
 // Close implements driver.Session: the adapter's input is closed, it is given
@@ -568,6 +619,8 @@ type sessionUpdate struct {
 	Status        string
 	Name          string
 	MetaToolName  string
+	// MCPCall is codex-acp's _meta.is_mcp_tool_call.
+	MCPCall       bool
 	Title         string
 	MCPServer     string
 	MCPTool       string
@@ -604,9 +657,11 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 		ClaudeCode struct {
 			ToolName string `json:"toolName"`
 		} `json:"claudeCode"`
+		MCPCall bool `json:"is_mcp_tool_call"`
 	}
 	if json.Unmarshal(fields["_meta"], &meta) == nil {
 		u.MetaToolName = meta.ClaudeCode.ToolName
+		u.MCPCall = meta.MCPCall
 	}
 	var input struct {
 		Server string `json:"server"`
@@ -744,7 +799,20 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		return
 	}
 	call, _ := decodeUpdate(p.ToolCall)
-	info := s.noteTool(call)
+
+	s.mu.Lock()
+	t := s.turn
+	askable := t != nil && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
+	canceled := t != nil && t.canceled
+	s.mu.Unlock()
+
+	// Only a request the session can be asked is merged into what it knows
+	// of its tool calls: one for another session, or outside a turn, could
+	// otherwise name a call that a later request is decided on.
+	info := toolInfo{name: toolName(call), kind: toolKind(call.Kind), locations: call.Locations}
+	if askable {
+		info = s.noteTool(call)
+	}
 	req := driver.PermissionRequest{
 		ToolCallID: call.ToolCallID,
 		Tool:       info.name,
@@ -754,12 +822,6 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 	for _, o := range p.Options {
 		req.Options = append(req.Options, driver.PermissionOption{ID: o.OptionID, Kind: driver.PermissionOptionKind(o.Kind)})
 	}
-
-	s.mu.Lock()
-	t := s.turn
-	askable := t != nil && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
-	canceled := t != nil && t.canceled
-	s.mu.Unlock()
 
 	if canceled {
 		// A turn being canceled answers its open requests as canceled, as
@@ -862,21 +924,25 @@ func (s *session) noteTool(u sessionUpdate) toolInfo {
 // toolName is the agent's name for the tool, where it says one: never the
 // call's title or input, which carry what the call does.
 //
-// claude-agent-acp names every tool in _meta (mcp__<server>__<tool> for an MCP
-// tool). codex-acp names an MCP call only by a title of "mcp.<server>.<tool>"
-// beside a raw input of {server, tool}; both must agree before the call is
-// given the MCP tool's name, so neither a title nor an input alone can claim
-// one.
+// claude-agent-acp names its tools in _meta or in name (mcp__<server>__<tool>
+// for an MCP tool), and a name it gives is final: its titles and raw inputs
+// are the model's to write. codex-acp gives an MCP call no name; it marks it
+// in _meta and titles it "mcp.<server>.<tool>" beside a raw input of
+// {server, tool}. Only a call with no name, so marked, whose title and input
+// agree, is given the MCP tool's name.
 func toolName(u sessionUpdate) string {
 	if u.MetaToolName != "" {
 		return plainName(u.MetaToolName)
 	}
-	if u.MCPServer != "" && u.MCPTool != "" && u.Title == "mcp."+u.MCPServer+"."+u.MCPTool &&
+	if u.Name != "" {
+		return plainName(u.Name)
+	}
+	if u.MCPCall && u.MCPServer != "" && u.MCPTool != "" && u.Title == "mcp."+u.MCPServer+"."+u.MCPTool &&
 		plainName(u.MCPServer) == u.MCPServer && plainName(u.MCPTool) == u.MCPTool &&
 		!strings.Contains(u.MCPServer, "__") && !strings.Contains(u.MCPServer, ".") {
 		return "mcp__" + u.MCPServer + "__" + u.MCPTool
 	}
-	return plainName(u.Name)
+	return ""
 }
 
 // plainName keeps a tool name to identifier characters.

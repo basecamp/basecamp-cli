@@ -21,7 +21,8 @@ import (
 // maxLine is the longest line the connector reads from an agent. A session/load
 // replay or a large tool result can be long; a line past this ends the session
 // rather than growing without bound.
-const maxLine = 64 << 20
+// A variable so tests need not write one.
+var maxLine = 64 << 20
 
 // JSON-RPC error codes the client sends.
 const (
@@ -86,8 +87,11 @@ func newConn(w io.Writer) *conn {
 	return &conn{w: w, pending: map[int64]chan wireMessage{}, done: make(chan struct{})}
 }
 
-// read dispatches lines until r ends, then fails every pending call.
-func (c *conn) read(r io.Reader) {
+// read dispatches lines until r ends, then fails every pending call. It
+// returns the scanner's error: a line past maxLine, or a failed read.
+func (c *conn) read(r io.Reader) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64<<10), maxLine)
 	defer func() {
 		c.mu.Lock()
 		c.closed = true
@@ -97,11 +101,7 @@ func (c *conn) read(r io.Reader) {
 		}
 		c.mu.Unlock()
 		close(c.done)
-		// Drain what is left so the agent never blocks on a full pipe.
-		_, _ = io.Copy(io.Discard, r)
 	}()
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64<<10), maxLine)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -139,75 +139,106 @@ func (c *conn) read(r io.Reader) {
 			}
 		}
 	}
+	return scanner.Err()
 }
 
 // call sends a request and decodes its result into out. A ctx that ends
-// abandons the wait, not the request.
+// abandons the wait, not the request; out is written only when the result is
+// delivered to this caller.
 func (c *conn) call(ctx context.Context, method string, params, out any) error {
-	p, err := c.start(method, params)
-	if err != nil {
+	p := c.register(method)
+	if err := c.sendCall(p, params); err != nil {
 		return err
 	}
-	done := make(chan error, 1)
-	go func() { done <- p.wait(out) }()
+	type answer struct {
+		raw json.RawMessage
+		err error
+	}
+	answers := make(chan answer, 1)
+	go func() {
+		raw, err := p.result()
+		answers <- answer{raw, err}
+	}()
 	select {
-	case err := <-done:
-		return err
+	case a := <-answers:
+		if a.err != nil || out == nil {
+			return a.err
+		}
+		if err := json.Unmarshal(a.raw, out); err != nil {
+			return fmt.Errorf("acp: %s: unreadable result: %w", method, err)
+		}
+		return nil
 	case <-ctx.Done():
-		c.forget(p.id)
+		c.abandon(p)
 		return ctx.Err()
 	}
 }
 
 // pendingCall is a request on the wire, waiting for its response.
 type pendingCall struct {
-	c      *conn
 	id     int64
 	method string
 	ch     chan wireMessage
 }
 
-// start writes a request and returns its pending response.
-func (c *conn) start(method string, params any) (*pendingCall, error) {
+// register reserves an id and a response slot for a request not yet sent. On
+// a closed connection the slot is already closed.
+func (c *conn) register(method string) *pendingCall {
 	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, errConnClosed
-	}
+	defer c.mu.Unlock()
 	c.nextID++
-	p := &pendingCall{c: c, id: c.nextID, method: method, ch: make(chan wireMessage, 1)}
-	c.pending[p.id] = p.ch
-	c.mu.Unlock()
-
-	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": p.id, "method": method, "params": params}); err != nil {
-		c.forget(p.id)
-		return nil, fmt.Errorf("%w: %s: %w", driver.ErrSessionEnded, method, err)
+	p := &pendingCall{id: c.nextID, method: method, ch: make(chan wireMessage, 1)}
+	if c.closed {
+		close(p.ch)
+	} else {
+		c.pending[p.id] = p.ch
 	}
-	return p, nil
+	return p
 }
 
-// wait blocks until the response arrives or the connection ends.
-func (p *pendingCall) wait(out any) error {
+// sendCall writes a registered request.
+func (c *conn) sendCall(p *pendingCall, params any) error {
+	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": p.id, "method": p.method, "params": params}); err != nil {
+		c.abandon(p)
+		return fmt.Errorf("%w: %s: %w", driver.ErrSessionEnded, p.method, err)
+	}
+	return nil
+}
+
+// result blocks until the response arrives, the call is abandoned, or the
+// connection ends.
+func (p *pendingCall) result() (json.RawMessage, error) {
 	m, ok := <-p.ch
 	if !ok {
-		return errConnClosed
+		return nil, errConnClosed
 	}
 	if m.Error != nil {
-		return &rpcError{Method: p.method, Code: m.Error.Code, Message: agentText(m.Error.Message)}
+		return nil, &rpcError{Method: p.method, Code: m.Error.Code, Message: agentText(m.Error.Message)}
 	}
-	if out == nil {
-		return nil
+	return m.Result, nil
+}
+
+// wait is result decoded into out.
+func (p *pendingCall) wait(out any) error {
+	raw, err := p.result()
+	if err != nil || out == nil {
+		return err
 	}
-	if err := json.Unmarshal(m.Result, out); err != nil {
+	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("acp: %s: unreadable result: %w", p.method, err)
 	}
 	return nil
 }
 
-func (c *conn) forget(id int64) {
+// abandon stops waiting for a call: its slot is closed, so whoever waits on
+// it gets errConnClosed, and a response that arrives later is dropped.
+func (c *conn) abandon(p *pendingCall) {
 	c.mu.Lock()
-	delete(c.pending, id)
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if ch, ok := c.pending[p.id]; ok {
+		delete(c.pending, p.id)
+		close(ch)
+	}
 }
 
 func (c *conn) notify(method string, params any) error {
@@ -238,10 +269,10 @@ func (c *conn) send(v any) error {
 	return nil
 }
 
-// closeWrite closes the agent's input, under the write lock so no line is cut.
+// closeWrite closes the agent's input. Not under the write lock: a write
+// stuck on a full pipe holds that lock, and closing the pipe is what unblocks
+// it.
 func (c *conn) closeWrite(closer io.Closer) {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	_ = closer.Close()
 }
 
