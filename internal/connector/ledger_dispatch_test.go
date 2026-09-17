@@ -25,13 +25,17 @@ const otherPersonID int64 = 1001
 // the task.
 type dispatchFixture struct {
 	ledger *Ledger
+	path   string
 	grant  TaskGrant
 	d      *TaskDispatch
 }
 
 func newDispatchFixture(t *testing.T) dispatchFixture {
 	t.Helper()
-	ledger := newTestLedger(t)
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	ledger, err := OpenLedger(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
 	ctx := context.Background()
 	for _, id := range []int64{1, 2} {
 		seenRecord(t, ledger, id)
@@ -45,7 +49,7 @@ func newDispatchFixture(t *testing.T) dispatchFixture {
 	require.NoError(t, err)
 	d, err := ledger.Dispatch(ctx, grant.Token, adapterAgentID)
 	require.NoError(t, err)
-	return dispatchFixture{ledger: ledger, grant: grant, d: d}
+	return dispatchFixture{ledger: ledger, path: path, grant: grant, d: d}
 }
 
 type taskEventRow struct {
@@ -839,4 +843,33 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 	root, err = StateRoot()
 	require.NoError(t, err)
 	assert.True(t, filepath.IsAbs(root), "a relative XDG_STATE_HOME is ignored, as the specification says")
+}
+
+// The ledger is free while a call builds its answer: every transaction here
+// takes the write lock as it opens, and decoding the snapshot and stripping
+// the agent's mention must not be done holding it.
+func TestGetDispatchDoesNotHoldTheLedgerWhileItBuildsItsAnswer(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	other, err := OpenExistingLedger(ctx, f.path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = other.Close() })
+
+	writes := 0
+	f.d.afterTx = func() {
+		// Intake, writing while the worker builds its instruction. It waits
+		// for the write lock, so a transaction still open here fails this
+		// (after the busy timeout) rather than deadlocking.
+		writes++
+		fresh, err := other.RecordSeen(ctx, testEvent(int64(100+writes)), LanePoll)
+		require.NoError(t, err)
+		require.True(t, fresh)
+	}
+
+	// The call that writes (exposure), and the repeat that writes nothing.
+	_, _, err = f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, _, err = f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 2, writes)
 }

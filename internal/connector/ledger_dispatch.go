@@ -286,6 +286,10 @@ type TaskDispatch struct {
 	ledger  *Ledger
 	hash    string
 	agentID int64
+
+	// afterTx runs when a call has closed its transaction and is building its
+	// answer. A test seam: it is where the ledger must already be free.
+	afterTx func()
 }
 
 // Dispatch binds the ledger to a worker's task token, refusing one that names
@@ -407,6 +411,8 @@ type taskEvent struct {
 	replyID  sql.NullInt64
 }
 
+// get is one get_dispatch: the ledger work in a transaction, the instruction
+// built once it is closed.
 func (d *TaskDispatch) get(ctx context.Context, eventID int64) (Instruction, bool, error) {
 	l := d.ledger
 	tx, err := l.db.BeginTx(ctx, nil)
@@ -469,6 +475,15 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if err := tx.Commit(); err != nil {
 			return Instruction{}, false, fmt.Errorf("connector: commit get_dispatch: %w", err)
 		}
+	} else if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return Instruction{}, false, fmt.Errorf("connector: end get_dispatch: %w", err)
+	}
+	// The transaction is over. Every transaction here takes the write lock as
+	// it opens, so decoding the snapshot and stripping the agent's mention —
+	// the only work in this call that is not a query — happens with the
+	// ledger free for the connector and for other workers.
+	if d.afterTx != nil {
+		d.afterTx()
 	}
 
 	var snapshot struct {

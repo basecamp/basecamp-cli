@@ -100,8 +100,8 @@ func TestTheConnectDomainExistsOnlyWhenConfigured(t *testing.T) {
 			actions = append(actions, name)
 		}
 	}
-	assert.Equal(t, []string{ackDispatchAction, completeDispatch, getDispatchAction}, actions,
-		"exactly these three: a worker never reads other tasks")
+	assert.ElementsMatch(t, []string{ackDispatchAction, completeDispatchAction, getDispatchAction}, actions,
+		"exactly these three, in whatever order the gateway lists them: a worker never reads other tasks")
 }
 
 // A server narrowed with --domains still serves the task's own domain.
@@ -161,7 +161,7 @@ func TestAckAndCompleteOverMCP(t *testing.T) {
 	_, isError = s.call(ackDispatchAction, map[string]any{})
 	assert.True(t, isError, "event_id is required")
 
-	text, isError = s.call(completeDispatch, map[string]any{
+	text, isError = s.call(completeDispatchAction, map[string]any{
 		"event_id": 7, "outcome": "succeeded", "links": []any{"https://example.com/pr"}, "reply_id": 100,
 	})
 	require.False(t, isError, text)
@@ -170,9 +170,9 @@ func TestAckAndCompleteOverMCP(t *testing.T) {
 	assert.Equal(t, []string{"https://example.com/pr"}, d.completes[0].Links)
 	require.NotNil(t, d.completes[0].ReplyID)
 
-	_, isError = s.call(completeDispatch, map[string]any{"event_id": 7})
+	_, isError = s.call(completeDispatchAction, map[string]any{"event_id": 7})
 	assert.True(t, isError, "outcome is required")
-	_, isError = s.call(completeDispatch, map[string]any{"event_id": 7, "outcome": "succeeded", "links": []any{1}})
+	_, isError = s.call(completeDispatchAction, map[string]any{"event_id": 7, "outcome": "succeeded", "links": []any{1}})
 	assert.True(t, isError, "links are strings")
 
 	// In process, a caller has a []string in hand; over the wire, JSON makes
@@ -203,7 +203,7 @@ func TestConnectRefusalsAreNamed(t *testing.T) {
 			}{
 				{getDispatchAction, nil},
 				{ackDispatchAction, map[string]any{"event_id": 7}},
-				{completeDispatch, map[string]any{"event_id": 7, "outcome": "failed"}},
+				{completeDispatchAction, map[string]any{"event_id": 7, "outcome": "failed"}},
 			} {
 				text, isError := s.call(call.action, call.params)
 				assert.True(t, isError)
@@ -219,7 +219,7 @@ func TestConnectRefusalsAreNamed(t *testing.T) {
 	assert.Contains(t, text, "connector ledger could not answer")
 
 	s = connectSession(t, &fakeDispatch{err: fmt.Errorf("connector: link %q is not an http(s) URL: %w", "ftp://x", connector.ErrInvalidReport)})
-	text, isError = s.call(completeDispatch, map[string]any{"event_id": 7, "outcome": "failed"})
+	text, isError = s.call(completeDispatchAction, map[string]any{"event_id": 7, "outcome": "failed"})
 	assert.True(t, isError)
 	assert.Contains(t, text, "ftp://x", "what the worker got wrong is said")
 }

@@ -23,12 +23,12 @@ import (
 // Nothing it returns carries the token, a feed position or a route; the
 // instruction is an allowlist of fields (connector.Instruction).
 const (
-	connectDomainKey   = "connect"
-	connectToolName    = "basecamp_connect"
-	getDispatchAction  = "get_dispatch"
-	ackDispatchAction  = "ack_dispatch"
-	completeDispatch   = "complete_dispatch"
-	connectDomainBlurb = "Your dispatch from the Basecamp agent connector: pull the instruction you were started for, acknowledge it, and report its outcome. Bound to this task; there is no listing."
+	connectDomainKey       = "connect"
+	connectToolName        = "basecamp_connect"
+	getDispatchAction      = "get_dispatch"
+	ackDispatchAction      = "ack_dispatch"
+	completeDispatchAction = "complete_dispatch"
+	connectDomainBlurb     = "Your dispatch from the Basecamp agent connector: pull the instruction you were started for, acknowledge it, and report its outcome. Bound to this task; there is no listing."
 )
 
 // Dispatch is the task-bound ledger the connect domain serves.
@@ -70,7 +70,7 @@ func connectDomain() *catalog.Domain {
 			},
 			{
 				ID:     "CompleteDispatch",
-				Action: completeDispatch,
+				Action: completeDispatchAction,
 				Tag:    "Connect",
 				Summary: syntheticSummaryTag + "report the outcome of an instruction: succeeded or failed, with your reply's id and any links (a pull request, a card). Also acknowledges it. " +
 					"A repeat of the same report answers the same receipt; a different report is refused, because a reported outcome stands.",
@@ -107,9 +107,9 @@ func connectDomain() *catalog.Domain {
 type connectHandler func(ctx context.Context, d Dispatch, params map[string]any) (*mcp.CallToolResult, error)
 
 var connectHandlers = map[string]connectHandler{
-	getDispatchAction: handleGetDispatch,
-	ackDispatchAction: handleAckDispatch,
-	completeDispatch:  handleCompleteDispatch,
+	getDispatchAction:      handleGetDispatch,
+	ackDispatchAction:      handleAckDispatch,
+	completeDispatchAction: handleCompleteDispatch,
 }
 
 func (d dispatcher) handleConnect(ctx context.Context, op *catalog.Operation, params map[string]any) (*mcp.CallToolResult, error) {
