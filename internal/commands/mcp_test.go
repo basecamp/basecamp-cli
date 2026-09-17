@@ -102,7 +102,13 @@ func stubMCPTransport(t *testing.T) mcp.Transport {
 func runMCPCommand(t *testing.T, upstream *httptest.Server, args ...string) *mcp.ClientSession {
 	t.Helper()
 	t.Setenv("BASECAMP_TOKEN", "test-token")
-	app := setupMCPTestApp(t, "999", upstream.URL)
+	return runMCPCommandWithApp(t, setupMCPTestApp(t, "999", upstream.URL), args...)
+}
+
+// runMCPCommandWithApp is runMCPCommand for an app the test has already
+// built, so it can adjust the environment the command will read.
+func runMCPCommandWithApp(t *testing.T, app *appctx.App, args ...string) *mcp.ClientSession {
+	t.Helper()
 	clientTransport := stubMCPTransport(t)
 
 	done := make(chan error, 1)

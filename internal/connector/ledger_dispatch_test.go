@@ -471,6 +471,10 @@ func TestSupersedingReturnsUnexposedWork(t *testing.T) {
 	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID), "a repeat is harmless")
 	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State)
 
+	// The conversation is not free while event 1 waits for settlement.
+	_, err = f.ledger.CreateTask(ctx, []int64{2})
+	require.ErrorIs(t, err, ErrConversationBusy)
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
 	grant, err := f.ledger.CreateTask(ctx, []int64{2})
 	require.NoError(t, err)
 	d, err := f.ledger.Dispatch(ctx, grant.Token, adapterAgentID)
@@ -479,6 +483,67 @@ func TestSupersedingReturnsUnexposedWork(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, int64(2), got.EventID)
+}
+
+// A conversation has one task at a time. Siblings a supersede returned wait
+// behind the exposed event a worker was handed, and two of them are never
+// launched as two tasks.
+func TestAConversationHasOneTaskAtATime(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	const key = "recording:10304028989"
+	for _, id := range []int64{1, 2, 3} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(id, 0, key))
+		require.NoError(t, err)
+	}
+	grant, err := ledger.CreateTask(ctx, []int64{1, 2, 3})
+	require.NoError(t, err)
+	d, err := ledger.Dispatch(ctx, grant.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.NoError(t, ledger.SupersedeTask(ctx, grant.ID))
+
+	_, err = ledger.CreateTask(ctx, []int64{2})
+	require.ErrorIs(t, err, ErrConversationBusy, "event 1 was handed to a worker and is not settled")
+	_, err = ledger.CreateTask(ctx, []int64{2, 3})
+	require.ErrorIs(t, err, ErrConversationBusy)
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 2).State, "a refused task moves nothing")
+
+	// A redispatch that takes the whole conversation is one task.
+	_, err = ledger.CreateTask(ctx, []int64{1, 2, 3})
+	require.NoError(t, err)
+
+	// Two separate launches on a free conversation: the second is refused.
+	other := newTestLedger(t)
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, other, id)
+		_, err := other.Admission().Commit(ctx, admittedVerdict(id, 0, key))
+		require.NoError(t, err)
+	}
+	_, err = other.CreateTask(ctx, []int64{1})
+	require.NoError(t, err)
+	_, err = other.CreateTask(ctx, []int64{2})
+	require.ErrorIs(t, err, ErrConversationBusy)
+}
+
+// Asked for by id or as the earliest, an event is served by one rule.
+func TestTheEarliestAndAnExplicitGetAgree(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	// Settled elsewhere while the worker had it, before it acknowledged.
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+
+	byID, ok, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	earliest, ok, err := f.d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, byID, earliest)
 }
 
 // Finished work is never handed out for the first time: a record completed
@@ -711,6 +776,7 @@ func TestStripMentionsOf(t *testing.T) {
 		"an entity in the sgid":          {"a" + entityEncodedSGID(agent) + "b", "ab"},
 		"inside a comment it is text":    {"<!-- " + agent + " -->" + other, "<!-- " + agent + " -->" + other},
 		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "ab"},
+		"the first sgid is the one":      {strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1), strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))
@@ -723,4 +789,41 @@ func TestStripMentionsOf(t *testing.T) {
 func entityEncodedSGID(mention string) string {
 	i := strings.Index(mention, `sgid="`) + len(`sgid="`)
 	return mention[:i] + fmt.Sprintf("&#x%x;", mention[i]) + mention[i+1:]
+}
+
+func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", home)
+	root, err := StateRoot()
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "basecamp", "connect"), root)
+	canonical := filepath.Join(root, StateDirName("999", adapterAgentID))
+
+	agentID, err := ResolveStateDir(canonical, "999")
+	require.NoError(t, err)
+	assert.Equal(t, adapterAgentID, agentID)
+	agentID, err = ResolveStateDir(canonical+"/", "0999")
+	require.NoError(t, err, "accounts compare as numbers, and a trailing slash is the same directory")
+	assert.Equal(t, adapterAgentID, agentID)
+
+	for name, dir := range map[string]string{
+		"outside the root":   filepath.Join(t.TempDir(), StateDirName("999", adapterAgentID)),
+		"nested in the root": filepath.Join(root, "x", StateDirName("999", adapterAgentID)),
+		"another account":    filepath.Join(root, StateDirName("1000", adapterAgentID)),
+		"no agent":           filepath.Join(root, "999-"),
+		"no account":         filepath.Join(root, "-52007412"),
+		"not a number":       filepath.Join(root, "999-abc"),
+		"the root itself":    root,
+		"above the root":     filepath.Join(root, "..", StateDirName("999", adapterAgentID)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ResolveStateDir(dir, "999")
+			assert.ErrorIs(t, err, ErrNotAStateDir)
+		})
+	}
+
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	root, err = StateRoot()
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(root), "a relative XDG_STATE_HOME is ignored, as the specification says")
 }

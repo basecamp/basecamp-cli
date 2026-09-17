@@ -12,6 +12,9 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +68,11 @@ var (
 	// ErrInvalidReport is a report the worker can correct: an outcome that
 	// is not one of the two, a link that is not a URL, too many links.
 	ErrInvalidReport = errors.New("the report is not valid")
+	// ErrConversationBusy is an event whose conversation already has a
+	// dispatched record outside the task being created: a running task, or
+	// work a worker was handed that is not settled yet. A conversation has
+	// one task at a time.
+	ErrConversationBusy = errors.New("the event's conversation already has a task")
 	// ErrEventOnLiveTask is an event a live task already carries. Handing it
 	// to a second task would give two workers one instruction.
 	ErrEventOnLiveTask = errors.New("the event is already on a live task")
@@ -126,6 +134,7 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 		return TaskGrant{}, fmt.Errorf("connector: task token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
+
 	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
 	if err != nil {
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
@@ -135,14 +144,14 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
 	}
 	for _, id := range eventIDs {
-		var acknowledge, servable int
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &servable); {
+		var acknowledge, hasInstruction int
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
 		}
-		if servable == 0 {
+		if hasInstruction == 0 {
 			// A task a worker could pull nothing from would read as a task
 			// with nothing left to do. A record without its instruction
 			// needs a new verdict first.
@@ -158,6 +167,36 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 			}
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
 		}
+	}
+
+	// One task per conversation: every dispatched record on the events'
+	// conversations must be among the events this task takes. Checked after
+	// every event is on the task — so an event already on a live task is told
+	// as that — and before any of them moves, so the records this call
+	// dispatches never count.
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
+	args := make([]any, 0, len(eventIDs)*2)
+	for _, id := range eventIDs {
+		args = append(args, id)
+	}
+	for _, id := range eventIDs {
+		args = append(args, id)
+	}
+	var busy int64
+	//nolint:gosec // G202: placeholders, not values
+	switch err := tx.QueryRowContext(ctx, `
+SELECT other.id FROM events other
+JOIN events mine ON mine.conversation_key = other.conversation_key
+WHERE mine.id IN (`+placeholders+`) AND mine.conversation_key <> ''
+  AND other.state = 'dispatched' AND other.id NOT IN (`+placeholders+`)
+LIMIT 1`, args...).Scan(&busy); {
+	case err == nil:
+		return TaskGrant{}, fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", busy, ErrConversationBusy)
+	case !errors.Is(err, sql.ErrNoRows):
+		return TaskGrant{}, fmt.Errorf("connector: read conversations: %w", err)
+	}
+
+	for _, id := range eventIDs {
 		// Admitted or queued work joins a task; a dispatched record whose
 		// task was superseded joins its replacement.
 		moved, err := l.move(ctx, tx, transition{id: id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued, StateDispatched}})
@@ -383,8 +422,7 @@ func (d *TaskDispatch) get(ctx context.Context, eventID int64) (Instruction, boo
 	if eventID == 0 {
 		err := tx.QueryRowContext(ctx, `
 SELECT te.event_id FROM task_events te JOIN events e ON e.id = te.event_id
-WHERE te.task_id = ? AND te.delivery IN ('admitted', 'exposed')
-  AND e.state = 'dispatched' AND e.content_dropped = 0 AND e.snapshot IS NOT NULL
+WHERE te.task_id = ? AND te.delivery IN ('admitted', 'exposed') AND `+servableSQL+`
 ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Instruction{}, false, nil
@@ -401,11 +439,7 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 	if err != nil {
 		return Instruction{}, false, err
 	}
-	// A completed record is served again only to the worker it was already
-	// exposed to; finished work is never handed out for the first time.
-	servable := record.State == StateDispatched ||
-		(record.State == StateCompleted && te.delivery != DeliveryAdmitted)
-	if !servable || record.ContentDropped || len(record.Decision.Snapshot) == 0 {
+	if !servable(record, te.delivery) {
 		return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 	}
 
@@ -462,6 +496,20 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		ContentUpdatedAt:  snapshot.UpdatedAt,
 	}, true, nil
 }
+
+// servable is whether an event on a task is handed to its worker: its record
+// is dispatched, or completed after this worker was exposed to it — finished
+// work is never handed out for the first time — and it still has its
+// instruction. servableSQL is the same rule over task_events te and events e,
+// for the earliest-event query; the two are kept side by side so they cannot
+// drift.
+func servable(record Record, delivery Delivery) bool {
+	state := record.State == StateDispatched || (record.State == StateCompleted && delivery != DeliveryAdmitted)
+	return state && !record.ContentDropped && len(record.Decision.Snapshot) > 0
+}
+
+const servableSQL = `(e.state = 'dispatched' OR (e.state = 'completed' AND te.delivery <> 'admitted'))
+  AND e.content_dropped = 0 AND e.snapshot IS NOT NULL AND length(e.snapshot) > 0`
 
 // Ack records the worker's acknowledgement: delivery moves to delivered, and
 // ackID, when given, is the worker's own boost or comment. A repeat — a lost
@@ -661,161 +709,272 @@ func sameID(stored sql.NullInt64, given *int64) bool {
 }
 
 // StripMentionsOf removes every mention of personID from rich text, and
-// leaves every other attachment — other people's mentions, files — as it was.
-// A worker handed its own mention reads an instruction addressed to itself,
-// which says nothing the dispatch does not already say.
+// leaves the rest as it was. A worker handed its own mention reads an
+// instruction addressed to itself, which says nothing the dispatch does not
+// already say.
 //
-// The markup is walked tag by tag, the way the SDK's mention reader walks it,
-// so the two agree on what a mention is: a comment is not markup, a ">" in a
-// quoted attribute does not end its tag, either quote style works, and the
-// sgid is entity-decoded before it is read. A mention element runs from its
-// start tag to the first closing tag, unless another attachment starts first
-// or none closes, in which case the start tag stands alone.
+// What counts as a mention is exactly what basecamp.MentionedPersonIDs — the
+// reader admission decided the trigger with — counts: the tag walk below is
+// that reader's, rule for rule (comments, "<!", "<?" and end tags skipped,
+// punctuation part of a name, the first sgid attribute authoritative even when
+// empty, entities decoded, an unterminated tag ending the markup). The two
+// are held to agreement by a differential test and a fuzz target over hostile
+// markup, not by review.
+//
+// A mention element runs from its start tag to the first end tag of the same
+// name, unless another attachment starts first or none closes, in which case
+// the start tag stands alone.
 func StripMentionsOf(richText string, personID int64) string {
-	var out strings.Builder
+	if !slices.Contains(basecamp.MentionedPersonIDs(richText), personID) {
+		return richText
+	}
+	out, _ := stripOnce(richText, personID)
+	if slices.Contains(basecamp.MentionedPersonIDs(out), personID) {
+		// The walk is the reader's, so one pass removes every mention it
+		// reads; a mention left means removing one joined the text around it
+		// into another. Handing that out would put the agent's own mention in
+		// front of the worker, and handing out nothing would lose the
+		// instruction. The escaped text keeps the words and no markup.
+		return html.EscapeString(out)
+	}
+	return out
+}
+
+// stripOnce removes each mention element of personID the walk finds, and
+// returns the text and the removed spans, as offsets into text.
+func stripOnce(text string, personID int64) (string, [][2]int) {
+	var (
+		out     strings.Builder
+		removed [][2]int
+	)
 	pos := 0
-	for pos < len(richText) {
-		t, ok := nextTag(richText, pos)
+	for pos < len(text) {
+		t, ok := nextMarkup(text, pos)
 		if !ok {
 			break
 		}
-		out.WriteString(richText[pos:t.start])
-		pos = t.end
-		if strings.EqualFold(t.name, "bc-attachment") {
-			if id, isPerson := basecamp.PersonIDFromSGID(html.UnescapeString(t.sgid)); isPerson && id == personID {
-				pos = mentionEnd(richText, t.end)
+		if !t.isEnd && strings.EqualFold(t.name, "bc-attachment") {
+			if id, isPerson := basecamp.PersonIDFromSGID(t.sgid); isPerson && id == personID {
+				out.WriteString(text[pos:t.start])
+				pos = mentionEnd(text, t.end)
+				removed = append(removed, [2]int{t.start, pos})
 				continue
 			}
 		}
-		out.WriteString(richText[t.start:t.end])
+		out.WriteString(text[pos:t.end])
+		pos = t.end
 	}
-	out.WriteString(richText[pos:])
-	return out.String()
+	out.WriteString(text[pos:])
+	return out.String(), removed
 }
 
-// mentionEnd is where the mention whose start tag ends at from ends: after its
-// closing tag, or at from when another attachment starts first or none closes.
+// mentionEnd is where the mention whose start tag ends at from ends: after the
+// first </bc-attachment>, or at from when another attachment starts first or
+// none closes.
 func mentionEnd(text string, from int) int {
 	for at := from; ; {
-		t, ok := nextTag(text, at)
-		if !ok || strings.EqualFold(t.name, "bc-attachment") {
+		t, ok := nextMarkup(text, at)
+		if !ok {
 			return from
 		}
-		if strings.EqualFold(t.name, "/bc-attachment") {
-			return t.end
+		if strings.EqualFold(t.name, "bc-attachment") {
+			if t.isEnd {
+				return t.end
+			}
+			return from
 		}
 		at = t.end
 	}
 }
 
-// tag is one start or end tag: its bounds, its name ("/name" for an end tag)
-// and its sgid attribute, raw.
-type tag struct {
+// markup is one start or end tag the walk found: where it starts and ends,
+// its name, whether it is an end tag, and a start tag's first sgid, decoded.
+type markup struct {
 	start, end int
-	name, sgid string
+	name       string
+	isEnd      bool
+	sgid       string
 }
 
-// nextTag finds the next complete tag at or after pos, skipping comments. ok
-// is false when none remains; a tag or comment left unterminated ends the
-// markup, as it does for a browser.
-func nextTag(text string, pos int) (tag, bool) {
+// nextMarkup returns the next start or end tag at or after pos, walking the
+// text as basecamp.MentionedPersonIDs does. ok is false when the markup ends:
+// no "<" left, or a comment, declaration or tag left unterminated, after
+// which nothing is markup.
+func nextMarkup(text string, pos int) (markup, bool) {
 	for pos < len(text) {
 		i := strings.IndexByte(text[pos:], '<')
 		if i < 0 {
-			return tag{}, false
+			return markup{}, false
 		}
 		start := pos + i
-		rest := text[start+1:]
-		if strings.HasPrefix(rest, "!--") {
-			stop := strings.Index(rest[3:], "-->")
+		pos = start + 1
+		rest := text[pos:]
+		switch {
+		case strings.HasPrefix(rest, "!--"):
+			stop := strings.Index(rest, "-->")
 			if stop < 0 {
-				return tag{}, false
+				return markup{}, false
 			}
-			pos = start + 1 + 3 + stop + 3
+			pos += stop + 3
+			continue
+		case strings.HasPrefix(rest, "/"):
+			stop := strings.IndexByte(rest, '>')
+			if stop < 0 {
+				return markup{}, false
+			}
+			nameEnd := 1
+			for nameEnd < len(rest) && isMarkupNameChar(rest[nameEnd]) {
+				nameEnd++
+			}
+			return markup{start: start, end: pos + stop + 1, name: rest[1:nameEnd], isEnd: true}, true
+		case strings.HasPrefix(rest, "!"), strings.HasPrefix(rest, "?"):
+			stop := strings.IndexByte(rest, '>')
+			if stop < 0 {
+				return markup{}, false
+			}
+			pos += stop + 1
 			continue
 		}
-		n := 0
-		if strings.HasPrefix(rest, "/") {
-			n = 1
+		nameEnd := 0
+		for nameEnd < len(rest) && isMarkupNameChar(rest[nameEnd]) {
+			nameEnd++
 		}
-		nameStart := n
-		for n < len(rest) && isTagNameByte(rest[n]) {
-			n++
+		if nameEnd == 0 {
+			continue // a bare "<" in text
 		}
-		if n == nameStart {
-			pos = start + 1
-			continue
+		sgid, end, ok := scanAttributes(text, pos+nameEnd)
+		if !ok {
+			return markup{}, false
 		}
-		t := tag{start: start, name: rest[:n]}
-		at := start + 1 + n
-		for at < len(text) {
-			c := text[at]
-			switch {
-			case c == '>':
-				t.end = at + 1
-				return t, true
-			case isTagNameByte(c):
-				attrStart := at
-				for at < len(text) && isTagNameByte(text[at]) {
-					at++
-				}
-				attr := text[attrStart:at]
-				for at < len(text) && isSpaceByte(text[at]) {
-					at++
-				}
-				if at >= len(text) || text[at] != '=' {
-					continue
-				}
-				at++
-				for at < len(text) && isSpaceByte(text[at]) {
-					at++
-				}
-				value, next := attributeValue(text, at)
-				if next < 0 {
-					return tag{}, false
-				}
-				if t.sgid == "" && strings.EqualFold(attr, "sgid") {
-					t.sgid = value
-				}
-				at = next
-			default:
-				at++
-			}
-		}
-		return tag{}, false
+		return markup{start: start, end: end, name: rest[:nameEnd], sgid: sgid}, true
 	}
-	return tag{}, false
+	return markup{}, false
 }
 
-// attributeValue reads a quoted or bare attribute value at pos and returns it
-// with the position after it; next is -1 for an unterminated quote.
-func attributeValue(text string, pos int) (value string, next int) {
-	if pos < len(text) && (text[pos] == '"' || text[pos] == '\'') {
-		end := strings.IndexByte(text[pos+1:], text[pos])
-		if end < 0 {
-			return "", -1
-		}
-		return text[pos+1 : pos+1+end], pos + end + 2
-	}
-	end := pos
-	for end < len(text) && !isSpaceByte(text[end]) && text[end] != '>' {
-		end++
-	}
-	return text[pos:end], end
+// isMarkupNameChar is what may follow "<" in a tag name: everything but space,
+// "/", ">", "<", "=" and quotes, so "<bc-attachment.x" is its own name.
+func isMarkupNameChar(c byte) bool {
+	return !isMarkupSpace(c) && c != '/' && c != '>' && c != '<' && c != '=' && c != '"' && c != '\''
 }
 
-func isTagNameByte(c byte) bool {
-	return c == '-' || c == '_' || c == ':' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-func isSpaceByte(c byte) bool {
+func isMarkupSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
-// StateDirName is the connector's state directory for one account and agent:
-// "<account>-<agent person id>", under $XDG_STATE_HOME/basecamp/connect/.
+// scanAttributes walks a start tag's attributes from pos to its ">", and
+// returns the first sgid attribute's decoded value (empty when absent or
+// empty), the index after the ">", and whether the tag closed.
+func scanAttributes(text string, pos int) (sgid string, end int, ok bool) {
+	seen := false
+	for pos < len(text) {
+		for pos < len(text) && (isMarkupSpace(text[pos]) || text[pos] == '/') {
+			pos++
+		}
+		if pos >= len(text) {
+			return sgid, pos, false
+		}
+		if text[pos] == '>' {
+			return sgid, pos + 1, true
+		}
+		nameStart := pos
+		for pos < len(text) && !isMarkupSpace(text[pos]) && text[pos] != '=' && text[pos] != '>' && text[pos] != '/' {
+			pos++
+		}
+		name := text[nameStart:pos]
+		for pos < len(text) && isMarkupSpace(text[pos]) {
+			pos++
+		}
+		value := ""
+		if pos < len(text) && text[pos] == '=' {
+			pos++
+			for pos < len(text) && isMarkupSpace(text[pos]) {
+				pos++
+			}
+			if pos < len(text) && (text[pos] == '"' || text[pos] == '\'') {
+				quote := text[pos]
+				pos++
+				closing := strings.IndexByte(text[pos:], quote)
+				if closing < 0 {
+					return sgid, len(text), false
+				}
+				value = text[pos : pos+closing]
+				pos += closing + 1
+			} else {
+				valueStart := pos
+				for pos < len(text) && !isMarkupSpace(text[pos]) && text[pos] != '>' {
+					pos++
+				}
+				value = text[valueStart:pos]
+			}
+		}
+		if name == "" {
+			pos++
+			continue
+		}
+		if !seen && strings.EqualFold(name, "sgid") {
+			seen = true
+			sgid = html.UnescapeString(value)
+		}
+	}
+	return sgid, pos, false
+}
+
+// StateDirName is the connector's state directory for one account and agent,
+// "<account>-<agent person id>", inside StateRoot.
 func StateDirName(accountID string, agentID int64) string {
 	return accountID + "-" + strconv.FormatInt(agentID, 10)
+}
+
+// ErrNotAStateDir is a directory that is not a connector state directory for
+// the account asked about.
+var ErrNotAStateDir = errors.New("not the connector's state directory for this account")
+
+// StateRoot is where every connector state directory lives:
+// $XDG_STATE_HOME/basecamp/connect, or ~/.local/state/basecamp/connect when
+// XDG_STATE_HOME is unset or not absolute, as the XDG specification says.
+func StateRoot() (string, error) {
+	base := os.Getenv("XDG_STATE_HOME")
+	if !filepath.IsAbs(base) {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "", fmt.Errorf("connector: no state home: %w", err)
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(filepath.Clean(base), "basecamp", "connect"), nil
+}
+
+// ResolveStateDir is the one place a state directory is accepted: dir must
+// be exactly StateRoot/<account>-<agent person id>, and its account must be
+// accountID, compared as numbers. It returns the agent's Person id.
+//
+// The location is part of the check, not only the name. A directory named
+// for this account anywhere else — a copy of another account's ledger renamed
+// to match — is refused, because the name is what binds a ledger to an
+// account and anyone can choose a name.
+func ResolveStateDir(dir, accountID string) (int64, error) {
+	root, err := StateRoot()
+	if err != nil {
+		return 0, err
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
+	}
+	if filepath.Dir(abs) != root {
+		return 0, fmt.Errorf("connector: %s is not inside %s: %w", abs, root, ErrNotAStateDir)
+	}
+	account, agent, ok := strings.Cut(filepath.Base(abs), "-")
+	agentID, err := strconv.ParseInt(agent, 10, 64)
+	if !ok || err != nil || agentID <= 0 {
+		return 0, fmt.Errorf("connector: %s is not named <account>-<agent person id>: %w", abs, ErrNotAStateDir)
+	}
+	given, errGiven := strconv.ParseUint(account, 10, 64)
+	want, errWant := strconv.ParseUint(accountID, 10, 64)
+	if errGiven != nil || errWant != nil || given == 0 || given != want {
+		return 0, fmt.Errorf("connector: %s belongs to account %s, not %s: %w", abs, account, accountID, ErrNotAStateDir)
+	}
+	return agentID, nil
 }
 
 // LedgerFile is the ledger's file name inside the state directory.

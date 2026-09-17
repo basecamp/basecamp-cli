@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
@@ -24,11 +24,17 @@ import (
 const connectTestAgentID int64 = 52007412
 
 // connectStateWithTask builds the connector's state directory for account 999
-// and the agent, with one admitted mention on a task, and returns the
-// directory and the task's grant.
+// and the agent under a private state home, with one admitted mention on a
+// task, and returns the directory and the task's grant. XDG_STATE_HOME is set
+// to that home, so run it after setupMCPTestApp, which sets its own.
 func connectStateWithTask(t *testing.T) (string, connector.TaskGrant, *connector.Ledger) {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), connector.StateDirName("999", connectTestAgentID))
+	home := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", home)
+	root, err := connector.StateRoot()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(root, 0o700))
+	dir := filepath.Join(root, connector.StateDirName("999", connectTestAgentID))
 	require.NoError(t, os.Mkdir(dir, 0o700))
 	ledger, err := connector.OpenLedger(filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
@@ -73,13 +79,23 @@ func toolNames(t *testing.T, session *mcp.ClientSession) []string {
 	return names
 }
 
+// connectMCPApp builds the app, then the connector state under the state home
+// the command will read.
+func connectMCPApp(t *testing.T, accountID, baseURL string) (*appctx.App, string, connector.TaskGrant, *connector.Ledger) {
+	t.Helper()
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+	app := setupMCPTestApp(t, accountID, baseURL)
+	dir, grant, ledger := connectStateWithTask(t)
+	return app, dir, grant, ledger
+}
+
 // Done when: the domain is served from the ledger with the task token, and a
 // server started without the token does not expose it.
 func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
-	dir, grant, ledger := connectStateWithTask(t)
+	app, dir, grant, ledger := connectMCPApp(t, "999", unusedUpstream(t).URL)
 	t.Setenv(connectTaskTokenEnv, grant.Token)
 
-	session := runMCPCommand(t, unusedUpstream(t), "--connect-state", dir)
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir)
 	assert.Contains(t, toolNames(t, session), "basecamp_connect")
 	assert.Empty(t, os.Getenv(connectTaskTokenEnv), "the token does not outlive startup in the environment")
 
@@ -98,97 +114,89 @@ func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
 	assert.NotContains(t, text, "secret-route")
 	assert.NotContains(t, text, grant.Token)
 
-	record, ok, err := ledger.Get(context.Background(), 1)
+	// Read back through the connector's own handle: a repeat writes nothing,
+	// and reports the delivery the server wrote.
+	d, err := ledger.Dispatch(context.Background(), grant.Token, connectTestAgentID)
+	require.NoError(t, err)
+	again, ok, err := d.Get(context.Background(), 1)
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.Equal(t, connector.StateDispatched, record.State, "exposure was written to the connector's ledger")
+	assert.Equal(t, connector.DeliveryExposed, again.Delivery, "exposure was written to the connector's ledger")
 }
 
 func TestMCPCommandMatchesTheAccountAsANumber(t *testing.T) {
-	dir, grant, _ := connectStateWithTask(t)
+	app, dir, grant, _ := connectMCPApp(t, "0999", unusedUpstream(t).URL)
 	t.Setenv(connectTaskTokenEnv, grant.Token)
-	t.Setenv("BASECAMP_TOKEN", "test-token")
-	app := setupMCPTestApp(t, "0999", unusedUpstream(t).URL)
-	clientTransport := stubMCPTransport(t)
-	done := make(chan error, 1)
-	go func() { done <- executeMCPCommand(t, app, "--connect-state", dir+"/") }()
-	// Raced against the command: one that refuses the directory exits without
-	// serving, and the client's connect would wait on it forever.
-	type connected struct {
-		session *mcp.ClientSession
-		err     error
-	}
-	connecting := make(chan connected, 1)
-	go func() {
-		client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
-		session, err := client.Connect(context.Background(), clientTransport, nil)
-		connecting <- connected{session, err}
-	}()
-	var session *mcp.ClientSession
-	select {
-	case cmdErr := <-done:
-		require.NoError(t, cmdErr, "basecamp mcp refused to serve")
-		t.Fatal("basecamp mcp exited before serving")
-	case c := <-connecting:
-		require.NoError(t, c.err)
-		session = c.session
-	}
+
+	session := runMCPCommandWithApp(t, app, "--connect-state", dir+"/")
 	assert.Contains(t, toolNames(t, session), "basecamp_connect")
-	require.NoError(t, session.Close())
-	require.NoError(t, <-done)
+}
+
+// Authentication can start helper processes, so the token is out of the
+// environment before it runs — even when it then fails.
+func TestMCPCommandTakesTheTokenBeforeAuthenticating(t *testing.T) {
+	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv(connectTaskTokenEnv, grant.Token)
+
+	err := executeMCPCommand(t, app, "--connect-state", dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Not authenticated")
+	assert.Empty(t, os.Getenv(connectTaskTokenEnv))
 }
 
 func TestMCPCommandRefusesReadOnlyBeforeTouchingTheToken(t *testing.T) {
-	dir, grant, _ := connectStateWithTask(t)
-	t.Setenv("BASECAMP_TOKEN", "test-token")
+	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
 	t.Setenv(connectTaskTokenEnv, grant.Token)
-	app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
 
 	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only")
 	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read-only")
 	assert.Equal(t, grant.Token, os.Getenv(connectTaskTokenEnv))
 }
 
 func TestMCPCommandWithoutConnectStateHasNoConnectDomain(t *testing.T) {
-	_, grant, _ := connectStateWithTask(t)
+	app, _, grant, _ := connectMCPApp(t, "999", unusedUpstream(t).URL)
 	t.Setenv(connectTaskTokenEnv, grant.Token)
 
-	session := runMCPCommand(t, unusedUpstream(t))
+	session := runMCPCommandWithApp(t, app)
 	assert.NotContains(t, toolNames(t, session), "basecamp_connect", "a token alone serves nothing")
 }
 
 func TestMCPCommandRefusesABadConnectState(t *testing.T) {
-	dir, grant, _ := connectStateWithTask(t)
-	otherAccount := filepath.Join(t.TempDir(), connector.StateDirName("1000", connectTestAgentID))
-	require.NoError(t, os.Mkdir(otherAccount, 0o700))
-	notAStateDir := filepath.Join(t.TempDir(), "connect")
-	require.NoError(t, os.Mkdir(notAStateDir, 0o700))
-	empty := filepath.Join(t.TempDir(), connector.StateDirName("999", connectTestAgentID))
-	require.NoError(t, os.Mkdir(empty, 0o700))
+	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
+	root, err := connector.StateRoot()
+	require.NoError(t, err)
+	mkdir := func(path string) string {
+		require.NoError(t, os.MkdirAll(path, 0o700))
+		return path
+	}
+	otherAccount := mkdir(filepath.Join(root, connector.StateDirName("1000", connectTestAgentID)))
+	notAStateDir := mkdir(filepath.Join(root, "connect"))
+	empty := mkdir(filepath.Join(root, connector.StateDirName("999", 1)))
+	// The right name in the wrong place: a copy that renamed itself to match.
+	elsewhere := mkdir(filepath.Join(t.TempDir(), connector.StateDirName("999", connectTestAgentID)))
+	ledger, err := os.ReadFile(filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(elsewhere, connector.LedgerFile), ledger, 0o600))
 
 	for name, tc := range map[string]struct {
 		dir, token, want string
 	}{
 		"no token":            {dir, "", connectTaskTokenEnv},
 		"another account":     {otherAccount, grant.Token, "belongs to account 1000"},
-		"not a state dir":     {notAStateDir, grant.Token, "not a connector state directory"},
+		"not a state dir":     {notAStateDir, grant.Token, "not named <account>-<agent person id>"},
+		"outside the root":    {elsewhere, grant.Token, "is not inside"},
 		"no ledger":           {empty, grant.Token, "no connector ledger"},
-		"read-only refused":   {dir, grant.Token, "read-only"},
 		"a token for no task": {dir, "not-a-task-token", "names no current task"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("BASECAMP_TOKEN", "test-token")
 			t.Setenv(connectTaskTokenEnv, tc.token)
-			app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
-			args := []string{"--connect-state", tc.dir}
-			if strings.HasPrefix(name, "read-only") {
-				args = append(args, "--read-only")
-			}
-			err := executeMCPCommand(t, app, args...)
+			err := executeMCPCommand(t, app, "--connect-state", tc.dir)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
-	_, err := os.Stat(filepath.Join(empty, connector.LedgerFile))
+	_, err = os.Stat(filepath.Join(empty, connector.LedgerFile))
 	assert.True(t, os.IsNotExist(err), "a worker's server never creates the connector's ledger")
 }
