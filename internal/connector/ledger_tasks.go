@@ -93,6 +93,12 @@ CREATE TABLE attempts (
   refusals         INTEGER NOT NULL DEFAULT 0,
   progress_at      TEXT,
   still_running    INTEGER NOT NULL DEFAULT 0,
+  -- The process the task token went to: the worker's MCP server, which an
+  -- agent may start in a process group of its own, so a restart can end it
+  -- too rather than leave a process of the connector's holding the token.
+  taker_pid        INTEGER,
+  taker_pgid       INTEGER,
+  taker_started    TEXT,
   UNIQUE (task_id, seq),
   CHECK ((state = 'ended') = (stop_reason <> ''))
 );
@@ -545,6 +551,33 @@ type AttemptProcess struct {
 	SessionID string
 }
 
+// RecordTaker records the process that took the attempt's task token — the
+// worker's MCP server, which an agent may have started in a process group of
+// its own. A restart ends it by this record, as it ends the worker by the
+// worker's.
+func (l *Ledger) RecordTaker(ctx context.Context, attemptID string, p AttemptProcess) error {
+	return retryBusy(func() error {
+		var started any
+		if !p.StartedAt.IsZero() {
+			started = stamp(p.StartedAt)
+		}
+		res, err := l.db.ExecContext(ctx, `
+UPDATE attempts SET taker_pid = ?, taker_pgid = ?, taker_started = ? WHERE id = ? AND state <> 'ended'`,
+			nullableInt(p.PID), nullableInt(p.PGID), started, attemptID)
+		if err != nil {
+			return fmt.Errorf("connector: record the process that took the token of %s: %w", attemptID, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return nil //nolint:nilerr // the write is committed
+		}
+		if n == 0 {
+			return fmt.Errorf("connector: record the process that took the token of %s: %w", attemptID, ErrNoLiveAttempt)
+		}
+		return nil
+	})
+}
+
 // MarkRunning moves a launching attempt to running with its process and
 // session.
 func (l *Ledger) MarkRunning(ctx context.Context, attemptID string, p AttemptProcess) error {
@@ -562,10 +595,7 @@ WHERE id = ? AND state = 'launching'`,
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
-			// The write is already committed; a driver that cannot say how
-			// many rows it touched is not a reason to count the refusal
-			// again at settlement.
-			return nil //nolint:nilerr // the write is committed; an unreadable row count is not a reason to count it again
+			return err
 		}
 		if n == 0 {
 			return fmt.Errorf("connector: mark attempt %s running: %w", attemptID, ErrNoLiveAttempt)
@@ -801,7 +831,10 @@ type LiveAttempt struct {
 	WorkDir         string
 	ConversationKey string
 	Process         AttemptProcess
-	LaunchedAt      time.Time
+	// Taker is the process the task token went to, where one took it. Its
+	// PID is zero when none did.
+	Taker      AttemptProcess
+	LaunchedAt time.Time
 	// DeadlineAt is zero when the task has none.
 	DeadlineAt time.Time
 }
@@ -812,7 +845,8 @@ type LiveAttempt struct {
 func (l *Ledger) LiveAttempts(ctx context.Context) ([]LiveAttempt, error) {
 	rows, err := l.db.QueryContext(ctx, `
 SELECT a.id, a.task_id, a.state, a.driver, t.route, t.work_dir, t.conversation_key,
-       COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started, a.session_id, a.launched_at, t.deadline_at
+       COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started, a.session_id, a.launched_at, t.deadline_at,
+       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	if err != nil {
@@ -822,13 +856,19 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	var out []LiveAttempt
 	for rows.Next() {
 		var (
-			a                 LiveAttempt
-			state, launched   string
-			started, deadline sql.NullString
+			a                       LiveAttempt
+			state, launched         string
+			started, deadline, took sql.NullString
 		)
 		if err := rows.Scan(&a.AttemptID, &a.TaskID, &state, &a.Driver, &a.Route, &a.WorkDir, &a.ConversationKey,
-			&a.Process.PID, &a.Process.PGID, &started, &a.Process.SessionID, &launched, &deadline); err != nil {
+			&a.Process.PID, &a.Process.PGID, &started, &a.Process.SessionID, &launched, &deadline,
+			&a.Taker.PID, &a.Taker.PGID, &took); err != nil {
 			return nil, fmt.Errorf("connector: live attempts: %w", err)
+		}
+		if took.Valid {
+			if a.Taker.StartedAt, err = parseStamp(took.String); err != nil {
+				return nil, err
+			}
 		}
 		a.State = AttemptState(state)
 		if a.LaunchedAt, err = parseStamp(launched); err != nil {
@@ -972,9 +1012,14 @@ func (l *Ledger) RecordRefusal(ctx context.Context, attemptID string) error {
 		if err != nil {
 			return fmt.Errorf("connector: record refusal on %s: %w", attemptID, err)
 		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n == 0 {
+		n, err := res.RowsAffected()
+		if err != nil {
+			// The write is already committed; a driver that cannot say how
+			// many rows it touched is not a reason to count the refusal
+			// again at settlement.
+			return nil //nolint:nilerr // the write is committed, so the refusal is recorded
+		}
+		if n == 0 {
 			return fmt.Errorf("connector: record refusal on %s: %w", attemptID, ErrNoLiveAttempt)
 		}
 		return nil

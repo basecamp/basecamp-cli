@@ -535,6 +535,13 @@ var (
 	// (card 23's finding). A driver's own sentinel for one of these wraps
 	// this one.
 	ErrSessionUnverified = errors.New("driver: the session is not the one the connector asked for")
+	// A server that stops working AFTER the handshake is not detectable from
+	// Claude Code's stream, which carries server status only in its init
+	// message: the connector's record is what catches it, since an event the
+	// worker could not report settles completed(unknown) and never succeeded,
+	// and the dispatcher logs connector.UnreportedFinishLine for a person to
+	// find.
+	//
 	// ErrSessionEnded is a call on a session whose worker is gone.
 	ErrSessionEnded = errors.New("driver: the session has ended")
 )
