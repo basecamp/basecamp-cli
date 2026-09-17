@@ -289,6 +289,18 @@ func (l *Ledger) claimIntent(ctx context.Context) (Intent, bool, error) {
 		in := intents[0]
 
 		next, note := IntentSending, ""
+		if in.Kind == IntentHoldingReply {
+			// The reply answers a record with no route. If the route arrived
+			// and the record moved on — it may be running now — the answer is
+			// wrong, so it is never sent.
+			var stillBlocked bool
+			if err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = 'no_route' FROM events WHERE id = ?`, in.EventID).Scan(&stillBlocked); err != nil {
+				return fmt.Errorf("connector: outbox claim holding reply %d: %w", in.ID, err)
+			}
+			if !stillBlocked {
+				next, note = IntentCanceled, "no longer called for"
+			}
+		}
 		if in.Kind == IntentGuardAck {
 			var stillCalledFor bool
 			if err := tx.QueryRowContext(ctx, `
@@ -472,27 +484,54 @@ func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessag
 		if err != nil {
 			return 0, "", err
 		}
-		if !owned {
+		if owned {
+			continue
+		}
+		// A worker's own acknowledgement or reply is the worker's, however
+		// alike the words: the guard's fixed form is short enough to collide.
+		workers, err := l.workerMessage(ctx, m.ID)
+		if err != nil {
+			return 0, "", err
+		}
+		if !workers {
 			matches = append(matches, m.ID)
 		}
 	}
 	if len(matches) != 1 {
 		return 0, strconv.Itoa(len(matches)) + " matching messages at the destination", nil
 	}
-	// Rivals are every intent at the destination whose message may exist
-	// without a receipt: not yet sent, sending, or never settled — abandoned
-	// included, since a person abandoning one did not prove it absent.
-	rivals, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending, IntentSending, IntentIndeterminate, IntentAbandoned}})
+	rivals, err := l.unsettledAt(ctx, in.Destination)
 	if err != nil {
 		return 0, "", err
 	}
 	for _, r := range rivals {
-		if r.ID != in.ID && r.Destination.Kind == in.Destination.Kind && r.Destination.RecordingID == in.Destination.RecordingID &&
-			MessageText(r.Body) == want {
+		if r.ID != in.ID && MessageText(r.Body) == want {
 			return 0, "intent " + strconv.FormatInt(r.ID, 10) + " could claim the same message", nil
 		}
 	}
 	return matches[0], "", nil
+}
+
+// workerMessage reports whether a message id is one a worker reported as its
+// own acknowledgement or reply.
+func (l *Ledger) workerMessage(ctx context.Context, id int64) (bool, error) {
+	var found bool
+	err := l.db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ? OR reply_id = ? OR adopted_reply_id = ?)`, id, id, id).Scan(&found)
+	return found, err
+}
+
+// unsettledAt lists the intents at a destination whose message may exist
+// without a receipt: not yet sent, sending, or never settled — abandoned
+// included, since a person abandoning one did not prove it absent.
+func (l *Ledger) unsettledAt(ctx context.Context, dest Destination) ([]Intent, error) {
+	rows, err := l.db.QueryContext(ctx, selectIntents+`
+WHERE message_kind = ? AND recording_id = ? AND state IN ('pending', 'sending', 'indeterminate', 'abandoned')`,
+		string(dest.Kind), dest.RecordingID)
+	if err != nil {
+		return nil, fmt.Errorf("connector: intents at %d: %w", dest.RecordingID, err)
+	}
+	return scanIntents(rows)
 }
 
 func (l *Ledger) receiptOwnedByOther(ctx context.Context, id int64, kind MessageKind, receipt int64) (bool, error) {
@@ -581,6 +620,8 @@ func (r LifecycleFilteredReplies) AgentReplies(ctx context.Context, bucketID int
 		return nil, fmt.Errorf("connector: no reply listing for %q", kind)
 	}
 	dest := Destination{BucketID: bucketID, Kind: messageKind, RecordingID: recordingID}
+	ctx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
+	defer cancel()
 	listed, err := r.Lister.List(ctx, dest, since)
 	if err != nil {
 		return nil, err

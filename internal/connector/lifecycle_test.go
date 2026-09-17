@@ -143,7 +143,7 @@ func TestCompletionNoticeRule(t *testing.T) {
 		}},
 		{name: "blocked after a second failed start", events: []SettledEvent{
 			{EventID: 1, Withdrawn: true, Blocked: true},
-		}, want: []string{"Event 1: the worker could not be started, again. Needs a person: basecamp connect redispatch 1"}},
+		}, want: []string{"Event 1: the worker could not be started. Needs a person: basecamp connect redispatch 1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -226,7 +226,7 @@ func TestOutboxCompletionReadsBlockedBack(t *testing.T) {
 	completions, err := ledger.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, completions, 1, "the first withdrawal retries quietly; the second needs a person")
-	assert.Contains(t, completions[0].Body, "Event 1: the worker could not be started, again. Needs a person: basecamp connect redispatch 1")
+	assert.Contains(t, completions[0].Body, "Event 1: the worker could not be started. Needs a person: basecamp connect redispatch 1")
 }
 
 // The holding reply answers only a request blocked for want of a route.

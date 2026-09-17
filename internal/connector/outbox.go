@@ -32,9 +32,11 @@ import (
 //     reconciled by listing the destination, never by posting.
 //  5. Reconciliation adopts only an unambiguous candidate: exactly one of the
 //     agent's messages at the destination since the intent went sending
-//     matches its body, no other intent owns it, and no other unfinished
-//     intent at the destination has the same body. Anything else is
-//     indeterminate, for a person.
+//     matches its body, the message is not a worker's own acknowledgement or
+//     reply, no other intent owns it, and no other intent at the destination
+//     whose own message may exist unreceipted — pending, sending,
+//     indeterminate, or abandoned by a person who could not prove it absent —
+//     has the same body. Anything else is indeterminate, for a person.
 //  6. A receipt belongs to exactly one intent, and once written it never
 //     changes. A unique index and a trigger.
 //  7. States move along the lifecycle's edges only: pending → sending |

@@ -12,10 +12,10 @@ import (
 // BasecampPoster posts lifecycle messages through the SDK as the agent: the
 // account client must be the agent's own, so every message is the agent's.
 //
-// A create is not idempotent, and the SDK makes one attempt at a
-// non-idempotent operation whatever its retry settings, so Post is one
-// request. The client given should still carry no retries of its own that
-// wrap the SDK.
+// A create is not idempotent, and the SDK's generated create path makes one
+// attempt at it whatever its retry settings, so Post is one request. (The SDK
+// does replay a mutation once after a 401 refreshes the token, which creates
+// nothing.) The client given should carry no retries of its own around that.
 type BasecampPoster struct {
 	account *basecamp.AccountClient
 	agentID int64
@@ -60,10 +60,13 @@ func (p *BasecampPoster) Post(ctx context.Context, dest Destination, body string
 	return 0, fmt.Errorf("connector: %q is not a message kind", dest.Kind)
 }
 
-// linePageLimit bounds how far back a chat listing pages. A Campfire busy
-// enough to need more between a send and its reconciliation leaves the
-// intent unreconciled — an error, not a shorter answer.
-const linePageLimit = 50
+// linePageLimit bounds how far back a chat listing pages, for both callers:
+// reconciliation, which reaches back to a send made minutes ago, and the
+// adopted-reply rule, which reaches back to an acknowledgement a task-length
+// ago. A Campfire busier than this leaves the intent unreconciled and the
+// reply unadopted — an error, not a shorter answer that would read as
+// "nothing was posted".
+const linePageLimit = 200
 
 // List answers the agent's messages at the destination since the time given.
 // Boosts and comments are listed whole; chat lines newest first, page by page,

@@ -75,7 +75,7 @@ func completionLine(e SettledEvent) string {
 	redispatch := " Needs a person: basecamp connect redispatch " + id
 	switch {
 	case e.Blocked:
-		return "Event " + id + ": the worker could not be started, again." + redispatch
+		return "Event " + id + ": the worker could not be started." + redispatch
 	case e.Withdrawn, e.Returned:
 		return ""
 	case e.Outcome == OutcomeFailed:

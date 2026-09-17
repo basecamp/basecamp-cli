@@ -786,3 +786,52 @@ func TestOutboxRunReconcilesWhileSendsKeepArriving(t *testing.T) {
 	require.NoError(t, ob.Run(runCtx))
 	assert.Equal(t, IntentSent, obIntent(t, ledger, stale.Key).State, "the stale sending intent was reconciled")
 }
+
+// A holding reply is never posted about work the connector went on to run: it
+// stands down when its record leaves blocked(no_route).
+func TestOutboxAHoldingReplyStandsDownWhenTheRouteArrives(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+
+	// connect.json gains the route: the record is decided again and dispatched.
+	_, err = ledger.Admission().Commit(ctx, admittedVerdict(1, getRecord(t, ledger, 1).Revision, "recording:10304028989"))
+	require.NoError(t, err)
+	obLaunch(t, ledger, 1)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Zero(t, basecamp.postCount())
+	got := obIntent(t, ledger, holdingKey(1))
+	assert.Equal(t, IntentCanceled, got.State)
+	assert.Equal(t, "no longer called for", got.Note)
+}
+
+// A message the worker reported as its own acknowledgement or reply is the
+// worker's, whatever it says: the guard's fixed form is short enough to
+// collide with an acknowledgement in the worker's own words.
+func TestOutboxNeverAdoptsAWorkersOwnMessage(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	clock.Advance(DefaultGuardDelay)
+	claimed, ok, err := ledger.claimIntent(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	workersOwn := basecamp.add(claimed.Destination, adapterAgentID, GuardAckBody)
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d.Ack(ctx, 1, &workersOwn)
+	require.NoError(t, err)
+
+	clock.Advance(2 * time.Minute)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+	got := obIntent(t, ledger, guardKey(1))
+	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Nil(t, got.ReceiptID)
+}
