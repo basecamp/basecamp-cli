@@ -87,11 +87,10 @@ commits pushed or merged, or whose directory you removed yourself. A worktree
 that still holds work is kept and listed with why.
 
 --force <path> removes that worktree even with work in it; name each one.
-Its branch is kept unless its commits are held elsewhere, and the commit its
-HEAD is on, if nothing else holds it, gets a branch of its own (head_branch).
-What --force does discard is a commit only the worktree's own reflog still
-reaches: one the worker made and then moved away from. A locked worktree is never forced: unlock it
-first, and neither is one that is no longer where it was (reason "moved"):
+Every commit it reaches that nothing else holds is first kept under
+refs/basecamp-connect/retained/ (retained_refs), so a force discards files,
+never commits. A worktree holding a submodule's own git data, or a lock, is
+never forced; neither is one that is no longer where it was (reason "moved"):
 move it back, or remove it yourself and prune again. A force that could not go
 through is reported as kept with force_refused. Worktrees of tasks still
 running are never touched.`,
@@ -121,7 +120,7 @@ running are never touched.`,
 			out := make([]pruneView, 0, len(results))
 			removed, kept := 0, 0
 			for _, r := range results {
-				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), BranchKept: r.BranchKept, HeadBranch: r.HeadBranch, ForceRefused: r.ForceRefused})
+				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), ForceRefused: r.ForceRefused, RetainedRefs: r.RetainedRefs})
 				if r.Action == connector.PruneKept {
 					kept++
 				} else {
@@ -150,10 +149,9 @@ type worktreeView struct {
 
 type pruneView struct {
 	worktreeView
-	Action       string `json:"action"`
-	BranchKept   bool   `json:"branch_kept,omitempty"`
-	HeadBranch   string `json:"head_branch,omitempty"`
-	ForceRefused bool   `json:"force_refused,omitempty"`
+	Action       string   `json:"action"`
+	ForceRefused bool     `json:"force_refused,omitempty"`
+	RetainedRefs []string `json:"retained_refs,omitempty"`
 }
 
 func viewWorktree(w connector.Worktree) worktreeView {

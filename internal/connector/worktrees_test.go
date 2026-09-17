@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -288,20 +289,6 @@ func TestAFailedCheckRetains(t *testing.T) {
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.Equal(t, RetainedUnverified, row.RetainedReason)
 	assert.True(t, exists(workDir))
-}
-
-// Invariant 2: work written between the check and the removal stops git's
-// removal, and the worktree is retained with the work in it.
-func TestWorkWrittenAfterTheCheckStopsTheRemoval(t *testing.T) {
-	h := newWorktreeHarness(t)
-	workDir, _ := h.prepare(10)
-	late := filepath.Join(workDir, "late.txt")
-	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"worktree remove"*) echo late > "`+late+`";; esac`))
-	row := h.finish(workDir)
-	assert.Equal(t, WorktreeRetained, row.State)
-	content, err := os.ReadFile(late)
-	require.NoError(t, err)
-	assert.Equal(t, "late\n", string(content))
 }
 
 // Invariant 2: the branch is deleted only while it still points at the commit
@@ -591,7 +578,7 @@ func TestABranchTheConnectorDidNotMakeIsNotDeleted(t *testing.T) {
 
 	unlock, err := h.wt.lock(ctx)
 	require.NoError(t, err)
-	settled := h.wt.settle(ctx, record, RemovedByConnector)
+	settled := h.wt.settle(ctx, record)
 	unlock()
 	assert.Equal(t, WorktreeRemoved, settled.State)
 	assert.True(t, h.branchExists(branch), "someone else's branch survives")
@@ -821,7 +808,7 @@ func TestPruneRemovesOnlyWhatTheOperatorDealtWith(t *testing.T) {
 	assert.True(t, exists(filepath.Join(keptDir, "wip.txt")))
 	assert.Equal(t, PruneMissing, actions[gone.Path].Action)
 	assert.Equal(t, PruneForced, actions[forced.Path].Action)
-	assert.True(t, actions[forced.Path].BranchKept, "an unpushed commit's branch outlives a forced removal")
+	assert.NotEmpty(t, actions[forced.Path].RetainedRefs, "an unpushed commit is kept under a ref")
 	assert.True(t, h.branchExists(forced.Branch))
 	assert.False(t, exists(forced.Path))
 	assert.Equal(t, WorktreeLive, h.row(liveDir).State)
@@ -845,8 +832,8 @@ func TestAForcedPruneKeepsADetachedHeadsCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, PruneForced, results[0].Action)
-	require.NotEmpty(t, results[0].HeadBranch)
-	assert.Equal(t, commit, h.git(h.repo, "rev-parse", "refs/heads/"+results[0].HeadBranch))
+	require.NotEmpty(t, results[0].RetainedRefs)
+	assert.Contains(t, h.git(h.repo, "for-each-ref", "--format=%(objectname)", RetainedRefPrefix), commit)
 	assert.False(t, exists(row.Path))
 }
 
@@ -1025,4 +1012,149 @@ WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses')
 	assert.Equal(t, PruneForced, results[0].Action)
 	assert.False(t, results[0].ForceRefused)
 	assert.False(t, exists(row.Path))
+}
+
+// The worktree rule ("One worktree, one removal"), case by case: what counts
+// as work, what happens to it, and that the check still holds when something
+// tries to land work between the check and the removal.
+func TestTheWorktreeRule(t *testing.T) {
+	commit := func(h *worktreeHarness, dir, name string) string {
+		h.write(dir, name, name+"\n")
+		h.git(dir, "add", name)
+		h.git(dir, "commit", "-q", "-m", name)
+		return h.git(dir, "rev-parse", "HEAD")
+	}
+	type rowT struct {
+		name string
+		// work makes the worktree's state; it returns a commit that must
+		// survive, if any.
+		work func(h *worktreeHarness, dir string, row Worktree) string
+		// frozen runs after the removal has frozen the worktree.
+		frozen func(t *testing.T, h *worktreeHarness, dir string, row Worktree)
+		force  bool
+		// want is the row's state after; reason when retained.
+		want   WorktreeState
+		reason RetainedReason
+	}
+	rows := []rowT{
+		{name: "clean", want: WorktreeRemoved},
+		{name: "modified file", work: func(h *worktreeHarness, d string, _ Worktree) string { h.write(d, "README", "x\n"); return "" }, want: WorktreeRetained, reason: RetainedDirty},
+		{name: "untracked file", work: func(h *worktreeHarness, d string, _ Worktree) string { h.write(d, "new.txt", "x\n"); return "" }, want: WorktreeRetained, reason: RetainedDirty},
+		{name: "ignored file", work: func(h *worktreeHarness, d string, _ Worktree) string {
+			exclude := h.git(d, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+			require.NoError(h.t, os.MkdirAll(filepath.Dir(exclude), 0o700))
+			require.NoError(h.t, os.WriteFile(exclude, []byte("*.local\n"), 0o600))
+			h.write(d, "notes.local", "x\n")
+			return ""
+		}, want: WorktreeRetained, reason: RetainedDirty},
+		{name: "unpushed commit", work: func(h *worktreeHarness, d string, _ Worktree) string { return commit(h, d, "c.txt") }, want: WorktreeRetained, reason: RetainedUnpushed},
+		{name: "commit only the reflog reaches", work: func(h *worktreeHarness, d string, row Worktree) string {
+			h.git(d, "checkout", "-q", "--detach")
+			sha := commit(h, d, "c.txt")
+			h.git(d, "checkout", "-q", row.Branch)
+			return sha
+		}, want: WorktreeRetained, reason: RetainedUnpushed},
+		{name: "commit a per-worktree ref holds", work: func(h *worktreeHarness, d string, row Worktree) string {
+			sha := commit(h, d, "c.txt")
+			h.git(d, "update-ref", "refs/worktree/keep", sha)
+			h.git(d, "reset", "-q", "--hard", row.BaseCommit)
+			h.git(d, "reflog", "expire", "--expire=now", "--all")
+			return sha
+		}, want: WorktreeRetained, reason: RetainedUnpushed},
+		{name: "stash", work: func(h *worktreeHarness, d string, _ Worktree) string {
+			h.write(d, "README", "stashed\n")
+			h.git(d, "stash", "-q")
+			return h.git(d, "rev-parse", "refs/stash")
+		}, want: WorktreeRemoved},
+		{name: "locked", work: func(h *worktreeHarness, _ string, row Worktree) string {
+			h.git(h.repo, "worktree", "lock", row.Path)
+			return ""
+		}, want: WorktreeRetained, reason: RetainedLocked},
+		{name: "a commit tried between the check and the removal", frozen: func(t *testing.T, h *worktreeHarness, dir string, row Worktree) {
+			for _, at := range []string{filepath.Join(row.Path, "app"), filepath.Join(dir, "app")} {
+				cmd := exec.CommandContext(context.Background(), "git", "-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "late")
+				cmd.Dir = at
+				cmd.Env = []string{"HOME=" + h.home, "PATH=" + os.Getenv("PATH")}
+				assert.Error(t, cmd.Run(), "no commit lands in a frozen worktree (%s)", at)
+			}
+		}, want: WorktreeRemoved},
+		{name: "a file written by path between the check and the removal", frozen: func(t *testing.T, _ *worktreeHarness, _ string, row Worktree) {
+			assert.Error(t, os.WriteFile(filepath.Join(row.Path, "app", "late.txt"), []byte("x"), 0o600), "the path does not reach a frozen worktree")
+		}, want: WorktreeRemoved},
+		{name: "forced unpushed commit", work: func(h *worktreeHarness, d string, _ Worktree) string { return commit(h, d, "c.txt") }, force: true, want: WorktreeRemoved},
+		{name: "forced commit only the reflog reaches", work: func(h *worktreeHarness, d string, row Worktree) string {
+			h.git(d, "checkout", "-q", "--detach")
+			sha := commit(h, d, "c.txt")
+			h.git(d, "checkout", "-q", row.Branch)
+			h.write(d, "wip.txt", "wip\n")
+			return sha
+		}, force: true, want: WorktreeRemoved},
+	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newWorktreeHarness(t)
+			ctx := context.Background()
+			workDir, row := h.prepare(300)
+			var keep string
+			if tc.work != nil {
+				keep = tc.work(h, workDir, row)
+			}
+			if tc.frozen != nil {
+				h.wt.whileFrozen = func(dir string) error { tc.frozen(t, h, dir, row); return nil }
+			}
+			var after Worktree
+			if tc.force {
+				// A force is prune's: the worktree is retained first.
+				h.wt.whileFrozen = nil
+				require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+				results, err := h.wt.Prune(ctx, []string{row.Path})
+				require.NoError(t, err)
+				require.Len(t, results, 1)
+				after = h.row(workDir)
+			} else {
+				after = h.finish(workDir)
+			}
+			assert.Equal(t, tc.want, after.State)
+			if tc.reason != "" {
+				assert.Equal(t, tc.reason, after.RetainedReason)
+			}
+			if tc.want == WorktreeRetained {
+				assert.DirExists(t, workDir, "a kept worktree is where it was")
+				assert.NoDirExists(t, frozenName(row.Path))
+			} else {
+				assert.NoDirExists(t, row.Path)
+				assert.NoDirExists(t, frozenName(row.Path))
+				assert.NoDirExists(t, frozenName(row.AdminDir))
+			}
+			if keep != "" {
+				assert.NoError(t, exec.CommandContext(ctx, "git", "-C", h.repo, "cat-file", "-e", keep+"^{commit}").Run())
+				if tc.want == WorktreeRemoved {
+					refs := h.git(h.repo, "for-each-ref", "--contains", keep, "--format=%(refname)")
+					assert.NotEmpty(t, refs, "the commit is still reachable from a ref")
+				}
+			}
+		})
+	}
+}
+
+// A crash while a worktree is frozen leaves a removing row and frozen names;
+// the next start restores them and judges again.
+func TestACrashWhileFrozenIsRestoredOnTheNextStart(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, row := h.prepare(301)
+	h.write(workDir, "wip.txt", "wip\n")
+	h.wt.whileFrozen = func(string) error { return errors.New("crash") }
+	require.Error(t, h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir))
+	require.DirExists(t, frozenName(row.Path))
+	require.Equal(t, WorktreeRemoving, h.row(workDir).State)
+
+	h.wt.whileFrozen = nil
+	require.NoError(t, h.wt.Recover(ctx))
+	after := h.row(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedDirty, after.RetainedReason)
+	assert.FileExists(t, filepath.Join(workDir, "wip.txt"))
+	assert.DirExists(t, row.AdminDir)
+	assert.NoDirExists(t, frozenName(row.Path))
 }
