@@ -113,8 +113,8 @@ func TestTerminateRecordedLeavesAReusedPidAlone(t *testing.T) {
 	started := time.Now()
 
 	signaled, err := TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started.Add(-time.Hour)}, time.Second)
-	require.NoError(t, err)
 	assert.False(t, signaled, "a recorded start time that does not match is another process")
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader, "and a group still holding that id is not this worker's to end")
 	assert.True(t, alive(cmd.Process.Pid))
 
 	signaled, err = TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started}, 2*time.Second)
@@ -154,4 +154,28 @@ func TestTerminateReturnsWhenADescendantLeftTheGroupHoldingTheOutput(t *testing.
 	case <-time.After(10 * time.Second):
 		t.Fatal("Terminate waited on a descendant outside the worker's group")
 	}
+}
+
+// Copilot r3: a process group can outlive its leader, and its members may be
+// the worker's own children.
+func TestAGroupThatOutlivedItsLeaderIsNotSilenceAbsence(t *testing.T) {
+	w, child := startWithChild(t)
+	leader := w.Process()
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+
+	// The leader alone goes; its child keeps the group.
+	require.NoError(t, syscall.Kill(leader.PID, syscall.SIGKILL))
+	<-w.Done()
+	require.Eventually(t, func() bool { return processStartTimeGone(leader.PID) }, 5*time.Second, 20*time.Millisecond)
+
+	signaled, err := TerminateRecorded(leader, time.Second)
+	assert.False(t, signaled)
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader)
+	assert.True(t, alive(child), "and the child is left alone for a person to decide about")
+}
+
+// processStartTimeGone reports whether the kernel has no process by that pid.
+func processStartTimeGone(pid int) bool {
+	_, err := processStartTime(pid)
+	return errors.Is(err, os.ErrNotExist)
 }

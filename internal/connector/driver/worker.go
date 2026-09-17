@@ -173,10 +173,18 @@ func (w *Worker) Terminate(grace time.Duration) {
 	<-w.done
 }
 
+// ErrGroupOutlivedLeader is a recorded process group whose leader is gone —
+// or is a pid the kernel has since reused — while the group still has
+// members. They may be the worker's own children, so the caller must not
+// treat the worker as finished.
+var ErrGroupOutlivedLeader = errors.New("driver: the recorded process group outlived its leader")
+
 // TerminateRecorded ends a worker a previous connector process started, by
 // the process group it recorded, but only while the group's leader is still
 // that process: a pid the kernel has since given to something else is left
-// alone. It reports whether it signaled anything.
+// alone. A group whose leader is gone but which still has members is
+// ErrGroupOutlivedLeader, because those members may be the worker's children.
+// It reports whether it signaled anything.
 func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
 		return false, nil
@@ -184,12 +192,12 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	started, err := processStartTime(p.PID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+			return false, groupGone(p.PGID)
 		}
 		return false, err
 	}
 	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
-		return false, nil
+		return false, groupGone(p.PGID)
 	}
 	if err := signalGroup(p.PGID, syscall.SIGTERM); err != nil {
 		if errors.Is(err, syscall.ESRCH) {
@@ -206,6 +214,16 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 	}
 	_ = signalGroup(p.PGID, syscall.SIGKILL)
 	return true, nil
+}
+
+// groupGone reports nil when the recorded group has no members left, and
+// ErrGroupOutlivedLeader when it still has some: a leader that exited does
+// not take its group with it.
+func groupGone(pgid int) error {
+	if err := signalGroup(pgid, 0); err == nil {
+		return fmt.Errorf("%w: %d", ErrGroupOutlivedLeader, pgid)
+	}
+	return nil
 }
 
 // tailBuffer keeps the last max bytes written to it.

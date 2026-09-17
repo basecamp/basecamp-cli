@@ -60,3 +60,17 @@ func TestThePolicyResolvesSymlinksOutOfTheDirectory(t *testing.T) {
 	assert.False(t, edit("link/new/dir/file.txt"), "a path not created yet, under that link")
 	assert.True(t, edit(filepath.Join(root, "new", "file.txt")), "a file not created yet, inside")
 }
+
+// Copilot r3: a call on the filesystem that names no path cannot be placed
+// inside the working directory.
+func TestThePolicyRefusesFilesystemCallsWithNoPath(t *testing.T) {
+	root := t.TempDir()
+	p := DefaultPolicy(root)
+	allow := func(kind driver.ToolKind) bool {
+		return p.Decide(context.Background(), driver.PermissionRequest{Kind: kind}).Allow
+	}
+	assert.False(t, allow(driver.ToolRead))
+	assert.False(t, allow(driver.ToolSearch))
+	assert.False(t, allow(driver.ToolEdit))
+	assert.True(t, allow(driver.ToolThink), "the one allowed kind that touches no file")
+}

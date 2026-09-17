@@ -1454,7 +1454,18 @@ basecamp auth login --with-token -P bot --account <id>  # Import a personal acce
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
 basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<dir>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
+basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
+basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
 ```
+
+`basecamp connect` runs until it is stopped: it is not a command to call for an
+answer. Stdout is a wire of one JSON object per line (events seen, verdicts,
+dispatches — ids and states, never content) and the logs are on stderr, so read
+the lines rather than the log. SIGINT and SIGTERM cancel whatever workers are
+running, settle them, and exit 130 and 143. It runs on macOS and Linux only,
+refuses a second connector for the same agent, and takes `--project` (repeatable)
+to hear and dispatch only those projects. Run it under a supervisor rather than
+from a session you will close.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

@@ -831,3 +831,38 @@ func TestASessionTheDriverSaysHasEndedIsLost(t *testing.T) {
 	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts`).Scan(&refusals))
 	assert.Equal(t, 1, refusals, "refusals are counted whatever ended the turn")
 }
+
+// Copilot r3: an attempt recovery left live holds a worker slot.
+func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
+	fake := newFakeDriver()
+	hold := make(chan struct{})
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		select {
+		case <-hold:
+		case <-s.canceled:
+			return driver.PromptResult{Stop: driver.TurnCanceled}, nil
+		}
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
+	// One attempt whose worker cannot be identified, on its own route.
+	h.routes[900] = admission.Route{Path: "/work/held"}
+	admitRouted(t, h.ledger, 1, 900, "recording:held", "/work/held")
+	_, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: "/work/held", Driver: "fake"})
+	require.NoError(t, err)
+	// Two more conversations, each with a route of its own.
+	h.routes[901] = admission.Route{Path: "/work/a"}
+	h.routes[902] = admission.Route{Path: "/work/b"}
+	admitRouted(t, h.ledger, 2, 901, "recording:a", "/work/a")
+	admitRouted(t, h.ledger, 3, 902, "recording:b", "/work/b")
+
+	require.NoError(t, h.d.Recover(context.Background()))
+	h.run(t)
+	nextSession(t, fake)
+	time.Sleep(200 * time.Millisecond)
+	fake.mu.Lock()
+	live := len(fake.sessions)
+	fake.mu.Unlock()
+	assert.Equal(t, 1, live, "the held attempt's worker may still exist, so only one more starts")
+	close(hold)
+}

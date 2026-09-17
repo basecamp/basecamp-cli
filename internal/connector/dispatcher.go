@@ -182,6 +182,9 @@ type Dispatcher struct {
 	// strandedAt is when the stranded count was last reported. Read and
 	// written only by the dispatch loop.
 	strandedAt time.Time
+	// held is how many attempts recovery left live because their workers
+	// could not be identified or verified. Written by Recover, read under mu.
+	held int
 }
 
 // NewDispatcher builds a dispatcher.
@@ -269,6 +272,11 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 // Recover ends every attempt a previous process left live (invariant 5).
 func (d *Dispatcher) Recover(ctx context.Context) error {
 	d.sweepPrivateDir()
+	// Recovery counts the attempts it leaves live afresh, so running it
+	// twice does not count them twice.
+	d.mu.Lock()
+	d.held = 0
+	d.mu.Unlock()
 	attempts, err := d.ledger.LiveAttempts(ctx)
 	if err != nil {
 		return err
@@ -282,6 +290,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			// conversation and directory stay held.
 			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live and its directory held",
 				"attempt_id", a.AttemptID, "task_id", a.TaskID)
+			d.hold()
 			continue
 		}
 		signaled, err := d.terminateRecorded(driver.Process{
@@ -294,6 +303,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			// there, until a person has looked.
 			d.log.Error("connector: could not verify whether a previous worker still runs; its attempt stays live and its directory held",
 				"attempt_id", a.AttemptID, "pid", a.Process.PID, "error", err)
+			d.hold()
 			continue
 		}
 		settlement, err := d.settle(ctx, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost})
@@ -302,6 +312,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			// and directory; it does not stop the connector.
 			d.log.Error("connector: could not settle an attempt a previous process left; it stays live",
 				"attempt_id", a.AttemptID, "error", err)
+			d.hold()
 			continue
 		}
 		d.log.Info("connector: settled an attempt a previous process left", "attempt_id", a.AttemptID,
@@ -316,6 +327,14 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// hold counts an attempt recovery left live: its worker may still exist, so
+// it holds one of the connector's worker slots until a person settles it.
+func (d *Dispatcher) hold() {
+	d.mu.Lock()
+	d.held++
+	d.mu.Unlock()
 }
 
 // sweepPrivateDir removes session files a crashed process left: they can hold
@@ -336,7 +355,10 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	for _, r := range d.live {
 		runs = append(runs, r)
 	}
-	free := d.opts.Concurrency - len(d.live)
+	// An attempt recovery left live may still have a worker; it holds a slot
+	// as a running one does, so the bound is on workers, not on this
+	// process's own.
+	free := d.opts.Concurrency - len(d.live) - d.held
 	d.mu.Unlock()
 
 	approved := d.approvedRoutes()
