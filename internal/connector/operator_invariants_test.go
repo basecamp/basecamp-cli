@@ -772,3 +772,45 @@ func TestImportCancelsTheMessagesOfARecordItCloses(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, pending, "nothing is posted about a record a person closed")
 }
+
+// A completion notice waiting in the outbox is rendered again when it is
+// claimed: a record a person decided in between asks nothing of them.
+func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	launch := launchOf(t, l, 1)
+	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
+	require.NoError(t, err)
+	require.Len(t, notices, 1)
+	require.Contains(t, notices[0].Body, "redispatch 1")
+
+	_, err = l.Discard(ctx, 1, opBy)
+	require.NoError(t, err)
+	claimed, ok, err := l.claimIntent(ctx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, IntentSending, claimed.State)
+	assert.Contains(t, claimed.Body, "Event 1: unknown")
+	assert.NotContains(t, claimed.Body, "redispatch 1", "a person already decided it")
+}
+
+// Invariant 2, at the database: a task takes no follow-up while the hold
+// marker stands, however the hold arrived.
+func TestInvariant2ATaskTakesNoFollowUpUnderTheHold(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	launch := launchOf(t, l, 1)
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"), "a new generation's record on the live conversation")
+
+	joined, err := l.JoinConversation(ctx, launch.TaskID)
+	require.NoError(t, err)
+	assert.Empty(t, joined)
+	assert.Equal(t, StateQueued, stateOf(t, l, 2))
+}

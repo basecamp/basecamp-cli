@@ -89,7 +89,14 @@ func parseEventIDArg(raw string) (int64, error) {
 // openConnectLedger opens the connector's ledger for a decision. It must
 // already exist: a decision is about records the connector wrote. The returned
 // func releases whatever the open holds, and is never nil.
-func openConnectLedger(p connectProfile) (*connector.Ledger, func(), error) {
+//
+// requireStopped takes the instance lock for the whole command, for the work
+// that cannot run beside a connector (an import). Otherwise the lock is taken
+// only when the ledger is older than this build, because opening it then
+// migrates it, and a connector running on the older schema must not have its
+// triggers replaced underneath it. Either way the lock is the authority: the
+// metadata beside it is written best-effort and says nothing on its own.
+func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
 	dir, err := connectStatePath(p.file, false)
 	if err != nil {
@@ -104,21 +111,28 @@ func openConnectLedger(p connectProfile) (*connector.Ledger, func(), error) {
 	// The instance lock is what says no connector is running — the metadata
 	// beside it is diagnostic — so it is taken before the migration and held
 	// until the ledger is closed.
-	if reader, err := connector.OpenLedgerReadOnly(context.Background(), path); err == nil {
+	outOfDate := false
+	if reader, err := connector.OpenLedgerReadOnly(ctx, path); err == nil {
 		_ = reader.Close()
 	} else if errors.Is(err, connector.ErrLedgerOutOfDate) {
+		outOfDate = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, done, err
+	}
+	if requireStopped || outOfDate {
 		lock, lockErr := connector.AcquireInstanceLock(dir, p.file.AccountID, p.file.Agent.PersonID, time.Now())
 		switch {
-		case errors.Is(lockErr, connector.ErrAlreadyRunning):
+		case errors.Is(lockErr, connector.ErrAlreadyRunning) && outOfDate:
 			return nil, done, output.ErrUsageHint(
 				"The connector is running on a ledger older than this build, and this command would migrate it underneath it: "+lockErr.Error(),
 				"Stop the connector, run this command, and start it again.")
+		case errors.Is(lockErr, connector.ErrAlreadyRunning):
+			return nil, done, &output.Error{Code: output.CodeLockUnavailable, Message: lockErr.Error(),
+				Hint: "Stop the connector before this command."}
 		case lockErr != nil:
 			return nil, done, lockErr
 		}
 		done = func() { _ = lock.Release() }
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, done, err
 	}
 	ledger, err := connector.OpenLedger(path)
 	if err != nil {
@@ -389,7 +403,7 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	if err != nil {
 		return err
 	}
-	ledger, done, err := openConnectLedger(p)
+	ledger, done, err := openConnectLedger(cmd.Context(), p, false)
 	if err != nil {
 		return err
 	}
@@ -557,7 +571,7 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 			if err != nil {
 				return err
 			}
-			ledger, done, err := openConnectLedger(p)
+			ledger, done, err := openConnectLedger(cmd.Context(), p, false)
 			if err != nil {
 				return err
 			}
@@ -591,7 +605,7 @@ held records stay held until each is redispatched or discarded.`,
 			if err != nil {
 				return err
 			}
-			ledger, done, err := openConnectLedger(p)
+			ledger, done, err := openConnectLedger(cmd.Context(), p, false)
 			if err != nil {
 				return err
 			}
@@ -714,15 +728,9 @@ The file is JSON:
 			if _, err := os.Lstat(filepath.Join(dir, connector.LedgerFile)); errors.Is(err, os.ErrNotExist) {
 				return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Promote the shadow first: basecamp connect shadow promote -P "+shellQuote(p.name))
 			}
-			lock, err := connector.AcquireInstanceLock(dir, p.file.AccountID, p.file.Agent.PersonID, time.Now())
-			if err != nil {
-				if errors.Is(err, connector.ErrAlreadyRunning) {
-					return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(), Hint: "Stop the connector before importing."}
-				}
-				return err
-			}
-			defer func() { _ = lock.Release() }()
-			ledger, done, err := openConnectLedger(p)
+			// The connector must be stopped: the open takes the instance lock
+			// and holds it for the import.
+			ledger, done, err := openConnectLedger(cmd.Context(), p, true)
 			if err != nil {
 				return err
 			}

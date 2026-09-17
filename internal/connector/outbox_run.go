@@ -374,6 +374,23 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 		in := intents[0]
 
 		next, note := IntentSending, ""
+		if in.Kind == IntentCompletion {
+			// Rendered again from the records: what a person decided between
+			// the settlement and the send is what the notice says.
+			settled, err := settlementFromRecords(ctx, tx, in.AttemptID)
+			if err != nil {
+				return err
+			}
+			switch body := renderCompletion(in.Destination.Kind, settled); {
+			case !CompletionNeeded(settled):
+				next, note = IntentCanceled, "every event it named was decided"
+			case body != in.Body:
+				if _, err := tx.ExecContext(ctx, `UPDATE outbox SET body = ? WHERE id = ? AND state = 'pending'`, body, in.ID); err != nil {
+					return fmt.Errorf("connector: outbox claim completion %d: %w", in.ID, err)
+				}
+				in.Body = body
+			}
+		}
 		if in.Kind == IntentHoldingReply {
 			// The reply answers a record with no route. If the route arrived
 			// and the record moved on — it may be running now — the answer is
