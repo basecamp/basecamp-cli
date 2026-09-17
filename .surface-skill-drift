@@ -1,11 +1,11 @@
 # Known skill drift — references the surface cannot confirm.
 # These are pre-existing mismatches, not regressions. Fix in SKILL.md when convenient.
 # Format: FLAG <command-path> <flag>
-#         CMD <command-path> <word> — a command reference the check refuses: the
-#             deepest command that exists and the word past it, exactly as the
-#             DRIFT line's "baseline entry" names it. This covers a hidden command
-#             (never in .surface) and a group that also runs bare (.surface cannot
-#             say it does).
+#         CMD <path>  — a command reference the check refuses, exactly as the DRIFT
+#             line's "baseline entry" names it: the deepest command that exists and
+#             the word past it, or the whole reference when nothing past "basecamp"
+#             is a command. This covers a hidden command (never in .surface) and a
+#             group that also runs bare (.surface cannot say it does).
 FLAG basecamp comments list --in
 FLAG basecamp comments update --in
 FLAG basecamp people --in

@@ -106,7 +106,7 @@ the real command tree rather than `.surface`. It reads hint text in `internal/co
 and `internal/connector/setup` — hints written inline, built into a variable, returned
 by a helper, or assigned to a hint-named field — and every string in `connect.go`. Asking
 the command lets it be exact where the script cannot: a word after a group passes only
-if the group runs and its own argument validator accepts the word — which a subcommand
+if the group is not the root, runs, and its own argument validator accepts the word — which a subcommand
 that never existed can still satisfy, under a group like `recordings` that takes one. It
 checks commands, not flags.
 

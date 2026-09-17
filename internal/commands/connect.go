@@ -883,11 +883,13 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 // unboundProfileError refuses a profile that names no account, with the
 // remedy that will work for this one.
 //
-// No command binds an account on its own — `profile` has none for it. Of the
-// commands that store a credential, only the headless ones write the account
-// too, and of those only `auth agent connect` fits here: it takes the
-// Agent's own account. A bot user logs in through the browser, and that login
-// binds nothing, so a bot's account goes into its config entry by hand.
+// No command binds an account on its own — `profile` has none for it. The
+// account is written by a command that stores a credential: `auth agent
+// connect`, which takes the Agent's own account, and the headless logins
+// (`auth login --with-token` or `--with-client-credentials` with --account).
+// A bot user logged in through the browser, which binds nothing, so for a
+// bot that already has its credential the account goes into its config entry
+// by hand rather than through another login.
 //
 // Even `auth agent connect` refuses an accountless entry that is not the
 // global config's, because the entry it would write stays shadowed by the
@@ -912,7 +914,7 @@ func unboundProfileError(name string) error {
 	global := filepath.Join(config.GlobalConfigDir(), "config.json")
 	return output.ErrUsageHint(message,
 		"For an Agent, connecting it binds its own account: basecamp auth agent connect -P "+shellQuote(name)+
-			". A bot user's login binds none, so for a bot add account_id to the profile's entry in "+richtext.SanitizeSingleLine(global)+".")
+			". A bot user's browser login binds none, so for a bot add account_id to the profile's entry in "+richtext.SanitizeSingleLine(global)+".")
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,

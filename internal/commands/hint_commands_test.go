@@ -144,8 +144,13 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything boo
 	names := map[string]bool{}
 	visited := map[string]bool{}
 
-	// collect takes every string in an expression, notes the names it
-	// mentions, and follows the functions it calls.
+	// collect takes every string in an expression, notes the local names
+	// whose values it is built from, and follows the functions it calls.
+	//
+	// Only a name that is itself a value counts. `cmd` in cmd.CommandPath()
+	// and `fmt` in fmt.Sprintf are not hint text, and following them would
+	// pull in whole command definitions — help text included — as if they
+	// were hints.
 	var collect func(ast.Node)
 	collect = func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
@@ -156,6 +161,8 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything boo
 				}
 			case *ast.Ident:
 				names[node.Name] = true
+			case *ast.SelectorExpr:
+				return false // a field or a package member, not a local value
 			case *ast.CallExpr:
 				callee := ""
 				switch fn := node.Fun.(type) {
@@ -168,6 +175,10 @@ func hintLiterals(file *ast.File, funcs map[string]*ast.FuncDecl, everything boo
 					visited[callee] = true
 					collect(decl.Body)
 				}
+				for _, arg := range node.Args {
+					collect(arg)
+				}
+				return false // the callee's name is not a value
 			}
 			return true
 		})
@@ -320,6 +331,11 @@ func resolveCommandPhrase(root *cobra.Command, removed map[string]bool, phrase s
 	path := cmd.CommandPath()
 	if i == len(words) {
 		return path, "", true
+	}
+	// The root takes no word it does not know: cobra answers "unknown
+	// command" there whatever its validator says, since it has none.
+	if !cmd.HasParent() {
+		return path, words[i], false
 	}
 	if removed[path+" "+words[i]] {
 		return path, words[i], false
