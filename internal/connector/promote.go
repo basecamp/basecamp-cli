@@ -75,10 +75,17 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 	statePath := filepath.Join(opts.StateDir, LedgerFile)
 
 	if _, err := os.Lstat(opts.ShadowDir); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return promoted(ctx, opts, statePath)
+		if !errors.Is(err, os.ErrNotExist) {
+			return PromoteResult{}, fmt.Errorf("connector: inspect the shadow state: %w", err)
 		}
-		return PromoteResult{}, fmt.Errorf("connector: inspect the shadow state: %w", err)
+		// No shadow state at all: this can only be a promote run again, and
+		// it still says so under the connector's own lock.
+		stateLock, err := AcquireInstanceLock(opts.StateDir, opts.AccountID, opts.AgentID, time.Now())
+		if err != nil {
+			return PromoteResult{}, fmt.Errorf("connector: the connector must be stopped first: %w", err)
+		}
+		defer func() { _ = stateLock.Release() }()
+		return promoted(ctx, opts, statePath)
 	}
 	shadowLock, err := AcquireInstanceLock(opts.ShadowDir, opts.AccountID, opts.AgentID, time.Now())
 	if err != nil {

@@ -429,3 +429,23 @@ func TestImportValidatesWhatItIsHanded(t *testing.T) {
 		})
 	}
 }
+
+// A promote run again takes the connector's lock even when there is no shadow
+// state left to stop: it never reports on a ledger a connector is running on.
+func TestPromoteRunAgainStillNeedsTheConnectorStopped(t *testing.T) {
+	shadowDir, stateDir := shadowFixture(t)
+	ctx := context.Background()
+	_, err := PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(shadowDir))
+
+	lock, err := AcquireInstanceLock(stateDir, opAccount, opAgent, timeNow())
+	require.NoError(t, err)
+	_, err = PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
+	require.ErrorIs(t, err, ErrAlreadyRunning)
+	require.NoError(t, lock.Release())
+
+	got, err := PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
+	require.NoError(t, err)
+	assert.True(t, got.Already)
+}
