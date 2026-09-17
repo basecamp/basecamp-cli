@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // Dispatch, acknowledgement and completion, with the connector killed at every
