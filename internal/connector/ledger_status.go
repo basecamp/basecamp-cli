@@ -100,9 +100,11 @@ type Status struct {
 	AuthorizedBlocked int `json:"authorized_blocked"`
 	RedispatchPending int `json:"redispatch_pending"`
 
-	Tasks          []TaskStatus     `json:"live_tasks"`
-	Worktrees      []WorktreeStatus `json:"retained_worktrees"`
-	WorktreesKnown bool             `json:"worktrees_tracked"`
+	Tasks     []TaskStatus     `json:"live_tasks"`
+	Worktrees []WorktreeStatus `json:"retained_worktrees"`
+	// WorktreesKnown is false when no lister was given: the retained
+	// worktrees are unavailable, not known to be none.
+	WorktreesKnown bool             `json:"worktrees_known"`
 	Indeterminate  []IntentStatus   `json:"indeterminate_intents"`
 	Held           []HeldStatus     `json:"held_records"`
 	Dispatches     []DispatchStatus `json:"dispatches"`
@@ -236,7 +238,8 @@ type DispatchedEvent struct {
 }
 
 // WorktreeLister lists retained worktrees for status. Card 19's worktree
-// ledger provides it; nil means this build does not track them.
+// ledger provides it; nil means this build cannot say whether any are
+// retained — which status reports as unavailable, never as none.
 type WorktreeLister func(ctx context.Context) ([]WorktreeStatus, error)
 
 // Status reads everything status shows in one read transaction, so the

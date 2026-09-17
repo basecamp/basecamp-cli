@@ -441,3 +441,19 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	assert.Contains(t, out, `"still_held"`)
 	assert.NotContains(t, out, `"StillHeld"`)
 }
+
+// Until the worktree driver lands, status says the retained worktrees are
+// unavailable — never that there are none.
+func TestStatusSaysWorktreesAreUnavailableNotNone(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err, styled)
+	assert.Contains(t, styled, "Worktrees      unavailable")
+	assert.NotContains(t, styled, "0 retained")
+
+	out, err := f.run(t, output.FormatJSON, "status")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"worktrees_known": false`)
+}

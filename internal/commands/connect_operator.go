@@ -331,7 +331,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
 	}
 	if !s.WorktreesKnown {
-		fmt.Fprintf(w, "  Worktrees      not tracked by this build\n")
+		fmt.Fprintf(w, "  Worktrees      unavailable until the worktree driver lands: this build cannot say whether any are retained\n")
 	} else {
 		fmt.Fprintf(w, "  Worktrees      %d retained\n", len(s.Worktrees))
 		for _, wt := range s.Worktrees {
