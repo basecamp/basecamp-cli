@@ -438,6 +438,9 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 // Unset means absent: for the IDs also empty (as for the top-level IDs),
 // while a present scope or client_id sets the field even when empty.
 //
+// One field is dropped rather than kept: a todolist belongs to a project, so
+// an entry that names another project and no todolist inherits none.
+//
 // Every field set records the file that set it, in cfg.ProfileOrigins.
 func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileLayer) {
 	baseURL, _ := entry["base_url"].(string)
@@ -479,6 +482,11 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 		set("account_id", &p.AccountID, account)
 	}
 	if v := getStringOrNumber(entry, "project_id"); v != "" {
+		if p.ProjectID != v && p.TodolistID != "" {
+			// The inherited todolist is in the project being replaced.
+			p.TodolistID = ""
+			delete(origin.Fields, "todolist_id")
+		}
 		set("project_id", &p.ProjectID, v)
 	}
 	if v := getStringOrNumber(entry, "todolist_id"); v != "" {

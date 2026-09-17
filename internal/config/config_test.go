@@ -1411,3 +1411,24 @@ func TestProfileEntryBindingAnUnboundOneRefinesIt(t *testing.T) {
 
 	assert.Equal(t, &ProfileConfig{BaseURL: "https://3.basecampapi.com", AccountID: "555", ProjectID: "1"}, cfg.Profiles["bot"])
 }
+
+// A todolist belongs to a project: an entry that names another project
+// leaves the farther file's todolist behind, and one that names its own
+// todolist keeps it.
+func TestProfileEntryForAnotherProjectDropsTheInheritedTodolist(t *testing.T) {
+	cfg, paths := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999","project_id":"9","todolist_id":"3"}}}`},
+		profileLayer{SourceRepo, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"42"}}}`},
+	)
+
+	assert.Equal(t, &ProfileConfig{BaseURL: "https://3.basecampapi.com", AccountID: "999", ProjectID: "42"}, cfg.Profiles["bot"])
+	assert.NotContains(t, cfg.ProfileOrigins["bot"].Fields, "todolist_id")
+	assert.Equal(t, paths[0], cfg.ProfileOrigins["bot"].Fields["account_id"], "the account is not a project's")
+
+	cfg, _ = loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"9","todolist_id":"3"}}}`},
+		profileLayer{SourceRepo, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"42","todolist_id":"7"}}}`},
+	)
+
+	assert.Equal(t, "7", cfg.Profiles["bot"].TodolistID)
+}

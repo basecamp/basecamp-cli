@@ -169,3 +169,19 @@ func TestUnusableGlobalConfigIsReportedAsItself(t *testing.T) {
 	assert.NotContains(t, err.Error(), "not the global config")
 	assert.Equal(t, 12, in.Len(), "refused before stdin is read")
 }
+
+// Setup reads the profile's account, so it asks the same question, and a
+// global config it cannot parse is reported as that rather than as a
+// profile defined somewhere else.
+func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
+	s := startConnectSetupServer(t)
+	bareSetupApp(t, s, "agent")
+	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, s.srv.URL))
+	writeGlobalConfigHere(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.srv.URL))
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	require.Error(t, err, out)
+	hint := hintOf(t, err)
+	assert.NotContains(t, hint, "not the global config", "the global config was skipped, so it is no evidence")
+	assert.Contains(t, hint, "basecamp auth agent connect -P agent", "the generic remedy, which reports the file itself")
+}
