@@ -477,3 +477,18 @@ func TestADispatchedTasksUncommittedWorkIsRetained(t *testing.T) {
 		assert.Equal(t, "work\n", string(content))
 	}
 }
+
+// Worktree states move along their edges only: nothing goes back to live,
+// and nothing leaves removed.
+func TestWorktreeStatesMoveAlongTheirEdgesOnly(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	_, row := h.prepare(60)
+	require.NoError(t, h.ledger.RetainWorktree(ctx, row.ID, RetainedDirty, WorktreeLive))
+	_, err := h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET state = 'live' WHERE id = ?`, row.ID)
+	require.Error(t, err)
+	require.NoError(t, h.ledger.RemovedWorktree(ctx, row.ID, RemovedMissing, WorktreeRetained))
+	_, err = h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET state = 'retained', removed_by = '', retained_reason = 'dirty' WHERE id = ?`, row.ID)
+	require.Error(t, err)
+	require.ErrorIs(t, h.ledger.MoveWorktree(ctx, row.ID, WorktreeRemoving, WorktreeRetained), ErrWorktreeState)
+}
