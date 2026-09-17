@@ -1472,3 +1472,26 @@ func TestOutboxACanceledNoticeDoesNotHideAReply(t *testing.T) {
 	require.Len(t, listed, 1, "nothing of ours is there to hide it")
 	assert.Equal(t, reply, listed[0].ID)
 }
+
+// A receipt identifies the connector's message whatever its intent's state,
+// and since the dispatcher is given no id-only predicate beside this filter,
+// that is the whole of the spec's "not one of the connector's own lifecycle
+// messages" for a notice the ledger has a receipt for.
+func TestOutboxASentNoticeIsLeftOutByItsReceipt(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	since := clock.Now().Add(-time.Minute)
+	landed := basecamp.add(in.Destination, adapterAgentID, `<div dir="auto">`+in.Body+`</div>`)
+	reply := basecamp.add(in.Destination, adapterAgentID, "<div>Done: the fix is on the branch.</div>")
+	_, err := ledger.recordReceipt(ctx, in.ID, landed)
+	require.NoError(t, err)
+	require.Equal(t, IntentSent, obIntent(t, ledger, in.Key).State)
+
+	listed, err := LifecycleFilteredReplies{Lister: basecamp, Ledger: ledger}.
+		AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the sent notice is left out by its receipt")
+	assert.Equal(t, reply, listed[0].ID)
+}
