@@ -36,6 +36,11 @@ type Queue struct {
 	// warning that no later event will clear.
 	edges  sync.Mutex
 	warned bool
+	// depth is the queue's length as the operations themselves report it.
+	depth int
+	// afterChannelOp runs between a channel operation and the transition it
+	// produces. A test seam: it is where the queue was losing a crossing.
+	afterChannelOp func()
 	// pending holds edges decided but not yet delivered, in the order they
 	// were decided; delivering says a goroutine is already draining them.
 	pending    []queueEdge
@@ -73,9 +78,15 @@ func NewQueue(warnAt, pauseAt int) (*Queue, error) {
 // at the pause threshold. Waiting here is the pause: the caller is the feed's
 // delivery path, and it is not reading the feed while it waits.
 func (q *Queue) Offer(ctx context.Context, id int64) error {
+	// Counted before it is sent. An id on its way into the queue is backlog
+	// either way, and counting it first is what keeps the depth honest: a
+	// take can only receive what a send has already put in, so its decrement
+	// can never be applied before the increment it belongs to, and a crossing
+	// can never be lost to the order two operations happen to take the lock in.
+	q.applyDelta(1)
 	select {
 	case q.ids <- id:
-		q.noteDepth()
+		q.afterOp()
 		return nil
 	default:
 	}
@@ -91,9 +102,11 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 
 	select {
 	case q.ids <- id:
-		q.noteDepth()
+		q.afterOp()
 		return nil
 	case <-ctx.Done():
+		// It never went in, so it is not backlog.
+		q.applyDelta(-1)
 		return ctx.Err()
 	}
 }
@@ -106,7 +119,8 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 func (q *Queue) Take(ctx context.Context) (int64, error) {
 	select {
 	case id := <-q.ids:
-		q.noteDepth()
+		q.afterOp()
+		q.applyDelta(-1)
 		return id, nil
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -114,25 +128,45 @@ func (q *Queue) Take(ctx context.Context) (int64, error) {
 }
 
 // Depth is the number of ids waiting.
-func (q *Queue) Depth() int { return len(q.ids) }
+func (q *Queue) Depth() int {
+	q.edges.Lock()
+	defer q.edges.Unlock()
+	return q.depth
+}
 
 // Paused reports whether an offer is currently waiting for room — which is to
 // say whether the feed is being consumed.
 func (q *Queue) Paused() bool { return q.waiting.Load() > 0 }
 
-// noteDepth fires the warning edges. It is edge-triggered, not level: a
-// backlog that sits above the threshold for an hour is one warning, and the
-// recovery is the other half of the pair, so a warning is never left standing
-// after the thing it warned about went away.
-func (q *Queue) noteDepth() {
-	// The transition is decided under the lock, and appended to one ordered
-	// list of edges. Exactly one goroutine at a time delivers that list, in
-	// order, with the lock released around each callback: an operator sees the
-	// edges in the order the state took them, and a callback may use the queue
-	// — its own edge is queued behind, and delivered by, the drain already
-	// running.
+// afterOp is a test seam: it runs between a channel operation and whatever
+// follows it, which is where a crossing used to be lost.
+func (q *Queue) afterOp() {
+	if q.afterChannelOp != nil {
+		q.afterChannelOp()
+	}
+}
+
+// applyDelta records what one operation does to the depth and fires the
+// warning edges it crosses.
+//
+// The depth is a counter this method owns, not a later read of the channel's
+// length. With a length read, an offer and a concurrent take could both
+// observe the depth AFTER the take, and a queue that really crossed the
+// threshold raised no warning at all. Every delta is applied under one lock
+// and the crossing is derived from the depth that operation produced.
+//
+// The edges are edge-triggered, not level: a backlog that sits above the
+// threshold for an hour is one warning, and the recovery is the other half of
+// the pair, so a warning is never left standing after the thing it warned
+// about went away.
+func (q *Queue) applyDelta(delta int) {
+	// The transition is decided under the lock; the callback runs after it, so
+	// a callback may observe or use the queue without deadlocking against the
+	// operation that raised it. Callbacks can therefore arrive out of order
+	// across goroutines, but the state they report on never is.
 	q.edges.Lock()
-	depth := q.Depth()
+	q.depth += delta
+	depth := q.depth
 	switch {
 	case depth >= q.warnAt && !q.warned:
 		q.warned = true

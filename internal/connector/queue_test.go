@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,7 +55,9 @@ func TestQueuePausesTheCallerAtTheThreshold(t *testing.T) {
 
 	select {
 	case depth := <-paused:
-		assert.Equal(t, 2, depth)
+		// Three: the two in the queue and the one waiting to go in, which is
+		// backlog too.
+		assert.Equal(t, 3, depth)
 	case <-time.After(2 * time.Second):
 		t.Fatal("the third offer should have waited for room")
 	}
@@ -102,4 +106,45 @@ func TestQueueRefusesNonsenseThresholds(t *testing.T) {
 	assert.Error(t, err)
 	_, err = NewQueue(5, 0)
 	assert.Error(t, err)
+}
+
+// F2: a crossing is never lost. An offer and a concurrent take could both read
+// the depth after the take, so a queue that really crossed the threshold
+// raised no warning at all.
+func TestACrossingIsNotLostToAConcurrentTake(t *testing.T) {
+	queue, err := NewQueue(1, 4)
+	require.NoError(t, err)
+	var warns, recovers int
+	var mu sync.Mutex
+	queue.OnWarn = func(int) { mu.Lock(); warns++; mu.Unlock() }
+	queue.OnRecover = func(int) { mu.Lock(); recovers++; mu.Unlock() }
+
+	ctx := context.Background()
+	taken := make(chan int64, 1)
+	// The take lands between the offer's send and the transition it produces.
+	// A flag, not a Once: the take runs this hook too, and must not wait on
+	// the offer that is waiting for it.
+	var interleaved atomic.Bool
+	queue.afterChannelOp = func() {
+		if !interleaved.CompareAndSwap(false, true) {
+			return
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			id, err := queue.Take(ctx)
+			assert.NoError(t, err)
+			taken <- id
+		}()
+		<-done
+	}
+
+	require.NoError(t, queue.Offer(ctx, 42))
+	assert.Equal(t, int64(42), <-taken)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, warns, "the queue crossed the threshold, so it warned")
+	assert.Equal(t, 1, recovers, "and the take brought it back")
+	assert.Zero(t, queue.Depth())
 }
