@@ -241,15 +241,18 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 
 	// The unpolled range behind the burst is served before anything from the
 	// burst: a checkpoint taken from a live id would have skipped it.
-	behindAt, aheadAt := -1, -1
-	for i, p := range h.feedPolls() {
+	// In the order the feed's own walk served events, not by page: one page
+	// may carry both.
+	behindAt, aheadAt, n := -1, -1, 0
+	for _, p := range h.feedPolls() {
 		for _, id := range p.Served {
 			if id == 106 && behindAt < 0 {
-				behindAt = i
+				behindAt = n
 			}
 			if id >= straggler && aheadAt < 0 {
-				aheadAt = i
+				aheadAt = n
 			}
+			n++
 		}
 	}
 	require.GreaterOrEqual(t, behindAt, 0, "the feed's own walk served the range behind the burst")
