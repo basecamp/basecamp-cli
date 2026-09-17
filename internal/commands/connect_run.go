@@ -291,7 +291,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		workspaces, err := connector.NewWorktrees(connector.WorktreesOptions{Ledger: ledger, Root: worktreesRoot, Logger: logger, Off: !file.Worktrees})
+		workspaces, err := connector.NewWorktrees(connector.WorktreesOptions{
+			Ledger: ledger, Root: worktreesRoot, Logger: logger, Off: !file.Worktrees,
+			Redaction: driver.Redaction{Dirs: []string{stateDir}},
+		})
 		if err != nil {
 			return err
 		}

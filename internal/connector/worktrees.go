@@ -102,6 +102,9 @@ type Worktrees struct {
 	env    []string
 	path   func(root, repository, name string) string
 	log    *slog.Logger
+	// red takes the connector's own paths and environment out of anything git
+	// says (the shared rule in driver/redact.go).
+	red *driver.Redactor
 	// walkLimit is WalkLimit; a test seam.
 	walkLimit time.Duration
 	// whileFrozen runs once a removal has frozen a worktree, before it is
@@ -146,6 +149,9 @@ type WorktreesOptions struct {
 	// Lookup reads the connector's environment for git's; os.LookupEnv when
 	// nil.
 	Lookup func(string) (string, bool)
+	// Redaction is what is taken out of anything git says: the driver
+	// package's shared rule.
+	Redaction driver.Redaction
 	// Path places a task's worktree; DefaultWorktreePath when nil.
 	Path   func(root, repository, name string) string
 	Logger *slog.Logger
@@ -190,7 +196,8 @@ func NewWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 	})
 	return &Worktrees{
 		ledger: opts.Ledger, root: opts.Root, git: opts.Git, env: env, path: opts.Path, log: opts.Logger,
-		now: time.Now, off: opts.Off, walkLimit: WalkLimit, failures: map[string]prepareFailure{},
+		now: time.Now, off: opts.Off, walkLimit: WalkLimit,
+		red: driver.NewRedactor(opts.Redaction.With(driver.Redaction{Env: env, Dirs: []string{opts.Root}})), failures: map[string]prepareFailure{},
 	}, nil
 }
 
@@ -1370,7 +1377,7 @@ func (w *Worktrees) runInput(ctx context.Context, config [][2]string, args []str
 		if len(msg) > 200 {
 			msg = msg[:200]
 		}
-		return stdout.Bytes(), fmt.Errorf("git %s: %w: %s", what, err, driver.Redact(msg))
+		return stdout.Bytes(), fmt.Errorf("git %s: %w: %s", what, err, w.red.Sanitize(msg))
 	}
 	return stdout.Bytes(), nil
 }

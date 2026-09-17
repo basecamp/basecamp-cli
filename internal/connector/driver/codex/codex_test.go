@@ -266,7 +266,7 @@ func TestTheTaskTokenIsNowhereTheDriverTouches(t *testing.T) {
 	drivertest.RequireNoSecret(t, testToken, drivertest.Places{
 		Env:   obs.Env,
 		Args:  obs.Args,
-		Texts: []string{s.(*session).worker.StderrTail(), string(serverEnv)},
+		Texts: []string{s.(*session).StderrTail(), string(serverEnv)},
 		Dirs:  []string{h.workDir, h.private, h.home},
 	})
 }
@@ -850,4 +850,94 @@ func TestAPromptBlockedWritingHonorsItsContext(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("a blocked write held Prompt past its context")
 	}
+}
+
+// redactionSecret is the value fed through every error path. It is obviously
+// fake, and is planted everywhere a real secret would be: in the worker's
+// environment, in its MCP server's environment, in the name of its private
+// directory, and in what the agent writes back.
+const redactionSecret = "test-token-not-real-c9f2b1"
+
+func redactionHarness(t *testing.T, sc scenario) (*harness, driver.SessionConfig) {
+	t.Helper()
+	h := newHarness(t, sc)
+	private := filepath.Join(t.TempDir(), redactionSecret)
+	require.NoError(t, os.Mkdir(private, 0o700))
+	cfg := h.config()
+	cfg.PrivateDir = private
+	cfg.Env = append(cfg.Env, "FAKE_CODEX_SECRET="+redactionSecret)
+	cfg.MCPServers[0].Env["BASECAMP_CONNECT_TASK_TOKEN"] = redactionSecret
+	cfg.Redaction = driver.Redaction{Secrets: []string{redactionSecret}}
+	return h, cfg
+}
+
+func drain(s driver.Session) []driver.Update {
+	var updates []driver.Update
+	for u := range s.Updates() {
+		updates = append(updates, u)
+	}
+	return updates
+}
+
+// The redaction rule (driver's redact.go): nothing this driver hands back
+// carries the secret, whichever way the session fails.
+func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
+	secretEvents := []string{
+		`{"type":"turn.started"}`,
+		`{"type":"item.completed","item":{"id":"` + redactionSecret + `","type":"mcp_tool_call","server":"` + redactionSecret + `","tool":"` + redactionSecret + `","status":"failed","error":{"message":"MCP tool call requires approval, but approval policy is never"}}}`,
+	}
+	stderr := "fatal: writing " + redactionSecret + ": patch rejected: writing outside of the project; rejected by user approval settings"
+	drivertest.RequireRedacted(t, redactionSecret, []drivertest.RedactionPath{
+		{Name: "start", Run: func(t *testing.T) drivertest.Crossing {
+			h, cfg := redactionHarness(t, scenario{})
+			h.drv.opts.Binary = filepath.Join(cfg.PrivateDir, "no-codex")
+			_, err := h.drv.NewSession(context.Background(), cfg)
+			require.ErrorIs(t, err, driver.ErrNotStarted)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "handshake", Run: func(t *testing.T) drivertest.Crossing {
+			tc := safeTurnContext()
+			tc["approval_policy"] = "on-request"
+			h, cfg := redactionHarness(t, scenario{TurnContext: tc, Events: append(secretEvents, turnCompleted()), Stderr: stderr})
+			s, result, err := h.run(context.Background(), cfg)
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+			updates := make(chan []driver.Update, 1)
+			go func() { updates <- drain(s) }()
+			require.NoError(t, s.Close())
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: <-updates, Texts: []string{s.(*session).StderrTail()}}
+		}},
+		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
+			h, cfg := redactionHarness(t, scenario{TurnContext: safeTurnContext(),
+				Events: append(secretEvents, `{"type":"turn.failed","error":{"message":"`+redactionSecret+`"}}`), Stderr: stderr, Exit: 1})
+			s, result, err := h.run(context.Background(), cfg)
+			require.Error(t, err)
+			updates := make(chan []driver.Update, 1)
+			go func() { updates <- drain(s) }()
+			require.NoError(t, s.Close())
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: <-updates, Texts: []string{s.(*session).StderrTail()}}
+		}},
+		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
+			h, cfg := redactionHarness(t, scenario{TurnContext: safeTurnContext(), Deaf: true, Hang: true, Stderr: stderr})
+			s, err := h.drv.NewSession(context.Background(), cfg)
+			require.NoError(t, err)
+			go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("x", 1<<20)) }()
+			waitDeaf(t, h)
+			cancelErr := s.Cancel(context.Background())
+			closeErr := s.Close()
+			return drivertest.Crossing{Errors: []error{cancelErr, closeErr}, Texts: []string{s.(*session).StderrTail()}}
+		}},
+		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
+			h, cfg := redactionHarness(t, scenario{TurnContext: safeTurnContext(), Events: secretEvents, Stderr: stderr, Exit: 1})
+			s, result, err := h.run(context.Background(), cfg)
+			require.Error(t, err, "the worker died in the turn")
+			updates := make(chan []driver.Update, 1)
+			go func() { updates <- drain(s) }()
+			closeErr := s.Close()
+			after, afterErr := s.Prompt(context.Background(), "again")
+			return drivertest.Crossing{Errors: []error{err, closeErr, afterErr},
+				Results: []driver.PromptResult{result, after}, Updates: <-updates, Texts: []string{s.(*session).StderrTail()}}
+		}},
+	})
 }

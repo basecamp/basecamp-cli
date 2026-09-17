@@ -142,15 +142,34 @@ func (d *Driver) Capabilities() driver.Capabilities {
 // NewSession implements driver.Driver. The session's id is Codex's thread id,
 // which Codex reports only once the prompt is written: ID is empty until then.
 func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driver.Session, error) {
-	return d.start(ctx, cfg, "")
+	s, err := d.start(ctx, cfg, "")
+	return s, d.redactor(cfg).Err(err)
+}
+
+// redactor is what every error and text of a session passes through: the
+// dispatcher's Redaction, plus the environment this driver builds, its MCP
+// servers' environments and its private directory.
+func (d *Driver) redactor(cfg driver.SessionConfig) *driver.Redactor {
+	more := driver.Redaction{Env: d.env(cfg), Dirs: []string{cfg.PrivateDir}}
+	for _, server := range cfg.MCPServers {
+		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
+	}
+	return driver.NewRedactor(cfg.Redaction.With(more))
+}
+
+// env is the worker's whole environment: the dispatcher's, plus what Codex
+// itself needs.
+func (d *Driver) env(cfg driver.SessionConfig) []string {
+	return mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
 }
 
 // LoadSession implements driver.Driver: `codex exec resume <thread id>`.
 func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
 	if !validThreadID(sessionID) {
-		return nil, fmt.Errorf("%w: session id %q is not a Codex thread id", driver.ErrNotStarted, sessionID)
+		return nil, d.redactor(cfg).Err(fmt.Errorf("%w: %w: session id %q is not a Codex thread id", driver.ErrNotStarted, driver.ErrUnusable, sessionID))
 	}
-	return d.start(ctx, cfg, sessionID)
+	s, err := d.start(ctx, cfg, sessionID)
+	return s, d.redactor(cfg).Err(err)
 }
 
 // Policy Codex runs every session under, as its turn_context spells it.
@@ -267,7 +286,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 	if cfg.Policy == nil || cfg.PrivateDir == "" || cfg.Cwd == "" {
 		return nil, fmt.Errorf("%w: a session needs a policy, a working directory and a private directory", driver.ErrNotStarted)
 	}
-	env := mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
+	env := d.env(cfg)
 	sessions, err := sessionsDir(env)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
@@ -293,6 +312,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		return nil, err
 	}
 	s := &session{
+		red:         d.redactor(cfg),
 		id:          resumeID,
 		worker:      worker,
 		cwd:         cfg.Cwd,
@@ -402,6 +422,10 @@ type session struct {
 	grace       time.Duration
 	verifyAfter time.Duration
 
+	// red is what every error, update text and stderr tail of this session
+	// passes through.
+	red *driver.Redactor
+
 	updates   chan driver.Update
 	readerEnd chan struct{}
 
@@ -441,7 +465,11 @@ func (s *session) ID() string {
 	defer s.mu.Unlock()
 	return s.id
 }
-func (s *session) Process() driver.Process       { return s.worker.Process() }
+func (s *session) Process() driver.Process { return s.worker.Process() }
+
+// StderrTail is the last line of the worker's stderr, redacted, for a caller
+// diagnosing an end.
+func (s *session) StderrTail() string            { return s.worker.StderrTail(s.red) }
 func (s *session) Updates() <-chan driver.Update { return s.updates }
 func (s *session) Done() <-chan struct{}         { return s.worker.Done() }
 func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
@@ -504,7 +532,7 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}()
 	select {
 	case <-t.done:
-		return t.result, t.err
+		return t.result, s.red.Err(t.err)
 	case <-ctx.Done():
 		return driver.PromptResult{}, ctx.Err()
 	}
@@ -577,6 +605,8 @@ func (s *session) finish(t *turn, result driver.PromptResult, err error) {
 
 func (s *session) emit(u driver.Update) {
 	u.At = time.Now()
+	u.Tool = s.red.Sanitize(u.Tool)
+	u.ToolCallID = s.red.Sanitize(u.ToolCallID)
 	select {
 	case s.updates <- u:
 	default:
@@ -825,7 +855,7 @@ func refusedByApproval(message string) bool {
 func (s *session) refused(id, tool string, kind driver.ToolKind) {
 	s.mu.Lock()
 	if s.turn != nil {
-		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: id, Tool: tool})
+		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(tool)})
 	}
 	s.mu.Unlock()
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: id, Tool: tool, ToolKind: kind, Allowed: false})
@@ -914,7 +944,7 @@ func (s *session) refusalsOf(t *turn) []driver.Refusal {
 // stream: an edit outside the working directory. Best effort: the stderr
 // kept is a tail.
 func (s *session) stderrRefusals() {
-	tail := s.worker.StderrTail()
+	tail := s.worker.StderrTail(s.red)
 	for line := range strings.SplitSeq(tail, "\n") {
 		if !refusedByApproval(line) {
 			continue
