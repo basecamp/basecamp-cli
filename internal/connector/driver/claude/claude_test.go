@@ -172,6 +172,17 @@ func fakeClaude(scenario string) {
 		if scenario == "die-secret" {
 			os.Exit(3)
 		}
+		if scenario == "nameless-result-denials" {
+			// Three denials in the result, none with a call id: three
+			// refusals, not one.
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID,
+				"permission_denials": []any{
+					map[string]any{"tool_name": "Bash"},
+					map[string]any{"tool_name": "Write"},
+					map[string]any{"tool_name": "WebFetch"},
+				}})
+			continue
+		}
 		if scenario == "two-nameless-refusals" {
 			// Two refusals of the same tool with no call id between them:
 			// two refusals, not one (card 19's Codex accounting).
@@ -793,6 +804,7 @@ func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
 		{"deny-then-die", []driver.Refusal{{ToolCallID: "toolu_dead", Tool: "Bash"}}},
 		{"denied-twice", []driver.Refusal{{ToolCallID: "toolu_twice", Tool: "Bash"}}},
 		{"two-nameless-refusals", []driver.Refusal{{Tool: "Bash"}, {Tool: "Bash"}}},
+		{"nameless-result-denials", []driver.Refusal{{Tool: "Bash"}, {Tool: "Write"}, {Tool: "WebFetch"}}},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			f := newFixture(t, tc.scenario)

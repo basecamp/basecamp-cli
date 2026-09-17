@@ -311,7 +311,7 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	t.Logf("production-sized prompt: %d tokens by the upper bound", estimateTokens(prompt))
 	assert.Less(t, estimateTokens(prompt), MaxPromptTokens)
 
-	// The token reaches the worker's MCP server only over its one-use socket.
+	// The token reaches the worker's MCP server only over the socket.
 	secret := <-token
 	require.NotEmpty(t, secret, "the worker's own group was handed the token")
 	require.Len(t, cfg.MCPServers, 1)
@@ -1539,4 +1539,35 @@ func TestTheRecorderCountsWhatItIsToldTwiceIfItIsToldTwice(t *testing.T) {
 	require.NoError(t, ledger.db.QueryRowContext(context.Background(),
 		`SELECT refusals FROM attempts WHERE id = ?`, l.AttemptID).Scan(&refusals))
 	assert.Equal(t, 2, refusals, "identical refusals with no call id are distinct")
+}
+
+// Opus r9: a peer that is not the worker's ends the socket for good, so it is
+// said out loud whether or not a delivery came first — it is the one event
+// the peer check exists to catch.
+func TestARefusedHandoffIsAlwaysSaidOutLoud(t *testing.T) {
+	var logs safeBuffer
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	})
+	for _, tc := range []struct {
+		handoff Handoff
+		after   bool
+		want    string
+	}{
+		{HandoffRefused, true, "is not the worker asked for its task token"},
+		{HandoffRefused, false, "is not the worker asked for its task token"},
+		{HandoffUndelivered, true, "could not be given it"},
+		{HandoffExpired, true, "within the window"},
+		{HandoffSpent, true, "restarted more often"},
+	} {
+		logs.Reset()
+		h.d.reportHandoff(slog.New(slog.NewJSONHandler(&logs, nil)), "att_x", tc.handoff, driver.Process{}, tc.after)
+		assert.Contains(t, logs.String(), tc.want, "%s after=%v", tc.handoff, tc.after)
+		assert.Contains(t, logs.String(), `"level":"WARN"`, "%s after=%v is worth a warning", tc.handoff, tc.after)
+	}
+
+	// Closed after a delivery is how every healthy attempt ends.
+	logs.Reset()
+	h.d.reportHandoff(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})), "att_x", HandoffClosed, driver.Process{}, true)
+	assert.NotContains(t, logs.String(), `"level":"WARN"`)
 }

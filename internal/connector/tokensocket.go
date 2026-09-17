@@ -206,6 +206,11 @@ const (
 	HandoffExpired Handoff = "expired"
 	// HandoffClosed: the connector closed the socket first.
 	HandoffClosed Handoff = "closed"
+	// HandoffUndelivered: the peer was the worker's and the connector could
+	// not write the token to it — the host killed its server between the
+	// connect and the read, say. It is not a refusal (nothing untrusted
+	// asked) and not fatal: the socket arms again for the next start.
+	HandoffUndelivered Handoff = "undelivered"
 	// HandoffSpent: the worker's MCP server started more times than the
 	// connector serves its token (MaxTokenHandoffs). A start after this one
 	// comes up without a token, and its Basecamp tools fail; no adapter
@@ -380,8 +385,9 @@ func (s *TokenSocket) Settled(wait time.Duration) bool {
 
 // waitForTakerGone waits for the process that took the token to be gone,
 // which is what a restart of the worker's MCP server looks like from here. It
-// reports whether the socket should arm again: false when the socket was
-// closed, or when the wait ran out with that process still alive.
+// reports whether the socket should arm again. The wait itself has no
+// deadline — MaxTokenHandoffs is what bounds the socket, not a clock — so the
+// only false is a socket that was closed.
 //
 // A taker whose identity could not be read cannot be waited for, so the
 // socket arms for one more window instead — the same bound as the first
@@ -393,26 +399,53 @@ func (s *TokenSocket) waitForTakerGone() bool {
 	if taker.PID <= 0 {
 		return true
 	}
-	ticker := time.NewTicker(takerPoll)
-	defer ticker.Stop()
+	wait := takerPoll
+	errors := 0
 	for {
+		timer := time.NewTimer(wait)
 		select {
 		case <-s.stop:
+			timer.Stop()
 			return false
-		case <-ticker.C:
+		case <-timer.C:
+		}
+		// The poll backs off: a task runs for hours, and asking the kernel
+		// about one process every second for all of it is a cost with no
+		// reader.
+		if wait < takerPollMax {
+			wait *= 2
 		}
 		gone, err := driver.ProcessGone(taker)
-		if err == nil && gone {
+		switch {
+		case err == nil && gone:
 			// The server that held the token is gone; the next start of it is
 			// what the socket arms for.
 			return true
+		case err == nil:
+			errors = 0
+		default:
+			// A kernel this process cannot read cannot answer whether that
+			// server is gone. Waiting forever on an unanswerable question
+			// would leave a restarted server with no token and say nothing,
+			// so after a while the socket arms as it does for a taker whose
+			// identity it never had.
+			errors++
+			if errors >= takerErrorLimit {
+				return true
+			}
 		}
 	}
 }
 
-// takerPoll is how often the socket looks to see whether the process that
-// took the token is gone.
-const takerPoll = time.Second
+const (
+	// takerPoll is how soon the socket first looks to see whether the process
+	// that took the token is gone, and takerPollMax how far that backs off.
+	takerPoll    = time.Second
+	takerPollMax = 15 * time.Second
+	// takerErrorLimit is how many times running the question past the kernel
+	// may fail before the socket stops waiting for an answer.
+	takerErrorLimit = 10
+)
 
 // handed records one handoff: the first is what Result answers, and every one
 // goes to OnHandoff's function. after says whether a delivery had already
@@ -420,8 +453,15 @@ const takerPoll = time.Second
 // worker that never took its token.
 func (s *TokenSocket) handed(h Handoff, taker driver.Process, after bool) {
 	s.mu.Lock()
-	if taker.PID > 0 {
+	switch {
+	case taker.PID > 0:
 		s.taker = taker
+	case h == HandoffDelivered:
+		// The token is out and the connector could not say to whom: keeping
+		// the last taker would have the socket waiting on a process that is
+		// not the one holding the token, and the release point ending the
+		// wrong thing (Opus r9). Nothing is better than something wrong.
+		s.taker = driver.Process{}
 	}
 	f := s.onHandoff
 	s.mu.Unlock()
@@ -464,11 +504,16 @@ func (s *TokenSocket) serve(window time.Duration) {
 		}
 		h, taker := s.handOne(window)
 		s.handed(h, taker, delivered)
-		if h != HandoffDelivered {
+		switch h {
+		case HandoffDelivered:
+			delivered = true
+		case HandoffUndelivered:
+			// Nothing was handed over and nothing untrusted asked: the next
+			// start of the server is still owed its token.
+		default:
 			s.Close()
 			return
 		}
-		delivered = true
 	}
 	// The budget is spent: a worker whose MCP server restarts more often than
 	// this is not one the connector keeps handing its token to, and the next
@@ -495,7 +540,9 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 		return HandoffRefused, driver.Process{}
 	}
 	if _, err := conn.Write([]byte(s.token + "\n")); err != nil {
-		return HandoffRefused, driver.Process{}
+		// The peer was the worker's; the write is what failed. On a unix
+		// socket a peer that has gone makes this EPIPE at once.
+		return HandoffUndelivered, driver.Process{}
 	}
 	return HandoffDelivered, s.takerOfConn(conn)
 }

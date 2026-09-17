@@ -807,7 +807,10 @@ func (s *session) handleResult(m streamMessage) {
 	canceled := t.canceled
 	s.mu.Unlock()
 	for _, d := range m.PermissionDenials {
-		if slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == s.red.Sanitize(d.ToolUseID) }) {
+		// Only an id can say two refusals are one: denials with no id are
+		// each their own, however alike (Opus r9 — "" matched "" here and
+		// three nameless denials counted as one).
+		if d.ToolUseID != "" && slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == s.red.Sanitize(d.ToolUseID) }) {
 			continue
 		}
 		// A refusal the stream did not announce is still the driver's own

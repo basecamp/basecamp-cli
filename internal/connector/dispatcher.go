@@ -635,7 +635,12 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 		_ = os.RemoveAll(dir)
 		return driver.SessionConfig{}, nil, func() {}, err
 	}
-	attemptID, log := launch.AttemptID, d.log
+	// This attempt's own logger, so a handoff line goes through the task's
+	// redaction (its token, its socket directory) and not only the
+	// dispatcher's. The session's environment is not known yet; what these
+	// lines carry is ids and enums.
+	attemptID := launch.AttemptID
+	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{SocketDir: socketDir}))
 	// The handoff outlives the start, and a shutdown must not stop the
 	// connector from recording who holds the token.
 	recordCtx := context.WithoutCancel(ctx)
@@ -643,28 +648,12 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// server re-runs the bridge, which takes the token again, and the newest
 	// server is the process the release point must end.
 	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
-		if handoff == HandoffSpent {
-			log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
-				"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
-			return
-		}
-		if handoff != HandoffDelivered {
-			if afterADelivery {
-				// The socket ran out or was closed after it had already
-				// served this worker: that is how every healthy attempt ends,
-				// and warning about it would drown the case worth hearing.
-				log.Debug("connector: the task token's socket is finished with", "attempt_id", attemptID, "handoff", string(handoff))
-				return
+		d.reportHandoff(log, attemptID, handoff, taker, afterADelivery)
+		if handoff == HandoffDelivered && taker.PID > 0 {
+			if err := d.ledger.RecordTaker(recordCtx, attemptID,
+				AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
+				log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
 			}
-			log.Warn("connector: the worker's MCP server did not take its task token", "attempt_id", attemptID, "handoff", string(handoff))
-			return
-		}
-		if taker.PID <= 0 {
-			return
-		}
-		if err := d.ledger.RecordTaker(recordCtx, attemptID,
-			AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
-			log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
 		}
 	})
 	cleanup := func() {
@@ -792,6 +781,38 @@ func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace
 	return takerOf(tokens)
 }
 
+// reportHandoff says what became of one handoff of the task token. Only a
+// socket the release point closed after it had served this worker is quiet:
+// everything else leaves a worker whose Basecamp tools will not work, and no
+// agent reports that on its own (card 23 measured both adapters).
+func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff Handoff, _ driver.Process, afterADelivery bool) {
+	switch handoff {
+	case HandoffDelivered:
+	case HandoffRefused:
+		// Whatever asked was not this worker's. It is the one event the peer
+		// check exists to catch, and it ends the socket, so it is said out
+		// loud whether or not a delivery came first.
+		log.Warn("connector: something that is not the worker asked for its task token; the socket is closed and this task's token will not be served again",
+			"attempt_id", attemptID)
+	case HandoffUndelivered:
+		log.Warn("connector: the worker's MCP server asked for its task token and could not be given it; the next start of it will be",
+			"attempt_id", attemptID)
+	case HandoffSpent:
+		log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
+			"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
+	case HandoffExpired:
+		// Before any delivery this is a worker that never took its token;
+		// after one it is a restart the socket waited for and did not see.
+		// Either way a server that starts now has no Basecamp tools.
+		log.Warn("connector: nothing took the worker's task token within the window; a server that starts now will have no Basecamp tools",
+			"attempt_id", attemptID, "after_a_delivery", afterADelivery)
+	default:
+		// Closed: the release point is done with this attempt, which is how
+		// every healthy one ends.
+		log.Debug("connector: the task token's socket is finished with", "attempt_id", attemptID, "handoff", string(handoff))
+	}
+}
+
 // takerOf is the process a socket's token went to, or none.
 func takerOf(tokens *TokenSocket) driver.Process {
 	if tokens == nil {
@@ -807,10 +828,11 @@ func takerOf(tokens *TokenSocket) driver.Process {
 // gone like the worker; a process that cannot be confirmed holds the attempt,
 // as any other unconfirmed group does.
 //
-// Its identity lives in this process only: a connector that restarts knows
-// the worker it recorded, not the MCP servers an agent started beside it.
-// Such a bridge exits when its agent's stdout closes, which is what ends it
-// after a crash.
+// Its identity is recorded on the attempt as it is handed the token
+// (Ledger.RecordTaker), so a connector that restarts ends it by that record
+// too (Recover passes it to this same point). A taker the connector never
+// managed to identify is the one case left to the agent's own exit: such a
+// bridge ends when its agent's output closes.
 func (d *Dispatcher) confirmTakerGone(worker, taker driver.Process) error {
 	ok := taker.PID > 0 && taker.PGID > 0
 	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
