@@ -70,8 +70,9 @@ const (
 // connector makes about a crash rests on the answer to "have I seen this id
 // before?" surviving the crash.
 type Ledger struct {
-	db  *sql.DB
-	now func() time.Time
+	db    *sql.DB
+	now   func() time.Time
+	hooks Hooks
 }
 
 // OpenLedger opens (creating if absent) the ledger at path and brings its
@@ -489,6 +490,10 @@ BEGIN
   SELECT RAISE(ABORT, 'nothing a worker was never handed is acknowledged or completed');
 END;
 `,
+	// Migration 6. The dispatcher's side of a task: what it runs in, its
+	// attempts, and how each ended. See ledger_tasks.go for the invariants
+	// these tables hold.
+	migrationTasksAndAttempts,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

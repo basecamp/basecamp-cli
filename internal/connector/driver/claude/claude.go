@@ -1,0 +1,665 @@
+// Package claude is the spawn driver for Claude Code: `claude -p` with
+// streaming JSON in and out, adapted onto the driver package's ACP-shaped
+// session.
+//
+// One process is one session. Prompts are user messages written to its stdin,
+// so a follow-up is a further prompt in the same session; a turn ends with the
+// result message. The permission policy is frozen into flags before the
+// process starts and verified on the first turn: the init message must report
+// the permission mode asked for, or the session is ended as unsafe. The host's
+// own Claude Code settings and MCP servers are not loaded, and the built-in
+// tools are limited to the ones the policy allows, so a tool the policy
+// refuses does not exist in the session at all.
+package claude
+
+import (
+	"bufio"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+)
+
+// Name is the driver's name.
+const Name = "claude"
+
+// Env is what Claude Code may take from the connector's environment besides
+// driver.BaseEnv: where its configuration lives and how it authenticates.
+var Env = []string{"CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"}
+
+// Options configures the driver.
+type Options struct {
+	// Binary is the claude executable; "claude" on PATH when empty.
+	Binary string
+	// Model is passed as --model when set.
+	Model string
+	// Lookup reads the connector's environment for Env; os.LookupEnv when
+	// nil.
+	Lookup func(string) (string, bool)
+	// CloseGrace is how long a session's process has to exit after its stdin
+	// closes, before its group is terminated.
+	CloseGrace time.Duration
+}
+
+// Driver starts Claude Code sessions.
+type Driver struct {
+	opts Options
+}
+
+var _ driver.Driver = (*Driver)(nil)
+
+// New builds the driver.
+func New(opts Options) *Driver {
+	if opts.Binary == "" {
+		opts.Binary = "claude"
+	}
+	if opts.Lookup == nil {
+		opts.Lookup = os.LookupEnv
+	}
+	if opts.CloseGrace <= 0 {
+		opts.CloseGrace = 5 * time.Second
+	}
+	return &Driver{opts: opts}
+}
+
+// Name implements driver.Driver.
+func (d *Driver) Name() string { return Name }
+
+// Capabilities implements driver.Driver.
+func (d *Driver) Capabilities() driver.Capabilities {
+	return driver.Capabilities{LoadSession: true, FollowUpPrompts: true}
+}
+
+// NewSession implements driver.Driver.
+func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driver.Session, error) {
+	id, err := newUUID()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+	}
+	return d.start(ctx, cfg, id, false)
+}
+
+// LoadSession implements driver.Driver.
+func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
+	if !validUUID(sessionID) {
+		return nil, fmt.Errorf("%w: session id %q is not a Claude Code session id", driver.ErrNotStarted, sessionID)
+	}
+	return d.start(ctx, cfg, sessionID, true)
+}
+
+// modeIDs maps the connector's permission modes to Claude Code's.
+var modeIDs = map[driver.PermissionMode]string{
+	driver.ModeEditsInWorkDir: "acceptEdits",
+}
+
+// kindTools are Claude Code's built-in tools for each kind the policy can
+// allow. Edits are acceptEdits's, confined to the working directory.
+var kindTools = map[driver.ToolKind][]string{
+	driver.ToolRead:   {"Read"},
+	driver.ToolSearch: {"Glob", "Grep"},
+	driver.ToolThink:  {"TodoWrite"},
+	driver.ToolEdit:   {"Edit", "Write", "NotebookEdit"},
+}
+
+// Args is the command line for a session, without the binary. Exposed so the
+// flags that hold the policy are tested as written.
+func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath, model string) ([]string, error) {
+	rules := cfg.Policy.Rules()
+	mode, ok := modeIDs[rules.Mode]
+	if !ok {
+		return nil, fmt.Errorf("claude: no Claude Code mode for policy mode %q", rules.Mode)
+	}
+	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
+		return nil, fmt.Errorf("claude: the policy's working directory %q is not the session's %q", rules.WorkDir, cfg.Cwd)
+	}
+	tools := slices.Clone(kindTools[driver.ToolEdit])
+	var allowed []string
+	for _, kind := range rules.AllowKinds {
+		names, ok := kindTools[kind]
+		if !ok {
+			return nil, fmt.Errorf("claude: no Claude Code tools for kind %q", kind)
+		}
+		tools = append(tools, names...)
+		allowed = append(allowed, names...)
+	}
+	for _, server := range rules.AllowMCPServers {
+		allowed = append(allowed, "mcp__"+server)
+	}
+
+	args := []string{
+		"-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		// The host's settings (a defaultMode of bypassPermissions, allow
+		// rules, hooks) are not this session's.
+		"--setting-sources", "",
+		"--permission-mode", mode,
+		// Nobody answers a prompt: what the rules do not allow is refused.
+		"--permission-prompts", "none",
+		"--tools", strings.Join(tools, ","),
+		"--allowed-tools", strings.Join(allowed, ","),
+		"--strict-mcp-config",
+		"--mcp-config", mcpConfigPath,
+	}
+	if resume {
+		args = append(args, "--resume", sessionID)
+	} else {
+		args = append(args, "--session-id", sessionID)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return args, nil
+}
+
+func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID string, resume bool) (driver.Session, error) {
+	if cfg.Policy == nil || cfg.PrivateDir == "" || cfg.Cwd == "" {
+		return nil, fmt.Errorf("%w: a session needs a policy, a working directory and a private directory", driver.ErrNotStarted)
+	}
+	mcpPath, err := writeMCPConfig(cfg.PrivateDir, cfg.MCPServers)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+	}
+	args, err := Args(cfg, sessionID, resume, mcpPath, d.opts.Model)
+	if err != nil {
+		_ = os.Remove(mcpPath)
+		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+	}
+	env := mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
+	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
+	if err != nil {
+		_ = os.Remove(mcpPath)
+		return nil, err
+	}
+	s := &session{
+		id:        sessionID,
+		worker:    worker,
+		mode:      args[slices.Index(args, "--permission-mode")+1],
+		mcpPath:   mcpPath,
+		mcpNames:  serverNames(cfg.MCPServers),
+		grace:     d.opts.CloseGrace,
+		updates:   make(chan driver.Update, 256),
+		readerEnd: make(chan struct{}),
+	}
+	go s.read()
+	return s, nil
+}
+
+// mergeEnv adds the driver's own variables to the dispatcher's allowlisted
+// environment. A variable the dispatcher set wins.
+func mergeEnv(base, extra []string) []string {
+	have := map[string]bool{}
+	for _, kv := range base {
+		k, _, _ := strings.Cut(kv, "=")
+		have[k] = true
+	}
+	out := slices.Clone(base)
+	if out == nil {
+		out = []string{}
+	}
+	for _, kv := range extra {
+		k, _, _ := strings.Cut(kv, "=")
+		if !have[k] {
+			out = append(out, kv)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func serverNames(servers []driver.MCPServer) []string {
+	names := make([]string, 0, len(servers))
+	for _, s := range servers {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// writeMCPConfig writes the session's MCP servers owner-only. The file holds
+// the servers' environments, a task token among them, so it is created
+// exclusively in the private directory and removed as soon as the agent has
+// started its servers, and again on Close.
+func writeMCPConfig(dir string, servers []driver.MCPServer) (string, error) {
+	type entry struct {
+		Type    string            `json:"type"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
+	config := struct {
+		MCPServers map[string]entry `json:"mcpServers"`
+	}{MCPServers: map[string]entry{}}
+	for _, s := range servers {
+		if s.Name == "" || s.Command == "" {
+			return "", errors.New("claude: an MCP server needs a name and a command")
+		}
+		env := s.Env
+		if env == nil {
+			env = map[string]string{}
+		}
+		config.MCPServers[s.Name] = entry{Type: "stdio", Command: s.Command, Args: s.Args, Env: env}
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp.json")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("claude: write MCP config: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return "", fmt.Errorf("claude: write MCP config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("claude: write MCP config: %w", err)
+	}
+	return path, nil
+}
+
+// session is one Claude Code process.
+type session struct {
+	id       string
+	worker   *driver.Worker
+	mode     string
+	mcpPath  string
+	mcpNames []string
+	grace    time.Duration
+
+	updates   chan driver.Update
+	readerEnd chan struct{}
+
+	mu       sync.Mutex
+	turn     *turn
+	verified bool
+	closed   bool
+	writeMu  sync.Mutex
+}
+
+// turn is a prompt in flight.
+type turn struct {
+	done     chan struct{}
+	result   driver.PromptResult
+	err      error
+	canceled bool
+	refusals []driver.Refusal
+}
+
+var _ driver.Session = (*session)(nil)
+
+func (s *session) ID() string                    { return s.id }
+func (s *session) Process() driver.Process       { return s.worker.Process() }
+func (s *session) Updates() <-chan driver.Update { return s.updates }
+func (s *session) Done() <-chan struct{}         { return s.worker.Done() }
+func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
+
+// Prompt implements driver.Session.
+func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return driver.PromptResult{}, driver.ErrSessionEnded
+	}
+	if s.turn != nil {
+		s.mu.Unlock()
+		return driver.PromptResult{}, errors.New("claude: a turn is already in flight")
+	}
+	t := &turn{done: make(chan struct{})}
+	s.turn = t
+	s.mu.Unlock()
+
+	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}}
+	if err := s.write(msg); err != nil {
+		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
+	}
+	select {
+	case <-t.done:
+		return t.result, t.err
+	case <-ctx.Done():
+		return driver.PromptResult{}, ctx.Err()
+	}
+}
+
+// Cancel implements driver.Session: Claude Code's interrupt control request.
+func (s *session) Cancel(context.Context) error {
+	s.mu.Lock()
+	t := s.turn
+	if t != nil {
+		t.canceled = true
+	}
+	s.mu.Unlock()
+	if t == nil {
+		return nil
+	}
+	id, err := newUUID()
+	if err != nil {
+		return err
+	}
+	return s.write(map[string]any{"type": "control_request", "request_id": id, "request": map[string]any{"subtype": "interrupt"}})
+}
+
+// Close implements driver.Session.
+func (s *session) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.writeMu.Lock()
+	_ = s.worker.Stdin().Close()
+	s.writeMu.Unlock()
+	select {
+	case <-s.worker.Done():
+	case <-time.After(s.grace):
+	}
+	s.worker.Terminate(s.grace)
+	<-s.readerEnd
+	s.removeMCPConfig()
+	return nil
+}
+
+func (s *session) removeMCPConfig() {
+	if err := os.Remove(s.mcpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return
+	}
+}
+
+func (s *session) write(v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	_, err = s.worker.Stdin().Write(append(data, '\n'))
+	return err
+}
+
+func (s *session) finish(t *turn, result driver.PromptResult, err error) {
+	s.mu.Lock()
+	if s.turn != t {
+		s.mu.Unlock()
+		return
+	}
+	s.turn = nil
+	s.mu.Unlock()
+	t.result, t.err = result, err
+	close(t.done)
+}
+
+func (s *session) emit(u driver.Update) {
+	u.At = time.Now()
+	select {
+	case s.updates <- u:
+	default:
+	}
+}
+
+// read maps the process's stream onto updates and turn results until the
+// process closes its stdout.
+func (s *session) read() {
+	defer func() {
+		close(s.updates)
+		s.mu.Lock()
+		t := s.turn
+		s.mu.Unlock()
+		if t != nil {
+			s.finish(t, driver.PromptResult{}, driver.ErrSessionEnded)
+		}
+		close(s.readerEnd)
+	}()
+	scanner := bufio.NewScanner(s.worker.Stdout())
+	scanner.Buffer(make([]byte, 64<<10), 64<<20)
+	for scanner.Scan() {
+		s.handle(scanner.Bytes())
+	}
+	// Drain what a scanner error left, so the process never blocks writing.
+	_, _ = io.Copy(io.Discard, s.worker.Stdout())
+}
+
+// streamMessage is the part of a stream-json line the driver reads. Text and
+// tool inputs are never decoded into anything kept.
+type streamMessage struct {
+	Type           string `json:"type"`
+	Subtype        string `json:"subtype"`
+	SessionID      string `json:"session_id"`
+	PermissionMode string `json:"permissionMode"`
+	MCPServers     []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers"`
+	Message *struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+	ToolName          string `json:"tool_name"`
+	ToolUseID         string `json:"tool_use_id"`
+	StopReason        string `json:"stop_reason"`
+	IsError           bool   `json:"is_error"`
+	PermissionDenials []struct {
+		ToolName  string `json:"tool_name"`
+		ToolUseID string `json:"tool_use_id"`
+	} `json:"permission_denials"`
+	Usage *struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+type contentBlock struct {
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Text      string `json:"text"`
+	ToolUseID string `json:"tool_use_id"`
+	IsError   bool   `json:"is_error"`
+}
+
+func (s *session) handle(line []byte) {
+	var m streamMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return
+	}
+	switch {
+	case m.Type == "system" && m.Subtype == "init":
+		s.handleInit(m)
+	case m.Type == "system" && m.Subtype == "permission_denied":
+		s.refused(m.ToolUseID, m.ToolName)
+	case m.Type == "assistant" && m.Message != nil:
+		var blocks []contentBlock
+		if json.Unmarshal(m.Message.Content, &blocks) != nil {
+			return
+		}
+		for _, b := range blocks {
+			switch b.Type {
+			case "tool_use":
+				s.emit(driver.Update{Kind: driver.UpdateToolCall, ToolCallID: b.ID, Tool: b.Name, ToolKind: toolKind(b.Name), Status: driver.ToolInProgress})
+			case "text":
+				s.emit(driver.Update{Kind: driver.UpdateAgentMessageChunk, Chars: len(b.Text)})
+			}
+		}
+	case m.Type == "user" && m.Message != nil:
+		var blocks []contentBlock
+		if json.Unmarshal(m.Message.Content, &blocks) != nil {
+			return
+		}
+		for _, b := range blocks {
+			if b.Type != "tool_result" {
+				continue
+			}
+			status := driver.ToolCompleted
+			if b.IsError {
+				status = driver.ToolFailed
+			}
+			s.emit(driver.Update{Kind: driver.UpdateToolCallUpdate, ToolCallID: b.ToolUseID, Status: status})
+		}
+	case m.Type == "result":
+		s.handleResult(m)
+	}
+}
+
+// handleInit verifies the session is the one asked for (driver invariant 2):
+// the mode, and the MCP servers connected. A session that is not is ended.
+func (s *session) handleInit(m streamMessage) {
+	var problem error
+	switch {
+	case m.PermissionMode != s.mode:
+		problem = fmt.Errorf("%w: asked for %q, the agent reports %q", driver.ErrUnsafeMode, s.mode, m.PermissionMode)
+	case m.SessionID != s.id:
+		problem = fmt.Errorf("claude: asked for session %s, the agent reports another", s.id)
+	default:
+		for _, name := range s.mcpNames {
+			connected := false
+			for _, server := range m.MCPServers {
+				if server.Name == name && server.Status == "connected" {
+					connected = true
+				}
+			}
+			if !connected {
+				problem = fmt.Errorf("claude: MCP server %q did not connect", name)
+			}
+		}
+	}
+	// The agent has started its servers, or failed to: the config file, which
+	// holds their environments, is not needed again.
+	s.removeMCPConfig()
+	s.mu.Lock()
+	t := s.turn
+	if problem == nil {
+		s.verified = true
+	}
+	s.mu.Unlock()
+	if problem != nil {
+		if t != nil {
+			s.finish(t, driver.PromptResult{}, problem)
+		}
+		s.worker.Terminate(0)
+	}
+}
+
+func (s *session) refused(toolUseID, tool string) {
+	s.mu.Lock()
+	if s.turn != nil {
+		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: toolUseID, Tool: tool})
+	}
+	s.mu.Unlock()
+	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: toolUseID, Tool: tool, ToolKind: toolKind(tool), Allowed: false})
+}
+
+func (s *session) handleResult(m streamMessage) {
+	s.mu.Lock()
+	t := s.turn
+	verified := s.verified
+	s.mu.Unlock()
+	if t == nil {
+		return
+	}
+	if !verified {
+		// A result before the init message proved the mode is not a turn this
+		// driver can vouch for.
+		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: no init message before the result", driver.ErrUnsafeMode))
+		s.worker.Terminate(0)
+		return
+	}
+	s.mu.Lock()
+	refusals := slices.Clone(t.refusals)
+	canceled := t.canceled
+	s.mu.Unlock()
+	for _, d := range m.PermissionDenials {
+		if !slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == d.ToolUseID }) {
+			refusals = append(refusals, driver.Refusal{ToolCallID: d.ToolUseID, Tool: d.ToolName})
+		}
+	}
+	result := driver.PromptResult{Refusals: refusals}
+	if m.Usage != nil {
+		result.Usage = driver.Usage{InputTokens: m.Usage.InputTokens, OutputTokens: m.Usage.OutputTokens}
+		s.emit(driver.Update{Kind: driver.UpdateUsage, Usage: &result.Usage})
+	}
+	switch {
+	case canceled:
+		// Only a cancel the connector asked for reads as canceled (driver
+		// invariant 3).
+		result.Stop = driver.TurnCanceled
+	case m.Subtype == "error_max_turns":
+		result.Stop = driver.TurnMaxTurnRequests
+	case m.StopReason == "max_tokens":
+		result.Stop = driver.TurnMaxTokens
+	case m.StopReason == "refusal":
+		result.Stop = driver.TurnRefusal
+	case m.Subtype == "success" && !m.IsError:
+		result.Stop = driver.TurnEndTurn
+	default:
+		s.finish(t, result, fmt.Errorf("claude: the turn ended in error (%s)", sanitize(m.Subtype)))
+		return
+	}
+	s.finish(t, result, nil)
+}
+
+// toolKind maps a Claude Code tool name to ACP's kind.
+func toolKind(name string) driver.ToolKind {
+	for kind, tools := range kindTools {
+		if slices.Contains(tools, name) {
+			return kind
+		}
+	}
+	switch name {
+	case "Bash":
+		return driver.ToolExecute
+	case "WebFetch", "WebSearch":
+		return driver.ToolFetch
+	}
+	return driver.ToolOther
+}
+
+func sanitize(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || r == '_' {
+			out = append(out, r)
+		}
+		if len(out) >= 40 {
+			break
+		}
+	}
+	return string(out)
+}
+
+func newUUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+func validUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
