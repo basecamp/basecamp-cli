@@ -731,3 +731,21 @@ func TestOutboxAFailedPostIsGivenTimeToLand(t *testing.T) {
 	assert.Zero(t, basecamp.lists, "not listed straight after the failure")
 	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State)
 }
+
+// A request claimed with time left is still cut off at the flush's deadline,
+// not at its own longer timeout.
+func TestOutboxFlushCapsARequestAtItsDeadline(t *testing.T) {
+	ledger, clock := obLedger(t)
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: blockingPoster{newFakeBasecamp(clock.Now)}, PostTimeout: time.Minute})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), MinPostWindow+500*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_ = ob.Flush(ctx)
+	assert.Less(t, time.Since(started), MinPostWindow+5*time.Second)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State)
+}
