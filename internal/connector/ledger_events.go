@@ -33,6 +33,43 @@ type Record struct {
 	SeenAt           time.Time
 	UpdatedAt        time.Time
 	ContentDropped   bool
+
+	// Revision counts every state write applied to the record since intake
+	// recorded it, a repeat of the state it already has included. A decision
+	// applies only at the revision it loaded.
+	Revision int64
+	// Decision is admission's latest verdict on the record; its zero value
+	// until one is written.
+	Decision Decision
+}
+
+// Decision is what admission wrote onto a record with its verdict. The pointer
+// fields stay intake's; these are admission's, and dispatch starts a task from
+// them.
+type Decision struct {
+	// DecidedAt is when the latest verdict was written.
+	DecidedAt *time.Time
+	// BlockedAt is when the record entered its current run of blocked
+	// verdicts; nil unless it is blocked.
+	BlockedAt *time.Time
+	// RetryAt is a throttled verdict's server deadline; nil otherwise.
+	RetryAt *time.Time
+
+	Trigger          string
+	Acknowledge      bool
+	ConversationKey  string
+	ReplyKind        string
+	ReplyRecordingID int64
+	Routed           bool
+	Route            string
+	Class            string
+	RecordingURL     string
+	RequesterID      int64
+	// Snapshot is the recording's content as admission read it, JSON. An
+	// admitted verdict writes it, as admitted or queued; it stays through
+	// dispatch and completion until retention drops it, and any move to
+	// blocked or discarded clears it.
+	Snapshot json.RawMessage
 }
 
 // EffectivePerformer is the id the performers/exclude_performers filters
@@ -168,8 +205,14 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // edges back into the working states. Completed and discarded have none.
 var lifecycle = map[RecordState][]RecordState{
 	// seen to queued is one edge, not two: admission commits an admitted
-	// verdict AS queued when the conversation is already live, so the record
-	// never passes through admitted at all.
+	// verdict AS queued when the conversation is already live — another
+	// record on it admitted or dispatched, admission.Ledger's definition — so
+	// the record never passes through admitted at all. Deciding that moves
+	// only the incoming record; a queued record leaves queued by dispatch.
+	//
+	// A blocked record's edges back into the working states are for the
+	// lifecycle's own bookkeeping. It returns to work with content only
+	// through a new verdict, because a move to blocked drops the snapshot.
 	StateSeen:     {StateAdmitted, StateQueued, StateBlocked, StateDiscarded},
 	StateAdmitted: {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
 	StateQueued:   {StateDispatched, StateBlocked, StateDiscarded},
@@ -211,47 +254,135 @@ var ErrNotATransition = errors.New("not a transition the ledger's lifecycle allo
 // two statements is a race, and this is the guarantee that a finished record
 // stays finished.
 func (l *Ledger) SetState(ctx context.Context, id int64, state RecordState, reason string) error {
-	switch state {
-	case StateBlocked, StateDiscarded:
-		if reason == "" {
-			return fmt.Errorf("connector: set state of %d: a %s record needs a reason", id, state)
-		}
-	case StateSeen, StateAdmitted, StateQueued, StateDispatched, StateCompleted:
-		if reason != "" {
-			return fmt.Errorf("connector: set state of %d: a %s record takes no reason", id, state)
-		}
-	default:
-		// A state outside the lifecycle is a row no recovery scan looks for.
-		return fmt.Errorf("connector: set state of %d: %q is not a ledger state", id, state)
-	}
-	froms := enterableFrom(state)
-	args := []any{string(state), reason, string(state), l.timestamp(), id}
-	for _, from := range froms {
-		args = append(args, from)
-	}
-	// The only thing concatenated is a list of "?" as long as the lifecycle's
-	// own edge list. Every value is bound.
-	//nolint:gosec // G202: placeholders, not values
-	//
-	// updated_at is left alone when the state does not change. It is the
-	// retention clock DropContent reads, and a repeated write of the state a
-	// record already has would silently restart the window on a finished
-	// record.
-	query := `UPDATE events SET state = ?, reason = ?,
-  updated_at = CASE WHEN state = ? THEN updated_at ELSE ? END
-WHERE id = ? AND state IN (` + strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + `)`
-	res, err := l.db.ExecContext(ctx, query, args...)
+	moved, err := l.move(ctx, l.db, transition{id: id, state: state, reason: reason})
 	if err != nil {
-		return fmt.Errorf("connector: set state of %d: %w", id, err)
+		return err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("connector: set state of %d: %w", id, err)
-	}
-	if affected == 0 {
+	if !moved {
 		return l.explainRefusal(ctx, id, state)
 	}
 	return nil
+}
+
+// dbtx is what a transition runs against: the ledger's handle, or a
+// transaction a caller already holds so the move commits with its other
+// writes.
+type dbtx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// transition is one state change and what is written with it.
+type transition struct {
+	id     int64
+	state  RecordState
+	reason string
+	// from narrows the states the record may be leaving. Empty means every
+	// state the lifecycle lets reach state; a narrowing can only remove edges,
+	// never add one.
+	from []RecordState
+	// revision, when set, applies the move only while the record is still at
+	// that revision.
+	revision *int64
+	// retryAt is a blocked record's not-before deadline, stored as retry_at;
+	// the zero time stores none. Only a move to blocked may carry one.
+	retryAt time.Time
+	// set is further columns written in the same statement.
+	set []assignment
+}
+
+// assignment is one further column a transition writes. column is this
+// package's own constant, never input; value is bound.
+type assignment struct {
+	column string
+	value  any
+}
+
+// move is the ledger's one state-changing write. Every change of state goes
+// through it, so every change meets the lifecycle, bumps the revision, and
+// keeps the retention clock where a repeat must leave it. It reports whether
+// the record moved; a refusal is the caller's to explain.
+//
+// revision is bumped on every applied write, a repeat included. It is what a
+// decision loaded earlier is compared against, and any write since that load
+// is a reason the decision may no longer hold.
+func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) {
+	switch t.state {
+	case StateBlocked, StateDiscarded:
+		if t.reason == "" {
+			return false, fmt.Errorf("connector: set state of %d: a %s record needs a reason", t.id, t.state)
+		}
+	case StateSeen, StateAdmitted, StateQueued, StateDispatched, StateCompleted:
+		if t.reason != "" {
+			return false, fmt.Errorf("connector: set state of %d: a %s record takes no reason", t.id, t.state)
+		}
+	default:
+		// A state outside the lifecycle is a row no recovery scan looks for.
+		return false, fmt.Errorf("connector: set state of %d: %q is not a ledger state", t.id, t.state)
+	}
+	if !t.retryAt.IsZero() && t.state != StateBlocked {
+		return false, fmt.Errorf("connector: set state of %d: only a blocked record has a retry deadline", t.id)
+	}
+	froms := enterableFrom(t.state)
+	if len(t.from) > 0 {
+		froms = slices.DeleteFunc(froms, func(from string) bool {
+			return !slices.Contains(t.from, RecordState(from))
+		})
+	}
+
+	// updated_at is left alone when the state does not change. It is the
+	// retention clock DropContent reads, and a repeated write of the state a
+	// record already has would silently restart the window on a finished
+	// record. Every right-hand side reads the row as it was before this
+	// statement, which is SQLite's rule for UPDATE.
+	//
+	// The blocked schedule's inputs are the move's too, so no path into or out
+	// of blocked can leave them stale. blocked_at is when the record entered
+	// its current run of blocked states — cleared on leaving, so it is set
+	// exactly on entering and kept across a repeat — because the retry
+	// window counts from it.
+	// retry_at holds only for the move that set it. And a record moving to
+	// blocked or discarded loses its snapshot: only a record on its way to a
+	// worker carries content.
+	now := l.timestamp()
+	var retryAt any
+	if !t.retryAt.IsZero() {
+		retryAt = stamp(t.retryAt)
+	}
+	var query strings.Builder
+	query.WriteString(`UPDATE events SET state = ?, reason = ?, revision = revision + 1,
+  updated_at = CASE WHEN state = ? THEN updated_at ELSE ? END,
+  blocked_at = CASE WHEN ? <> 'blocked' THEN NULL ELSE COALESCE(blocked_at, ?) END,
+  retry_at = ?,
+  snapshot = CASE WHEN ? IN ('blocked', 'discarded') THEN NULL ELSE snapshot END`)
+	args := []any{string(t.state), t.reason, string(t.state), now, string(t.state), now, retryAt, string(t.state)}
+	for _, a := range t.set {
+		query.WriteString(", " + a.column + " = ?")
+		args = append(args, a.value)
+	}
+	query.WriteString(" WHERE id = ?")
+	args = append(args, t.id)
+	if t.revision != nil {
+		query.WriteString(" AND revision = ?")
+		args = append(args, *t.revision)
+	}
+	query.WriteString(" AND state IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + ")")
+	for _, from := range froms {
+		args = append(args, from)
+	}
+
+	// Concatenated are column names this package declares,
+	// and a list of "?" as long as the lifecycle's own edge list. Every value
+	// is bound.
+	res, err := db.ExecContext(ctx, query.String(), args...) //nolint:gosec // G202: constants and placeholders, not values
+	if err != nil {
+		return false, fmt.Errorf("connector: set state of %d: %w", t.id, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("connector: set state of %d: %w", t.id, err)
+	}
+	return affected > 0, nil
 }
 
 // explainRefusal says why an update changed nothing: there is no such record,
@@ -286,7 +417,10 @@ func (l *Ledger) DropContent(ctx context.Context, discardedBefore, completedBefo
 UPDATE events
 SET details = NULL, event_type = '', kind = '', action = '', bucket_id = 0,
     creator_id = 0, performed_by_id = NULL, recording_id = 0, actor_type = '',
-    visible_to_clients = NULL, content_dropped = 1, updated_at = updated_at
+    visible_to_clients = NULL, content_dropped = 1, updated_at = updated_at,
+    snapshot = NULL, trigger_name = '', acknowledge = 0, conversation_key = '',
+    reply_kind = '', reply_recording_id = 0, routed = 0, route = '', class = '',
+    recording_url = '', requester_id = 0
 WHERE content_dropped = 0
   AND ((state = ? AND updated_at < ?) OR (state = ? AND updated_at < ?))`,
 		string(StateDiscarded), stamp(discardedBefore),
@@ -304,7 +438,10 @@ WHERE content_dropped = 0
 const selectRecords = `
 SELECT id, state, reason, lane, event_type, kind, action, bucket_id, creator_id,
        performed_by_id, recording_id, details, actor_type, visible_to_clients,
-       created_at, seen_at, updated_at, content_dropped
+       created_at, seen_at, updated_at, content_dropped, revision, decided_at,
+       blocked_at, retry_at, trigger_name, acknowledge, conversation_key,
+       reply_kind, reply_recording_id, routed, route, class, recording_url,
+       requester_id, snapshot
 FROM events`
 
 func scanRecords(rows *sql.Rows) ([]Record, error) {
@@ -320,11 +457,19 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			contentDropped               int
 			performedBy                  sql.NullInt64
 			visibleToClients             sql.NullBool
+			decidedAt, blockedAt         sql.NullString
+			retryAt                      sql.NullString
+			acknowledge, routed          int
+			snapshot                     []byte
+			d                            = &r.Decision
 		)
 		if err := rows.Scan(&r.ID, &state, &r.Reason, &lane, &r.EventType, &r.Kind,
 			&r.Action, &r.BucketID, &r.CreatorID, &performedBy, &r.RecordingID,
 			&details, &r.ActorType, &visibleToClients, &createdAt, &seenAt,
-			&updatedAt, &contentDropped); err != nil {
+			&updatedAt, &contentDropped, &r.Revision, &decidedAt, &blockedAt,
+			&retryAt, &d.Trigger, &acknowledge, &d.ConversationKey, &d.ReplyKind,
+			&d.ReplyRecordingID, &routed, &d.Route, &d.Class, &d.RecordingURL,
+			&d.RequesterID, &snapshot); err != nil {
 			return nil, fmt.Errorf("connector: scan event record: %w", err)
 		}
 		r.State = RecordState(state)
@@ -351,6 +496,23 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			return nil, err
 		}
 		r.ContentDropped = contentDropped != 0
+		d.Acknowledge, d.Routed = acknowledge != 0, routed != 0
+		if len(snapshot) > 0 {
+			d.Snapshot = json.RawMessage(snapshot)
+		}
+		for _, stamped := range []struct {
+			raw sql.NullString
+			to  **time.Time
+		}{{decidedAt, &d.DecidedAt}, {blockedAt, &d.BlockedAt}, {retryAt, &d.RetryAt}} {
+			if !stamped.raw.Valid {
+				continue
+			}
+			at, err := parseStamp(stamped.raw.String)
+			if err != nil {
+				return nil, err
+			}
+			*stamped.to = &at
+		}
 		records = append(records, r)
 	}
 	return records, rows.Err()

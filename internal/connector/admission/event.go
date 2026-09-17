@@ -10,7 +10,7 @@ import (
 const ActorTypeAgent = "agent"
 
 // Event is the pointer admission decides on: the fields intake stores for a
-// seen record (internal/connector Record in basecamp-cli PR 729), and nothing
+// seen record (internal/connector's Record), and nothing
 // else. It carries no title, no content, no URL and no names; whatever
 // admission needs beyond ids it reads.
 type Event struct {

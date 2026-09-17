@@ -282,6 +282,47 @@ BEGIN
   SELECT RAISE(ABORT, 'a terminal record cannot change state');
 END;
 `,
+	// Migration 4. What admission decides is written onto the record it
+	// decided, in the transaction that decides it.
+	//
+	// revision is the guard on that write: a decision carries the revision
+	// the record was loaded at, and applies only while the record is still
+	// there, so one event gets one verdict however many fetches decide it and
+	// an older decision never overwrites a newer one. Every state change bumps
+	// it, not only admission's.
+	//
+	// decided_at is when the latest verdict was written, blocked_at when the
+	// record entered its current run of blocked verdicts (the retry window
+	// counts from it), and retry_at a throttled verdict's server deadline.
+	// The rest is the verdict itself — what dispatch starts a task from, and
+	// what a blocked(no_route) record's holding reply needs. snapshot is the
+	// recording's content as admission read it. Only an admitted verdict
+	// writes one, whether the ledger writes it as admitted or as queued; a
+	// record keeps it through dispatch and completion until retention drops
+	// it, and loses it on any move to blocked or discarded. Nothing else in
+	// the ledger is content.
+	//
+	// Nothing has shipped that wrote a version 3 ledger, but a migration is
+	// how the schema changes regardless: the next time something has, this is
+	// the path that has to work.
+	`
+ALTER TABLE events ADD COLUMN revision           INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN decided_at         TEXT;
+ALTER TABLE events ADD COLUMN blocked_at         TEXT;
+ALTER TABLE events ADD COLUMN retry_at           TEXT;
+ALTER TABLE events ADD COLUMN trigger_name       TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN acknowledge        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN conversation_key   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN reply_kind         TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN reply_recording_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN routed             INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN route              TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN class              TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN recording_url      TEXT    NOT NULL DEFAULT '';
+ALTER TABLE events ADD COLUMN requester_id       INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN snapshot           BLOB;
+CREATE INDEX events_conversation ON events (conversation_key, state);
+`,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

@@ -73,13 +73,14 @@
 //
 // # The seam with intake
 //
-// Intake (basecamp-cli PR 729, internal/connector) hands admission an event id
-// through its Queue; the record behind that id is the ledger row, whose
-// pointer fields are exactly Event's. Run is written against two small
-// interfaces, IDSource (satisfied by that Queue's Take) and Records (a ledger
-// read returning a seen record as an Event), plus Ledger, whose Commit
-// contract is invariant 5. The adapter from intake's ledger to those
-// interfaces lands once 729 merges; this package imports nothing from it.
+// Intake (internal/connector) hands admission an event id through its Queue;
+// the record behind that id is the ledger row, whose pointer fields are
+// exactly Event's. Run is written against two small interfaces, IDSource
+// (satisfied by that Queue's Take) and Records (a ledger read returning a seen
+// record as an Event), plus Ledger, whose Commit contract is invariant 5.
+// Intake's ledger implements Records and Ledger (connector.Ledger.Admission),
+// and connector.RunAdmission wires Run onto the queue; this package imports
+// nothing from that one.
 //
 // # What is not here
 //
