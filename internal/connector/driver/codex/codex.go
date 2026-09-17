@@ -522,7 +522,10 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 
 	// The write runs apart: a worker that stops reading blocks it, and a ctx
 	// that ends must still end the wait (driver.Session's contract), while the
-	// turn itself is ended by Cancel or Close.
+	// turn itself is ended by Cancel or Close. What it may end up recording —
+	// a refusal read from the worker's last word — outlives this prompt's
+	// context, as every refusal does.
+	//nolint:contextcheck // the recorder's write is not this prompt's to cancel
 	go func() {
 		s.writing <- struct{}{}
 		_, err := io.WriteString(s.worker.Stdin(), prompt)
@@ -539,7 +542,7 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		canceled := t.canceled
 		s.mu.Unlock()
 		if canceled {
-			s.finishCanceled(t, nil)
+			s.finishCanceled(t)
 		} else {
 			s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
 		}
@@ -658,7 +661,7 @@ func (s *session) read() {
 			refusals := s.refusalsOf(t)
 			switch {
 			case canceled:
-				s.finishCanceled(t, refusals)
+				s.finishCanceled(t)
 			default:
 				err := s.failedVerification()
 				if err == nil {
@@ -775,11 +778,29 @@ func (s *session) failedVerification() error {
 	return s.verified()
 }
 
-// finishCanceled ends a turn the connector canceled. A policy check that has
-// already failed is reported over the cancel; one still running is not
-// waited for, because the process it would judge is being ended by the
-// cancel anyway.
-func (s *session) finishCanceled(t *turn, refusals []driver.Refusal) {
+// lastWord waits for the worker to go, bounded by the grace, and reads the
+// refusals it only logged. Whatever ends a turn ends it after this, so a
+// refusal Codex wrote on its way out is in the turn's result and not only in
+// the ledger.
+func (s *session) lastWord() {
+	if s.worker != nil {
+		select {
+		case <-s.worker.Done():
+		case <-time.After(s.grace):
+		}
+	}
+	s.stderrRefusals()
+}
+
+// finishCanceled ends a turn the connector canceled, after the worker's last
+// word. A policy check that has already failed is reported over the cancel;
+// one still running is not waited for, because the process it would judge is
+// being ended by the cancel anyway.
+func (s *session) finishCanceled(t *turn) {
+	s.lastWord()
+	// The turn's refusals are read after the worker's last word, so the
+	// result carries what the ledger carries.
+	refusals := s.refusalsOf(t)
 	s.mu.Lock()
 	done := s.verifyDone
 	s.mu.Unlock()
@@ -914,8 +935,7 @@ func (s *session) turnCompleted(e event) {
 	s.mu.Unlock()
 	if canceled {
 		// A cancel that won does not wait out the policy check either.
-		s.stderrRefusals()
-		s.finishCanceled(t, s.refusalsOf(t))
+		s.finishCanceled(t)
 		return
 	}
 	if err := s.verified(); err != nil {
@@ -956,8 +976,7 @@ func (s *session) turnFailed() {
 	canceled := t.canceled
 	s.mu.Unlock()
 	if canceled {
-		s.stderrRefusals()
-		s.finishCanceled(t, s.refusalsOf(t))
+		s.finishCanceled(t)
 		return
 	}
 	// As after a completed turn: the stderr tail is whole once Codex exits.

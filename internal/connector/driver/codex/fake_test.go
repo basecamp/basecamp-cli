@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -51,6 +53,9 @@ type scenario struct {
 	// CloseStdout closes stdout before the stderr is written: the reader is
 	// done with the process well before the process is done.
 	CloseStdout bool `json:"close_stdout"`
+	// StderrOnTerm is written to stderr when the process is asked to end, as
+	// a refusal Codex logs on its way out of a cancel is.
+	StderrOnTerm string `json:"stderr_on_term"`
 	// Deaf never reads its stdin: the prompt's write blocks once the pipe
 	// fills.
 	Deaf bool `json:"deaf"`
@@ -82,6 +87,15 @@ func fakeCodex() int {
 	if err := json.Unmarshal(data, &sc); err != nil {
 		fmt.Fprintln(os.Stderr, "fake codex: bad scenario:", err)
 		return 2
+	}
+	if sc.StderrOnTerm != "" {
+		ending := make(chan os.Signal, 1)
+		signal.Notify(ending, syscall.SIGTERM)
+		go func() {
+			<-ending
+			fmt.Fprintln(os.Stderr, sc.StderrOnTerm)
+			os.Exit(0)
+		}()
 	}
 	obs := observed{Args: os.Args[1:], Env: os.Environ()}
 	obs.Cwd, _ = os.Getwd()

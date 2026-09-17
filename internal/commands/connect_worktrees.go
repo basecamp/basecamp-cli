@@ -49,11 +49,12 @@ func newConnectWorktreesListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List the worktrees kept for you to deal with",
 		Long: `List the worktrees the connector kept, with the task each was for, its size
-on disk, and why it is kept: finished (its task ended — the connector removes
-no worktree of its own accord), dirty (uncommitted work), unpushed (commits
-nothing else holds), locked, moved (no longer where the connector left it),
-or unverified (their state could not be read). A prune says which of these a
-worktree turns out to be.`,
+on disk, git's record of it, and why it is kept: finished (its task ended —
+the connector removes no worktree of its own accord), dirty (uncommitted
+work), unpushed (commits nothing else holds), locked, moved (no longer where
+the connector left it), orphaned (its directory is gone, while git's record
+of it and the task branch are still there), or unverified (their state could
+not be read). A prune says which of these a worktree turns out to be.`,
 		Example: `  basecamp connect worktrees list -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

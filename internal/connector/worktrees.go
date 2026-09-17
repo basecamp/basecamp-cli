@@ -861,6 +861,9 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	// Delete the frozen copy: the directory, then the record.
 	if err := os.RemoveAll(v.dir); err != nil {
 		w.log.Warn("connector: a frozen worktree could not be deleted; kept", "path", r.Path, "error", err)
+		// The branch went first: a worktree that comes back comes back whole,
+		// checked out on the branch it was checked out on.
+		w.putBranchBack(ctx, r, judged.tip)
 		w.dropAnchors(ctx, r, judged)
 		if w.restore(r, v, admin) {
 			return w.retain(ctx, r, RetainedUnverified, removing)
@@ -868,7 +871,12 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 		return r
 	}
 	if err := os.RemoveAll(v.gitDir); err != nil {
-		w.log.Warn("connector: a worktree's record could not be deleted", "path", r.Path, "error", err)
+		// The directory is gone but git's record of it is not, and it is
+		// still frozen and locked. The row stays removing, which is a row the
+		// next start restores and judges again, rather than a removed row
+		// nothing lists and nothing reconciles.
+		w.log.Warn("connector: a worktree's record could not be deleted; the next start restores it", "path", r.Path, "error", err)
+		return r
 	}
 	// The worktree is gone: the anchors of its held commits are let go, each
 	// only while the ref the judgment found still holds its commit. One that
@@ -1583,6 +1591,18 @@ func (w *Worktrees) branchTip(ctx context.Context, r Worktree) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// putBranchBack makes the task branch again, at the commit it was deleted at,
+// for a removal that could not go through: what came back must be what was
+// there.
+func (w *Worktrees) putBranchBack(ctx context.Context, r Worktree, commit string) {
+	if commit == "" || !r.BranchCreated || !strings.HasPrefix(r.Branch, BranchPrefix) {
+		return
+	}
+	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "--end-of-options", "refs/heads/"+r.Branch, commit, ""); err != nil {
+		w.log.Warn("connector: a task branch could not be made again for a worktree that stayed", "branch", r.Branch, "error", err)
+	}
 }
 
 // deleteBranch deletes the task branch of a worktree whose directory is gone,

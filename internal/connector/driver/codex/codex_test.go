@@ -624,7 +624,7 @@ func TestACanceledTurnReportsAFailedPolicyCheck(t *testing.T) {
 			}
 			turn := &turn{done: make(chan struct{})}
 			s.turn = turn
-			s.finishCanceled(turn, nil)
+			s.finishCanceled(turn)
 			<-turn.done
 			if tc.want != nil {
 				require.ErrorIs(t, turn.err, tc.want)
@@ -1049,6 +1049,41 @@ func TestARefusalIsRecordedEvenWithNoTurnLeft(t *testing.T) {
 	waitDone(t, s)
 
 	assert.Len(t, recorder.Recorded(), 1, "the refusal is recorded, turn or no turn")
+}
+
+// A refusal Codex logs on its way out of a canceled turn is in the turn's
+// result, not only in the ledger: the cancel waits for the worker's last word.
+func TestACanceledTurnCarriesALateRefusalInItsResult(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		Hang:        true,
+		// Codex logs the refusal as it is being ended, not before.
+		StderrOnTerm: "patch rejected: writing outside of the project; rejected by user approval settings",
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "Event 1.")
+		answers <- result
+	}()
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(filepath.Join(h.home, "observed.json"))
+		return err == nil && strings.Contains(string(data), "Event 1.")
+	}, 10*time.Second, 20*time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	select {
+	case result := <-answers:
+		assert.Len(t, result.Refusals, 1, "the result carries what the ledger carries")
+	case <-time.After(20 * time.Second):
+		t.Fatal("the canceled turn did not end")
+	}
+	assert.Len(t, recorder.Recorded(), 1)
 }
 
 // A canceled turn records what Codex logged before it went.
