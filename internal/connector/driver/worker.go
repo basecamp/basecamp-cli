@@ -142,6 +142,9 @@ func (w *Worker) Terminate(grace time.Duration) {
 		case <-time.After(grace):
 		}
 		_ = signalGroup(w.process.PGID, syscall.SIGKILL)
+		// The leader by its own pid as well: were it not a group leader, the
+		// group signal would reach nothing and Terminate would wait forever.
+		_ = w.cmd.Process.Kill()
 	})
 	<-w.done
 }
