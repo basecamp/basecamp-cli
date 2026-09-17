@@ -281,6 +281,11 @@ func (c *conn) closeWrite(closer io.Closer) {
 // up in a log: redacted (driver invariant 6), stripped of the escapes and
 // controls a terminal would act on, on one line, and short.
 func agentText(s string) string {
+	// Cut first: a line from the agent may be megabytes, and none of it past
+	// the first few hundred bytes reaches the error anyway.
+	if len(s) > 4<<10 {
+		s = s[:4<<10]
+	}
 	out := []rune(richtext.SanitizeSingleLine(driver.Redact(s)))
 	if len(out) > 120 {
 		out = out[:120]

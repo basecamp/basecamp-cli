@@ -291,6 +291,7 @@ func TestAPolicyModeTheAdapterHasNoAskingModeForStartsNothing(t *testing.T) {
 	_, err := d.NewSession(context.Background(), h.config())
 	require.ErrorIs(t, err, driver.ErrNotStarted)
 	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+	require.ErrorIs(t, err, driver.ErrUnusable, "a configuration no retry can fix")
 	_, statErr := os.Stat(h.sc.Record)
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "no process was started")
 }
@@ -485,13 +486,17 @@ func TestARefusalIsNeverReportedAsACancel(t *testing.T) {
 	})
 }
 
-func TestCancelWithNoTurnSendsNothing(t *testing.T) {
+func TestACancelWithNoTurnEndsTheNextOne(t *testing.T) {
 	h := newHarness(t)
+	h.turns(turnScript{WaitForCancel: true, Stop: string(driver.TurnCanceled)})
 	s := h.open()
 	require.NoError(t, s.Cancel(context.Background()))
-	_, err := s.Prompt(context.Background(), "go")
+	assert.NotContains(t, h.record().Methods, "session/cancel", "nothing is sent for a turn that is not there")
+
+	res, err := s.Prompt(context.Background(), "go")
 	require.NoError(t, err)
-	assert.NotContains(t, h.record().Methods, "session/cancel")
+	assert.Equal(t, driver.TurnCanceled, res.Stop, "the turn the cancel raced starts canceled")
+	assert.Contains(t, h.record().Methods, "session/cancel")
 }
 
 // ---------------------------------------------------------------- invariant 5
@@ -916,6 +921,12 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("['mcp_servers'.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted key declares them too")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[\"mcp\\u005fservers\".basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a key with an escape is refused rather than read")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles.\"my profile\".mcp_servers.x]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted table path declares them too")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
+	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))
 	withCodexHome := func(name string) (string, bool) {
@@ -936,6 +947,7 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	_, err := d.NewSession(context.Background(), h.config())
 	require.ErrorIs(t, err, ErrForeignMCPConfig)
 	require.ErrorIs(t, err, driver.ErrNotStarted)
+	require.ErrorIs(t, err, driver.ErrUnusable)
 	_, statErr := os.Stat(h.sc.Record)
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
 }

@@ -126,20 +126,34 @@ var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MC
 
 // mcpServersKey finds a TOML line that declares MCP servers: a table header
 // or a dotted or bare key naming mcp_servers, at any depth.
-var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?([A-Za-z0-9_"'.\-]+\.)?['"]?mcp_servers['"]?\s*[.\]=]`)
+var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?(("[^"]*"|'[^']*'|[A-Za-z0-9_.\-]+)\.)*['"]?mcp_servers['"]?\s*[.\]=]`)
+
+// escapedTOMLKey is a table header or a key whose name carries a backslash
+// escape.
+var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 
 // codexPreflight refuses a session when a Codex config layer declares MCP
 // servers: the user's ($CODEX_HOME, or ~/.codex), the system's, or a
 // project's .codex/config.toml in the working directory or above it. Codex
 // merges every layer into the session, and a server declared there would run
 // beside the connector's, or, named basecamp, in place of it with every tool
-// allowed. It reads for the key, not the TOML: a false alarm refuses a
-// session; a miss would not.
+// allowed; in the asking mode its tool calls need not be put to the policy at
+// all. It reads for the key, not the TOML: a false alarm refuses a session; a
+// miss would not.
+//
+// It covers the layers a file on this machine can hold. Codex also takes
+// configuration from layers this cannot read — an MDM profile, a cloud-managed
+// config, a plugin — so it is a guard, not a proof. What would be a proof is
+// the effective configuration the app server reports, which ACP does not carry.
 func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 	var files []string
 	home := ""
-	if v, ok := lookup("CODEX_HOME"); ok && filepath.IsAbs(v) {
+	if v, ok := lookup("CODEX_HOME"); ok && v != "" {
+		// Codex reads a relative CODEX_HOME against the working directory.
 		home = v
+		if !filepath.IsAbs(v) {
+			home = filepath.Join(cwd, v)
+		}
 	} else if v, ok := lookup("HOME"); ok && filepath.IsAbs(v) {
 		home = filepath.Join(v, ".codex")
 	}
@@ -164,6 +178,12 @@ func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 		for _, line := range strings.Split(string(raw), "\n") {
 			if mcpServersKey.MatchString(line) {
 				return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
+			}
+			if escapedTOMLKey.MatchString(line) {
+				// TOML decodes escapes in a quoted key, so "mcp\u005fservers"
+				// is mcp_servers to Codex and something else to a reader. A
+				// key this cannot read plainly is refused rather than guessed.
+				return fmt.Errorf("%w: %s has a key this cannot read (an escape in a quoted key)", ErrForeignMCPConfig, file)
 			}
 		}
 	}

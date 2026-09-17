@@ -33,12 +33,15 @@ type session struct {
 	// write is stuck.
 	promptSem chan struct{}
 
-	mu            sync.Mutex
-	id            string
-	turn          *turn
-	mode          string
-	modeSeen      chan struct{}
-	verified      bool
+	mu       sync.Mutex
+	id       string
+	turn     *turn
+	mode     string
+	modeSeen chan struct{}
+	verified bool
+	// canceled is a cancel the connector asked for, whether or not a turn was
+	// in flight when it did.
+	canceled      bool
 	unsafe        error
 	replaying     bool
 	updatesClosed bool
@@ -369,7 +372,12 @@ func (s *session) reportMode(id string) {
 		go func() {
 			if t != nil {
 				s.conn.abandon(t.call)
-				<-t.done
+				// Bounded: a turn whose prompt is still stuck in a write the
+				// agent never reads must not keep the worker alive.
+				select {
+				case <-t.done:
+				case <-time.After(s.grace):
+				}
 			}
 			end()
 		}()
@@ -396,8 +404,18 @@ func stringValue(o *configOption) (string, bool) {
 	return v, true
 }
 
+// maxOptionDepth bounds how deeply a select option's groups may nest: the
+// agent writes that JSON, and a deep one would otherwise recurse until the
+// process dies.
+const maxOptionDepth = 8
+
 // optionValues are a select option's values, flat or grouped.
-func optionValues(raw json.RawMessage) []string {
+func optionValues(raw json.RawMessage) []string { return optionValuesAt(raw, 0) }
+
+func optionValuesAt(raw json.RawMessage, depth int) []string {
+	if depth >= maxOptionDepth {
+		return nil
+	}
 	var items []struct {
 		Value   *string         `json:"value"`
 		Options json.RawMessage `json:"options"`
@@ -411,7 +429,7 @@ func optionValues(raw json.RawMessage) []string {
 			out = append(out, *it.Value)
 		}
 		if len(it.Options) > 0 {
-			out = append(out, optionValues(it.Options)...)
+			out = append(out, optionValuesAt(it.Options, depth+1)...)
 		}
 	}
 	return out
@@ -421,7 +439,19 @@ func optionValues(raw json.RawMessage) []string {
 
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
-	s.promptSem <- struct{}{}
+	select {
+	case s.promptSem <- struct{}{}:
+	default:
+		// Nothing is on the wire: wait for the turn ahead, but not past this
+		// session's end or the caller's context.
+		select {
+		case s.promptSem <- struct{}{}:
+		case <-s.readerEnd:
+			return driver.PromptResult{}, driver.ErrSessionEnded
+		case <-ctx.Done():
+			return driver.PromptResult{}, ctx.Err()
+		}
+	}
 	s.mu.Lock()
 	var refuse error
 	switch {
@@ -440,6 +470,9 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		return driver.PromptResult{}, refuse
 	}
 	t := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
+	// A cancel that arrived before the turn it was meant for ends this one:
+	// the connector asked for no further work on this session.
+	t.canceled = s.canceled
 	s.turn = t
 	id := s.id
 	s.mu.Unlock()
@@ -449,7 +482,11 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		"sessionId": id,
 		"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
 	})
+	canceled := t.canceled
 	<-s.promptSem
+	if canceled && err == nil {
+		go func() { _ = s.conn.notify("session/cancel", map[string]any{"sessionId": id}) }()
+	}
 	go s.finishTurn(t, answer, err)
 
 	select {
@@ -544,6 +581,9 @@ func (s *session) Cancel(ctx context.Context) error {
 	if t != nil {
 		t.canceled = true
 	}
+	// A cancel with no turn in flight is remembered: the dispatcher asked for
+	// this session to stop, and a turn that starts after it starts canceled.
+	s.canceled = true
 	id := s.id
 	s.mu.Unlock()
 	// The prompt this cancel ends is on the wire; a later prompt cannot start
@@ -842,6 +882,13 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		return
 	}
 	allow := askable && s.policy.Decide(context.Background(), req).Allow
+	if allow {
+		// The policy took its time; the session may have been canceled or
+		// found unsafe while it did, and neither allows anything more.
+		s.mu.Lock()
+		allow = s.turn == t && !t.canceled && s.unsafe == nil && !s.closed
+		s.mu.Unlock()
+	}
 	option := chooseOption(req.Options, allow)
 	if allow && option == "" {
 		// Allowing is only ever allow_once; without it, the answer is no.

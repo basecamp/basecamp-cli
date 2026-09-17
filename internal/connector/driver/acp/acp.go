@@ -39,6 +39,11 @@
 //  5. Load is gated by what the agent advertised at initialize: session/load
 //     when loadSession is true, session/resume when sessionCapabilities.resume
 //     is present, otherwise an error. Its history replay is not progress.
+//     6a. A configuration this driver cannot run — an adapter with no asking
+//     mode for the policy's, a policy for another directory, an MCP server
+//     without an absolute command, a Codex config that declares MCP servers —
+//     is ErrUnusable beside ErrNotStarted: nothing started, and a retry would
+//     fail the same way.
 //  6. The adapter is the pinned one: initialize must report protocol version
 //     1 and the Adapter's package and version, or the session is ended.
 //  7. Nothing the agent volunteers is kept: _auth/status_update (which
@@ -160,7 +165,7 @@ func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driv
 // LoadSession implements driver.Driver.
 func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
 	if !validSessionID(sessionID) {
-		return nil, fmt.Errorf("%w: %q is not an ACP session id", driver.ErrNotStarted, sessionID)
+		return nil, fmt.Errorf("%w: %w: %q is not an ACP session id", driver.ErrNotStarted, driver.ErrUnusable, sessionID)
 	}
 	return d.open(ctx, cfg, sessionID)
 }
@@ -170,23 +175,25 @@ func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sess
 // (driver invariant 4).
 func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID string) (driver.Session, error) {
 	if cfg.Policy == nil || !filepath.IsAbs(cfg.Cwd) {
-		return nil, fmt.Errorf("%w: a session needs a policy and an absolute working directory", driver.ErrNotStarted)
+		return nil, fmt.Errorf("%w: %w: a session needs a policy and an absolute working directory", driver.ErrNotStarted, driver.ErrUnusable)
 	}
 	rules := cfg.Policy.Rules()
 	mode, ok := d.opts.Adapter.Modes[rules.Mode]
 	if !ok {
-		return nil, fmt.Errorf("%w: %w: %s has no asking mode for policy mode %q", driver.ErrNotStarted, driver.ErrUnsafeMode, d.opts.Adapter.Name, rules.Mode)
+		return nil, fmt.Errorf("%w: %w: %w: %s has no asking mode for policy mode %q", driver.ErrNotStarted, driver.ErrUnusable, driver.ErrUnsafeMode, d.opts.Adapter.Name, rules.Mode)
 	}
 	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
-		return nil, fmt.Errorf("%w: the policy's working directory is not the session's", driver.ErrNotStarted)
+		return nil, fmt.Errorf("%w: %w: the policy's working directory is not the session's", driver.ErrNotStarted, driver.ErrUnusable)
 	}
 	servers, err := wireServers(cfg.MCPServers)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 	}
 	if d.opts.Adapter.Preflight != nil {
 		if err := d.opts.Adapter.Preflight(cfg.Cwd, d.opts.Lookup); err != nil {
-			return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+			// Configuration on this machine: the same session would fail the
+			// same way, so it is not retried.
+			return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 		}
 	}
 
