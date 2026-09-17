@@ -45,6 +45,8 @@ type scenario struct {
 	// Escape leaves a process of its own, outside the fake's process group,
 	// holding the fake's stdout.
 	Escape bool `json:"escape"`
+	// Stderr is written, slowly, after the events.
+	Stderr string `json:"stderr"`
 	// Hang waits to be killed after the events.
 	Hang bool `json:"hang"`
 	// Exit is the exit status.
@@ -146,6 +148,11 @@ func fakeCodex() int {
 	}
 	for _, e := range sc.Events {
 		fmt.Println(e)
+	}
+	if sc.Stderr != "" {
+		// After the last stdout line, as a sandbox refusal Codex logs is.
+		time.Sleep(50 * time.Millisecond)
+		fmt.Fprintln(os.Stderr, sc.Stderr)
 	}
 	if sc.Hang {
 		time.Sleep(5 * time.Minute)

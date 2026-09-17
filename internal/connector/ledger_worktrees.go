@@ -29,6 +29,7 @@ CREATE TABLE worktrees (
   base_commit          TEXT    NOT NULL,
   originating_event_id INTEGER NOT NULL,
   branch_created       INTEGER NOT NULL DEFAULT 0,
+  admin_dir            TEXT    NOT NULL DEFAULT '',
   task_id              INTEGER REFERENCES tasks (id),
   state                TEXT    NOT NULL
                        CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
@@ -113,6 +114,10 @@ type Worktree struct {
 	// BranchCreated is this row's proof that the connector made the task
 	// branch, so deleting it can never delete someone else's.
 	BranchCreated bool
+	// AdminDir is the repository's own record of this worktree
+	// (<repo>/.git/worktrees/<name>), which says where it is even after
+	// someone moves it or changes what it has checked out.
+	AdminDir string
 	// TaskID is the task that last worked in it; zero before one launched.
 	TaskID         int64
 	State          WorktreeState
@@ -124,7 +129,7 @@ type Worktree struct {
 	RemovedBy      RemovedBy
 }
 
-const worktreeColumns = `id, path, work_dir, route, repository, branch, base_commit, originating_event_id, branch_created, COALESCE(task_id, 0),
+const worktreeColumns = `id, path, work_dir, route, repository, branch, base_commit, originating_event_id, branch_created, admin_dir, COALESCE(task_id, 0),
 state, retained_reason, created_at, finished_at, retained_at, removed_at, removed_by`
 
 func scanWorktree(row interface{ Scan(...any) error }) (Worktree, error) {
@@ -133,7 +138,7 @@ func scanWorktree(row interface{ Scan(...any) error }) (Worktree, error) {
 		state, reason, removedBy, created string
 		finished, retained, removed       sql.NullString
 	)
-	if err := row.Scan(&w.ID, &w.Path, &w.WorkDir, &w.Route, &w.Repository, &w.Branch, &w.BaseCommit, &w.OriginatingEventID, &w.BranchCreated, &w.TaskID,
+	if err := row.Scan(&w.ID, &w.Path, &w.WorkDir, &w.Route, &w.Repository, &w.Branch, &w.BaseCommit, &w.OriginatingEventID, &w.BranchCreated, &w.AdminDir, &w.TaskID,
 		&state, &reason, &created, &finished, &retained, &removed, &removedBy); err != nil {
 		return Worktree{}, err
 	}
@@ -185,6 +190,17 @@ VALUES (?, ?, ?, ?, ?, ?, ?, 'creating', ?)`,
 func (l *Ledger) WorktreeBranchCreated(ctx context.Context, id int64) error {
 	return retryBusy(func() error {
 		_, err := l.db.ExecContext(ctx, `UPDATE worktrees SET branch_created = 1 WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("connector: worktree %d: %w", id, err)
+		}
+		return nil
+	})
+}
+
+// WorktreeAdminDir records the repository's directory for a worktree.
+func (l *Ledger) WorktreeAdminDir(ctx context.Context, id int64, dir string) error {
+	return retryBusy(func() error {
+		_, err := l.db.ExecContext(ctx, `UPDATE worktrees SET admin_dir = ? WHERE id = ?`, dir, id)
 		if err != nil {
 			return fmt.Errorf("connector: worktree %d: %w", id, err)
 		}

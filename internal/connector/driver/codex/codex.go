@@ -617,7 +617,10 @@ func (s *session) emit(u driver.Update) {
 // the process closes its stdout.
 func (s *session) read() {
 	defer func() {
-		close(s.updates)
+		// The updates channel closes last: finishing the turn still emits
+		// (a refusal read from stderr), and a send on a closed channel is a
+		// panic, not a dropped update.
+		defer close(s.updates)
 		s.mu.Lock()
 		t := s.turn
 		s.mu.Unlock()
@@ -868,6 +871,13 @@ func (s *session) turnCompleted(e event) {
 		s.finish(t, driver.PromptResult{}, err)
 		s.worker.Terminate(0)
 		return
+	}
+	// Codex exits right after the turn it completed, and its stderr is whole
+	// only once it has: a refusal it logged and did not put on the stream is
+	// in the tail by then.
+	select {
+	case <-s.worker.Done():
+	case <-time.After(s.grace):
 	}
 	s.stderrRefusals()
 	s.mu.Lock()

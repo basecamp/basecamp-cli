@@ -679,3 +679,31 @@ func TestCloseDoesNotWaitForAnEscapedChild(t *testing.T) {
 		t.Fatal("Close waited on an escaped child")
 	}
 }
+
+// Invariant 6 and 3 together: a refusal Codex logs on stderr after the turn's
+// last stdout line is still counted, and emitting it as the session ends does
+// not send on a closed channel.
+func TestARefusalLoggedAtTheVeryEndIsCounted(t *testing.T) {
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`, turnCompleted()},
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+	})
+	s, err := h.drv.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	drained := make(chan int, 1)
+	go func() {
+		n := 0
+		for u := range s.Updates() {
+			if u.Kind == driver.UpdatePermission {
+				n++
+			}
+		}
+		drained <- n
+	}()
+	result, err := s.Prompt(context.Background(), "Event 1.")
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	assert.Len(t, result.Refusals, 1)
+	assert.Positive(t, <-drained)
+}

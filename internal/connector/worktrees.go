@@ -259,6 +259,12 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 
 	err = w.add(ctx, record)
 	if err == nil {
+		record.AdminDir, err = w.gitOut(ctx, record.Path, "rev-parse", "--absolute-git-dir")
+	}
+	if err == nil {
+		err = w.ledger.WorktreeAdminDir(ctx, id, record.AdminDir)
+	}
+	if err == nil {
 		err = w.ledger.MoveWorktree(ctx, id, WorktreeLive, WorktreeCreating)
 	}
 	if err != nil {
@@ -544,9 +550,23 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 // row's branch somewhere else: someone moved it, and its files are work the
 // connector neither judges nor forgets, so the row is kept.
 func (w *Worktrees) movedElsewhere(ctx context.Context, r Worktree) bool {
+	// The repository's record of this worktree names where it is now,
+	// whatever it has checked out and whatever its branch is called.
+	if r.AdminDir != "" {
+		switch at, err := os.ReadFile(filepath.Join(r.AdminDir, "gitdir")); {
+		case err == nil:
+			path := filepath.Dir(strings.TrimSpace(string(at)))
+			return !samePath(path, r.Path) && exists(path)
+		case !errors.Is(err, os.ErrNotExist):
+			// The record cannot be read: assume it is still somewhere.
+			return true
+		}
+		return false
+	}
+	// A row from before the admin directory was recorded: its branch is the
+	// only handle left.
 	out, err := w.gitRaw(ctx, r.Repository, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
-		// Unknown: treat the row as still somewhere, which retains it.
 		return true
 	}
 	var current string
@@ -563,10 +583,12 @@ func (w *Worktrees) movedElsewhere(ctx context.Context, r Worktree) bool {
 	return false
 }
 
-// exists reports whether a path is there at all.
+// exists reports whether a path is anything but proven absent: a path that
+// cannot be read counts as there, because an error is not evidence that work
+// is gone.
 func exists(path string) bool {
 	_, err := os.Lstat(path)
-	return err == nil
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 func (w *Worktrees) retain(ctx context.Context, r Worktree, reason RetainedReason, from []WorktreeState) Worktree {

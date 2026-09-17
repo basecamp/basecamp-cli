@@ -409,6 +409,21 @@ func TestAMovedWorktreeIsKept(t *testing.T) {
 	assert.FileExists(t, filepath.Join(moved, "app", "README"))
 }
 
+// A worktree moved with a detached HEAD is kept too: the repository's own
+// record of it, not its branch, is what says where it is.
+func TestAMovedWorktreeWithNoBranchIsKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(92)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.git(h.repo, "branch", "-q", "-D", row.Branch)
+	moved := filepath.Join(t.TempDir(), "moved")
+	h.git(h.repo, "worktree", "move", row.Path, moved)
+
+	row = h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, row.State)
+	assert.FileExists(t, filepath.Join(moved, "app", "README"))
+}
+
 // A worktree moved and then deleted is gone, not kept forever.
 func TestAMovedWorktreeThatIsThenDeletedIsGone(t *testing.T) {
 	h := newWorktreeHarness(t)
