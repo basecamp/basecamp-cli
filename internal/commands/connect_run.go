@@ -97,8 +97,8 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
-	if runtime.GOOS == "windows" {
-		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it starts workers as process groups")
+	if !connectSupportedOS(runtime.GOOS) {
+		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
 	}
 	app := appctx.FromContext(cmd.Context())
 	ctx := cmd.Context()
@@ -128,6 +128,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
 		return output.ErrUsage("connect.json cannot be used: " + err.Error())
+	}
+	if file.Worktrees && !f.shadow {
+		// Refused rather than ignored: workers would share the route's
+		// checkout while connect.json says each task gets its own.
+		return output.ErrUsage("connect.json asks for worktrees, which this basecamp does not support yet; run setup with --worktrees=false")
 	}
 	driverName := file.Driver
 	if f.driver != "" {
@@ -237,10 +242,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		routes := map[int64]admission.Route{}
-		for bucket, route := range file.Projects {
-			routes[bucket] = route
-		}
+		routes := newConnectRoutes(path, file, logger)
 		worker, err := spawn.New(file.WorkerName(), spawn.Options{})
 		if err != nil {
 			return output.ErrUsage(err.Error())
@@ -248,7 +250,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		dispatcher, err = connector.NewDispatcher(connector.DispatcherOptions{
 			Ledger:       ledger,
 			Driver:       worker,
-			Routes:       func() map[int64]admission.Route { return routes },
+			Routes:       routes.Current,
 			Concurrency:  file.Concurrency,
 			Deadline:     time.Duration(file.Deadline),
 			MCP:          connector.WorkerMCP{Command: exe, Profile: name, StateDir: stateDir},
@@ -326,6 +328,77 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return ctx.Err()
 	}
 	return nil
+}
+
+// connectSupportedOS is where the connector runs: the platforms whose
+// process start times the driver can read, so a recorded worker group is
+// never signaled after its pid was reused.
+func connectSupportedOS(goos string) bool {
+	return goos == "linux" || goos == "darwin"
+}
+
+// connectRoutes is connect.json's routes as they are now, not as they were at
+// start: a route removed by `connect setup --unroute` stops authorizing
+// dispatch without a restart. A file that no longer loads, or that now names
+// another agent or account, authorizes nothing.
+type connectRoutes struct {
+	path     string
+	agent    setup.Agent
+	account  string
+	log      *slog.Logger
+	now      func() time.Time
+	mu       sync.Mutex
+	loadedAt time.Time
+	routes   map[int64]admission.Route
+	failing  bool
+}
+
+// connectRoutesTTL is how long a read of connect.json is reused.
+const connectRoutesTTL = 2 * time.Second
+
+func newConnectRoutes(path string, file setup.File, log *slog.Logger) *connectRoutes {
+	return &connectRoutes{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
+}
+
+// Current returns a copy of the routes connect.json approves now.
+func (r *connectRoutes) Current() map[int64]admission.Route {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.routes == nil || r.now().Sub(r.loadedAt) >= connectRoutesTTL {
+		r.reload()
+	}
+	out := make(map[int64]admission.Route, len(r.routes))
+	for k, v := range r.routes {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *connectRoutes) reload() {
+	r.loadedAt = r.now()
+	file, err := setup.Load(r.path)
+	switch {
+	case err != nil:
+		err = fmt.Errorf("connect.json cannot be read: %w", err)
+	case file.Agent != r.agent || file.AccountID != r.account:
+		err = errors.New("connect.json now names another agent or account")
+	}
+	if err != nil {
+		if !r.failing {
+			r.log.Error("connector: dispatching nothing until connect.json is usable again", "error", err)
+		}
+		r.failing = true
+		r.routes = map[int64]admission.Route{}
+		return
+	}
+	if r.failing {
+		r.log.Info("connector: connect.json is usable again")
+	}
+	r.failing = false
+	r.routes = make(map[int64]admission.Route, len(file.Projects))
+	for bucket, route := range file.Projects {
+		r.routes[bucket] = route
+	}
 }
 
 func parseProjectIDs(raw []string) ([]int64, error) {

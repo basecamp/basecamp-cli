@@ -15,10 +15,6 @@ import (
 	"time"
 )
 
-// DefaultGrace is how long a worker's process group has between SIGTERM and
-// SIGKILL.
-const DefaultGrace = 10 * time.Second
-
 // startTolerance is how far a process's start time, as the kernel reports it,
 // may be from the time the driver recorded for it and still be the same
 // process. The driver stamps the time just after the fork returns.
@@ -36,7 +32,7 @@ type Worker struct {
 	cmd     *exec.Cmd
 	process Process
 	stdin   io.WriteCloser
-	stdout  io.ReadCloser
+	stdout  *os.File
 	stderr  *tailBuffer
 
 	done     chan struct{}
@@ -81,14 +77,26 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	if w.stdin, err = ec.StdinPipe(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
-	if w.stdout, err = ec.StdoutPipe(); err != nil {
+	// Stdout is a pipe of the Worker's own, not exec's StdoutPipe: Wait
+	// closes an exec pipe when the process exits, which can drop the last
+	// lines a worker wrote before exiting while they are still being read.
+	// This one closes only when the reader has everything, or CloseStdout.
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
+	ec.Stdout = writeEnd
+	w.stdout = readEnd
 	if err := ec.Start(); err != nil {
 		// exec.Cmd.Start returns an error only when no process was created:
 		// a missing binary, a bad directory, a failed fork.
+		_ = readEnd.Close()
+		_ = writeEnd.Close()
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
+	// The child has its copy; this process keeps none, so the reader sees
+	// end of file once the worker and everything it started have closed it.
+	_ = writeEnd.Close()
 	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: time.Now()}
 	go func() {
 		err := ec.Wait()
@@ -119,8 +127,13 @@ func (w *Worker) Process() Process { return w.process }
 // Stdin is the worker's standard input.
 func (w *Worker) Stdin() io.WriteCloser { return w.stdin }
 
-// Stdout is the worker's standard output.
+// Stdout is the worker's standard output. Read it to end of file.
 func (w *Worker) Stdout() io.Reader { return w.stdout }
+
+// CloseStdout abandons the worker's output: a reader blocked on it returns.
+// For a worker that is gone while a descendant that left its group still
+// holds the pipe.
+func (w *Worker) CloseStdout() { _ = w.stdout.Close() }
 
 // Done is closed once the process has exited and been reaped.
 func (w *Worker) Done() <-chan struct{} { return w.done }

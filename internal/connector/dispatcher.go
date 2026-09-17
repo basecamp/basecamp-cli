@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -103,6 +104,8 @@ type DispatcherOptions struct {
 	Driver driver.Driver
 	// Routes is connect.json's current routes by project.
 	Routes func() map[int64]admission.Route
+	// Buckets is the --project scope; empty means every routed project.
+	Buckets []int64
 	// Concurrency is the most live tasks; setup's default when zero.
 	Concurrency int
 	// Deadline is each task's deadline; zero for none.
@@ -170,6 +173,12 @@ type Dispatcher struct {
 	mu   sync.Mutex
 	live map[string]*taskRun
 	wg   sync.WaitGroup
+
+	// terminateRecorded ends a previous process's worker; a test seam.
+	terminateRecorded func(driver.Process, time.Duration) (bool, error)
+	// afterTurn runs when a turn has ended cleanly, before anything more is
+	// exposed; a test seam.
+	afterTurn func()
 }
 
 // NewDispatcher builds a dispatcher.
@@ -216,6 +225,8 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		log:    opts.Logger,
 		lines:  opts.Lines,
 		live:   map[string]*taskRun{},
+
+		terminateRecorded: driver.TerminateRecorded,
 	}, nil
 }
 
@@ -260,16 +271,25 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, a := range attempts {
-		signaled, err := driver.TerminateRecorded(driver.Process{
+		signaled, err := d.terminateRecorded(driver.Process{
 			PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt,
 		}, driver.DefaultGrace)
 		if err != nil {
-			d.log.Warn("connector: could not verify a previous worker's process; its token is superseded",
+			// A worker that may still be running with the operator's
+			// authority is not settled around. Its attempt stays live, so its
+			// conversation and its directory stay held and nothing new runs
+			// there, until a person has looked.
+			d.log.Error("connector: could not verify whether a previous worker still runs; its attempt stays live and its directory held",
 				"attempt_id", a.AttemptID, "pid", a.Process.PID, "error", err)
+			continue
 		}
-		settlement, err := d.ledger.EndAttempt(ctx, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost})
+		settlement, err := d.settle(ctx, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost})
 		if err != nil {
-			return fmt.Errorf("connector: settle attempt %s a previous process left: %w", a.AttemptID, err)
+			// One attempt that cannot be settled holds its own conversation
+			// and directory; it does not stop the connector.
+			d.log.Error("connector: could not settle an attempt a previous process left; it stays live",
+				"attempt_id", a.AttemptID, "error", err)
+			continue
 		}
 		d.log.Info("connector: settled an attempt a previous process left", "attempt_id", a.AttemptID,
 			"task_id", a.TaskID, "was", string(a.State), "worker_signaled", signaled)
@@ -322,20 +342,24 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	if free <= 0 {
 		return nil
 	}
-	records, err := d.ledger.StartableRecords(ctx, d.opts.Concurrency*4)
+	// Invariant 2, in the query: only records whose route connect.json
+	// approves now, in the projects this run hears, and on a directory no live
+	// task holds. A record the dispatcher cannot start never fills the window.
+	approved := map[int64]string{}
+	for bucket, route := range d.opts.Routes() {
+		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
+			approved[bucket] = route.Path
+		}
+	}
+	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
+		Routes: approved, RouteHeld: !d.perTaskDirs(), Limit: d.opts.Concurrency * 4,
+	})
 	if err != nil {
 		return err
 	}
-	routes := d.opts.Routes()
 	for _, record := range records {
 		if free <= 0 {
 			break
-		}
-		route, ok := routes[record.BucketID]
-		if !ok || route.Path != record.Decision.Route {
-			// Invariant 2: connect.json stopped approving the directory.
-			d.log.Warn("connector: a record's route is no longer approved; not dispatching it", "event_id", record.ID, "bucket_id", record.BucketID)
-			continue
 		}
 		if d.workDirBusy(record.Decision.Route) {
 			continue
@@ -354,8 +378,13 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	return nil
 }
 
+func (d *Dispatcher) perTaskDirs() bool {
+	w, ok := d.opts.Workspaces.(PerTaskWorkspaces)
+	return ok && w.PerTaskDirs()
+}
+
 func (d *Dispatcher) workDirBusy(route string) bool {
-	if w, ok := d.opts.Workspaces.(PerTaskWorkspaces); ok && w.PerTaskDirs() {
+	if d.perTaskDirs() {
 		// Each task gets its own directory; LaunchTask's unique working
 		// directory is what holds.
 		return false
@@ -459,9 +488,27 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 	}, cleanup, nil
 }
 
+// settleAttempts is how many times ending an attempt is tried before it is
+// left for the next start.
+const settleAttempts = 5
+
+// settle ends an attempt in the ledger, retrying a failure with backoff: an
+// attempt left live holds its token, conversation and directory.
+func (d *Dispatcher) settle(ctx context.Context, end AttemptEnd) (Settlement, error) {
+	backoff := 200 * time.Millisecond
+	for i := 1; ; i++ {
+		settlement, err := d.ledger.EndAttempt(ctx, end)
+		if err == nil || errors.Is(err, ErrNoLiveAttempt) || i == settleAttempts {
+			return settlement, err
+		}
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+}
+
 // end settles an attempt and forgets its run.
 func (d *Dispatcher) end(ctx context.Context, launch Launch, end AttemptEnd, run *taskRun) {
-	settlement, err := d.ledger.EndAttempt(ctx, end)
+	settlement, err := d.settle(ctx, end)
 	if err != nil {
 		d.log.Error("connector: could not settle an attempt; it is settled as lost on the next start",
 			"attempt_id", end.AttemptID, "error", err)
@@ -563,7 +610,10 @@ func (r *taskRun) supervise(ctx context.Context) {
 	_ = r.session.Close()
 	<-r.session.Done()
 	exit := r.session.Exit()
-	if stop == StopFinished && (exit.Code != 0 || exit.Err != nil) {
+	// Only an exit the worker chose fails a clean stop. Close signals a
+	// worker slow to leave, and a descendant holding its output makes the
+	// wait end in an error; neither is the worker failing.
+	if stop == StopFinished && exit.Code > 0 && !exit.Signaled {
 		stop = StopFailed
 	}
 	<-updatesDone
@@ -595,7 +645,20 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 			// a task of its own.
 			return StopFinished
 		}
-		next, ok, err := r.nextFollowUp(ctx)
+		if d.afterTurn != nil {
+			d.afterTurn()
+		}
+		// A stop asked for while the turn was ending is still that stop, and
+		// nothing more is exposed to a worker about to be stopped.
+		if ctx.Err() != nil {
+			return StopShutdown
+		}
+		select {
+		case <-deadline:
+			return StopDeadline
+		default:
+		}
+		next, ok, err := r.nextFollowUp(context.WithoutCancel(ctx))
 		if err != nil {
 			d.log.Warn("connector: follow-up", "task_id", r.launch.TaskID, "error", err)
 			return StopFailed
@@ -675,9 +738,15 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 			// before exiting still counts.
 			select {
 			case a := <-answers:
-				if a.err == nil {
-					r.addRefusals(len(a.result.Refusals))
+				r.addRefusals(len(a.result.Refusals))
+				switch {
+				case a.err == nil:
 					return a.result, "", false
+				case errors.Is(a.err, driver.ErrUnsafeMode):
+					// The driver ended an unsafe session itself; that is a
+					// failure, not a worker lost.
+					d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
+					return a.result, StopFailed, true
 				}
 			case <-time.After(time.Second):
 			}

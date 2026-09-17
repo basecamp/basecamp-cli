@@ -403,3 +403,20 @@ func TestAdoptableReplyRule(t *testing.T) {
 	_, ok = AdoptableReply(c, []AgentReply{{ID: 2, CreatedAt: at(1)}}, func(id int64) bool { return id == 2 })
 	assert.False(t, ok, "a lifecycle message is never adopted")
 }
+
+// Copilot: a follow-up admitted under another route waits for its own task.
+func TestAFollowUpOnAnotherRouteDoesNotJoinTheTask(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	seenRecord(t, ledger, 2)
+	v := admittedVerdict(2, 0, "recording:1")
+	v.Route = "/work/moved"
+	_, err := ledger.Admission().Commit(ctx, v)
+	require.NoError(t, err)
+
+	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	require.NoError(t, err)
+	assert.Empty(t, joined)
+}
