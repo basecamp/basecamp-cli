@@ -998,6 +998,28 @@ func TestARefusalLoggedAfterTheOutputEndsIsStillRecorded(t *testing.T) {
 	assert.Len(t, result.Refusals, 1)
 }
 
+// Codex logs its sandbox refusals and keeps writing: each one is recorded,
+// not only whatever it said last.
+func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`, turnCompleted()},
+		Stderr: strings.Join([]string{
+			"patch rejected: writing outside of the project; rejected by user approval settings",
+			"ERROR: command failed because the approval policy is never",
+			"thinking about the next step",
+		}, "\n"),
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, result, err := h.run(context.Background(), cfg)
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	assert.Len(t, recorder.Recorded(), 2, "both refusals, though neither is the last line")
+	assert.Len(t, result.Refusals, 2)
+}
+
 // A refusal Codex logged is recorded even when the turn it belonged to has
 // already ended: the reader reads the stderr of a worker that is gone, with
 // no turn left to hang it on.

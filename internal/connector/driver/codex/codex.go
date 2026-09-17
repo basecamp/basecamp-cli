@@ -988,21 +988,22 @@ func (s *session) stderrRefusals() {
 	if s.worker == nil {
 		return
 	}
-	// The shared tail is the worker's last line of stderr, sanitized: a
-	// refusal Codex logged before it wrote anything else is not there to be
-	// read, and the refusals it puts on the stream are the ones a turn is
-	// judged by.
-	line := s.worker.StderrTail(s.red)
-	if !refusedByApproval(line) {
-		return
+	// Every line the worker's stderr kept, sanitized: a refusal Codex logs
+	// and does not put on the stream is one of them, wherever it is in the
+	// output.
+	for _, line := range s.worker.StderrLines(s.red) {
+		if !refusedByApproval(line) {
+			continue
+		}
+		tool, kind := "exec", driver.ToolExecute
+		if strings.Contains(line, "patch rejected") {
+			tool, kind = "apply_patch", driver.ToolEdit
+		}
+		// Codex gives these no id: the line itself is the key, so reading the
+		// same output again — every way a turn can end reads it — records
+		// each refusal once.
+		s.refused("stderr:"+line, "", tool, kind)
 	}
-	tool, kind := "exec", driver.ToolExecute
-	if strings.Contains(line, "patch rejected") {
-		tool, kind = "apply_patch", driver.ToolEdit
-	}
-	// Codex gives these no id: the line itself is the key, so reading the
-	// same tail again — every way a turn can end reads it — records once.
-	s.refused("stderr:"+line, "", tool, kind)
 }
 
 // turnContext is the part of a rollout's turn_context record the driver
