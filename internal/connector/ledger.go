@@ -514,6 +514,17 @@ func (l *Ledger) migrate(ctx context.Context) error {
 )`); err != nil {
 		return fmt.Errorf("connector: create migration table: %w", err)
 	}
+	// A ledger a newer basecamp wrote is refused, not opened as if it were
+	// current: its triggers and states (a held record, say) are rules this
+	// binary does not know, and running over them could break them — the
+	// rollback case.
+	var newest int
+	if err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&newest); err != nil {
+		return fmt.Errorf("connector: read schema version: %w", err)
+	}
+	if newest > len(migrations) {
+		return fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", newest, len(migrations), ErrLedgerSchema)
+	}
 
 	for i := range migrations {
 		version := i + 1

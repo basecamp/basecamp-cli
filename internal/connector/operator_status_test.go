@@ -125,3 +125,17 @@ func TestOpenLedgerReadOnlyRefusesANewerSchema(t *testing.T) {
 	require.ErrorIs(t, err, ErrLedgerSchema)
 	assert.NotErrorIs(t, err, ErrLedgerOutOfDate)
 }
+
+// The connector's own open refuses a ledger a newer build wrote too: an older
+// binary rolled back onto it must not run over rules it does not know.
+func TestOpenLedgerRefusesANewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", LedgerFile)
+	l, err := OpenLedger(path)
+	require.NoError(t, err)
+	_, err = l.db.ExecContext(context.Background(), `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, len(migrations)+1, stamp(time.Now()))
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	_, err = OpenLedger(path)
+	require.ErrorIs(t, err, ErrLedgerSchema)
+}

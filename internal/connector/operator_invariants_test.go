@@ -918,6 +918,9 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	assert.Equal(t, StateDiscarded, one.State)
 	assert.Equal(t, ReasonImportedDone, one.Reason)
 	assert.Equal(t, StateCompleted, stateOf(t, l, 2))
+	var recordedAs string
+	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT to_state FROM decisions WHERE event_id = 2 AND action = 'import'`).Scan(&recordedAs))
+	assert.Equal(t, string(StateCompleted), recordedAs, "the audit says what happened, not what would have")
 	_, err = l.Redispatch(ctx, 1, opBy)
 	assert.ErrorIs(t, err, ErrDecisionRefused)
 	claimed, ok, err := l.claimIntent(ctx)

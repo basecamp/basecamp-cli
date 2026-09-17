@@ -121,6 +121,7 @@ func (l *Ledger) importReconciliation(ctx context.Context, r Reconciliation, by 
 			return ImportResult{}, fmt.Errorf("connector: import event %d: %w", e.EventID, err)
 		}
 		recorded := false
+		toState := StateDiscarded
 		switch e.Decision {
 		case DecisionDone:
 			done[e.EventID] = true
@@ -153,6 +154,7 @@ VALUES (?, 'discarded', ?, 'import', '', '', '', 0, 0, 0, ?, ?, ?, 1)`, e.EventI
 				}
 				if task.outcome != OutcomeUnknown && task.outcome != OutcomeFailed {
 					out.AlreadyTerminal++
+					toState = StateCompleted
 					break
 				}
 				// Recorded before the move, which the database allows out of
@@ -195,7 +197,7 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 			}
 			if !recorded {
 				if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: now,
-					fromState: RecordState(state), toState: StateDiscarded, note: "done"}); err != nil {
+					fromState: RecordState(state), toState: toState, note: "done"}); err != nil {
 					return ImportResult{}, err
 				}
 			}
