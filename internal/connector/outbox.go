@@ -57,8 +57,10 @@ import (
 //     fired, so that task's workers do not acknowledge either: the
 //     acknowledgement is missing, never doubled, the spec's own preference.
 //     A later task for the event (a person's redispatch) arms afresh, since
-//     a canceled intent marks nothing fired. How a refusal is recorded across
-//     the ledger follows card 18's shared rule once it lands.
+//     a canceled intent marks nothing fired. This is the spec's rule: a
+//     missing acknowledgement costs less than a double one. A refusal here is
+//     Basecamp refusing the connector's own lifecycle request, recorded on
+//     the outbox row; a worker's permission refusals are another matter.
 //  10. Reconciliation never holds up sending for long. A running connector
 //     sends a batch, then lists at most one due destination; each listing is
 //     bounded in time; each failure backs its intent off, doubling, and the
