@@ -468,12 +468,13 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 }
 
 // measuredDispatchPromptTokens is the production-sized dispatch prompt below
-// counted by a real tokenizer, once: Claude Opus 5 counted it at 322 tokens —
+// counted by a real tokenizer, once: Claude Opus 5 counted it at 296 tokens —
 // Claude Code's reported input usage for the prompt, minus the same session
-// with a one-character prompt (2840 - 2518), on 2026-09-17. Other agents'
-// tokenizers are not measured. The test cannot re-derive it; estimateTokens
-// is the bound the budget is asserted on, and it has to stay above this.
-const measuredDispatchPromptTokens = 322
+// with a one-character prompt (2809 - 2513), on 2026-09-17, at 810 bytes.
+// Other agents' tokenizers are not measured. The test cannot re-derive it;
+// estimateTokens is the bound the budget is asserted on, and it has to stay
+// above this.
+const measuredDispatchPromptTokens = 296
 
 // The dispatch prompt is measured as the worker received it, through each
 // driver's wire, at production-sized ids, and at its worst case: the largest
@@ -515,13 +516,22 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 	})
 
 	t.Run("worst case", func(t *testing.T) {
-		longest := "https://app.basecamp.com/" + strings.Repeat("9", 200-len("https://app.basecamp.com/"))
+		// The most the prompt can carry: ids at the end of their range, and a
+		// recording URL at the longest the prompt repeats. A longer one is
+		// omitted whole, so it cannot be the worst case.
+		longest := "https://app.basecamp.com/" + strings.Repeat("9", MaxPromptURL-len("https://app.basecamp.com/"))
 		record := Record{ID: math.MaxInt64, Decision: Decision{Trigger: "completed", RecordingURL: longest}}
 		prompt := DispatchPrompt(Launch{TaskID: math.MaxInt64}, record)
 		require.Contains(t, prompt, longest, "the longest URL the prompt repeats")
 		tokens := estimateTokens(prompt)
 		t.Logf("worst-case dispatch prompt: %d bytes, %d tokens by the bound, budget %d", len(prompt), tokens, MaxPromptTokens)
 		assert.Less(t, tokens, MaxPromptTokens)
+
+		tooLong := longest + "9"
+		assert.NotContains(t, DispatchPrompt(Launch{TaskID: math.MaxInt64},
+			Record{ID: math.MaxInt64, Decision: Decision{Trigger: "completed", RecordingURL: tooLong}}),
+			tooLong, "a URL past the cap is omitted, not carried")
+
 		followUp := FollowUpPrompt(math.MaxInt64)
 		assert.Less(t, estimateTokens(followUp), MaxPromptTokens)
 	})
