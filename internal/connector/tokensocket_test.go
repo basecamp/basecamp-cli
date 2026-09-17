@@ -87,11 +87,13 @@ func TestAnotherUsersPeerGetsNothing(t *testing.T) {
 }
 
 func TestAWorkerGroupNeverNamedHandsNothingOver(t *testing.T) {
-	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 300*time.Millisecond)
+	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 100*time.Millisecond)
 	require.NoError(t, err)
 	got, _ := fetch(t, s.Path())
-	assert.Empty(t, got)
-	assert.Equal(t, HandoffRefused, s.Result())
+	assert.Empty(t, got, "there is no worker to trust a peer against")
+	// A worker that is never named leaves nothing to decide about the peer;
+	// the socket gives up on the worker, not on it.
+	assert.Equal(t, HandoffExpired, s.Result())
 }
 
 func TestATokenSocketNobodyUsesExpires(t *testing.T) {
@@ -132,4 +134,29 @@ func TestAWorkersDescendantInItsOwnGroupGetsTheToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, socketTestToken, strings.TrimSpace(string(out)))
 	assert.Equal(t, HandoffDelivered, s.Result())
+}
+
+// Card 23's review: the window is the worker's MCP server's, and a slow
+// launcher or a handshake that takes as long as the window must not spend it.
+func TestTheWindowStartsWhenTheWorkerIsNamed(t *testing.T) {
+	window := 300 * time.Millisecond
+	s, err := ServeTaskToken(tokenDir(t), socketTestToken, window)
+	require.NoError(t, err)
+	defer s.Close()
+
+	// A handshake as long as the whole window, and then the worker exists.
+	time.Sleep(window + 100*time.Millisecond)
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	assert.Equal(t, socketTestToken, strings.TrimSpace(got))
+	assert.Equal(t, HandoffDelivered, s.Result())
+}
+
+// A worker that is never named does not hold the socket forever.
+func TestASocketNoWorkerIsEverNamedForExpires(t *testing.T) {
+	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 150*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, HandoffExpired, s.Result())
 }
