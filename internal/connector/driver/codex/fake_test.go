@@ -19,7 +19,7 @@ import (
 // The test binary doubles as a fake `codex`: run with "exec" as its first
 // argument, it plays the scenario in $CODEX_HOME/scenario.json instead of
 // running tests. Everything it saw (argv, environment, prompt, the MCP
-// server's environment file) is written beside the scenario.
+// server's environment) is written beside the scenario.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "exec" {
 		os.Exit(fakeCodex())

@@ -509,8 +509,8 @@ func TestUpdatesCarryNoContentAndRefusalsAreRecorded(t *testing.T) {
 	assert.Equal(t, len(secret), updates[i].Chars)
 }
 
-// ErrNotStarted means no process: a missing binary is one, and leaves no
-// environment file behind.
+// ErrNotStarted means no process: a missing binary is one, and leaves the
+// session's private directory as it found it.
 func TestAMissingBinaryIsNotStarted(t *testing.T) {
 	h := newHarness(t, scenario{})
 	h.drv.opts.Binary = filepath.Join(t.TempDir(), "no-codex")
