@@ -254,9 +254,12 @@ func serverNames(servers []driver.MCPServer) []string {
 }
 
 // writeMCPConfig writes the session's MCP servers owner-only. The file holds
-// the servers' environments, a task token among them, so it is created
+// each server's command, its declared environment and the path of the token
+// socket — never the task token, which crosses over that socket and is in no
+// file (the connector's "The task token's carriage"). It is still created
 // exclusively in the private directory and removed as soon as the agent has
-// started its servers, and again on Close.
+// started its servers, and again on Close: the socket path is not a secret,
+// but it is this attempt's, and nothing of an attempt outlives it.
 func writeMCPConfig(dir string, servers []driver.MCPServer) (string, error) {
 	type entry struct {
 		Type    string            `json:"type"`
@@ -766,10 +769,16 @@ func (s *session) refused(toolUseID, tool string) {
 // only the first time its tool call id is seen (driver's "Refusals").
 func (s *session) record(toolUseID, tool string) (driver.Refusal, bool) {
 	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(toolUseID), Tool: s.red.Sanitize(tool)}
-	if s.recorded[toolUseID] {
-		return refusal, false
+	// Once per tool call id, where there is one. A refusal with no id — one
+	// read from a line of output rather than from a call — is its own every
+	// time it happens: two identical refusals are two refusals (card 19's
+	// Codex accounting), and only an id can say otherwise.
+	if toolUseID != "" {
+		if s.recorded[toolUseID] {
+			return refusal, false
+		}
+		s.recorded[toolUseID] = true
 	}
-	s.recorded[toolUseID] = true
 	if s.recorder != nil {
 		// The recorder owns what happens when the ledger refuses the write;
 		// the refusal happened either way.

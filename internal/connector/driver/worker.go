@@ -104,9 +104,11 @@ const pipeWaitDelay = 2 * time.Second
 //     the worker's MCP server, running as the agent's profile, reads it from
 //     that store itself.
 //   - A task token lives from LaunchTask to the end of its task. The ledger
-//     keeps only its hash. It crosses to exactly one process, the worker's
-//     MCP server, and never to the agent process: the dispatcher serves it
-//     once over a unix socket in the attempt's owner-only runtime directory,
+//     keeps only its hash. It crosses only to the worker's MCP server, and
+//     never to the agent process: the dispatcher serves it over a unix socket
+//     in the attempt's owner-only runtime directory, once per start of that
+//     server (an MCP host that restarts a stdio server re-runs it, so the
+//     bridge asks again) and at most connector.MaxTokenHandoffs times,
 //     only to a peer of this user in the worker's process group or descended
 //     from its leader (connector.ServeTaskToken), and `basecamp connect
 //     worker-mcp` passes it on to `basecamp mcp` over an inherited
@@ -371,17 +373,45 @@ func OwnsWorker(p Process) (bool, error) {
 	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
 		return false, nil
 	}
-	started, err := processStartTime(p.PID)
+	gone, err := ProcessGone(p)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, groupGone(p.PGID)
-		}
 		return false, err
 	}
-	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
+	if gone {
+		// The leader is gone, or its pid is somebody else's now: what is left
+		// of the group decides whether anything of this worker remains.
 		return false, groupGone(p.PGID)
 	}
 	return true, nil
+}
+
+// ProcessGone reports whether the process a record names is gone: no process
+// by that pid, a zombie, or a later process the kernel gave the same pid. It
+// asks only about that process and says nothing about its group, which is
+// what a caller wants to know about a worker's MCP server — the group is the
+// agent's and outlives its servers.
+//
+// It is the one place the question "is this still that process?" is answered;
+// OwnsWorker asks it too, and adds the group.
+func ProcessGone(p Process) (bool, error) {
+	if p.PID <= 0 {
+		return true, nil
+	}
+	started, err := processStartTime(p.PID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, err
+	}
+	if p.StartedAt.IsZero() {
+		// Nothing to compare: a pid that exists is taken to be it.
+		return false, nil
+	}
+	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
+		return true, nil
+	}
+	return false, nil
 }
 
 // LookupProcess is a live process's identity: its pid, the process group it

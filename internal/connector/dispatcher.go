@@ -38,8 +38,9 @@ import (
 //  3. Nothing crosses to a worker that it does not need. The prompt names
 //     events and a recording URL, never content, and is under
 //     MaxPromptTokens at its worst case; the task token reaches only the
-//     worker's MCP server, over a one-use socket, never an argv or an
-//     environment; both environments are allowlists.
+//     worker's MCP server, over a socket that serves one handoff per start of
+//     that server, never an argv or an environment; both environments are
+//     allowlists.
 //  4. Stop reasons are the dispatcher's own record: deadline and shutdown
 //     are stops it asked for; a canceled turn it did not ask for is failed;
 //     a worker gone with a turn in flight is lost.
@@ -452,7 +453,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		if d.workDirBusy(record.Decision.Route) {
 			continue
 		}
-		if _, err := d.start(ctx, record); err != nil {
+		if err := d.start(ctx, record); err != nil {
 			if errors.Is(err, ErrNotStartable) {
 				continue
 			}
@@ -528,15 +529,17 @@ func (d *Dispatcher) workDirBusy(route string) bool {
 	return false
 }
 
-// start launches a task for record. It reports whether a worker is running.
-func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
+// start launches a task for record: the ledger first, then the driver, and
+// the release point on every path that fails after it. Capacity is the
+// caller's question (free), not this one's.
+func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	route := record.Decision.Route
 	workDir := route
 	if d.opts.Workspaces != nil {
 		dir, err := d.opts.Workspaces.Prepare(ctx, route, record.ID)
 		if err != nil {
 			d.log.Warn("connector: could not prepare a working directory", "event_id", record.ID, "error", err)
-			return false, nil
+			return nil
 		}
 		workDir = dir
 	}
@@ -548,7 +551,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// worker to confirm: the directory prepared for it was never a
 		// task's.
 		d.discardPreparedWorkspace(ctx, route, workDir)
-		return false, err
+		return err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs, State: string(AttemptLaunching)})
 
@@ -563,7 +566,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
 		d.release(settleCtx, launch, driver.Process{}, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
-		return false, nil //nolint:nilerr // settled as a start that ran nothing
+		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
 	if err != nil {
@@ -578,7 +581,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// release point confirms that group gone before anything is settled.
 		d.release(settleCtx, launch, driver.StartedProcess(err), takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
-		return false, nil
+		return nil
 	}
 	p := session.Process()
 	// The token goes only to this worker's own process group.
@@ -591,7 +594,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		taker := settledTaker(tokens, log, launch.AttemptID, d.opts.CancelGrace)
 		cleanup()
 		d.release(settleCtx, launch, p, taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
-		return false, err
+		return err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
@@ -604,7 +607,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		defer d.wg.Done()
 		run.supervise(ctx)
 	}()
-	return true, nil
+	return nil
 }
 
 // sessionConfig builds what the driver is given (invariant 3).
@@ -613,7 +616,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return driver.SessionConfig{}, nil, func() {}, fmt.Errorf("connector: session directory: %w", err)
 	}
-	// The token's one carriage: a one-use socket, served only to the worker's
+	// The token's one carriage: a socket served only to the worker's
 	// process group (tokensocket.go). It goes in the attempt's own directory
 	// unless a socket path there would be longer than a unix socket takes.
 	socketDir, temporary, err := TokenSocketDir(dir, d.shortSocketBase(dir))
@@ -639,8 +642,15 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// Every handoff, not only the first: an MCP host that restarts its stdio
 	// server re-runs the bridge, which takes the token again, and the newest
 	// server is the process the release point must end.
-	tokens.OnHandoff(func(handoff Handoff, taker driver.Process) {
+	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
 		if handoff != HandoffDelivered {
+			if afterADelivery {
+				// The socket ran out or was closed after it had already
+				// served this worker: that is how every healthy attempt ends,
+				// and warning about it would drown the case worth hearing.
+				log.Debug("connector: the task token's socket is finished with", "attempt_id", attemptID, "handoff", string(handoff))
+				return
+			}
 			log.Warn("connector: the worker's MCP server did not take its task token", "attempt_id", attemptID, "handoff", string(handoff))
 			return
 		}

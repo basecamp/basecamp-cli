@@ -63,7 +63,11 @@
 //  1. The driver calls SessionConfig.Refusals.RecordRefusal before it sends
 //     its answer to the agent, or before it emits the update for a refusal
 //     it observed. It calls it once per tool call id: a refusal the stream
-//     announced and the result repeats is one refusal.
+//     announced and the result repeats is one refusal. A refusal with NO
+//     tool call id — one read from a line of the agent's output rather than
+//     from a call — counts every time it happens, identical text included:
+//     two refusals of the same tool are two refusals, and nothing but an id
+//     can say they are one.
 //  2. The dispatcher's recorder writes it to the attempt's row at once
 //     (connector.Ledger.RecordRefusal: attempts.refusals, incremented while
 //     the attempt is live). A write the ledger refuses is carried by the

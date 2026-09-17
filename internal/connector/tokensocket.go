@@ -23,31 +23,49 @@ import (
 // hands a stdio server only its standard I/O: there is no descriptor to put a
 // token on, and the environment and argv are where a token must never be. So
 // the MCP server the agent starts is the connector's own bridge (`basecamp
-// connect worker-mcp`), and the token reaches it over a one-use unix socket
-// that the connector serves for that one attempt:
+// connect worker-mcp`), and the token reaches it over a unix socket the
+// connector serves for that one attempt:
 //
 //  1. The socket is bound in the attempt's owner-only (0700) session
 //     directory under the per-user runtime directory, so no other user can
 //     reach its path.
-//  2. It accepts exactly one connection, then closes and unlinks itself,
-//     whatever that connection turns out to be. A second connection is
-//     refused.
-//  3. Before it writes anything it checks the peer's credentials with the
+//  2. It serves ONE handoff per start of the worker's MCP server, up to
+//     MaxTokenHandoffs. An MCP host that restarts a stdio server re-runs its
+//     command, and the bridge takes the token again on every start, so a
+//     socket that closed after the first handoff would leave a restarted
+//     server with no Basecamp tools and no way to say so. Anything but a
+//     delivery — a peer that is not the worker's, a window that runs out —
+//     ends the socket there and then.
+//  3. Between handoffs the socket does not accept. After a delivery it waits
+//     for the process that took the token to be gone before it will hand the
+//     token to anything again (ProcessGone on the recorded taker), because
+//     that is exactly what a restart is: while the server that holds the
+//     token lives, nothing else may ask for it. Only where the taker's
+//     identity could not be read does it fall back to arming for one more
+//     window.
+//  4. Before it writes anything it checks the peer's credentials with the
 //     kernel (SO_PEERCRED on Linux, LOCAL_PEERCRED and LOCAL_PEERPID on
-//     macOS): the peer must be this user, and its process must belong to the
-//     worker — in the worker's process group, or a descendant of the worker
-//     process, since an agent may start its MCP servers in groups of their
-//     own (Codex does). Anything else is closed with no token.
-//  4. It expires: if nothing connects within the window, it closes and
-//     unlinks, and nothing is handed over.
+//     macOS), on every handoff and not only the first: the peer must be this
+//     user, and its process must belong to the worker — in the worker's
+//     process group, or a descendant of the worker process, since an agent
+//     may start its MCP servers in groups of their own (Codex does).
+//     Anything else is closed with no token.
+//  5. It expires: if nothing connects within the window, it closes and
+//     unlinks, and nothing is handed over. The release point closes it too,
+//     so no handoff outlives its attempt.
 //
 // The bridge puts the token on a pipe and execs `basecamp mcp
 // --connect-token-fd`, so after the handoff the token is in no environment, no
 // argv and no file. A same-user process outside the worker's group that wins
 // the race gets nothing and makes the real bridge fail, which the agent
 // reports as a server that did not connect and the session ends as unsafe.
-// A process inside the worker's group could take the token — but that is the
-// worker, which is who the token is for.
+//
+// Where this can still be broken: a process inside the worker's group can
+// take the token — but that is the worker, which is who the token is for. An
+// agent's own tools run in that group, so an agent that goes looking can ask
+// for the token while the socket is armed: at the start of the session, and
+// after its MCP server has died, which is the window rule (3) exists to keep
+// short. What it gets is a token for the tools it already has.
 
 // errUnreadableDescriptor is a socket whose descriptor is not a number the
 // syscall wrappers take. It cannot happen on any platform the connector runs
@@ -197,7 +215,8 @@ type PeerCredentials struct {
 	UID int
 }
 
-// TokenSocket serves one task token, once, to the worker's own process group.
+// TokenSocket serves one task token to the worker's own process group, once
+// per start of the worker's MCP server.
 type TokenSocket struct {
 	path     string
 	token    string
@@ -223,10 +242,10 @@ type TokenSocket struct {
 
 	mu        sync.Mutex
 	taker     driver.Process
-	onHandoff func(Handoff, driver.Process)
+	onHandoff func(Handoff, driver.Process, bool)
 }
 
-// ServeTaskToken binds the one-use socket for token in dir, which must be the
+// ServeTaskToken binds the socket for token in dir, which must be the
 // attempt's own owner-only directory, and serves it for window.
 func ServeTaskToken(dir, token string, window time.Duration) (*TokenSocket, error) {
 	return serveTaskToken(dir, token, window, peerCredentials, processGroupOf)
@@ -319,7 +338,7 @@ func (s *TokenSocket) Result() Handoff {
 // OnHandoff is called for every handoff the socket makes or refuses, with the
 // process that took the token where one did. It is set before the worker is
 // named, and is how the connector keeps up with a restarted MCP server.
-func (s *TokenSocket) OnHandoff(f func(Handoff, driver.Process)) {
+func (s *TokenSocket) OnHandoff(f func(handoff Handoff, taker driver.Process, afterADelivery bool)) {
 	s.mu.Lock()
 	s.onHandoff = f
 	s.mu.Unlock()
@@ -341,9 +360,47 @@ func (s *TokenSocket) Settled(wait time.Duration) bool {
 	}
 }
 
+// waitForTakerGone waits for the process that took the token to be gone,
+// which is what a restart of the worker's MCP server looks like from here. It
+// reports whether the socket should arm again: false when the socket was
+// closed, or when the wait ran out with that process still alive.
+//
+// A taker whose identity could not be read cannot be waited for, so the
+// socket arms for one more window instead — the same bound as the first
+// handoff.
+func (s *TokenSocket) waitForTakerGone() bool {
+	s.mu.Lock()
+	taker := s.taker
+	s.mu.Unlock()
+	if taker.PID <= 0 {
+		return true
+	}
+	ticker := time.NewTicker(takerPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return false
+		case <-ticker.C:
+		}
+		gone, err := driver.ProcessGone(taker)
+		if err == nil && gone {
+			// The server that held the token is gone; the next start of it is
+			// what the socket arms for.
+			return true
+		}
+	}
+}
+
+// takerPoll is how often the socket looks to see whether the process that
+// took the token is gone.
+const takerPoll = time.Second
+
 // handed records one handoff: the first is what Result answers, and every one
-// goes to OnHandoff's function.
-func (s *TokenSocket) handed(h Handoff, taker driver.Process) {
+// goes to OnHandoff's function. after says whether a delivery had already
+// been made, so a terminal handoff on a healthy attempt is not reported as a
+// worker that never took its token.
+func (s *TokenSocket) handed(h Handoff, taker driver.Process, after bool) {
 	s.mu.Lock()
 	if taker.PID > 0 {
 		s.taker = taker
@@ -355,7 +412,7 @@ func (s *TokenSocket) handed(h Handoff, taker driver.Process) {
 		close(s.done)
 	})
 	if f != nil {
-		f(h, taker)
+		f(h, taker, after)
 	}
 }
 
@@ -368,25 +425,32 @@ func (s *TokenSocket) serve(window time.Duration) {
 	case want := <-s.group:
 		s.group <- want
 	case <-s.stop:
-		s.handed(HandoffClosed, driver.Process{})
+		s.handed(HandoffClosed, driver.Process{}, false)
 		return
 	case <-time.After(startWindows * window):
 		s.Close()
-		s.handed(HandoffExpired, driver.Process{})
+		s.handed(HandoffExpired, driver.Process{}, false)
 		return
 	}
 	// One handoff per start of the worker's MCP server, up to
 	// MaxTokenHandoffs: a host that restarts a stdio server re-runs it, and
-	// the bridge takes the token again. Each has its own window and the same
-	// peer checks, and anything but a delivery ends the socket — a connection
-	// that is not the worker's is not something to wait past.
+	// the bridge takes the token again. Each gets the same peer checks, and
+	// anything but a delivery ends the socket — a connection that is not the
+	// worker's is not something to wait past.
+	delivered := false
 	for range MaxTokenHandoffs {
+		if delivered && !s.waitForTakerGone() {
+			// Closed, or the process that took the token is still running:
+			// nothing else may have it while that server lives.
+			return
+		}
 		h, taker := s.handOne(window)
-		s.handed(h, taker)
+		s.handed(h, taker, delivered)
 		if h != HandoffDelivered {
 			s.Close()
 			return
 		}
+		delivered = true
 	}
 	// The budget is spent: a worker whose MCP server restarts more often than
 	// this is not one the connector keeps handing its token to.
@@ -414,6 +478,17 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 		return HandoffRefused, driver.Process{}
 	}
 	return HandoffDelivered, s.takerOfConn(conn)
+}
+
+// allowedGroup is the worker's process group, or 0 before it is named.
+func (s *TokenSocket) allowedGroup() int {
+	select {
+	case want := <-s.group:
+		s.group <- want
+		return want
+	default:
+		return 0
+	}
 }
 
 // trusted reports whether the peer is this user's process in the worker's
@@ -470,6 +545,13 @@ func (s *TokenSocket) takerOfConn(conn *net.UnixConn) driver.Process {
 	}
 	taker, err := s.lookup(cred.PID)
 	if err != nil {
+		return driver.Process{}
+	}
+	// The group read here is the one the release point would signal, and it
+	// is a second reading of the kernel: it must still satisfy the rule the
+	// peer passed, or this attempt does not own it (Opus r8).
+	want := s.allowedGroup()
+	if want <= 1 || (taker.PGID != want && !s.descendsFrom(taker.PID, want)) {
 		return driver.Process{}
 	}
 	return taker
