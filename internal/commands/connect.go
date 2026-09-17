@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -72,12 +71,12 @@ Examples:
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
-			return runConnectShow(cmd, app)
+			return runConnectShow(app)
 		},
 	}
 }
 
-func runConnectShow(cmd *cobra.Command, app *appctx.App) error {
+func runConnectShow(app *appctx.App) error {
 	name := app.Config.ActiveProfile
 	if name == "" {
 		return output.ErrUsageHint("Show needs the agent's profile", "Pass -P/--profile <name>.")
@@ -108,46 +107,28 @@ func runConnectShow(cmd *cobra.Command, app *appctx.App) error {
 			"Nothing of it was shown. Remove "+richtext.SanitizeSingleLine(path)+" and run setup again for this profile.")
 	}
 
-	if format := app.Output.EffectiveFormat(); format == output.FormatStyled || format == output.FormatMarkdown {
-		// The generic object renderer drops nested maps, which is where the
-		// agent, the trust and the routes live: say them in lines instead.
-		_, err := fmt.Fprint(cmd.OutOrStdout(), connectShowText(name, path, f, format == output.FormatMarkdown))
-		return err
-	}
+	// The generic object renderer drops nested maps, which is where the
+	// agent, the trust and the routes live, so a person's formats get them
+	// flattened to one line each; JSON keeps the file's own shape.
+	markdown := app.Output.EffectiveFormat() == output.FormatMarkdown
 	return app.OK(connectShowResult{Path: path, File: f},
-		output.WithSummary(fmt.Sprintf("Profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
+		output.WithDisplayData(connectShowDisplay(path, f, markdown)),
+		output.WithSummary(fmt.Sprintf("Connector setup for profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
 }
 
-// connectShowText is show's output for a person: every setting connect.json
-// records, one to a line, with the routes in project order.
-func connectShowText(name, path string, f setup.File, markdown bool) string {
-	var b strings.Builder
-	item := func(label, value string) {
-		if markdown {
-			fmt.Fprintf(&b, "- **%s:** %s\n", label, value)
-		} else {
-			fmt.Fprintf(&b, "  %-9s %s\n", label+":", value)
-		}
-	}
-	if markdown {
-		fmt.Fprintf(&b, "## Connector setup for profile %q\n\n", name)
-	} else {
-		fmt.Fprintf(&b, "Connector setup for profile %q\n\n", name)
-	}
-	// Paths shown exactly, spaces and all: quoted for a terminal, a code span
-	// for Markdown, so nothing in one renders as formatting.
+// connectShowDisplay is show's data for a person: every setting connect.json
+// records as a flat field, one per route. Paths are shown exactly: quoted,
+// or as a code span in Markdown, so nothing in one renders as formatting or
+// reaches a terminal as a control byte.
+func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any {
 	exact := strconv.Quote
 	if markdown {
 		exact = func(s string) string { return markdownCode(escapeControls(s)) }
 	}
-	item("File", exact(path))
-	item("Account", f.AccountID)
 	agent := fmt.Sprintf("person %d (%s)", f.Agent.PersonID, f.Agent.Kind)
 	if f.Agent.IdentityID != 0 {
 		agent += fmt.Sprintf(", identity %d", f.Agent.IdentityID)
 	}
-	item("Agent", agent)
-	item("Operator", fmt.Sprintf("person %d", f.Trust.OperatorID))
 	trust := string(f.Trust.Mode)
 	if len(f.Trust.AllowlistIDs) > 0 {
 		ids := make([]string, len(f.Trust.AllowlistIDs))
@@ -156,39 +137,30 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 		}
 		trust += ": people " + strings.Join(ids, ", ")
 	}
-	item("Trust", trust)
 	worktrees := "off"
 	if f.Worktrees {
 		worktrees = "on"
 	}
-	item("Workers", fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees))
-
-	ids := make([]int64, 0, len(f.Projects))
-	for id := range f.Projects {
-		ids = append(ids, id)
+	d := map[string]any{
+		"file":     exact(path),
+		"account":  f.AccountID,
+		"agent":    agent,
+		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
+		"trust":    trust,
+		"workers":  fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees),
+		"routes":   strconv.Itoa(len(f.Projects)),
 	}
-	slices.Sort(ids)
-	if len(ids) == 0 {
-		item("Projects", "none routed")
-		return b.String()
-	}
-	item("Projects", strconv.Itoa(len(ids))+" routed")
-	for _, id := range ids {
-		r := f.Projects[id]
-		line := fmt.Sprintf("%d → %s", id, exact(r.Path))
+	for id, r := range f.Projects {
+		route := exact(r.Path)
 		if r.Class != "" {
-			line += ", class " + r.Class
+			route += ", class " + r.Class
 		}
 		if r.WatchCompletions {
-			line += ", watches completions"
+			route += ", watches completions"
 		}
-		if markdown {
-			fmt.Fprintf(&b, "  - %s\n", line)
-		} else {
-			fmt.Fprintf(&b, "            %s\n", line)
-		}
+		d[fmt.Sprintf("project_%d", id)] = route
 	}
-	return b.String()
+	return d
 }
 
 // escapeControls writes every control or non-printable rune in s, and the

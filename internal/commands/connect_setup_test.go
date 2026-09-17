@@ -1340,7 +1340,7 @@ func TestConnectShowRefusesAnUnsafeConnectJSON(t *testing.T) {
 
 // A person reading show in a terminal or as Markdown sees what matters: the
 // agent, the operator, the trust and every route, which the generic object
-// renderer would drop.
+// renderer would drop, through the same output pipeline as every command.
 func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
@@ -1353,18 +1353,20 @@ func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 
 	for _, format := range []output.Format{output.FormatStyled, output.FormatMarkdown} {
 		app := newConnectSetupApp(t, s, "agent")
-		app.Output = output.New(output.Options{Format: format, Writer: &bytes.Buffer{}})
+		var buf bytes.Buffer
+		app.Output = output.New(output.Options{Format: format, Writer: &buf})
 		out, err := runConnectShowCmd(t, app)
 		require.NoError(t, err, out)
+		shown := buf.String()
 		for _, want := range []string{
 			fmt.Sprintf("person %d (agent)", setupAgentPerson),
 			fmt.Sprintf("person %d", setupOperatorPerson),
 			"operator",
-			fmt.Sprintf("%d → ", setupProject),
+			fmt.Sprintf("Project %d", setupProject),
 			route,
 			"deadline 45m0s",
 		} {
-			assert.Contains(t, out, want, "format %v", format)
+			assert.Contains(t, shown, want, "format %v", format)
 		}
 	}
 }
@@ -1401,10 +1403,10 @@ func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
 	f.Trust.OperatorID = 1001
 	f.Projects[222] = admission.Route{Path: path}
 	for _, markdown := range []bool{false, true} {
-		out := connectShowText("agent", "/x/connect.json", f, markdown)
-		assert.NotContains(t, out, "\x1b", "markdown %v", markdown)
-		assert.NotContains(t, out, "\u009b", "markdown %v", markdown)
-		assert.Contains(t, out, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
+		route := connectShowDisplay("/x/connect.json", f, markdown)["project_222"].(string)
+		assert.NotContains(t, route, "\x1b", "markdown %v", markdown)
+		assert.NotContains(t, route, "\u009b", "markdown %v", markdown)
+		assert.Contains(t, route, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
 	}
 }
 
@@ -1413,11 +1415,8 @@ func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
 // or read as an escape.
 func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
 	f := setup.New("agent")
-	f.AccountID = "999"
-	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
-	f.Trust.OperatorID = 1001
-	out := connectShowText("agent", "/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)
-	assert.Contains(t, out, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``")
+	file := connectShowDisplay("/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)["file"]
+	assert.Equal(t, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``", file)
 }
 
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
