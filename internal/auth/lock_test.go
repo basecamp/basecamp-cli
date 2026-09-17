@@ -1186,3 +1186,49 @@ func TestHeldCredentialIsInvalidAfterTheLockIsReleased(t *testing.T) {
 	assert.Nil(t, creds)
 	assert.Empty(t, heldKey)
 }
+
+// A required lock is only a lock if every process takes the same inode, so
+// a lock directory or lock file this user does not own is refused rather
+// than used.
+func TestWithCredentialRefusesAnUntrustworthyLockPath(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	const key = "profile:agent"
+
+	for name, plant := range map[string]func(t *testing.T, dir string){
+		"the lock directory is a symlink": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.RemoveAll(locks))
+			require.NoError(t, os.Symlink(t.TempDir(), locks))
+		},
+		"the lock directory is writable by others": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.MkdirAll(locks, 0o700))
+			require.NoError(t, os.Chmod(locks, 0o777))
+		},
+		"the lock file is a symlink": func(t *testing.T, dir string) {
+			locks := filepath.Join(dir, "locks")
+			require.NoError(t, os.MkdirAll(locks, 0o700))
+			planted := filepath.Join(locks, keyLockName(key))
+			require.NoError(t, os.RemoveAll(planted))
+			require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "planted"), planted))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			store := NewStore(dir)
+			require.NoError(t, store.Save(key, &Credentials{AccessToken: "first", OAuthType: "agent"}))
+			plant(t, dir)
+
+			ran := false
+			err := store.WithCredential(context.Background(), key, func(HeldCredential) error {
+				ran = true
+				return nil
+			})
+			require.Error(t, err)
+			assert.False(t, ran, "the section never runs on a lock it cannot trust")
+			var apiErr *output.Error
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, output.CodeLockUnavailable, apiErr.Code)
+		})
+	}
+}

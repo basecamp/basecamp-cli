@@ -344,7 +344,15 @@ func (s *Store) lockFile(req lockRequest) (func(), error) {
 		return s.unlocked(req, err.Error())
 	}
 
-	fl := flock.New(filepath.Join(s.lockDir(), req.name))
+	lockPath := filepath.Join(s.lockDir(), req.name)
+	if req.require {
+		// A required lock is only a lock if every process takes the same
+		// inode: refuse a lock directory or file this user does not own.
+		if err := requirePrivateLockPath(s.lockDir(), lockPath); err != nil {
+			return s.unlocked(req, err.Error())
+		}
+	}
+	fl := flock.New(lockPath)
 	try := fl.TryLock
 	if req.shared {
 		try = fl.TryRLock

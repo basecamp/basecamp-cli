@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1214,4 +1215,22 @@ func TestConnectSetupPropagatesCancellation(t *testing.T) {
 	require.Error(t, err, out)
 	assert.ErrorIs(t, err, context.Canceled)
 	assertNotWritten(t, "agent")
+}
+
+// Stopping setup while it waits for the credential lock is an
+// interruption, not a usage error.
+func TestConnectSetupClassifiesCancellationUnderTheLock(t *testing.T) {
+	for name, err := range map[string]error{
+		"canceled": context.Canceled,
+		"deadline": context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := classifyWriteError("agent", fmt.Errorf("under the lock: %w", err))
+			assert.ErrorIs(t, got, err)
+			var apiErr *output.Error
+			if errors.As(got, &apiErr) {
+				assert.NotEqual(t, output.CodeUsage, apiErr.Code)
+			}
+		})
+	}
 }

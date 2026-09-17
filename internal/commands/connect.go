@@ -407,14 +407,16 @@ func classifyWriteError(name string, err error) error {
 	var apiErr *output.Error
 	profile := shellQuote(name)
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// A person who stopped the command, or a deadline: the run ended,
+		// it was not misused, and nothing was written.
+		return err
 	case errors.Is(err, setup.ErrSetupRunning):
 		return errBusy(name, err)
 	case errors.As(err, &apiErr) && apiErr.Code == output.CodeRateLimit:
 		// The credential store reports contention on its own key as a
-		// retryable rate limit; in this command that is the profile being
-		// busy, which is the code its contract names.
-		busy := errBusy(name, err)
-		return busy
+		// retryable rate limit; here that is the profile being busy.
+		return errBusy(name, err)
 	case errors.As(err, &apiErr):
 		// Already in the contract: the credential store reports contention
 		// as a retryable rate_limit, and setup's own refusals are typed.
