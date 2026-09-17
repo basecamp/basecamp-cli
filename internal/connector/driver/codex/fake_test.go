@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -57,16 +58,14 @@ type scenario struct {
 }
 
 type observed struct {
-	Args       []string          `json:"args"`
-	Env        []string          `json:"env"`
-	Cwd        string            `json:"cwd"`
-	Prompt     string            `json:"prompt"`
-	EnvFile    map[string]string `json:"env_file_modes"`
-	MCPExit    int               `json:"mcp_exit"`
-	ChildPID   int               `json:"child_pid"`
-	EscapedPID int               `json:"escaped_pid"`
-	Deaf       bool              `json:"deaf"`
-	FileAfter  bool              `json:"env_file_after_server"`
+	Args       []string `json:"args"`
+	Env        []string `json:"env"`
+	Cwd        string   `json:"cwd"`
+	Prompt     string   `json:"prompt"`
+	MCPExit    int      `json:"mcp_exit"`
+	ChildPID   int      `json:"child_pid"`
+	EscapedPID int      `json:"escaped_pid"`
+	Deaf       bool     `json:"deaf"`
 }
 
 func fakeCodex() int {
@@ -81,7 +80,7 @@ func fakeCodex() int {
 		fmt.Fprintln(os.Stderr, "fake codex: bad scenario:", err)
 		return 2
 	}
-	obs := observed{Args: os.Args[1:], Env: os.Environ(), EnvFile: map[string]string{}}
+	obs := observed{Args: os.Args[1:], Env: os.Environ()}
 	obs.Cwd, _ = os.Getwd()
 	save := func() {
 		out, _ := json.Marshal(obs)
@@ -106,18 +105,17 @@ func fakeCodex() int {
 
 	if sc.RunMCP {
 		for _, server := range mcpServers(os.Args) {
-			if info, err := os.Stat(server.file); err == nil {
-				obs.EnvFile[server.file] = fmt.Sprintf("%o", info.Mode().Perm())
-			}
 			cmd := exec.CommandContext(context.Background(), server.command, server.args...) //nolint:gosec // the fake runs what the driver configured
+			// As Codex does: a near-empty environment plus the declared env.
 			cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+			for k, v := range server.env {
+				cmd.Env = append(cmd.Env, k+"="+v)
+			}
 			if err := cmd.Run(); err != nil {
 				obs.MCPExit = 1
 				fmt.Fprintln(os.Stderr, "required MCP servers failed to initialize")
 				return 1
 			}
-			_, statErr := os.Stat(server.file)
-			obs.FileAfter = statErr == nil
 		}
 		save()
 	}
@@ -182,14 +180,22 @@ func appendRecord(path, kind string, payload map[string]any) {
 type fakeServer struct {
 	command string
 	args    []string
-	file    string
+	env     map[string]string
 }
 
+var tomlPair = regexp.MustCompile(`("(?:[^"\\]|\\.)*")=("(?:[^"\\]|\\.)*")`)
+
 // mcpServers reads the mcp_servers overrides back from argv. The values are
-// the JSON-compatible subset of TOML the driver writes.
+// the JSON-compatible subset of TOML the driver writes; an env table is
+// {"K"="v",...}.
 func mcpServers(argv []string) []fakeServer {
-	commands := map[string]string{}
-	arguments := map[string][]string{}
+	servers := map[string]*fakeServer{}
+	get := func(name string) *fakeServer {
+		if servers[name] == nil {
+			servers[name] = &fakeServer{env: map[string]string{}}
+		}
+		return servers[name]
+	}
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] != "-c" {
 			continue
@@ -202,23 +208,21 @@ func mcpServers(argv []string) []fakeServer {
 		name, field, _ := strings.Cut(rest, ".")
 		switch field {
 		case "command":
-			var s string
-			_ = json.Unmarshal([]byte(value), &s)
-			commands[name] = s
+			_ = json.Unmarshal([]byte(value), &get(name).command)
 		case "args":
-			var a []string
-			_ = json.Unmarshal([]byte(value), &a)
-			arguments[name] = a
+			_ = json.Unmarshal([]byte(value), &get(name).args)
+		case "env":
+			for _, m := range tomlPair.FindAllStringSubmatch(value, -1) {
+				var k, v string
+				_ = json.Unmarshal([]byte(m[1]), &k)
+				_ = json.Unmarshal([]byte(m[2]), &v)
+				get(name).env[k] = v
+			}
 		}
 	}
-	out := make([]fakeServer, 0, len(commands))
-	for name, command := range commands {
-		a := arguments[name]
-		s := fakeServer{command: command, args: a}
-		if len(a) > 2 {
-			s.file = a[2]
-		}
-		out = append(out, s)
+	out := make([]fakeServer, 0, len(servers))
+	for _, s := range servers {
+		out = append(out, *s)
 	}
 	return out
 }

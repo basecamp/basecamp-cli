@@ -16,12 +16,13 @@
 //     hooks, plugins, connected apps and skills are not loaded; the only MCP
 //     servers are SessionConfig.MCPServers. The model's shell gets Codex's
 //     core environment only.
-//  2. No secret in argv, none in Codex's environment. An MCP server's
-//     environment (a task token among it) is written owner-only and
-//     exclusively into the private directory, sourced by the server's own
-//     wrapper, which deletes it before it starts the server; Close deletes
-//     it again. Codex's own mcp_servers env_vars would hand the token to
-//     Codex, and from there to every shell command the model runs.
+//  2. Nothing is written to disk to start a session, and no MCP server's
+//     environment reaches Codex's own. A server's declared environment goes
+//     to Codex as its mcp_servers env table, which Codex hands only to that
+//     server. It carries no secret: the task token reaches the worker's MCP
+//     server over the connector's one-use socket (connector/tokensocket.go),
+//     never through the driver. (Codex's own env_vars would copy a variable
+//     from Codex's environment, and from there to the model's shell.)
 //  3. The permission mode is set by flags and verified. `codex exec` echoes
 //     no mode, and an override Codex does not recognize is silently ignored,
 //     so the driver reads the policy Codex actually applied from the turn's
@@ -51,15 +52,13 @@
 // is Codex's, not the connector's. One consequence is worth knowing: a
 // worktree's git data lives outside the working directory, so a Codex worker
 // cannot commit, and a Codex task that edits anything ends with its worktree
-// kept. Codex's sandbox reads the whole
-// filesystem, so a model in one session can read what the connector's state
-// directory holds while it is there, another session's MCP environment file
-// between its writing and its server's start among it.
+// kept. Codex's sandbox reads the whole filesystem, but runs the model's
+// shell in a PID namespace of its own, so the processes outside it — MCP
+// servers among them — are not visible to it.
 package codex
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -177,18 +176,9 @@ var allowedKinds = []driver.ToolKind{driver.ToolRead, driver.ToolSearch, driver.
 
 var validServerName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// mcpWrapper is the script each MCP server runs under: source the private
-// environment file named by $0, delete it, and exec the server. A file that
-// cannot be sourced stops the server before it starts, and Codex, which
-// requires the server, refuses the turn.
-//
-//nolint:gosec // G101: a shell script, not a credential
-const mcpWrapper = `set -a && . "$0" && set +a && rm -f -- "$0" && exec "$@"`
-
-// Args is the command line for a session, without the binary. envFiles maps
-// each MCP server's name to its private environment file. Exposed so the
+// Args is the command line for a session, without the binary. Exposed so the
 // flags that hold the policy are tested as written.
-func Args(cfg driver.SessionConfig, resumeID string, envFiles map[string]string, model string) ([]string, error) {
+func Args(cfg driver.SessionConfig, resumeID, model string) ([]string, error) {
 	if cfg.Policy == nil {
 		return nil, errors.New("codex: a session needs a policy")
 	}
@@ -246,19 +236,19 @@ func Args(cfg driver.SessionConfig, resumeID string, envFiles map[string]string,
 		if s.Command == "" {
 			return nil, fmt.Errorf("%w: codex: MCP server %q has no command", driver.ErrUnusable, s.Name)
 		}
-		file, ok := envFiles[s.Name]
-		if !ok || !filepath.IsAbs(file) {
-			return nil, fmt.Errorf("codex: MCP server %q has no private environment file", s.Name)
-		}
 		approval := "prompt"
 		if slices.Contains(rules.AllowMCPServers, s.Name) {
 			approval = "approve"
 		}
 		key := "mcp_servers." + s.Name + "."
-		wrapped := append([]string{"-c", mcpWrapper, file, s.Command}, s.Args...)
+		env, err := tomlTable(s.Env)
+		if err != nil {
+			return nil, fmt.Errorf("%w: codex: MCP server %q: %w", driver.ErrUnusable, s.Name, err)
+		}
 		args = append(args,
-			"-c", key+"command="+tomlString("/bin/sh"),
-			"-c", key+"args="+tomlArray(wrapped),
+			"-c", key+"command="+tomlString(s.Command),
+			"-c", key+"args="+tomlArray(s.Args),
+			"-c", key+"env="+env,
 			"-c", key+"required=true",
 			"-c", key+"default_tools_approval_mode="+tomlString(approval),
 		)
@@ -294,23 +284,12 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		}
 		offset = info.Size()
 	}
-	envFiles, err := writeEnvFiles(cfg.PrivateDir, cfg.MCPServers)
+	args, err := Args(cfg, resumeID, d.opts.Model)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
-	}
-	removeFiles := func() {
-		for _, f := range envFiles {
-			_ = os.Remove(f)
-		}
-	}
-	args, err := Args(cfg, resumeID, envFiles, d.opts.Model)
-	if err != nil {
-		removeFiles()
 		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
 	}
 	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
 	if err != nil {
-		removeFiles()
 		return nil, err
 	}
 	s := &session{
@@ -319,7 +298,6 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		cwd:         cfg.Cwd,
 		sessions:    sessions,
 		offset:      offset,
-		envFiles:    envFiles,
 		grace:       d.opts.CloseGrace,
 		verifyAfter: d.opts.VerifyTimeout,
 		writing:     make(chan struct{}, 1),
@@ -370,55 +348,21 @@ func mergeEnv(base, extra []string) []string {
 
 var validEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// writeEnvFiles writes each MCP server's environment owner-only and
-// exclusively into dir, as shell assignments the wrapper sources.
-func writeEnvFiles(dir string, servers []driver.MCPServer) (map[string]string, error) {
-	files := map[string]string{}
-	fail := func(err error) (map[string]string, error) {
-		for _, f := range files {
-			_ = os.Remove(f)
+// tomlTable is an inline TOML table of strings, keys sorted.
+func tomlTable(values map[string]string) (string, error) {
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		if !validEnvName.MatchString(k) {
+			return "", fmt.Errorf("environment variable name %q", k)
 		}
-		return nil, err
+		keys = append(keys, k)
 	}
-	for _, s := range servers {
-		if !validServerName.MatchString(s.Name) {
-			return fail(fmt.Errorf("codex: MCP server name %q is not one Codex's config can key", s.Name))
-		}
-		if _, dup := files[s.Name]; dup {
-			return fail(fmt.Errorf("codex: MCP server %q is named twice", s.Name))
-		}
-		names := make([]string, 0, len(s.Env))
-		for k := range s.Env {
-			names = append(names, k)
-		}
-		slices.Sort(names)
-		var buf bytes.Buffer
-		for _, k := range names {
-			v := s.Env[k]
-			if !validEnvName.MatchString(k) || strings.ContainsRune(v, 0) {
-				return fail(fmt.Errorf("codex: MCP server %q has an environment variable a shell cannot carry", s.Name))
-			}
-			buf.WriteString(k + "=" + shellQuote(v) + "\n")
-		}
-		path := filepath.Join(dir, "mcp-"+s.Name+".env")
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return fail(fmt.Errorf("codex: write MCP environment: %w", err))
-		}
-		files[s.Name] = path
-		if _, err := f.Write(buf.Bytes()); err != nil {
-			_ = f.Close()
-			return fail(fmt.Errorf("codex: write MCP environment: %w", err))
-		}
-		if err := f.Close(); err != nil {
-			return fail(fmt.Errorf("codex: write MCP environment: %w", err))
-		}
+	slices.Sort(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, tomlString(k)+"="+tomlString(values[k]))
 	}
-	return files, nil
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return "{" + strings.Join(parts, ",") + "}", nil
 }
 
 // tomlString is a TOML basic string. Only \\, \" and \uXXXX escapes are
@@ -455,7 +399,6 @@ type session struct {
 	cwd         string
 	sessions    string
 	offset      int64
-	envFiles    map[string]string
 	grace       time.Duration
 	verifyAfter time.Duration
 
@@ -610,9 +553,6 @@ func (s *session) Close() error {
 		// working directory and the connector's shutdown open forever.
 		s.worker.CloseStdout()
 		<-s.readerEnd
-	}
-	for _, f := range s.envFiles {
-		_ = os.Remove(f)
 	}
 	return nil
 }

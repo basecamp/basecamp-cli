@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -28,6 +27,7 @@ const (
 	testThread = "01a0adfe-499c-7f63-9553-b9975a3c4b55"
 	testToken  = "test-token-not-real"
 	hostCanary = "host-canary-not-real"
+	serverOnly = "declared-for-the-server-only"
 )
 
 // safeTurnContext is the policy the driver's flags ask for.
@@ -134,7 +134,7 @@ func (h *harness) config() driver.SessionConfig {
 			Name:    "basecamp",
 			Command: "/bin/sh",
 			Args:    []string{"-c", `env > "$MCP_ENV_OUT"`},
-			Env:     map[string]string{"MCP_ENV_OUT": h.mcpOut, connector.TaskTokenEnv: testToken, "PATH": os.Getenv("PATH")},
+			Env:     map[string]string{"MCP_ENV_OUT": h.mcpOut, "SERVER_ONLY_NOT_SECRET": serverOnly, "PATH": os.Getenv("PATH")},
 		}},
 		Policy:     connector.DefaultPolicy(h.workDir),
 		Scope:      driver.Scope{WorkDir: h.workDir},
@@ -173,12 +173,11 @@ func TestArgsHoldThePolicy(t *testing.T) {
 		Cwd:    "/work/app",
 		Policy: connector.DefaultPolicy("/work/app"),
 		MCPServers: []driver.MCPServer{
-			{Name: "basecamp", Command: "/bin/basecamp", Args: []string{"mcp"}, Env: map[string]string{connector.TaskTokenEnv: testToken}},
+			{Name: "basecamp", Command: "/bin/basecamp", Args: []string{"connect", "worker-mcp", "--socket", "/run/token.sock"}, Env: map[string]string{"HOME": "/home/op", "BASECAMP_NO_KEYRING": `a"quoted\value`}},
 			{Name: "other", Command: "/bin/other"},
 		},
 	}
-	files := map[string]string{"basecamp": "/private/mcp-basecamp.env", "other": "/private/mcp-other.env"}
-	args, err := Args(cfg, "", files, "")
+	args, err := Args(cfg, "", "")
 	require.NoError(t, err)
 
 	joined := strings.Join(args, "\x00")
@@ -194,7 +193,10 @@ func TestArgsHoldThePolicy(t *testing.T) {
 		{"-c", "skills.include_instructions=false"},
 		{"-c", "skills.bundled.enabled=false"},
 		{"--disable", "apps"}, {"--disable", "plugins"}, {"--disable", "hooks"},
-		{"-c", `mcp_servers.basecamp.command="/bin/sh"`},
+		{"--strict-config"},
+		{"-c", `mcp_servers.basecamp.command="/bin/basecamp"`},
+		{"-c", `mcp_servers.basecamp.args=["connect","worker-mcp","--socket","/run/token.sock"]`},
+		{"-c", `mcp_servers.basecamp.env={"BASECAMP_NO_KEYRING"="a\"quoted\\value","HOME"="/home/op"}`},
 		{"-c", "mcp_servers.basecamp.required=true"},
 		{"-c", `mcp_servers.basecamp.default_tools_approval_mode="approve"`},
 		{"-c", "mcp_servers.other.required=true"},
@@ -204,17 +206,8 @@ func TestArgsHoldThePolicy(t *testing.T) {
 	}
 	assert.Equal(t, "exec", args[0])
 	assert.Equal(t, "-", args[len(args)-1], "the prompt is read from stdin")
-	assert.NotContains(t, joined, testToken, "no secret in argv")
 
-	var serverArgs []string
-	for i, a := range args {
-		if a == "-c" && strings.HasPrefix(args[i+1], "mcp_servers.basecamp.args=") {
-			require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(args[i+1], "mcp_servers.basecamp.args=")), &serverArgs))
-		}
-	}
-	assert.Equal(t, []string{"-c", mcpWrapper, "/private/mcp-basecamp.env", "/bin/basecamp", "mcp"}, serverArgs)
-
-	resumed, err := Args(cfg, testThread, files, "gpt-test")
+	resumed, err := Args(cfg, testThread, "gpt-test")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"exec", "resume"}, resumed[:2])
 	assert.Equal(t, []string{"--model", "gpt-test", testThread, "-"}, resumed[len(resumed)-4:])
@@ -222,100 +215,76 @@ func TestArgsHoldThePolicy(t *testing.T) {
 
 // A policy Codex's flags cannot hold is refused before anything starts.
 func TestArgsRefuseAPolicyCodexCannotHold(t *testing.T) {
-	files := map[string]string{"basecamp": "/private/mcp-basecamp.env"}
 	server := []driver.MCPServer{{Name: "basecamp", Command: "/bin/basecamp"}}
 	for name, cfg := range map[string]driver.SessionConfig{
-		"another mode":        {Cwd: "/w", Policy: testPolicy{workDir: "/w", mode: "anything"}, MCPServers: server},
-		"another workdir":     {Cwd: "/w", Policy: testPolicy{workDir: "/elsewhere"}, MCPServers: server},
-		"execute allowed":     {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolExecute}}, MCPServers: server},
-		"fetch allowed":       {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolFetch}}, MCPServers: server},
-		"unkeyable server":    {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "a.b", Command: "/bin/x"}}},
-		"no environment file": {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "other", Command: "/bin/x"}}},
+		"another mode":       {Cwd: "/w", Policy: testPolicy{workDir: "/w", mode: "anything"}, MCPServers: server},
+		"another workdir":    {Cwd: "/w", Policy: testPolicy{workDir: "/elsewhere"}, MCPServers: server},
+		"execute allowed":    {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolExecute}}, MCPServers: server},
+		"fetch allowed":      {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolFetch}}, MCPServers: server},
+		"unkeyable server":   {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "a.b", Command: "/bin/x"}}},
+		"no command":         {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "other"}}},
+		"unkeyable env name": {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "other", Command: "/bin/x", Env: map[string]string{"A=B": "x"}}}},
 	} {
-		_, err := Args(cfg, "", files, "")
-		assert.Error(t, err, name)
+		_, err := Args(cfg, "", "")
+		assert.ErrorIs(t, err, driver.ErrUnusable, name)
 	}
 }
 
-// Invariants 1 and 2: the worker's environment is the allowlist and Codex's
-// own variables; the token reaches the MCP server through an owner-only file
-// the wrapper deletes before the server starts, never Codex's environment or
-// argv; and Close leaves no file behind.
-func TestTheTokenReachesOnlyTheMCPServer(t *testing.T) {
+// Invariants 1 and 2 under the connector's own token carriage: the MCP
+// server gets exactly its declared environment, Codex's own environment gets
+// none of it and nothing of the host's, and with a task token served on its
+// one-use socket (as the dispatcher serves it) the token is in no
+// environment, no argv, no log and no file, at any moment of the session.
+func TestTheTaskTokenIsNowhereTheDriverTouches(t *testing.T) {
 	h := newHarness(t, scenario{RunMCP: true, TurnContext: safeTurnContext(), Events: []string{`{"type":"turn.started"}`, turnCompleted()}})
-	s, result, err := h.run(context.Background(), h.config())
+	tokens, err := connector.ServeTaskToken(h.private, testToken, time.Minute)
 	require.NoError(t, err)
+	t.Cleanup(tokens.Close)
+	cfg := h.config()
+	cfg.MCPServers[0].Args = append(cfg.MCPServers[0].Args, "--socket", tokens.Path())
+
+	var s driver.Session
+	stop := drivertest.WatchForSecretFiles(testToken, h.private, h.workDir, h.home)
+	s, result, err := h.run(context.Background(), cfg)
+	require.NoError(t, err)
+	require.NoError(t, s.Close())
+	assert.Empty(t, stop(), "no file ever held the token")
 	assert.Equal(t, driver.TurnEndTurn, result.Stop)
 	assert.Equal(t, testThread, s.ID())
 
 	obs := h.observed()
 	for _, kv := range obs.Env {
-		assert.NotContains(t, kv, testToken, "the token is not in Codex's environment")
 		assert.NotContains(t, kv, hostCanary, "nothing outside the allowlist is inherited")
+		assert.NotContains(t, kv, serverOnly, "an MCP server's environment is not Codex's")
 	}
 	assert.Contains(t, obs.Env, "CODEX_HOME="+h.home)
-	assert.NotContains(t, strings.Join(obs.Args, " "), testToken)
 	assert.Equal(t, "Task 1. Event 2.", obs.Prompt)
-
-	require.Len(t, obs.EnvFile, 1)
-	for file, mode := range obs.EnvFile {
-		assert.Equal(t, "600", mode)
-		assert.Equal(t, h.private, filepath.Dir(file))
-	}
-	assert.False(t, obs.FileAfter, "the wrapper deletes the environment file before the server runs")
-
 	serverEnv, err := os.ReadFile(h.mcpOut)
 	require.NoError(t, err)
-	assert.Contains(t, string(serverEnv), connector.TaskTokenEnv+"="+testToken)
+	assert.Contains(t, string(serverEnv), "SERVER_ONLY_NOT_SECRET="+serverOnly)
 
-	require.NoError(t, s.Close())
-	entries, err := os.ReadDir(h.private)
-	require.NoError(t, err)
-	assert.Empty(t, entries)
-
-	// The credential rule's places (drivertest): Codex's environment and argv,
-	// what the session wrote to its log, and every file the working directory,
-	// the private directory and Codex's home are left holding.
 	drivertest.RequireNoSecret(t, testToken, drivertest.Places{
 		Env:   obs.Env,
 		Args:  obs.Args,
-		Texts: []string{s.(*session).worker.StderrTail()},
-		Dirs:  []string{h.workDir, h.private, filepath.Join(h.home, "sessions")},
+		Texts: []string{s.(*session).worker.StderrTail(), string(serverEnv)},
+		Dirs:  []string{h.workDir, h.private, h.home},
 	})
 }
 
-// The credential rule, while the session runs: no file under the private
-// directory ever carries the token. The driver does not hold this yet: the
-// MCP server's environment file lives from its writing until the wrapper
-// deletes it, before the server starts. Card 18's worker-mcp bridge carries
-// the token over a one-use socket instead, and this test is switched on with
-// it.
+// The credential rule, while the session runs, in drivertest's own form: no
+// file under the session's directories ever carries the token.
 func TestNoTokenFileEverExists(t *testing.T) {
-	t.Skip("the env-file window closes with card 18's worker-mcp bridge; see the codex package doc")
 	h := newHarness(t, scenario{RunMCP: true, TurnContext: safeTurnContext(), Events: []string{turnCompleted()}})
-	drivertest.RequireNoSecretFilesDuring(t, testToken, []string{h.private, h.workDir}, func() {
-		s, _, err := h.run(context.Background(), h.config())
+	tokens, err := connector.ServeTaskToken(h.private, testToken, time.Minute)
+	require.NoError(t, err)
+	t.Cleanup(tokens.Close)
+	cfg := h.config()
+	cfg.MCPServers[0].Args = append(cfg.MCPServers[0].Args, "--socket", tokens.Path())
+	drivertest.RequireNoSecretFilesDuring(t, testToken, []string{h.private, h.workDir, h.home}, func() {
+		s, _, err := h.run(context.Background(), cfg)
 		require.NoError(t, err)
 		require.NoError(t, s.Close())
 	})
-}
-
-// Close removes an environment file the server never consumed.
-func TestCloseRemovesAnUnconsumedEnvironmentFile(t *testing.T) {
-	h := newHarness(t, scenario{Hang: true})
-	s, err := h.drv.NewSession(context.Background(), h.config())
-	require.NoError(t, err)
-	entries, err := os.ReadDir(h.private)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	info, err := entries[0].Info()
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-
-	require.NoError(t, s.Close())
-	entries, err = os.ReadDir(h.private)
-	require.NoError(t, err)
-	assert.Empty(t, entries)
 }
 
 // Invariant 3: a turn is finished only once the rollout shows the policy the
@@ -552,26 +521,6 @@ func TestAMissingBinaryIsNotStarted(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestEnvironmentFilesAreShellSafe(t *testing.T) {
-	dir := t.TempDir()
-	value := `it's $(touch pwned) "quoted" ` + "`x`\nline"
-	files, err := writeEnvFiles(dir, []driver.MCPServer{{Name: "basecamp", Env: map[string]string{"V": value}}})
-	require.NoError(t, err)
-	out := filepath.Join(dir, "out")
-	script := `set -a && . "$0" && set +a && printf %s "$V" > "` + out + `"`
-	cmd := execCommand("/bin/sh", "-c", script, files["basecamp"])
-	cmd.Dir = dir
-	require.NoError(t, cmd.Run())
-	got, err := os.ReadFile(out)
-	require.NoError(t, err)
-	assert.Equal(t, value, string(got))
-	_, err = os.Stat(filepath.Join(dir, "pwned"))
-	assert.True(t, errors.Is(err, os.ErrNotExist))
-
-	_, err = writeEnvFiles(t.TempDir(), []driver.MCPServer{{Name: "basecamp", Env: map[string]string{"BAD-NAME": "x"}}})
-	assert.Error(t, err)
-}
-
 func waitDone(t *testing.T, s driver.Session) {
 	t.Helper()
 	select {
@@ -612,10 +561,6 @@ func assertGone(t *testing.T, pid int) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("process %d outlived its group's end", pid)
-}
-
-func execCommand(name string, args ...string) *exec.Cmd {
-	return exec.CommandContext(context.Background(), name, args...) //nolint:gosec // test helper
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
