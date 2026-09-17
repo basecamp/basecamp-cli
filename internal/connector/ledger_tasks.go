@@ -429,7 +429,9 @@ func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64,
 
 // JoinConversation puts the records on a live task's conversation that wait
 // for a worker onto the task, at delivery admitted, and returns their ids. A
-// task that has ended takes none: they start a task of their own.
+// task that has ended takes none: they start a task of their own. Nor does a
+// task a redispatch superseded while it runs: its worker's token is refused,
+// so what joined it could only end unknown.
 func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, error) {
 	var out []int64
 	err := retryBusy(func() error {
@@ -439,7 +441,7 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 		}
 		defer func() { _ = tx.Rollback() }()
 		var key, route string
-		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key, route FROM tasks WHERE id = ? AND ended_at IS NULL`, taskID).Scan(&key, &route); {
+		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key, route FROM tasks WHERE id = ? AND ended_at IS NULL AND superseded_at IS NULL`, taskID).Scan(&key, &route); {
 		case errors.Is(err, sql.ErrNoRows):
 			out = nil
 			return nil

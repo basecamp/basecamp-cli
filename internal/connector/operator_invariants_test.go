@@ -683,17 +683,45 @@ func TestInvariant3AHoldWithdrawsAWaitingRedispatch(t *testing.T) {
 	require.NoError(t, err, "a person can authorize it again")
 }
 
-// An import that says an entry is done withdraws its waiting redispatch.
-func TestImportDoneWithdrawsAWaitingRedispatch(t *testing.T) {
+// An import withdraws a waiting redispatch, whether the file says the entry is
+// done or does not name it.
+func TestImportWithdrawsAWaitingRedispatch(t *testing.T) {
+	for name, entries := range map[string][]ReconciliationEntry{
+		"done":    {{EventID: 1, Decision: DecisionDone}},
+		"unnamed": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := newTestLedger(t)
+			ctx := context.Background()
+			launch := pendingRedispatch(t, l)
+			_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: entries}, opBy)
+			require.NoError(t, err)
+
+			_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+			require.NoError(t, err)
+			assert.Equal(t, StateCompleted, stateOf(t, l, 1))
+		})
+	}
+}
+
+// A task a redispatch superseded while it runs takes no follow-up: the event
+// waits for the task to end and starts its own.
+func TestASupersededTaskTakesNoFollowUp(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
 	launch := pendingRedispatch(t, l)
-	_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: []ReconciliationEntry{{EventID: 1, Decision: DecisionDone}}}, opBy)
-	require.NoError(t, err)
+	require.Equal(t, StateAdmitted, opAdmit(t, l, 2, "recording:9"), "the conversation's task is superseded, so a new event is admitted")
 
+	joined, err := l.JoinConversation(ctx, launch.TaskID)
+	require.NoError(t, err)
+	assert.Empty(t, joined)
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
 	require.NoError(t, err)
-	assert.Equal(t, StateCompleted, stateOf(t, l, 1))
+	startable, err := l.StartableRecords(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, startable, 1)
+	second := launchOf(t, l, 1)
+	assert.ElementsMatch(t, []int64{1, 2}, second.EventIDs)
 }
 
 // A held record redispatched onto a live conversation is queued, as admission

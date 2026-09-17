@@ -41,9 +41,11 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	cmd := exec.CommandContext(ctx, exe, args...) //nolint:gosec // this binary, with a validated profile name
 	cmd.Env = driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), connector.MCPServerEnv...), os.LookupEnv, nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// The group this check started, and nothing else, signaled while its
-	// leader is still unreaped (nothing waits on it before this runs), so the
-	// group id cannot have been reused.
+	// The group this check started, and nothing else. On the success path it
+	// is signaled before session.Close reaps the leader. When the handshake
+	// fails the client has already closed, and so reaped, the leader; a group
+	// id is not reused while any member lives, so the signal reaches only what
+	// is left of this group, or nothing.
 	stop := func() {
 		if cmd.Process != nil && cmd.Process.Pid > 1 {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)

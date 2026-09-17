@@ -14,7 +14,9 @@ import (
 )
 
 // OpenLedgerReadOnly opens an existing ledger for reading only: no migration,
-// no write, no lock. status uses it beside a running connector (invariant 8).
+// no write to the database, no lock. status uses it beside a running connector
+// (invariant 8). SQLite may create the WAL sidecars of a cleanly closed ledger
+// to read it; they sit in the ledger's private directory.
 //
 // The file must already exist, and it is refused unless it is private, as
 // OpenLedger refuses it. A ledger an older binary wrote, which the running
@@ -27,8 +29,9 @@ func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 	if isInMemory(path) || strings.ContainsAny(path, "?#%") {
 		return nil, fmt.Errorf("connector: ledger path %q cannot be opened as a file", path)
 	}
-	// Vetted as the writer's open vets it, creating nothing: a ledger that
-	// vanishes under a reader (a promote renaming it) is not recreated empty.
+	// Vetted as the writer's open vets it, without creating the file: a ledger
+	// that vanishes under a reader (a promote renaming it) is not recreated
+	// empty.
 	if err := setup.CheckPrivateFile(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, err

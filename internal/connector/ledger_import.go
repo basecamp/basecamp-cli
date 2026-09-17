@@ -185,6 +185,13 @@ WHERE state NOT IN ('completed', 'discarded')`)
 	if err != nil {
 		return ImportResult{}, err
 	}
+	// As a hold does: a redispatch still waiting for its task was authorized
+	// before the cutover review, and waits for that review too.
+	if _, err := tx.ExecContext(ctx, `
+UPDATE events SET redispatch_decision = NULL, authorized_at = NULL, authorized_by = ''
+WHERE state = 'completed' AND redispatch_decision IS NOT NULL`); err != nil {
+		return ImportResult{}, fmt.Errorf("connector: import: withdraw waiting redispatches: %w", err)
+	}
 	out.Tagged, out.Held = int(tagged), waiting
 	importStep("tagged")
 	if err := recordDecision(ctx, tx, decision{action: "import", by: by, at: now,
