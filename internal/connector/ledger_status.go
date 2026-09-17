@@ -147,12 +147,19 @@ type LossStatus struct {
 
 // TaskStatus is a live task and its attempt.
 type TaskStatus struct {
-	TaskID     int64      `json:"task_id"`
-	AttemptID  string     `json:"attempt_id"`
-	State      string     `json:"state"`
-	Driver     string     `json:"driver"`
-	WorkDir    string     `json:"work_dir"`
-	PID        int        `json:"pid,omitempty"`
+	TaskID    int64  `json:"task_id"`
+	AttemptID string `json:"attempt_id"`
+	State     string `json:"state"`
+	Driver    string `json:"driver"`
+	WorkDir   string `json:"work_dir"`
+	PID       int    `json:"pid,omitempty"`
+	PGID      int    `json:"pgid,omitempty"`
+	// ProcessStartedAt is the start time recorded with the pid: with it, the
+	// pid is an identity (driver.OwnsWorker).
+	ProcessStartedAt *time.Time `json:"process_started_at,omitempty"`
+	// Worker is whether the recorded process is still this task's worker, as
+	// the caller established it; the ledger read leaves it empty.
+	Worker     string     `json:"worker,omitempty"`
 	LaunchedAt time.Time  `json:"launched_at"`
 	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
 	EventIDs   []int64    `json:"event_ids"`
@@ -398,7 +405,7 @@ SELECT
 
 func statusTasks(ctx context.Context, tx *sql.Tx, s *Status) error {
 	rows, err := tx.QueryContext(ctx, `
-SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), a.launched_at, t.deadline_at
+SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started, a.launched_at, t.deadline_at
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	if err != nil {
@@ -410,10 +417,19 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 			t        TaskStatus
 			launched string
 			deadline sql.NullString
+			started  sql.NullString
 		)
-		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &launched, &deadline); err != nil {
+		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &t.PGID, &started, &launched, &deadline); err != nil {
 			_ = rows.Close()
 			return err
+		}
+		if started.Valid {
+			at, err := parseStamp(started.String)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			t.ProcessStartedAt = &at
 		}
 		if t.LaunchedAt, err = parseStamp(launched); err != nil {
 			_ = rows.Close()

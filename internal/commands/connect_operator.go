@@ -221,6 +221,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	if err != nil {
 		return err
 	}
+	for i, t := range status.Tasks {
+		status.Tasks[i].Worker = recordedWorkerState(t)
+	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
 		report.Running = &connectRunning{PID: holder.PID, StartedAt: holder.StartedAt, Alive: processAlive(holder.PID)}
@@ -308,7 +311,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))
 	for _, t := range s.Tasks {
-		fmt.Fprintf(w, "    task %d  %s  %s  pid %d  since %s  events %v  in %s\n", t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
+		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  since %s  events %v  in %s\n", t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
 	}
 	if !s.WorktreesKnown {
 		fmt.Fprintf(w, "  Worktrees      not tracked by this build\n")
@@ -385,8 +388,11 @@ type connectRedispatchReport struct {
 	connector.RedispatchResult
 	// WorkerStopped says the replaced worker's recorded process group was
 	// signaled.
-	WorkerStopped bool   `json:"worker_stopped,omitempty"`
-	WorkerNote    string `json:"worker_note,omitempty"`
+	WorkerStopped bool `json:"worker_stopped,omitempty"`
+	// WorkerState is what became of it: stopped, gone, held (its group still
+	// runs and was not proven this task's to signal) or unverified.
+	WorkerState string `json:"worker_state,omitempty"`
+	WorkerNote  string `json:"worker_note,omitempty"`
 	// Verdict is what running the prerequisite again decided.
 	Verdict      string `json:"verdict,omitempty"`
 	VerdictNote  string `json:"verdict_reason,omitempty"`
@@ -415,18 +421,10 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	report := connectRedispatchReport{RedispatchResult: res}
 	if res.Worker != nil {
-		// The recorded group, and only while its leader is still the process
-		// that was recorded: never a pid some other process now has.
-		signaled, err := driver.TerminateRecorded(driver.Process{
+		stop := stopReplacedWorker(driver.Process{
 			PID: res.Worker.Process.PID, PGID: res.Worker.Process.PGID, StartedAt: res.Worker.Process.StartedAt,
 		}, driver.DefaultGrace)
-		report.WorkerStopped = signaled
-		switch {
-		case err != nil:
-			report.WorkerNote = "the recorded worker could not be verified, so nothing was signaled; its token is retired: " + richtext.SanitizeSingleLine(err.Error())
-		case !signaled:
-			report.WorkerNote = "no recorded worker process was still running under its recorded start; nothing was signaled, and its token is retired"
-		}
+		report.WorkerStopped, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
 	}
 	if res.Rerun {
 		verdict, reason, err := rerunPrerequisite(ctx, p, ledger, id)
