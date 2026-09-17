@@ -332,7 +332,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		updates:     make(chan driver.Update, 256),
 		readerEnd:   make(chan struct{}),
 	}
-	go s.read()
+	go s.read() //nolint:contextcheck // the reader outlives the start's context: it runs as long as the worker does
 	return s, nil
 }
 
@@ -642,19 +642,16 @@ func (s *session) read() {
 		if t != nil {
 			s.mu.Lock()
 			canceled := t.canceled
-			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
 			// Whatever ended the turn, a refusal Codex only logged is read
 			// before the session is done: a cancel is where they would
 			// otherwise be lost.
 			s.stderrRefusals()
-			refusals = s.refusalsOf(t)
+			refusals := s.refusalsOf(t)
 			switch {
 			case canceled:
 				s.finishCanceled(t, refusals)
 			default:
-				s.stderrRefusals()
-				refusals = s.refusalsOf(t)
 				err := s.failedVerification()
 				if err == nil {
 					err = driver.ErrSessionEnded
@@ -949,7 +946,6 @@ func (s *session) turnFailed() {
 	}
 	s.mu.Lock()
 	canceled := t.canceled
-	refusals := slices.Clone(t.refusals)
 	s.mu.Unlock()
 	if canceled {
 		s.stderrRefusals()
@@ -962,7 +958,7 @@ func (s *session) turnFailed() {
 	case <-time.After(s.grace):
 	}
 	s.stderrRefusals()
-	refusals = s.refusalsOf(t)
+	refusals := s.refusalsOf(t)
 	if err := s.failedVerification(); err != nil {
 		s.finish(t, driver.PromptResult{Refusals: refusals}, err)
 		s.worker.Terminate(0)
