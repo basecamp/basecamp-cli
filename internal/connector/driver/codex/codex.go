@@ -598,13 +598,15 @@ func (s *session) read() {
 			canceled := t.canceled
 			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
-			switch err := s.failedVerification(); {
+			switch {
 			case canceled:
-				s.finish(t, driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil)
-			case err != nil:
-				s.finish(t, driver.PromptResult{Refusals: refusals}, err)
+				s.finishCanceled(t, refusals)
 			default:
-				s.finish(t, driver.PromptResult{Refusals: refusals}, driver.ErrSessionEnded)
+				err := s.failedVerification()
+				if err == nil {
+					err = driver.ErrSessionEnded
+				}
+				s.finish(t, driver.PromptResult{Refusals: refusals}, err)
 			}
 		}
 		close(s.readerEnd)
@@ -713,6 +715,30 @@ func (s *session) failedVerification() error {
 		return nil
 	}
 	return s.verified()
+}
+
+// finishCanceled ends a turn the connector canceled. A policy check that has
+// already failed is reported over the cancel; one still running is not
+// waited for, because the process it would judge is being ended by the
+// cancel anyway.
+func (s *session) finishCanceled(t *turn, refusals []driver.Refusal) {
+	s.mu.Lock()
+	done := s.verifyDone
+	s.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+			s.mu.Lock()
+			verdict := s.verifyErr
+			s.mu.Unlock()
+			if verdict != nil {
+				s.finish(t, driver.PromptResult{Refusals: refusals}, verdict)
+				return
+			}
+		default:
+		}
+	}
+	s.finish(t, driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil)
 }
 
 // verified waits for the policy check's verdict.
@@ -840,7 +866,7 @@ func (s *session) turnFailed() {
 	refusals := slices.Clone(t.refusals)
 	s.mu.Unlock()
 	if canceled {
-		s.finish(t, driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil)
+		s.finishCanceled(t, refusals)
 		return
 	}
 	if err := s.failedVerification(); err != nil {

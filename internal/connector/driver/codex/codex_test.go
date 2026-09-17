@@ -609,3 +609,34 @@ func TestACancelBeforeThePromptCancelsIt(t *testing.T) {
 	assert.Equal(t, driver.TurnCanceled, result.Stop)
 	waitDone(t, s)
 }
+
+// A canceled turn whose policy check has already failed is reported unsafe,
+// not canceled; one whose check is still running is canceled at once.
+func TestACanceledTurnReportsAFailedPolicyCheck(t *testing.T) {
+	for name, tc := range map[string]struct {
+		done bool
+		err  error
+		want error
+	}{
+		"check failed":  {done: true, err: driver.ErrUnsafeMode, want: driver.ErrUnsafeMode},
+		"check passed":  {done: true},
+		"check running": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := &session{verifyDone: make(chan struct{}), verifyErr: tc.err}
+			if tc.done {
+				close(s.verifyDone)
+			}
+			turn := &turn{done: make(chan struct{})}
+			s.turn = turn
+			s.finishCanceled(turn, nil)
+			<-turn.done
+			if tc.want != nil {
+				require.ErrorIs(t, turn.err, tc.want)
+				return
+			}
+			require.NoError(t, turn.err)
+			assert.Equal(t, driver.TurnCanceled, turn.result.Stop)
+		})
+	}
+}
