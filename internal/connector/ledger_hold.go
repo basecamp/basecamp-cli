@@ -25,9 +25,10 @@ import (
 //     a trigger, in the same statement. A held record is not startable.
 //  2. The hold marker stops dispatch and posting at the database. While it
 //     stands no attempt row can be written, no task takes a follow-up, no
-//     event is handed to a worker for the first time — get_dispatch included,
-//     so a worker a crashed connector left running is told nothing new — and
-//     no outbox intent can move to sending. It lives in the ledger, so every
+//     event is handed to a worker for the first time — neither a first
+//     exposure nor a first pull of an event the launch exposed, so a worker a
+//     crashed connector left running is told nothing new — and no outbox
+//     intent can move to sending. It lives in the ledger, so every
 //     start respects it, and only Release clears it. What it does not stop is
 //     what such a worker already holds: an instruction it was handed before
 //     the hold, and its own Basecamp credential. Ending it is the one-owner
@@ -140,6 +141,17 @@ END;
 CREATE TRIGGER task_events_exposure_refused_under_hold
 BEFORE UPDATE OF delivery ON task_events
 WHEN OLD.delivery = 'admitted' AND NEW.delivery = 'exposed' AND EXISTS (SELECT 1 FROM hold_marker)
+BEGIN
+  SELECT RAISE(ABORT, 'the connector is held: no instruction is handed to a worker until basecamp connect release');
+END;
+
+-- The other first hand-off: an event the launch exposed carries only a
+-- pointer until a worker pulls its instruction, so a first pull is new work
+-- reaching that worker and the hold refuses it too. A repeat — a worker
+-- asking again for what it already pulled — is answered.
+CREATE TRIGGER task_events_pull_refused_under_hold
+BEFORE UPDATE OF pulled_at ON task_events
+WHEN OLD.pulled_at IS NULL AND NEW.pulled_at IS NOT NULL AND EXISTS (SELECT 1 FROM hold_marker)
 BEGIN
   SELECT RAISE(ABORT, 'the connector is held: no instruction is handed to a worker until basecamp connect release');
 END;

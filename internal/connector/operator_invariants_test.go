@@ -1080,3 +1080,34 @@ func TestAHoldWithholdsTheNextInstructionWithoutFailingTheTask(t *testing.T) {
 	assert.Len(t, s.promptList(), 1, "nothing more was handed over")
 	assert.Equal(t, StateHeld, stateOf(t, h.ledger, 2), "the follow-up waits for a person")
 }
+
+// Invariant 2: an event the launch exposed carries only a pointer until a
+// worker pulls its instruction, so the hold refuses that first pull too —
+// the case a crash during launch and a restart under --hold leaves behind.
+func TestInvariant2AFirstPullIsRefusedUnderTheHold(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	launch := launchOf(t, l, 1)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	_, _, err = d.Get(ctx, 1)
+	require.ErrorIs(t, err, ErrHeld, "the instruction is not handed over under the hold")
+
+	_, err = l.Release(ctx, opBy)
+	require.NoError(t, err)
+	first, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// Pulled once, a repeat is answered even if a hold lands after it.
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	repeat, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, first.EventID, repeat.EventID)
+}

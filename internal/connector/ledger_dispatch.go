@@ -601,6 +601,11 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		// instruction, and the exposure can no longer be withdrawn as a
 		// spawn that failed before any worker existed.
 		if _, err := tx.ExecContext(ctx, `UPDATE task_events SET pulled_at = ? WHERE task_id = ? AND event_id = ? AND pulled_at IS NULL`, now, taskID, eventID); err != nil {
+			// A hold refuses a first pull (ledger_hold.go): the worker is
+			// told the connector is held, not given the instruction.
+			if held, holdErr := isHeld(ctx, tx); holdErr == nil && held {
+				return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrHeld)
+			}
 			return Instruction{}, false, fmt.Errorf("connector: record the pull of %d: %w", eventID, err)
 		}
 		wrote = true
