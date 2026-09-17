@@ -128,6 +128,10 @@ func reachRecord(t *testing.T, ledger *Ledger, state RecordState, held bool) {
 		if state == StateCompleted {
 			require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 		}
+	case StateHeld:
+		// Held is written by a hold's review tag (ledger_hold.go), never by
+		// a transition these tests drive.
+		t.Fatalf("reachRecord does not build a %s record", state)
 	}
 	require.Equal(t, state, getRecord(t, ledger, 1).State)
 }
