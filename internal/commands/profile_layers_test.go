@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,4 +144,28 @@ func TestAuthAgentConnectNamesTheFileAProfileIsBoundIn(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bound to account 123 (bound in "+filepath.Join(config.GlobalConfigDir(), "config.json")+")")
+}
+
+// A global config that cannot be parsed was skipped by the loader, so what
+// it recorded about the profile's files proves nothing. Both binding paths
+// report the unusable file itself rather than telling the operator their
+// entry comes from somewhere else.
+func TestUnusableGlobalConfigIsReportedAsItself(t *testing.T) {
+	as := startConnectAS(t)
+	app := connectApp(t, as, &config.Config{})
+	writeGlobalConfigHere(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, as.srv.URL))
+	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, as.srv.URL))
+	reloadApp(t, app, as.srv.URL, "agent")
+
+	_, err := runAgentConnect(t, app, "--device-name", "build-box")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not valid JSON, refusing to rewrite it")
+	assert.Empty(t, as.mints())
+
+	in := strings.NewReader("bc_at_secret")
+	_, err = runLogin(t, app, in, "--with-token")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not valid JSON, refusing to rewrite it")
+	assert.NotContains(t, err.Error(), "not the global config")
+	assert.Equal(t, 12, in.Len(), "refused before stdin is read")
 }

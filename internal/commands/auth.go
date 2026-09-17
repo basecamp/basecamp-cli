@@ -855,6 +855,12 @@ func resolveHeadlessProfile(app *appctx.App, login headlessLogin) (*profileTarge
 	}
 	blocker := ""
 	if existing != nil && existing.AccountID == "" {
+		// Binding rewrites the global config file: a file the writers would
+		// refuse is reported as itself, before anything is said about which
+		// file defines the profile, and before the secret is consumed.
+		if err := globalConfigTakesProfiles(); err != nil {
+			return nil, err
+		}
 		blocker = globalBindingBlocker(app.Config, name)
 	}
 

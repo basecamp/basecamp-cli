@@ -569,6 +569,14 @@ func globalProfileEntry(configData map[string]any, name string) map[string]any {
 // for another Basecamp replaced its entry whole, or it has no entry, and the
 // account has to go into a file that is.
 func globalBindingBlocker(cfg *config.Config, name string) string {
+	if globalConfigUnusable() {
+		// A global config the loader could not read or parse was skipped,
+		// so the layers say nothing about which file defines the profile —
+		// the one that does may be the file that was skipped. Say nothing
+		// about files: the commands that bind report the unusable file
+		// itself, in full, before they write.
+		return ""
+	}
 	origin := cfg.ProfileOrigins[name]
 	if origin == nil || len(origin.Layers) == 0 {
 		// Only a config file defines a profile; an entry with no origin was
@@ -595,11 +603,28 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 	// by the ones that do define it, and the account in it holds. That is
 	// the remedy to name first: a repo config is shared, and an operator's
 	// account does not belong in it (nor can they always write /etc).
-	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Add an entry for it to %s, with the same base_url (%s) and an account_id — or add account_id to the entry in %s",
+	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Give it an entry in %s with base_url %s and an account_id — or add account_id to the entry in %s",
 		richtext.SanitizeSingleLine(closest.Path),
 		richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json")),
 		richtext.SanitizeSingleLine(closest.BaseURL),
 		richtext.SanitizeSingleLine(closest.Path))
+}
+
+// globalConfigUnusable reports whether the global config file exists but
+// cannot be read or parsed. config.Load skips such a file, profiles and
+// all, so what it recorded about where a profile comes from is not
+// evidence: the entry that defines it may be in the file that was skipped.
+func globalConfigUnusable() bool {
+	path := filepath.Join(config.GlobalConfigDir(), "config.json")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: the global config path
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	var parsed map[string]any
+	return json.Unmarshal(data, &parsed) != nil || parsed == nil
 }
 
 // boundIn names the config file a profile's account came from, as " (bound

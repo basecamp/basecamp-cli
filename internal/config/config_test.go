@@ -1326,7 +1326,6 @@ func TestProfileEntryForTheSameBasecampRefinesFieldByField(t *testing.T) {
 		{Source: SourceLocal, Path: paths[1], BaseURL: "https://3.basecampapi.com/"},
 	}, origin.Layers)
 	assert.Empty(t, origin.Replaced)
-	assert.Empty(t, origin.Replaced)
 	assert.Equal(t, map[string]string{
 		"base_url": paths[1], "account_id": paths[0], "project_id": paths[1], "scope": paths[1], "client_id": paths[0],
 	}, origin.Fields)

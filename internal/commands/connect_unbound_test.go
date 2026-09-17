@@ -53,8 +53,8 @@ func TestUnboundProfileHintNamesTheConfigFileWhenTheEntryIsNotGlobal(t *testing.
 	hint := hintOf(t, unboundProfileError(loadConfig(t), "agent"))
 
 	assert.Contains(t, hint, "Its entry comes from "+local+", not the global config")
-	assert.Contains(t, hint, "Add an entry for it to "+filepath.Join(config.GlobalConfigDir(), "config.json")+
-		", with the same base_url (https://3.basecampapi.com) and an account_id",
+	assert.Contains(t, hint, "Give it an entry in "+filepath.Join(config.GlobalConfigDir(), "config.json")+
+		" with base_url https://3.basecampapi.com and an account_id",
 		"a global entry for the same Basecamp is refined by this one, so the account in it holds")
 	assert.Contains(t, hint, "or add account_id to the entry in "+local)
 	assert.NotContains(t, hint, "basecamp auth", "a command that would refuse this profile is no remedy")
