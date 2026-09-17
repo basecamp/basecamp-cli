@@ -412,3 +412,22 @@ func TestRedispatchAndDoctorRefuseAShadowingToken(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decisions`).Scan(&decisions))
 	assert.Zero(t, decisions, "nothing was decided")
 }
+
+// The decision commands' JSON is the CLI's snake_case, as status's is.
+func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
+	f := newOperatorFixture(t)
+	l := f.ledger(t, false)
+	_, err := l.SetHold(context.Background(), "local:tester", connector.HoldByOperator)
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+
+	out, err := f.run(t, output.FormatJSON, "redispatch", "1")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"event_id"`)
+	assert.NotContains(t, out, `"EventID"`)
+
+	out, err = f.run(t, output.FormatJSON, "release")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"still_held"`)
+	assert.NotContains(t, out, `"StillHeld"`)
+}

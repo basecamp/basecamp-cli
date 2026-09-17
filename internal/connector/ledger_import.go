@@ -73,14 +73,14 @@ func ParseReconciliation(data []byte) (Reconciliation, error) {
 type ImportResult struct {
 	// Tombstoned counts records closed as discarded(imported_done), Inserted
 	// the tombstones written for events the ledger had never seen.
-	Tombstoned int
-	Inserted   int
+	Tombstoned int `json:"tombstoned"`
+	Inserted   int `json:"tombstones_inserted"`
 	// AlreadyTerminal counts done entries whose record had already finished.
-	AlreadyTerminal int
+	AlreadyTerminal int `json:"already_terminal"`
 	// Tagged counts non-terminal records tagged for review, and Held those
 	// of them that were waiting for a worker and are now held.
-	Tagged int
-	Held   int
+	Tagged int `json:"tagged_for_review"`
+	Held   int `json:"held"`
 }
 
 // importStep is a test seam: a crash test kills the process at a named step.

@@ -94,36 +94,36 @@ func loadOperatorRecord(ctx context.Context, tx *sql.Tx, eventID int64) (operato
 
 // RedispatchResult is what a redispatch did.
 type RedispatchResult struct {
-	EventID     int64
-	FromState   RecordState
-	FromReason  string
-	FromOutcome Outcome
+	EventID     int64       `json:"event_id"`
+	FromState   RecordState `json:"from_state"`
+	FromReason  string      `json:"from_reason,omitempty"`
+	FromOutcome Outcome     `json:"from_outcome,omitempty"`
 	// State is the record's state after the authorization.
-	State RecordState
+	State RecordState `json:"state"`
 	// Admitted says the record waits for a worker now.
-	Admitted bool
+	Admitted bool `json:"admitted"`
 	// Pending says the record's task is still live: it is admitted in the
 	// transaction that ends that task.
-	Pending bool
+	Pending bool `json:"pending,omitempty"`
 	// Rerun says the record was authorized as blocked: the caller runs its
 	// prerequisite again (admission), which admits it when it succeeds.
-	Rerun bool
+	Rerun bool `json:"rerun,omitempty"`
 	// SupersededTaskID is the task whose token this redispatch retired; zero
 	// when it was already retired.
-	SupersededTaskID int64
+	SupersededTaskID int64 `json:"superseded_task_id,omitempty"`
 	// Worker is the replaced attempt's recorded process, still live in the
 	// ledger: the caller terminates it (driver.TerminateRecorded).
-	Worker *LiveWorker
+	Worker *LiveWorker `json:"worker,omitempty"`
 	// Held says the hold marker stands: authorized, and nothing launches
 	// until release.
-	Held bool
+	Held bool `json:"held,omitempty"`
 }
 
 // LiveWorker is an attempt's recorded worker process.
 type LiveWorker struct {
-	AttemptID string
-	TaskID    int64
-	Process   AttemptProcess
+	AttemptID string         `json:"attempt_id"`
+	TaskID    int64          `json:"task_id"`
+	Process   AttemptProcess `json:"process"`
 }
 
 // Redispatch authorizes a record to run again, or for the first time, and
@@ -311,16 +311,16 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 
 // DiscardResult is what a discard did.
 type DiscardResult struct {
-	EventID     int64
-	FromState   RecordState
-	FromReason  string
-	FromOutcome Outcome
+	EventID     int64       `json:"event_id"`
+	FromState   RecordState `json:"from_state"`
+	FromReason  string      `json:"from_reason,omitempty"`
+	FromOutcome Outcome     `json:"from_outcome,omitempty"`
 	// Already says the record was discarded by a person before; nothing
 	// changed.
-	Already bool
+	Already bool `json:"already_discarded,omitempty"`
 	// Canceled counts lifecycle messages still pending for the event that
 	// will not be sent.
-	Canceled int
+	Canceled int `json:"canceled_messages"`
 }
 
 // Discard closes a held, blocked or unknown record without running it, as

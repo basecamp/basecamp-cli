@@ -27,12 +27,12 @@ type PromoteOptions struct {
 type PromoteResult struct {
 	// Already says an earlier promote finished: the normal ledger stands
 	// under its hold and there was no shadow ledger left to move.
-	Already bool
-	Hold    Hold
-	Tagged  int
-	Held    int
+	Already bool `json:"already_promoted,omitempty"`
+	Hold    Hold `json:"hold"`
+	Tagged  int  `json:"tagged_for_review"`
+	Held    int  `json:"held"`
 	// Ledger is the promoted ledger's path.
-	Ledger string
+	Ledger string `json:"ledger"`
 }
 
 // Errors from promote.

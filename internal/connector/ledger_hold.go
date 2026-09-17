@@ -24,9 +24,13 @@ import (
 //     by a task's end returning it, by anything — is written held instead, by
 //     a trigger, in the same statement. A held record is not startable.
 //  2. The hold marker stops dispatch and posting at the database. While it
-//     stands no attempt row can be written and no outbox intent can move to
-//     sending. It lives in the ledger, so every start respects it, and only
-//     Release clears it.
+//     stands no attempt row can be written, no task takes a follow-up and no
+//     outbox intent can move to sending. It lives in the ledger, so every
+//     start respects it, and only Release clears it. What it does not stop is
+//     a worker a crashed connector left running: it holds its own task token
+//     until a start recovers that attempt, and what it does in Basecamp is
+//     its own. Ending it is the one-owner rule's (driver/worker.go), and a
+//     person can hurry it with redispatch.
 //  3. A hold is one transaction: the marker, a new intake generation, the
 //     review tag on every non-terminal record of the generations before it
 //     (clearing any earlier authorization, a redispatch still waiting for its
@@ -112,6 +116,10 @@ BEGIN
   UPDATE events SET state = 'held', reason = '', revision = revision + 1 WHERE id = NEW.id;
 END;
 
+-- A held record's acknowledgement guard is canceled, not merely delayed: the
+-- record may wait days for a person, and "received" then is worse than
+-- nothing. A redispatch does not write a new one — the worker's own
+-- acknowledgement is the first thing its prompt asks for.
 CREATE TRIGGER events_held_cancels_guard
 AFTER UPDATE OF state ON events
 WHEN NEW.state = 'held' AND OLD.state <> 'held'
@@ -235,19 +243,19 @@ const (
 type Hold struct {
 	// Generation is the intake generation the latest hold opened. Records of
 	// earlier generations were tagged for review.
-	Generation int64
-	Cause      HoldCause
-	HeldBy     string
-	HeldAt     time.Time
+	Generation int64     `json:"generation"`
+	Cause      HoldCause `json:"cause"`
+	HeldBy     string    `json:"held_by"`
+	HeldAt     time.Time `json:"held_at"`
 }
 
 // HoldResult is what setting a hold did.
 type HoldResult struct {
-	Hold Hold
+	Hold Hold `json:"hold"`
 	// Tagged is how many non-terminal records were tagged for review.
-	Tagged int
+	Tagged int `json:"tagged_for_review"`
 	// Held is how many of them were waiting for a worker and are now held.
-	Held int
+	Held int `json:"held"`
 }
 
 // SetHold sets the durable hold marker, opens a new intake generation, and
@@ -346,10 +354,10 @@ WHERE state = 'completed' AND redispatch_decision IS NOT NULL`); err != nil {
 // ReleaseResult is what a release did.
 type ReleaseResult struct {
 	// Released is false when no hold stood.
-	Released bool
-	Hold     Hold
+	Released bool `json:"released"`
+	Hold     Hold `json:"hold,omitzero"`
 	// StillHeld counts held records, which stay held.
-	StillHeld int
+	StillHeld int `json:"still_held"`
 }
 
 // Release clears the hold marker. Held records stay held; records a person
@@ -464,7 +472,9 @@ const (
 	// admission, dispatch, outbox — having passed every check before them. It
 	// says nothing finer about the feed's socket, which intake does not report.
 	ConnectionRunning = "running"
-	// ConnectionStopped is a connector that has exited, however it ended.
+	// ConnectionStopped is a connector that exited through its own shutdown.
+	// A second signal or a crash leaves the last state standing, so status
+	// reads this beside the instance lock's holder rather than instead of it.
 	ConnectionStopped = "stopped"
 )
 

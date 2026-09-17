@@ -171,7 +171,8 @@ messages waiting for a person, held records, and the last 20 dispatches with
 their outcomes.
 
 It reads the ledger read-only and takes no lock, so it works while the
-connector runs. It shows no content and no token.`,
+connector runs. It shows no content, no feed position and no token; a held
+record's recording URL is shown so a person can open what was asked.`,
 		Example: `  basecamp connect status -P agent
   basecamp connect status -P agent --shadow --json`,
 		Args: cobra.NoArgs,
