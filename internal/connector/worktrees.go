@@ -720,7 +720,7 @@ var safeGit = []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=f
 func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([]string, error) {
 	out, err := w.run(ctx, append(slices.Clone(safeGit), "-C", dir, "config", "--name-only", "--get-regexp", `^filter\.`), "config")
 	var exitErr *exec.ExitError
-	if err != nil && !(errors.As(err, &exitErr) && exitErr.ExitCode() == 1) {
+	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
 		// Exit 1 is "no such keys"; anything else leaves filters unknown.
 		return nil, err
 	}

@@ -529,13 +529,13 @@ func TestPruneRemovesOnlyWhatTheOperatorDealtWith(t *testing.T) {
 // branch of its own.
 func TestAForcedPruneKeepsADetachedHeadsCommit(t *testing.T) {
 	h := newWorktreeHarness(t)
-	workDir, row := h.prepare(45)
+	workDir, _ := h.prepare(45)
 	h.git(workDir, "checkout", "-q", "--detach")
 	h.write(workDir, "c.txt", "c\n")
 	h.git(workDir, "add", "c.txt")
 	h.git(workDir, "commit", "-q", "-m", "detached")
 	commit := h.git(workDir, "rev-parse", "HEAD")
-	row = h.finish(workDir)
+	row := h.finish(workDir)
 	require.Equal(t, RetainedUnpushed, row.RetainedReason)
 
 	results, err := h.wt.Prune(context.Background(), []string{row.Path})
