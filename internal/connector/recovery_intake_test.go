@@ -216,7 +216,7 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 	assert.Equal(t, []int64{deleted}, unrecovered)
 	assert.Equal(t, LaneRepair, r.Lane, "the straggler came from the repair walk")
 	// The checkpoint is the feed's own walk, wherever the repair walk got to.
-	assert.Equal(t, int64(lastLive), h.positionID(l, eventfeed.Filters{}))
+	assert.Equal(t, lastLive, h.positionID(l, eventfeed.Filters{}))
 
 	var walks, servedAt int
 	for _, p := range h.polls() {

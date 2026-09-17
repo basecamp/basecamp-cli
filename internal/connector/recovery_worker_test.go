@@ -110,7 +110,7 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if token == "" {
 		return errors.New("the MCP server's environment carries no task token")
 	}
-	l, err := OpenLedger(filepath.Join(server.Args[i+1], LedgerFile))
+	l, err := OpenLedger(filepath.Join(server.Args[i+1], LedgerFile)) //nolint:contextcheck // OpenLedger migrates on its own context, as the MCP server opens it
 	if err != nil {
 		return err
 	}
