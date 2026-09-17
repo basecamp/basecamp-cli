@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -189,4 +190,39 @@ func TestASecondRunRepairsToo(t *testing.T) {
 	require.NoError(t, intake.resumeReconciliation(second))
 	require.Eventually(t, func() bool { return polls.calls.Load() > after }, 5*time.Second, 5*time.Millisecond,
 		"the second run's repairs are queued to a pool with no workers")
+}
+
+// Run is reusable, so its per-run state starts clean. A checkpoint saved by an
+// earlier run would otherwise clear this run's --since before it has saved
+// anything of its own, and an earlier abort would end it before it began.
+func TestASecondRunStartsWithCleanRunState(t *testing.T) {
+	ledger := newTestLedger(t)
+	intake, transport, minter, polls := newFeedIntake(t, ledger, Options{SinceEventID: 17099838000})
+	intake.checkpointed = true
+	intake.abortErr = errors.New("an earlier run's fatal")
+	intake.hasReentry = true
+	intake.replaying = true
+	intake.enteredByReentry = true
+
+	minter.ScriptTicket(ticket())
+	polls.ScriptPage(eventfeed.PollPage{Position: "p1"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := runInBackground(ctx, t, intake)
+	subscribedConn(t, transport)
+
+	require.Eventually(t, func() bool { return polls.CallCount() > 0 }, 5*time.Second, 10*time.Millisecond,
+		"an earlier run's abort must not end this one")
+	assert.Equal(t, "17099838000", polls.Calls()[0].Cursor.Since)
+
+	// checkpointed is legitimately true again by now, this run having saved
+	// its own page; what must not come back is the rest.
+	intake.mu.Lock()
+	clean := intake.abortErr == nil && !intake.hasReentry && !intake.replaying
+	intake.mu.Unlock()
+	assert.True(t, clean, "per-run state starts clean")
+
+	cancel()
+	awaitReturn(t, done, "Run should return on shutdown")
 }

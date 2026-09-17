@@ -126,6 +126,14 @@ func (w *repairWalker) finalPass(ctx context.Context, loss *Loss) error {
 	if _, err := w.walk(ctx, loss); err != nil && !errors.Is(err, errReconciliationEnded) {
 		return err
 	}
+	if w.retryAfter > 0 {
+		// The server refused the only attempt this pass had and named a wait.
+		// Nothing was learned about the missing ids, and a throttle is not a
+		// verdict: the loss stays open and the next start tries again.
+		w.log.Warn("the last repair attempt was throttled; the loss stays open for the next start",
+			"loss_id", loss.ID, "retry_after", w.retryAfter)
+		return nil
+	}
 	if err := ctx.Err(); err != nil {
 		// The final attempt did not run to its end; closing now would condemn
 		// ids on a pass that never happened.

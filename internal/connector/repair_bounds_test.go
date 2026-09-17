@@ -169,3 +169,25 @@ func TestARepairWalkHonoursRetryAfter(t *testing.T) {
 	assert.GreaterOrEqual(t, waits[0], 15*time.Minute,
 		"the server asked for fifteen minutes; the repair cadence does not overrule it")
 }
+
+// C2: a throttle is not a verdict. A final pass whose only poll was refused
+// with Retry-After has learned nothing about the missing ids, so the loss
+// stays open for the next start rather than closing them as unrecovered.
+func TestAThrottledFinalPassLeavesTheLossOpen(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-time.Hour), time.Minute, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	open, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	assert.Len(t, open, 1, "the window closed, but nothing was learned about the ids")
+	unrecovered, err := ledger.UnrecoveredIDs(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, unrecovered, "a throttle is not a verdict")
+}

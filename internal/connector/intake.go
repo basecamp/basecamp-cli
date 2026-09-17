@@ -270,6 +270,7 @@ func (in *Intake) CheckpointKey() eventfeed.CheckpointKey { return in.key }
 // position refused before this run had a safe re-entry of its own. Everything
 // else the feed can recover from, it recovers from inside the package.
 func (in *Intake) Run(ctx context.Context) error {
+	in.resetRunState()
 	// Repairs get a child lifetime that ends when Run does, whatever the
 	// reason. A repair is off the delivery path: a terminal feed must not wait
 	// out its sixty-second cadence, and an unfinished repair resumes on the
@@ -309,6 +310,31 @@ func (in *Intake) Run(ctx context.Context) error {
 		default:
 			return err
 		}
+	}
+}
+
+// resetRunState clears everything scoped to one Run.
+//
+// Run is reusable — each one builds its own repair pool — so nothing a
+// previous one decided may leak into the next: a checkpoint it saved would
+// clear this run's --since before this run has saved anything, and an abort it
+// suffered would end this one before it began. What survives is knowledge
+// about the account rather than the run: the listed and learned projects.
+func (in *Intake) resetRunState() {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.checkpointed = false
+	in.abortErr = nil
+	in.hasReentry = false
+	in.reentry = eventfeed.Start{}
+	in.reentryLog = ""
+	in.reentryReplays = false
+	in.replaying = false
+	in.enteredByReentry = false
+	in.promotedThisRun = false
+	select {
+	case <-in.reconnect:
+	default:
 	}
 }
 
