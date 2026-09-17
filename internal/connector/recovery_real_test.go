@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,6 +63,16 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 					require.NoError(t, os.MkdirAll(config, 0o700))
 					require.NoError(t, os.WriteFile(filepath.Join(config, "config.json"),
 						[]byte(`{"profiles":{"agent":{"base_url":"http://127.0.0.1:9","account_id":"`+harnessAccount+`"}}}`), 0o600))
+					// The worker's MCP server is the real one, and it refuses
+					// to start without a credential. The bridge hands it no
+					// token from the environment — by design — so the profile
+					// gets a stored one, in this harness's own config
+					// directory, pointing at a closed port.
+					t.Setenv("BASECAMP_NO_KEYRING", "1")
+					require.NoError(t, auth.NewStore(config).Save(auth.ProfileCredentialKey("agent"), &auth.Credentials{
+						AccessToken: "test-token-not-real", OAuthType: "bc5",
+						ExpiresAt: time.Now().Add(time.Hour).Unix(),
+					}))
 					// These are appended after os.Environ(), and the last
 					// duplicate wins in exec, so what the operator's own
 					// environment says is overridden rather than reaching the
@@ -90,13 +102,15 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 						}
 					}
 					if row.held {
+						// The other project's attempt is a second one; the
+						// held attempt is the first.
 						// Run until a real worker has finished an event in the
 						// other project: recovery returned and the dispatcher
 						// went on around the held attempt.
 						h.publish(feedEntry{Event: otherTodoEvent(102, 6001)})
 						h.run(harnessRun{StateDir: stateDir, Env: env, Until: "state:102=completed"})
 						attempts := harnessAttempts(t, l)
-						require.Len(t, attempts, 1)
+						require.NotEmpty(t, attempts)
 						assert.Equal(t, string(AttemptLaunching), attempts[0].State, "held, not settled")
 						assert.Equal(t, StateDispatched, stateOf(t, l, 101))
 						assert.Empty(t, h.notices(101))
@@ -118,6 +132,16 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 						assert.Equal(t, string(OutcomeUnknown), outcome, "never prompted, still unknown: a process may have existed")
 					}
 					assert.LessOrEqual(t, len(h.notices(101)), 1, "at most one completion notice")
+					if row.kill == "" {
+						// The whole chain ran: the agent started its MCP
+						// server, the bridge took the task token from the
+						// connector's socket, and the worker called
+						// get_dispatch, which cancels the guard.
+						var canceled int
+						require.NoError(t, l.db.QueryRowContext(context.Background(),
+							`SELECT COUNT(*) FROM task_events WHERE event_id = 101 AND guard = 'canceled'`).Scan(&canceled))
+						assert.Equal(t, 1, canceled, "the real worker read its dispatch")
+					}
 					for _, pid := range pids {
 						assert.True(t, processGone(context.Background(), pid), "the worker the crash left is gone, pid %d", pid)
 					}

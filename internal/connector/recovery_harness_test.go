@@ -406,7 +406,12 @@ func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
 	err := cmd.Wait()
 	defer h.requireNoTaskTokenLeaked(out)
 	if path := os.Getenv("BASECAMP_RECOVERY_DEBUG"); path != "" {
-		_ = os.WriteFile(path, []byte(out.String()), 0o600)
+		// Appended: a test is several runs, and the one that matters is
+		// rarely the last.
+		if f, openErr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); openErr == nil {
+			_, _ = f.WriteString(out.String())
+			_ = f.Close()
+		}
 	}
 	if r.Killed {
 		var exit *exec.ExitError
