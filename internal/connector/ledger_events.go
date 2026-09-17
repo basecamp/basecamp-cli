@@ -205,8 +205,14 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // edges back into the working states. Completed and discarded have none.
 var lifecycle = map[RecordState][]RecordState{
 	// seen to queued is one edge, not two: admission commits an admitted
-	// verdict AS queued when the conversation is already live, so the record
-	// never passes through admitted at all.
+	// verdict AS queued when the conversation is already live — another
+	// record on it admitted or dispatched, admission.Ledger's definition — so
+	// the record never passes through admitted at all. Deciding that moves
+	// only the incoming record; a queued record leaves queued by dispatch.
+	//
+	// A blocked record's edges back into the working states are for the
+	// lifecycle's own bookkeeping. It returns to work with content only
+	// through a new verdict, because a move to blocked drops the snapshot.
 	StateSeen:     {StateAdmitted, StateQueued, StateBlocked, StateDiscarded},
 	StateAdmitted: {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
 	StateQueued:   {StateDispatched, StateBlocked, StateDiscarded},

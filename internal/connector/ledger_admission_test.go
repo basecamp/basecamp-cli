@@ -339,6 +339,13 @@ func TestAdmissionQueuesBehindALiveConversation(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, written)
 			assert.Equal(t, RecordState(tc.want), getRecord(t, ledger, 1).State)
+			if tc.name == "a queued record alone is not a task" {
+				// Liveness decides only the incoming record. The queued one
+				// is not moved, expired or re-decided by it.
+				third := getRecord(t, ledger, 3)
+				assert.Equal(t, StateQueued, third.State)
+				assert.Equal(t, int64(1), third.Revision)
+			}
 		})
 	}
 }
