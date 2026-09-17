@@ -600,14 +600,16 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 	}
 	// The global config has no entry for this profile, so there is nothing
 	// to bind. An entry added there is refined by the ones that do define
-	// it — and the account in it holds — but only while nothing between
-	// them replaces it. Where something does, the global config is no
-	// remedy at all: a new entry would be replaced the same way.
-	if len(origin.Replaced) > 0 {
-		replacer := origin.Replaced[0].By
+	// it — and the account in it holds — but only while nothing closer
+	// than the global config replaces it. Where something does, the global
+	// config is no remedy at all: a new entry would be replaced the same
+	// way. A replaced entry the system config made is no such evidence: it
+	// is farther than the global config, and a new entry there replaces it
+	// rather than the other way round.
+	if replaced := firstReplacedAfterGlobal(origin); replaced != nil {
 		return fmt.Sprintf("Its entry comes from %s, not the global config, and the entry in %s, for %s, replaces everything farther — an entry added to the global config among them. Add account_id to the profile's entry in %s",
-			richtext.SanitizeSingleLine(closest.Path), richtext.SanitizeSingleLine(replacer.Path),
-			richtext.SanitizeSingleLine(replacer.BaseURL), richtext.SanitizeSingleLine(closest.Path))
+			richtext.SanitizeSingleLine(closest.Path), richtext.SanitizeSingleLine(replaced.By.Path),
+			richtext.SanitizeSingleLine(replaced.By.BaseURL), richtext.SanitizeSingleLine(closest.Path))
 	}
 	// Naming the global config first: a repo config is shared, and an
 	// operator's account does not belong in it (nor can they always
@@ -617,6 +619,20 @@ func globalBindingBlocker(cfg *config.Config, name string) string {
 		richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json")),
 		richtext.SanitizeSingleLine(closest.BaseURL),
 		richtext.SanitizeSingleLine(closest.Path))
+}
+
+// firstReplacedAfterGlobal is the farthest replaced entry a new global
+// entry would be replaced along with: one a repo or local config made,
+// which is closer than the global config. A system entry is farther, so a
+// replacement of one says nothing about an entry added to the global
+// config. Nil when there is none.
+func firstReplacedAfterGlobal(origin *config.ProfileOrigin) *config.ReplacedProfileLayer {
+	for i := range origin.Replaced {
+		if origin.Replaced[i].Source == config.SourceRepo || origin.Replaced[i].Source == config.SourceLocal {
+			return &origin.Replaced[i]
+		}
+	}
+	return nil
 }
 
 // globalConfigUnusable reports whether the global config file exists but

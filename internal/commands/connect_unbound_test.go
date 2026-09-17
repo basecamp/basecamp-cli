@@ -140,3 +140,23 @@ func TestGlobalBindingBlockerDoesNotOfferAGlobalEntryThatWouldBeReplaced(t *test
 	assert.Equal(t, "Its entry comes from /l/config.json, not the global config, and the entry in /l/config.json, for http://localhost:3000, replaces everything farther — an entry added to the global config among them. Add account_id to the profile's entry in /l/config.json", hint)
 	assert.NotContains(t, hint, config.GlobalConfigDir()+"/config.json", "a global entry would be replaced too")
 }
+
+// A replaced system entry is no such obstacle: the global config is closer,
+// so an entry added there replaces the system one rather than the other way
+// round, and the closer entries refine it.
+func TestGlobalBindingBlockerOffersAGlobalEntryOverAReplacedSystemOne(t *testing.T) {
+	writeGlobalConfig(t, `{}`)
+	system := config.ProfileLayer{Source: config.SourceSystem, Path: "/etc/basecamp/config.json", BaseURL: "https://3.basecampapi.com"}
+	repo := config.ProfileLayer{Source: config.SourceRepo, Path: "/r/config.json", BaseURL: "http://localhost:3000"}
+	cfg := &config.Config{ProfileOrigins: map[string]*config.ProfileOrigin{
+		"agent": {
+			Replaced: []config.ReplacedProfileLayer{{ProfileLayer: system, By: repo}},
+			Layers:   []config.ProfileLayer{repo},
+		},
+	}}
+
+	assert.Equal(t,
+		"Its entry comes from /r/config.json, not the global config, so no command can bind it. Give it an entry in "+
+			filepath.Join(config.GlobalConfigDir(), "config.json")+" with base_url http://localhost:3000 and an account_id — or add account_id to the entry in /r/config.json",
+		globalBindingBlocker(cfg, "agent"))
+}
