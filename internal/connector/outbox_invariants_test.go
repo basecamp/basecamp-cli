@@ -1405,3 +1405,23 @@ func TestOutboxAStillRunningNoticeIsNotPostedAfterTheAttemptEnded(t *testing.T) 
 	assert.Equal(t, IntentCanceled, got.State)
 	assert.Equal(t, "the attempt ended before the notice went out", got.Note)
 }
+
+// A still-running notice whose attempt is not in the ledger at all is
+// canceled too, as a holding reply is when its record is gone.
+func TestOutboxAStillRunningNoticeWithNoAttemptIsCanceled(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	_, err := ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `PRAGMA foreign_keys = off`)
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `DELETE FROM attempts WHERE id = ?`, l.AttemptID)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Zero(t, basecamp.postCount())
+	assert.Equal(t, IntentCanceled, obIntent(t, ledger, stillRunningKey(l.AttemptID, 1)).State)
+}
