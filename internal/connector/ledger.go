@@ -78,6 +78,7 @@ type Ledger struct {
 	file   *openLedgerFile
 	closed sync.Once
 	now    func() time.Time
+	hooks  Hooks
 }
 
 // OpenLedger opens (creating if absent) the ledger at path and brings its
@@ -760,6 +761,10 @@ BEGIN
   SELECT RAISE(ABORT, 'a worker acknowledges and completes what it pulled; anything else is the dispatcher settling a completed record');
 END;
 `,
+	// Migration 6. The dispatcher's side of a task: what it runs in, its
+	// attempts, and how each ended. See ledger_tasks.go for the invariants
+	// these tables hold.
+	migrationTasksAndAttempts,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
