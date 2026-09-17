@@ -525,12 +525,11 @@ func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	//
 	// An entry that EXISTS without an account deliberately gets no
 	// --account. The login binds one there only when the global config
-	// file is the layer that defines the profile, and from here there is
-	// no way to know which layer did — a repo or system config that
-	// defines it accountless would make this command fail with "not the
-	// global config's entry", and a command handed over to be run
-	// verbatim should not be one that cannot work. Without it the login
-	// refuses by naming exactly what it needs, layer included, which is
+	// file is one of the layers the profile is made of — a repo or local
+	// entry for another Basecamp, or one the global file lacks, would make
+	// this command fail — and a command handed over to be run verbatim
+	// should not be one that cannot work. Without it the login refuses by
+	// naming exactly what it needs, the file to change included, which is
 	// better guidance than a guess.
 	if entry, registered := m.cfg.Profiles[m.cfg.ActiveProfile]; !registered || entry == nil {
 		command += " --account " + m.accountToBind()

@@ -52,6 +52,64 @@ type Config struct {
 
 	// Sources tracks where each value came from (for debugging).
 	Sources map[string]string `json:"-"`
+
+	// ProfileOrigins records, per profile name, the config files its entry
+	// in Profiles was made from. Set by the file layers only: a profile an
+	// invocation adds to Profiles in memory has none.
+	ProfileOrigins map[string]*ProfileOrigin `json:"-"`
+}
+
+// ProfileLayer is one config file's entry for a profile.
+type ProfileLayer struct {
+	Source  Source
+	Path    string
+	BaseURL string
+}
+
+// ProfileOrigin is where a profile's effective entry came from. See
+// mergeProfile for how entries from different files combine.
+type ProfileOrigin struct {
+	// Layers are the files whose entries make up the profile, farthest
+	// first: the first defines it, and each later one refines it.
+	Layers []ProfileLayer
+
+	// Fields maps each field set on the profile, by its JSON key, to the
+	// path of the file that set it.
+	Fields map[string]string
+
+	// Replaced are the files whose entries a closer entry for a different
+	// Basecamp replaced whole, farthest first. Nothing of them applies.
+	Replaced []ProfileLayer
+}
+
+// Includes reports whether a file of the given source contributes to the
+// profile.
+func (o *ProfileOrigin) Includes(source Source) bool {
+	return o.find(o.Layers, source) != nil
+}
+
+// ReplacedLayer returns the replaced entry from a file of the given source,
+// nil when no such entry was replaced.
+func (o *ProfileOrigin) ReplacedLayer(source Source) *ProfileLayer {
+	return o.find(o.Replaced, source)
+}
+
+// Closest is the closest file contributing to the profile: the one whose
+// fields win.
+func (o *ProfileOrigin) Closest() ProfileLayer {
+	if len(o.Layers) == 0 {
+		return ProfileLayer{}
+	}
+	return o.Layers[len(o.Layers)-1]
+}
+
+func (o *ProfileOrigin) find(layers []ProfileLayer, source Source) *ProfileLayer {
+	for i := len(layers) - 1; i >= 0; i-- {
+		if layers[i].Source == source {
+			return &layers[i]
+		}
+	}
+	return nil
 }
 
 // IsExperimental returns true if the named experimental feature is enabled.
@@ -333,38 +391,82 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		if untrusted {
 			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
 		} else {
-			if cfg.Profiles == nil {
-				cfg.Profiles = make(map[string]*ProfileConfig)
-			}
 			for name, profileData := range v {
 				if profileMap, ok := profileData.(map[string]any); ok {
-					profileCfg := &ProfileConfig{}
-					if baseURL, ok := profileMap["base_url"].(string); ok && baseURL != "" {
-						profileCfg.BaseURL = baseURL
-					} else {
-						// Skip profiles with empty or missing base_url
-						continue
-					}
-					if accountID := getStringOrNumber(profileMap, "account_id"); accountID != "" {
-						profileCfg.AccountID = accountID
-					}
-					if projectID := getStringOrNumber(profileMap, "project_id"); projectID != "" {
-						profileCfg.ProjectID = projectID
-					}
-					if todolistID := getStringOrNumber(profileMap, "todolist_id"); todolistID != "" {
-						profileCfg.TodolistID = todolistID
-					}
-					if scope, ok := profileMap["scope"].(string); ok {
-						profileCfg.Scope = scope
-					}
-					if clientID, ok := profileMap["client_id"].(string); ok {
-						profileCfg.ClientID = clientID
-					}
-					cfg.Profiles[name] = profileCfg
+					mergeProfile(cfg, name, profileMap, ProfileLayer{Source: source, Path: path})
 				}
 			}
 			cfg.Sources["profiles"] = string(source)
 		}
+	}
+}
+
+// mergeProfile layers one config file's entry for a profile over the entry
+// the farther files made of it. This is the one place profile entries from
+// different files meet, and the rule is:
+//
+//   - An entry with no base_url is skipped, as if the file did not name the
+//     profile.
+//   - An entry for the same Basecamp as the one it layers over — the same
+//     base_url, normalized — refines it field by field. A field the closer
+//     entry sets wins; a field it leaves unset keeps the farther file's
+//     value. So a trusted repo or local config that names a profile's
+//     project does not hide the account the global config binds it to,
+//     just as an unset top-level key never hides a farther file's.
+//   - An entry for a different Basecamp replaces the farther one whole. IDs
+//     and a client from one Basecamp mean nothing on another, so nothing is
+//     carried across; the replaced files are kept in the origin, since an
+//     account bound there no longer applies.
+//
+// Unset means absent: for the IDs also empty (as for the top-level IDs),
+// while a present scope or client_id sets the field even when empty.
+//
+// Every field set records the file that set it, in cfg.ProfileOrigins.
+func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileLayer) {
+	baseURL, _ := entry["base_url"].(string)
+	if baseURL == "" {
+		return
+	}
+	layer.BaseURL = baseURL
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]*ProfileConfig)
+	}
+	if cfg.ProfileOrigins == nil {
+		cfg.ProfileOrigins = make(map[string]*ProfileOrigin)
+	}
+
+	p, origin := cfg.Profiles[name], cfg.ProfileOrigins[name]
+	if p == nil || origin == nil || NormalizeBaseURL(p.BaseURL) != NormalizeBaseURL(baseURL) {
+		replaced := []ProfileLayer(nil)
+		if p != nil && origin != nil {
+			replaced = append(append(replaced, origin.Replaced...), origin.Layers...)
+		}
+		p = &ProfileConfig{}
+		origin = &ProfileOrigin{Replaced: replaced, Fields: make(map[string]string)}
+		cfg.Profiles[name] = p
+		cfg.ProfileOrigins[name] = origin
+	}
+	origin.Layers = append(origin.Layers, layer)
+
+	set := func(field string, dst *string, value string) {
+		*dst = value
+		origin.Fields[field] = layer.Path
+	}
+	set("base_url", &p.BaseURL, baseURL)
+	if v := getStringOrNumber(entry, "account_id"); v != "" {
+		set("account_id", &p.AccountID, v)
+	}
+	if v := getStringOrNumber(entry, "project_id"); v != "" {
+		set("project_id", &p.ProjectID, v)
+	}
+	if v := getStringOrNumber(entry, "todolist_id"); v != "" {
+		set("todolist_id", &p.TodolistID, v)
+	}
+	if v, ok := entry["scope"].(string); ok {
+		set("scope", &p.Scope, v)
+	}
+	if v, ok := entry["client_id"].(string); ok {
+		set("client_id", &p.ClientID, v)
 	}
 }
 

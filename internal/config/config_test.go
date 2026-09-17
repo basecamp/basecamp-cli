@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1274,4 +1275,94 @@ func TestNonInteractiveEnv(t *testing.T) {
 			assert.Equal(t, tt.want, NonInteractiveEnv())
 		})
 	}
+}
+
+// profileLayer is a config file's contents and the layer it loads as.
+type profileLayer struct {
+	source   Source
+	contents string
+}
+
+// loadProfileLayers loads each file's contents as a trusted layer of the
+// given source, in order, farthest first, and returns the config and the
+// files' paths.
+func loadProfileLayers(t *testing.T, layers ...profileLayer) (*Config, []string) {
+	t.Helper()
+	dir := t.TempDir()
+	trust := NewTrustStore(dir)
+	cfg := Default()
+	paths := make([]string, len(layers))
+	for i, l := range layers {
+		paths[i] = filepath.Join(dir, fmt.Sprintf("layer%d", i), "config.json")
+		require.NoError(t, os.MkdirAll(filepath.Dir(paths[i]), 0o700))
+		require.NoError(t, os.WriteFile(paths[i], []byte(l.contents), 0o600))
+		require.NoError(t, trust.Trust(paths[i]))
+		loadFromFile(cfg, paths[i], l.source, trust)
+	}
+	return cfg, paths
+}
+
+// A closer entry for the same Basecamp refines the farther one field by
+// field: what it sets wins, what it leaves unset is kept. So a local entry
+// without an account does not hide the global binding.
+func TestProfileEntryForTheSameBasecampRefinesFieldByField(t *testing.T) {
+	cfg, paths := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":999,"project_id":"1","scope":"read","client_id":"c"}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com/","account_id":"","project_id":"42","scope":""}}}`},
+	)
+
+	p := cfg.Profiles["bot"]
+	require.NotNil(t, p)
+	assert.Equal(t, "https://3.basecampapi.com/", p.BaseURL, "base_urls equal once normalized; the closer spelling wins")
+	assert.Equal(t, "999", p.AccountID, "an empty account is unset, and hides nothing")
+	assert.Equal(t, "42", p.ProjectID)
+	assert.Equal(t, "", p.Scope, "a present scope sets the field, even empty")
+	assert.Equal(t, "c", p.ClientID)
+
+	origin := cfg.ProfileOrigins["bot"]
+	require.NotNil(t, origin)
+	assert.Equal(t, []ProfileLayer{
+		{Source: SourceGlobal, Path: paths[0], BaseURL: "https://3.basecampapi.com"},
+		{Source: SourceLocal, Path: paths[1], BaseURL: "https://3.basecampapi.com/"},
+	}, origin.Layers)
+	assert.Empty(t, origin.Replaced)
+	assert.Equal(t, map[string]string{
+		"base_url": paths[1], "account_id": paths[0], "project_id": paths[1], "scope": paths[1], "client_id": paths[0],
+	}, origin.Fields)
+	assert.True(t, origin.Includes(SourceGlobal))
+	assert.Equal(t, paths[1], origin.Closest().Path)
+}
+
+// A closer entry for another Basecamp replaces the farther one whole: no ID
+// or client is carried across Basecamps, and the replaced files are kept.
+func TestProfileEntryForAnotherBasecampReplacesTheEntryWhole(t *testing.T) {
+	cfg, paths := loadProfileLayers(t,
+		profileLayer{SourceSystem, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","project_id":"1"}}}`},
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999","client_id":"c"}}}`},
+		profileLayer{SourceRepo, `{"profiles":{"bot":{"base_url":"http://localhost:3000"}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"base_url":"http://localhost:3000","project_id":"42"}}}`},
+	)
+
+	assert.Equal(t, &ProfileConfig{BaseURL: "http://localhost:3000", ProjectID: "42"}, cfg.Profiles["bot"])
+	origin := cfg.ProfileOrigins["bot"]
+	assert.False(t, origin.Includes(SourceGlobal))
+	assert.Equal(t, []string{paths[2], paths[3]}, []string{origin.Layers[0].Path, origin.Layers[1].Path})
+	require.Len(t, origin.Replaced, 2)
+	hidden := origin.ReplacedLayer(SourceGlobal)
+	require.NotNil(t, hidden)
+	assert.Equal(t, paths[1], hidden.Path)
+	assert.Equal(t, "https://3.basecampapi.com", hidden.BaseURL)
+	assert.Equal(t, map[string]string{"base_url": paths[3], "project_id": paths[3]}, origin.Fields)
+}
+
+// An entry without a base_url names nothing, and changes nothing.
+func TestProfileEntryWithoutABaseURLIsSkipped(t *testing.T) {
+	cfg, paths := loadProfileLayers(t,
+		profileLayer{SourceGlobal, `{"profiles":{"bot":{"base_url":"https://3.basecampapi.com","account_id":"999"}}}`},
+		profileLayer{SourceLocal, `{"profiles":{"bot":{"account_id":"1"},"orphan":{"project_id":"1"}}}`},
+	)
+
+	assert.Equal(t, "999", cfg.Profiles["bot"].AccountID)
+	assert.Equal(t, []ProfileLayer{{Source: SourceGlobal, Path: paths[0], BaseURL: "https://3.basecampapi.com"}}, cfg.ProfileOrigins["bot"].Layers)
+	assert.NotContains(t, cfg.Profiles, "orphan")
 }
