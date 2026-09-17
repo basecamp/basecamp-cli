@@ -137,6 +137,7 @@ widens trust.
     "222": { "path": "/home/me/Work/app", "class": "internal", "watch_completions": true }
   },
   "driver": "spawn",
+  "worker": "claude",
   "concurrency": 2,
   "deadline": "45m0s",
   "worktrees": false
@@ -155,9 +156,10 @@ widens trust.
 | `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
 | `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
 | `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
+| `worker` | Which coding agent a spawn worker is: `claude` (default) or `codex` | `--worker` |
 | `concurrency` | Workers at once, 1 to 32 (default 2) | `--concurrency` |
 | `deadline` | Time limit per task, 1m to 24h (default 45m) | `--deadline 90m` |
-| `worktrees` | Each task gets its own git worktree of the routed directory | `--worktrees`, `--worktrees=false` |
+| `worktrees` | Each task gets its own git worktree of the routed directory, kept when the task ends and removed only by `connect worktrees prune` | `--worktrees`, `--worktrees=false` |
 
 **Never edit connect.json by hand.** It is the trust anchor: setup verifies
 every person and route before writing it, writes it owner-only, and parses it
@@ -312,7 +314,7 @@ project names up the same way as on first setup, and quote values by the Shell q
 | Trust only the operator, or project members | `--trust operator` / `--trust project` (leaving allowlist mode drops the list) |
 | Trust specific people | `--allow <person-id>` for each; the list you pass **replaces** the old one, so pass everyone who stays |
 | Change the operator | `--operator-profile '<profile>'` |
-| Change workers | `--driver`, `--concurrency`, `--deadline`, `--worktrees` / `--worktrees=false` |
+| Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline`, `--worktrees` / `--worktrees=false` |
 | Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
 
 A class or watch setting needs the project routed first, in the same run or an

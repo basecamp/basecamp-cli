@@ -665,22 +665,19 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	}
 
 	judged := w.judge(ctx, r, v, how)
-	if judged.reason == "" {
-		// Every commit the worktree reaches is kept under a ref of the
-		// connector's own before anything is deleted, and those refs are let
-		// go only once the removal is over. Whatever else holds those commits
-		// — a remote branch a fetch prunes, a branch someone deletes — may go
-		// while the removal runs: it takes nothing with it.
-		anchors, err := w.keepCommits(ctx, r, judged.tips)
+	if judged.reason == "" && how.force && len(judged.unheld) > 0 {
+		// A force keeps what nothing holds before anything else happens, and
+		// those refs hold it from here on: the transaction below verifies
+		// them with every other holder.
+		kept, err := w.keepCommits(ctx, r, judged.unheld)
 		if err != nil {
 			judged.reason = RetainedUnverified
-		} else if how.force && refs != nil {
-			// What a force keeps for the operator is the anchors of the
-			// commits nothing else holds: those outlive the removal.
-			for i, commit := range judged.tips {
-				if slices.Contains(judged.unheld, commit) {
-					*refs = append(*refs, anchors[i])
-				}
+		} else {
+			if refs != nil {
+				*refs = append(*refs, kept...)
+			}
+			for i, ref := range kept {
+				judged.holds = append(judged.holds, hold{ref: ref, oid: judged.unheld[i], commit: judged.unheld[i]})
 			}
 		}
 	}
@@ -704,6 +701,18 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 			return w.retain(ctx, r, RetainedUnverified, removing)
 		}
 		w.log.Warn("connector: a frozen worktree could not be restored; the next start restores it", "path", r.Path)
+		return r
+	}
+	// Every commit the worktree reaches is now held by a ref of the
+	// connector's own, made after the judgment was proven still to stand and
+	// let go only once the removal is over. Whatever else holds those commits
+	// — a remote branch a fetch prunes, a branch someone deletes — may go
+	// while the deleting runs: it takes nothing with it.
+	if _, err := w.keepCommits(ctx, r, judged.tips); err != nil {
+		w.log.Warn("connector: a worktree's commits could not be held for its removal; kept", "path", r.Path, "error", err)
+		if w.restore(r, v, admin) {
+			return w.retain(ctx, r, RetainedUnverified, removing)
+		}
 		return r
 	}
 	// Delete the frozen copy: the directory, then the record.
@@ -1035,6 +1044,11 @@ func (w *Worktrees) dropAnchors(ctx context.Context, r Worktree, judged judgment
 	var left []string
 	for _, h := range judged.holds {
 		anchor := retainedRef(r, h.commit)
+		if h.ref == anchor {
+			// What a force kept is the anchor itself: it stays, and the
+			// operator was told about it.
+			continue
+		}
 		stdin := "start\nverify " + h.ref + " " + h.oid + "\ndelete " + anchor + " " + h.commit + "\nprepare\ncommit\n"
 		if err := w.gitStdin(ctx, r.Repository, stdin, "update-ref", "--stdin"); err != nil {
 			w.log.Info("connector: a commit of a removed worktree is kept under a ref: what held it moved", "ref", anchor, "path", r.Path)
@@ -1136,6 +1150,27 @@ func (w *Worktrees) recordHoldsNothing(ctx context.Context, r Worktree) bool {
 		return false
 	}
 	tips = append(tips, strings.Fields(string(out))...)
+	// The record's pseudo-refs, as judge reads them: they live in the record
+	// and go with it.
+	for _, name := range pseudoRefs {
+		out, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--quiet", "--end-of-options", name + "^{commit}"}, "rev-parse")
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+			tips = append(tips, strings.Fields(string(out))...)
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 1:
+		default:
+			return false
+		}
+	}
+	// And the task branch's own reflog, which its deletion below forgets.
+	if r.BranchCreated && strings.HasPrefix(r.Branch, BranchPrefix) {
+		logged, err := reflogFileTips(filepath.Join(r.Repository, ".git", "logs", "refs", "heads", r.Branch))
+		if err != nil {
+			return false
+		}
+		tips = append(tips, logged...)
+	}
 	// A record whose HEAD names no commit — a removal that crashed between
 	// deleting the directory and deleting the record, after the branch HEAD
 	// named was deleted — is still judged: git refuses to read the reflog of

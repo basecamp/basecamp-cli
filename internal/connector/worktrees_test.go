@@ -1364,6 +1364,8 @@ func TestAHolderOffTheBranchTipMustNotMoveEither(t *testing.T) {
 	assert.Equal(t, WorktreeRetained, after.State, "the judgment no longer stands")
 	assert.True(t, exists(workDir), "the worktree is still there")
 	assert.Equal(t, off, h.git(workDir, "rev-parse", "HEAD@{1}"), "and the commit with it")
+	assert.Empty(t, h.git(h.repo, "for-each-ref", "--format=%(refname)", RetainedRefPrefix),
+		"a removal that did not happen leaves no ref of the connector's own behind")
 }
 
 // The commit a worktree was made from is judged like any other: the route's
@@ -1388,6 +1390,29 @@ func TestTheBaseCommitIsNotAssumedHeld(t *testing.T) {
 	assert.Equal(t, RetainedUnpushed, after.RetainedReason)
 	assert.True(t, h.branchExists(row.Branch), "the branch reaching the commit is kept")
 	assert.Equal(t, base, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
+}
+
+// A worktree an operator deleted by hand, whose record still reaches a commit
+// through its own ORIG_HEAD: the row is kept, because deleting the task
+// branch would leave that commit for git to discard.
+func TestAMissingWorktreeWhoseRecordHoldsACommitInOrigHeadIsKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(311)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "reset", "-q", "--hard", row.BaseCommit)
+	h.git(workDir, "reflog", "expire", "--expire=now", "--all")
+	require.Equal(t, sha, h.git(workDir, "rev-parse", "ORIG_HEAD"))
+	// The operator deletes the directory, leaving git's record of it.
+	require.NoError(t, os.RemoveAll(row.Path))
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnverified, after.RetainedReason)
+	assert.True(t, h.branchExists(row.Branch), "the branch is not deleted under a commit nothing else holds")
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run())
 }
 
 // A record a removal left behind after the branch its HEAD names was deleted:

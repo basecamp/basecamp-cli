@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -237,7 +236,7 @@ func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, f
 	file, err := setup.Load(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return nil, nil, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+strconv.Quote(name))
+		return nil, nil, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
 		return nil, nil, output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
@@ -250,7 +249,7 @@ func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, f
 	ledgerPath := filepath.Join(stateDir, connector.LedgerFile)
 	if _, err := os.Lstat(ledgerPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, output.ErrUsageHint("This connector has not run yet: there is no ledger in "+stateDir, "Run: basecamp connect -P "+strconv.Quote(name))
+			return nil, nil, output.ErrUsageHint("This connector has not run yet: there is no ledger in "+stateDir, "Run: basecamp connect -P "+shellQuote(name))
 		}
 		return nil, nil, err
 	}
