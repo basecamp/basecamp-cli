@@ -61,8 +61,18 @@ func socketDescriptor(fd uintptr) (int, bool) {
 }
 
 // DefaultTokenWindow is how long a task token's socket waits for the worker's
-// MCP server. It covers an agent's start-up, not a task's life.
+// MCP server once the worker exists. It covers an agent's start-up, not a
+// task's life, and it does not start until AllowGroup names the worker: a
+// launcher or a handshake that takes its time must not spend the window of
+// the worker it is still starting (card 23's review). The socket waits the
+// same window for the worker to be named at all, so nothing waits forever.
 const DefaultTokenWindow = 2 * time.Minute
+
+// startWindows is how many windows the socket waits for the worker to be
+// named at all. It is a backstop against a dispatcher that neither names a
+// worker nor closes the socket, not a bound on a start: the dispatcher closes
+// the socket on every path where a start fails.
+const startWindows = 5
 
 // TokenSocketName is the socket's name inside the attempt's session directory.
 const TokenSocketName = "token.sock"
@@ -177,6 +187,20 @@ func (s *TokenSocket) Close() {
 func (s *TokenSocket) Result() Handoff { return <-s.result }
 
 func (s *TokenSocket) serve(window time.Duration) {
+	// Nothing is offered before the worker exists, and the window does not
+	// run while it is being started. A connection that arrives first waits in
+	// the listener's backlog, which is where the kernel keeps it.
+	select {
+	case want := <-s.group:
+		s.group <- want
+	case <-s.stop:
+		s.result <- HandoffClosed
+		return
+	case <-time.After(startWindows * window):
+		s.Close()
+		s.result <- HandoffExpired
+		return
+	}
 	deadline := time.Now().Add(window)
 	_ = s.listener.SetDeadline(deadline)
 	conn, err := s.listener.AcceptUnix()
