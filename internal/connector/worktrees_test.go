@@ -748,6 +748,21 @@ func TestAnUnreadablePathCountsAsThere(t *testing.T) {
 	assert.False(t, exists(filepath.Join(dir, "never")), "absent is absent")
 }
 
+// A moved worktree is found through the repository's record of it however
+// that record spells the path.
+func TestAMovedWorktreeIsFoundWithRelativePaths(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.git(h.repo, "config", "worktree.useRelativePaths", "true")
+	workDir, row := h.prepare(95)
+	moved := filepath.Join(t.TempDir(), "moved")
+	h.git(h.repo, "worktree", "move", row.Path, moved)
+
+	row = h.finish(workDir)
+	assert.Equal(t, RetainedMoved, row.RetainedReason)
+	assert.True(t, h.branchExists(row.Branch))
+	assert.FileExists(t, filepath.Join(moved, "app", "README"))
+}
+
 // A moved worktree is not forced away either: there is nothing at the path to
 // judge, and prune says so instead of trying.
 func TestAMovedWorktreeIsNotForced(t *testing.T) {

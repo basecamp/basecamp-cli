@@ -108,6 +108,7 @@ func TestConnectWorktreesPruneRecordsOnesTheOperatorRemoved(t *testing.T) {
 	app, out, w := worktreesCmdEnv(t)
 	require.NoError(t, runWorktreesCmd(t, app, "prune"))
 	assert.Contains(t, out.String(), `"action": "missing"`)
+	assert.NotContains(t, out.String(), `"force_refused"`, "nothing was forced")
 	out.Reset()
 	require.NoError(t, runWorktreesCmd(t, app, "list"))
 	assert.NotContains(t, out.String(), w.Path)

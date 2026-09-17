@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,8 +48,8 @@ func newConnectWorktreesListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List the worktrees kept for you to deal with",
 		Long: `List the worktrees the connector kept, with why: dirty (uncommitted work),
-unpushed (commits nothing else holds), locked, or unverified (their state
-could not be read).`,
+unpushed (commits nothing else holds), locked, moved (no longer where the
+connector left it), or unverified (their state could not be read).`,
 		Example: `  basecamp connect worktrees list -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -90,7 +91,10 @@ Its branch is kept unless its commits are held elsewhere, and the commit its
 HEAD is on, if nothing else holds it, gets a branch of its own (head_branch).
 What --force does discard is a commit only the worktree's own reflog still
 reaches: one the worker made and then moved away from. A locked worktree is never forced: unlock it
-first. Worktrees of tasks still running are never touched.`,
+first, and neither is one that is no longer where it was (reason "moved"):
+move it back, or remove it yourself and prune again. A force that could not go
+through is reported as kept with force_refused. Worktrees of tasks still
+running are never touched.`,
 		Example: `  basecamp connect worktrees prune -P agent
   basecamp connect worktrees prune -P agent --force ~/.local/state/basecamp/connect/2914079-52007412/worktrees/app-1a2b3c4d/17-a1b2c3`,
 		Args: cobra.NoArgs,
@@ -117,7 +121,7 @@ first. Worktrees of tasks still running are never touched.`,
 			out := make([]pruneView, 0, len(results))
 			removed, kept := 0, 0
 			for _, r := range results {
-				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), BranchKept: r.BranchKept, HeadBranch: r.HeadBranch})
+				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), BranchKept: r.BranchKept, HeadBranch: r.HeadBranch, ForceRefused: r.ForceRefused})
 				if r.Action == connector.PruneKept {
 					kept++
 				} else {
@@ -146,9 +150,10 @@ type worktreeView struct {
 
 type pruneView struct {
 	worktreeView
-	Action     string `json:"action"`
-	BranchKept bool   `json:"branch_kept,omitempty"`
-	HeadBranch string `json:"head_branch,omitempty"`
+	Action       string `json:"action"`
+	BranchKept   bool   `json:"branch_kept,omitempty"`
+	HeadBranch   string `json:"head_branch,omitempty"`
+	ForceRefused bool   `json:"force_refused,omitempty"`
 }
 
 func viewWorktree(w connector.Worktree) worktreeView {
@@ -201,7 +206,11 @@ func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, f
 	if err != nil {
 		return nil, nil, err
 	}
-	wt, err := connector.NewWorktrees(connector.WorktreesOptions{Ledger: ledger, Root: filepath.Join(stateDir, connectWorktreesDir)})
+	wt, err := connector.NewWorktrees(connector.WorktreesOptions{
+		Ledger: ledger, Root: filepath.Join(stateDir, connectWorktreesDir),
+		// What a removal refuses is said, not swallowed.
+		Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	})
 	if err != nil {
 		_ = ledger.Close()
 		return nil, nil, err

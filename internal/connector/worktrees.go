@@ -45,11 +45,12 @@ import (
 //  2. Git refuses too. The removal itself is `git worktree remove` without
 //     --force, so a modified or untracked file written between the check and
 //     the removal still stops it, and a task branch is deleted only by
-//     compare-and-delete against the commit that was verified. What git does
-//     not refuse is an ignored file written in that window: removal runs
-//     after the task's process group is gone, so only a process that escaped
-//     the group, or a person editing a kept worktree while pruning it, can
-//     write one, and the window is the one git call.
+//     compare-and-delete against the commit that was verified. Two things git
+//     does not refuse in that window: an ignored file written into the
+//     worktree, and a HEAD moved onto a commit nothing else holds. Removal
+//     runs only after the task's process group is confirmed gone, so what is
+//     left is a process that escaped the group or a person working in a kept
+//     worktree while pruning it, and the window is the one git call.
 //  3. The ledger first. A worktree is recorded creating before `git worktree
 //     add` runs, and removing before `git worktree remove` does, so a crash
 //     at any point leaves a row that says where a directory may be; the
@@ -564,7 +565,13 @@ func (w *Worktrees) movedElsewhere(ctx context.Context, r Worktree) bool {
 	if r.AdminDir != "" {
 		switch at, err := os.ReadFile(filepath.Join(r.AdminDir, "gitdir")); {
 		case err == nil:
-			path := filepath.Dir(strings.TrimSpace(string(at)))
+			// The record is the worktree's .git file, absolute or — with
+			// worktree.useRelativePaths — relative to the admin directory.
+			path := strings.TrimSpace(string(at))
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(r.AdminDir, path)
+			}
+			path = filepath.Dir(path)
 			return !samePath(path, r.Path) && exists(path)
 		case !errors.Is(err, os.ErrNotExist):
 			// The record cannot be read: assume it is still somewhere.
