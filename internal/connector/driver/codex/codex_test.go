@@ -977,6 +977,27 @@ func TestEveryRefusalIsRecordedOnce(t *testing.T) {
 	}
 }
 
+// A worker whose output ends before it does: the refusal it logs on its way
+// out is still read, because the reader waits for the process, not for its
+// stdout.
+func TestARefusalLoggedAfterTheOutputEndsIsStillRecorded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		CloseStdout: true,
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+		Exit:        1,
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, result, err := h.run(context.Background(), cfg)
+	require.Error(t, err)
+	require.NoError(t, s.Close())
+	assert.Len(t, recorder.Recorded(), 1, "the refusal Codex logged after closing its output")
+	assert.Len(t, result.Refusals, 1)
+}
+
 // A canceled turn records what Codex logged before it went.
 func TestACanceledTurnRecordsItsRefusals(t *testing.T) {
 	recorder := &drivertest.Refusals{}

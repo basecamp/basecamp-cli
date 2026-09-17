@@ -48,6 +48,9 @@ type scenario struct {
 	Escape bool `json:"escape"`
 	// Stderr is written, slowly, after the events.
 	Stderr string `json:"stderr"`
+	// CloseStdout closes stdout before the stderr is written: the reader is
+	// done with the process well before the process is done.
+	CloseStdout bool `json:"close_stdout"`
 	// Deaf never reads its stdin: the prompt's write blocks once the pipe
 	// fills.
 	Deaf bool `json:"deaf"`
@@ -155,6 +158,9 @@ func fakeCodex() int {
 	}
 	for _, e := range sc.Events {
 		fmt.Println(e)
+	}
+	if sc.CloseStdout {
+		_ = os.Stdout.Close()
 	}
 	if sc.Stderr != "" {
 		// After the last stdout line, as a sandbox refusal Codex logs is.

@@ -306,8 +306,10 @@ func TestABranchThatMovedIsNotDeleted(t *testing.T) {
 	moved := h.git(other, "rev-parse", "HEAD")
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/`+row.Branch+` `+moved+`;; esac`))
 	row = h.finish(workDir)
-	assert.Equal(t, WorktreeRemoved, row.State)
+	// The judgment no longer stands, so the worktree is kept with it.
+	assert.Equal(t, WorktreeRetained, row.State)
 	assert.Equal(t, moved, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
+	assert.True(t, exists(workDir), "the worktree is still there")
 }
 
 // Invariant 6: the repository's hooks do not run.
@@ -751,9 +753,21 @@ func TestRemovalsTakeTheWorktreesLock(t *testing.T) {
 	defer cancel()
 	err = h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Equal(t, WorktreeLive, h.row(workDir).State)
+	// A worktree that could not be judged is kept, and said to be: a row left
+	// live is a directory nothing lists and no prune touches.
+	row := h.row(workDir)
+	assert.Equal(t, WorktreeRetained, row.State)
+	assert.Equal(t, RetainedUnverified, row.RetainedReason)
 	unlock()
-	assert.Equal(t, WorktreeRemoved, h.finish(workDir).State)
+	retained, err := h.wt.Retained(context.Background())
+	require.NoError(t, err)
+	require.Len(t, retained, 1)
+	assert.Equal(t, row.Path, retained[0].Path)
+	// And the prune that follows judges it as any other kept worktree.
+	results, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneRemoved, results[0].Action)
 }
 
 // Invariant 5: prune removes what the operator dealt with, keeps what still
@@ -1217,6 +1231,46 @@ func TestSignatureVerificationDoesNotRun(t *testing.T) {
 
 // Invariant 4: a task branch is deleted in one ref transaction with a check
 // that its holder has not moved; a holder moved in between keeps the branch.
+// The judgment leans on every ref that holds a commit the worktree reaches,
+// not only the one holding its branch tip: a holder that moves between the
+// check and the removal keeps the worktree, commit and all.
+func TestAHolderOffTheBranchTipMustNotMoveEither(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(305)
+	h.write(workDir, "off.txt", "off\n")
+	h.git(workDir, "add", "off.txt")
+	h.git(workDir, "commit", "-q", "-m", "off the tip")
+	off := h.git(workDir, "rev-parse", "HEAD")
+	// Another branch holds that commit, and the task branch is rolled back to
+	// its base: the commit is reachable from the worktree's reflogs, and what
+	// holds it is not the branch tip's holder.
+	h.git(h.repo, "branch", "keeper", off)
+	h.git(workDir, "reset", "-q", "--hard", row.BaseCommit)
+	// Just before the removal's transaction, keeper is moved off it.
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/keeper `+row.BaseCommit+`;; esac`))
+
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, after.State, "the judgment no longer stands")
+	assert.True(t, exists(workDir), "the worktree is still there")
+	assert.Equal(t, off, h.git(workDir, "rev-parse", "HEAD@{1}"), "and the commit with it")
+}
+
+// A record a removal left behind after the branch its HEAD names was deleted:
+// its HEAD resolves to nothing, and what it still reaches is held, so the row
+// clears instead of being kept for an operator who can do nothing with it.
+func TestARecordWhoseHeadResolvesToNothingIsStillJudged(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(306)
+	// The crash: the directory is gone, the branch its record's HEAD names
+	// was deleted with it, and the record is still there.
+	require.NoError(t, os.RemoveAll(row.Path))
+	h.git(h.repo, "update-ref", "-d", "refs/heads/"+row.Branch)
+
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRemoved, after.State)
+	assert.Equal(t, RemovedMissing, after.RemovedBy)
+}
+
 func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
 	h := newWorktreeHarness(t)
 	workDir, row := h.prepare(304)
@@ -1228,8 +1282,10 @@ func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
 	// is reset away.
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/remotes/origin/`+row.Branch+` `+row.BaseCommit+`;; esac`))
 	after := h.finish(workDir)
-	assert.Equal(t, WorktreeRemoved, after.State)
+	// Nothing holds the commit any more: the worktree and its branch stay.
+	assert.Equal(t, WorktreeRetained, after.State)
 	assert.True(t, h.branchExists(row.Branch), "the branch holding the commit alone is kept")
+	assert.True(t, exists(workDir), "the worktree the branch is checked out in is kept")
 }
 
 // Git data of a repository inside the worktree — one a worker made, not a

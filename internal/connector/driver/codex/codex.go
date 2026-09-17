@@ -73,7 +73,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -434,11 +433,11 @@ type session struct {
 	// passes through.
 	red *driver.Redactor
 	// recorder records each refusal once, as it is made or read (driver's
-	// "Refusals"); recorded is the tool call ids already recorded, and
-	// stderrSeen how many of the refusals Codex logs have been.
-	recorder   driver.RefusalRecorder
-	recorded   map[string]bool
-	stderrSeen int
+	// "Refusals"); recorded is what has been recorded already, by tool call
+	// id for the refusals on the stream and by line for the ones Codex only
+	// logs.
+	recorder driver.RefusalRecorder
+	recorded map[string]bool
 
 	updates   chan driver.Update
 	readerEnd chan struct{}
@@ -645,7 +644,12 @@ func (s *session) read() {
 			s.mu.Unlock()
 			// Whatever ended the turn, a refusal Codex only logged is read
 			// before the session is done: a cancel is where they would
-			// otherwise be lost.
+			// otherwise be lost. Its stderr is whole only once the process
+			// is gone, which closing its stdout does not say.
+			select {
+			case <-s.worker.Done():
+			case <-time.After(s.grace):
+			}
 			s.stderrRefusals()
 			refusals := s.refusalsOf(t)
 			switch {
@@ -981,24 +985,21 @@ func (s *session) stderrRefusals() {
 	if s.worker == nil {
 		return
 	}
-	tail := s.worker.StderrTail(s.red)
-	seen := 0
-	for line := range strings.SplitSeq(tail, "\n") {
-		if !refusedByApproval(line) {
-			continue
-		}
-		seen++
-		tool, kind := "exec", driver.ToolExecute
-		if strings.Contains(line, "patch rejected") {
-			tool, kind = "apply_patch", driver.ToolEdit
-		}
-		// Codex gives these no id, so they are counted: the nth refusal in the
-		// tail is recorded once, however often the tail is read.
-		s.refused("stderr:"+strconv.Itoa(seen), "", tool, kind)
+	// The shared tail is the worker's last line of stderr, sanitized: a
+	// refusal Codex logged before it wrote anything else is not there to be
+	// read, and the refusals it puts on the stream are the ones a turn is
+	// judged by.
+	line := s.worker.StderrTail(s.red)
+	if !refusedByApproval(line) {
+		return
 	}
-	s.mu.Lock()
-	s.stderrSeen = max(s.stderrSeen, seen)
-	s.mu.Unlock()
+	tool, kind := "exec", driver.ToolExecute
+	if strings.Contains(line, "patch rejected") {
+		tool, kind = "apply_patch", driver.ToolEdit
+	}
+	// Codex gives these no id: the line itself is the key, so reading the
+	// same tail again — every way a turn can end reads it — records once.
+	s.refused("stderr:"+line, "", tool, kind)
 }
 
 // turnContext is the part of a rollout's turn_context record the driver
