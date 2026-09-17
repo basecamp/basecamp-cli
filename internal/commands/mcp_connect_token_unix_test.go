@@ -16,7 +16,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -332,19 +331,6 @@ func TestTheTokenPreScanReadsOnlyThisCommandsDescriptor(t *testing.T) {
 	fd, found := connectTokenFD(testRootForMCP(t), []string{"--json", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"})
 	require.True(t, found, "a root flag before the command is the root's, not a value")
 	assert.Equal(t, 3, fd)
-}
-
-// testRootForMCP is the command tree TakeConnectTaskToken resolves against:
-// a root carrying this command, as cli.Execute builds it.
-func testRootForMCP(t *testing.T) *cobra.Command {
-	t.Helper()
-	root := &cobra.Command{Use: "basecamp"}
-	root.PersistentFlags().Bool("json", false, "")
-	root.PersistentFlags().CountP("verbose", "v", "")
-	root.PersistentFlags().String("project", "", "")
-	root.AddCommand(NewMCPCmd())
-	root.AddCommand(&cobra.Command{Use: "search", RunE: func(*cobra.Command, []string) error { return nil }})
-	return root
 }
 
 // A descriptor number no descriptor could have is refused where every other

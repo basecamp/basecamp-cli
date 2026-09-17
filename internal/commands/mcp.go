@@ -61,8 +61,26 @@ func TakeConnectTaskToken(root *cobra.Command, args []string) {
 		return
 	}
 	takenTaskToken.taken = true
+	// The environment is refused before the descriptor is read, so a stale
+	// token there does not cost the connector its handoff, and it is out of
+	// the environment before the hooks that could pass it to a child.
+	if _, set := os.LookupEnv(connectTaskTokenEnv); set {
+		_ = os.Unsetenv(connectTaskTokenEnv)
+		takenTaskToken.err = output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
+			"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
+		return
+	}
 	takenTaskToken.token, takenTaskToken.err = readTaskToken(fd)
 }
+
+// discardedValue stands in for a flag this read does not care about: it keeps
+// the flag's shape, so the arguments parse as the command will parse them, and
+// keeps none of its value.
+type discardedValue struct{ kind string }
+
+func (discardedValue) String() string   { return "" }
+func (discardedValue) Set(string) error { return nil }
+func (v discardedValue) Type() string   { return v.kind }
 
 // connectStateGiven is the one rule for whether a state directory was given,
 // used by the startup read and by the command, so they never disagree about
@@ -79,26 +97,38 @@ func connectTokenFD(root *cobra.Command, args []string) (int, bool) {
 		return 0, false
 	}
 
-	// The command's own flags and the root's, as the command will see them:
-	// the definitions are the command's, so a flag it does not accept fails
-	// here exactly as it will there, and nothing is read for an invocation
-	// cobra is about to refuse.
-	flags := pflag.NewFlagSet("mcp", pflag.ContinueOnError)
+	// This command's own flags, on a command of its own: the definitions are
+	// the real ones, so a flag it does not accept, or a value it needs and
+	// does not get, fails here exactly as it will there — and nothing the
+	// command will actually run is touched, because binding to the live
+	// command's flags would set its values and count its counters twice.
+	// The root's flags are unknown here and are skipped rather than guessed.
+	flags := NewMCPCmd().Flags()
+	flags.Init("mcp", pflag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	flags.AddFlagSet(target.Flags())
-	flags.AddFlagSet(target.Root().PersistentFlags())
-	if flags.Lookup("help") == nil {
-		flags.BoolP("help", "h", false, "")
-	}
+	flags.BoolP("help", "h", false, "")
+	// The root's flags may appear anywhere, and what they are is the root's
+	// business: each is copied by shape alone — name, shorthand, and whether
+	// it takes a value — onto a value that keeps nothing. So this parse
+	// accepts exactly what the command will accept, and a flag neither of
+	// them knows is refused here as it will be there.
+	target.Root().PersistentFlags().VisitAll(func(f *pflag.Flag) {
+		if flags.Lookup(f.Name) != nil {
+			return
+		}
+		copied := flags.VarPF(discardedValue{kind: f.Value.Type()}, f.Name, f.Shorthand, f.Usage)
+		copied.NoOptDefVal = f.NoOptDefVal
+	})
 	if err := flags.Parse(rest); err != nil {
 		return 0, false
+	}
+	if flags.NArg() > 0 {
+		return 0, false // cobra.NoArgs refuses it
 	}
 	if help, _ := flags.GetBool("help"); help {
 		return 0, false // cobra prints help and serves nothing
 	}
-	if version, err := flags.GetBool("version"); err == nil && version {
-		return 0, false
-	}
+
 	readOnly, _ := flags.GetBool("read-only")
 	state, _ := flags.GetString("connect-state")
 	fd, err := flags.GetInt("connect-token-fd")
@@ -166,7 +196,7 @@ func NewMCPCmd() *cobra.Command {
 			switch {
 			case !connectStateGiven(connectState) && cmd.Flags().Changed("connect-token-fd"):
 				return output.ErrUsage("--connect-token-fd is only for a server started with --connect-state")
-			case connectState != "":
+			case connectStateGiven(connectState):
 				if readOnly {
 					// Every connect action records something; refused before
 					// the token or the ledger is touched.

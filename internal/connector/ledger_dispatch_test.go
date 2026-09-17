@@ -1210,3 +1210,54 @@ func TestCreateTaskRefusesAnEmptyInstruction(t *testing.T) {
 	_, err = f.ledger.CreateTask(ctx, []int64{1})
 	require.ErrorIs(t, err, ErrNotDispatchable)
 }
+
+// A reported outcome stands, and so does what came with it: an
+// acknowledgement arriving after the completion is refused, not written.
+func TestAnAcknowledgementAfterTheOutcomeIsRefused(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	require.NoError(t, err)
+
+	late := int64(4242)
+	_, err = f.d.Ack(ctx, 1, &late)
+
+	require.ErrorIs(t, err, ErrReportConflict)
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	assert.Nil(t, ack, "nothing was written")
+}
+
+// A withdrawn exposure is finished: the record it belonged to may be running
+// again on a new task, and the old row does not follow it.
+func TestAWithdrawnExposureDoesNotFollowTheRetry(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	tx, err := f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+	require.NoError(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""))
+	retry, err := f.ledger.createTask(ctx, tx, []int64{1})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	// The retry's worker pulls and completes it, so the record is completed.
+	d, err := f.ledger.Dispatch(ctx, retry.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	require.NoError(t, err)
+
+	// The withdrawn row on the old task stays where it was.
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'completed' WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+	require.Error(t, err)
+	var delivery string
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT delivery FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&delivery))
+	assert.Equal(t, "exposed", delivery)
+}

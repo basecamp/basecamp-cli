@@ -129,8 +129,11 @@ import (
 //     returns to admitted for its one retry, or goes to blocked after a
 //     second failure (withdrawExposure) — the only way from dispatched to
 //     blocked.
-//  5. A worker acts only on its own task's rows, reports only what it was
-//     handed, and a reported outcome stands.
+//  5. A worker acts only on its own task's rows, reports only what it
+//     pulled, and a reported outcome stands — the report path enforces that,
+//     and the delivery triggers hold the same shape for anything else writing
+//     to the file: forward only, never past a missing pull, with the
+//     dispatcher settling a completed record as the one exception.
 //  6. A task is made only of instructions a worker can pull, and finished
 //     work is never handed out for the first time: a completed record is
 //     served, acknowledged and completed only by the worker that pulled it
@@ -796,16 +799,23 @@ func (d *TaskDispatch) Complete(ctx context.Context, eventID int64, c Completion
 				}
 				return false, fmt.Errorf("connector: event %d completed as %s: %w", eventID, te.outcome, ErrReportConflict)
 			}
-			if _, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}}); err != nil {
-				return false, err
-			}
+			// The delivery first, the record after: while the record is still
+			// dispatched, task_events_exposure_comes_first reads this as a
+			// worker's completion and holds it to the pull. Completing the
+			// record first would make every completion look like the
+			// dispatcher settling one.
 			now := d.ledger.timestamp()
-			_, err = tx.ExecContext(ctx, `
+			if _, err = tx.ExecContext(ctx, `
 UPDATE task_events
 SET delivery = 'completed', delivered_at = COALESCE(delivered_at, ?), completed_at = ?,
     outcome = ?, links = ?, reply_id = ?
-WHERE task_id = ? AND event_id = ?`, now, now, string(c.Outcome), string(encoded), nullableID(c.ReplyID), taskID, eventID)
-			return true, err
+WHERE task_id = ? AND event_id = ?`, now, now, string(c.Outcome), string(encoded), nullableID(c.ReplyID), taskID, eventID); err != nil {
+				return false, err
+			}
+			if _, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}}); err != nil {
+				return false, err
+			}
+			return true, nil
 		})
 		return err
 	})

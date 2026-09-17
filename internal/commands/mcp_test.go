@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -208,4 +209,38 @@ func TestMCPCommandFlagPassthrough(t *testing.T) {
 		"read-only basecamp_projects lost its read actions")
 	assert.False(t, strings.Contains(tools[0].Description, "create_project"),
 		"read-only basecamp_projects still lists a write action")
+}
+
+// testRootForMCP is the command tree TakeConnectTaskToken resolves against:
+// a root carrying this command, as cli.Execute builds it.
+func testRootForMCP(t *testing.T) *cobra.Command {
+	t.Helper()
+	root := &cobra.Command{Use: "basecamp"}
+	root.PersistentFlags().Bool("json", false, "")
+	root.PersistentFlags().CountP("verbose", "v", "")
+	root.PersistentFlags().String("project", "", "")
+	root.AddCommand(NewMCPCmd())
+	root.AddCommand(&cobra.Command{Use: "search", RunE: func(*cobra.Command, []string) error { return nil }})
+	return root
+}
+
+// The startup read must not touch the flags of the command that then runs:
+// pflag's slice and count values append and increment once a value has been
+// set, so sharing them would double what the command was given.
+func TestTakeConnectTaskTokenLeavesTheCommandsOwnFlagsAlone(t *testing.T) {
+	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
+	root := testRootForMCP(t)
+	argv := []string{"-v", "mcp", "--domains", "todos,cards", "--connect-state", "/x", "--connect-token-fd", "3"}
+
+	TakeConnectTaskToken(root, argv)
+
+	target, rest, err := root.Find(argv)
+	require.NoError(t, err)
+	require.NoError(t, target.ParseFlags(rest))
+	domains, err := target.Flags().GetStringSlice("domains")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"todos", "cards"}, domains, "the command sees what it was given, once")
+	verbose, err := root.PersistentFlags().GetCount("verbose")
+	require.NoError(t, err)
+	assert.Equal(t, 1, verbose)
 }

@@ -12,7 +12,10 @@ import (
 // where ownership is read.
 func ownedByThisUser(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && int(stat.Uid) == os.Getuid()
+	// The effective uid, which is what setup's private-path check compares
+	// against: the two must agree, or a first open could pass where a later
+	// one is refused.
+	return ok && int(stat.Uid) == os.Geteuid()
 }
 
 // sameOwner reports two stats of a file with the same owner.

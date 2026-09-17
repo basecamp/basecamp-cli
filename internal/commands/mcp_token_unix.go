@@ -44,11 +44,15 @@ func readTaskToken(fd int) (string, error) {
 	if kind := st.Mode & unix.S_IFMT; kind != unix.S_IFIFO && kind != unix.S_IFSOCK {
 		return "", output.ErrUsage(fmt.Sprintf("descriptor %d is not a pipe or a socket; the task token is handed over on one, never from a file", fd))
 	}
-	// Non-blocking before it is wrapped, so the runtime polls it and a read
-	// deadline applies. The flag is on the open file description, so anything
-	// else sharing it would see it too; the connector's bridge execs this
-	// server, so nothing does.
+	// Non-blocking before it is wrapped, which is the order os.NewFile needs
+	// to hand back a pollable file, and a read deadline only applies to one.
+	// The flag is on the open file description, so anything else sharing it
+	// would see it too; the connector's bridge execs this server, so nothing
+	// does. From the moment the mode is changed the descriptor is ours, so
+	// this path closes it rather than leaving it open through the hooks that
+	// follow, where a child could inherit it.
 	if err := unix.SetNonblock(fd, true); err != nil {
+		_ = unix.Close(fd)
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))
 	}
 	file := os.NewFile(uintptr(fd), "connect-token")
