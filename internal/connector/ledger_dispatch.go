@@ -114,6 +114,13 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	if len(eventIDs) == 0 {
 		return TaskGrant{}, errors.New("connector: a task needs at least one event")
 	}
+	seen := make(map[int64]bool, len(eventIDs))
+	for _, id := range eventIDs {
+		if seen[id] {
+			return TaskGrant{}, fmt.Errorf("connector: event %d is named twice for one task", id)
+		}
+		seen[id] = true
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return TaskGrant{}, fmt.Errorf("connector: task token: %w", err)
@@ -128,12 +135,18 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
 	}
 	for _, id := range eventIDs {
-		var acknowledge int
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge FROM events WHERE id = ?`, id).Scan(&acknowledge); {
+		var acknowledge, servable int
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &servable); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		if servable == 0 {
+			// A task a worker could pull nothing from would read as a task
+			// with nothing left to do. A record without its instruction
+			// needs a new verdict first.
+			return TaskGrant{}, fmt.Errorf("connector: task event %d has no instruction: %w", id, ErrNotDispatchable)
 		}
 		guard := ""
 		if acknowledge != 0 {

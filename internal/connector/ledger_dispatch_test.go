@@ -433,6 +433,25 @@ func TestCreateTaskInsideACallersTransaction(t *testing.T) {
 	assert.Equal(t, StateDispatched, getRecord(t, ledger, 1).State)
 }
 
+// A task is only ever made of instructions a worker can pull. A record that
+// lost its snapshot on the way through blocked is refused, not dispatched as
+// an empty task.
+func TestCreateTaskRefusesARecordWithoutItsInstruction(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
+
+	_, err := f.ledger.CreateTask(ctx, []int64{1})
+	require.ErrorIs(t, err, ErrNotDispatchable)
+	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 1).State)
+
+	_, err = f.ledger.CreateTask(ctx, []int64{2, 2})
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrEventOnLiveTask, "a duplicate id is not another task's event")
+}
+
 func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
