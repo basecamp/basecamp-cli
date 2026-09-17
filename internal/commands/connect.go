@@ -134,7 +134,13 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 	} else {
 		fmt.Fprintf(&b, "Connector setup for profile %q\n\n", name)
 	}
-	item("File", richtext.SanitizeSingleLine(path))
+	// Paths shown exactly, spaces and all: quoted for a terminal, a code span
+	// for Markdown, so nothing in one renders as formatting.
+	exact := strconv.Quote
+	if markdown {
+		exact = func(s string) string { return markdownCode(escapeControls(s)) }
+	}
+	item("File", exact(path))
 	item("Account", f.AccountID)
 	agent := fmt.Sprintf("person %d (%s)", f.Agent.PersonID, f.Agent.Kind)
 	if f.Agent.IdentityID != 0 {
@@ -169,13 +175,7 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 	item("Projects", strconv.Itoa(len(ids))+" routed")
 	for _, id := range ids {
 		r := f.Projects[id]
-		// The path exactly, spaces and all: quoted for a terminal, a code
-		// span for Markdown, so nothing in it renders as formatting.
-		shown := strconv.Quote(r.Path)
-		if markdown {
-			shown = markdownCode(escapeControls(r.Path))
-		}
-		line := fmt.Sprintf("%d → %s", id, shown)
+		line := fmt.Sprintf("%d → %s", id, exact(r.Path))
 		if r.Class != "" {
 			line += ", class " + r.Class
 		}
@@ -191,13 +191,14 @@ func connectShowText(name, path string, f setup.File, markdown bool) string {
 	return b.String()
 }
 
-// escapeControls writes every control or non-printable rune in s as a Go
-// escape (\x1b, \u009b), so a path can reach a terminal or a pager without
-// a single control byte, and still reads exactly.
+// escapeControls writes every control or non-printable rune in s, and the
+// backslash, as a Go escape (\x1b, \u009b, \\), so a path can reach a
+// terminal or a pager without a single control byte and still reads exactly:
+// an escape in the output never stands for text the path already held.
 func escapeControls(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if unicode.IsControl(r) || !unicode.IsPrint(r) {
+		if r == '\\' || unicode.IsControl(r) || !unicode.IsPrint(r) {
 			q := strconv.QuoteRune(r)
 			b.WriteString(q[1 : len(q)-1])
 			continue

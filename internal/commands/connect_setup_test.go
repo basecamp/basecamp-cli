@@ -1408,6 +1408,18 @@ func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
 	}
 }
 
+// The file's own path is shown as literally as the routes: a configuration
+// directory holding Markdown syntax or a backslash does not render as a link
+// or read as an escape.
+func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
+	f := setup.New("agent")
+	f.AccountID = "999"
+	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
+	f.Trust.OperatorID = 1001
+	out := connectShowText("agent", "/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)
+	assert.Contains(t, out, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``")
+}
+
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
 	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
 	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
