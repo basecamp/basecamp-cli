@@ -19,14 +19,14 @@ func StartWorker(context.Context, Launcher, Scope, Command) (*Worker, error) {
 	return nil, errors.Join(ErrNotStarted, errUnsupported)
 }
 
-func (*Worker) Process() Process        { return Process{} }
-func (*Worker) Stdin() io.WriteCloser   { return nil }
-func (*Worker) Stdout() io.Reader       { return nil }
-func (*Worker) CloseStdout()            {}
-func (*Worker) Done() <-chan struct{}   { return nil }
-func (*Worker) Exit() Exit              { return Exit{} }
-func (*Worker) StderrTail() string      { return "" }
-func (*Worker) Terminate(time.Duration) {}
+func (*Worker) Process() Process            { return Process{} }
+func (*Worker) Stdin() io.WriteCloser       { return nil }
+func (*Worker) Stdout() io.Reader           { return nil }
+func (*Worker) CloseStdout()                {}
+func (*Worker) Done() <-chan struct{}       { return nil }
+func (*Worker) Exit() Exit                  { return Exit{} }
+func (*Worker) StderrTail(*Redactor) string { return "" }
+func (*Worker) Terminate(time.Duration)     {}
 
 // OwnsWorker cannot answer off Unix, and an identity that cannot be
 // established is never acted on.

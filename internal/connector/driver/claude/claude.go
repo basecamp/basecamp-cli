@@ -585,7 +585,13 @@ func (s *session) read() {
 		t := s.turn
 		s.mu.Unlock()
 		if t != nil {
-			s.finish(t, driver.PromptResult{}, driver.ErrSessionEnded)
+			// Copilot: the turn ends with nothing to report but what it
+			// refused, which the ledger already has, and which its caller
+			// still reads on the result.
+			s.mu.Lock()
+			refusals := slices.Clone(t.refusals)
+			s.mu.Unlock()
+			s.finish(t, driver.PromptResult{Refusals: refusals}, driver.ErrSessionEnded)
 		}
 		// Whatever comes next: there is no reader to finish a turn, so a
 		// later prompt is answered rather than left waiting.

@@ -781,9 +781,12 @@ func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
 				for range s.Updates() {
 				}
 			}()
-			_, _ = s.Prompt(context.Background(), "hello")
+			result, _ := s.Prompt(context.Background(), "hello")
 			require.NoError(t, s.Close())
 			assert.Equal(t, tc.want, recorder.Recorded())
+			// Copilot: a turn the worker's exit ended still reports what it
+			// refused.
+			assert.Equal(t, tc.want, result.Refusals)
 		})
 	}
 }
