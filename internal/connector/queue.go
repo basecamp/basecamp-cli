@@ -83,10 +83,11 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	// take can only receive what a send has already put in, so its decrement
 	// can never be applied before the increment it belongs to, and a crossing
 	// can never be lost to the order two operations happen to take the lock in.
-	q.applyDelta(1)
+	q.stage(1)
 	select {
 	case q.ids <- id:
 		q.afterOp()
+		q.deliver()
 		return nil
 	default:
 	}
@@ -103,10 +104,12 @@ func (q *Queue) Offer(ctx context.Context, id int64) error {
 	select {
 	case q.ids <- id:
 		q.afterOp()
+		q.deliver()
 		return nil
 	case <-ctx.Done():
 		// It never went in, so it is not backlog.
-		q.applyDelta(-1)
+		q.stage(-1)
+		q.deliver()
 		return ctx.Err()
 	}
 }
@@ -120,7 +123,8 @@ func (q *Queue) Take(ctx context.Context) (int64, error) {
 	select {
 	case id := <-q.ids:
 		q.afterOp()
-		q.applyDelta(-1)
+		q.stage(-1)
+		q.deliver()
 		return id, nil
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -146,8 +150,8 @@ func (q *Queue) afterOp() {
 	}
 }
 
-// applyDelta records what one operation does to the depth and fires the
-// warning edges it crosses.
+// stage records what one operation does to the depth and decides the edges it
+// crosses, without delivering them.
 //
 // The depth is a counter this method owns, not a later read of the channel's
 // length. With a length read, an offer and a concurrent take could both
@@ -155,16 +159,13 @@ func (q *Queue) afterOp() {
 // threshold raised no warning at all. Every delta is applied under one lock
 // and the crossing is derived from the depth that operation produced.
 //
-// The edges are edge-triggered, not level: a backlog that sits above the
-// threshold for an hour is one warning, and the recovery is the other half of
-// the pair, so a warning is never left standing after the thing it warned
-// about went away.
-func (q *Queue) applyDelta(delta int) {
-	// The transition is decided under the lock; the callback runs after it, so
-	// a callback may observe or use the queue without deadlocking against the
-	// operation that raised it. Callbacks can therefore arrive out of order
-	// across goroutines, but the state they report on never is.
+// Deciding and delivering are separate because an offer counts its id before
+// it sends it: a callback delivered there could call Take and wait for an id
+// the offer has not sent yet, and neither would ever finish. So the edges wait
+// for deliver, which every operation calls once its channel work is done.
+func (q *Queue) stage(delta int) {
 	q.edges.Lock()
+	defer q.edges.Unlock()
 	q.depth += delta
 	depth := q.depth
 	switch {
@@ -175,6 +176,14 @@ func (q *Queue) applyDelta(delta int) {
 		q.warned = false
 		q.pending = append(q.pending, queueEdge{fire: q.OnRecover, depth: depth})
 	}
+}
+
+// deliver hands the staged edges to their callbacks, in the order they were
+// decided, one goroutine at a time and with the lock released around each: a
+// callback may use the queue, and its own edge is delivered by the drain
+// already running.
+func (q *Queue) deliver() {
+	q.edges.Lock()
 	if q.delivering {
 		q.edges.Unlock()
 		return

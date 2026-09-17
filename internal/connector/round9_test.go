@@ -226,3 +226,30 @@ func TestASecondRunStartsWithCleanRunState(t *testing.T) {
 	cancel()
 	awaitReturn(t, done, "Run should return on shutdown")
 }
+
+// A loss still in the queue when a run ends is walked by the next one: the
+// mark that says "a worker has this" belongs to the pool, and goes with it.
+func TestALossQueuedAtShutdownIsWalkedByTheNextRun(t *testing.T) {
+	polls := &countingPolls{}
+	intake, ledger, _ := newTestIntake(t, polls, nil)
+	intake.opts.RepairInterval = time.Hour
+	intake.repairSweep = time.Hour
+
+	first, cancelFirst := context.WithCancel(context.Background())
+	intake.startRepairWorkers(first)
+	loss, err := ledger.RecordLoss(first, []int64{17099838509}, intake.now().Add(-time.Hour), time.Minute, eventfeed.Filters{})
+	require.NoError(t, err)
+	cancelFirst()
+	intake.repairs.Wait()
+	intake.startRepair(loss) // queued, with no worker left to take it
+	intake.releaseRepairWorkers()
+
+	second, cancelSecond := context.WithCancel(context.Background())
+	defer cancelSecond()
+	intake.startRepairWorkers(second)
+	intake.startRepair(loss)
+	require.Eventually(t, func() bool { return polls.calls.Load() > 0 }, 5*time.Second, 5*time.Millisecond,
+		"the next run walks it")
+	cancelSecond()
+	intake.repairs.Wait()
+}

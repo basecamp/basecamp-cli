@@ -42,8 +42,12 @@ type RunOptions struct {
 	// Workers is the fetcher pool size; DefaultWorkers when zero.
 	Workers int
 	// Lines receives one NDJSON line per committed verdict.
-	Lines  io.Writer
-	Logger *slog.Logger
+	Lines io.Writer
+	// LineWriter, when set, is the writer the lines go through, and Lines is
+	// ignored: one sink has one writer and one lock, and a caller wiring
+	// admission beside intake passes the same writer to both.
+	LineWriter *ndjson.Writer
+	Logger     *slog.Logger
 }
 
 // Run takes ids until ctx ends, deciding and committing each. It returns nil
@@ -68,7 +72,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	lines := &lineWriter{w: opts.Lines}
+	lines := &lineWriter{w: opts.Lines, out: opts.LineWriter}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -186,10 +190,14 @@ type lineWriter struct {
 }
 
 func (l *lineWriter) write(v Verdict) error {
-	if l.w == nil {
+	if l.w == nil && l.out == nil {
 		return nil
 	}
-	l.once.Do(func() { l.out = ndjson.NewWriter(l.w) })
+	l.once.Do(func() {
+		if l.out == nil {
+			l.out = ndjson.NewWriter(l.w)
+		}
+	})
 	if err := l.out.WriteLine(LineFor(v)); err != nil {
 		return fmt.Errorf("admission: %w", err)
 	}

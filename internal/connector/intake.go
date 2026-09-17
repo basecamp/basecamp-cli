@@ -72,6 +72,11 @@ type Options struct {
 	// serialized: an interleaved write tears a line and breaks the watcher
 	// reading it.
 	Pointers io.Writer
+	// Lines, when set, is the writer the pointer lines go through, and
+	// Pointers is ignored. One process stdout has one writer and one lock, so
+	// a caller wiring intake and admission onto the same stdout passes the
+	// same writer to both rather than relying on them to find each other.
+	Lines *ndjson.Writer
 	// Logger receives everything else. Pointer lines are the protocol;
 	// logging is not.
 	Logger *slog.Logger
@@ -247,7 +252,7 @@ func New(opts Options) (*Intake, error) {
 		queue:     opts.Queue,
 		log:       opts.Logger,
 		now:       opts.Clock,
-		pointer:   newPointerWriter(opts.Pointers),
+		pointer:   newPointerWriter(opts.Pointers, opts.Lines),
 		reconnect: make(chan struct{}, 1),
 		key: eventfeed.CheckpointKey{
 			Origin:            origin,
@@ -926,6 +931,10 @@ func (in *Intake) releaseRepairWorkers() {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	in.repairQueue = nil
+	// The marks say "a worker has this", and the workers are gone. A loss
+	// still sitting in the dropped queue would otherwise be skipped by every
+	// later run and every sweep.
+	in.inFlight = nil
 }
 
 // repairWorker walks one loss at a time until ctx ends.
@@ -1235,7 +1244,12 @@ type pointerWriter struct {
 	out *ndjson.Writer
 }
 
-func newPointerWriter(w io.Writer) *pointerWriter { return &pointerWriter{out: ndjson.NewWriter(w)} }
+func newPointerWriter(w io.Writer, shared *ndjson.Writer) *pointerWriter {
+	if shared != nil {
+		return &pointerWriter{out: shared}
+	}
+	return &pointerWriter{out: ndjson.NewWriter(w)}
+}
 
 // Pointer is the line intake writes to stdout for each newly seen event. It
 // carries what the feed carried and nothing more: no title, no body, no URL,

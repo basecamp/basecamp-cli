@@ -106,7 +106,9 @@ func (c *cancelingPolls) Poll(ctx context.Context, _ eventfeed.Cursor, _ eventfe
 func TestACanceledRepairWalkLeavesTheLossOpenForTheNextStart(t *testing.T) {
 	for name, age := range map[string]time.Duration{
 		"inside the window": 0,
-		"on the final pass": 24 * time.Hour,
+		// Past its window, but well inside the absolute deadline: this is
+		// about cancellation, not about a loss that has run out of time.
+		"on the final pass": time.Hour,
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := newTestLedger(t)

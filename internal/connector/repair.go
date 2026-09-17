@@ -57,6 +57,19 @@ func (w *repairWalker) reconcileLoss(ctx context.Context, loss Loss) error {
 
 func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 	for {
+		if !w.now().Before(loss.DetectedAt.Add(maxLossLifetime)) {
+			// The absolute deadline. A throttle postpones the window, and a
+			// server that keeps asking for patience could postpone it forever;
+			// a loss that can never close is its own kind of silence. At a day
+			// old it closes, whatever the retry state, with its ids reported.
+			unrecovered, err := w.ledger.CloseLoss(ctx, loss.ID, w.now())
+			if err != nil {
+				return err
+			}
+			w.log.Error("a buffer overflow reached its absolute deadline; what is still missing is unrecovered",
+				"loss_id", loss.ID, "unrecovered", unrecovered, "age", w.now().Sub(loss.DetectedAt))
+			return nil
+		}
 		if !w.now().Before(loss.DeadlineAt) {
 			// Past the window already — perhaps across restarts whose walks
 			// each ended in a failure no retry fixes. One last pass is still
@@ -98,6 +111,9 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 			if err := w.postpone(ctx, &loss); err != nil {
 				return err
 			}
+			// Used: this wait was the server's answer to this attempt, and
+			// says nothing about the next one.
+			w.retryAfter = 0
 		}
 		if err := w.wait(ctx, wait); err != nil {
 			return err
@@ -296,6 +312,10 @@ func (w *repairWalker) walk(ctx context.Context, loss *Loss) (string, error) {
 // stops rather than looping back to find nothing missing and calling that a
 // full recovery.
 var errReconciliationEnded = errors.New("connector: reconciliation ended inside the repair walk")
+
+// maxLossLifetime is how long a loss can stay open, however often a server
+// asks for patience. A day is far past any horizon the feed itself has.
+const maxLossLifetime = 24 * time.Hour
 
 // maxRepairPagesPerPass bounds the pages one repair pass walks. A thousand
 // pages crosses up to a million ledger rows; past that the pass yields to the

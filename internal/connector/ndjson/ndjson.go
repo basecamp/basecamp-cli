@@ -32,6 +32,12 @@ type Writer struct {
 // Keying on the sink makes that impossible whoever calls this, without every
 // caller having to agree to pass one instance around.
 //
+// A value-typed sink is the one case this cannot settle by itself: two copies
+// can wrap one underlying writer and compare unequal, and hashing one can
+// panic, so each gets its own Writer. A composition that puts two producers on
+// one such sink passes them one Writer instead — intake's Options.Lines and
+// admission's RunOptions.LineWriter are there for exactly that.
+//
 // Only reference-like sinks are keyed — a pointer, a channel, an unsafe
 // pointer — which covers every real one, os.Stdout included. A value-typed
 // sink is a copy rather than the same sink, and hashing one can panic when it

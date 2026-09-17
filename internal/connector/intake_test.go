@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 )
 
 type stubMinter struct{}
@@ -51,6 +53,15 @@ func (c *fixedClock) now() time.Time { return c.at }
 func newTestIntake(t *testing.T, polls eventfeed.PollSource, pointers io.Writer) (*Intake, *Ledger, *Queue) {
 	t.Helper()
 	return newTestIntakeWith(t, newTestLedger(t), polls, pointers)
+}
+
+// newTestIntakeLines builds an intake whose pointer lines go through an
+// injected writer.
+func newTestIntakeLines(t *testing.T, lines *ndjson.Writer) (*Intake, *Ledger, *Queue) {
+	t.Helper()
+	intake, ledger, queue := newTestIntakeWith(t, newTestLedger(t), nil, nil)
+	intake.pointer = newPointerWriter(linesSink(lines), lines)
+	return intake, ledger, queue
 }
 
 // newTestIntakeOn builds an intake over an existing ledger, as a later start

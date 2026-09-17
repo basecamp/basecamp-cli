@@ -104,3 +104,62 @@ func TestAThrottleInsideTheWindowPostponesItImmediately(t *testing.T) {
 	assert.Equal(t, loss.DeadlineAt.Add(15*time.Minute).UTC(), atWait.UTC(),
 		"the window moved out by exactly what the server asked for")
 }
+
+// One throttle governs one pass. A later pass with a healthy server waits the
+// ordinary cadence and does not push the window out again.
+func TestOneThrottleDoesNotGovernEveryLaterPass(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, time.Hour, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	polls := &scriptedPolls{errs: []error{&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}}}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	var waits []time.Duration
+	walker.sleep = func(sleepCtx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		clock.at = clock.at.Add(d)
+		if len(waits) >= 3 {
+			return context.Canceled
+		}
+		return nil
+	}
+	require.ErrorIs(t, walker.reconcile(ctx, loss), context.Canceled)
+
+	require.Len(t, waits, 3)
+	assert.Equal(t, 15*time.Minute, waits[0], "the server asked for this one")
+	assert.Equal(t, walker.interval, waits[1], "and said nothing about the next")
+	assert.Equal(t, walker.interval, waits[2])
+
+	open, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	require.Len(t, open, 1)
+	assert.Equal(t, loss.DeadlineAt.Add(15*time.Minute).UTC(), open[0].DeadlineAt.UTC(),
+		"the window moved out once, for the one wait the server asked for")
+}
+
+// C2: a loss cannot live forever. However long a server keeps asking for
+// patience, a loss closes at its absolute deadline with its ids reported.
+func TestALossClosesAtItsAbsoluteDeadline(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, 10*time.Minute, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	walker, _ := newTestWalker(t, ledger, alwaysThrottling{}, clock)
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		clock.at = clock.at.Add(d)
+		return nil
+	}
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	open, err := ledger.OpenLosses(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, open, "closed exactly once, at its absolute deadline")
+	unrecovered, err := ledger.UnrecoveredIDs(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{17099838509}, unrecovered, "and its ids are reported, not forgotten")
+	assert.False(t, clock.at.Before(loss.DetectedAt.Add(maxLossLifetime)), "not before the absolute deadline")
+}

@@ -153,10 +153,12 @@ func TestQueueCallbacksMayTouchTheQueue(t *testing.T) {
 	queue, err := NewQueue(1, 4)
 	require.NoError(t, err)
 	var depths []int
+	// No timeout: a callback that takes from the queue must actually get the
+	// id the offer is delivering, not time out and call that success.
 	queue.OnWarn = func(int) {
-		ctxTake, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer stop()
-		_, _ = queue.Take(ctxTake)
+		id, err := queue.Take(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), id)
 		depths = append(depths, queue.Depth())
 	}
 
