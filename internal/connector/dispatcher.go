@@ -144,6 +144,11 @@ type DispatcherOptions struct {
 
 	Lines  *ndjson.Writer
 	Logger *slog.Logger
+	// Redaction is what, besides the task token, the worker's environments,
+	// the private directory and the state directory, is taken out of every
+	// log line, error and status line the dispatcher writes (driver's
+	// redact.go).
+	Redaction driver.Redaction
 
 	Tick             time.Duration
 	CancelGrace      time.Duration
@@ -196,6 +201,9 @@ type Dispatcher struct {
 	// held is how many attempts recovery left live because their workers
 	// could not be identified or verified. Written by Recover, read under mu.
 	held int
+	// red is the dispatcher's redaction rule; a task's lines use its own
+	// (taskRedaction), which adds the task's token and environments.
+	red *driver.Redactor
 }
 
 // NewDispatcher builds a dispatcher.
@@ -239,10 +247,14 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 	if opts.ProgressInterval <= 0 {
 		opts.ProgressInterval = DefaultProgressInterval
 	}
+	// Every log line passes through the redaction rule; a task's own lines
+	// through its task's (taskRedaction).
+	opts.Redaction = opts.Redaction.With(driver.Redaction{Dirs: []string{opts.PrivateDir, opts.MCP.StateDir}})
 	return &Dispatcher{
 		opts:   opts,
 		ledger: opts.Ledger,
-		log:    opts.Logger,
+		log:    slog.New(driver.NewRedactor(opts.Redaction).Handler(opts.Logger.Handler())),
+		red:    driver.NewRedactor(opts.Redaction),
 		lines:  opts.Lines,
 		live:   map[string]*taskRun{},
 
@@ -518,9 +530,11 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	// Settling must outlive a shutdown that interrupts the start.
 	settleCtx := context.WithoutCancel(ctx)
 	cfg, tokens, cleanup, err := d.sessionConfig(launch, record)
+	cfg.Redaction = d.taskRedaction(launch, cfg)
+	log := d.taskLog(cfg.Redaction)
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
-		d.log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
+		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
 		d.release(settleCtx, launch, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
 		return false, nil //nolint:nilerr // settled as a start that ran nothing
 	}
@@ -531,8 +545,8 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// A configuration no retry can fix is proof no process existed and
 		// proof that starting again would fail the same way.
 		unusable := errors.Is(err, driver.ErrUnusable)
-		d.log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
-			"no_process", spawnFailed, "unusable", unusable, "error", driver.Redact(err.Error()))
+		log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
+			"no_process", spawnFailed, "unusable", unusable, "error", err)
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
 		d.release(settleCtx, launch, driver.StartedProcess(err), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
@@ -550,7 +564,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
-	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup}
+	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log}
 	d.mu.Lock()
 	d.live[launch.AttemptID] = run
 	d.mu.Unlock()
@@ -611,6 +625,21 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 	}, tokens, cleanup, nil
 }
 
+// taskRedaction is the dispatcher's redaction plus what only this task has:
+// its token and the environments its worker and MCP server were given.
+func (d *Dispatcher) taskRedaction(launch Launch, cfg driver.SessionConfig) driver.Redaction {
+	more := driver.Redaction{Secrets: []string{launch.Token}, Env: slices.Clone(cfg.Env)}
+	for _, server := range cfg.MCPServers {
+		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
+	}
+	return d.opts.Redaction.With(more)
+}
+
+// taskLog is the dispatcher's logger under a task's redaction.
+func (d *Dispatcher) taskLog(r driver.Redaction) *slog.Logger {
+	return slog.New(driver.NewRedactor(r).Handler(d.opts.Logger.Handler()))
+}
+
 // settleAttempts is how many times ending an attempt is tried before it is
 // left for the next start.
 const settleAttempts = 5
@@ -627,12 +656,13 @@ const settleAttempts = 5
 // person settles it, and this process stops counting it among the workers it
 // may start.
 func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, end AttemptEnd, run *taskRun) {
+	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	if err := d.confirmGroupGone(worker, d.opts.CancelGrace); err != nil {
 		d.hold()
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		d.log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
+		log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -643,7 +673,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		d.log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
+		log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -744,6 +774,10 @@ func (d *Dispatcher) line(l DispatchLine) {
 	if d.lines == nil {
 		return
 	}
+	// A status line crosses out like a log line does. Its strings are the
+	// dispatcher's own enums and ids, and pass through the rule regardless.
+	red := d.red
+	l.Type, l.AttemptID, l.State, l.StopReason = red.Sanitize(l.Type), red.Sanitize(l.AttemptID), red.Sanitize(l.State), red.Sanitize(l.StopReason)
 	if err := d.lines.WriteLine(l); err != nil {
 		d.log.Warn("connector: dispatch line", "error", err)
 	}
@@ -756,6 +790,8 @@ type taskRun struct {
 	record  Record
 	session driver.Session
 	cleanup func()
+	// log is the dispatcher's logger under this task's redaction.
+	log *slog.Logger
 
 	mu       sync.Mutex
 	refusals int
@@ -801,9 +837,11 @@ func (r *taskRun) supervise(ctx context.Context) {
 
 	if stop != StopFinished {
 		if tail, ok := r.session.(interface{ StderrTail() string }); ok {
+			// The driver's StderrTail is already its redactor's Stderr: the
+			// last line, sanitized, never the text verbatim.
 			if text := strings.TrimSpace(tail.StderrTail()); text != "" {
-				d.log.Warn("connector: the worker's last output", "attempt_id", r.launch.AttemptID,
-					"stop_reason", string(stop), "stderr", richtext.SanitizeSingleLine(lastLine(text)))
+				r.log.Warn("connector: the worker's last output", "attempt_id", r.launch.AttemptID,
+					"stop_reason", string(stop), "stderr", richtext.SanitizeSingleLine(text))
 			}
 		}
 	}
@@ -849,7 +887,7 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 		}
 		next, ok, err := r.nextFollowUp(context.WithoutCancel(ctx))
 		if err != nil {
-			d.log.Warn("connector: follow-up", "task_id", r.launch.TaskID, "error", err)
+			r.log.Warn("connector: follow-up", "task_id", r.launch.TaskID, "error", err)
 			return StopFailed
 		}
 		if !ok {
@@ -864,7 +902,7 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 // stopped approving the task's directory for its project.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 	if !r.authorized() {
-		r.d.log.Warn("connector: the task's route is no longer approved; no more instructions are handed to its worker",
+		r.log.Warn("connector: the task's route is no longer approved; no more instructions are handed to its worker",
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
 	}
@@ -931,7 +969,7 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 			return stopFor(StopShutdown)
 		case <-stillRunning:
 			if _, err := d.ledger.StillRunning(context.WithoutCancel(ctx), r.launch.AttemptID); err != nil {
-				d.log.Warn("connector: still-running", "attempt_id", r.launch.AttemptID, "error", err)
+				r.log.Warn("connector: still-running", "attempt_id", r.launch.AttemptID, "error", err)
 			}
 		}
 	}
@@ -949,12 +987,12 @@ func (r *taskRun) answered(result driver.PromptResult, err error) (driver.Prompt
 	case err == nil:
 		return result, "", false
 	case errors.Is(err, driver.ErrUnsafeMode):
-		r.d.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
+		r.log.Error("connector: the worker did not confirm its permission mode; stopped", "task_id", r.launch.TaskID)
 		return result, StopFailed, true
 	case errors.Is(err, driver.ErrSessionEnded):
 		return result, r.goneStop(), true
 	}
-	r.d.log.Warn("connector: prompt failed", "task_id", r.launch.TaskID, "error", driver.Redact(err.Error()))
+	r.log.Warn("connector: prompt failed", "task_id", r.launch.TaskID, "error", err)
 	select {
 	case <-r.session.Done():
 		return result, r.goneStop(), true
@@ -998,11 +1036,11 @@ func (r *taskRun) drainUpdates(ctx context.Context, done chan<- struct{}) {
 		if time.Since(last) >= r.d.opts.ProgressInterval {
 			last = time.Now()
 			if err := r.d.ledger.RecordProgress(ctx, r.launch.AttemptID); err != nil {
-				r.d.log.Debug("connector: progress", "error", err)
+				r.log.Debug("connector: progress", "error", err)
 			}
 		}
 		if u.Kind == driver.UpdatePermission && !u.Allowed {
-			r.d.log.Info("connector: a permission was refused", "attempt_id", r.launch.AttemptID, "tool", richtext.SanitizeSingleLine(driver.Redact(u.Tool)))
+			r.log.Info("connector: a permission was refused", "attempt_id", r.launch.AttemptID, "tool", richtext.SanitizeSingleLine(u.Tool))
 		}
 	}
 }
@@ -1070,18 +1108,6 @@ func promptURL(raw string) (string, bool) {
 		}
 	}
 	return u.Scheme + "://" + u.Host + u.Path, true
-}
-
-// lastLine is the final line of a worker's output, which is where a program
-// that could not start says why.
-func lastLine(text string) string {
-	if i := strings.LastIndexByte(text, '\n'); i >= 0 {
-		text = text[i+1:]
-	}
-	if len(text) > 300 {
-		text = text[len(text)-300:]
-	}
-	return text
 }
 
 func isPathRune(r rune) bool {

@@ -105,16 +105,13 @@ const pipeWaitDelay = 2 * time.Second
 //     that store itself.
 //   - A task token lives from LaunchTask to the end of its task. The ledger
 //     keeps only its hash. It crosses to exactly one process, the worker's
-//     MCP server, and never to the agent process where that can be avoided:
-//     not in the agent's environment, never in argv, never in a log or a
-//     dispatch line, and never in a file under a working directory or the
-//     connector's state directory. The one file that carries it today is the
-//     MCP configuration the agent reads at start, written owner-only under
-//     the per-user runtime directory (never the state or working directory),
-//     removed as soon as the agent reports its servers started and again on
-//     Close, and swept when the connector starts. When `basecamp mcp` takes
-//     the token over an inherited descriptor (#736), that file stops carrying
-//     it at all.
+//     MCP server, and never to the agent process: the dispatcher serves it
+//     once over a unix socket in the attempt's owner-only runtime directory,
+//     only to a peer of this user in the worker's process group or descended
+//     from its leader (connector.ServeTaskToken), and `basecamp connect
+//     worker-mcp` passes it on to `basecamp mcp` over an inherited
+//     descriptor. It is never in an environment, never in argv, never in a
+//     file, and never in a log or a dispatch line.
 //   - The agent's own credential (ANTHROPIC_API_KEY, where one is used) is in
 //     the agent's environment because the agent needs it, and nowhere else
 //     the connector writes.
@@ -122,12 +119,12 @@ const pipeWaitDelay = 2 * time.Second
 // drivertest.RequireNoSecret and RequireNoSecretFilesDuring are the checks:
 // the environment, argv, written text, and — watched continuously, so a file
 // that lives milliseconds is still caught — every file under the working and
-// session directories after the agent's servers start.
+// session directories. What comes back OUT of a worker is the redaction
+// rule's (redact.go), and drivertest.RequireRedacted is its check.
 //
-// Where this can still be broken: until #736's descriptor carriage lands, the
-// token is in a file for the moments between the MCP configuration being
-// written and the agent's init message; and an agent may copy what it was
-// handed anywhere its tools can write.
+// Where this can still be broken: an agent may copy what it was handed
+// anywhere its tools can write, and any process of this user in the worker's
+// group could take the token first — the group is the agent's own tree.
 //
 // ## The environment a worker and its MCP servers get
 //
@@ -135,21 +132,17 @@ const pipeWaitDelay = 2 * time.Second
 //     environment and MCPServer.Env is each server's, and each is an
 //     allowlist the dispatcher built by name (BuildEnv over BaseEnv, plus the
 //     variables a driver names for its own agent).
-//   - No credential of the connector's is in either: the agent's Basecamp
-//     token stays in the connector, and the only secret that crosses is the
-//     task token, in the MCP server's declared environment.
+//   - No credential is in either: the agent's Basecamp credential stays in
+//     the CLI's store, and the task token travels over the socket.
 //   - No secret is ever in argv, which every process on the machine can read.
 //
 // Where this can still be broken: an agent may ADD to the environment it
 // hands its MCP servers — Claude Code passes its own whole environment down,
 // which carries the agent's own credentials — so the declared environment is
-// a floor, not a ceiling. connector.SanitizeWorkerServerEnv is how the
-// connector's own server drops everything it did not declare on arrival,
-// before it authenticates or starts a helper; `basecamp mcp` (#736, which owns
-// that command and is changing how it takes the task token) is where it is
-// called. Until it is, the agent's own credentials reach the connector's MCP
-// server by that inheritance. A third-party MCP server the operator adds to a
-// worker would inherit them regardless; the connector ships none.
+// a floor, not a ceiling. The bridge (`basecamp connect worker-mcp`) execs
+// `basecamp mcp` with the declared environment only, so the connector's own
+// server does not keep them; a third-party MCP server the operator adds to a
+// worker would inherit them regardless, and the connector ships none.
 //
 // ## When an attempt may be adopted, settled or released
 //
@@ -299,8 +292,9 @@ func (w *Worker) Exit() Exit {
 	return w.exit
 }
 
-// StderrTail is the end of the worker's stderr, redacted.
-func (w *Worker) StderrTail() string { return Redact(w.stderr.String()) }
+// StderrTail is what may be passed on of the worker's stderr, through r
+// (Redactor.Stderr): never the text verbatim.
+func (w *Worker) StderrTail(r *Redactor) string { return r.Stderr(w.stderr.String()) }
 
 // Terminate ends the process group: SIGTERM, grace, SIGKILL. It returns once
 // the leader is reaped. Idempotent.

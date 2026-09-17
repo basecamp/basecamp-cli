@@ -145,6 +145,11 @@ type SessionConfig struct {
 	// files into (an MCP config, say). The driver removes what it wrote when
 	// the session is closed; the dispatcher sweeps the directory on start.
 	PrivateDir string
+	// Redaction is what the driver takes out of every error it returns and
+	// every text an update or a stderr tail carries (redact.go). The driver
+	// adds the environment it builds, its MCP servers' environments and
+	// PrivateDir to it.
+	Redaction Redaction
 }
 
 // MCPServer is one stdio MCP server handed to the agent, as ACP's

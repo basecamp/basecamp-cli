@@ -31,13 +31,6 @@ func TestBuildEnvTakesExactNamesOnly(t *testing.T) {
 	assert.Equal(t, []string{"EXTRA=1", "HOME=/home/x", "PATH=/usr/bin"}, env)
 }
 
-func TestRedactHidesEmailsAndCredentialShapes(t *testing.T) {
-	out := Redact("logged in as someone@example.com with Bearer abc.def-ghi and " + strings.Repeat("x", 48))
-	assert.NotContains(t, out, "someone@example.com")
-	assert.NotContains(t, out, "abc.def-ghi")
-	assert.NotContains(t, out, strings.Repeat("x", 48))
-}
-
 func TestStartWorkerNeverInheritsTheConnectorsEnvironment(t *testing.T) {
 	t.Setenv("CONNECTOR_CANARY_NOT_REAL", "leaked")
 	out := filepath.Join(t.TempDir(), "env.txt")
