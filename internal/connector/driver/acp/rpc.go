@@ -25,10 +25,15 @@ import (
 // A variable so tests need not write one.
 var maxLine = 64 << 20
 
+// maxHandlers bounds the agent requests answered at once.
+const maxHandlers = 16
+
 // JSON-RPC error codes the client sends.
 const (
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
+	// codeBusy is JSON-RPC's implementation-defined server error range.
+	codeBusy = -32000
 )
 
 type wireMessage struct {
@@ -77,6 +82,11 @@ type conn struct {
 	// reply or replyError.
 	onRequest func(id json.RawMessage, method string, params json.RawMessage)
 
+	// handlers bounds the requests being answered at once: a flood of them
+	// spawns no more than this many goroutines, and the rest are refused as
+	// they are read.
+	handlers chan struct{}
+
 	done chan struct{}
 
 	// trace, set only by this package's tests, sees every line in each
@@ -85,7 +95,11 @@ type conn struct {
 }
 
 func newConn(w io.Writer) *conn {
-	return &conn{w: w, pending: map[int64]chan wireMessage{}, done: make(chan struct{})}
+	return &conn{
+		w: w, pending: map[int64]chan wireMessage{},
+		handlers: make(chan struct{}, maxHandlers),
+		done:     make(chan struct{}),
+	}
 }
 
 // read dispatches lines until r ends, then fails every pending call. It
@@ -121,7 +135,18 @@ func (c *conn) read(r io.Reader) error {
 				c.replyError(m.ID, codeMethodNotFound, "method not supported by this client")
 				continue
 			}
-			go c.onRequest(m.ID, m.Method, m.Params)
+			select {
+			case c.handlers <- struct{}{}:
+			default:
+				// Already answering as many as this client answers at once.
+				c.replyError(m.ID, codeBusy, "too many requests at once")
+				continue
+			}
+			id, method, params := m.ID, m.Method, m.Params
+			go func() {
+				defer func() { <-c.handlers }()
+				c.onRequest(id, method, params)
+			}()
 		case m.Method != "":
 			if c.onNotification != nil {
 				c.onNotification(m.Method, m.Params)

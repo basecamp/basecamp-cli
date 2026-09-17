@@ -417,6 +417,7 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 				a.mu.Lock()
 				a.rec.Outcomes = append(a.rec.Outcomes, outcome)
 				a.mu.Unlock()
+				a.flush()
 			}()
 		}
 		wg.Wait()

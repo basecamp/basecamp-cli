@@ -3,9 +3,12 @@
 package acp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -148,11 +151,18 @@ func (h *harness) open() driver.Session {
 	return s
 }
 
+// record is what the fake agent has written about its run so far. It waits
+// for the file: a process that has just been started may not have written it
+// yet on a loaded machine.
 func (h *harness) record() agentRecord {
 	h.t.Helper()
 	var rec agentRecord
-	raw, err := os.ReadFile(h.sc.Record)
-	require.NoError(h.t, err)
+	var raw []byte
+	require.Eventually(h.t, func() bool {
+		var err error
+		raw, err = os.ReadFile(h.sc.Record)
+		return err == nil
+	}, 30*time.Second, 10*time.Millisecond, "the agent wrote no record")
 	require.NoError(h.t, json.Unmarshal(raw, &rec))
 	return rec
 }
@@ -646,7 +656,7 @@ func TestOnlyAStartThatRanNothingIsErrNotStarted(t *testing.T) {
 		h := newHarness(t)
 		h.sc.Hang = "session/new"
 		d := h.driver()
-		d.opts.HandshakeTimeout = 300 * time.Millisecond
+		d.opts.HandshakeTimeout = 3 * time.Second
 		_, err := d.NewSession(context.Background(), h.config())
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		assert.NotErrorIs(t, err, driver.ErrNotStarted)
@@ -1059,8 +1069,9 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 		<-release
 		return true
 	}
+	const flood = 60
 	h.turns(turnScript{
-		FloodPermissions: 40,
+		FloodPermissions: flood,
 		FloodCall:        permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
 		Stop:             "end_turn",
 	})
@@ -1071,10 +1082,13 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 		assert.NoError(t, err)
 		answers <- res
 	}()
-	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 10*time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 20*time.Second, 10*time.Millisecond,
 		"the session decides at most %d at once", maxDecisions)
-	time.Sleep(200 * time.Millisecond)
+	// Every request but the ones stuck in a decision has been answered.
+	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 30*time.Second, 20*time.Millisecond,
+		"a flood is answered as it arrives")
 	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
+	answered := h.record().Outcomes
 	close(release)
 	select {
 	case <-answers:
@@ -1082,10 +1096,81 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 		t.Fatal("the flooded turn never ended")
 	}
 	canceled := 0
-	for _, o := range h.record().Outcomes {
+	for _, o := range answered {
+		if len(o) == 0 || string(o) == "null" {
+			continue
+		}
 		if outcome, _ := outcomeOf(t, o); outcome == outcomeCanceled {
 			canceled++
 		}
 	}
-	assert.Positive(t, canceled, "what does not fit is refused rather than queued")
+	assert.Positive(t, canceled, "what reaches the policy past its bound is refused undecided")
+	allowed := 0
+	for _, o := range h.record().Outcomes {
+		if len(o) == 0 || string(o) == "null" {
+			continue
+		}
+		if _, option := outcomeOf(t, o); option == "allow-once" {
+			allowed++
+		}
+	}
+	assert.Positive(t, allowed, "while what fits is still decided")
+}
+
+// The connection answers at most maxHandlers requests at once, whatever the
+// agent sends: the rest are refused as they are read, so no flood of requests
+// becomes a flood of goroutines.
+func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
+	// What the client writes, the test reads; what the test writes, the
+	// client reads.
+	fromClient, toAgent := io.Pipe()
+	toClient, fromAgent := io.Pipe()
+	t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+
+	c := newConn(toAgent)
+	release := make(chan struct{})
+	var inFlight, peak atomic.Int32
+	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		inFlight.Add(-1)
+		c.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+	}
+	go func() { _ = c.read(toClient) }()
+
+	answers := make(chan int, 1)
+	go func() {
+		// Read what the client writes, so no reply of its own can block it.
+		refused := 0
+		scanner := bufio.NewScanner(fromClient)
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), "too many requests") {
+				refused++
+			}
+			if strings.Contains(scanner.Text(), "outcome") {
+				break
+			}
+		}
+		answers <- refused
+	}()
+	for i := range 64 {
+		_, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i)
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return inFlight.Load() == maxHandlers }, 10*time.Second, 5*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, int32(maxHandlers), peak.Load(), "no more goroutines than the bound, whatever arrives")
+	close(release)
+	select {
+	case refused := <-answers:
+		assert.Positive(t, refused, "what does not fit is refused as it is read")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no answer reached the agent")
+	}
 }
