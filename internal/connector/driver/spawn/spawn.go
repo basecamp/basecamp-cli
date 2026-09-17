@@ -8,6 +8,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/claude"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/codex"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
@@ -22,6 +23,7 @@ type Options struct {
 // adds its row here.
 var constructors = map[string]func(Options) driver.Driver{
 	setup.WorkerClaude: func(o Options) driver.Driver { return claude.New(claude.Options{Lookup: o.Lookup}) },
+	setup.WorkerCodex:  func(o Options) driver.Driver { return codex.New(codex.Options{Lookup: o.Lookup}) },
 }
 
 // New is the spawn driver for worker.
