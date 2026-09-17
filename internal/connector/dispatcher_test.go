@@ -305,6 +305,7 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	assert.NotContains(t, prompt, "please look", "no content")
 	assert.NotContains(t, prompt, "A comment", "no title")
 	assert.Contains(t, prompt, "https://app.basecamp.com/2914079/buckets/48699913/recordings/10304028972")
+	t.Logf("production-sized prompt: %d tokens by the upper bound", estimateTokens(prompt))
 	assert.Less(t, estimateTokens(prompt), MaxPromptTokens)
 
 	// The token reaches the worker's MCP server only over its one-use socket.
