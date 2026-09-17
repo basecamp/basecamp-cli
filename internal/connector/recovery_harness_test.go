@@ -361,6 +361,11 @@ type harnessRun struct {
 	// after settling an attempt, before anything could have claimed its
 	// notice.
 	NoOutbox bool
+	// RequireLog is a line the connector must have written by the end of the
+	// run: what it decided, where the ledger cannot show that it decided
+	// anything (a held attempt is indistinguishable from one recovery never
+	// looked at).
+	RequireLog string
 	// Shadow runs intake and admission only, and installs no hooks: a
 	// `--shadow` run.
 	Shadow bool
@@ -436,6 +441,9 @@ func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
 		return
 	}
 	require.NoError(h.t, err, "the connector must run to %q and stop cleanly\n%s", r.Until, out.String())
+	if r.RequireLog != "" {
+		require.Contains(h.t, out.String(), r.RequireLog, "the connector said what it decided")
+	}
 }
 
 type lockedBuffer struct {

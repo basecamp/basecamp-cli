@@ -568,7 +568,8 @@ func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 		h.publish(feedEntry{Event: todoEvent(104, 5004)})
 		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
-			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
+			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed",
+				RequireLog: "cannot be identified"})
 			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other))
 		}
 		assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
@@ -667,7 +668,8 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		h.publish(feedEntry{Event: todoEvent(104, 5004)})
 		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
-			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
+			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed",
+				RequireLog: "could not verify whether a previous worker still runs"})
 			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other), "work that does not need the held directory still runs")
 			assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
 
