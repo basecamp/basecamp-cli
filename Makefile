@@ -320,6 +320,9 @@ provenance-check:
 .PHONY: vet
 vet: check-toolchain
 	$(GOVET) $(BUILD_TAGS) ./...
+	@# The adapter-compatibility test builds only with its own tag, so
+	@# nothing else would notice it rotting.
+	$(GOVET) -tags acpcompat ./internal/connector/driver/acp/
 
 # Format code
 .PHONY: fmt

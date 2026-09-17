@@ -455,7 +455,8 @@ func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
 		options = append(options, id)
 	}
 	assert.Equal(t, []string{"allow-once", "reject", "reject", "reject", "reject", "reject", "allow-once", "allow-once", "reject", "reject"}, options)
-	assert.Len(t, res.Refusals, 7)
+	// mcp-9 was asked about twice, and a call refused twice is one refusal.
+	assert.Len(t, res.Refusals, 6)
 }
 
 func TestARequestOutsideATurnIsRefusedUnasked(t *testing.T) {
@@ -648,7 +649,7 @@ func TestLoadIsGatedByWhatTheAgentAdvertises(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------- invariant 6 and driver invariant 4
+// ---------------------------------------------------------------- invariants 6 and 7, and driver invariant 4
 
 func TestOnlyAStartThatRanNothingIsErrNotStarted(t *testing.T) {
 	t.Run("missing binary", func(t *testing.T) {
@@ -738,7 +739,7 @@ func TestAWorkerThatDiesMidTurnEndsThePrompt(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------- invariant 7
+// ---------------------------------------------------------------- invariant 8
 
 func TestNothingTheAgentVolunteersIsKept(t *testing.T) {
 	h := newHarness(t)
@@ -1289,14 +1290,20 @@ func TestARefusalRecordIsBounded(t *testing.T) {
 	s.mu.Lock()
 	s.turn = tr
 	s.mu.Unlock()
-	for range maxRefusals + 50 {
-		s.record(driver.PermissionRequest{ToolCallID: strings.Repeat("x", 4*maxToolCallID), Kind: driver.ToolEdit}, tr)
+	t.Cleanup(func() {
+		s.mu.Lock()
+		s.turn = nil
+		s.mu.Unlock()
+	})
+	long := strings.Repeat("x", 4*maxToolCallID)
+	for i := range maxRecorded + maxRefusals + 100 {
+		s.record(driver.PermissionRequest{ToolCallID: fmt.Sprintf("%s-%d", long, i), Kind: driver.ToolEdit}, tr)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	assert.Len(t, tr.refusals, maxRefusals)
+	assert.Len(t, tr.refusals, maxRefusals, "a turn holds so many refusals and no more")
 	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID, "a recorded id is cut, and then redacted")
-	s.turn = nil
+	assert.LessOrEqual(t, len(s.recorded), maxRecorded, "and a session remembers so many and no more")
 }
 
 // A cancel that arrives once the agent has answered the prompt, while the
@@ -1816,4 +1823,53 @@ func TestEveryRefusalIsRecordedOnceAsItIsMade(t *testing.T) {
 		"each refusal is recorded as it is made, before the turn ends")
 	recorded := recorder.Recorded()
 	assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}, {ToolCallID: "call-2", Tool: "execute"}}, recorded[:2])
+}
+
+// The dispatcher logs a worker's last output when it stops badly; it reads
+// it off the session, so the session must offer it.
+func TestTheDispatcherCanReadTheAdaptersLastWords(t *testing.T) {
+	h := newHarness(t)
+	h.sc.Secret = "the adapter's last words"
+	s := h.open()
+	tail, ok := s.(interface{ StderrTail() string })
+	require.True(t, ok, "the dispatcher probes for this method")
+	require.Eventually(t, func() bool { return strings.Contains(tail.StderrTail(), "last words") },
+		10*time.Second, 50*time.Millisecond)
+}
+
+// A session that failed while its handshake was returning is ended, not
+// handed out: nothing prompts a worker the driver has already killed.
+func TestASessionAlreadyFailedIsNeverHandedOut(t *testing.T) {
+	h := newHarness(t)
+	// The failure lands while session/new is being answered; the handshake
+	// itself succeeds.
+	h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "failed"}
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s, err := d.NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, ErrMCPServerNotConnected)
+	assert.Nil(t, s)
+	waitGone(t, h.record().PID)
+}
+
+// A permission request this client cannot read is a refusal it made, and is
+// recorded like any other.
+func TestAnUnreadableRequestIsARefusalToo(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	h.turns(turnScript{Steps: []step{{Permission: raw(t, []any{"not", "an", "object"})}}, Hang: true})
+	s := h.open()
+	go func() { _, _ = s.Prompt(context.Background(), "go") }()
+	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 1 }, 10*time.Second, 20*time.Millisecond)
+	select {
+	case u := <-s.Updates():
+		assert.Equal(t, driver.UpdatePermission, u.Kind)
+		assert.False(t, u.Allowed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no update for a refusal")
+	}
 }

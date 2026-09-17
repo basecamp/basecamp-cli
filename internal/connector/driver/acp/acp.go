@@ -39,21 +39,26 @@
 //  5. Load is gated by what the agent advertised at initialize: session/load
 //     when loadSession is true, session/resume when sessionCapabilities.resume
 //     is present, otherwise an error. Its history replay is not progress.
-//     6a. A configuration this driver cannot run — an adapter with no asking
-//     mode for the policy's, a policy for another directory, an MCP server
-//     without an absolute command, a Codex config that declares MCP servers —
-//     is ErrUnusable beside ErrNotStarted: nothing started, and a retry would
+//  6. A configuration this driver cannot run — an adapter with no asking mode
+//     for the policy's, a policy for another directory, an MCP server without
+//     an absolute command, a Codex config that declares MCP servers — is
+//     ErrUnusable beside ErrNotStarted: nothing started, and a retry would
 //     fail the same way.
-//  6. The adapter is the pinned one: initialize must report protocol version
+//  7. The adapter is the pinned one: initialize must report protocol version
 //     1 and the Adapter's package and version, or the session is ended.
-//  7. Nothing the agent volunteers is kept: _auth/status_update (which
+//  8. Nothing the agent volunteers is kept: _auth/status_update (which
 //     carries the account's email) is dropped unread, updates carry no text,
 //     and agent-written text that reaches an error is redacted first.
-//  8. No session goes on without its MCP servers. The adapter's own account of
-//     them is read (Claude Code's init, forwarded; codex-acp's startup
-//     failures), and a server that did not connect — or, for Claude, a first
-//     turn that ends with no init at all — fails the turn with
-//     ErrMCPServerNotConnected and ends the worker.
+//  9. A session runs only on the MCP servers it was given, as far as its
+//     adapter says. The adapter's own account of them is read (Claude Code's
+//     init, forwarded; codex-acp's startup failures), and a server that did
+//     not connect — or, for Claude, a first turn that ends with no init at
+//     all — fails the turn with ErrMCPServerNotConnected and ends the worker.
+//
+// Three of these are rules rather than single checks, so each is stated once
+// and held in one place: the MCP isolation boundary in mcp.go, who may decide
+// a permission and on what evidence in permission.go, and what bounds every
+// buffer the driver keeps in limits.go.
 package acp
 
 import (
@@ -84,10 +89,6 @@ const (
 // confirmGroupGone is driver.ConfirmGroupGone; a seam for this package's
 // tests.
 var confirmGroupGone = driver.ConfirmGroupGone
-
-// modeConfirmWait is how long a session with no mode config option has to
-// report the mode it was set to. A variable so tests need not wait it out.
-var modeConfirmWait = 10 * time.Second
 
 // Errors.
 var (
@@ -254,6 +255,15 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		// A start that launched a process says which (driver invariant 4):
 		// the connector confirms its group gone before it settles anything.
 		return nil, &driver.StartError{Process: worker.Process(), Err: red.Err(fmt.Errorf("%w%s", err, s.stderrNote()))}
+	}
+	if own := s.failure(); own != nil {
+		// A failure claimed while the handshake was returning: the worker is
+		// already being ended, so the session is never handed out.
+		s.abort()
+		if gone := confirmGroupGone(worker.Process(), d.opts.CloseGrace); gone != nil {
+			own = fmt.Errorf("%w; %w", own, gone)
+		}
+		return nil, &driver.StartError{Process: worker.Process(), Err: red.Err(own)}
 	}
 	return s, nil
 }

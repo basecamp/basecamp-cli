@@ -665,7 +665,7 @@ func checkTokenBridge(t *testing.T, e compatEnv) {
 				// `basecamp mcp` cannot serve here — its profile is a dummy
 				// with no credentials — so the agent reports the server
 				// failed, and the driver must refuse to go on with a session
-				// whose MCP server did not connect (invariant 8). A session
+				// whose MCP server did not connect (invariant 9). A session
 				// whose server does serve is the live end-to-end proof.
 				_, err := s.Prompt(turnCtx(t), "Reply with just the word OK. Do not use any tools.")
 				if !errors.Is(err, ErrMCPServerNotConnected) {

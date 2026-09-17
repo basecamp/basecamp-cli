@@ -19,20 +19,6 @@ import (
 // protocol's unstable drafts; a transcript of exactly what went over the wire
 // is worth more here than their generated types.
 
-// maxLine is the longest line the connector reads from an agent. A session/load
-// replay or a large tool result can be long; a line past this ends the session
-// rather than growing without bound.
-// A variable so tests need not write one.
-var maxLine = 64 << 20
-
-// maxHandlers bounds the agent requests answered at once, and maxBusy the
-// refusals waiting to be written. A variable so tests need not send a
-// thousand requests.
-var (
-	maxHandlers = 16
-	maxBusy     = 256
-)
-
 // JSON-RPC error codes the client sends.
 const (
 	codeMethodNotFound = -32601
@@ -103,9 +89,10 @@ type conn struct {
 	// spawns no more than this many goroutines, and the rest are refused as
 	// they are read.
 	handlers chan struct{}
-	// busy carries the ids of requests refused at the bound to the one
-	// goroutine that answers them.
-	busy chan json.RawMessage
+	// busy carries the requests refused at the bound to the one goroutine
+	// that records and answers them: neither happens on the reader, so an
+	// agent that floods requests cannot stall what the client reads.
+	busy chan busyRequest
 
 	done chan struct{}
 
@@ -121,20 +108,30 @@ func newConn(w io.Writer) *conn {
 	c := &conn{
 		w: w, pending: map[int64]chan wireMessage{},
 		handlers: make(chan struct{}, maxHandlers),
-		busy:     make(chan json.RawMessage, maxBusy),
+		busy:     make(chan busyRequest, maxBusy),
 		done:     make(chan struct{}),
 	}
 	go c.answerBusy()
 	return c
 }
 
-// answerBusy answers requests refused at the handler bound, until the
-// connection ends.
+// busyRequest is a request refused at the handler bound.
+type busyRequest struct {
+	id     json.RawMessage
+	method string
+	params json.RawMessage
+}
+
+// answerBusy records and answers the requests refused at the handler bound,
+// until the connection ends.
 func (c *conn) answerBusy() {
 	for {
 		select {
-		case id := <-c.busy:
-			c.replyError(id, codeBusy, "too many requests at once")
+		case r := <-c.busy:
+			if c.onBusy != nil {
+				c.onBusy(r.method, r.params)
+			}
+			c.replyError(r.id, codeBusy, "too many requests at once")
 		case <-c.done:
 			return
 		}
@@ -178,14 +175,11 @@ func (c *conn) read(r io.Reader) error {
 			case c.handlers <- struct{}{}:
 			default:
 				// Already answering as many as this client answers at once.
-				if c.onBusy != nil {
-					c.onBusy(m.Method, m.Params)
-				}
-				// Answered off the reader, and dropped if even that is full:
-				// an agent flooding requests while it has stopped reading its
-				// input must not stall what the client reads from it.
+				// Recorded and answered off the reader: an agent flooding
+				// requests while it has stopped reading its input must not
+				// stall what the client reads from it.
 				select {
-				case c.busy <- m.ID:
+				case c.busy <- busyRequest{id: m.ID, method: m.Method, params: m.Params}:
 				default:
 					// More unanswered requests than any agent asks: it is not
 					// working with this client, and the session ends.

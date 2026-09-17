@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -94,8 +93,12 @@ type turn struct {
 	call     *pendingCall
 	canceled bool
 	refusals []driver.Refusal
-	result   driver.PromptResult
-	err      error
+	// seen is the tool calls already on refusals, by digest of the id the
+	// agent sent: a call the stream announced and the result repeats is one
+	// refusal, and two ids that are shown the same are still two calls.
+	seen   map[[sha256.Size]byte]bool
+	result driver.PromptResult
+	err    error
 }
 
 var _ driver.Session = (*session)(nil)
@@ -239,45 +242,6 @@ type configOption struct {
 	Type         string          `json:"type"`
 	CurrentValue json.RawMessage `json:"currentValue"`
 	Options      json.RawMessage `json:"options"`
-}
-
-// wireServer is ACP's stdio McpServer.
-type wireServer struct {
-	Name    string    `json:"name"`
-	Command string    `json:"command"`
-	Args    []string  `json:"args"`
-	Env     []wireEnv `json:"env"`
-}
-
-type wireEnv struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// wireServers declares every server's whole environment (invariant 1): some
-// adapters pass their own environment down to MCP servers and some pass
-// almost nothing, so nothing a server needs is left to inheritance.
-func wireServers(servers []driver.MCPServer) ([]wireServer, error) {
-	out := make([]wireServer, 0, len(servers))
-	for _, srv := range servers {
-		if srv.Name == "" || !filepath.IsAbs(srv.Command) {
-			return nil, errors.New("acp: an MCP server needs a name and an absolute command")
-		}
-		env := make([]wireEnv, 0, len(srv.Env))
-		for k, v := range srv.Env {
-			if k == "" || strings.ContainsAny(k, "=\x00") {
-				return nil, fmt.Errorf("acp: MCP server %q has an invalid environment name", srv.Name)
-			}
-			env = append(env, wireEnv{Name: k, Value: v})
-		}
-		slices.SortFunc(env, func(a, b wireEnv) int { return strings.Compare(a.Name, b.Name) })
-		args := srv.Args
-		if args == nil {
-			args = []string{}
-		}
-		out = append(out, wireServer{Name: srv.Name, Command: srv.Command, Args: args, Env: env})
-	}
-	return out, nil
 }
 
 func (s *session) newSession(ctx context.Context, cwd string, servers []wireServer, meta map[string]any) (sessionState, error) {
@@ -505,43 +469,6 @@ func (s *session) endAfterTurn(t *turn, end func()) {
 	}()
 }
 
-// reportMCPServers takes the agent's own account of its MCP servers
-// (invariant 8): every server the session was given must be connected, and a
-// server it was never given must not be there at all.
-//
-// complete says whether statuses is the agent's whole account of them (an
-// init) or only what it said about one server (a startup failure).
-func (s *session) reportMCPServers(statuses map[string]string, complete bool) {
-	s.mu.Lock()
-	names := slices.Clone(s.mcpNames)
-	s.mu.Unlock()
-	for name, status := range statuses {
-		switch {
-		case !slices.Contains(names, name):
-			// strictMcpConfig and the Codex preflight are meant to leave the
-			// agent nothing else; a server it names is evidence they did not,
-			// whether this is its whole list or one startup report.
-			s.fail(fmt.Errorf("%w: the agent has a server the session never gave it, %q", ErrMCPServerNotConnected, s.conn.agentText(name)))
-			return
-		case status != "connected":
-			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, s.conn.agentText(status)))
-			return
-		}
-	}
-	if !complete {
-		return
-	}
-	for _, name := range names {
-		if statuses[name] != "connected" {
-			s.fail(fmt.Errorf("%w: the agent did not report %q at all", ErrMCPServerNotConnected, name))
-			return
-		}
-	}
-	s.mu.Lock()
-	s.mcpConfirmed = true
-	s.mu.Unlock()
-}
-
 func modeOption(options []configOption) *configOption {
 	for i := range options {
 		if options[i].Category == "mode" && options[i].Type == "select" {
@@ -561,11 +488,6 @@ func stringValue(o *configOption) (string, bool) {
 	}
 	return v, true
 }
-
-// maxOptionDepth bounds how deeply a select option's groups may nest: the
-// agent writes that JSON, and a deep one would otherwise recurse until the
-// process dies.
-const maxOptionDepth = 8
 
 // optionValues are a select option's values, flat or grouped.
 func optionValues(raw json.RawMessage) []string { return optionValuesAt(raw, 0) }
@@ -839,9 +761,15 @@ func (s *session) Close() error {
 func (s *session) awaitReader() {
 	select {
 	case <-s.readerEnd:
+		return
 	case <-time.After(s.grace):
-		s.worker.CloseStdout()
-		<-s.readerEnd
+	}
+	s.worker.CloseStdout()
+	select {
+	case <-s.readerEnd:
+	case <-time.After(s.grace):
+		// The reader is not coming back: the worker is gone and its output
+		// abandoned, so nothing is waiting on it that the caller needs.
 	}
 }
 
@@ -855,6 +783,10 @@ func (s *session) abort() {
 		s.awaitReader()
 	})
 }
+
+// StderrTail is what may be passed on of the adapter's stderr: the
+// dispatcher logs it when a worker stops badly.
+func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
 
 // stderrNote is the end of the adapter's stderr, redacted, for an error.
 func (s *session) stderrNote() string {
@@ -969,7 +901,7 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 
 // onNotification handles the agent's notifications in wire order. Only
 // session/update is read; _auth/status_update, which carries the account's
-// email, and every extension are dropped unread (invariant 7).
+// email, and every extension are dropped unread (invariant 8).
 func (s *session) onNotification(method string, params json.RawMessage) {
 	if method == "_claude/sdkMessage" {
 		s.onSDKMessage(params)
@@ -1057,147 +989,6 @@ func (s *session) emit(u driver.Update) {
 	}
 }
 
-// onSDKMessage reads the one Claude Code message the session asks
-// claude-agent-acp to forward, its init, for each MCP server's name and
-// status. Everything else in it, and every other message, is dropped unread.
-func (s *session) onSDKMessage(params json.RawMessage) {
-	if s.mcpStatus != MCPStatusInit {
-		return
-	}
-	var n struct {
-		SessionID string `json:"sessionId"`
-		Message   struct {
-			Type       string `json:"type"`
-			Subtype    string `json:"subtype"`
-			MCPServers []struct {
-				Name   string `json:"name"`
-				Status string `json:"status"`
-			} `json:"mcp_servers"`
-		} `json:"message"`
-	}
-	if json.Unmarshal(params, &n) != nil || n.SessionID == "" || !s.ours(n.SessionID) ||
-		n.Message.Type != "system" || n.Message.Subtype != "init" {
-		return
-	}
-	statuses := map[string]string{}
-	for _, srv := range n.Message.MCPServers {
-		statuses[srv.Name] = srv.Status
-	}
-	s.mu.Lock()
-	known := s.id != ""
-	if !known {
-		// The session's id is not known yet: this account of the servers is
-		// held until it is, so an init naming another session cannot vouch
-		// for this one.
-		if s.earlyInit == nil {
-			s.earlyInit = map[string]map[string]string{}
-		}
-		s.earlyInit[n.SessionID] = statuses
-	}
-	s.mu.Unlock()
-	if known {
-		s.reportMCPServers(statuses, true)
-	}
-}
-
-// onRequest answers the agent's requests. The client offers no fs and no
-// terminal, so a permission is the only request it serves.
-func (s *session) onRequest(id json.RawMessage, method string, params json.RawMessage, claimed any) {
-	if method != "session/request_permission" {
-		s.conn.replyError(id, codeMethodNotFound, "method not supported by this client")
-		return
-	}
-	defer func() {
-		s.mu.Lock()
-		s.deciding--
-		s.mu.Unlock()
-	}()
-	// The turn the request was read in, not whatever turn is in flight by
-	// the time this goroutine runs.
-	t, _ := claimed.(*turn)
-	var p struct {
-		SessionID string          `json:"sessionId"`
-		ToolCall  json.RawMessage `json:"toolCall"`
-		Options   []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
-	if err := json.Unmarshal(params, &p); err != nil {
-		s.conn.replyError(id, codeInvalidParams, "unreadable permission request")
-		return
-	}
-	call, _ := decodeUpdate(p.ToolCall)
-
-	select {
-	case s.decisions <- struct{}{}:
-		defer func() { <-s.decisions }()
-	default:
-		// More at once than a session has any business asking: refused
-		// without a decision, and recorded as the refusal it is.
-		s.refuse(id, driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}, t)
-		return
-	}
-
-	s.mu.Lock()
-	// A turn the agent has already answered asks nothing more.
-	askable := t != nil && s.turn == t && !t.settling && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
-	canceled := t != nil && t.canceled
-	s.mu.Unlock()
-
-	// Only a request the session can be asked is merged into what it knows
-	// of its tool calls: one for another session, or outside a turn, could
-	// otherwise name a call that a later request is decided on.
-	info := toolInfo{name: toolName(call), kind: toolKind(call.Kind), locations: call.Locations}
-	if askable {
-		info = s.noteTool(call)
-	}
-	req := driver.PermissionRequest{
-		ToolCallID: call.ToolCallID,
-		Tool:       info.name,
-		Kind:       info.kind,
-		Locations:  slices.Clone(info.locations),
-	}
-	for _, o := range p.Options {
-		req.Options = append(req.Options, driver.PermissionOption{ID: o.OptionID, Kind: driver.PermissionOptionKind(o.Kind)})
-	}
-
-	if canceled {
-		// A turn being canceled answers its open requests as canceled, as
-		// ACP asks of a client. It is still a call this session did not
-		// allow, so it is recorded as one.
-		s.refuse(id, req, t)
-		return
-	}
-	allow := askable && s.policy.Decide(context.Background(), req).Allow
-	if allow {
-		// The policy took its time; the session may have been canceled or
-		// found unsafe while it did, and neither allows anything more.
-		s.mu.Lock()
-		allow = s.turn == t && !t.settling && !t.canceled && s.unsafe == nil && !s.closed
-		s.mu.Unlock()
-	}
-	option := chooseOption(req.Options, allow)
-	if allow && option == "" {
-		// Allowing is only ever allow_once; without it, the answer is no.
-		allow = false
-		option = chooseOption(req.Options, false)
-	}
-	if !allow {
-		s.record(req, t)
-	}
-	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind, Allowed: allow})
-	if option == "" {
-		s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
-		return
-	}
-	s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": option}})
-}
-
-// outcomeCanceled is ACP's permission outcome for a request not answered by
-// an option.
-const outcomeCanceled = "cancelled" //nolint:misspell // ACP's wire value
-
 // onResponse marks a turn settling the moment its prompt's answer is read,
 // on the reading goroutine: a request read after that answer is outside the
 // turn, however soon the turn's own goroutine runs.
@@ -1216,114 +1007,12 @@ func (s *session) inFlight(t *turn) bool {
 	return s.turn == t && !t.settling
 }
 
-// onBusy records a permission request refused at the connection's handler
-// bound as the refusal it is.
-func (s *session) onBusy(method string, params json.RawMessage) {
-	if method != "session/request_permission" {
-		return
-	}
-	var p struct {
-		ToolCall json.RawMessage `json:"toolCall"`
-	}
-	_ = json.Unmarshal(params, &p)
-	call, _ := decodeUpdate(p.ToolCall)
-	req := driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}
-	s.record(req, nil)
-	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind})
-}
-
-// refuse answers a request the session will not put to the policy at all,
-// with no option of the agent's, and records it as the refusal it is.
-func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *turn) {
-	s.record(req, t)
-	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind})
-	s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
-}
-
-// record puts a refusal on the turn it belongs to (invariant 4). A turn given
-// as nil is looked up: a refusal the session made before it read the turn
-// still belongs to the turn in flight.
-func (s *session) record(req driver.PermissionRequest, t *turn) {
-	id := req.ToolCallID
-	if len(id) > maxToolCallID {
-		id = id[:maxToolCallID]
-	}
-	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(refusalTool(req))}
-	// Once-ness is per the id the agent sent, by digest: two ids cut or
-	// redacted to the same text are still two calls.
-	key := sha256.Sum256([]byte(req.ToolCallID))
-
-	s.mu.Lock()
-	first := !s.recorded[key]
-	if first {
-		s.recorded[key] = true
-	}
-	if t == nil {
-		t = s.turn
-	}
-	if t != nil && s.turn == t && len(t.refusals) < maxRefusals {
-		t.refusals = append(t.refusals, refusal)
-	}
-	recorder := s.recorder
-	s.mu.Unlock()
-
-	// The ledger, not a session's memory, is where a refusal is kept: a
-	// worker that exits before its result, or a turn cut short, ends that
-	// memory. Once per tool call id (driver's "Refusals"); the recorder owns
-	// what happens when the ledger refuses the write.
-	if first && recorder != nil {
-		_ = recorder.RecordRefusal(context.Background(), refusal)
-	}
-}
-
-// chooseOption selects by kind, never by id or label (invariant 3).
-func chooseOption(options []driver.PermissionOption, allow bool) string {
-	want := []driver.PermissionOptionKind{driver.RejectOnce, driver.RejectAlways}
-	if allow {
-		want = []driver.PermissionOptionKind{driver.AllowOnce}
-	}
-	for _, kind := range want {
-		for _, o := range options {
-			if o.Kind == kind && o.ID != "" {
-				return o.ID
-			}
-		}
-	}
-	return ""
-}
-
-func refusalTool(req driver.PermissionRequest) string {
-	if req.Tool != "" {
-		return req.Tool
-	}
-	return string(req.Kind)
-}
-
 // toolInfo is what is known of one tool call.
 type toolInfo struct {
 	name      string
 	kind      driver.ToolKind
 	locations []string
 }
-
-// maxDecisions bounds the permission requests one session decides at once.
-const maxDecisions = 8
-
-// decisionDrain is how long a turn's end waits for permissions still being
-// decided.
-var decisionDrain = 2 * time.Second
-
-// maxTools bounds the tool calls remembered for one session, maxToolCallID
-// the id of one, and maxLocations the paths it may name: the agent writes all
-// three, and a session's memory is not its to grow.
-const (
-	// maxRefusals bounds the refusals one turn records; past it, a refusal is
-	// still an update.
-	maxRefusals   = 1024
-	maxTools      = 1024
-	maxToolCallID = 256
-	maxLocations  = 64
-)
 
 // noteTool merges what u says about its tool call into what the session
 // knows of it, and returns the result. A later message fills in what an

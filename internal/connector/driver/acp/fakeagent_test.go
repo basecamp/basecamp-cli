@@ -448,10 +448,14 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 			a.update(sid, map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": st.ModeChange})
 		}
 		if len(st.Permission) > 0 {
-			var p map[string]any
-			_ = json.Unmarshal(st.Permission, &p)
-			if _, ok := p["sessionId"]; !ok {
-				p["sessionId"] = sid
+			var p any
+			if json.Unmarshal(st.Permission, &p) != nil {
+				p = st.Permission
+			} else if object, ok := p.(map[string]any); ok {
+				if _, named := object["sessionId"]; !named {
+					object["sessionId"] = sid
+				}
+				p = object
 			}
 			outcome := a.request("session/request_permission", p)
 			a.mu.Lock()
