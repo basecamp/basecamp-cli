@@ -57,11 +57,14 @@ type scenario struct {
 	// input.
 	StopReadingAfter string `json:"stop_reading_after"`
 	// Hang names a method the agent never answers.
-	Hang            string `json:"hang"`
-	AuthEmail       string `json:"auth_email"`
-	SpawnChild      bool   `json:"spawn_child"`
-	IgnoreStdinEOF  bool   `json:"ignore_stdin_eof"`
-	IgnoreTerminate bool   `json:"ignore_terminate"`
+	Hang       string `json:"hang"`
+	AuthEmail  string `json:"auth_email"`
+	SpawnChild bool   `json:"spawn_child"`
+	// EscapingChild starts the child in a session of its own, holding the
+	// agent's output: a process group kill does not reach it.
+	EscapingChild   bool `json:"escaping_child"`
+	IgnoreStdinEOF  bool `json:"ignore_stdin_eof"`
+	IgnoreTerminate bool `json:"ignore_terminate"`
 }
 
 type turnScript struct {
@@ -131,8 +134,12 @@ func runFakeAgent(path string) {
 		}
 	}
 	slices.Sort(a.rec.Env)
-	if sc.SpawnChild {
+	if sc.SpawnChild || sc.EscapingChild {
 		child := exec.CommandContext(context.Background(), os.Args[0], fakeChildArg)
+		if sc.EscapingChild {
+			child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			child.Stdout = os.Stdout
+		}
 		if child.Start() == nil {
 			a.rec.ChildPID = child.Process.Pid
 		}

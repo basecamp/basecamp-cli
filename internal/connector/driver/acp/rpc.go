@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // JSON-RPC 2.0 over newline-delimited JSON, hand-rolled: ACP v1's stdio
@@ -276,19 +277,13 @@ func (c *conn) closeWrite(closer io.Closer) {
 	_ = closer.Close()
 }
 
-// agentText is text the agent wrote, made fit for an error string: redacted
-// (driver invariant 6), on one line, and short.
+// agentText is text the agent wrote, made fit for an error string that ends
+// up in a log: redacted (driver invariant 6), stripped of the escapes and
+// controls a terminal would act on, on one line, and short.
 func agentText(s string) string {
-	s = driver.Redact(s)
-	out := make([]rune, 0, 120)
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
-			r = ' '
-		}
-		out = append(out, r)
-		if len(out) >= 120 {
-			break
-		}
+	out := []rune(richtext.SanitizeSingleLine(driver.Redact(s)))
+	if len(out) > 120 {
+		out = out[:120]
 	}
 	return string(out)
 }

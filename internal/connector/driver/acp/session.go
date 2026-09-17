@@ -578,9 +578,21 @@ func (s *session) Close() error {
 		case <-time.After(s.grace):
 		}
 		s.worker.Terminate(s.grace)
-		<-s.readerEnd
+		s.awaitReader()
 	})
 	return nil
+}
+
+// awaitReader waits for the session's reader to finish, and gives up on the
+// worker's output when something outside its process group still holds the
+// pipe: the worker is gone, and its output is no longer worth waiting for.
+func (s *session) awaitReader() {
+	select {
+	case <-s.readerEnd:
+	case <-time.After(s.grace):
+		s.worker.CloseStdout()
+		<-s.readerEnd
+	}
 }
 
 // abort ends a session that failed its handshake, without grace.
@@ -590,7 +602,7 @@ func (s *session) abort() {
 		s.closed = true
 		s.mu.Unlock()
 		s.worker.Terminate(0)
-		<-s.readerEnd
+		s.awaitReader()
 	})
 }
 

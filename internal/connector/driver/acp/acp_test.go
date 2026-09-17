@@ -914,6 +914,8 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("['mcp_servers'.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted key declares them too")
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))
 	withCodexHome := func(name string) (string, bool) {
@@ -936,4 +938,36 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, err, driver.ErrNotStarted)
 	_, statErr := os.Stat(h.sc.Record)
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
+}
+
+func TestCloseGivesUpOnOutputAnEscapedDescendantHolds(t *testing.T) {
+	h := newHarness(t)
+	h.sc.EscapingChild, h.sc.IgnoreStdinEOF, h.sc.IgnoreTerminate = true, true, true
+	h.grace = 300 * time.Millisecond
+	s := h.open()
+	rec := h.record()
+	require.NotZero(t, rec.ChildPID)
+	t.Cleanup(func() { _ = syscall.Kill(rec.ChildPID, syscall.SIGKILL) })
+
+	closed := make(chan struct{})
+	go func() { _ = s.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited on output a process outside the worker's group holds")
+	}
+	waitGone(t, rec.PID)
+	assert.False(t, gone(rec.ChildPID), "the escaped descendant is not this driver's to kill by name")
+}
+
+func TestAgentTextIsFitForALog(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{ErrorMessage: "quota for person@example.com\u001b[31mred\u009b31mred\nsecond line\ttab"})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.Error(t, err)
+	for _, bad := range []string{"person@example.com", "\u001b", "\u009b", "\n", "\t"} {
+		assert.NotContains(t, err.Error(), bad)
+	}
+	assert.Contains(t, err.Error(), "quota for")
 }
