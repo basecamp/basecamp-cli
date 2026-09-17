@@ -101,9 +101,13 @@ type cutover struct {
 	shadowDir, stateDir string
 }
 
-func newCutover(t *testing.T) cutover {
+// newCutover lays the two directories out under the harness's own state home,
+// where the connector puts them, so a worker's MCP server would resolve the
+// promoted one exactly as it resolves an ordinary run's.
+func newCutover(h *harness) cutover {
+	t := h.t
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "basecamp")
+	root := filepath.Join(h.dir, "state", "basecamp")
 	c := cutover{
 		shadowDir: filepath.Join(root, "connect-shadow", StateDirName(harnessAccount, harnessAgent)),
 		stateDir:  filepath.Join(root, "connect", StateDirName(harnessAccount, harnessAgent)),
@@ -146,15 +150,19 @@ func TestRecoveryACrashInShadowPromoteNeverDispatchesAHeldRecord(t *testing.T) {
 		for _, step := range []string{"locked", "marker", "tagged", "held", "checkpointed", "renamed", "synced"} {
 			t.Run(step, func(t *testing.T) {
 				h := newHarness(t, d, harnessScenario{})
-				c := newCutover(t)
+				c := newCutover(h)
 				h.shadowLedger(c)
 
 				runKilled(t, "promote:"+step, "SHADOW_DIR="+c.shadowDir, "STATE_DIR="+c.stateDir)
 				if c.normalLedgerExists() {
 					// The supervisor restarts the connector over whatever the
 					// crash left at the normal path.
+					t.Logf("killed at %q: the ledger is at the normal path, and a restart must dispatch nothing", step)
 					h.run(harnessRun{StateDir: c.stateDir})
 					h.assertNothingDispatched(h.ledgerAt(c.stateDir), 101, 102)
+				} else {
+					t.Logf("killed at %q: the shadow is untouched or held, and there is nothing at the normal path to restart over", step)
+					assertUntouchedOrHeldShadow(t, c.shadowDir)
 				}
 
 				got, err := PromoteShadow(context.Background(), PromoteOptions{
@@ -177,7 +185,7 @@ func TestRecoveryACrashInImportNeverDispatchesAHeldRecord(t *testing.T) {
 		for _, step := range []string{"entry", "tagged"} {
 			t.Run(step, func(t *testing.T) {
 				h := newHarness(t, d, harnessScenario{})
-				c := newCutover(t)
+				c := newCutover(h)
 				h.shadowLedger(c)
 				_, err := PromoteShadow(context.Background(), PromoteOptions{
 					ShadowDir: c.shadowDir, StateDir: c.stateDir, AccountID: harnessAccount, AgentID: harnessAgent, By: "operator",
@@ -202,6 +210,25 @@ func TestRecoveryACrashInImportNeverDispatchesAHeldRecord(t *testing.T) {
 			})
 		}
 	})
+}
+
+// assertUntouchedOrHeldShadow is the other half of the promote rule: what the
+// crash left is a shadow ledger, held or exactly as it was — never an unheld
+// ledger at the normal path, which the caller has already established is not
+// there.
+func assertUntouchedOrHeldShadow(t *testing.T, shadowDir string) {
+	t.Helper()
+	l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(shadowDir, LedgerFile))
+	require.NoError(t, err, "the shadow ledger is still where it was")
+	defer func() { _ = l.Close() }()
+	held, err := l.Held(context.Background())
+	require.NoError(t, err)
+	state := stateOf(t, l, 101)
+	if held {
+		assert.Equal(t, StateHeld, state, "a held shadow holds its waiting record")
+	} else {
+		assert.Equal(t, StateAdmitted, state, "an untouched shadow is as the crash found it")
+	}
 }
 
 func (h *harness) ledgerAt(dir string) *Ledger {

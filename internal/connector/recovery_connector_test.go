@@ -29,8 +29,8 @@ import (
 // The connector process the recovery harness starts and kills: its kill points,
 // its composition, and the ledger predicates a surviving run stops at.
 
-// killSpec is a run's kill point: "<point>" or "<point>:<n>", killing at the
-// n-th time the point is reached (the first when n is absent). Line points are
+// killSpec is a run's kill point: "<point>", or "<point>#<n>" to kill at the
+// n-th time the point is reached rather than the first. Line points are
 // "line:<type>:<state>".
 type killSpec struct {
 	point string
@@ -169,7 +169,13 @@ func runHarnessConnector(dir string) error {
 		return err
 	}
 	defer func() { _ = ledger.Close() }()
-	hooks := LifecycleHooks(ledger, LifecycleOptions{GuardDelay: time.Hour})
+	// The guard is an hour out unless a scenario asks for it: a test that is
+	// not about the guard must not have one fire in the middle of it.
+	guardDelay := sc.GuardDelay
+	if guardDelay <= 0 {
+		guardDelay = time.Hour
+	}
+	hooks := LifecycleHooks(ledger, LifecycleOptions{GuardDelay: guardDelay})
 	ended := hooks.AttemptEnded
 	hooks.AttemptEnded = func(ctx context.Context, tx Tx, s Settlement) error {
 		if err := ended(ctx, tx, s); err != nil {
@@ -275,6 +281,7 @@ func runHarnessConnector(dir string) error {
 		MCP:                mcp,
 		PrivateDir:         filepath.Join(dir, "sessions"),
 		Replies:            storeReplies{dir: dir},
+		Workspaces:         &harnessWorkspaces{dir: dir},
 		IsLifecycleMessage: IsLifecycleMessageIn(ledger),
 		Lines:              lines,
 		Logger:             logger,
@@ -295,6 +302,17 @@ func runHarnessConnector(dir string) error {
 	if err != nil {
 		return err
 	}
+
+	// Who is running, for a fake worker that is to kill it: written before
+	// anything can be dispatched, removed when this process leaves cleanly.
+	identity, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": time.Now().UTC()})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, connectorFile), identity, 0o600); err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(filepath.Join(dir, connectorFile)) }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -437,6 +455,27 @@ func harnessPredicate(ctx context.Context, dir string, l *Ledger, until string) 
 	return false, fmt.Errorf("unknown predicate %q", until)
 }
 
+// harnessWorkspaces is the working directory a task gets: the route itself,
+// as the run command's default does. It records every preparation and every
+// release, so a test can say whether a directory was released — which the
+// one-owner rule allows only once a worker's process group is gone.
+type harnessWorkspaces struct{ dir string }
+
+type workspaceEvent struct {
+	Step    string `json:"step"`
+	Route   string `json:"route"`
+	WorkDir string `json:"work_dir"`
+	EventID int64  `json:"event_id,omitempty"`
+}
+
+func (w *harnessWorkspaces) Prepare(_ context.Context, route string, eventID int64) (string, error) {
+	return route, appendJSONLine(filepath.Join(w.dir, workspaceFile), workspaceEvent{Step: "prepare", Route: route, WorkDir: route, EventID: eventID})
+}
+
+func (w *harnessWorkspaces) Finish(_ context.Context, route, workDir string) error {
+	return appendJSONLine(filepath.Join(w.dir, workspaceFile), workspaceEvent{Step: "finish", Route: route, WorkDir: workDir})
+}
+
 // unsettled says what a run that never reached its predicate was still
 // holding, so a failure names it rather than the timeout alone.
 func unsettled(ctx context.Context, l *Ledger) string {
@@ -469,13 +508,27 @@ func ledgerSettled(ctx context.Context, dir string, l *Ledger) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// One query for the whole feed rather than a read per event: the overflow
+	// scenario publishes ten thousand of them, and this runs on a timer.
 	repairPolls := countRepairPolls(dir)
+	var want, lowest, highest int64
 	for _, e := range entries {
 		if e.FromRepairPoll > repairPolls || e.Never {
 			continue
 		}
-		if _, ok, err := l.Get(ctx, e.Event.ID); err != nil || !ok {
+		want++
+		if lowest == 0 || e.Event.ID < lowest {
+			lowest = e.Event.ID
+		}
+		highest = max(highest, e.Event.ID)
+	}
+	if want > 0 {
+		var have int64
+		if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE id BETWEEN ? AND ?`, lowest, highest).Scan(&have); err != nil {
 			return false, err
+		}
+		if have < want {
+			return false, nil
 		}
 	}
 	var busy int

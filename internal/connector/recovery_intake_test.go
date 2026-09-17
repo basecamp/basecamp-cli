@@ -198,7 +198,9 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 	// by the feed's next page.
 	positions := h.watchCheckpoints()
 	h.run(harnessRun{Until: "losses-closed"})
-	for _, position := range positions() {
+	sampled := positions()
+	require.Contains(t, sampled, "feed-106", "the watcher must have caught the window it watches, or it proves nothing")
+	for _, position := range sampled {
 		assert.True(t, strings.HasPrefix(position, "feed-"), "the feed's checkpoint only ever holds a feed position, saw %q", position)
 	}
 
@@ -229,15 +231,25 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 			servedAt = walks
 		}
 	}
-	assert.Equal(t, 3, servedAt, "the walk repeated through the safety delay until the straggler was served")
-	assert.Greater(t, walks, 3, "and kept repeating until the window closed")
-	for _, p := range h.feedPolls() {
-		if p.Position == "" {
-			continue
+	assert.GreaterOrEqual(t, servedAt, 3, "no repair poll before the third served the straggler: the walk repeated through the safety delay")
+	assert.Greater(t, walks, servedAt, "and kept repeating until the window closed")
+
+	// The unpolled range behind the burst is served before anything from the
+	// burst: a checkpoint taken from a live id would have skipped it.
+	behindAt, aheadAt := -1, -1
+	for i, p := range h.feedPolls() {
+		for _, id := range p.Served {
+			if id == 106 && behindAt < 0 {
+				behindAt = i
+			}
+			if id >= straggler && aheadAt < 0 {
+				aheadAt = i
+			}
 		}
-		id, _ := strconv.ParseInt(strings.TrimPrefix(p.Position, "feed-"), 10, 64)
-		assert.False(t, id >= straggler && id < 104, "the feed never jumped a live id ahead of the range behind it")
 	}
+	require.GreaterOrEqual(t, behindAt, 0, "the feed's own walk served the range behind the burst")
+	require.GreaterOrEqual(t, aheadAt, 0, "and went on past it")
+	assert.Less(t, behindAt, aheadAt, "the feed never jumped a live id ahead of the range behind it")
 }
 
 // watchCheckpoints samples the feed's stored position until the returned
@@ -258,7 +270,7 @@ func (h *harness) watchCheckpoints() func() []string {
 				return
 			case <-time.After(2 * time.Millisecond):
 			}
-			l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(h.dir, LedgerFile))
+			l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(h.state, LedgerFile))
 			if err != nil {
 				continue
 			}

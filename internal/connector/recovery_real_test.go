@@ -53,12 +53,17 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 			for _, row := range rows {
 				t.Run(row.name, func(t *testing.T) {
 					h := newHarness(t, d, harnessScenario{})
-					stateDir := filepath.Join(h.dir, StateDirName(harnessAccount, harnessAgent))
+					stateDir := h.state
 					config := filepath.Join(h.dir, "config", "basecamp")
-					require.NoError(t, os.MkdirAll(stateDir, 0o700))
 					require.NoError(t, os.MkdirAll(config, 0o700))
 					require.NoError(t, os.WriteFile(filepath.Join(config, "config.json"),
 						[]byte(`{"profiles":{"agent":{"base_url":"http://127.0.0.1:9","account_id":"`+harnessAccount+`"}}}`), 0o600))
+					// These are appended after os.Environ(), and the last
+					// duplicate wins in exec, so a real BASECAMP_TOKEN in the
+					// operator's environment is overridden by the fake one
+					// rather than reaching the worker's MCP server. That
+					// server's profile points at a closed port, so no request
+					// it makes can leave the machine either.
 					env := []string{
 						harnessRealBasecampEnv + "=" + basecampBinary,
 						"XDG_CONFIG_HOME=" + filepath.Join(h.dir, "config"),

@@ -59,6 +59,13 @@ import (
 // task token) and calls the ledger exactly as `basecamp mcp --connect-state`
 // does. Every dispatch test runs once per registered driver.
 //
+// # What the harness does not cover
+//
+// A driver row builds its driver directly, where the run command goes through
+// spawn.New(connect.json's worker): the registry that maps a worker name to a
+// driver is that package's own test's. The fake agent is the driver's binary,
+// which is what the registry would otherwise decide.
+//
 // # Synchronization
 //
 // No test sleeps for an outcome. The connector runs until a predicate over the
@@ -201,6 +208,10 @@ type harnessScenario struct {
 	QueuePause int `json:"queue_pause"`
 	// ReadGate names recordings whose admission read waits for the parent.
 	ReadGate []int64 `json:"read_gate"`
+	// GuardDelay is how long a worker has to call get_dispatch before the
+	// guard acknowledges; an hour when zero, so no guard fires in a test that
+	// is not about it.
+	GuardDelay time.Duration `json:"guard_delay"`
 	// RepairWindow is the loss window; a minute when zero.
 	RepairWindow time.Duration `json:"repair_window"`
 	// OverflowLosses is how many losses the scenario's overflow records: the
@@ -211,8 +222,12 @@ type harnessScenario struct {
 // harness is one scenario's directory: the connector's state directory, the
 // fake Basecamp, the feed, and every process's log.
 type harness struct {
-	t      *testing.T
-	dir    string
+	t   *testing.T
+	dir string
+	// state is the connector's state directory, under this harness's own
+	// XDG_STATE_HOME and named as the connector names it, so a worker's MCP
+	// server resolves it exactly as `basecamp mcp --connect-state` does.
+	state  string
 	agent  string
 	driver harnessDriver
 	sc     harnessScenario
@@ -225,7 +240,7 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sessions"), 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o700))
 	sc.Driver = d.Name
-	h := &harness{t: t, dir: dir, driver: d, sc: sc}
+	h := &harness{t: t, dir: dir, state: harnessStateDir(t, dir), driver: d, sc: sc}
 	h.writeScenario()
 
 	exe, err := os.Executable()
@@ -234,11 +249,26 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	wrapper := "#!/bin/sh\n" +
 		harnessAgentEnv + "=" + shellQuote(d.Name) + " " + harnessDirEnv + "=" + shellQuote(dir) + " exec " + shellQuote(exe) + ` "$@"` + "\n"
 	require.NoError(t, os.WriteFile(h.agent, []byte(wrapper), 0o700)) //nolint:gosec // the fake agent's wrapper must be executable
-	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile} {
+	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile, workspaceFile} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
 	}
 	t.Cleanup(h.killAgents)
 	return h
+}
+
+// harnessStateDir is the connector's state directory for this harness:
+// <dir>/state/basecamp/connect/<account>-<agent>, which is what
+// connector.StateRoot resolves to with XDG_STATE_HOME set to <dir>/state.
+// The location and the name are both part of what a worker's MCP server
+// checks, so the harness's directory is the real shape, not a temp name.
+func harnessStateDir(t *testing.T, dir string) string {
+	t.Helper()
+	state := filepath.Join(dir, "state", "basecamp", "connect", StateDirName(harnessAccount, harnessAgent))
+	require.NoError(t, os.MkdirAll(state, 0o700))
+	for d := state; d != dir; d = filepath.Dir(d) {
+		require.NoError(t, os.Chmod(d, 0o700))
+	}
+	return state
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -251,13 +281,17 @@ func (h *harness) writeScenario() {
 
 // Files in a harness directory.
 const (
-	scenarioFile = "scenario.json"
-	feedFile     = "feed.jsonl"
-	storeFile    = "basecamp.jsonl"
-	linesFile    = "lines.jsonl"
-	pollsFile    = "polls.jsonl"
-	agentLogFile = "agent.jsonl"
-	liveFile     = "live.jsonl"
+	scenarioFile  = "scenario.json"
+	feedFile      = "feed.jsonl"
+	storeFile     = "basecamp.jsonl"
+	linesFile     = "lines.jsonl"
+	pollsFile     = "polls.jsonl"
+	agentLogFile  = "agent.jsonl"
+	liveFile      = "live.jsonl"
+	workspaceFile = "workspaces.jsonl"
+	// connectorFile is the running connector's own identity: the pid a fake
+	// worker kills, so no process this harness did not start is signaled.
+	connectorFile = "connector.json"
 )
 
 func readScenario(dir string) (harnessScenario, error) {
@@ -311,6 +345,9 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 		// A run that is to die runs until it does.
 		r.Until = "never"
 	}
+	if r.StateDir == "" {
+		r.StateDir = h.state
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	h.t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRecoveryConnector$", "-test.count=1", "-test.v")
@@ -322,6 +359,7 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 		harnessSpawnFailEnv+"="+strconv.Itoa(r.SpawnFail),
 		harnessFiltersEnv+"="+r.Filters,
 		harnessStateEnv+"="+r.StateDir,
+		"XDG_STATE_HOME="+filepath.Join(h.dir, "state"),
 		harnessShadowEnv+"="+strconv.FormatBool(r.Shadow),
 		harnessFaultEnv+"="+r.Fault,
 	)
@@ -330,6 +368,25 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	cmd.Stdout, cmd.Stderr = out, out
 	require.NoError(h.t, cmd.Start())
 	return cmd, out
+}
+
+// runUntilLog starts the connector, waits for a line of its log, and kills it:
+// the way to watch a connector that is meant to keep running — one holding an
+// attempt it cannot verify has nothing left to settle, so no ledger predicate
+// can say it is done.
+func (h *harness) runUntilLog(r harnessRun, substring string) {
+	h.t.Helper()
+	r.Until, r.Killed = "never", true
+	cmd, out := h.start(r)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := waitFor(ctx, func() (bool, error) { return strings.Contains(out.String(), substring), nil }); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		h.t.Fatalf("the connector never said %q:\n%s", substring, out.String())
+	}
+	require.NoError(h.t, cmd.Process.Kill())
+	h.wait(cmd, out, r)
 }
 
 func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
@@ -367,20 +424,49 @@ func (b *lockedBuffer) String() string {
 	return string(b.buf)
 }
 
-// killAgents ends every fake agent a harness started that is still alive, by
-// the process group it recorded, so a failed test leaves nothing behind.
+// killAgents ends every fake agent a harness started that is still alive, so
+// a failed test leaves nothing behind. It signals by the identity the agent
+// recorded — pid, group and start time — through the same call the connector
+// uses, so the harness never signals a pid the kernel has since reused.
 func (h *harness) killAgents() {
 	for _, entry := range h.agentLog() {
-		if entry.Step == "start" && entry.PGID > 0 {
-			_ = syscall.Kill(-entry.PGID, syscall.SIGKILL)
+		if entry.Step != "start" || entry.PID <= 0 || entry.PGID <= 0 {
+			continue
+		}
+		_, _ = driver.TerminateRecorded(driver.Process{PID: entry.PID, PGID: entry.PGID, StartedAt: entry.StartedAt}, time.Second)
+	}
+}
+
+// workspaces is every preparation and release of a task's working directory.
+func (h *harness) workspaces() []workspaceEvent {
+	h.t.Helper()
+	var out []workspaceEvent
+	require.NoError(h.t, readJSONLines(filepath.Join(h.dir, workspaceFile), func(line []byte) error {
+		var e workspaceEvent
+		if err := json.Unmarshal(line, &e); err != nil {
+			return err
+		}
+		out = append(out, e)
+		return nil
+	}))
+	return out
+}
+
+// released says a task's working directory was handed back, which the
+// one-owner rule allows only once its worker's process group is gone.
+func (h *harness) released() bool {
+	for _, e := range h.workspaces() {
+		if e.Step == "finish" {
+			return true
 		}
 	}
+	return false
 }
 
 // ledger opens the harness's ledger. The connector need not be stopped.
 func (h *harness) ledger() *Ledger {
 	h.t.Helper()
-	l, err := OpenLedger(filepath.Join(h.dir, LedgerFile))
+	l, err := OpenLedger(filepath.Join(h.state, LedgerFile))
 	require.NoError(h.t, err)
 	h.t.Cleanup(func() { _ = l.Close() })
 	return l

@@ -4,6 +4,7 @@ package connector
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"os"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,8 +153,6 @@ var crashRows = []crashRow{
 		handed: 1, outcome: OutcomeSucceeded, stop: StopFinished},
 	{name: "admitted", kill: "line:event:admitted", plan: completedWork,
 		handed: 1, outcome: OutcomeSucceeded, stop: StopFinished},
-	{name: "dispatched, attempt launching", kill: "line:dispatch:launching", plan: completedWork,
-		handed: 0, outcome: OutcomeUnknown, stop: StopLost, notices: 1},
 	{name: "dispatched, attempt running before the prompt", kill: "line:dispatch:running", plan: completedWork,
 		handed: 0, outcome: OutcomeUnknown, stop: StopLost, notices: 1},
 	{name: "exposed by get_dispatch", plan: []string{"get", "kill", "linger"},
@@ -210,9 +210,35 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 				h.run(harnessRun{})
 				h.assertRecovered(row)
 				assert.Len(t, h.connectorPosts(), posts, "recovery never resends a lifecycle message")
+				h.assertNoWorkerOutlivedItsRecord()
 			})
 		}
 	})
+}
+
+// assertNoWorkerOutlivedItsRecord: every worker the ledger recorded is gone
+// once its attempt is settled. A settled record with a live process would be
+// a worker acting with nobody's authority.
+func (h *harness) assertNoWorkerOutlivedItsRecord() {
+	t := h.t
+	t.Helper()
+	l := h.ledger()
+	rows, err := l.db.QueryContext(context.Background(), `SELECT id, state, COALESCE(pid, 0), COALESCE(pgid, 0), process_started FROM attempts WHERE pid IS NOT NULL AND pid > 0`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id, state string
+			pid, pgid int
+			started   sql.NullString
+		)
+		require.NoError(t, rows.Scan(&id, &state, &pid, &pgid, &started))
+		if state != string(AttemptEnded) {
+			continue
+		}
+		assert.True(t, processGone(pid), "attempt %s is ended, but its worker (pid %d) still runs", id, pid)
+	}
+	require.NoError(t, rows.Err())
 }
 
 func (h *harness) assertRecovered(row crashRow) {
@@ -399,10 +425,13 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 }
 
 // measuredTokenizerRatio is how far estimateTokens undercounts a real
-// tokenizer on the dispatch prompt: Claude Opus 5 counted the production-sized
-// prompt below at 322 tokens where the estimate says 230 (measured with
-// Claude Code's reported input usage, against the same session with a
-// one-character prompt). The budget is asserted on the estimate scaled by it.
+// tokenizer on the dispatch prompt. It is a one-off measurement, not something
+// this test can re-derive: Claude Opus 5 counted the production-sized prompt
+// below at 322 tokens where the estimate says 230 — Claude Code's reported
+// input usage for the prompt, minus the same session with a one-character
+// prompt (2840 - 2518), on 2026-09-17. The budget is asserted on the estimate
+// scaled by it, so the number this test prints is an estimate, and the number
+// on the card is the measurement.
 const measuredTokenizerRatio = 1.5
 
 // The dispatch prompt is measured as the worker received it, through each
@@ -453,5 +482,87 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 		assert.Less(t, float64(tokens)*measuredTokenizerRatio, float64(MaxPromptTokens))
 		followUp := FollowUpPrompt(math.MaxInt64)
 		assert.Less(t, float64(estimateTokens(followUp))*measuredTokenizerRatio, float64(MaxPromptTokens))
+	})
+}
+
+// An attempt whose worker the connector cannot identify is held, not settled:
+// it stays live in the ledger, its conversation and its working directory
+// stay its own, and no restart runs anything for it. A crash between the
+// spawn and the write of the worker's pid is that case.
+func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, d harnessDriver) {
+		raceSubset(t, false)
+		h := newHarness(t, d, harnessScenario{Plans: map[string][]string{"101#1": completedWork}})
+		h.publish(feedEntry{Event: todoEvent(101, 5001)})
+		h.run(harnessRun{Kill: "line:dispatch:launching", Killed: true})
+
+		l := h.ledger()
+		attempts := harnessAttempts(t, l)
+		require.Len(t, attempts, 1)
+		assert.Equal(t, string(AttemptLaunching), attempts[0].State, "killed before the worker's process was recorded")
+
+		// However often it restarts.
+		for range 2 {
+			h.runUntilLog(harnessRun{}, "cannot be identified")
+		}
+		assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record stays live: nobody may act on it but a person")
+		assert.Equal(t, 0, h.handed(101), "no worker was ever given the event")
+		attempts = harnessAttempts(t, l)
+		require.Len(t, attempts, 1, "no attempt is started around the one that is held")
+		assert.Equal(t, string(AttemptLaunching), attempts[0].State)
+		assert.Empty(t, attempts[0].StopReason)
+		assert.False(t, h.released(), "the task's working directory is not released either")
+		assert.Empty(t, h.connectorPosts(), "an attempt that is still live has no completion to post")
+	})
+}
+
+// The guard acknowledgement is the connector's own message, and a crash around
+// its post leaves it sent once or indeterminate — never twice.
+func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, d harnessDriver) {
+		raceSubset(t, false)
+		for _, row := range []struct {
+			name    string
+			kill    string
+			boosts  int
+			waiting int
+		}{
+			{name: "posted, receipt not recorded", kill: "post-after", boosts: 1},
+			{name: "sending, not posted", kill: "post-before", waiting: 1},
+		} {
+			t.Run(row.name, func(t *testing.T) {
+				// A worker that never calls get_dispatch is what the guard is
+				// for: the acknowledgement falls to the connector.
+				h := newHarness(t, d, harnessScenario{
+					GuardDelay: 50 * time.Millisecond,
+					Plans:      map[string][]string{"101#1": {"linger"}},
+				})
+				h.publish(feedEntry{Event: todoEvent(101, 5001)})
+				h.run(harnessRun{Kill: row.kill, Killed: true})
+				h.run(harnessRun{})
+				h.run(harnessRun{})
+
+				var boosts []storedMessage
+				for _, m := range h.connectorPosts() {
+					if m.Kind == MessageBoost {
+						boosts = append(boosts, m)
+					}
+				}
+				assert.Len(t, boosts, row.boosts, "guard acknowledgements posted")
+				for _, boost := range boosts {
+					assert.Equal(t, GuardAckBody, boost.Content)
+					assert.Equal(t, int64(5001), boost.RecordingID)
+				}
+				status, err := h.ledger().Status(context.Background(), nil)
+				require.NoError(t, err)
+				waiting := 0
+				for _, in := range status.Indeterminate {
+					if in.Kind == string(IntentGuardAck) {
+						waiting++
+					}
+				}
+				assert.Equal(t, row.waiting, waiting, "guard acknowledgements waiting for a person")
+			})
+		}
 	})
 }

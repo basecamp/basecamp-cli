@@ -29,18 +29,18 @@ type fakeWorker struct {
 	sc       harnessScenario
 	ledger   *Ledger
 	dispatch *TaskDispatch
-	ppid     int
 
 	replies map[int64]int64
 }
 
 // agentLogEntry is one thing a fake agent did.
 type agentLogEntry struct {
-	PID   int    `json:"pid"`
-	PGID  int    `json:"pgid"`
-	Event int64  `json:"event,omitempty"`
-	N     int    `json:"n,omitempty"`
-	Step  string `json:"step"`
+	PID       int       `json:"pid"`
+	PGID      int       `json:"pgid"`
+	StartedAt time.Time `json:"started_at"`
+	Event     int64     `json:"event,omitempty"`
+	N         int       `json:"n,omitempty"`
+	Step      string    `json:"step"`
 	// Prompt is the prompt as the agent received it, on a "prompt" step.
 	Prompt string `json:"prompt,omitempty"`
 }
@@ -53,7 +53,7 @@ func newFakeWorker(dir string) (*fakeWorker, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &fakeWorker{dir: dir, sc: sc, ppid: os.Getppid(), replies: map[int64]int64{}}
+	w := &fakeWorker{dir: dir, sc: sc, replies: map[int64]int64{}}
 	w.log(0, 0, "start")
 	return w, nil
 }
@@ -66,7 +66,8 @@ func (w *fakeWorker) close() {
 
 func (w *fakeWorker) log(event int64, n int, step string) {
 	pgid, _ := syscall.Getpgid(0)
-	_ = appendJSONLine(filepath.Join(w.dir, agentLogFile), agentLogEntry{PID: os.Getpid(), PGID: pgid, Event: event, N: n, Step: step})
+	_ = appendJSONLine(filepath.Join(w.dir, agentLogFile),
+		agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Event: event, N: n, Step: step})
 }
 
 func (h *harness) agentLog() []agentLogEntry {
@@ -96,8 +97,11 @@ func (w *fakeWorker) BadMode() bool {
 }
 
 // Bind takes the worker's task from the MCP server declaration its driver
-// handed the agent: the state directory in its arguments and the token in its
-// environment, as `basecamp mcp --connect-state` reads them.
+// handed the agent, exactly as `basecamp mcp --connect-state` does
+// (internal/commands/mcp.go): the state directory is resolved by location and
+// name, which is where the agent's id comes from; the token comes from the
+// environment; and the ledger is opened as it is, never created and never
+// migrated — the connector owns it.
 func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if server.Name != MCPServerName {
 		return fmt.Errorf("the MCP server is %q, not %q", server.Name, MCPServerName)
@@ -106,15 +110,20 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if i < 0 || i+1 >= len(server.Args) {
 		return errors.New("the MCP server has no --connect-state")
 	}
+	stateDir := server.Args[i+1]
+	agentID, err := ResolveStateDir(stateDir, harnessAccount)
+	if err != nil {
+		return err
+	}
 	token := server.Env[TaskTokenEnv]
 	if token == "" {
 		return errors.New("the MCP server's environment carries no task token")
 	}
-	l, err := OpenLedger(filepath.Join(server.Args[i+1], LedgerFile)) //nolint:contextcheck // OpenLedger migrates on its own context, as the MCP server opens it
+	l, err := OpenExistingLedger(ctx, filepath.Join(stateDir, LedgerFile))
 	if err != nil {
 		return err
 	}
-	d, err := l.Dispatch(ctx, token, harnessAgent)
+	d, err := l.Dispatch(ctx, token, agentID)
 	if err != nil {
 		_ = l.Close()
 		return err
@@ -135,7 +144,8 @@ func (w *fakeWorker) Turn(ctx context.Context, prompt string) error {
 	event, _ := strconv.ParseInt(m[1], 10, 64)
 	n := w.prompted(event) + 1
 	pgid, _ := syscall.Getpgid(0)
-	_ = appendJSONLine(filepath.Join(w.dir, agentLogFile), agentLogEntry{PID: os.Getpid(), PGID: pgid, Event: event, N: n, Step: "prompt", Prompt: prompt})
+	_ = appendJSONLine(filepath.Join(w.dir, agentLogFile),
+		agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Event: event, N: n, Step: "prompt", Prompt: prompt})
 	steps, ok := w.sc.Plans[m[1]+"#"+strconv.Itoa(n)]
 	if !ok {
 		steps = []string{"get", "ack", "reply", "complete"}
@@ -213,7 +223,7 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 		}
 	case "kill":
 		// The connector dies while this worker is mid-turn.
-		w.killConnector(ctx)
+		return w.killConnector(ctx)
 	case "linger":
 		// A worker the connector left behind: it stays until something ends
 		// its process group, which only the connector's restart may do.
@@ -251,11 +261,40 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 	return nil
 }
 
-// killConnector SIGKILLs the process that started this worker and returns once
-// it is gone, so the steps after it run in a world without a connector.
-func (w *fakeWorker) killConnector(ctx context.Context) {
-	_ = syscall.Kill(w.ppid, syscall.SIGKILL)
-	_ = waitFor(ctx, func() (bool, error) { return processGone(w.ppid), nil })
+// killConnector SIGKILLs the connector and returns once it is gone, so the
+// steps after it run in a world without a connector.
+//
+// The connector is the pid it wrote down when it started, not this process's
+// parent: a worker started behind an adapter (ACP) has the adapter as its
+// parent, and an orphan's parent is the subreaper, which may be pid 1. A pid
+// this harness did not record is never signaled.
+func (w *fakeWorker) killConnector(ctx context.Context) error {
+	pid, err := harnessConnectorPID(w.dir)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("kill the connector (pid %d): %w", pid, err)
+	}
+	return waitFor(ctx, func() (bool, error) { return processGone(pid), nil })
+}
+
+// harnessConnectorPID reads the pid the connector wrote when it started.
+func harnessConnectorPID(dir string) (int, error) {
+	data, err := os.ReadFile(filepath.Join(dir, connectorFile))
+	if err != nil {
+		return 0, err
+	}
+	var running struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(data, &running); err != nil {
+		return 0, err
+	}
+	if running.PID <= 1 {
+		return 0, fmt.Errorf("the connector recorded pid %d, which is nothing this harness may signal", running.PID)
+	}
+	return running.PID, nil
 }
 
 func waitFor(ctx context.Context, cond func() (bool, error)) error {
