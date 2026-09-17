@@ -337,7 +337,8 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
 		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
-			worker, AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
+			worker, driver.Process{PID: a.Taker.PID, PGID: a.Taker.PGID, StartedAt: a.Taker.StartedAt},
+			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
 	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
 		if err := w.Recover(ctx); err != nil {
@@ -529,7 +530,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 
 	// Settling must outlive a shutdown that interrupts the start.
 	settleCtx := context.WithoutCancel(ctx)
-	cfg, tokens, cleanup, err := d.sessionConfig(launch, record)
+	cfg, tokens, cleanup, err := d.sessionConfig(ctx, launch, record)
 	cfg.Redaction = d.taskRedaction(launch, cfg)
 	log := d.taskLog(cfg.Redaction)
 	refusals := &refusalRecorder{ledger: d.ledger, attemptID: launch.AttemptID, log: log}
@@ -537,7 +538,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
-		d.release(settleCtx, launch, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		d.release(settleCtx, launch, driver.Process{}, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
 		return false, nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
@@ -551,7 +552,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 			"no_process", spawnFailed, "unusable", unusable, "error", err)
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
-		d.release(settleCtx, launch, driver.StartedProcess(err), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		d.release(settleCtx, launch, driver.StartedProcess(err), takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return false, nil
 	}
@@ -561,7 +562,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
 		_ = session.Close()
 		cleanup()
-		d.release(settleCtx, launch, p, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
+		d.release(settleCtx, launch, p, takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
 		return false, err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
@@ -579,7 +580,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 }
 
 // sessionConfig builds what the driver is given (invariant 3).
-func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.SessionConfig, *TokenSocket, func(), error) {
+func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Record) (driver.SessionConfig, *TokenSocket, func(), error) {
 	dir := filepath.Join(d.opts.PrivateDir, launch.AttemptID)
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return driver.SessionConfig{}, nil, func() {}, fmt.Errorf("connector: session directory: %w", err)
@@ -592,9 +593,23 @@ func (d *Dispatcher) sessionConfig(launch Launch, record Record) (driver.Session
 		return driver.SessionConfig{}, nil, func() {}, err
 	}
 	attemptID, log := launch.AttemptID, d.log
+	// The handoff outlives the start, and a shutdown must not stop the
+	// connector from recording who holds the token.
+	recordCtx := context.WithoutCancel(ctx)
 	go func() {
 		if handoff := tokens.Result(); handoff != HandoffDelivered {
 			log.Warn("connector: the worker's MCP server did not take its task token", "attempt_id", attemptID, "handoff", string(handoff))
+			return
+		}
+		// Which process took it, so a restart can end it as it ends the
+		// worker: an agent may have started it in a group of its own.
+		taker, ok := tokens.Taker()
+		if !ok {
+			return
+		}
+		if err := d.ledger.RecordTaker(recordCtx, attemptID,
+			AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
+			log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
 		}
 	}()
 	cleanup := func() {
@@ -642,6 +657,40 @@ func (d *Dispatcher) taskLog(r driver.Redaction) *slog.Logger {
 	return slog.New(driver.NewRedactor(r).Handler(d.opts.Logger.Handler()))
 }
 
+// UnreportedFinishLine is the message a person greps for when a worker ended
+// its turn without reporting the dispatch it was given.
+const UnreportedFinishLine = "connector: a worker finished without reporting its dispatch"
+
+// reportUnreported says when a worker ended its turn cleanly and never
+// reported an event it was handed. The ledger's own record is the guarantee —
+// such an event settles completed(unknown), never succeeded — and this is the
+// hint a person needs to go and look.
+//
+// It is the only signal there is for an agent whose Basecamp MCP server died
+// mid-session: an agent that cannot call the tools cannot report, and Claude
+// Code's stream carries no server status after its init message, so nothing
+// tells the driver the server has gone.
+func reportUnreported(log *slog.Logger, stop StopReason, settlement Settlement) {
+	if stop != StopFinished {
+		return
+	}
+	for _, event := range settlement.Events {
+		if event.Outcome == OutcomeUnknown && !event.Reported {
+			log.Warn(UnreportedFinishLine, "task_id", settlement.TaskID,
+				"attempt_id", settlement.AttemptID, "event_id", event.EventID)
+		}
+	}
+}
+
+// takerOf is the process a socket's token went to, or none.
+func takerOf(tokens *TokenSocket) driver.Process {
+	if tokens == nil {
+		return driver.Process{}
+	}
+	taker, _ := tokens.Taker()
+	return taker
+}
+
 // confirmTakerGone is the release point's second confirmation: the process
 // that took the task token from the socket, when the agent started it outside
 // the worker's own process group. It is ended by its own group and confirmed
@@ -652,11 +701,8 @@ func (d *Dispatcher) taskLog(r driver.Redaction) *slog.Logger {
 // the worker it recorded, not the MCP servers an agent started beside it.
 // Such a bridge exits when its agent's stdout closes, which is what ends it
 // after a crash.
-func (d *Dispatcher) confirmTakerGone(worker driver.Process, run *taskRun) error {
-	if run == nil || run.tokens == nil {
-		return nil
-	}
-	taker, ok := run.tokens.Taker()
+func (d *Dispatcher) confirmTakerGone(worker, taker driver.Process) error {
+	ok := taker.PID > 0 && taker.PGID > 0
 	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
 		// A record that names the connector's own group is a mistake, not a
 		// worker's server: nothing is signaled on it, and nothing is held
@@ -697,14 +743,14 @@ const settleAttempts = 5
 // live: its token, its conversation and its directory are still its own, a
 // person settles it, and this process stops counting it among the workers it
 // may start.
-func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, end AttemptEnd, run *taskRun) {
+func (d *Dispatcher) release(ctx context.Context, launch Launch, worker, taker driver.Process, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
 	if err == nil {
 		// An agent may start the connector's own MCP server in a process
 		// group of its own (Codex does), and that process holds the task's
 		// token: it is confirmed gone here too, by the same rule.
-		err = d.confirmTakerGone(worker, run)
+		err = d.confirmTakerGone(worker, taker)
 	}
 	if err != nil {
 		d.hold()
@@ -727,6 +773,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
 	}
+	reportUnreported(log, end.Stop, settlement)
 	// Adoption is a read of Basecamp, bounded but slow, and nothing waits on
 	// it: the settlement is already written, and the link it may add is not
 	// what the next dispatch depends on.
@@ -900,7 +947,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 
 	// Through the one release point: it confirms the worker's group is gone
 	// before the attempt is settled or its directory released.
-	d.release(settleCtx, r.launch, r.session.Process(), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
+	d.release(settleCtx, r.launch, r.session.Process(), takerOf(r.tokens), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt

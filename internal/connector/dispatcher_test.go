@@ -1277,18 +1277,16 @@ func TestTheProcessThatTookTheTokenIsEndedWithTheWorker(t *testing.T) {
 	socket.mu.Lock()
 	socket.taker = taker
 	socket.mu.Unlock()
-	run := &taskRun{d: h.d, tokens: socket}
-
 	// A worker in another group entirely, already confirmed gone.
 	worker := driver.Process{PID: 1 << 30, PGID: 1 << 30}
-	require.NoError(t, h.d.confirmTakerGone(worker, run))
+	require.NoError(t, h.d.confirmTakerGone(worker, takerOf(socket)))
 	// Alive() counts a zombie, and this test is the process that has not
 	// reaped it; the rule's own question is whether anything of the group
 	// still runs.
 	assert.False(t, driver.GroupMembersRemain(taker), "the process holding the task token is ended with its worker")
 
 	// Asked again, with nothing of it left, it is still gone.
-	assert.NoError(t, h.d.confirmTakerGone(worker, run))
+	assert.NoError(t, h.d.confirmTakerGone(worker, takerOf(socket)))
 }
 
 // A token taken inside the worker's own group is already covered by the
@@ -1301,9 +1299,8 @@ func TestATakerInTheWorkersGroupIsNotEndedTwice(t *testing.T) {
 	socket.mu.Lock()
 	socket.taker = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
 	socket.mu.Unlock()
-	run := &taskRun{d: h.d, tokens: socket}
-	require.NoError(t, h.d.confirmTakerGone(driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp()}, run))
-	assert.NoError(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, run),
+	require.NoError(t, h.d.confirmTakerGone(driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp()}, takerOf(socket)))
+	assert.NoError(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, takerOf(socket)),
 		"this process's own group is never signaled, whatever a record says")
 }
 
@@ -1322,4 +1319,54 @@ func TestASessionThatIsNotTheOneAskedForIsFailed(t *testing.T) {
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
 	assert.Equal(t, "failed", h.attemptsEnded(t, 1)[0].StopReason)
+}
+
+// Card 23's review, across a restart: the process that took the task token is
+// recorded with the attempt, so a connector that comes back ends it rather
+// than leave a process of its own holding a superseded token.
+func TestARestartEndsTheProcessThatTookTheToken(t *testing.T) {
+	bridge := exec.CommandContext(context.Background(), "/bin/sleep", "300")
+	bridge.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, bridge.Start())
+	t.Cleanup(func() {
+		_ = bridge.Process.Kill()
+		_ = bridge.Wait()
+	})
+	taker, err := driver.LookupProcess(bridge.Process.Pid)
+	require.NoError(t, err)
+
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+	ctx := context.Background()
+	// A worker whose pid is above the kernel's maximum: gone, nothing to
+	// signal. Its MCP server is the one still running.
+	require.NoError(t, h.ledger.MarkRunning(ctx, l.AttemptID, AttemptProcess{PID: 1 << 30, PGID: 1 << 30, StartedAt: time.Now(), SessionID: "s"}))
+	require.NoError(t, h.ledger.RecordTaker(ctx, l.AttemptID, AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}))
+
+	live, err := h.ledger.LiveAttempts(ctx)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	assert.Equal(t, taker.PID, live[0].Taker.PID, "the ledger carries it across the restart")
+
+	require.NoError(t, h.d.Recover(ctx))
+	assert.Equal(t, "lost", readAttempt(t, h.ledger, l.AttemptID).StopReason)
+	assert.False(t, driver.GroupMembersRemain(taker), "the process holding the token is ended by the restart")
+}
+
+// A worker whose Basecamp MCP server dies mid-session cannot report what it
+// was given; nothing in Claude Code's stream says so, so the end of a clean
+// turn with an unreported event is logged for a person to find.
+func TestACleanFinishWithAnUnreportedEventIsLogged(t *testing.T) {
+	var logs safeBuffer
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	require.Equal(t, "finished", h.attemptsEnded(t, 1)[0].StopReason)
+	require.Eventually(t, func() bool { return strings.Contains(logs.String(), UnreportedFinishLine) },
+		5*time.Second, 10*time.Millisecond, "a clean finish that reported nothing is named in the log")
+	assert.Contains(t, logs.String(), `"event_id":1`)
 }
