@@ -148,3 +148,35 @@ func TestACrossingIsNotLostToAConcurrentTake(t *testing.T) {
 	assert.Equal(t, 1, recovers, "and the take brought it back")
 	assert.Zero(t, queue.Depth())
 }
+
+func TestAPanickingBacklogCallbackLeavesTheQueueUsable(t *testing.T) {
+	queue, err := NewQueue(1, 4)
+	require.NoError(t, err)
+
+	var recoveries int
+	queue.OnWarn = func(int) { panic("a warning callback panics") }
+	queue.OnRecover = func(int) { recoveries++ }
+
+	// The panic belongs to the callback. It must reach the caller, who can
+	// recover it, and not take the process — or the drain — with it.
+	panicked := func() (caught bool) {
+		defer func() { caught = recover() != nil }()
+		require.NoError(t, queue.Offer(context.Background(), 1))
+		return false
+	}()
+	require.True(t, panicked, "the callback's panic should reach the caller")
+
+	// The drain is unlatched and the queue still works: a second id goes in,
+	// both come out, and the recovery edge is delivered.
+	require.NoError(t, queue.Offer(context.Background(), 2))
+	assert.Equal(t, 2, queue.Depth())
+
+	first, err := queue.Take(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), first)
+	second, err := queue.Take(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), second)
+	assert.Equal(t, 0, queue.Depth())
+	assert.Equal(t, 1, recoveries, "the drain should still be delivering edges")
+}

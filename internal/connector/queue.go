@@ -191,7 +191,8 @@ func (q *Queue) deliver() {
 	q.delivering = true
 	// Cleared with a defer: a callback that panics and is recovered above
 	// would otherwise leave the drain latched and every later edge
-	// undelivered.
+	// undelivered. The loop below holds the lock whenever it is not inside a
+	// callback, so this runs holding it on every path.
 	defer func() {
 		q.delivering = false
 		q.edges.Unlock()
@@ -200,10 +201,16 @@ func (q *Queue) deliver() {
 		edge := q.pending[0]
 		q.pending = q.pending[1:]
 		q.edges.Unlock()
-		if edge.fire != nil {
-			edge.fire(edge.depth)
-		}
-		q.edges.Lock()
+		// The lock is retaken by a defer, not after the call: a callback that
+		// panics unwinds through here, and the cleanup above unlocks. Retaking
+		// it on the way out of every callback — returned or panicked — is what
+		// makes that unlock the one that pairs with this Lock.
+		func() {
+			defer q.edges.Lock()
+			if edge.fire != nil {
+				edge.fire(edge.depth)
+			}
+		}()
 	}
 }
 
