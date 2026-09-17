@@ -188,7 +188,8 @@ func (o *Outbox) Start(ctx context.Context) error {
 	if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil {
 		switch {
 		case ctx.Err() != nil:
-			return nil
+			// The bound or shutdown ended the start; Run carries on.
+			return nil //nolint:nilerr // not a failure of the ledger
 		case !errors.Is(err, errBackedOff):
 			return fmt.Errorf("connector: reconcile lifecycle messages on start: %w", err)
 		}
