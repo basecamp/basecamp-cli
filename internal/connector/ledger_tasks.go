@@ -707,14 +707,8 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 				se.ReplyID = &id
 			}
 		case r.delivery == DeliveryAdmitted:
-			// Never exposed: back to admitted, to wait for a task of its own.
-			moved, err := l.move(ctx, tx, transition{id: r.eventID, state: StateAdmitted, from: []RecordState{StateDispatched, StateAdmitted, StateQueued}})
-			if err != nil {
-				return Settlement{}, err
-			}
-			if !moved {
-				return Settlement{}, fmt.Errorf("connector: return event %d: %w", r.eventID, ErrNotDispatchable)
-			}
+			// Never exposed: supersedeTask below returns it to admitted, to
+			// wait for a task of its own.
 			se.Returned = true
 		case end.SpawnFailed && r.exposedBy.Valid && r.exposedBy.String == end.AttemptID:
 			// Exposed by this attempt, whose driver proved nothing ran
@@ -740,12 +734,14 @@ UPDATE task_events SET delivery = 'completed', completed_at = ?, outcome = ? WHE
 		settlement.Events = append(settlement.Events, se)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?), ended_at = ? WHERE id = ?`, now, now, taskID); err != nil {
-		return Settlement{}, fmt.Errorf("connector: end task %d: %w", taskID, err)
+	// #736's supersession: the token refused, every row retired, and the
+	// never-exposed events returned to admitted. Then the task ends; the
+	// trigger refuses an end the supersession did not precede.
+	if err := l.supersedeTask(ctx, tx, taskID); err != nil {
+		return Settlement{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
-		return Settlement{}, fmt.Errorf("connector: retire task %d: %w", taskID, err)
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET ended_at = ? WHERE id = ?`, now, taskID); err != nil {
+		return Settlement{}, fmt.Errorf("connector: end task %d: %w", taskID, err)
 	}
 	if l.hooks.AttemptEnded != nil {
 		if err := l.hooks.AttemptEnded(ctx, tx, settlement); err != nil {
@@ -894,11 +890,13 @@ func (l *Ledger) StartableRecordsWhere(ctx context.Context, f StartableFilter) (
 // startable runs the startable query with an extra condition. extra is built
 // from this package's constants and placeholders only.
 func (l *Ledger) startable(ctx context.Context, extra string, args []any, limit int) ([]Record, error) {
-	rows, err := l.db.QueryContext(ctx, `
+	//nolint:gosec // G202: extra is this package's constants and placeholders, never a value
+	query := `
 SELECT MIN(e.id) FROM events e
-WHERE `+startableCondition+extra+`
+WHERE ` + startableCondition + extra + `
   AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.ended_at IS NULL AND t.conversation_key = e.conversation_key)
-GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`, append(args, limit)...) //nolint:gosec // G202: constants and placeholders
+GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
+	rows, err := l.db.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: startable records: %w", err)
 	}
