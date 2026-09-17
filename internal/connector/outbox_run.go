@@ -294,8 +294,10 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 		// never posted.
 		settled, err := o.ledger.refuse(context.WithoutCancel(ctx), intent, RefusedNote)
 		if err != nil {
-			o.log.Warn("connector: settling a refused lifecycle message", "intent_id", intent.ID, "error", err)
-			return intent.ID, false, nil
+			// The ledger failed, not Basecamp. The intent stays sending, which
+			// reconciliation settles, finding nothing; the failure is an error
+			// wherever it happens, so a start stops on it.
+			return intent.ID, false, fmt.Errorf("connector: settle refused lifecycle message %d: %w", intent.ID, err)
 		}
 		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		o.line(settled)
@@ -317,9 +319,10 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 	}
 	recorded, err := o.ledger.recordReceipt(context.WithoutCancel(ctx), intent.ID, receipt)
 	if err != nil {
-		// The message exists; reconciliation finds it by its body.
-		o.log.Warn("connector: could not record a lifecycle message's receipt; it will be reconciled", "intent_id", intent.ID, "error", err)
-		return intent.ID, false, nil
+		// The message exists and reconciliation will find it by its body,
+		// but the ledger failed: that is an error wherever it happens, so a
+		// start stops on it.
+		return intent.ID, false, fmt.Errorf("connector: record receipt of lifecycle message %d: %w", intent.ID, err)
 	}
 	o.line(recorded)
 	return intent.ID, false, nil

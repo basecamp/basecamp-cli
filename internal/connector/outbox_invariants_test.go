@@ -1212,3 +1212,36 @@ func TestOutboxStartSeesAHardErrorAfterABackedOffListing(t *testing.T) {
 
 	require.Error(t, obOutbox(t, ledger, failingAt{basecamp, 901}).Start(ctx))
 }
+
+// A ledger that cannot record what a send settled — a receipt, or a
+// refusal — is an error wherever it happens: a start stops on it and sends
+// nothing more, and the intent stays sending for reconciliation to settle.
+func TestOutboxALedgerFailureAfterASendStopsTheStart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trigger string
+		postErr error
+	}{
+		{name: "receipt", trigger: `CREATE TRIGGER refuse_receipt BEFORE UPDATE OF receipt_id ON outbox WHEN NEW.receipt_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected'); END`},
+		{name: "refusal", trigger: `CREATE TRIGGER refuse_cancel BEFORE UPDATE OF state ON outbox WHEN NEW.state = 'canceled' BEGIN SELECT RAISE(ABORT, 'injected'); END`, postErr: fmt.Errorf("403: %w", ErrNotPosted)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger, clock := obLedger(t)
+			ctx := context.Background()
+			for _, id := range []int64{1, 2} {
+				seenRecord(t, ledger, id)
+				_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(id, 0, obCommentReply))
+				require.NoError(t, err)
+			}
+			_, err := ledger.db.ExecContext(ctx, tc.trigger)
+			require.NoError(t, err)
+			basecamp := newFakeBasecamp(clock.Now)
+			basecamp.beforePost = func(Destination, string) error { return tc.postErr }
+
+			require.Error(t, obOutbox(t, ledger, basecamp).Start(ctx))
+			assert.Equal(t, 1, basecamp.postCount(), "nothing sent past the failure")
+			assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State, "left for reconciliation")
+			assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(2)).State)
+		})
+	}
+}
