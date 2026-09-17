@@ -145,10 +145,11 @@ acp-adapters:
 	cp internal/connector/driver/acp/adapters/package.json internal/connector/driver/acp/adapters/package-lock.json "$(ACP_ADAPTERS_DIR)/"
 	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund --engine-strict
 
-# The ACP adapter-compatibility test: seven checks through the acp driver
+# The ACP adapter-compatibility test: eight checks through the acp driver
 # against each installed adapter (the spike's four, the worker shell's
-# environment, a decoy MCP server in the working directory, and the task
-# token's bridge). Sends real prompts (model quota); skipped
+# environment, a decoy MCP server in the working directory, the task
+# token's bridge, and what an adapter does when a session's MCP server dies
+# mid-session). Sends real prompts (model quota); skipped
 # for an adapter that is not installed. ACP_TRANSCRIPTS=<dir> keeps redacted
 # JSON-RPC transcripts.
 .PHONY: test-acp-compat

@@ -158,10 +158,6 @@ var ErrMCPServerNotConnected = fmt.Errorf("%w: an MCP server of the session did 
 // own, which the connector cannot keep out of a session.
 var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MCP servers of its own")
 
-// mcpServersKey finds a TOML line that declares MCP servers: a table header
-// or a dotted or bare key naming mcp_servers, at any depth.
-var mcpServersKey = regexp.MustCompile(`^\s*(\[\[?\s*)?(("[^"]*"|'[^']*'|[A-Za-z0-9_\-]+)\s*\.\s*)*['"]?mcp_servers['"]?\s*[.\]=]`)
-
 // escapedTOMLKey is a table header or a key whose name carries a backslash
 // escape.
 var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
@@ -172,7 +168,13 @@ var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 // merges every layer into the session, and a server declared there would run
 // beside the connector's, or, named basecamp, in place of it with every tool
 // allowed; in the asking mode its tool calls need not be put to the policy at
-// all. It reads for the key, not the TOML: a false alarm refuses a session; a
+// all.
+//
+// It reads for the name, not the TOML: the name anywhere in the file — a
+// table header, a dotted key, an inline table, a profile, a comment — refuses
+// the session. Parsing it would mean matching Codex's own merge of profiles,
+// includes and overrides, and being wrong there is being wrong in the
+// direction that runs a foreign server. A false alarm refuses a session; a
 // miss would not.
 //
 // It covers the layers a file on this machine can hold. Codex also takes
@@ -204,15 +206,18 @@ func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 	for _, file := range files {
 		raw, err := os.ReadFile(file) //nolint:gosec // G304: codex's own config locations
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return fmt.Errorf("acp: read %s: %w", file, err)
+			// A file that is there and cannot be read is not a file this can
+			// say anything about, and Codex may read it where this cannot.
+			return fmt.Errorf("%w: %s cannot be read: %w", ErrForeignMCPConfig, file, err)
 		}
-		for _, line := range strings.Split(strings.TrimPrefix(string(raw), "\ufeff"), "\n") {
-			if mcpServersKey.MatchString(line) {
-				return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
-			}
+		text := strings.TrimPrefix(string(raw), "\ufeff")
+		if strings.Contains(text, "mcp_servers") {
+			return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
+		}
+		for _, line := range strings.Split(text, "\n") {
 			if escapedTOMLKey.MatchString(line) {
 				// TOML decodes escapes in a quoted key, so "mcp\u005fservers"
 				// is mcp_servers to Codex and something else to a reader. A

@@ -12,8 +12,11 @@ import (
 // Who may decide a permission, and on what evidence
 //
 // The connector's policy decides; the agent's request is evidence only of
-// what the agent asked for. Every session/request_permission is answered
-// here, in onRequest, and nowhere else.
+// what the agent asked for. onRequest is the only place a permission is
+// decided. Two paths answer one without deciding it, and both record the
+// refusal they are: a request past the connection's handler bound is
+// answered busy (onBusy), and past even the queue of those the session ends,
+// which answers every request it had outstanding.
 //
 // A request reaches the policy only when all of this holds: it names this
 // session's own id, it was read inside a turn that has not been answered
@@ -34,33 +37,49 @@ import (
 //     maxToolCallID wherever it is kept or shown (the session's tool calls,
 //     an update, a refusal) and digested where once-ness is decided.
 //
-// What is not, because an adapter can write anything: the option ids and
-// labels (so the answer is chosen by kind — allow_once, never allow_always,
-// so no answer outlives its request), the call's title and raw input (never
-// decoded into anything kept), and the tool's name, which is taken only
-// where the adapter's own marking, title and input agree (toolName) and only
-// in a form the policy can key on (plainName). The locations are the
-// agent's, and are kept against the call — and so decide a later request —
-// only for a request the session could be asked at all.
+// What is not, because an adapter can write anything:
+//
+//   - The option ids and labels. The answer is chosen by kind — allow_once,
+//     never allow_always, so no answer outlives its request — and a list
+//     that gives one id to two options selects nothing at all.
+//   - The call's title and raw input. Neither is kept, and neither names a
+//     tool on its own: they are read only to corroborate codex-acp's MCP
+//     calls, which arrive with no name, and only where the adapter's own
+//     marking, the title and the input agree. What claude-agent-acp names in
+//     _meta or in name is taken as it gives it — the adapter's word for its
+//     own tool — and in either case only in a form the policy can key on
+//     (plainName), never one made plain by dropping what is not.
+//   - The locations. They are the agent's paths, cut to what a path can be,
+//     and are kept against the call — and so reach a later request about it —
+//     only while the session could be asked about that call at all
+//     (mayAskLocked).
 //
 // The policy may take its time, so the conditions are rechecked before an
 // allow is sent: a session canceled, ended or found unsafe while it decided
 // allows nothing more.
+// mayAskLocked reports whether the session could be asked to decide something
+// for turn t right now: t is the turn in flight, the agent has not answered
+// it, no history is replaying, the mode is confirmed, and the session is
+// neither unsafe nor closed. It is the one condition on which a request is
+// put to the policy and the one on which evidence about a tool call is kept,
+// so an update the session could not be asked about cannot describe a call
+// that a later request is decided on.
+func (s *session) mayAskLocked(t *turn) bool {
+	return t != nil && s.turn == t && !t.settling && !s.replaying &&
+		s.verified && s.unsafe == nil && !s.closed
+}
+
 // onRequest answers the agent's requests. The client offers no fs and no
 // terminal, so a permission is the only request it serves.
-func (s *session) onRequest(id json.RawMessage, method string, params json.RawMessage, claimed any) {
+func (s *session) onRequest(id json.RawMessage, method string, params json.RawMessage, claim any) {
+	defer s.release(claim)
 	if method != "session/request_permission" {
 		s.conn.replyError(id, codeMethodNotFound, "method not supported by this client")
 		return
 	}
-	defer func() {
-		s.mu.Lock()
-		s.deciding--
-		s.mu.Unlock()
-	}()
 	// The turn the request was read in, not whatever turn is in flight by
 	// the time this goroutine runs.
-	t, _ := claimed.(*turn)
+	t := turnOf(claim)
 	var p struct {
 		SessionID string          `json:"sessionId"`
 		ToolCall  json.RawMessage `json:"toolCall"`
@@ -90,8 +109,7 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 	}
 
 	s.mu.Lock()
-	// A turn the agent has already answered asks nothing more.
-	askable := t != nil && s.turn == t && !t.settling && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
+	askable := s.mayAskLocked(t) && s.id != "" && p.SessionID == s.id
 	canceled := t != nil && t.canceled
 	s.mu.Unlock()
 
@@ -150,7 +168,7 @@ const outcomeCanceled = "cancelled" //nolint:misspell // ACP's wire value
 
 // onBusy records a permission request refused at the connection's handler
 // bound as the refusal it is.
-func (s *session) onBusy(method string, params json.RawMessage) {
+func (s *session) onBusy(method string, params json.RawMessage, claim any) {
 	if method != "session/request_permission" {
 		return
 	}
@@ -160,7 +178,9 @@ func (s *session) onBusy(method string, params json.RawMessage) {
 	_ = json.Unmarshal(params, &p)
 	call, _ := decodeUpdate(p.ToolCall)
 	req := driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}
-	s.record(req, nil)
+	// On the turn the request was read in: this refusal is answered off the
+	// reading goroutine, so by now a later turn may be in flight.
+	s.record(req, turnOf(claim))
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: req.ToolCallID, Tool: req.Tool, ToolKind: req.Kind})
 }
 
@@ -214,8 +234,21 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 	}
 }
 
-// chooseOption selects by kind, never by id or label (invariant 3).
+// chooseOption selects by kind, never by id or label (invariant 3). A list
+// that gives one id to two options says nothing about which the agent will
+// act on, so nothing is selected from it and the request is answered as
+// canceled.
 func chooseOption(options []driver.PermissionOption, allow bool) string {
+	seen := make(map[string]bool, len(options))
+	for _, o := range options {
+		if o.ID == "" {
+			continue
+		}
+		if seen[o.ID] {
+			return ""
+		}
+		seen[o.ID] = true
+	}
 	want := []driver.PermissionOptionKind{driver.RejectOnce, driver.RejectAlways}
 	if allow {
 		want = []driver.PermissionOptionKind{driver.AllowOnce}
@@ -235,4 +268,62 @@ func refusalTool(req driver.PermissionRequest) string {
 		return req.Tool
 	}
 	return string(req.Kind)
+}
+
+// toolInfo is what is known of one tool call.
+type toolInfo struct {
+	name      string
+	kind      driver.ToolKind
+	locations []string
+}
+
+// noteTool merges what u says about its tool call into what the session
+// knows of it, and returns the result. A later message fills in what an
+// earlier one left out; it never blanks what was known.
+//
+// What it keeps is evidence a permission decision may rest on, so it is kept
+// only on the condition a request is put to the policy at all: an update read
+// outside a turn, or while a load replays a session's history, says what it
+// says of itself and leaves nothing behind for a later request to inherit.
+func (s *session) noteTool(u sessionUpdate) toolInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.mayAskLocked(s.turn) {
+		info := toolInfo{name: toolName(u), kind: toolKind(u.Kind), locations: slices.Clone(u.Locations)}
+		if len(info.locations) > maxLocations {
+			info.locations = info.locations[:maxLocations]
+		}
+		if info.kind == "" {
+			info.kind = driver.ToolOther
+		}
+		return info
+	}
+	info := s.tools[u.ToolCallID]
+	if name := toolName(u); name != "" {
+		info.name = name
+	}
+	if u.Kind != "" {
+		info.kind = toolKind(u.Kind)
+	}
+	if info.kind == "" {
+		info.kind = driver.ToolOther
+	}
+	if len(u.Locations) > 0 {
+		info.locations = slices.Clone(u.Locations)
+		if len(info.locations) > maxLocations {
+			info.locations = info.locations[:maxLocations]
+		}
+	}
+	if u.ToolCallID == "" || len(u.ToolCallID) > maxToolCallID {
+		return info
+	}
+	switch toolStatus(u.Status) {
+	case driver.ToolCompleted, driver.ToolFailed:
+		delete(s.tools, u.ToolCallID)
+	default:
+		if _, known := s.tools[u.ToolCallID]; known || len(s.tools) < maxTools {
+			s.tools[u.ToolCallID] = info
+		}
+	}
+	return info
 }

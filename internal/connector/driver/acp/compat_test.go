@@ -1,4 +1,4 @@
-//go:build acpcompat
+//go:build acpcompat && (linux || darwin)
 
 package acp
 
@@ -8,12 +8,14 @@ package acp
 // MCP server the working directory declares never runs beside or instead of
 // the connector's; and a seventh, that the connector's token bridge reaches
 // its one-use socket from where the adapter starts MCP servers, with the
-// token in no process's environment or command line and in no file. It sends real prompts, so it
+// token in no process's environment or command line and in no file; and an
+// eighth, which reports what each adapter does when a session's MCP server
+// dies mid-session. It sends real prompts, so it
 // spends model quota on whatever account each adapter is logged in to, and it
 // is skipped unless the adapters are installed:
 //
 //	make acp-adapters      # npm ci the pinned adapters (once)
-//	make test-acp-compat   # the seven checks against both
+//	make test-acp-compat   # the eight checks against both
 //
 // Environment: BASECAMP_ACP_ADAPTERS_DIR (required; the npm prefix),
 // BASECAMP_ACP_ADAPTER (one adapter name; both when unset),
@@ -66,14 +68,14 @@ func TestAdapterCompat(t *testing.T) {
 	stub := buildStub(t)
 	checks := map[string]func(*testing.T, compatEnv){
 		"1": checkMCPEnv, "2": checkLoadAfterRestart, "3": checkPolicyPermission, "4": checkCancel,
-		"5": checkShellEnvironment, "6": checkDecoyMCPServer, "7": checkTokenBridge,
+		"5": checkShellEnvironment, "6": checkDecoyMCPServer, "7": checkTokenBridge, "8": checkMCPRestart,
 	}
 	if only := os.Getenv("BASECAMP_ACP_ADAPTER"); only != "" {
 		if _, ok := AdapterNamed(only); !ok {
 			t.Fatalf("BASECAMP_ACP_ADAPTER %q names no pinned adapter", only)
 		}
 	}
-	want := strings.Split(envOr("BASECAMP_ACP_CHECKS", "1,2,3,4,5,6,7"), ",")
+	want := strings.Split(envOr("BASECAMP_ACP_CHECKS", "1,2,3,4,5,6,7,8"), ",")
 	for _, adapter := range Adapters() {
 		if only := os.Getenv("BASECAMP_ACP_ADAPTER"); only != "" && only != adapter.Name {
 			continue
@@ -724,4 +726,84 @@ func addWorkerProcesses(places drivertest.Places, root int) drivertest.Places {
 		}
 	}
 	return places
+}
+
+// checkMCPRestart reports what an adapter does when a session's MCP server
+// dies while the session is running: re-runs the server's command as a new
+// process, keeps talking to what is already there, or leaves the session
+// without the server. The connector's token bridge serves one handoff per
+// start of that command, so a re-run is the shape it is built for, and a
+// server left dead is the shape only ErrMCPServerNotConnected protects.
+//
+// The server it kills is the stub this check's own session declared, started
+// by the adapter this check started, in the worker's process group: it is
+// killed by the pid the stub itself recorded, and nothing else is signalled.
+func checkMCPRestart(t *testing.T, e compatEnv) {
+	wd := workDir(t)
+	record := filepath.Join(t.TempDir(), "record.json")
+	policy := &compatPolicy{workDir: wd}
+	d := e.driverFor(t, "")
+	s, err := d.NewSession(turnCtx(t), e.config(t, wd, record, policy))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	first := readRecord(t, record, func(r stubRecord) bool { return slices.Contains(r.Methods, "tools/list") }, 90*time.Second)
+	if first.PID == 0 {
+		t.Fatal("the MCP server never started, so there is nothing to kill")
+	}
+	if err := syscall.Kill(first.PID, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the MCP server (pid %d): %v", first.PID, err)
+	}
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		if errors.Is(syscall.Kill(first.PID, 0), syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the MCP server (pid %d) did not die", first.PID)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Logf("killed the session's MCP server (pid %d)", first.PID)
+
+	res, err := s.Prompt(turnCtx(t), "Use the basecamp MCP tool named note with the text after. "+
+		"If that tool is not available to you, reply with exactly UNAVAILABLE and use no tools.")
+	second := readRecord(t, record, func(r stubRecord) bool {
+		return r.PID != 0 && r.PID != first.PID && slices.Contains(r.Methods, "initialize")
+	}, 60*time.Second)
+	switch {
+	case second.PID != 0 && second.PID != first.PID:
+		worker := s.Process()
+		t.Logf("RESTARTED: %s re-ran the server's command as a new process (pid %d after %d); "+
+			"a per-start handoff is the right shape. turn: stop=%v err=%v", e.adapter.Name, second.PID, first.PID, res.Stop, err)
+		// What the connector's token socket checks of a peer: its process
+		// group, or its descent from the worker's leader.
+		ppid, pgid := parentAndGroup(t, second.PID)
+		t.Logf("the restarted server: pid %d ppid %d pgid %d; the worker: pid %d pgid %d%s",
+			second.PID, ppid, pgid, worker.PID, worker.PGID,
+			map[bool]string{true: " (same group)", false: " (another group)"}[pgid == worker.PGID])
+	case errors.Is(err, ErrMCPServerNotConnected):
+		t.Logf("NOT RESTARTED, and reported: %s left the server dead and said so; the driver refused the turn: %v", e.adapter.Name, err)
+	default:
+		t.Logf("NOT RESTARTED, and not reported: %s left the server dead and the turn ended stop=%v err=%v; "+
+			"nothing but the session's own account of its servers stands between a worker and a turn without its tools",
+			e.adapter.Name, res.Stop, err)
+	}
+}
+
+// parentAndGroup is a process's parent and process group, as ps reports them.
+func parentAndGroup(t *testing.T, pid int) (int, int) {
+	t.Helper()
+	out, err := exec.CommandContext(context.Background(), "ps", "-o", "ppid=,pgid=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		t.Logf("ps for pid %d: %v", pid, err)
+		return 0, 0
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, 0
+	}
+	ppid, _ := strconv.Atoi(fields[0])
+	pgid, _ := strconv.Atoi(fields[1])
+	return ppid, pgid
 }

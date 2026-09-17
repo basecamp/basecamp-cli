@@ -73,8 +73,12 @@ type conn struct {
 	// to its caller, so what follows it on the wire is read knowing it came.
 	onResponse func(id int64)
 	// onBusy hears a request refused at the handler bound, before its answer
-	// is written, so the refusal is on the record.
-	onBusy func(method string, params json.RawMessage)
+	// is written, so the refusal is on the record. It is given what the
+	// request was read in, because it runs later than the reading of it.
+	onBusy func(method string, params json.RawMessage, claimed any)
+	// release gives up a claim taken for a request that was dropped without
+	// being answered at all.
+	release func(claimed any)
 	// onOverflow hears that even the refusals have backed up.
 	onOverflow func()
 	// onRequest runs on its own goroutine per request; it must answer with
@@ -115,11 +119,13 @@ func newConn(w io.Writer) *conn {
 	return c
 }
 
-// busyRequest is a request refused at the handler bound.
+// busyRequest is a request refused at the handler bound, with what it was
+// read in.
 type busyRequest struct {
-	id     json.RawMessage
-	method string
-	params json.RawMessage
+	id      json.RawMessage
+	method  string
+	params  json.RawMessage
+	claimed any
 }
 
 // answerBusy records and answers the requests refused at the handler bound,
@@ -129,9 +135,12 @@ func (c *conn) answerBusy() {
 		select {
 		case r := <-c.busy:
 			if c.onBusy != nil {
-				c.onBusy(r.method, r.params)
+				c.onBusy(r.method, r.params, r.claimed)
 			}
 			c.replyError(r.id, codeBusy, "too many requests at once")
+			if c.release != nil {
+				c.release(r.claimed)
+			}
 		case <-c.done:
 			return
 		}
@@ -171,6 +180,14 @@ func (c *conn) read(r io.Reader) error {
 				c.replyError(m.ID, codeMethodNotFound, "method not supported by this client")
 				continue
 			}
+			// What the request was read in is taken here either way, on the
+			// reading goroutine and in wire order: the turn it belongs to is
+			// the turn in flight now, not whatever is in flight when it is
+			// answered.
+			var claimed any
+			if c.claim != nil {
+				claimed = c.claim(m.Method)
+			}
 			select {
 			case c.handlers <- struct{}{}:
 			default:
@@ -179,10 +196,15 @@ func (c *conn) read(r io.Reader) error {
 				// requests while it has stopped reading its input must not
 				// stall what the client reads from it.
 				select {
-				case c.busy <- busyRequest{id: m.ID, method: m.Method, params: m.Params}:
+				case c.busy <- busyRequest{id: m.ID, method: m.Method, params: m.Params, claimed: claimed}:
 				default:
 					// More unanswered requests than any agent asks: it is not
-					// working with this client, and the session ends.
+					// working with this client, and the session ends. This one
+					// is neither answered nor recorded; the session's end is
+					// the answer to all of them.
+					if c.release != nil {
+						c.release(claimed)
+					}
 					if c.onOverflow != nil {
 						c.onOverflow()
 					}
@@ -190,10 +212,6 @@ func (c *conn) read(r io.Reader) error {
 				continue
 			}
 			id, method, params := m.ID, m.Method, m.Params
-			var claimed any
-			if c.claim != nil {
-				claimed = c.claim(method)
-			}
 			go func() {
 				defer func() { <-c.handlers }()
 				c.onRequest(id, method, params, claimed)

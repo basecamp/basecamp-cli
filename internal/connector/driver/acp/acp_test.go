@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1030,8 +1031,14 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "TOML allows space around the dots")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("\ufeff[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
 	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a byte order mark does not hide the first line")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"),
+		[]byte("profile = \"demo\"\nprofiles = { demo = { mcp_servers = { basecamp = { command = \"/bin/evil\" } } } }\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "an inline table declares them on one line, at any depth")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
 	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
+	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o000))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a config this cannot read is refused, not assumed empty")
+	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o600))
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))
 	withCodexHome := func(name string) (string, bool) {
@@ -1161,7 +1168,7 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 
 	c := newConn(toAgent)
 	var busy atomic.Int32
-	c.onBusy = func(string, json.RawMessage) { busy.Add(1) }
+	c.onBusy = func(string, json.RawMessage, any) { busy.Add(1) }
 	release := make(chan struct{})
 	var inFlight, peak atomic.Int32
 	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage, _ any) {
@@ -1213,6 +1220,11 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 func TestWhatOneToolCallMayCostTheSession(t *testing.T) {
 	h := newHarness(t)
 	s := h.open().(*session)
+	// What a tool call costs is what it costs inside a turn: outside one,
+	// nothing of it is kept at all.
+	s.mu.Lock()
+	s.turn = &turn{done: make(chan struct{})}
+	s.mu.Unlock()
 	long := strings.Repeat("c", maxToolCallID+1)
 	locations := make([]string, maxLocations*4)
 	for i := range locations {
@@ -1409,7 +1421,7 @@ func TestTheTurnEndWaitsForRequestsAlreadyRead(t *testing.T) {
 	h := newHarness(t)
 	s := h.open().(*session)
 	claimed := s.claim("session/request_permission")
-	assert.Nil(t, claimed, "no turn in flight")
+	assert.Nil(t, turnOf(claimed), "no turn in flight")
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		s.mu.Lock()
@@ -1852,6 +1864,24 @@ func TestASessionAlreadyFailedIsNeverHandedOut(t *testing.T) {
 	waitGone(t, h.record().PID)
 }
 
+// And a failure claimed in the window between the handshake returning and the
+// session being handed out: the seam stands where only a race could.
+func TestASessionThatFailsAsItIsHandedOutIsNotHandedOut(t *testing.T) {
+	h := newHarness(t)
+	failure := errors.New("acp: claimed as the handshake returned")
+	old := afterHandshake
+	afterHandshake = func(s *session) { s.fail(failure) }
+	t.Cleanup(func() { afterHandshake = old })
+
+	s, err := h.driver().NewSession(context.Background(), h.config())
+	assert.Nil(t, s)
+	require.ErrorIs(t, err, failure)
+	var start *driver.StartError
+	require.ErrorAs(t, err, &start, "a start that ran a process says which")
+	assert.NotZero(t, start.Process.PID)
+	waitGone(t, h.record().PID)
+}
+
 // A permission request this client cannot read is a refusal it made, and is
 // recorded like any other.
 func TestAnUnreadableRequestIsARefusalToo(t *testing.T) {
@@ -1872,4 +1902,282 @@ func TestAnUnreadableRequestIsARefusalToo(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no update for a refusal")
 	}
+}
+
+// ---------------------------------------------------------------- what the agent writes is bounded
+
+// An adapter can send an account of its MCP servers for any session it likes,
+// as often as it likes, before the session's own id is known. What is held is
+// bounded in every direction: how many accounts, which ids may have one, and
+// how much of one is kept.
+func TestTheAccountsHeldBeforeASessionIsNamedAreBounded(t *testing.T) {
+	h := newHarness(t)
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s := h.open().(*session)
+	s.mu.Lock()
+	s.id = ""
+	s.mcpStatus = MCPStatusInit
+	s.mu.Unlock()
+
+	init := func(id string, servers ...map[string]any) {
+		list := make([]any, 0, len(servers))
+		for _, srv := range servers {
+			list = append(list, srv)
+		}
+		s.onSDKMessage(raw(t, map[string]any{
+			"sessionId": id,
+			"message":   map[string]any{"type": "system", "subtype": "init", "mcp_servers": list},
+		}))
+	}
+	// An id this session could never have been given is not held at all, so
+	// it does not even take a place among the few that are.
+	init(strings.Repeat("x", 4096), map[string]any{"name": "basecamp", "status": "connected"})
+	init("../../etc/passwd", map[string]any{"name": "basecamp", "status": "connected"})
+	s.mu.Lock()
+	assert.Empty(t, s.earlyInit, "no account is held for an id this session could not have")
+	s.mu.Unlock()
+
+	// Then a flood of accounts, each naming far more servers than the
+	// session was given, and each name far longer than a name.
+	long := strings.Repeat("l", 8192)
+	for i := range maxEarlyInit * 20 {
+		servers := make([]map[string]any, 0, 200)
+		for j := range 200 {
+			servers = append(servers, map[string]any{"name": fmt.Sprintf("%s-%d-%d", long, i, j), "status": long})
+		}
+		init(fmt.Sprintf("sess-%d", i), servers...)
+	}
+
+	s.mu.Lock()
+	held := len(s.earlyInit)
+	ids := slices.Collect(maps.Keys(s.earlyInit))
+	widest, longest := 0, 0
+	for _, a := range s.earlyInit {
+		width := len(a.statuses)
+		if a.foreign != "" {
+			width++
+		}
+		widest = max(widest, width)
+		longest = max(longest, len(a.foreign), len(a.status))
+		for name, status := range a.statuses {
+			longest = max(longest, len(name), len(status))
+		}
+	}
+	names := len(s.mcpNames)
+	s.mu.Unlock()
+	assert.LessOrEqual(t, held, maxEarlyInit, "no more accounts held than could ever be used")
+	for _, id := range ids {
+		assert.True(t, validSessionID(id), "an id this session could never be given is not held: %q", id)
+	}
+	assert.LessOrEqual(t, widest, names+1, "an account holds the session's own servers and the one name it did not give")
+	assert.LessOrEqual(t, longest, 512, "and none of it is the agent's to size")
+
+	// And what is held is still an account: the one that turns out to name
+	// this session vouches for its servers when the id arrives.
+	s.mu.Lock()
+	s.earlyInit = nil
+	s.mcpConfirmed = false
+	s.mu.Unlock()
+	init("sess-good", map[string]any{"name": "basecamp", "status": "connected"})
+	s.nameSession("sess-good")
+	s.mu.Lock()
+	confirmed, unsafe := s.mcpConfirmed, s.unsafe
+	s.mu.Unlock()
+	assert.NoError(t, unsafe, "an account of the servers the session gave is no reason to end it")
+	assert.True(t, confirmed, "and it is the account that vouches for them")
+}
+
+// A path no filesystem takes, and a mode no adapter has, are cut to what they
+// can be rather than kept whole.
+func TestALongPathAndALongModeAreCutToWhatTheyCanBe(t *testing.T) {
+	long := strings.Repeat("p", maxLocationPath*4)
+	u, ok := decodeUpdate(raw(t, map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "edit",
+		"locations": []any{map[string]any{"path": "/work/" + long}},
+	}))
+	require.True(t, ok)
+	require.Len(t, u.Locations, 1)
+	assert.Len(t, u.Locations[0], maxLocationPath)
+	assert.True(t, strings.HasPrefix(u.Locations[0], "/work/"), "what is kept is the leading part, which is what the policy judges")
+
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.reportMode(strings.Repeat("m", maxMode*4))
+	s.mu.Lock()
+	mode := s.mode
+	s.mu.Unlock()
+	assert.Len(t, mode, maxMode)
+}
+
+// ---------------------------------------------------------------- what a decision may rest on
+
+// A tool call announced where the session could not be asked about it — a
+// load's replayed history — tells the session nothing: a later request that
+// names only that call's id is decided without the name the replay carried.
+func TestAReplayedToolCallCannotNameALaterRequest(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(r driver.PermissionRequest) bool { return strings.HasPrefix(r.Tool, "mcp__basecamp__") }
+	h.sc.SessionID = "sess-earlier"
+	h.sc.Replay = []json.RawMessage{
+		raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "replayed-1", "kind": "other",
+			"name": "mcp__basecamp__note", "status": "in_progress"}),
+	}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "replayed-1", "kind": "other"}, standardOptions()...)},
+	}, Stop: "end_turn"})
+
+	s, err := h.driver().LoadSession(context.Background(), h.config(), "sess-earlier")
+	require.NoError(t, err)
+	defer s.Close()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+
+	requests := h.policy.requests()
+	require.Len(t, requests, 1)
+	assert.Empty(t, requests[0].Tool, "a call the replay named is not a call this session announced")
+	assert.NotEmpty(t, res.Refusals, "so it is decided on its kind, and refused")
+	outcomes := h.record().Outcomes
+	require.Len(t, outcomes, 1)
+	_, option := outcomeOf(t, outcomes[0])
+	assert.Equal(t, "reject", option)
+}
+
+// Two options of one id say nothing about which the agent would act on, so
+// none is selected and the request is answered as canceled.
+func TestOptionsSharingAnIDSelectNothing(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "dup-1", "kind": "read"},
+			[2]string{"x", "allow_once"}, [2]string{"x", "reject_once"})},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	outcomes := h.record().Outcomes
+	require.Len(t, outcomes, 1)
+	kind, option := outcomeOf(t, outcomes[0])
+	assert.Equal(t, outcomeCanceled, kind, "nothing of that list is selected")
+	assert.Empty(t, option)
+	assert.NotEmpty(t, res.Refusals, "and it is a call this session did not allow")
+}
+
+// A request turned away at the connection's own bound is answered later, off
+// the reading goroutine; the turn it belongs to is the one it was read in.
+func TestARequestRefusedAtTheBoundCarriesTheTurnItWasReadIn(t *testing.T) {
+	fromClient, toAgent := io.Pipe()
+	toClient, fromAgent := io.Pipe()
+	t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+	go func() { _, _ = io.Copy(io.Discard, fromClient) }()
+
+	c := newConn(toAgent)
+	mine := &claimed{turn: &turn{}}
+	c.claim = func(string) any { return mine }
+	heard := make(chan any, 1)
+	c.onBusy = func(_ string, _ json.RawMessage, got any) { heard <- got }
+	released := make(chan any, 1)
+	c.release = func(got any) { released <- got }
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	c.onRequest = func(json.RawMessage, string, json.RawMessage, any) { <-hold }
+	go func() { _ = c.read(toClient) }()
+
+	for i := range maxHandlers + 1 {
+		_, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i)
+		require.NoError(t, err)
+	}
+	select {
+	case got := <-heard:
+		assert.Same(t, mine, got, "the refusal is recorded against what the request was read in")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refusal was never heard")
+	}
+	select {
+	case got := <-released:
+		assert.Same(t, mine, got, "and the turn's end stops waiting for it once it is answered")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the claim was never given up")
+	}
+}
+
+// ---------------------------------------------------------------- nothing hangs
+
+// An agent that has stopped reading its input cannot hold a prompt past its
+// context, however much of the prompt is still in the pipe.
+func TestAPromptWhoseWriteIsStuckReturnsWithItsContext(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	s := h.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := s.Prompt(ctx, strings.Repeat("prompt ", 1<<20))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 10*time.Second)
+}
+
+// A cancel is one per turn: a second call ends nothing more and sends
+// nothing more.
+func TestASecondCancelIsNotASecondCancel(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{WaitForCancel: true, Stop: "cancelled"}) //nolint:misspell // ACP's wire value
+	s := h.open()
+	answers := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "go")
+		answers <- err
+	}()
+	require.Eventually(t, func() bool { return slices.Contains(h.record().Methods, "session/prompt") },
+		10*time.Second, 10*time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	require.NoError(t, s.Cancel(context.Background()), "a second cancel is not an error")
+	<-answers
+	cancels := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			cancels++
+		}
+	}
+	assert.Equal(t, 1, cancels, "one cancel per turn, whoever asks twice")
+}
+
+// ---------------------------------------------------------------- configuration
+
+// Two MCP servers of one name are one name in the agent's account of them, so
+// there is no session this driver can judge.
+func TestTwoMCPServersOfOneNameAreUnusable(t *testing.T) {
+	h := newHarness(t)
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.MCPServers = append(cfg.MCPServers, cfg.MCPServers[0])
+		return cfg
+	}
+	_, err := h.driver().NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, driver.ErrUnusable)
+	require.ErrorIs(t, err, driver.ErrNotStarted)
+	_, statErr := os.Stat(h.sc.Record)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
+}
+
+// What the preflight reads is the environment the adapter will run in, not
+// the connector's: a session's own environment is what the adapter resolves
+// its configuration against.
+func TestThePreflightReadsTheEnvironmentTheAdapterWillHave(t *testing.T) {
+	h := newHarness(t)
+	h.lookup["CODEX_HOME"] = "/connector/home"
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Env = append(cfg.Env, "CODEX_HOME=/session/home")
+		return cfg
+	}
+	seen := make(chan string, 1)
+	d := h.driver()
+	d.opts.Adapter.Preflight = func(_ string, lookup func(string) (string, bool)) error {
+		v, _ := lookup("CODEX_HOME")
+		seen <- v
+		return nil
+	}
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+	assert.Equal(t, "/session/home", <-seen)
 }

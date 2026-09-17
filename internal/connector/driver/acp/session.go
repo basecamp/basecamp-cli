@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -56,7 +55,7 @@ type session struct {
 	unsafe   error
 	// earlyInit holds an account of the MCP servers that arrived before the
 	// session's id did, by the id it named.
-	earlyInit map[string]map[string]string
+	earlyInit map[string]earlyAccount
 	// mcpStatus, mcpNames and mcpConfirmed are how the session learns its MCP
 	// servers connected (Adapter.MCPStatus).
 	mcpStatus    MCPStatus
@@ -145,6 +144,7 @@ func newSession(opts sessionOptions) *session {
 	s.conn.claim = s.claim
 	s.conn.onResponse = s.onResponse
 	s.conn.onBusy = s.onBusy
+	s.conn.release = s.release
 	s.conn.onOverflow = func() {
 		s.fail(errors.New("acp: the agent has more requests unanswered than this client will hold"))
 	}
@@ -266,11 +266,11 @@ func (s *session) newSession(ctx context.Context, cwd string, servers []wireServ
 func (s *session) nameSession(id string) {
 	s.mu.Lock()
 	s.id = id
-	early := s.earlyInit[id]
+	early, held := s.earlyInit[id]
 	s.earlyInit = nil
 	s.mu.Unlock()
-	if early != nil {
-		s.reportMCPServers(early, true)
+	if held {
+		s.reportMCPServers(early.account(), true)
 	}
 }
 
@@ -404,6 +404,9 @@ func (s *session) reportModeSince(id string, since int64) {
 		return
 	}
 	s.modeSeq++
+	if len(id) > maxMode {
+		id = id[:maxMode]
+	}
 	s.mode = id
 	close(s.modeSeen)
 	s.modeSeen = make(chan struct{})
@@ -559,18 +562,26 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	s.mu.Unlock()
 
 	answer := t.call
-	err := s.conn.sendCall(answer, map[string]any{
-		"sessionId": id,
-		"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
-	})
-	canceled := t.canceled
-	<-s.promptSem
-	if canceled && err == nil {
-		go func() {
-			_ = s.conn.notifyIf(func() bool { return s.inFlight(t) }, "session/cancel", map[string]any{"sessionId": id})
-		}()
-	}
-	go s.finishTurn(t, answer, err)
+	// The write is on its own goroutine, and the turn's place in the queue is
+	// held until it is done: an agent that has stopped reading its input
+	// cannot hold this caller past its context, and no cancel of this turn
+	// goes out before the prompt it cancels.
+	go func() {
+		err := s.conn.sendCall(answer, map[string]any{
+			"sessionId": id,
+			"prompt":    []any{map[string]any{"type": "text", "text": prompt}},
+		})
+		s.mu.Lock()
+		canceled := t.canceled
+		s.mu.Unlock()
+		<-s.promptSem
+		if canceled && err == nil {
+			go func() {
+				_ = s.conn.notifyIf(func() bool { return s.inFlight(t) }, "session/cancel", map[string]any{"sessionId": id})
+			}()
+		}
+		s.finishTurn(t, answer, err)
+	}()
 
 	select {
 	case <-t.done:
@@ -607,7 +618,7 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 	canceled := t.canceled
 	unsafe := s.unsafe
 	usage := s.context
-	unconfirmed := s.mcpStatus == MCPStatusInit && len(s.mcpNames) > 0 && !s.mcpConfirmed
+	unconfirmed := s.mcpUnconfirmedLocked()
 	s.mu.Unlock()
 	if unsafe == nil && err == nil && unconfirmed {
 		// A turn ended and the agent never said its MCP servers connected:
@@ -663,7 +674,32 @@ func (s *session) claim(method string) any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deciding++
-	return s.turn
+	return &claimed{turn: s.turn}
+}
+
+// claimed is what a permission request was read in: the turn it belongs to,
+// counted among the session's decisions until it is answered. A request
+// refused at the connection's own bound carries one too, so its refusal is
+// recorded against the turn it arrived in and that turn's end waits for it.
+type claimed struct{ turn *turn }
+
+// release gives up a claim, whether the request it was taken for was
+// answered by the policy, refused unasked, or dropped unanswered.
+func (s *session) release(c any) {
+	if c == nil {
+		return
+	}
+	s.mu.Lock()
+	s.deciding--
+	s.mu.Unlock()
+}
+
+// turnOf is the turn a claim was taken in, or nil.
+func turnOf(c any) *turn {
+	if got, ok := c.(*claimed); ok {
+		return got.turn
+	}
+	return nil
 }
 
 // stopOf maps ACP's stop reason to the driver's (invariant 4).
@@ -703,7 +739,11 @@ func (s *session) Cancel(ctx context.Context) error {
 	s.mu.Lock()
 	t := s.turn
 	settling := t != nil && t.settling
-	if t != nil && !settling {
+	// One cancel per turn: the caller that ends the turn is the one that
+	// sends the notification, so a second call cannot put another
+	// session/cancel on the wire for a turn already canceled.
+	mine := t != nil && !settling && !t.canceled
+	if mine {
 		t.canceled = true
 	}
 	// A cancel with no turn in flight is remembered for the next one: the
@@ -716,7 +756,7 @@ func (s *session) Cancel(ctx context.Context) error {
 	// The prompt this cancel ends is on the wire; a later prompt cannot start
 	// while its turn is in flight.
 	<-s.promptSem
-	if t == nil || settling {
+	if !mine {
 		return nil
 	}
 	sent := make(chan error, 1)
@@ -864,12 +904,24 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 	var locations []json.RawMessage
 	if json.Unmarshal(fields["locations"], &locations) == nil {
 		for _, l := range locations {
+			if len(u.Locations) >= maxLocations {
+				break
+			}
 			var loc struct {
 				Path string `json:"path"`
 			}
-			if json.Unmarshal(l, &loc) == nil && loc.Path != "" {
-				u.Locations = append(u.Locations, loc.Path)
+			if json.Unmarshal(l, &loc) != nil || loc.Path == "" {
+				continue
 			}
+			if len(loc.Path) > maxLocationPath {
+				// No pathname this long names a file the agent could act on.
+				// What is kept is its leading part, which is what the policy
+				// places inside the working directory or outside it; dropping
+				// it instead would take a path off a call that the policy
+				// would have refused for naming it.
+				loc.Path = loc.Path[:maxLocationPath]
+			}
+			u.Locations = append(u.Locations, loc.Path)
 		}
 	}
 	var n int64
@@ -921,14 +973,7 @@ func (s *session) onNotification(method string, params json.RawMessage) {
 	if !ok {
 		return
 	}
-	if s.mcpStatus == MCPStatusStartupFailures && strings.HasPrefix(u.ToolCallID, "mcp_startup.") &&
-		(u.Status == string(driver.ToolFailed) || u.Status == "cancelled") { //nolint:misspell // codex-acp's wire value
-		name := strings.TrimPrefix(u.ToolCallID, "mcp_startup.")
-		if unescaped, err := url.PathUnescape(name); err == nil {
-			name = unescaped
-		}
-		s.reportMCPServers(map[string]string{name: "failed"}, false)
-	}
+	s.noteStartupFailure(u)
 	switch u.SessionUpdate {
 	case "current_mode_update":
 		s.reportMode(u.CurrentModeID)
@@ -1005,49 +1050,6 @@ func (s *session) inFlight(t *turn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.turn == t && !t.settling
-}
-
-// toolInfo is what is known of one tool call.
-type toolInfo struct {
-	name      string
-	kind      driver.ToolKind
-	locations []string
-}
-
-// noteTool merges what u says about its tool call into what the session
-// knows of it, and returns the result. A later message fills in what an
-// earlier one left out; it never blanks what was known.
-func (s *session) noteTool(u sessionUpdate) toolInfo {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	info := s.tools[u.ToolCallID]
-	if name := toolName(u); name != "" {
-		info.name = name
-	}
-	if u.Kind != "" {
-		info.kind = toolKind(u.Kind)
-	}
-	if info.kind == "" {
-		info.kind = driver.ToolOther
-	}
-	if len(u.Locations) > 0 {
-		info.locations = slices.Clone(u.Locations)
-		if len(info.locations) > maxLocations {
-			info.locations = info.locations[:maxLocations]
-		}
-	}
-	if u.ToolCallID == "" || len(u.ToolCallID) > maxToolCallID {
-		return info
-	}
-	switch toolStatus(u.Status) {
-	case driver.ToolCompleted, driver.ToolFailed:
-		delete(s.tools, u.ToolCallID)
-	default:
-		if _, known := s.tools[u.ToolCallID]; known || len(s.tools) < maxTools {
-			s.tools[u.ToolCallID] = info
-		}
-	}
-	return info
 }
 
 // toolName is the agent's name for the tool, where it says one: never the
@@ -1143,6 +1145,19 @@ func mergeEnv(base, extra []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// lookupIn reads a variable from an environment already built, so whatever
+// reads it sees what the adapter will.
+func lookupIn(env []string) func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		for i := len(env) - 1; i >= 0; i-- {
+			if after, ok := strings.CutPrefix(env[i], name+"="); ok {
+				return after, true
+			}
+		}
+		return "", false
+	}
 }
 
 // setEnv sets the adapter's own switches over whatever env holds of the same

@@ -90,6 +90,11 @@ const (
 // tests.
 var confirmGroupGone = driver.ConfirmGroupGone
 
+// afterHandshake runs between a handshake returning and the session being
+// handed out. It does nothing; it is where this package's tests stand to
+// claim a failure in exactly that window.
+var afterHandshake = func(*session) {}
+
 // Errors.
 var (
 	// ErrLoadUnsupported is a session/load asked of an agent that advertises
@@ -200,16 +205,19 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 	}
+	env := mergeEnv(cfg.Env, driver.BuildEnv(d.opts.Adapter.Env, d.opts.Lookup, nil))
+	env = setEnv(env, d.opts.Adapter.SetEnv)
 	if d.opts.Adapter.Preflight != nil {
-		if err := d.opts.Adapter.Preflight(cfg.Cwd, d.opts.Lookup); err != nil {
+		// Read in the environment the adapter is about to run in, not this
+		// process's: what the preflight looks for (a CODEX_HOME, a HOME) is
+		// what the adapter will resolve its own configuration against.
+		if err := d.opts.Adapter.Preflight(cfg.Cwd, lookupIn(env)); err != nil {
 			// Configuration on this machine: the same session would fail the
 			// same way, so it is not retried.
 			return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 		}
 	}
 
-	env := mergeEnv(cfg.Env, driver.BuildEnv(d.opts.Adapter.Env, d.opts.Lookup, nil))
-	env = setEnv(env, d.opts.Adapter.SetEnv)
 	// Everything this session says passes through the dispatcher's redaction,
 	// plus the environment built here, its MCP servers' environments and its
 	// private directory.
@@ -256,6 +264,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		// the connector confirms its group gone before it settles anything.
 		return nil, &driver.StartError{Process: worker.Process(), Err: red.Err(fmt.Errorf("%w%s", err, s.stderrNote()))}
 	}
+	afterHandshake(s)
 	if own := s.failure(); own != nil {
 		// A failure claimed while the handshake was returning: the worker is
 		// already being ended, so the session is never handed out.

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,16 +36,17 @@ import (
 //     DISABLE_MCP_CONFIG_FILTERING so the servers it was given reach the
 //     session whole. Both live with the adapters, in adapters.go.
 //
-//  3. What actually connected. reportMCPServers is the one place that judges
-//     the adapter's own account of its servers, however that account
-//     arrives: Claude Code's init, forwarded as an SDK message
-//     (onSDKMessage), or codex-acp's mcp_startup.<server> failures
-//     (MCPStatus, in adapters.go). A server the session was given that did
-//     not connect, a server it was never given that is there anyway, or — for
-//     Claude — a first turn that ends with no init at all fails the turn with
-//     ErrMCPServerNotConnected and ends the worker (invariant 9). An account
-//     that names another session is not this session's account and is
-//     dropped.
+//  3. What actually connected. Every account of the servers is read and
+//     judged in this file, whichever adapter sends it and whatever shape it
+//     arrives in: Claude Code's init, forwarded as an SDK message
+//     (onSDKMessage), or codex-acp's failed mcp_startup.<server> tool calls
+//     (noteStartupFailure). reportMCPServers judges an account —  a server
+//     the session was given that did not connect, or a server it was never
+//     given that is there anyway, fails the turn with
+//     ErrMCPServerNotConnected and ends the worker (invariant 9) — and
+//     mcpUnconfirmedLocked judges the absence of one, which only the end of a
+//     turn can see. An account naming another session is not this session's
+//     and is held or dropped, never applied.
 //
 // Ending the session ends the servers: the adapter starts them, the worker's
 // process group is ended as a group, and a server the adapter keeps outside
@@ -66,10 +69,18 @@ type wireEnv struct {
 // almost nothing, so nothing a server needs is left to inheritance.
 func wireServers(servers []driver.MCPServer) ([]wireServer, error) {
 	out := make([]wireServer, 0, len(servers))
+	seen := make(map[string]bool, len(servers))
 	for _, srv := range servers {
 		if srv.Name == "" || !filepath.IsAbs(srv.Command) {
 			return nil, errors.New("acp: an MCP server needs a name and an absolute command")
 		}
+		if seen[srv.Name] {
+			// Two servers of one name are one name in the agent's account of
+			// them, so one could stand for the other: there is no session
+			// this driver can judge.
+			return nil, fmt.Errorf("acp: two MCP servers are named %q", srv.Name)
+		}
+		seen[srv.Name] = true
 		env := make([]wireEnv, 0, len(srv.Env))
 		for k, v := range srv.Env {
 			if k == "" || strings.ContainsAny(k, "=\x00") {
@@ -150,19 +161,89 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 	for _, srv := range n.Message.MCPServers {
 		statuses[srv.Name] = srv.Status
 	}
+	// Reduced before it is held: what is held is the agent's to send, and as
+	// much of it as it likes, until the session's own id settles which one
+	// account matters.
+	held := s.reduce(statuses)
 	s.mu.Lock()
 	known := s.id != ""
-	if !known {
+	if !known && validSessionID(n.SessionID) {
 		// The session's id is not known yet: this account of the servers is
 		// held until it is, so an init naming another session cannot vouch
-		// for this one.
+		// for this one. An id this session could never be given is not held
+		// at all, and neither is an account past the bound.
 		if s.earlyInit == nil {
-			s.earlyInit = map[string]map[string]string{}
+			s.earlyInit = map[string]earlyAccount{}
 		}
-		s.earlyInit[n.SessionID] = statuses
+		if _, ok := s.earlyInit[n.SessionID]; ok || len(s.earlyInit) < maxEarlyInit {
+			s.earlyInit[n.SessionID] = held
+		}
 	}
 	s.mu.Unlock()
 	if known {
 		s.reportMCPServers(statuses, true)
 	}
+}
+
+// earlyAccount is an account of the MCP servers that arrived before the
+// session's id did, reduced to what judging it needs: what the agent said of
+// each server this session was given, and the first name it gave that this
+// session was not. Neither the agent's own names nor how many it sends are
+// kept, so what is held is bounded by what the session gave.
+type earlyAccount struct {
+	statuses map[string]string
+	foreign  string
+	status   string
+}
+
+// reduce is that reduction.
+func (s *session) reduce(statuses map[string]string) earlyAccount {
+	s.mu.Lock()
+	names := slices.Clone(s.mcpNames)
+	s.mu.Unlock()
+	held := earlyAccount{statuses: make(map[string]string, len(names))}
+	for name, status := range statuses {
+		switch {
+		case slices.Contains(names, name):
+			held.statuses[name] = s.conn.agentText(status)
+		case held.foreign == "":
+			held.foreign, held.status = s.conn.agentText(name), s.conn.agentText(status)
+		}
+	}
+	return held
+}
+
+// account is the held account as reportMCPServers judges it: a name the
+// session never gave is still in it, because that name is what fails the
+// session.
+func (a earlyAccount) account() map[string]string {
+	out := make(map[string]string, len(a.statuses)+1)
+	maps.Copy(out, a.statuses)
+	if a.foreign != "" {
+		out[a.foreign] = a.status
+	}
+	return out
+}
+
+// mcpUnconfirmedLocked reports the third case of the rule: a Claude session
+// whose turn ended with no account of its MCP servers at all. The other two
+// (a server that did not connect, a server the session never gave) are
+// reportMCPServers'; this one can only be seen when a turn ends, so
+// finishTurn asks it here rather than judging for itself.
+func (s *session) mcpUnconfirmedLocked() bool {
+	return s.mcpStatus == MCPStatusInit && len(s.mcpNames) > 0 && !s.mcpConfirmed
+}
+
+// noteStartupFailure reads codex-acp's account, which arrives as failed tool
+// calls named for the server that did not start, one at a time.
+func (s *session) noteStartupFailure(u sessionUpdate) {
+	if s.mcpStatus != MCPStatusStartupFailures || !strings.HasPrefix(u.ToolCallID, "mcp_startup.") ||
+		(u.Status != string(driver.ToolFailed) && u.Status != outcomeCanceled) {
+		return
+	}
+	name := strings.TrimPrefix(u.ToolCallID, "mcp_startup.")
+	if unescaped, err := url.PathUnescape(name); err == nil {
+		name = unescaped
+	}
+	s.reportMCPServers(map[string]string{name: "failed"}, false)
 }
