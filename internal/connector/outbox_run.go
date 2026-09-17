@@ -163,20 +163,34 @@ func (o *Outbox) Run(ctx context.Context) error {
 	}
 }
 
+// Start is the outbox's part of a connector's start, run before anything else
+// transitions: every sending intent a previous process left is reconciled,
+// then every due pending intent is sent. It honors the one wait start-up
+// cannot skip: an intent that went sending less than ReconcileAfter ago — a
+// process that died seconds before this one started — may still be landing,
+// and listing it now could only make it indeterminate for want of patience.
+// Run reconciles it once it comes of age. Everything older, which after any
+// ordinary restart is everything, is settled before Start returns.
+func (o *Outbox) Start(ctx context.Context) error {
+	if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil && ctx.Err() == nil {
+		// A listing that failed has backed its intent off; Run tries again.
+		o.log.Warn("connector: reconciling lifecycle messages on start", "error", err)
+	}
+	return o.Flush(ctx)
+}
+
 // Recover reconciles every sending intent whose listing is due, whatever its
-// age. A connector does not call it on start: Run reconciles what a previous
-// process left once it is ReconcileAfter old, so a request that was still
-// landing when that process died has landed. It is here for a caller that
-// knows the wait has already passed — a test with a killed process, say.
+// age. A connector does not call it on start — Start does, honoring the wait
+// for a request still landing. It is here for a caller that knows the wait
+// has already passed: a test with a killed process, say.
 func (o *Outbox) Recover(ctx context.Context) error {
 	_, err := o.reconcileStale(ctx, 0)
 	return err
 }
 
 // Flush sends every intent that is due, one at a time, and returns when none
-// is left or ctx ends. One flush claims an intent at most once: a claim that
-// came back for an intent already claimed would be a second send, and stops
-// the flush instead.
+// is left or ctx ends. One flush claims an intent at most once: an intent a
+// person sent back to pending while the flush drains waits for the next one.
 func (o *Outbox) Flush(ctx context.Context) error { return o.flushSome(ctx, 0) }
 
 // flushSome sends at most limit intents, or every due one when limit is zero.
@@ -229,6 +243,8 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 		return 0, err
 	}
 	if claimed[intent.ID] {
+		// Unreachable while the claim's query skips these ids; kept so a
+		// broken query stops the flush rather than sending twice.
 		return 0, fmt.Errorf("connector: outbox intent %d was claimed twice in one flush; not sending it again", intent.ID)
 	}
 	claimed[intent.ID] = true
@@ -607,8 +623,6 @@ func (l *Ledger) receiptOwnedByOther(ctx context.Context, id int64, kind Message
 	return owned, err
 }
 
-// settleReconciled writes a reconciliation's answer onto a still-sending
-// intent: sent with the adopted receipt, or indeterminate with why.
 // giveUpReconciling settles a sending intent indeterminate after its last
 // failed listing, recording that failure in the same write so the count a
 // person reads is the count that gave up.
@@ -633,6 +647,8 @@ WHERE id = ? AND state = 'sending'`, l.timestamp(), note, failures, id)
 	return l.Intent(ctx, id)
 }
 
+// settleReconciled writes a reconciliation's answer onto a still-sending
+// intent: sent with the adopted receipt, or indeterminate with why.
 func (l *Ledger) settleReconciled(ctx context.Context, id, receipt int64, note string) (Intent, error) {
 	err := retryBusy(func() error {
 		var (

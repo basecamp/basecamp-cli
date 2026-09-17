@@ -1081,3 +1081,44 @@ func TestOutboxAGuardIsFiredWhileInFlightAndArmedAfterRefusal(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, after.GuardAcknowledged, "a refused guard acknowledged nothing")
 }
+
+// orderedPoster records the order of listings and posts.
+type orderedPoster struct {
+	*fakeBasecamp
+	calls []string
+}
+
+func (o *orderedPoster) Post(ctx context.Context, dest Destination, body string) (int64, error) {
+	o.calls = append(o.calls, "post")
+	return o.fakeBasecamp.Post(ctx, dest, body)
+}
+
+func (o *orderedPoster) List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
+	o.calls = append(o.calls, "list")
+	return o.fakeBasecamp.List(ctx, dest, since)
+}
+
+// On start: what a previous process left sending is reconciled, then what is
+// due is sent, all before Start returns and so before anything else runs —
+// except an intent that went sending too recently to have landed, which waits.
+func TestOutboxStartSettlesWhatAPreviousProcessLeftBeforeSending(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	stale := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	basecamp := &orderedPoster{fakeBasecamp: newFakeBasecamp(clock.Now)}
+	landed := basecamp.add(stale.Destination, adapterAgentID, stale.Body)
+
+	clock.Advance(10 * time.Minute) // the previous process died a while ago
+	young := sendingHolding(t, ledger, 2, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 902})
+	seenRecord(t, ledger, 3)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(3, 0, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 903}))
+	require.NoError(t, err)
+
+	require.NoError(t, obOutbox(t, ledger, basecamp).Start(ctx))
+	got := obIntent(t, ledger, stale.Key)
+	require.Equal(t, IntentSent, got.State, "reconciled on start")
+	assert.Equal(t, landed, *got.ReceiptID)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, young.Key).State, "a request that may still be landing waits")
+	assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(3)).State, "what was due went out on start")
+	assert.Equal(t, []string{"list", "post"}, basecamp.calls, "reconcile, then send")
+}

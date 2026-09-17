@@ -366,6 +366,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			cancel()
 		})
 	}
+	if outbox != nil {
+		// On start, before anything transitions: settle what a previous
+		// process left sending and send what is due, so no stale notice
+		// waits behind new work.
+		if err := outbox.Start(runCtx); err != nil && runCtx.Err() == nil {
+			logger.Warn("connector: lifecycle messages on start", "error", err)
+		}
+	}
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
