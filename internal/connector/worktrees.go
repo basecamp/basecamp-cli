@@ -418,9 +418,11 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 	return nil
 }
 
-// Retained lists the worktrees kept for the operator.
+// Retained lists the worktrees kept for the operator: those retained, and
+// those a removal left mid-flight, which hold work until a start or a prune
+// judges them again.
 func (w *Worktrees) Retained(ctx context.Context) ([]Worktree, error) {
-	return w.ledger.RetainedWorktrees(ctx)
+	return w.ledger.Worktrees(ctx, WorktreeRetained, WorktreeRemoving)
 }
 
 // PruneAction is what prune did with one retained worktree.
@@ -615,6 +617,15 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 		}
 		return w.retain(ctx, r, RetainedUnverified, removing)
 	}
+	if !how.unpopulated && slices.Contains(from, WorktreeCreating) {
+		// A crash between `worktree add --no-checkout` and the checkout
+		// leaves a directory holding only git's .git file: never checked out,
+		// so nothing in it to lose, though the full rule would read an empty
+		// index against HEAD as every file deleted.
+		if reason, _, _ := w.judge(ctx, r, v, removal{unpopulated: true}); reason == "" {
+			how.unpopulated = true
+		}
+	}
 	if w.whileFrozen != nil {
 		if err := w.whileFrozen(v.dir); err != nil {
 			// A test standing in for a crash: names stay frozen.
@@ -639,6 +650,14 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 		return w.retain(ctx, r, reason, removing)
 	}
 
+	// The branch goes first: it is deleted only at a commit judged held, so
+	// a crash between the two leaves nothing unreachable, while the other
+	// order would leave a branch nothing later settles.
+	if how.force {
+		w.deleteBranchIfHeld(ctx, r)
+	} else {
+		w.deleteBranchAt(ctx, r, tip)
+	}
 	// Delete the frozen copy: the directory, then the record.
 	if err := os.RemoveAll(v.dir); err != nil {
 		w.log.Warn("connector: a frozen worktree could not be deleted; kept", "path", r.Path, "error", err)
@@ -649,11 +668,6 @@ func (w *Worktrees) removeWorktree(ctx context.Context, r Worktree, by RemovedBy
 	}
 	if err := os.RemoveAll(v.gitDir); err != nil {
 		w.log.Warn("connector: a worktree's record could not be deleted", "path", r.Path, "error", err)
-	}
-	if how.force {
-		w.deleteBranchIfHeld(ctx, r)
-	} else {
-		w.deleteBranchAt(ctx, r, tip)
 	}
 	if err := w.ledger.RemovedWorktree(ctx, r.ID, by, removing...); err != nil {
 		// The worktree is gone; the row still says removing, and the next
@@ -887,6 +901,9 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 		}
 		tips = append(tips, strings.Fields(string(out))...)
 	}
+	// Those refs' own reflogs are not read: git logs ref updates only for
+	// HEAD, refs/heads, refs/remotes and refs/notes, so a per-worktree ref has
+	// none to read.
 	slices.Sort(tips)
 	var unheld []string
 	for _, commit := range slices.Compact(tips) {
@@ -1084,6 +1101,13 @@ func (w *Worktrees) untrackedOnDisk(ctx context.Context, v view) (untracked, git
 			case rel == ".git" && !d.IsDir():
 				// The worktree's link to its repository.
 				return nil
+			case filepath.Base(rel) == ".git":
+				// Git data of a repository inside the worktree — a submodule
+				// git someone initialized, a repository a worker made, or a
+				// .git the worktree's own was replaced with. No ref here can
+				// keep its commits, so it is never removed, forced or not.
+				found.gitlink = true
+				return filepath.SkipAll
 			case gitlinks[rel]:
 				if !d.IsDir() {
 					found.gitlink = true

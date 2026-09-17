@@ -138,6 +138,7 @@ running are never touched.`,
 // worktreeView is a kept worktree as the commands show it.
 type worktreeView struct {
 	Path       string `json:"path"`
+	State      string `json:"state"`
 	WorkDir    string `json:"work_dir"`
 	Branch     string `json:"branch"`
 	Route      string `json:"route"`
@@ -156,7 +157,7 @@ type pruneView struct {
 
 func viewWorktree(w connector.Worktree) worktreeView {
 	v := worktreeView{
-		Path: w.Path, WorkDir: w.WorkDir, Branch: w.Branch, Route: w.Route,
+		Path: w.Path, State: string(w.State), WorkDir: w.WorkDir, Branch: w.Branch, Route: w.Route,
 		Reason: string(w.RetainedReason), EventID: w.OriginatingEventID, TaskID: w.TaskID,
 	}
 	if !w.RetainedAt.IsZero() {

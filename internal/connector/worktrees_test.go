@@ -1231,3 +1231,85 @@ func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
 	assert.Equal(t, WorktreeRemoved, after.State)
 	assert.True(t, h.branchExists(row.Branch), "the branch holding the commit alone is kept")
 }
+
+// Git data of a repository inside the worktree — one a worker made, not a
+// submodule of the route's — is work no ref can keep: never removed, and a
+// force is refused.
+func TestARepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	workDir, row := h.prepare(400)
+	nested := filepath.Join(workDir, "vendor", "lib")
+	require.NoError(t, os.MkdirAll(nested, 0o700))
+	h.git(nested, "init", "-q", "-b", "main")
+	h.write(nested, "lib.txt", "lib\n")
+	h.git(nested, "add", ".")
+	h.git(nested, "commit", "-q", "-m", "only copy")
+	commit := h.git(nested, "rev-parse", "HEAD")
+
+	row = h.finish(workDir)
+	require.Equal(t, RetainedDirty, row.RetainedReason)
+	results, err := h.wt.Prune(ctx, []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.True(t, results[0].ForceRefused)
+	assert.DirExists(t, filepath.Join(nested, ".git"))
+	assert.NoError(t, exec.CommandContext(ctx, "git", "-C", nested, "cat-file", "-e", commit+"^{commit}").Run())
+}
+
+// A crash between `worktree add --no-checkout` and the checkout leaves a
+// directory that was never checked out: nothing in it to lose.
+func TestAWorktreeThatWasNeverCheckedOutIsRemoved(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	base := h.git(h.repo, "rev-parse", "HEAD")
+	path := filepath.Join(h.root, "repo", "401-abcdef")
+	record := Worktree{
+		Path: path, WorkDir: filepath.Join(path, "app"), Route: filepath.Join(h.repo, "app"), Repository: h.repo,
+		Branch: BranchPrefix + "401-abcdef", BaseCommit: base, OriginatingEventID: 401, State: WorktreeCreating,
+	}
+	id, err := h.ledger.BeginWorktree(ctx, record)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	h.git(h.repo, "update-ref", "refs/heads/"+record.Branch, base, "")
+	require.NoError(t, h.ledger.WorktreeBranchCreated(ctx, id))
+	h.git(h.repo, "worktree", "add", "--no-checkout", "-q", path, record.Branch)
+	require.FileExists(t, filepath.Join(path, ".git"))
+
+	require.NoError(t, h.wt.Recover(ctx))
+	rows, err := h.ledger.Worktrees(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WorktreeRemoved, rows[0].State)
+	assert.False(t, exists(path))
+}
+
+// A frozen name already taken keeps the worktree, untouched.
+func TestAFrozenNameAlreadyTakenKeepsTheWorktree(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(402)
+	require.NoError(t, os.Mkdir(frozenName(row.Path), 0o700))
+
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnverified, after.RetainedReason)
+	assert.DirExists(t, workDir)
+	assert.NoFileExists(t, filepath.Join(row.AdminDir, "locked"), "no lock is left on the record")
+}
+
+// A row without a stored record, in a repository that writes relative worktree
+// paths, is still proven and removed.
+func TestALegacyRowWithRelativePathsIsRemoved(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	h.git(h.repo, "config", "worktree.useRelativePaths", "true")
+	workDir, row := h.prepare(403)
+	_, err := h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET admin_dir = '' WHERE id = ?`, row.ID)
+	require.NoError(t, err)
+
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRemoved, after.State)
+	assert.False(t, exists(row.Path))
+	assert.NoDirExists(t, row.AdminDir)
+}
