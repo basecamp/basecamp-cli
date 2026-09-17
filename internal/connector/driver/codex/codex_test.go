@@ -746,16 +746,27 @@ func TestAWorkerThatStopsReadingHoldsNothing(t *testing.T) {
 	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("Event 1. ", 200_000)) }()
 	waitDeaf(t, h)
 
-	done := make(chan struct{})
+	canceled := make(chan struct{})
 	go func() {
 		require.NoError(t, s.Cancel(context.Background()))
-		_ = s.Close()
-		close(done)
+		close(canceled)
 	}()
 	select {
-	case <-done:
+	case <-canceled:
+	case <-time.After(20 * time.Second):
+		t.Fatal("a worker that stopped reading held Cancel")
+	}
+
+	// And Close on its own, with no cancel to end the process first.
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
 	case <-time.After(30 * time.Second):
-		t.Fatal("a worker that stopped reading held Cancel or Close")
+		t.Fatal("a worker that stopped reading held Close")
 	}
 	waitDone(t, s)
 }
