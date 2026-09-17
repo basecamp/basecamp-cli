@@ -508,6 +508,9 @@ func optionValuesAt(raw json.RawMessage, depth int) []string {
 	}
 	var out []string
 	for _, it := range items {
+		if len(out) >= maxConfigOptions {
+			break
+		}
 		if it.Value != nil {
 			out = append(out, *it.Value)
 		}
@@ -830,12 +833,15 @@ func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
 
 // stderrNote is the end of the adapter's stderr, redacted, for an error.
 func (s *session) stderrNote() string {
-	// Every bounded line of it, not only the last: an adapter that fails to
-	// start says why on one line and prints a stack trace after it, and the
-	// last line of that trace explains nothing.
+	// More than the last line, because an adapter that fails to start says
+	// why on one line and prints a stack trace after it; not every line,
+	// because this becomes the attempt's own error text.
 	lines := s.worker.StderrLines(s.red)
 	if len(lines) == 0 {
 		return ""
+	}
+	if len(lines) > stderrNoteLines {
+		lines = lines[len(lines)-stderrNoteLines:]
 	}
 	return " (adapter stderr: " + strings.Join(lines, " | ") + ")"
 }
@@ -859,11 +865,16 @@ type sessionUpdate struct {
 	Name          string
 	MetaToolName  string
 	// MCPCall is codex-acp's _meta.is_mcp_tool_call.
-	MCPCall       bool
-	Title         string
-	MCPServer     string
-	MCPTool       string
-	Locations     []string
+	MCPCall   bool
+	Title     string
+	MCPServer string
+	MCPTool   string
+	Locations []string
+	// Unplaceable is a call this driver cannot carry the paths of whole:
+	// more paths than maxLocations, or one longer than maxLocationPath. The
+	// policy places a call by every path it names, so a call whose paths are
+	// not all here is one the policy cannot place.
+	Unplaceable   bool
 	Used          *int64
 	Size          *int64
 	Chars         int
@@ -911,10 +922,15 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 	}
 	var locations []json.RawMessage
 	if json.Unmarshal(fields["locations"], &locations) == nil {
+		if len(locations) > maxLocations {
+			// More paths than this driver carries. The policy allows a call
+			// only when every path it names is inside the working directory,
+			// so judging it on the ones that fit would allow a call by
+			// leaving out the path that refuses it.
+			u.Unplaceable = true
+			locations = locations[:maxLocations]
+		}
 		for _, l := range locations {
-			if len(u.Locations) >= maxLocations {
-				break
-			}
 			var loc struct {
 				Path string `json:"path"`
 			}
@@ -922,11 +938,11 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 				continue
 			}
 			if len(loc.Path) > maxLocationPath {
-				// No pathname this long names a file the agent could act on.
-				// What is kept is its leading part, which is what the policy
-				// places inside the working directory or outside it; dropping
-				// it instead would take a path off a call that the policy
-				// would have refused for naming it.
+				// A pathname longer than the driver carries is not a path
+				// this call can be placed by either: what is cut off can be
+				// the part that leaves the working directory, and a tool that
+				// normalizes before it opens would still reach it.
+				u.Unplaceable = true
 				loc.Path = loc.Path[:maxLocationPath]
 			}
 			u.Locations = append(u.Locations, loc.Path)
@@ -949,6 +965,9 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 	}
 	var options []json.RawMessage
 	if json.Unmarshal(fields["configOptions"], &options) == nil {
+		if len(options) > maxConfigOptions {
+			options = options[:maxConfigOptions]
+		}
 		for _, o := range options {
 			var opt configOption
 			if json.Unmarshal(o, &opt) == nil {

@@ -20,12 +20,15 @@ import "time"
 //     which are dropped rather than blocking it.
 //   - Per turn: maxRefusals refusals kept on a result.
 //   - Per tool call: maxToolCallID bytes of id, maxLocations paths, and
-//     maxLocationPath bytes of each.
-//   - Per option list: maxOptionDepth of nesting.
+//     maxLocationPath bytes of each. A call whose paths do not all fit is
+//     unplaceable: refused, never judged on the paths that did.
+//   - Per option list: maxOptionDepth of nesting and maxConfigOptions
+//     options, however they are grouped.
 //   - At once: maxHandlers agent requests being answered, maxDecisions of
 //     them at the policy, maxBusy refusals waiting to be written. An agent
 //     that outruns the last of these ends its session, and the requests
 //     dropped in that ending are neither answered nor recorded.
+//   - Per error: stderrNoteLines of the adapter's stderr.
 //   - In time: modeConfirmWait for a mode to be confirmed, decisionDrain for
 //     the decisions still in flight when a turn ends, and Options.CloseGrace
 //     for each wait Close and Cancel make on the worker. What follows the
@@ -91,11 +94,20 @@ const maxMode = 256
 // first turn rather than running unvouched for.
 const maxEarlyInit = 8
 
-// maxLocationPath bounds a path an agent names for a tool call. The systems
-// this runs on take no pathname longer, so a longer one names no file the
-// agent could act on; what is kept is the leading part, which is what the
-// policy judges.
-const maxLocationPath = 4096
+// maxLocationPath bounds a path an agent names for a tool call, and
+// maxConfigOptions the options it offers in one list or one update. A call
+// whose paths do not all fit — too many of them, or one too long — is a call
+// the policy cannot place, and is refused rather than judged on the part that
+// fits.
+const (
+	maxLocationPath  = 4096
+	maxConfigOptions = 256
+)
+
+// stderrNoteLines is how many of the adapter's last stderr lines an error
+// carries. The error becomes the attempt's own text, so this is a few lines
+// of why, not the whole of what a failing adapter printed.
+const stderrNoteLines = 5
 
 // modeConfirmWait is how long a session with no mode config option has to
 // report the mode it was set to. A variable so tests need not wait it out.

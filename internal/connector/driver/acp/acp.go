@@ -181,7 +181,12 @@ func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driv
 // LoadSession implements driver.Driver.
 func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
 	if !validSessionID(sessionID) {
-		return nil, fmt.Errorf("%w: %w: %q is not an ACP session id", driver.ErrNotStarted, driver.ErrUnusable, sessionID)
+		// Through the session's redaction, even here: this is the one error
+		// path before the adapter's environment joins it, and the id it names
+		// came from outside.
+		red := driver.NewRedactor(cfg.Redaction)
+		return nil, red.Err(fmt.Errorf("%w: %w: %q is not an ACP session id",
+			driver.ErrNotStarted, driver.ErrUnusable, red.Sanitize(sessionID)))
 	}
 	return d.open(ctx, cfg, sessionID)
 }

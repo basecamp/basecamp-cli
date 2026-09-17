@@ -152,7 +152,7 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 			} `json:"mcp_servers"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(params, &n) != nil || n.SessionID == "" || !s.ours(n.SessionID) ||
+	if json.Unmarshal(params, &n) != nil || n.SessionID == "" ||
 		n.Message.Type != "system" || n.Message.Subtype != "init" {
 		return
 	}
@@ -160,27 +160,37 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 	for _, srv := range n.Message.MCPServers {
 		statuses[srv.Name] = srv.Status
 	}
-	// Reduced before it is held: what is held is the agent's to send, and as
-	// much of it as it likes, until the session's own id settles which one
-	// account matters.
+	// Reduced before anything else: what arrives is the agent's to send, and
+	// as much of it as it likes, until the session's own id settles which one
+	// account matters. Both paths below apply the same reduced account, so
+	// neither can be the lenient one.
 	held := s.reduce(statuses)
+	// Whose account this is, is decided under one lock: the session's id can
+	// arrive between reading it and acting on it, and an account read as
+	// nobody's must not then be applied as this session's.
 	s.mu.Lock()
-	known := s.id != ""
-	if !known && validSessionID(n.SessionID) {
-		// The session's id is not known yet: this account of the servers is
-		// held until it is, so an init naming another session cannot vouch
-		// for this one. An id this session could never be given is not held
-		// at all, and neither is an account past the bound.
-		if s.earlyInit == nil {
-			s.earlyInit = map[string]earlyAccount{}
+	switch {
+	case s.id == "":
+		// The session's id is not known yet: this account is held until it
+		// is, so an init naming another session cannot vouch for this one. An
+		// id this session could never be given is not held at all, and
+		// neither is an account past the bound.
+		if validSessionID(n.SessionID) {
+			if s.earlyInit == nil {
+				s.earlyInit = map[string]earlyAccount{}
+			}
+			if _, ok := s.earlyInit[n.SessionID]; ok || len(s.earlyInit) < maxEarlyInit {
+				s.earlyInit[n.SessionID] = held
+			}
 		}
-		if _, ok := s.earlyInit[n.SessionID]; ok || len(s.earlyInit) < maxEarlyInit {
-			s.earlyInit[n.SessionID] = held
-		}
-	}
-	s.mu.Unlock()
-	if known {
-		s.reportMCPServers(statuses, true)
+		s.mu.Unlock()
+	case n.SessionID != s.id:
+		// Another session's account, and this session's id is known: it says
+		// nothing about this one.
+		s.mu.Unlock()
+	default:
+		s.mu.Unlock()
+		s.reportAccount(held)
 	}
 }
 

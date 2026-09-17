@@ -13,10 +13,11 @@ import (
 //
 // The connector's policy decides; the agent's request is evidence only of
 // what the agent asked for. onRequest is the only place a permission is
-// decided. Two paths answer one without deciding it, and both record the
-// refusal they are: a request past the connection's handler bound is
-// answered busy (onBusy), and past even the queue of those the session ends,
-// which answers every request it had outstanding.
+// decided. One other path answers a request without deciding it, and records
+// the refusal it is: a request past the connection's handler bound is
+// answered busy (onBusy). Past even the queue of those, a request is dropped
+// unanswered and unrecorded and the session is ended — an agent that outruns
+// its own refusals is not working with this client.
 //
 // A request reaches the policy only when all of this holds: it names this
 // session's own id, it was read inside a turn that has not been answered
@@ -125,6 +126,14 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		Tool:       info.name,
 		Kind:       info.kind,
 		Locations:  slices.Clone(info.locations),
+	}
+	if info.unplaceable || call.Unplaceable {
+		// The policy allows such a call only when every path it names is
+		// inside the working directory, and this is a call whose paths this
+		// driver could not carry whole. It is refused without being asked,
+		// rather than judged on the paths that fit.
+		s.refuse(id, req, t)
+		return
 	}
 	for _, o := range p.Options {
 		req.Options = append(req.Options, driver.PermissionOption{ID: o.OptionID, Kind: driver.PermissionOptionKind(o.Kind)})
@@ -273,6 +282,9 @@ type toolInfo struct {
 	name      string
 	kind      driver.ToolKind
 	locations []string
+	// unplaceable is a call whose paths this driver could not carry whole, so
+	// the policy cannot place it. It is never allowed.
+	unplaceable bool
 }
 
 // noteTool merges what u says about its tool call into what the session
@@ -286,10 +298,23 @@ type toolInfo struct {
 func (s *session) noteTool(u sessionUpdate) toolInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	usable := u.ToolCallID != "" && len(u.ToolCallID) <= maxToolCallID
+	done := false
+	switch toolStatus(u.Status) {
+	case driver.ToolCompleted, driver.ToolFailed:
+		done = true
+	case driver.ToolPending, driver.ToolInProgress:
+	}
+	if usable && done {
+		// A call that has finished is forgotten whatever the session could be
+		// asked right now: what it said of itself must not outlive it and
+		// describe a call a later turn is asked about.
+		delete(s.tools, u.ToolCallID)
+	}
 	if !s.mayAskLocked(s.turn) {
-		info := toolInfo{name: toolName(u), kind: toolKind(u.Kind), locations: slices.Clone(u.Locations)}
-		if len(info.locations) > maxLocations {
-			info.locations = info.locations[:maxLocations]
+		info := toolInfo{
+			name: toolName(u), kind: toolKind(u.Kind),
+			locations: slices.Clone(u.Locations), unplaceable: u.Unplaceable,
 		}
 		if info.kind == "" {
 			info.kind = driver.ToolOther
@@ -306,22 +331,15 @@ func (s *session) noteTool(u sessionUpdate) toolInfo {
 	if info.kind == "" {
 		info.kind = driver.ToolOther
 	}
-	if len(u.Locations) > 0 {
+	if len(u.Locations) > 0 || u.Unplaceable {
 		info.locations = slices.Clone(u.Locations)
-		if len(info.locations) > maxLocations {
-			info.locations = info.locations[:maxLocations]
-		}
+		info.unplaceable = u.Unplaceable
 	}
-	if u.ToolCallID == "" || len(u.ToolCallID) > maxToolCallID {
+	if !usable || done {
 		return info
 	}
-	switch toolStatus(u.Status) {
-	case driver.ToolCompleted, driver.ToolFailed:
-		delete(s.tools, u.ToolCallID)
-	default:
-		if _, known := s.tools[u.ToolCallID]; known || len(s.tools) < maxTools {
-			s.tools[u.ToolCallID] = info
-		}
+	if _, known := s.tools[u.ToolCallID]; known || len(s.tools) < maxTools {
+		s.tools[u.ToolCallID] = info
 	}
 	return info
 }

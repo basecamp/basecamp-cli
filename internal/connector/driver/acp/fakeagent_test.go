@@ -214,12 +214,22 @@ func runFakeAgent(path string) {
 		a.flush()
 		go a.handle(m.ID, m.Method, m.Params)
 		if m.Method == sc.StopReadingAfter {
-			select {}
+			// Reads no more, and outlives no test: a run that is interrupted
+			// while the client's write is stuck would otherwise leave this
+			// process behind with nothing to end it.
+			stall()
 		}
 	}
 	if sc.IgnoreStdinEOF {
-		select {}
+		stall()
 	}
+}
+
+// stall is an agent that does nothing more, for longer than any test waits
+// and not forever.
+func stall() {
+	time.Sleep(10 * time.Minute)
+	os.Exit(0)
 }
 
 // runFakeChild is a process the fake agent leaves in its group: it ignores

@@ -1226,12 +1226,19 @@ func TestWhatOneToolCallMayCostTheSession(t *testing.T) {
 	s.turn = &turn{done: make(chan struct{})}
 	s.mu.Unlock()
 	long := strings.Repeat("c", maxToolCallID+1)
-	locations := make([]string, maxLocations*4)
-	for i := range locations {
-		locations[i] = fmt.Sprintf("/work/%d", i)
+	locations := make([]any, 0, maxLocations*4)
+	for i := range maxLocations * 4 {
+		locations = append(locations, map[string]any{"path": fmt.Sprintf("/work/%d", i)})
 	}
-	info := s.noteTool(sessionUpdate{ToolCallID: long, Kind: "edit", Status: "pending", Locations: locations})
-	assert.Len(t, info.locations, maxLocations, "a call names as many paths as the policy will look at, no more")
+	u, ok := decodeUpdate(raw(t, map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": long, "kind": "edit", "status": "pending", "locations": locations,
+	}))
+	require.True(t, ok)
+	assert.Len(t, u.Locations, maxLocations, "a call carries as many paths as this driver carries, no more")
+	assert.True(t, u.Unplaceable, "and a call whose paths did not all fit is one the policy cannot place")
+	info := s.noteTool(u)
+	assert.Len(t, info.locations, maxLocations)
+	assert.True(t, info.unplaceable)
 	s.mu.Lock()
 	remembered := len(s.tools)
 	s.mu.Unlock()
@@ -2260,4 +2267,140 @@ func TestRefusalsWithNoToolCallIDAreCountedEveryTime(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, res.Refusals, 3, "three nameless denials are three refusals")
 	assert.Len(t, recorder.Recorded(), 3, "and three records")
+}
+
+// A call whose paths this driver could not carry whole is a call the policy
+// cannot place: it is refused without being asked, rather than judged on the
+// paths that fit. The policy allows an edit only when every path it names is
+// inside the working directory, so judging a subset is how a refusal becomes
+// an allow.
+func TestACallWhosePathsDoNotFitIsRefusedUnasked(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	inside := make([]any, 0, maxLocations+1)
+	for i := range maxLocations {
+		inside = append(inside, map[string]any{"path": filepath.Join(h.dir, fmt.Sprintf("f%d", i))})
+	}
+	// The path that would have refused the call is the one past the cap.
+	tooMany := append(slices.Clone(inside), map[string]any{"path": "/etc/shadow"})
+	tooLong := []any{map[string]any{"path": filepath.Join(h.dir, strings.Repeat("s/", 3000)+"x")}}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "many-1", "kind": "edit", "locations": tooMany}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "long-1", "kind": "edit", "locations": tooLong}, standardOptions()...)},
+		// And a call announced with paths that did not fit is still
+		// unplaceable when the agent asks about it by id alone.
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "many-2", "kind": "edit",
+			"status": "in_progress", "locations": tooMany})},
+		{Permission: permission(t, map[string]any{"toolCallId": "many-2", "kind": "edit"}, standardOptions()...)},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+
+	assert.Empty(t, h.policy.requests(), "a call the policy cannot place is not put to it")
+	outcomes := make([]string, 0, 3)
+	for _, o := range h.record().Outcomes {
+		kind, option := outcomeOf(t, o)
+		outcomes = append(outcomes, kind)
+		assert.Empty(t, option, "refused with no option of the agent's")
+	}
+	assert.Equal(t, []string{outcomeCanceled, outcomeCanceled, outcomeCanceled}, outcomes)
+	assert.Len(t, res.Refusals, 3, "and each is a refusal of this driver's")
+}
+
+// A tool call that has finished is forgotten whatever the session could be
+// asked at that moment: what it said of itself must not outlive it and
+// describe a call a later turn is asked about.
+func TestAFinishedToolCallIsForgottenEvenOutsideATurn(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	first := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = first
+	s.mu.Unlock()
+	s.noteTool(sessionUpdate{ToolCallID: "X", Name: "mcp__basecamp__note", Kind: "read", Status: "in_progress"})
+	s.mu.Lock()
+	_, known := s.tools["X"]
+	s.mu.Unlock()
+	require.True(t, known, "a call announced in a turn is what the session knows of it")
+
+	// The turn is answered, and the call completes after it: outside any turn.
+	s.mu.Lock()
+	s.turn = nil
+	s.mu.Unlock()
+	s.noteTool(sessionUpdate{ToolCallID: "X", Status: "completed"})
+	s.mu.Lock()
+	_, stillKnown := s.tools["X"]
+	s.mu.Unlock()
+	assert.False(t, stillKnown, "a finished call is forgotten")
+
+	second := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = second
+	s.mu.Unlock()
+	info := s.noteTool(sessionUpdate{ToolCallID: "X", Kind: "execute"})
+	assert.Empty(t, info.name, "so the next turn's request by that id inherits no name")
+	assert.Equal(t, driver.ToolExecute, info.kind)
+}
+
+// Whose account of the MCP servers this is, is decided under one lock: the
+// session's id can arrive while an account is being read, and an account read
+// as nobody's must not then be applied as this session's.
+func TestAnAccountIsNeverAppliedToTheSessionItDoesNotName(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	foreign := raw(t, map[string]any{
+		"sessionId": "sess-other",
+		"message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": []any{
+			map[string]any{"name": "basecamp", "status": "connected"},
+		}},
+	})
+	// The two meet on a barrier: the account is read as nobody's just as the
+	// session's own id arrives.
+	for range 50000 {
+		s.mu.Lock()
+		s.id = ""
+		s.mcpStatus = MCPStatusInit
+		s.mcpConfirmed = false
+		s.earlyInit = nil
+		s.mu.Unlock()
+		ready, done := make(chan struct{}), make(chan struct{})
+		go func() {
+			close(ready)
+			s.onSDKMessage(foreign)
+			close(done)
+		}()
+		<-ready
+		s.nameSession("sess-real")
+		<-done
+		s.mu.Lock()
+		confirmed := s.mcpConfirmed
+		s.mu.Unlock()
+		if confirmed {
+			t.Fatal("another session's account vouched for this session's MCP servers")
+		}
+	}
+}
+
+// A cancel never reaches a turn whose prompt is still on its way: the turn
+// holds its place in the queue until its write is done, so no session/cancel
+// can be written for a prompt the agent has not been sent.
+func TestACancelDoesNotTouchATurnWhosePromptIsStillBeingWritten(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	h.grace = 500 * time.Millisecond
+	s := h.open().(*session)
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("prompt ", 1<<20)) }()
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.turn != nil
+	}, 10*time.Second, 5*time.Millisecond, "the turn is in flight")
+
+	err := s.Cancel(context.Background())
+	require.Error(t, err, "the agent is not reading, so the cancel could not be sent")
+	s.mu.Lock()
+	canceled := s.turn != nil && s.turn.canceled
+	s.mu.Unlock()
+	assert.False(t, canceled, "and it did not mark a turn whose prompt is still being written")
 }
