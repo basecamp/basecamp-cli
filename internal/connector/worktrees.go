@@ -62,10 +62,14 @@ import (
 //     only when the operator names it with --force, and even then its branch
 //     is kept unless its commits are held elsewhere, and the commit HEAD is
 //     on is kept on a branch of its own when nothing else holds it; a HEAD it
-//     cannot read is not forced. What a force does discard is a commit only
+//     cannot read, or one holding a submodule's own content, is not forced.
+//     What a force does discard is a commit only
 //     the worktree's own reflog, a per-worktree ref, or the reflog of a task
 //     branch deleted because its tip was held elsewhere still reaches.
-//  6. Nothing the repository or its configuration names runs: git runs with
+//  6. Nothing the repository, its configuration or a worker's files name runs:
+//     no git command looks inside a submodule's directory (the disk is judged
+//     before git is asked anything that could recurse, and status is told to
+//     ignore submodules), and git runs with
 //     hooks, the fsmonitor and every content filter its configuration defines
 //     for the directory it runs in disabled (the new worktree's own, for its
 //     checkout), and a fixed environment.
@@ -294,6 +298,7 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 		// had leaves the row for the next start.
 		settleCtx := context.WithoutCancel(ctx)
 		if unlock, lockErr := w.lock(settleCtx); lockErr == nil {
+			w.discardUnpopulated(settleCtx, record)
 			w.settle(settleCtx, record, RemovedByConnector)
 			unlock()
 		}
@@ -477,6 +482,12 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 // branch unless its commits are held elsewhere.
 func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 	kept := PruneResult{Worktree: r, Action: PruneKept, Reason: r.RetainedReason, ForceRefused: true}
+	// A submodule's commits live in git directories a forced removal deletes
+	// and no anchor here covers: a worktree with any is not forced.
+	if held, err := w.submoduleContent(ctx, r); err != nil || held {
+		w.log.Warn("connector: forced worktree removal refused: it holds submodule content; kept", "path", r.Path)
+		return kept
+	}
 	headBranch, err := w.anchorHead(ctx, r)
 	if err != nil {
 		// A HEAD that cannot be read or kept is not forced away.
@@ -508,6 +519,104 @@ func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, RemovedByPruneForced
 	return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept, HeadBranch: headBranch}
+}
+
+// forgetMissing removes the repository's record of a worktree whose directory
+// is gone (<repo>/.git/worktrees/<name>), which git would otherwise keep
+// listing as prunable and the connector could never reconcile once its row is
+// removed. The record holds the worktree's HEAD, reflog and per-worktree refs,
+// so it is removed only when each commit they reach is held elsewhere. It
+// reports whether nothing of the worktree is left to keep.
+func (w *Worktrees) forgetMissing(ctx context.Context, r Worktree) bool {
+	if r.AdminDir == "" {
+		return true
+	}
+	at, err := os.ReadFile(filepath.Join(r.AdminDir, "gitdir"))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if _, statErr := os.Lstat(r.AdminDir); errors.Is(statErr, os.ErrNotExist) {
+			return true
+		}
+		return false
+	case err != nil:
+		return false
+	}
+	recorded := strings.TrimSpace(string(at))
+	if !filepath.IsAbs(recorded) {
+		recorded = filepath.Join(r.AdminDir, recorded)
+	}
+	if exists(filepath.Dir(recorded)) {
+		// The record names a directory that is there: a worktree still.
+		return false
+	}
+	var tips []string
+	for _, args := range [][]string{
+		{"reflog", "show", "--format=%H", "HEAD", "--"},
+		{"for-each-ref", "--format=%(objectname)", "refs/worktree/"},
+	} {
+		out, err := w.run(ctx, safeGit, append([]string{"--git-dir", r.AdminDir}, args...), args[0])
+		if err != nil {
+			return false
+		}
+		tips = append(tips, strings.Fields(string(out))...)
+	}
+	if head, err := w.run(ctx, safeGit, []string{"--git-dir", r.AdminDir, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"}, "rev-parse"); err == nil {
+		tips = append(tips, strings.TrimSpace(string(head)))
+	}
+	slices.Sort(tips)
+	for _, commit := range slices.Compact(tips) {
+		if held, err := w.held(ctx, r, commit); err != nil || !held {
+			return false
+		}
+	}
+	return os.RemoveAll(r.AdminDir) == nil
+}
+
+// discardUnpopulated removes a worktree whose checkout never happened: its
+// directory holds nothing but git's .git file, so there is nothing in it to
+// lose, and settling it as it is would keep an empty checkout as dirty (every
+// file a staged deletion) at each retry.
+func (w *Worktrees) discardUnpopulated(ctx context.Context, r Worktree) {
+	entries, err := os.ReadDir(r.Path)
+	if err != nil || len(entries) != 1 || entries[0].Name() != ".git" || entries[0].IsDir() {
+		return
+	}
+	if _, err := w.gitOut(ctx, r.Repository, "worktree", "remove", "--force", "--end-of-options", r.Path); err != nil {
+		w.log.Debug("connector: an unpopulated worktree stays for settling", "path", r.Path, "error", err)
+	}
+}
+
+// submoduleContent reports whether a worktree holds anything of a submodule's
+// own: a submodule directory that is not empty, or git directories under the
+// worktree's modules/.
+func (w *Worktrees) submoduleContent(ctx context.Context, r Worktree) (bool, error) {
+	modules, err := w.gitOut(ctx, r.Path, "rev-parse", "--path-format=absolute", "--git-path", "modules")
+	if err != nil {
+		return false, err
+	}
+	switch entries, err := os.ReadDir(modules); {
+	case err == nil && len(entries) > 0:
+		return true, nil
+	case err != nil && !errors.Is(err, os.ErrNotExist):
+		return false, err
+	}
+	out, err := w.gitRaw(ctx, r.Path, "ls-files", "--stage", "-z")
+	if err != nil {
+		return false, err
+	}
+	for entry := range strings.SplitSeq(string(out), "\x00") {
+		meta, path, ok := strings.Cut(entry, "\t")
+		if !ok || !strings.HasPrefix(meta, "160000 ") {
+			continue
+		}
+		switch entries, err := os.ReadDir(filepath.Join(r.Path, filepath.FromSlash(path))); {
+		case err == nil && len(entries) > 0:
+			return true, nil
+		case err != nil && !errors.Is(err, os.ErrNotExist):
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 // anchorHead makes sure the commit a worktree's HEAD is on survives its
@@ -542,8 +651,14 @@ func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) 
 func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktree {
 	from := []WorktreeState{r.State}
 	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) && !w.movedElsewhere(ctx, r) {
-		// Nothing on disk. A branch git made stays unless it still points at
-		// the base, which holds nothing of the task's.
+		// Nothing on disk. The repository's record of the worktree goes too,
+		// but only when every commit it still reaches is held elsewhere;
+		// otherwise the row stays, for a person.
+		if !w.forgetMissing(ctx, r) {
+			return w.retain(ctx, r, RetainedUnverified, from)
+		}
+		// A branch git made stays unless it still points at the base, which
+		// holds nothing of the task's.
 		w.deleteBranchAt(ctx, r, r.BaseCommit)
 		gone := RemovedMissing
 		if r.State == WorktreeCreating {
@@ -675,22 +790,27 @@ func (w *Worktrees) inspect(ctx context.Context, r Worktree) (RetainedReason, st
 			return RetainedUnverified, ""
 		}
 	}
-	// What git tracks, and what differs from it.
-	status, err := w.gitRaw(ctx, r.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=none")
-	if err != nil {
-		return RetainedUnverified, ""
-	}
-	if len(status) > 0 {
-		return RetainedDirty, ""
-	}
-	// Everything else on disk. Git does not report every file it would
+	// Everything on disk first. Git does not report every file it would
 	// delete with the worktree (a file inside a submodule's never-initialized
 	// directory, for one), so the rule is on the disk itself: whatever is not
-	// a file git tracks is work.
+	// a file git tracks is work. It comes before any git command that could
+	// recurse: a submodule directory holding anything at all — a git directory
+	// and configuration a worker planted among it — is work, and git is never
+	// asked to look inside it.
 	switch untracked, err := w.untrackedOnDisk(ctx, r); {
 	case err != nil:
 		return RetainedUnverified, ""
 	case untracked:
+		return RetainedDirty, ""
+	}
+	// What git tracks, and what differs from it. Every submodule directory is
+	// empty by now, so there is nothing to recurse into, and git is told not
+	// to.
+	status, err := w.gitRaw(ctx, r.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--ignore-submodules=all")
+	if err != nil {
+		return RetainedUnverified, ""
+	}
+	if len(status) > 0 {
 		return RetainedDirty, ""
 	}
 	// An index entry marked skip-worktree or assume-unchanged hides its edits

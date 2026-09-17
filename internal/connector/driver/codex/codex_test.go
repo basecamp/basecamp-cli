@@ -671,6 +671,11 @@ func TestCloseDoesNotWaitForAnEscapedChild(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Prompt(context.Background(), "Event 1.")
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if pid := h.observed().EscapedPID; pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
 	done := make(chan struct{})
 	go func() { _ = s.Close(); close(done) }()
 	select {
@@ -806,4 +811,21 @@ func TestCloseSurvivesAWorkerThatStoppedReading(t *testing.T) {
 		t.Fatal("a worker that stopped reading held Close")
 	}
 	waitDone(t, s)
+}
+
+// A turn that completes while a cancel is pending ends canceled at once, not
+// after the policy check's whole timeout.
+func TestACompletedTurnThatWasCanceledDoesNotWaitForTheCheck(t *testing.T) {
+	s := &session{verifyDone: make(chan struct{}), verifyAfter: time.Hour}
+	turn := &turn{done: make(chan struct{}), canceled: true}
+	s.turn = turn
+	done := make(chan struct{})
+	go func() { s.turnCompleted(event{}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a canceled turn waited for the policy check")
+	}
+	require.NoError(t, turn.err)
+	assert.Equal(t, driver.TurnCanceled, turn.result.Stop)
 }

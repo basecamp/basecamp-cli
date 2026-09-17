@@ -886,6 +886,14 @@ func (s *session) turnCompleted(e event) {
 	if t == nil {
 		return
 	}
+	s.mu.Lock()
+	canceled := t.canceled
+	s.mu.Unlock()
+	if canceled {
+		// A cancel that won does not wait out the policy check either.
+		s.finishCanceled(t, s.refusalsOf(t))
+		return
+	}
 	if err := s.verified(); err != nil {
 		s.finish(t, driver.PromptResult{}, err)
 		s.worker.Terminate(0)

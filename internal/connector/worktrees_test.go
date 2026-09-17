@@ -432,6 +432,107 @@ func TestARequiredFilterDoesNotBreakTheCheckout(t *testing.T) {
 	assert.Equal(t, WorktreeRemoved, h.finish(workDir).State)
 }
 
+// submoduleHarness is a worktree harness whose repository has a submodule at
+// app/vendor, and the submodule's source.
+func submoduleHarness(t *testing.T) (*worktreeHarness, string) {
+	t.Helper()
+	h := newWorktreeHarness(t)
+	sub := filepath.Join(t.TempDir(), "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o700))
+	h.git(sub, "init", "-q", "-b", "main")
+	h.write(sub, "lib.txt", "lib\n")
+	h.git(sub, "add", ".")
+	h.git(sub, "commit", "-q", "-m", "sub")
+	h.git(h.repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "app/vendor")
+	h.git(h.repo, "commit", "-q", "-m", "submodule")
+	return h, sub
+}
+
+// Invariant 6 in a submodule's directory: a git directory and configuration a
+// worker planted there never make the connector's git run a filter, because
+// git is never asked to look inside it.
+func TestAFilterPlantedInASubmoduleDoesNotRun(t *testing.T) {
+	h, sub := submoduleHarness(t)
+	workDir, _ := h.prepare(98)
+	marker := filepath.Join(t.TempDir(), "ran")
+	vendor := filepath.Join(workDir, "vendor")
+	clone := filepath.Join(t.TempDir(), "clone")
+	h.git(filepath.Dir(clone), "clone", "-q", sub, clone)
+	require.NoError(t, os.Rename(filepath.Join(clone, ".git"), filepath.Join(vendor, ".planted")))
+	require.NoError(t, os.Rename(filepath.Join(clone, "lib.txt"), filepath.Join(vendor, "lib.txt")))
+	h.write(vendor, ".git", "gitdir: .planted\n")
+	h.write(vendor, ".planted/info/attributes", "lib.txt filter=probe\n")
+	h.git(vendor, "config", "filter.probe.clean", "touch "+marker+"; cat")
+	require.NoError(t, os.Chtimes(filepath.Join(vendor, "lib.txt"), time.Now().Add(time.Hour), time.Now().Add(time.Hour)))
+
+	row := h.finish(workDir)
+	assert.False(t, exists(marker), "no filter ran")
+	assert.Equal(t, RetainedDirty, row.RetainedReason)
+}
+
+// Invariant 5 with a submodule: its commits live in git directories a forced
+// removal would delete, so a worktree holding any is not forced.
+func TestAForcedPruneKeepsASubmodulesCommits(t *testing.T) {
+	h, _ := submoduleHarness(t)
+	workDir, _ := h.prepare(99)
+	h.git(workDir, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
+	vendor := filepath.Join(workDir, "vendor")
+	h.write(vendor, "more.txt", "more\n")
+	h.git(vendor, "add", ".")
+	h.git(vendor, "commit", "-q", "-m", "only copy")
+	subGitDir := h.git(vendor, "rev-parse", "--absolute-git-dir")
+	row := h.finish(workDir)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.True(t, results[0].ForceRefused)
+	assert.DirExists(t, subGitDir)
+}
+
+// A checkout that never happened leaves nothing kept: an empty worktree is
+// not work, and keeping it as dirty at every retry would fill the disk.
+func TestAnUnpopulatedWorktreeIsNotKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"reset --quiet --hard"*) exit 128;; esac`))
+	_, err := h.wt.Prepare(context.Background(), filepath.Join(h.repo, "app"), 100)
+	require.Error(t, err)
+	rows, err := h.ledger.Worktrees(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, WorktreeRemoved, rows[0].State)
+	assert.False(t, exists(rows[0].Path))
+	assert.False(t, h.branchExists(rows[0].Branch))
+}
+
+// A worktree whose directory was deleted leaves no record behind in the
+// repository, unless that record still reaches a commit nothing else holds.
+func TestAMissingWorktreeIsForgottenByTheRepositoryToo(t *testing.T) {
+	t.Run("nothing to keep", func(t *testing.T) {
+		h := newWorktreeHarness(t)
+		workDir, row := h.prepare(101)
+		require.NoError(t, os.RemoveAll(row.Path))
+		row = h.finish(workDir)
+		assert.Equal(t, RemovedMissing, row.RemovedBy)
+		assert.NoDirExists(t, row.AdminDir)
+		assert.NotContains(t, h.git(h.repo, "worktree", "list", "--porcelain"), row.Path)
+	})
+	t.Run("a commit only its reflog reaches", func(t *testing.T) {
+		h := newWorktreeHarness(t)
+		workDir, row := h.prepare(102)
+		h.git(workDir, "checkout", "-q", "--detach")
+		h.write(workDir, "c.txt", "c\n")
+		h.git(workDir, "add", "c.txt")
+		h.git(workDir, "commit", "-q", "-m", "reflog only")
+		h.git(workDir, "checkout", "-q", row.Branch)
+		require.NoError(t, os.RemoveAll(row.Path))
+		row = h.finish(workDir)
+		assert.Equal(t, WorktreeRetained, row.State)
+		assert.DirExists(t, row.AdminDir)
+	})
+}
+
 // A worktree someone moved is kept, not forgotten: its files are still
 // somewhere, and the connector cannot judge them where it cannot find them.
 func TestAMovedWorktreeIsKept(t *testing.T) {
