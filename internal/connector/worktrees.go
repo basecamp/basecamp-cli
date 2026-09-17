@@ -52,8 +52,9 @@ import (
 //  5. Prune refuses work. A retained worktree still holding work is removed
 //     only when the operator names it with --force, and even then its branch
 //     is kept unless its commits are held elsewhere.
-//  6. The repository's own code does not run: git runs with hooks disabled
-//     and a fixed environment.
+//  6. Nothing the repository or its configuration names runs: git runs with
+//     hooks, the fsmonitor and every configured content filter disabled, and
+//     a fixed environment.
 //
 // Placement goes through Options.Path, one function, because under the
 // sandbox launcher (step 26) the working directory comes from broker-owned
@@ -581,12 +582,54 @@ func (w *Worktrees) gitOut(ctx context.Context, dir string, args ...string) (str
 	return strings.TrimSpace(string(out)), err
 }
 
-// gitRaw runs git in dir with hooks disabled and a fixed environment
-// (invariant 6).
+// gitRaw runs git in dir with hooks, the fsmonitor and every configured
+// content filter disabled, and a fixed environment (invariant 6).
 func (w *Worktrees) gitRaw(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", dir}, args...)
+	guard, err := w.filterOverrides(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	full := append(append(guard, "-C", dir), args...)
+	return w.run(ctx, full, args[0])
+}
+
+// safeGit is what every git call starts with.
+var safeGit = []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"}
+
+// filterOverrides blanks every content filter git's configuration defines
+// for dir. A checkout runs a path's smudge, clean or process filter, which is
+// a command from configuration a worker in the checkout could have edited;
+// an empty command is no filter. Reading the configuration runs nothing.
+func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([]string, error) {
+	out, err := w.run(ctx, append(slices.Clone(safeGit), "-C", dir, "config", "--name-only", "--get-regexp", `^filter\.`), "config")
+	var exitErr *exec.ExitError
+	if err != nil && !(errors.As(err, &exitErr) && exitErr.ExitCode() == 1) {
+		// Exit 1 is "no such keys"; anything else leaves filters unknown.
+		return nil, err
+	}
+	guard := slices.Clone(safeGit)
+	seen := map[string]bool{}
+	for key := range strings.SplitSeq(string(out), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(key), "filter.")
+		if !ok {
+			continue
+		}
+		i := strings.LastIndexByte(rest, '.')
+		if i <= 0 || seen[rest[:i]] {
+			continue
+		}
+		name := rest[:i]
+		seen[name] = true
+		for _, cmd := range []string{"clean", "smudge", "process"} {
+			guard = append(guard, "-c", "filter."+name+"."+cmd+"=")
+		}
+	}
+	return guard, nil
+}
+
+func (w *Worktrees) run(ctx context.Context, full []string, what string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, w.git, full...) //nolint:gosec // G204: git with the connector's own arguments
 	cmd.Env = w.env
 	var stdout, stderr bytes.Buffer
@@ -596,7 +639,7 @@ func (w *Worktrees) gitRaw(ctx context.Context, dir string, args ...string) ([]b
 		if len(msg) > 200 {
 			msg = msg[:200]
 		}
-		return nil, fmt.Errorf("git %s: %w: %s", args[0], err, driver.Redact(msg))
+		return stdout.Bytes(), fmt.Errorf("git %s: %w: %s", what, err, driver.Redact(msg))
 	}
 	return stdout.Bytes(), nil
 }

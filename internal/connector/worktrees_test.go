@@ -323,6 +323,27 @@ func TestTheRepositorysHooksDoNotRun(t *testing.T) {
 	assert.False(t, exists(marker))
 }
 
+// Invariant 6: a content filter the repository's configuration defines does
+// not run when the connector checks out or inspects a worktree.
+func TestConfiguredContentFiltersDoNotRun(t *testing.T) {
+	h := newWorktreeHarness(t)
+	markers := t.TempDir()
+	h.write(h.repo, ".gitattributes", "*.txt filter=probe\n")
+	h.write(h.repo, "app/data.txt", "data\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "attributes")
+	h.git(h.repo, "config", "filter.probe.smudge", "touch "+filepath.Join(markers, "smudge")+"; cat")
+	h.git(h.repo, "config", "filter.probe.clean", "touch "+filepath.Join(markers, "clean")+"; cat")
+
+	workDir, _ := h.prepare(13)
+	h.write(workDir, "data.txt", "changed\n")
+	row := h.finish(workDir)
+	assert.Equal(t, RetainedDirty, row.RetainedReason)
+	entries, err := os.ReadDir(markers)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "no filter ran")
+}
+
 // Invariant 3: every row a crash can leave is settled on the next start under
 // the same rules, and a worktree a live task works in is not touched.
 func TestRecoverSettlesWhatACrashLeft(t *testing.T) {
