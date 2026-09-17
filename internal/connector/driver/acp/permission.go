@@ -192,9 +192,10 @@ func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *tu
 	s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
 }
 
-// record puts a refusal on the turn it belongs to (invariant 4). A turn given
-// as nil is looked up: a refusal the session made before it read the turn
-// still belongs to the turn in flight.
+// record puts a refusal on the turn it belongs to (invariant 4): the turn the
+// request was read in, which its claim carried. A request read in no turn
+// belongs to no turn — it is recorded in the ledger and on nothing else,
+// because a turn that started after it was read did not ask for it.
 func (s *session) record(req driver.PermissionRequest, t *turn) {
 	id := req.ToolCallID
 	if len(id) > maxToolCallID {
@@ -211,9 +212,6 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 	first := req.ToolCallID == "" || !s.recorded[key]
 	if len(s.recorded) < maxRecorded {
 		s.recorded[key] = true
-	}
-	if t == nil {
-		t = s.turn
 	}
 	if t != nil && s.turn == t && len(t.refusals) < maxRefusals && (req.ToolCallID == "" || !t.seen[key]) {
 		if t.seen == nil {

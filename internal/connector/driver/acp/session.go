@@ -270,7 +270,7 @@ func (s *session) nameSession(id string) {
 	s.earlyInit = nil
 	s.mu.Unlock()
 	if held {
-		s.reportMCPServers(early.account(), true)
+		s.reportAccount(early)
 	}
 }
 

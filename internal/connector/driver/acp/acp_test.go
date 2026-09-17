@@ -1955,11 +1955,11 @@ func TestTheAccountsHeldBeforeASessionIsNamedAreBounded(t *testing.T) {
 	widest, longest := 0, 0
 	for _, a := range s.earlyInit {
 		width := len(a.statuses)
-		if a.foreign != "" {
+		if a.foreign {
 			width++
 		}
 		widest = max(widest, width)
-		longest = max(longest, len(a.foreign), len(a.status))
+		longest = max(longest, len(a.reason))
 		for name, status := range a.statuses {
 			longest = max(longest, len(name), len(status))
 		}
@@ -2180,4 +2180,61 @@ func TestThePreflightReadsTheEnvironmentTheAdapterWillHave(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 	assert.Equal(t, "/session/home", <-seen)
+}
+
+// A name the session never gave is not kept as a name, because a name put
+// through a sanitizer can come out as one the session did give: an account
+// naming "base\acamp" as connected vouches for nothing.
+func TestAForeignNameThatReadsAsAGivenOneVouchesForNothing(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.mu.Lock()
+	s.id = ""
+	s.mcpStatus = MCPStatusInit
+	s.mcpConfirmed = false
+	s.earlyInit = nil
+	s.mu.Unlock()
+
+	s.onSDKMessage(raw(t, map[string]any{
+		"sessionId": "sess-good",
+		"message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": []any{
+			map[string]any{"name": "base\acamp", "status": "connected"},
+		}},
+	}))
+	s.nameSession("sess-good")
+
+	s.mu.Lock()
+	confirmed, unsafe := s.mcpConfirmed, s.unsafe
+	s.mu.Unlock()
+	assert.False(t, confirmed, "a server the session never gave vouches for no server it did")
+	require.ErrorIs(t, unsafe, ErrMCPServerNotConnected)
+}
+
+// A permission request read in no turn belongs to no turn: a prompt that
+// started after it was read did not ask for it, and its refusal is not on
+// that prompt's result. The ledger still has it.
+func TestARefusalReadInNoTurnIsOnNoTurnsResult(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	s := h.open().(*session)
+	outside := s.claim("session/request_permission")
+	require.Nil(t, turnOf(outside), "no turn was in flight when it was read")
+	t.Cleanup(func() { s.release(outside) })
+
+	later := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = later
+	s.mu.Unlock()
+	s.record(driver.PermissionRequest{ToolCallID: "outside-1", Tool: "Bash", Kind: driver.ToolExecute}, turnOf(outside))
+
+	s.mu.Lock()
+	refusals := len(later.refusals)
+	s.mu.Unlock()
+	assert.Zero(t, refusals, "a turn that began after the request was read did not ask for it")
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "outside-1", Tool: "Bash"}}, recorder.Recorded(),
+		"and it is still the driver's own record")
 }

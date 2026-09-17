@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -187,13 +186,17 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 
 // earlyAccount is an account of the MCP servers that arrived before the
 // session's id did, reduced to what judging it needs: what the agent said of
-// each server this session was given, and the first name it gave that this
-// session was not. Neither the agent's own names nor how many it sends are
-// kept, so what is held is bounded by what the session gave.
+// each server this session was given, keyed by the session's own name for it,
+// and whether it named a server the session did not give. Neither the agent's
+// own names nor how many it sends are kept, so what is held is bounded by
+// what the session gave — and a name the session never gave is never kept as
+// a name at all, only as the reason it fails, because a name put through a
+// sanitizer can come out as one the session did give.
 type earlyAccount struct {
 	statuses map[string]string
-	foreign  string
-	status   string
+	foreign  bool
+	// reason is the foreign name and status, sanitized, for the error only.
+	reason string
 }
 
 // reduce is that reduction.
@@ -203,26 +206,29 @@ func (s *session) reduce(statuses map[string]string) earlyAccount {
 	s.mu.Unlock()
 	held := earlyAccount{statuses: make(map[string]string, len(names))}
 	for name, status := range statuses {
-		switch {
-		case slices.Contains(names, name):
-			held.statuses[name] = s.conn.agentText(status)
-		case held.foreign == "":
-			held.foreign, held.status = s.conn.agentText(name), s.conn.agentText(status)
+		if i := slices.Index(names, name); i >= 0 {
+			// Keyed by the session's own name, which is the one thing here
+			// that is not the agent's text.
+			held.statuses[names[i]] = s.conn.agentText(status)
+			continue
+		}
+		if !held.foreign {
+			held.foreign = true
+			held.reason = fmt.Sprintf("%q is %q", s.conn.agentText(name), s.conn.agentText(status))
 		}
 	}
 	return held
 }
 
-// account is the held account as reportMCPServers judges it: a name the
-// session never gave is still in it, because that name is what fails the
-// session.
-func (a earlyAccount) account() map[string]string {
-	out := make(map[string]string, len(a.statuses)+1)
-	maps.Copy(out, a.statuses)
-	if a.foreign != "" {
-		out[a.foreign] = a.status
+// reportAccount applies a held account: a server the session never gave fails
+// it here, because that name was not kept, and the rest is judged by
+// reportMCPServers like any other account.
+func (s *session) reportAccount(a earlyAccount) {
+	if a.foreign {
+		s.fail(fmt.Errorf("%w: the agent has a server the session never gave it, %s", ErrMCPServerNotConnected, a.reason))
+		return
 	}
-	return out
+	s.reportMCPServers(a.statuses, true)
 }
 
 // mcpUnconfirmedLocked reports the third case of the rule: a Claude session
@@ -236,6 +242,14 @@ func (s *session) mcpUnconfirmedLocked() bool {
 
 // noteStartupFailure reads codex-acp's account, which arrives as failed tool
 // calls named for the server that did not start, one at a time.
+//
+// A load's replayed history can carry one of these from the session's earlier
+// life, and nothing on the wire tells it apart from the failure of the server
+// this process has just started — both are session/update for the same
+// session, both during the load. So a replayed failure fails the load, which
+// is the safe way round: a session that cannot be loaded is started fresh,
+// and a startup failure taken for history would be a worker running without
+// the tools it was given.
 func (s *session) noteStartupFailure(u sessionUpdate) {
 	if s.mcpStatus != MCPStatusStartupFailures || !strings.HasPrefix(u.ToolCallID, "mcp_startup.") ||
 		(u.Status != string(driver.ToolFailed) && u.Status != outcomeCanceled) {
