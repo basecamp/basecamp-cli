@@ -6,7 +6,9 @@ package acp
 // this driver against the real pinned adapters; a fifth, that the worker's own
 // shell sees neither the task token nor the host's token; and a sixth, that an
 // MCP server the working directory declares never runs beside or instead of
-// the connector's. It sends real prompts, so it
+// the connector's; and a seventh, that the connector's token bridge reaches
+// its one-use socket from where the adapter starts MCP servers, with the
+// token in no process's environment or command line and in no file. It sends real prompts, so it
 // spends model quota on whatever account each adapter is logged in to, and it
 // is skipped unless the adapters are installed:
 //
@@ -32,7 +34,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,7 +44,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 const (
@@ -60,14 +66,14 @@ func TestAdapterCompat(t *testing.T) {
 	stub := buildStub(t)
 	checks := map[string]func(*testing.T, compatEnv){
 		"1": checkMCPEnv, "2": checkLoadAfterRestart, "3": checkPolicyPermission, "4": checkCancel,
-		"5": checkShellEnvironment, "6": checkDecoyMCPServer,
+		"5": checkShellEnvironment, "6": checkDecoyMCPServer, "7": checkTokenBridge,
 	}
 	if only := os.Getenv("BASECAMP_ACP_ADAPTER"); only != "" {
 		if _, ok := AdapterNamed(only); !ok {
 			t.Fatalf("BASECAMP_ACP_ADAPTER %q names no pinned adapter", only)
 		}
 	}
-	want := strings.Split(envOr("BASECAMP_ACP_CHECKS", "1,2,3,4,5,6"), ",")
+	want := strings.Split(envOr("BASECAMP_ACP_CHECKS", "1,2,3,4,5,6,7"), ",")
 	for _, adapter := range Adapters() {
 		if only := os.Getenv("BASECAMP_ACP_ADAPTER"); only != "" && only != adapter.Name {
 			continue
@@ -535,4 +541,138 @@ func checkDecoyMCPServer(t *testing.T, e compatEnv) {
 	if _, err := os.Stat(decoy); err == nil {
 		t.Errorf("an MCP server from the working directory's .mcp.json ran")
 	}
+}
+
+// Check 7: the task token's carriage, as the dispatcher builds it. The MCP
+// server is the connector's bridge (`basecamp connect worker-mcp`), the token
+// is served once on a socket in the attempt's private directory, and the
+// socket is told the worker's process group only once NewSession returns —
+// the order the dispatcher uses. The bridge must reach the socket from
+// wherever the adapter starts it, the handoff must be delivered, and the
+// token must not be in any environment, command line or file of the worker's
+// processes. No Basecamp account is involved: the bridge's profile is a dummy
+// in a private config, so the `basecamp mcp` it becomes goes no further.
+func checkTokenBridge(t *testing.T, e compatEnv) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the process walk reads /proc")
+	}
+	wd := workDir(t)
+	bin := filepath.Join(t.TempDir(), "basecamp")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "github.com/basecamp/basecamp-cli/cmd/basecamp")
+	build.Stderr = os.Stderr
+	if err := build.Run(); err != nil {
+		t.Fatalf("build basecamp: %v", err)
+	}
+	config := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(config, "basecamp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	profile := `{"profiles":{"compat-dummy":{"base_url":"https://example.invalid","account_id":"1"}}}`
+	if err := os.WriteFile(filepath.Join(config, "basecamp", "config.json"), []byte(profile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	private, err := os.MkdirTemp(os.TempDir(), "acp-bridge-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(private) })
+	state := t.TempDir()
+	token := "test-token-not-real-" + strings.Repeat("b", 23)
+	tokens, err := connector.ServeTaskToken(private, token, 2*time.Minute)
+	if err != nil {
+		t.Fatalf("ServeTaskToken: %v", err)
+	}
+	defer tokens.Close()
+
+	serverEnv := driver.EnvMap(driver.BuildEnv(driver.BaseEnv, os.LookupEnv, map[string]string{
+		"XDG_CONFIG_HOME": config, "BASECAMP_NO_KEYRING": "1",
+	}))
+	policy := &compatPolicy{workDir: wd}
+	cfg := driver.SessionConfig{
+		Cwd: wd,
+		Env: driver.BuildEnv(driver.BaseEnv, os.LookupEnv, nil),
+		MCPServers: []driver.MCPServer{{
+			Name: compatServer, Command: bin,
+			Args: []string{"connect", "worker-mcp", "--profile", "compat-dummy", "--connect-state", state, "--socket", tokens.Path()},
+			Env:  serverEnv,
+		}},
+		Policy:     policy,
+		Scope:      driver.Scope{WorkDir: wd},
+		PrivateDir: private,
+	}
+	d := e.driverFor(t, "")
+	var s driver.Session
+	var places drivertest.Places
+	drivertest.RequireNoSecretFilesDuring(t, token, []string{wd, private, state}, func() {
+		started := time.Now()
+		s, err = d.NewSession(turnCtx(t), cfg)
+		if err != nil {
+			t.Fatalf("NewSession: %v", err)
+		}
+		t.Logf("NewSession took %s", time.Since(started).Round(time.Millisecond))
+		tokens.AllowGroup(s.Process().PGID)
+		handed := make(chan connector.Handoff, 1)
+		go func() { handed <- tokens.Result() }()
+		deadline := time.After(90 * time.Second)
+		for {
+			places = addWorkerProcesses(places, s.Process().PID)
+			select {
+			case h := <-handed:
+				places = addWorkerProcesses(places, s.Process().PID)
+				if h != connector.HandoffDelivered {
+					_ = s.Close()
+					t.Fatalf("the bridge did not take the token: %s", h)
+				}
+				t.Logf("handoff %s %s after NewSession began; %d worker processes seen", h, time.Since(started).Round(time.Millisecond), len(places.Args))
+				_ = s.Close()
+				return
+			case <-deadline:
+				_ = s.Close()
+				t.Fatal("no handoff within 90s")
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	})
+	drivertest.RequireNoSecret(t, token, places)
+}
+
+// addWorkerProcesses adds the environment and command line of every process
+// descended from root, root included, to places.
+func addWorkerProcesses(places drivertest.Places, root int) drivertest.Places {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return places
+	}
+	parent := map[int]int{}
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		raw, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		fields := strings.Fields(string(raw)[strings.LastIndexByte(string(raw), ')')+1:])
+		if len(fields) > 1 {
+			ppid, _ := strconv.Atoi(fields[1])
+			parent[pid] = ppid
+		}
+	}
+	for pid := range parent {
+		for p, n := pid, 0; p > 1 && n < 64; p, n = parent[p], n+1 {
+			if p != root {
+				continue
+			}
+			dir := "/proc/" + strconv.Itoa(pid)
+			if cmdline, err := os.ReadFile(dir + "/cmdline"); err == nil {
+				places.Args = append(places.Args, strings.ReplaceAll(string(cmdline), "\x00", " "))
+			}
+			if environ, err := os.ReadFile(dir + "/environ"); err == nil {
+				places.Env = append(places.Env, strings.Split(string(environ), "\x00")...)
+			}
+			break
+		}
+	}
+	return places
 }
