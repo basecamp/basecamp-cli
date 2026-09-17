@@ -1,3 +1,5 @@
+//go:build unix
+
 package connector
 
 import (
@@ -194,9 +196,31 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts processes")
 	}
+	type crash struct {
+		step string
+		// preHeld is a shadow already run with --hold, whose marker keeps
+		// that cause through the promote.
+		preHeld bool
+	}
+	crashes := []crash{{step: "renamed", preHeld: true}, {step: "synced", preHeld: true}}
 	for _, step := range []string{"locked", "marker", "tagged", "held", "checkpointed", "renamed", "synced"} {
-		t.Run(step, func(t *testing.T) {
+		crashes = append(crashes, crash{step: step})
+	}
+	for _, c := range crashes {
+		step := c.step
+		name := step
+		if c.preHeld {
+			name += " of a held shadow"
+		}
+		t.Run(name, func(t *testing.T) {
 			shadowDir, stateDir := shadowFixture(t)
+			if c.preHeld {
+				l, err := OpenLedger(filepath.Join(shadowDir, LedgerFile))
+				require.NoError(t, err)
+				_, err = l.SetHold(context.Background(), opBy, HoldByOperator)
+				require.NoError(t, err)
+				require.NoError(t, l.Close())
+			}
 			runKilled(t, "promote:"+step, "SHADOW_DIR="+shadowDir, "STATE_DIR="+stateDir)
 
 			shadowLedger := filepath.Join(shadowDir, LedgerFile)
@@ -207,15 +231,17 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 
 			if stateErr == nil {
 				assertHeld(t, stateLedger)
-			} else if isHeld(t, shadowLedger) {
+			} else if c.preHeld || isHeld(t, shadowLedger) {
 				assertHeld(t, shadowLedger)
 			} else {
 				assertUntouchedShadow(t, shadowDir)
 			}
 
 			got, err := PromoteShadow(context.Background(), promoteOptions(shadowDir, stateDir))
-			require.NoError(t, err)
-			assert.Equal(t, HoldByPromote, got.Hold.Cause)
+			require.NoError(t, err, "promote run again finishes")
+			if !c.preHeld {
+				assert.Equal(t, HoldByPromote, got.Hold.Cause)
+			}
 			assertHeld(t, stateLedger)
 		})
 	}

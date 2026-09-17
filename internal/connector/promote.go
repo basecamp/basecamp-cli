@@ -189,7 +189,13 @@ func promoted(ctx context.Context, statePath string) (PromoteResult, error) {
 	if err != nil {
 		return PromoteResult{}, err
 	}
-	if !ok || hold.Cause != HoldByPromote {
+	// The promote's own decision is the mark, not the hold's cause: a shadow
+	// already held by --hold keeps its first cause through the promote.
+	var promotedHere bool
+	if err := ledger.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM decisions WHERE action = 'shadow_promote')`).Scan(&promotedHere); err != nil {
+		return PromoteResult{}, fmt.Errorf("connector: read the ledger's promote: %w", err)
+	}
+	if !ok || !promotedHere {
 		return PromoteResult{}, fmt.Errorf("connector: %w", ErrNoShadowLedger)
 	}
 	return PromoteResult{Already: true, Hold: hold, Ledger: statePath}, nil
