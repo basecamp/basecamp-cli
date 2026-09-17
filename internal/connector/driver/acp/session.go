@@ -46,6 +46,9 @@ type session struct {
 	modeSeq  int64
 	modeSeen chan struct{}
 	verified bool
+	// deciding counts the permission requests admitted and not yet answered,
+	// counted from the moment they are read.
+	deciding int
 	// canceled is a cancel that found no turn to end: the next turn starts
 	// canceled, and takes the flag with it.
 	canceled      bool
@@ -98,6 +101,7 @@ func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode s
 	s.conn.trace = trace
 	s.conn.onNotification = s.onNotification
 	s.conn.onRequest = s.onRequest
+	s.conn.claim = s.claim
 	s.conn.onBusy = s.onBusy
 	go func() {
 		if err := s.conn.read(worker.Stdout()); err != nil {
@@ -580,9 +584,29 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 // (invariant 4).
 func (s *session) drainDecisions() {
 	deadline := time.Now().Add(decisionDrain)
-	for len(s.decisions) > 0 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		n := s.deciding
+		s.mu.Unlock()
+		if n == 0 {
+			return
+		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+// claim is taken on the reading goroutine as a permission request is
+// admitted: the turn it arrived in, and a count the turn's end waits on. A
+// request read before the prompt's answer belongs to that turn, however late
+// its goroutine runs.
+func (s *session) claim(method string) any {
+	if method != "session/request_permission" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deciding++
+	return s.turn
 }
 
 // stopOf maps ACP's stop reason to the driver's (invariant 4).
@@ -621,19 +645,21 @@ func (s *session) Cancel(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	t := s.turn
-	if t != nil {
+	settling := t != nil && t.settling
+	if t != nil && !settling {
 		t.canceled = true
 	}
 	// A cancel with no turn in flight is remembered for the next one: the
 	// dispatcher asked for this session to stop, and the turn it meant to end
-	// may be a moment from starting.
+	// may be a moment from starting. A turn the agent has already answered is
+	// over; its stop stands as the agent gave it.
 	s.canceled = t == nil
 	id := s.id
 	s.mu.Unlock()
 	// The prompt this cancel ends is on the wire; a later prompt cannot start
 	// while its turn is in flight.
 	<-s.promptSem
-	if t == nil {
+	if t == nil || settling {
 		return nil
 	}
 	sent := make(chan error, 1)
@@ -869,6 +895,9 @@ func (s *session) ours(id string) bool {
 
 func (s *session) emit(u driver.Update) {
 	u.At = time.Now()
+	if len(u.ToolCallID) > maxToolCallID {
+		u.ToolCallID = u.ToolCallID[:maxToolCallID]
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.updatesClosed || s.replaying {
@@ -882,11 +911,19 @@ func (s *session) emit(u driver.Update) {
 
 // onRequest answers the agent's requests. The client offers no fs and no
 // terminal, so a permission is the only request it serves.
-func (s *session) onRequest(id json.RawMessage, method string, params json.RawMessage) {
+func (s *session) onRequest(id json.RawMessage, method string, params json.RawMessage, claimed any) {
 	if method != "session/request_permission" {
 		s.conn.replyError(id, codeMethodNotFound, "method not supported by this client")
 		return
 	}
+	defer func() {
+		s.mu.Lock()
+		s.deciding--
+		s.mu.Unlock()
+	}()
+	// The turn the request was read in, not whatever turn is in flight by
+	// the time this goroutine runs.
+	t, _ := claimed.(*turn)
 	var p struct {
 		SessionID string          `json:"sessionId"`
 		ToolCall  json.RawMessage `json:"toolCall"`
@@ -907,13 +944,13 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 	default:
 		// More at once than a session has any business asking: refused
 		// without a decision, and recorded as the refusal it is.
-		s.refuse(id, driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}, nil)
+		s.refuse(id, driver.PermissionRequest{ToolCallID: call.ToolCallID, Tool: toolName(call), Kind: toolKind(call.Kind)}, t)
 		return
 	}
 
 	s.mu.Lock()
-	t := s.turn
-	askable := t != nil && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
+	// A turn the agent has already answered asks nothing more.
+	askable := t != nil && s.turn == t && !t.settling && s.verified && s.unsafe == nil && !s.closed && s.id != "" && p.SessionID == s.id
 	canceled := t != nil && t.canceled
 	s.mu.Unlock()
 
@@ -946,7 +983,7 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		// The policy took its time; the session may have been canceled or
 		// found unsafe while it did, and neither allows anything more.
 		s.mu.Lock()
-		allow = s.turn == t && !t.canceled && s.unsafe == nil && !s.closed
+		allow = s.turn == t && !t.settling && !t.canceled && s.unsafe == nil && !s.closed
 		s.mu.Unlock()
 	}
 	option := chooseOption(req.Options, allow)

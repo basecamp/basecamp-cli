@@ -83,7 +83,11 @@ type conn struct {
 	onBusy func(method string, params json.RawMessage)
 	// onRequest runs on its own goroutine per request; it must answer with
 	// reply or replyError.
-	onRequest func(id json.RawMessage, method string, params json.RawMessage)
+	onRequest func(id json.RawMessage, method string, params json.RawMessage, claimed any)
+	// claim runs on the reading goroutine as a request is admitted, in wire
+	// order, and what it returns is handed to onRequest: the state the
+	// request arrived in, before anything read after it can change that.
+	claim func(method string) any
 
 	// handlers bounds the requests being answered at once: a flood of them
 	// spawns no more than this many goroutines, and the rest are refused as
@@ -149,9 +153,13 @@ func (c *conn) read(r io.Reader) error {
 				continue
 			}
 			id, method, params := m.ID, m.Method, m.Params
+			var claimed any
+			if c.claim != nil {
+				claimed = c.claim(method)
+			}
 			go func() {
 				defer func() { <-c.handlers }()
-				c.onRequest(id, method, params)
+				c.onRequest(id, method, params, claimed)
 			}()
 		case m.Method != "":
 			if c.onNotification != nil {

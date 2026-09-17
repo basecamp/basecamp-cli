@@ -215,6 +215,12 @@ func TestConnectDriverRunsTheWorkersPinnedACPAdapterFromWhereItWasInstalled(t *t
 	require.NoError(t, err)
 	assert.Equal(t, acp.Name, d.Name())
 
+	// A relative directory is the operator's, from where they run the command.
+	t.Chdir(filepath.Dir(dir))
+	d, err = connectDriver(setup.DriverACP, setup.WorkerClaude, filepath.Base(dir))
+	require.NoError(t, err)
+	assert.Equal(t, acp.Name, d.Name())
+
 	_, err = connectDriver(setup.DriverACP, "nobody", dir)
 	assert.Error(t, err)
 }

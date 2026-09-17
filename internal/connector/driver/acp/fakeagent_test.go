@@ -87,6 +87,9 @@ type turnScript struct {
 	// StopWithoutWaiting answers the prompt without waiting for the
 	// permissions it asked for.
 	StopWithoutWaiting bool `json:"stop_without_waiting"`
+	// LateRequest is a permission request sent just after the prompt is
+	// answered.
+	LateRequest json.RawMessage `json:"late_request,omitempty"`
 }
 
 type step struct {
@@ -118,6 +121,10 @@ type fakeAgent struct {
 	mode     string
 	prompts  int
 	canceled chan struct{}
+	// cancelEarly is a cancel handled before the prompt it followed on the
+	// wire: the fake handles each message on its own goroutine, so the two
+	// can run in either order.
+	cancelEarly bool
 }
 
 func runFakeAgent(path string) {
@@ -355,6 +362,8 @@ func (a *fakeAgent) handle(id json.RawMessage, method string, params json.RawMes
 		if a.canceled != nil {
 			close(a.canceled)
 			a.canceled = nil
+		} else {
+			a.cancelEarly = true
 		}
 		a.mu.Unlock()
 	case "session/prompt":
@@ -372,6 +381,11 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 	a.prompts++
 	canceled := make(chan struct{})
 	a.canceled = canceled
+	if a.cancelEarly {
+		a.cancelEarly = false
+		close(canceled)
+		a.canceled = nil
+	}
 	a.mu.Unlock()
 	if len(a.sc.Turns) == 0 {
 		a.reply(id, map[string]any{"stopReason": "end_turn"})
@@ -446,4 +460,14 @@ func (a *fakeAgent) prompt(id json.RawMessage) {
 		result["usage"] = ts.Usage
 	}
 	a.reply(id, result)
+	if len(ts.LateRequest) > 0 {
+		var p map[string]any
+		_ = json.Unmarshal(ts.LateRequest, &p)
+		p["sessionId"] = a.sessionID()
+		outcome := a.request("session/request_permission", p)
+		a.mu.Lock()
+		a.rec.Outcomes = append(a.rec.Outcomes, outcome)
+		a.mu.Unlock()
+		a.flush()
+	}
 }

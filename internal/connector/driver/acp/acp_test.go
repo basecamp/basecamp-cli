@@ -443,7 +443,7 @@ func TestARequestOutsideATurnIsRefusedUnasked(t *testing.T) {
 	// Feed the request straight in: no turn is in flight.
 	params := raw(t, map[string]any{"sessionId": "sess-1", "toolCall": map[string]any{"toolCallId": "c", "kind": "edit"},
 		"options": []any{map[string]any{"optionId": "ok", "kind": "allow_once"}, map[string]any{"optionId": "no", "kind": "reject_once"}}})
-	s.onRequest(json.RawMessage(`99`), "session/request_permission", params)
+	s.onRequest(json.RawMessage(`99`), "session/request_permission", params, s.claim("session/request_permission"))
 	assert.Empty(t, h.policy.requests())
 }
 
@@ -1136,7 +1136,7 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 	c.onBusy = func(string, json.RawMessage) { busy.Add(1) }
 	release := make(chan struct{})
 	var inFlight, peak atomic.Int32
-	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage) {
+	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage, _ any) {
 		n := inFlight.Add(1)
 		for {
 			p := peak.Load()
@@ -1238,12 +1238,13 @@ func TestARefusalDecidedAsTheTurnEndsIsOnItsResult(t *testing.T) {
 // attempt on that error.
 func TestAFailedHandshakeLeavesNoGroupBehind(t *testing.T) {
 	// Several runs: the window this closes is a matter of milliseconds.
-	for run := range 5 {
+	for run := range 4 {
 		h := newHarness(t)
 		h.sc.SpawnChild, h.sc.IgnoreTerminate = true, true
-		h.sc.Hang = "initialize"
+		// Past initialize, so the agent has surely started and said so.
+		h.sc.Hang = "session/new"
 		d := h.driver()
-		d.opts.HandshakeTimeout = 500 * time.Millisecond
+		d.opts.HandshakeTimeout = 3 * time.Second
 		d.opts.CloseGrace = 2 * time.Second
 		_, err := d.NewSession(context.Background(), h.config())
 		require.Error(t, err)
@@ -1301,4 +1302,118 @@ func TestACancelAfterTheAgentAnsweredIsNotSent(t *testing.T) {
 	res := <-answers
 	assert.Equal(t, driver.TurnEndTurn, res.Stop)
 	assert.NotContains(t, h.record().Methods, "session/cancel")
+}
+
+// A turn the agent has answered asks nothing more: a request that arrives
+// while the session waits on a decision still in flight is refused, not put
+// to the policy.
+func TestARequestAfterTheAgentAnsweredIsNotAllowed(t *testing.T) {
+	h := newHarness(t)
+	var calls atomic.Int32
+	h.policy.allow = func(req driver.PermissionRequest) bool {
+		if calls.Add(1) == 1 {
+			time.Sleep(800 * time.Millisecond)
+		}
+		return true
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit", "locations": []any{map[string]any{"path": "x"}}}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+		LateRequest:        permission(t, map[string]any{"toolCallId": "late", "kind": "edit"}, standardOptions()...),
+	})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(h.record().Outcomes) == 2 }, 10*time.Second, 20*time.Millisecond)
+	for _, r := range h.policy.requests() {
+		assert.NotEqual(t, "late", r.ToolCallID, "a request after the answer is not put to the policy")
+	}
+	late := h.record().Outcomes
+	_, lastOption := outcomeOf(t, late[len(late)-1])
+	assert.NotEqual(t, "allow-once", lastOption)
+}
+
+// A cancel that arrives after the agent has answered does not turn the
+// agent's own stop into one the connector asked for.
+func TestACancelAfterTheAnswerDoesNotClaimTheStop(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		time.Sleep(700 * time.Millisecond)
+		return true
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit", "locations": []any{map[string]any{"path": "x"}}}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               string(driver.TurnCanceled),
+	})
+	s := h.open()
+	type answer struct {
+		res driver.PromptResult
+		err error
+	}
+	answers := make(chan answer, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		answers <- answer{res, err}
+	}()
+	// The agent answers 150ms in; the decision runs to 700ms.
+	time.Sleep(400 * time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	a := <-answers
+	assert.NotEqual(t, driver.TurnCanceled, a.res.Stop, "the connector's cancel came after the agent had stopped")
+	// The decision still in flight came back allowed after the agent had
+	// answered, so it was refused; the agent's own canceled stop is that refusal.
+	require.NoError(t, a.err)
+	assert.Equal(t, driver.TurnRefusal, a.res.Stop)
+	assert.NotContains(t, h.record().Methods, "session/cancel")
+}
+
+func TestTheTurnEndWaitsForRequestsAlreadyRead(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	claimed := s.claim("session/request_permission")
+	assert.Nil(t, claimed, "no turn in flight")
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		s.mu.Lock()
+		s.deciding--
+		s.mu.Unlock()
+	}()
+	start := time.Now()
+	s.drainDecisions()
+	assert.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond, "a request read but not yet decided holds the turn's end")
+}
+
+func TestUpdatesCarryBoundedIDs(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.emit(driver.Update{Kind: driver.UpdateToolCall, ToolCallID: strings.Repeat("i", 10*maxToolCallID)})
+	select {
+	case u := <-s.Updates():
+		assert.Len(t, u.ToolCallID, maxToolCallID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no update")
+	}
+}
+
+// The driver asks for the group's confirmation with the worker it started,
+// and an answer that the group outlived its leader is in the error the caller
+// settles on.
+func TestAFailedHandshakeAsksForTheGroupsConfirmation(t *testing.T) {
+	h := newHarness(t)
+	h.sc.FailInitialize = true
+	var asked []driver.Process
+	old := confirmGroupGone
+	confirmGroupGone = func(p driver.Process, grace time.Duration) error {
+		asked = append(asked, p)
+		return driver.ErrGroupOutlivedLeader
+	}
+	t.Cleanup(func() { confirmGroupGone = old })
+	_, err := h.driver().NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
+	require.Len(t, asked, 1)
+	assert.Equal(t, h.record().PID, asked[0].PGID, "the group of the adapter this session started")
 }

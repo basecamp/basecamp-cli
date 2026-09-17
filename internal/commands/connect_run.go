@@ -133,6 +133,13 @@ func connectDriver(name, worker, adaptersDir string) (driver.Driver, error) {
 	if name != setup.DriverACP {
 		return spawn.New(worker, spawn.Options{})
 	}
+	if adaptersDir != "" && !filepath.IsAbs(adaptersDir) {
+		abs, err := filepath.Abs(adaptersDir)
+		if err != nil {
+			return nil, err
+		}
+		adaptersDir = abs
+	}
 	return acp.ForWorker(worker, adaptersDir, nil)
 }
 

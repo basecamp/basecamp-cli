@@ -75,6 +75,10 @@ const (
 	DefaultCloseGrace       = 5 * time.Second
 )
 
+// confirmGroupGone is driver.ConfirmGroupGone; a seam for this package's
+// tests.
+var confirmGroupGone = driver.ConfirmGroupGone
+
 // modeConfirmWait is how long a session with no mode config option has to
 // report the mode it was set to. A variable so tests need not wait it out.
 var modeConfirmWait = 10 * time.Second
@@ -217,7 +221,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		// agent and its MCP servers before the handshake failed, and the
 		// caller settles this attempt on the error. A group that is not
 		// confirmed gone says so (driver.ErrGroupOutlivedLeader).
-		if gone := driver.ConfirmGroupGone(worker.Process(), d.opts.CloseGrace); gone != nil {
+		if gone := confirmGroupGone(worker.Process(), d.opts.CloseGrace); gone != nil {
 			err = fmt.Errorf("%w; %w", err, gone)
 		}
 		return nil, fmt.Errorf("%w%s", err, s.stderrNote())
