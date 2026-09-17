@@ -41,7 +41,12 @@
 //  5. Cancel ends the process group the driver started. A turn ends as
 //     TurnCanceled only when Cancel asked for it.
 //  6. Updates carry kinds, ids and counts, never the agent's text, a
-//     command, or a tool's arguments.
+//     command, or a tool's arguments, and everything that leaves the driver —
+//     errors, updates, refusals, the stderr tail — goes through the shared
+//     redactor.
+//  7. Every refusal is recorded through SessionConfig.Refusals as it is read,
+//     once per call, whichever way the turn ends: a refusal Codex puts only on
+//     its stderr is read before a canceled, failed or lost turn is finished.
 //
 // Codex's reach differs from Claude Code's, and this driver claims nothing
 // beyond it: Codex reads and searches through shell commands, so its shell
@@ -68,6 +73,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -313,6 +319,8 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 	}
 	s := &session{
 		red:         d.redactor(cfg),
+		recorder:    cfg.Refusals,
+		recorded:    map[string]bool{},
 		id:          resumeID,
 		worker:      worker,
 		cwd:         cfg.Cwd,
@@ -425,6 +433,12 @@ type session struct {
 	// red is what every error, update text and stderr tail of this session
 	// passes through.
 	red *driver.Redactor
+	// recorder records each refusal once, as it is made or read (driver's
+	// "Refusals"); recorded is the tool call ids already recorded, and
+	// stderrSeen how many of the refusals Codex logs have been.
+	recorder   driver.RefusalRecorder
+	recorded   map[string]bool
+	stderrSeen int
 
 	updates   chan driver.Update
 	readerEnd chan struct{}
@@ -630,6 +644,11 @@ func (s *session) read() {
 			canceled := t.canceled
 			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
+			// Whatever ended the turn, a refusal Codex only logged is read
+			// before the session is done: a cancel is where they would
+			// otherwise be lost.
+			s.stderrRefusals()
+			refusals = s.refusalsOf(t)
 			switch {
 			case canceled:
 				s.finishCanceled(t, refusals)
@@ -827,7 +846,7 @@ func (s *session) item(kind string, e event) {
 	}
 	s.emit(u)
 	if kind == "item.completed" && it.Type == "mcp_tool_call" && it.Error != nil && refusedByApproval(it.Error.Message) {
-		s.refused(it.ID, u.Tool, u.ToolKind)
+		s.refused("item:"+it.ID, it.ID, u.Tool, u.ToolKind)
 	}
 }
 
@@ -852,12 +871,29 @@ func refusedByApproval(message string) bool {
 	return strings.Contains(message, "approval policy is never") || strings.Contains(message, "rejected by user approval settings")
 }
 
-func (s *session) refused(id, tool string, kind driver.ToolKind) {
+// refused is the moment a refusal is read: it is recorded through the
+// session's recorder before anything else is done with it, and only the first
+// time its tool call id is seen (driver's "Refusals"). A refusal Codex logs
+// and gives no id gets the key the caller passes.
+func (s *session) refused(key, id, tool string, kind driver.ToolKind) {
+	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(tool)}
 	s.mu.Lock()
-	if s.turn != nil {
-		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(tool)})
+	first := !s.recorded[key]
+	if first {
+		s.recorded[key] = true
+		if s.turn != nil {
+			s.turn.refusals = append(s.turn.refusals, refusal)
+		}
 	}
 	s.mu.Unlock()
+	if !first {
+		return
+	}
+	if s.recorder != nil {
+		// The recorder owns what happens when the ledger refuses the write;
+		// the refusal happened either way.
+		_ = s.recorder.RecordRefusal(context.Background(), refusal)
+	}
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: id, Tool: tool, ToolKind: kind, Allowed: false})
 }
 
@@ -873,6 +909,7 @@ func (s *session) turnCompleted(e event) {
 	s.mu.Unlock()
 	if canceled {
 		// A cancel that won does not wait out the policy check either.
+		s.stderrRefusals()
 		s.finishCanceled(t, s.refusalsOf(t))
 		return
 	}
@@ -915,7 +952,8 @@ func (s *session) turnFailed() {
 	refusals := slices.Clone(t.refusals)
 	s.mu.Unlock()
 	if canceled {
-		s.finishCanceled(t, refusals)
+		s.stderrRefusals()
+		s.finishCanceled(t, s.refusalsOf(t))
 		return
 	}
 	// As after a completed turn: the stderr tail is whole once Codex exits.
@@ -944,17 +982,27 @@ func (s *session) refusalsOf(t *turn) []driver.Refusal {
 // stream: an edit outside the working directory. Best effort: the stderr
 // kept is a tail.
 func (s *session) stderrRefusals() {
+	if s.worker == nil {
+		return
+	}
 	tail := s.worker.StderrTail(s.red)
+	seen := 0
 	for line := range strings.SplitSeq(tail, "\n") {
 		if !refusedByApproval(line) {
 			continue
 		}
+		seen++
 		tool, kind := "exec", driver.ToolExecute
 		if strings.Contains(line, "patch rejected") {
 			tool, kind = "apply_patch", driver.ToolEdit
 		}
-		s.refused("", tool, kind)
+		// Codex gives these no id, so they are counted: the nth refusal in the
+		// tail is recorded once, however often the tail is read.
+		s.refused("stderr:"+strconv.Itoa(seen), "", tool, kind)
 	}
+	s.mu.Lock()
+	s.stderrSeen = max(s.stderrSeen, seen)
+	s.mu.Unlock()
 }
 
 // turnContext is the part of a rollout's turn_context record the driver

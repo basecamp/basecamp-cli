@@ -941,3 +941,69 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 		}},
 	})
 }
+
+// The refusal rule (driver's "Refusals"): every refusal is recorded as it is
+// read, once per call, whichever way the turn ends — a canceled turn included,
+// where a refusal Codex only logged would otherwise go with the session.
+func TestEveryRefusalIsRecordedOnce(t *testing.T) {
+	denial := `{"type":"item.completed","item":{"id":"item_7","type":"mcp_tool_call","server":"other","tool":"write","error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	stderr := "patch rejected: writing outside of the project; rejected by user approval settings"
+	for name, tc := range map[string]struct {
+		events   []string
+		exit     int
+		cancel   bool
+		wantErr  bool
+		wantSeen int
+	}{
+		"a completed turn": {events: []string{`{"type":"turn.started"}`, denial, turnCompleted()}, wantSeen: 2},
+		"a failed turn":    {events: []string{`{"type":"turn.started"}`, denial, `{"type":"turn.failed","error":{"message":"x"}}`}, exit: 1, wantErr: true, wantSeen: 2},
+		"a lost worker":    {events: []string{`{"type":"turn.started"}`, denial}, exit: 1, wantErr: true, wantSeen: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			recorder := &drivertest.Refusals{}
+			h := newHarness(t, scenario{TurnContext: safeTurnContext(), Events: tc.events, Stderr: stderr, Exit: tc.exit})
+			cfg := h.config()
+			cfg.Refusals = recorder
+			s, result, err := h.run(context.Background(), cfg)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, s.Close())
+			assert.Len(t, recorder.Recorded(), tc.wantSeen, "each refusal recorded once")
+			assert.Len(t, result.Refusals, tc.wantSeen)
+		})
+	}
+}
+
+// A canceled turn records what Codex logged before it went.
+func TestACanceledTurnRecordsItsRefusals(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+		Hang:        true,
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "Event 1.")
+		answers <- result
+	}()
+	require.Eventually(t, func() bool { return strings.Contains(s.(*session).StderrTail(), "rejected") }, 10*time.Second, 20*time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	select {
+	case result := <-answers:
+		assert.Equal(t, driver.TurnCanceled, result.Stop)
+		assert.Len(t, result.Refusals, 1)
+	case <-time.After(20 * time.Second):
+		t.Fatal("the canceled turn did not end")
+	}
+	assert.Len(t, recorder.Recorded(), 1, "the refusal Codex logged is recorded, not lost with the cancel")
+}
