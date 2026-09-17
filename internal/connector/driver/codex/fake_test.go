@@ -124,6 +124,8 @@ func fakeCodex() int {
 		if _, ok := tc["cwd"]; !ok {
 			tc["cwd"] = obs.Cwd
 		}
+		raw, _ := json.Marshal(tc)
+		_ = json.Unmarshal([]byte(strings.ReplaceAll(string(raw), "$CWD", obs.Cwd)), &tc)
 		appendRecord(rollout, "turn_context", tc)
 	}
 	if !sc.NoThread {

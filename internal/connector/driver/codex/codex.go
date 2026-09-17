@@ -27,7 +27,9 @@
 //     so the driver reads the policy Codex actually applied from the turn's
 //     turn_context record in its rollout file, and ends the session as
 //     unsafe (ErrUnsafeMode) when it is not the one asked for or cannot be
-//     read. A turn is never reported finished before that check passed, and
+//     read. Both the sandbox mode and the filesystem policy the sandbox is
+//     built from are checked: nothing but the working directory writable.
+//     A turn is never reported finished before that check passed, and
 //     a turn that fails or loses its process after Codex reported its thread
 //     waits for the check too, so an unsafe session is reported as unsafe.
 //     The check runs beside the turn, not before it: Codex writes the record
@@ -46,7 +48,10 @@
 // writes only inside the working directory, no network, no /tmp) with
 // approvals set to never, so whatever the sandbox would refuse is refused
 // without asking anyone. That is still policy, not containment: the sandbox
-// is Codex's, not the connector's.
+// is Codex's, not the connector's. Codex's sandbox reads the whole
+// filesystem, so a model in one session can read what the connector's state
+// directory holds while it is there, another session's MCP environment file
+// between its writing and its server's start among it.
 package codex
 
 import (
@@ -906,6 +911,43 @@ type turnContext struct {
 		ExcludeSlashTmp     bool     `json:"exclude_slash_tmp"`
 		WritableRoots       []string `json:"writable_roots"`
 	} `json:"sandbox_policy"`
+	// FileSystem is the filesystem policy Codex's sandbox is actually built
+	// from; PermissionProfile carries the same in older records.
+	FileSystem        *fileSystemPolicy `json:"file_system_sandbox_policy"`
+	PermissionProfile *struct {
+		FileSystem *fileSystemPolicy `json:"file_system"`
+	} `json:"permission_profile"`
+}
+
+type fileSystemPolicy struct {
+	Kind    string `json:"kind"`
+	Type    string `json:"type"`
+	Entries []struct {
+		Path struct {
+			Type string `json:"type"`
+			Path string `json:"path"`
+		} `json:"path"`
+		Access string `json:"access"`
+	} `json:"entries"`
+}
+
+// writesOnlyIn reports whether a filesystem policy is restricted and lets
+// nothing but cwd be written.
+func (p *fileSystemPolicy) writesOnlyIn(cwd string) bool {
+	if p == nil || (p.Kind != "restricted" && p.Type != "restricted") {
+		return false
+	}
+	writable := false
+	for _, e := range p.Entries {
+		if e.Access == "read" || e.Access == "none" {
+			continue
+		}
+		if e.Path.Type != "path" || !samePath(e.Path.Path, cwd) {
+			return false
+		}
+		writable = true
+	}
+	return writable
 }
 
 // verifyRollout waits for the first turn_context record after offset in the
@@ -947,6 +989,13 @@ func checkTurnContext(tc turnContext, cwd string) error {
 		return fmt.Errorf("%w: Codex's sandbox reaches past the working directory", driver.ErrUnsafeMode)
 	case !samePath(tc.Cwd, cwd):
 		return fmt.Errorf("%w: Codex runs in another directory than the session's", driver.ErrUnsafeMode)
+	}
+	fs := tc.FileSystem
+	if fs == nil && tc.PermissionProfile != nil {
+		fs = tc.PermissionProfile.FileSystem
+	}
+	if !fs.writesOnlyIn(cwd) {
+		return fmt.Errorf("%w: Codex's filesystem sandbox writes past the working directory, or was not reported", driver.ErrUnsafeMode)
 	}
 	return nil
 }

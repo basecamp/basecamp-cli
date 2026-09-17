@@ -37,7 +37,20 @@ func safeTurnContext() map[string]any {
 			"type": "workspace-write", "network_access": false,
 			"exclude_tmpdir_env_var": true, "exclude_slash_tmp": true,
 		},
+		// "$CWD" is the fake's own working directory.
+		"file_system_sandbox_policy": map[string]any{
+			"kind": "restricted",
+			"entries": []any{
+				map[string]any{"path": map[string]any{"type": "special", "value": map[string]any{"kind": "root"}}, "access": "read"},
+				map[string]any{"path": map[string]any{"type": "path", "path": "$CWD"}, "access": "write"},
+				map[string]any{"path": map[string]any{"type": "path", "path": "$CWD/.git"}, "access": "read"},
+			},
+		},
 	}
+}
+
+func fsEntries(tc map[string]any) []any {
+	return tc["file_system_sandbox_policy"].(map[string]any)["entries"].([]any)
 }
 
 type harness struct {
@@ -289,6 +302,15 @@ func TestTheAppliedPolicyIsVerified(t *testing.T) {
 		"slash tmp":            func(tc map[string]any) { tc["sandbox_policy"].(map[string]any)["exclude_slash_tmp"] = false },
 		"writable roots":       func(tc map[string]any) { tc["sandbox_policy"].(map[string]any)["writable_roots"] = []string{"/"} },
 		"another directory":    func(tc map[string]any) { tc["cwd"] = "/" },
+		"no filesystem policy": func(tc map[string]any) { delete(tc, "file_system_sandbox_policy") },
+		"root writable": func(tc map[string]any) {
+			fsEntries(tc)[0].(map[string]any)["access"] = "write"
+		},
+		"another path writable": func(tc map[string]any) {
+			tc["file_system_sandbox_policy"].(map[string]any)["entries"] = append(fsEntries(tc),
+				map[string]any{"path": map[string]any{"type": "path", "path": "/tmp"}, "access": "write"})
+		},
+		"unrestricted": func(tc map[string]any) { tc["file_system_sandbox_policy"].(map[string]any)["kind"] = "unrestricted" },
 	}
 	for name, mutate := range unsafe {
 		t.Run(name, func(t *testing.T) {
