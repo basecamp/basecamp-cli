@@ -252,10 +252,10 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 }
 
 // killConnector SIGKILLs the process that started this worker and returns once
-// it is gone: the kernel reparents an orphan, so a changed parent is proof.
+// it is gone, so the steps after it run in a world without a connector.
 func (w *fakeWorker) killConnector(ctx context.Context) {
 	_ = syscall.Kill(w.ppid, syscall.SIGKILL)
-	_ = waitFor(ctx, func() (bool, error) { return os.Getppid() != w.ppid, nil })
+	_ = waitFor(ctx, func() (bool, error) { return processGone(w.ppid), nil })
 }
 
 func waitFor(ctx context.Context, cond func() (bool, error)) error {

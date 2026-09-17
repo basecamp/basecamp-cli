@@ -6,6 +6,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -74,14 +75,20 @@ func (h *harness) agentStarts() int {
 	return n
 }
 
-// lingering is the pids of workers a killed connector left running.
-func (h *harness) lingering() []int {
+// recordedWorkers is the worker processes the ledger recorded, which is all a
+// restart has to end them by.
+func recordedWorkers(t *testing.T, l *Ledger) []int {
+	t.Helper()
+	rows, err := l.db.QueryContext(context.Background(), `SELECT pid FROM attempts WHERE pid IS NOT NULL AND pid > 0`)
+	require.NoError(t, err)
+	defer rows.Close()
 	var out []int
-	for _, e := range h.agentLog() {
-		if e.Step == "linger" {
-			out = append(out, e.PID)
-		}
+	for rows.Next() {
+		var pid int
+		require.NoError(t, rows.Scan(&pid))
+		out = append(out, pid)
 	}
+	require.NoError(t, rows.Err())
 	return out
 }
 
@@ -181,7 +188,16 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 					last := lines[len(lines)-1]
 					assert.Equal(t, kind, last.Type+":"+last.State, "the connector's last word was the line it was killed at")
 				}
-				lingering := h.lingering()
+				var lingering []int
+				if slices.Contains(row.plan, "linger") {
+					// The crash left a worker running: it is the restart's to
+					// end, by the process group the ledger recorded.
+					lingering = recordedWorkers(t, h.ledger())
+					require.NotEmpty(t, lingering, "the crash left a worker the ledger recorded")
+					for _, pid := range lingering {
+						assert.False(t, processGone(pid), "the worker outlived the connector, pid %d", pid)
+					}
+				}
 
 				h.run(harnessRun{})
 				h.assertRecovered(row)
@@ -335,7 +351,7 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 		raceSubset(t, false)
 		t.Run("a follow-up arrives, the task ends", func(t *testing.T) {
 			h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
-				"101#1": {"get", "arrive:102", "await:102=queued|dispatched", "ack", "reply", "complete"},
+				"101#1": {"get", "arrive:102", "await:102=dispatched", "ack", "reply", "complete"},
 			}})
 			h.publish(feedEntry{Event: todoEvent(101, 5001)})
 			h.run(harnessRun{})
@@ -348,7 +364,7 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 		})
 		t.Run("the connector dies before the follow-up is handed over", func(t *testing.T) {
 			h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
-				"101#1": {"get", "arrive:102", "await:102=queued|dispatched", "kill", "linger"},
+				"101#1": {"get", "arrive:102", "await:102=dispatched", "kill", "linger"},
 			}})
 			h.publish(feedEntry{Event: todoEvent(101, 5001)})
 			h.run(harnessRun{Killed: true})
@@ -364,7 +380,7 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 		})
 		t.Run("the connector dies with the follow-up exposed", func(t *testing.T) {
 			h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
-				"101#1": {"get", "arrive:102", "await:102=queued|dispatched", "ack", "reply", "complete"},
+				"101#1": {"get", "arrive:102", "await:102=dispatched", "ack", "reply", "complete"},
 				"102#1": {"get", "kill", "linger"},
 			}})
 			h.publish(feedEntry{Event: todoEvent(101, 5001)})
@@ -401,7 +417,7 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
 		raceSubset(t, false)
 		h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
-			strconv.FormatInt(event, 10) + "#1": {"get", "arrive:" + strconv.FormatInt(followUp, 10), "await:" + strconv.FormatInt(followUp, 10) + "=queued|dispatched", "ack", "reply", "complete"},
+			strconv.FormatInt(event, 10) + "#1": {"get", "arrive:" + strconv.FormatInt(followUp, 10), "await:" + strconv.FormatInt(followUp, 10) + "=dispatched", "ack", "reply", "complete"},
 		}})
 		h.publish(feedEntry{Event: todoEvent(event, recording)})
 		h.run(harnessRun{})
