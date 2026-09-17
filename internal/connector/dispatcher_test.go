@@ -1370,3 +1370,49 @@ func TestACleanFinishWithAnUnreportedEventIsLogged(t *testing.T) {
 		5*time.Second, 10*time.Millisecond, "a clean finish that reported nothing is named in the log")
 	assert.Contains(t, logs.String(), `"event_id":1`)
 }
+
+// Card 22's review: a unix socket path is 103 bytes at most, and a long home
+// or deep state directory puts a session directory past it. That would fail
+// every dispatch, not one, so the socket moves rather than the task failing.
+func TestADeepSessionDirectoryStillGetsItsTokenAcross(t *testing.T) {
+	deep, err := os.MkdirTemp("/tmp", "bcc-deep-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	// Long enough that a socket in an attempt's own directory cannot fit.
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+	require.False(t, TokenSocketFits(filepath.Join(deep, "att_000000000000000000000000")),
+		"the fixture must be past the limit for this test to mean anything")
+
+	fake := newFakeDriver()
+	fake.process = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
+	var cfg driver.SessionConfig
+	fake.onStart = func(c driver.SessionConfig) { cfg = c }
+	token := make(chan string, 1)
+	fake.turn = func(*fakeSession, int, string) (driver.PromptResult, error) {
+		socket := cfg.MCPServers[0].Args[len(cfg.MCPServers[0].Args)-1]
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		conn, dialErr := dialer.DialContext(context.Background(), "unix", socket)
+		if dialErr != nil {
+			token <- ""
+			return driver.PromptResult{Stop: driver.TurnEndTurn}, nil //nolint:nilerr // the failure is reported through the channel the test reads
+		}
+		data, _ := io.ReadAll(conn)
+		_ = conn.Close()
+		token <- strings.TrimSpace(string(data))
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.PrivateDir = deep })
+	// The worker's group is this test's own: confirming it gone would kill
+	// the test.
+	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return nil }
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	h.attemptsEnded(t, 1)
+
+	assert.NotEmpty(t, <-token, "the worker's MCP server was handed its token from a socket that fits")
+	socket := cfg.MCPServers[0].Args[len(cfg.MCPServers[0].Args)-1]
+	assert.LessOrEqual(t, len(socket), 103)
+	_, err = os.Stat(filepath.Dir(socket))
+	assert.True(t, os.IsNotExist(err), "and the directory it was moved to is removed with the attempt")
+}

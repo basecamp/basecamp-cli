@@ -105,15 +105,22 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 // Not the platform's temporary directory: on macOS that path is too long for
 // a unix socket inside it. Owner-only, and swept when the connector starts.
 func connectSessionsDir(file setup.File) (string, error) {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if info, err := os.Stat(base); base == "" || !filepath.IsAbs(base) || err != nil || !info.IsDir() {
-		base = "/tmp"
-	}
-	dir := filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	dir := connectSessionsPath(file)
 	if err := setup.EnsurePrivateDir(dir); err != nil {
 		return "", fmt.Errorf("the connector's session directory cannot be used: %w", err)
 	}
 	return dir, nil
+}
+
+// connectSessionsPath is where a run's session directories go, without making
+// anything: the per-user runtime directory, which is short and cleared when
+// the user logs out, and /tmp where there is none.
+func connectSessionsPath(file setup.File) string {
+	base := os.Getenv("XDG_RUNTIME_DIR")
+	if info, err := os.Stat(base); base == "" || !filepath.IsAbs(base) || err != nil || !info.IsDir() {
+		base = "/tmp"
+	}
+	return filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
