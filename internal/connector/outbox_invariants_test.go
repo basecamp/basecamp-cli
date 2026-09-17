@@ -1245,3 +1245,36 @@ func TestOutboxALedgerFailureAfterASendStopsTheStart(t *testing.T) {
 		})
 	}
 }
+
+// hangingAt blocks listings at one destination until ctx ends.
+type hangingAt struct {
+	*fakeBasecamp
+	recording int64
+}
+
+func (h hangingAt) List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
+	if dest.RecordingID == h.recording {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return h.fakeBasecamp.List(ctx, dest, since)
+}
+
+// A ledger failure met during the start's reconciliation stops the start even
+// when the start's bound runs out later in the same pass.
+func TestOutboxStartStopsOnALedgerFailureWhateverTheBoundDoesAfter(t *testing.T) {
+	ledger, clock := obLedger(t)
+	first := sendingHolding(t, ledger, 1, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 902})
+	sendingHolding(t, ledger, 2, admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 901})
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.add(first.Destination, adapterAgentID, first.Body)
+	clock.Advance(10 * time.Minute)
+	_, err := ledger.db.ExecContext(context.Background(), `ALTER TABLE task_events RENAME TO task_events_gone`)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	require.Error(t, obOutbox(t, ledger, hangingAt{basecamp, 901}).Start(ctx))
+	assert.Less(t, time.Since(started), 2500*time.Millisecond, "the pass stops at the failure rather than spending the bound")
+}

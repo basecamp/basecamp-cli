@@ -25,6 +25,10 @@ type Poster interface {
 	List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error)
 }
 
+// errLedger marks a reconciliation that failed in the ledger, not at
+// Basecamp: a start never proceeds past one.
+var errLedger = errors.New("the ledger could not settle a lifecycle message")
+
 // errBackedOff marks a listing failure whose backoff was recorded: the intent
 // is tried again later, and nothing about the ledger is wrong.
 var errBackedOff = errors.New("listing failed; backed off")
@@ -186,12 +190,13 @@ func (o *Outbox) Run(ctx context.Context) error {
 // intent once it comes of age.
 func (o *Outbox) Start(ctx context.Context) error {
 	if _, err := o.reconcileStale(ctx, o.opts.ReconcileAfter); err != nil {
-		switch {
-		case ctx.Err() != nil:
-			// The bound or shutdown ended the start; Run carries on.
-			return nil //nolint:nilerr // not a failure of the ledger
-		case !errors.Is(err, errBackedOff):
+		if errors.Is(err, errLedger) {
 			return fmt.Errorf("connector: reconcile lifecycle messages on start: %w", err)
+		}
+		// A listing that backed off, or one the bound or shutdown cut short:
+		// Run carries on with it.
+		if ctx.Err() != nil {
+			return nil //nolint:nilerr // not a failure of the ledger
 		}
 		o.log.Warn("connector: a lifecycle message's listing failed on start; it is tried again", "error", err)
 	}
@@ -490,8 +495,12 @@ func (o *Outbox) reconcileSome(ctx context.Context, age time.Duration, limit int
 			if firstErr == nil {
 				firstErr = err
 			}
-			if hardErr == nil && !errors.Is(err, errBackedOff) && ctx.Err() == nil {
-				hardErr = err
+			if !errors.Is(err, errBackedOff) && ctx.Err() == nil {
+				// The ledger failed. The pass stops here: nothing it does
+				// afterwards — nor a bound running out meanwhile — may hide
+				// that from a start.
+				hardErr = fmt.Errorf("%w: %w", errLedger, err)
+				break
 			}
 			continue
 		}
