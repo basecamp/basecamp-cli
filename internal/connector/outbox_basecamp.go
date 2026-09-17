@@ -37,6 +37,18 @@ var _ Poster = (*BasecampPoster)(nil)
 
 // Post creates the message.
 func (p *BasecampPoster) Post(ctx context.Context, dest Destination, body string) (int64, error) {
+	id, err := p.post(ctx, dest, body)
+	if err == nil {
+		return id, nil
+	}
+	if e := basecamp.AsError(err); e != nil && (e.Code == basecamp.CodeNotFound || e.Code == basecamp.CodeForbidden || e.Code == basecamp.CodeValidation) {
+		// Basecamp answered, and its answer is that it created nothing.
+		return 0, fmt.Errorf("connector: post %s at %d: %w: %w", dest.Kind, dest.RecordingID, ErrNotPosted, err)
+	}
+	return id, err
+}
+
+func (p *BasecampPoster) post(ctx context.Context, dest Destination, body string) (int64, error) {
 	switch dest.Kind {
 	case MessageBoost:
 		boost, err := p.account.Boosts().CreateRecording(ctx, dest.RecordingID, body)

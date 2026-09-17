@@ -835,3 +835,69 @@ func TestOutboxNeverAdoptsAWorkersOwnMessage(t *testing.T) {
 	assert.Equal(t, IntentIndeterminate, got.State)
 	assert.Nil(t, got.ReceiptID)
 }
+
+// A request Basecamp refused created nothing, and says so: no listing, no
+// backoff, and a note a person can act on.
+func TestOutboxARefusedRequestSaysNoMessageExists(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("404: %w", ErrNotPosted) }
+
+	ob := obOutbox(t, ledger, basecamp)
+	require.NoError(t, ob.Flush(ctx))
+	got := obIntent(t, ledger, holdingKey(1))
+	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Equal(t, "the request was refused; no message was created", got.Note)
+	assert.Zero(t, basecamp.lists, "nothing to look for")
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, 1, basecamp.postCount(), "never asked again")
+}
+
+// A reconciliation listing is bounded in time: a destination that pages
+// forever cannot hold up the sending of what is due.
+func TestOutboxReconciliationListingIsBounded(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: hangingLister{basecamp}, Tick: time.Millisecond})
+	require.NoError(t, err)
+
+	started := time.Now()
+	_, err = ob.reconcileStale(ctx, 0)
+	require.Error(t, err)
+	assert.Less(t, time.Since(started), AdoptionScanTimeout+5*time.Second)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, in.Key).State, "a listing cut short is a failed listing")
+	assert.NotNil(t, obIntent(t, ledger, in.Key).ReconcileAt)
+}
+
+// hangingLister answers a listing only when its request's context ends.
+type hangingLister struct{ *fakeBasecamp }
+
+func (h hangingLister) List(ctx context.Context, _ Destination, _ time.Time) ([]PostedMessage, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A guard or holding reply whose record is gone is canceled, not claimed
+// again on every tick behind everything else waiting to be sent.
+func TestOutboxAnIntentWithNoRecordIsCanceled(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `PRAGMA foreign_keys = off`)
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `DELETE FROM events WHERE id = 1`)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Equal(t, IntentCanceled, obIntent(t, ledger, holdingKey(1)).State)
+	assert.Zero(t, basecamp.postCount())
+}

@@ -102,7 +102,8 @@ CREATE TRIGGER outbox_guard_canceled_by_get_dispatch
 AFTER UPDATE OF guard ON task_events
 WHEN OLD.guard = 'armed' AND NEW.guard = 'canceled'
 BEGIN
-  UPDATE outbox SET state = 'canceled', note = 'get_dispatch'
+  UPDATE outbox SET state = 'canceled', note = 'get_dispatch',
+    finished_at = strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now')
   WHERE intent_key = 'guard_ack:event:' || NEW.event_id AND state = 'pending';
 END;
 

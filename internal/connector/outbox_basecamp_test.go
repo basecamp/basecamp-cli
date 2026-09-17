@@ -313,3 +313,16 @@ func TestBasecampPosterMarksAGoneDestinationUnlistable(t *testing.T) {
 	_, err = p.List(context.Background(), Destination{Kind: MessageComment, RecordingID: 1}, time.Now())
 	require.ErrorIs(t, err, ErrUnlistable)
 }
+
+// Basecamp refusing a create is an answer: the message was not created.
+func TestBasecampPosterRefusalIsNotPosted(t *testing.T) {
+	server := newOBServer(t)
+	server.beforeStore = func(*http.Request) int { return http.StatusForbidden }
+	_, err := server.poster(t).Post(context.Background(), Destination{Kind: MessageComment, RecordingID: 5}, "x")
+	require.ErrorIs(t, err, ErrNotPosted)
+
+	server.beforeStore = func(*http.Request) int { return http.StatusServiceUnavailable }
+	_, err = server.poster(t).Post(context.Background(), Destination{Kind: MessageComment, RecordingID: 5}, "x")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNotPosted, "a 503 may or may not have created it")
+}

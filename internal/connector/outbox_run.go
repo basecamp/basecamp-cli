@@ -25,6 +25,11 @@ type Poster interface {
 	List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error)
 }
 
+// ErrNotPosted is a request Basecamp answered by refusing it: the message was
+// not created, so there is nothing to find and nothing to resend without a
+// person.
+var ErrNotPosted = errors.New("the message was not created")
+
 // ErrUnlistable is a destination that cannot be listed and will not become
 // listable by waiting: gone, forbidden, or too busy to reach back to the
 // sending time. An intent whose destination is unlistable is indeterminate.
@@ -157,7 +162,10 @@ func (o *Outbox) Run(ctx context.Context) error {
 }
 
 // Recover reconciles every sending intent whose listing is due, whatever its
-// age.
+// age. A connector does not call it on start: Run reconciles what a previous
+// process left once it is ReconcileAfter old, so a request that was still
+// landing when that process died has landed. It is here for a caller that
+// knows the wait has already passed — a test with a killed process, say.
 func (o *Outbox) Recover(ctx context.Context) error {
 	_, err := o.reconcileStale(ctx, 0)
 	return err
@@ -235,6 +243,18 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	receipt, postErr := o.opts.Poster.Post(postCtx, intent.Destination, intent.Body)
 	cancel()
+	if errors.Is(postErr, ErrNotPosted) {
+		// Basecamp refused the request, so no message exists to find. There
+		// is nothing to reconcile and nothing to resend without a person.
+		settled, err := o.ledger.settleReconciled(context.WithoutCancel(ctx), intent.ID, 0, "the request was refused; no message was created")
+		if err != nil {
+			o.log.Warn("connector: settling a refused lifecycle message", "intent_id", intent.ID, "error", err)
+			return intent.ID, nil
+		}
+		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
+		o.line(settled)
+		return intent.ID, nil
+	}
 	if postErr != nil {
 		// The request may have reached Basecamp. The intent stays sending and
 		// is reconciled once it has had time to land — counted from now, not
@@ -294,7 +314,12 @@ func (l *Ledger) claimIntent(ctx context.Context) (Intent, bool, error) {
 			// and the record moved on — it may be running now — the answer is
 			// wrong, so it is never sent.
 			var stillBlocked bool
-			if err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = 'no_route' FROM events WHERE id = ?`, in.EventID).Scan(&stillBlocked); err != nil {
+			switch err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = 'no_route' FROM events WHERE id = ?`, in.EventID).Scan(&stillBlocked); {
+			case errors.Is(err, sql.ErrNoRows):
+				// No record, nothing to answer for. Canceled rather than
+				// left to be claimed again on every tick.
+				stillBlocked = false
+			case err != nil:
 				return fmt.Errorf("connector: outbox claim holding reply %d: %w", in.ID, err)
 			}
 			if !stillBlocked {
@@ -303,11 +328,14 @@ func (l *Ledger) claimIntent(ctx context.Context) (Intent, bool, error) {
 		}
 		if in.Kind == IntentGuardAck {
 			var stillCalledFor bool
-			if err := tx.QueryRowContext(ctx, `
+			switch err := tx.QueryRowContext(ctx, `
 SELECT e.acknowledge = 1 AND e.state IN ('admitted', 'queued', 'dispatched')
    AND NOT EXISTS (SELECT 1 FROM task_events te
                    WHERE te.event_id = e.id AND (te.guard = 'canceled' OR te.delivery IN ('delivered', 'completed')))
-FROM events e WHERE e.id = ?`, in.EventID).Scan(&stillCalledFor); err != nil {
+FROM events e WHERE e.id = ?`, in.EventID).Scan(&stillCalledFor); {
+			case errors.Is(err, sql.ErrNoRows):
+				stillCalledFor = false
+			case err != nil:
 				return fmt.Errorf("connector: outbox claim guard %d: %w", in.ID, err)
 			}
 			if !stillCalledFor {
@@ -407,12 +435,18 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 		since = *in.SendingAt
 	}
 	since = since.Add(-o.opts.ReconcileSlack)
-	listed, err := o.opts.Poster.List(ctx, in.Destination, since)
+	// Bounded like every other listing: Run sends and reconciles in one
+	// sequence, and a Campfire deep enough to page for minutes would hold up
+	// a guard that is due in thirty seconds. A listing cut short is a failed
+	// listing, which backs off.
+	listCtx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
+	defer cancel()
+	listed, err := o.opts.Poster.List(listCtx, in.Destination, since)
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, err
 		}
-		updated, settled, recErr := o.ledger.listingFailed(ctx, in, err)
+		updated, settled, recErr := o.ledger.listingFailed(context.WithoutCancel(ctx), in, err)
 		if recErr != nil {
 			return false, recErr
 		}
@@ -589,10 +623,14 @@ func (o *Outbox) IsLifecycleMessage(id int64) bool {
 // built without a sender.
 func IsLifecycleMessageIn(l *Ledger) func(id int64) bool {
 	return func(id int64) bool {
-		var found bool
-		err := l.db.QueryRowContext(context.Background(),
-			`SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id = ?)`, id).Scan(&found)
-		return err != nil || found
+		ctx := context.Background()
+		for _, kind := range []MessageKind{MessageComment, MessageChatLine} {
+			found, err := l.IsLifecycleReceipt(ctx, kind, id)
+			if err != nil || found {
+				return true
+			}
+		}
+		return false
 	}
 }
 
