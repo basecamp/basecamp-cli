@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -605,4 +606,154 @@ func nextSession(t *testing.T, fake *fakeDriver) *fakeSession {
 		t.Fatal("no session was started")
 		return nil
 	}
+}
+
+// admitRouted admits a record on its own conversation in bucket, routed to
+// route.
+func admitRouted(t *testing.T, ledger *Ledger, id, bucket int64, key, route string) {
+	t.Helper()
+	seenRecord(t, ledger, id)
+	v := admittedVerdict(id, 0, key)
+	v.Route = route
+	_, err := ledger.ledgerCommitWithBucket(v, bucket)
+	require.NoError(t, err)
+}
+
+// Review r1, blocking: records the dispatcher cannot start never fill the
+// window ahead of one it can.
+func TestRecordsTheDispatcherCannotStartDoNotStarveOthers(t *testing.T) {
+	t.Run("a route no longer approved", func(t *testing.T) {
+		fake := newFakeDriver()
+		h := newDispatchHarness(t, fake, nil)
+		for i := int64(1); i <= 12; i++ {
+			admitRouted(t, h.ledger, i, 777, "recording:u"+string(rune('a'+i)), "/unrouted")
+		}
+		admitRouted(t, h.ledger, 50, adapterBucketID, "recording:ok", testRoute)
+		h.run(t)
+		s := nextSession(t, fake)
+		assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
+	})
+	t.Run("a backlog on a busy route", func(t *testing.T) {
+		fake := newFakeDriver()
+		hold := make(chan struct{})
+		fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+			select {
+			case <-hold:
+			case <-s.canceled:
+				return driver.PromptResult{Stop: driver.TurnCanceled}, nil
+			}
+			return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+		}
+		h := newDispatchHarness(t, fake, nil)
+		h.routes[888] = admission.Route{Path: "/work/other"}
+		for i := int64(1); i <= 12; i++ {
+			admitRouted(t, h.ledger, i, adapterBucketID, "recording:b"+string(rune('a'+i)), testRoute)
+		}
+		admitRouted(t, h.ledger, 50, 888, "recording:other", "/work/other")
+		h.run(t)
+		first, second := nextSession(t, fake), nextSession(t, fake)
+		assert.ElementsMatch(t, []string{testRoute, "/work/other"}, []string{first.cfg.Cwd, second.cfg.Cwd})
+		close(hold)
+	})
+}
+
+func TestTheProjectScopeNarrowsDispatch(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Buckets = []int64{888} })
+	h.routes[888] = admission.Route{Path: "/work/other"}
+	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", testRoute)
+	admitRouted(t, h.ledger, 2, 888, "recording:2", "/work/other")
+	h.run(t)
+	s := nextSession(t, fake)
+	assert.Equal(t, int64(2), s.cfg.Scope.EventIDs[0])
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, StateAdmitted, getRecord(t, h.ledger, 1).State, "a project outside --project is not dispatched")
+}
+
+// Review r1, 2: a stop asked for as a turn ends is still that stop.
+func TestAShutdownAsATurnEndsIsRecordedAsShutdown(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	// The shutdown lands after the turn's clean answer, before a follow-up
+	// is looked for.
+	h.d.afterTurn = cancel
+	go func() { done <- h.d.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	assert.Equal(t, "shutdown", h.attemptsEnded(t, 1)[0].StopReason)
+}
+
+// Review r1, 3 and 4.
+func TestExitsTheDispatcherCausedAreNotFailures(t *testing.T) {
+	t.Run("a worker signaled on close after a clean turn", func(t *testing.T) {
+		fake := newFakeDriver()
+		fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+			s.mu.Lock()
+			s.exit = driver.Exit{Code: -1, Signaled: true}
+			s.mu.Unlock()
+			return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+		}
+		h := newDispatchHarness(t, fake, nil)
+		admitOn(t, h.ledger, 1, "recording:1")
+		h.run(t)
+		assert.Equal(t, "finished", h.attemptsEnded(t, 1)[0].StopReason)
+	})
+	t.Run("an unsafe session the driver ended itself", func(t *testing.T) {
+		for i := range 10 {
+			t.Run(strconv.Itoa(i), func(t *testing.T) {
+				fake := newFakeDriver()
+				fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+					s.exitWith(driver.Exit{Code: -1, Signaled: true})
+					return driver.PromptResult{}, driver.ErrUnsafeMode
+				}
+				h := newDispatchHarness(t, fake, nil)
+				admitOn(t, h.ledger, 1, "recording:1")
+				h.run(t)
+				assert.Equal(t, "failed", h.attemptsEnded(t, 1)[0].StopReason, "not lost")
+			})
+		}
+	})
+}
+
+// Copilot and review r1, 5: an unverifiable worker is not settled around.
+func TestAWorkerThatCannotBeVerifiedKeepsItsAttemptLive(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now(), SessionID: "s"}))
+	admitOn(t, h.ledger, 2, "recording:2")
+	h.d.terminateRecorded = func(driver.Process, time.Duration) (bool, error) {
+		return false, errors.New("start time unreadable")
+	}
+
+	require.NoError(t, h.d.Recover(context.Background()))
+	assert.Equal(t, "running", readAttempt(t, h.ledger, l.AttemptID).State, "not settled")
+	h.run(t)
+	time.Sleep(150 * time.Millisecond)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	assert.Empty(t, fake.sessions, "its directory stays held")
+}
+
+// Review r1, 7.
+func TestASettlementThatFailsIsRetried(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, nil)
+	var mu sync.Mutex
+	failures := 2
+	h.ledger.SetHooks(Hooks{AttemptEnded: func(context.Context, Tx, Settlement) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failures > 0 {
+			failures--
+			return errors.New("busy outbox")
+		}
+		return nil
+	}})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	assert.Equal(t, "finished", h.attemptsEnded(t, 1)[0].StopReason)
 }

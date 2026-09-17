@@ -421,6 +421,10 @@ func (DirectLauncher) Launch(_ context.Context, req LaunchRequest) (Launched, er
 // Receipts implements Launcher.
 func (DirectLauncher) Receipts(context.Context, string) ([]Receipt, error) { return nil, nil }
 
+// DefaultGrace is how long a worker's process group has between SIGTERM and
+// SIGKILL.
+const DefaultGrace = 10 * time.Second
+
 // Errors a driver reports.
 var (
 	// ErrNotStarted wraps a start that failed before any worker process

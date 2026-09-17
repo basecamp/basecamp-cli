@@ -99,7 +99,9 @@ func fakeClaude(scenario string) {
 		}
 		switch msg["type"] {
 		case "control_request":
-			if scenario == "hang" || scenario == "child" {
+			// Like Claude Code, an interrupt with no turn running does
+			// nothing.
+			if inited && (scenario == "hang" || scenario == "child") {
 				emit(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "session_id": sessionID})
 			}
 			continue
@@ -129,6 +131,13 @@ func fakeClaude(scenario string) {
 			continue
 		case "die":
 			os.Exit(3)
+		case "escape":
+			// A descendant in a session of its own, holding stdout.
+			pid, _ := syscall.ForkExec("/bin/sleep", []string{"sleep", "300"}, &syscall.ProcAttr{
+				Env: []string{}, Files: []uintptr{0, 1, 2}, Sys: &syscall.SysProcAttr{Setsid: true},
+			})
+			report.Extra["escaped"] = fmt.Sprint(pid)
+			writeReport()
 		}
 		emit(map[string]any{"type": "assistant", "message": map[string]any{"content": []any{
 			map[string]any{"type": "text", "text": "secret words the connector never keeps"},
@@ -233,7 +242,8 @@ func TestArgsFreezeThePolicyAndCarryNoSecret(t *testing.T) {
 	tools := strings.Split(argAfter(args, "--tools"), ",")
 	assert.NotContains(t, tools, "Bash")
 	assert.NotContains(t, tools, "WebFetch")
-	assert.Equal(t, "Read,Glob,Grep,mcp__basecamp", argAfter(args, "--allowed-tools"))
+	assert.Equal(t, "mcp__basecamp", argAfter(args, "--allowed-tools"), "no read tool is an allow rule: that would allow reads anywhere")
+	assert.Contains(t, tools, "Read", "the tool exists; the mode confines it to the working directory")
 	assert.NotContains(t, strings.Join(args, " "), "test-token-not-real")
 
 	f.cfg.Cwd = "/elsewhere"
@@ -385,4 +395,57 @@ func TestAMissingBinaryIsNotStarted(t *testing.T) {
 	assert.ErrorIs(t, err, driver.ErrNotStarted)
 	entries, _ := os.ReadDir(f.cfg.PrivateDir)
 	assert.Empty(t, entries, "nothing holding the token is left behind")
+}
+
+func TestACancelRightAfterPromptStillInterruptsThatTurn(t *testing.T) {
+	f := newFixture(t, "hang")
+	s := start(t, f)
+	ss := s.(*session)
+	ss.beforePromptWrite = func() {
+		go func() { _ = s.Cancel(context.Background()) }()
+		time.Sleep(200 * time.Millisecond)
+	}
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "hello")
+		answers <- result
+	}()
+	select {
+	case result := <-answers:
+		assert.Equal(t, driver.TurnCanceled, result.Stop)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the interrupt went out before the prompt and interrupted nothing")
+	}
+}
+
+func TestCloseReturnsWhenADescendantOutsideTheGroupHoldsTheOutput(t *testing.T) {
+	f := newFixture(t, "escape")
+	f.driver.opts.CloseGrace = 200 * time.Millisecond
+	s := start(t, f)
+	go func() { _, _ = s.Prompt(context.Background(), "hello") }()
+	var escaped int
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(f.report)
+		if err != nil {
+			return false
+		}
+		var r fakeReport
+		if json.Unmarshal(data, &r) != nil || r.Extra["escaped"] == "" {
+			return false
+		}
+		_, err = fmt.Sscan(r.Extra["escaped"], &escaped)
+		return err == nil && escaped > 0
+	}, 5*time.Second, 20*time.Millisecond)
+	t.Cleanup(func() { _ = syscall.Kill(escaped, syscall.SIGKILL) })
+
+	closed := make(chan struct{})
+	go func() {
+		_ = s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited on output held by a process outside the worker's group")
+	}
 }

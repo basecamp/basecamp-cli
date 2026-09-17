@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -51,15 +53,45 @@ func (p Policy) Decide(_ context.Context, req driver.PermissionRequest) driver.P
 	return driver.PermissionDecision{Allow: false}
 }
 
-// inside reports whether every location is within the working directory.
-// No locations means nothing outside is touched.
+// resolveExisting resolves the symlinks in the longest existing prefix of an
+// absolute path and appends the rest, which does not exist yet and so cannot
+// be a link.
+func resolveExisting(path string) (string, bool) {
+	rest := ""
+	for current := path; ; {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(resolved, rest), true
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", false
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		rest = filepath.Join(filepath.Base(current), rest)
+		current = parent
+	}
+}
+
+// inside reports whether every location is within the working directory, as
+// the filesystem resolves it: a symlink inside the directory that points out
+// of it is outside. No locations means nothing outside is touched.
 func (p Policy) inside(locations []string) bool {
-	root := filepath.Clean(p.WorkDir)
+	root, err := filepath.EvalSymlinks(filepath.Clean(p.WorkDir))
+	if err != nil {
+		return false
+	}
 	for _, loc := range locations {
 		if !filepath.IsAbs(loc) {
-			loc = filepath.Join(root, loc)
+			loc = filepath.Join(p.WorkDir, loc)
 		}
-		rel, err := filepath.Rel(root, filepath.Clean(loc))
+		resolved, ok := resolveExisting(filepath.Clean(loc))
+		if !ok {
+			return false
+		}
+		rel, err := filepath.Rel(root, resolved)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return false
 		}

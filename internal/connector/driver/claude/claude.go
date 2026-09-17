@@ -129,8 +129,10 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 		if !ok {
 			return nil, fmt.Errorf("claude: no Claude Code tools for kind %q", kind)
 		}
+		// The tools exist in the session but get no allow rule: an allow
+		// rule for Read is a read anywhere on disk, where the policy allows
+		// reads in the working directory, which the mode already grants.
 		tools = append(tools, names...)
-		allowed = append(allowed, names...)
 	}
 	for _, server := range rules.AllowMCPServers {
 		allowed = append(allowed, "mcp__"+server)
@@ -283,6 +285,10 @@ type session struct {
 	updates   chan driver.Update
 	readerEnd chan struct{}
 
+	// beforePromptWrite runs between a turn's registration and its write; a
+	// test seam.
+	beforePromptWrite func()
+
 	mu       sync.Mutex
 	turn     *turn
 	verified bool
@@ -309,21 +315,31 @@ func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
 
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
+	// The turn is registered and its message written under the write lock,
+	// so a Cancel that sees the turn writes its interrupt after the prompt,
+	// never before it, where it would interrupt nothing.
+	s.writeMu.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.writeMu.Unlock()
 		return driver.PromptResult{}, driver.ErrSessionEnded
 	}
 	if s.turn != nil {
 		s.mu.Unlock()
+		s.writeMu.Unlock()
 		return driver.PromptResult{}, errors.New("claude: a turn is already in flight")
 	}
 	t := &turn{done: make(chan struct{})}
 	s.turn = t
 	s.mu.Unlock()
-
+	if s.beforePromptWrite != nil {
+		s.beforePromptWrite()
+	}
 	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": prompt}}
-	if err := s.write(msg); err != nil {
+	err := s.writeLocked(msg)
+	s.writeMu.Unlock()
+	if err != nil {
 		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
 	}
 	select {
@@ -365,7 +381,14 @@ func (s *session) Close() error {
 	case <-time.After(s.grace):
 	}
 	s.worker.Terminate(s.grace)
-	<-s.readerEnd
+	select {
+	case <-s.readerEnd:
+	case <-time.After(s.grace):
+		// The worker is gone and a descendant outside its group still holds
+		// the output: stop reading it.
+		s.worker.CloseStdout()
+		<-s.readerEnd
+	}
 	s.removeMCPConfig()
 	return nil
 }
@@ -377,12 +400,16 @@ func (s *session) removeMCPConfig() {
 }
 
 func (s *session) write(v any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return s.writeLocked(v)
+}
+
+func (s *session) writeLocked(v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 	_, err = s.worker.Stdin().Write(append(data, '\n'))
 	return err
 }

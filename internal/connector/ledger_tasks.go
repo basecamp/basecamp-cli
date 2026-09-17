@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -304,7 +305,7 @@ SELECT EXISTS (SELECT 1 FROM tasks WHERE ended_at IS NULL AND (conversation_key 
 	// The originating event first, then every other record on the
 	// conversation that waits for a worker. createTask dispatches them all
 	// and refuses an event a live task already carries.
-	joinable, err := joinableOn(ctx, tx, record.Decision.ConversationKey, spec.EventID)
+	joinable, err := joinableOn(ctx, tx, record.Decision.ConversationKey, spec.Route, spec.EventID)
 	if err != nil {
 		return Launch{}, err
 	}
@@ -371,9 +372,11 @@ AND e.routed = 1 AND e.conversation_key <> ''
 AND NOT EXISTS (SELECT 1 FROM task_events te WHERE te.event_id = e.id AND te.retired_at IS NULL)`
 
 // joinableOn lists the records on key, other than except, that wait for a
-// worker, oldest first.
-func joinableOn(ctx context.Context, tx *sql.Tx, key string, except int64) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.conversation_key = ? AND e.id <> ? AND `+startableCondition+` ORDER BY e.id`, key, except)
+// worker and carry route, oldest first. A record admitted under another route
+// (connect.json changed while a task ran) waits for a task in its own
+// directory rather than riding along in this one.
+func joinableOn(ctx context.Context, tx *sql.Tx, key, route string, except int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.conversation_key = ? AND e.route = ? AND e.id <> ? AND `+startableCondition+` ORDER BY e.id`, key, route, except)
 	if err != nil {
 		return nil, fmt.Errorf("connector: find follow-ups on %s: %w", key, err)
 	}
@@ -392,8 +395,8 @@ func joinableOn(ctx context.Context, tx *sql.Tx, key string, except int64) ([]in
 // joinConversation puts every record on key that waits for a worker onto the
 // live task taskID at delivery admitted, dispatched, as createTask would have,
 // and returns their ids, oldest first.
-func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key string) ([]int64, error) {
-	ids, err := joinableOn(ctx, tx, key, 0)
+func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key, route string) ([]int64, error) {
+	ids, err := joinableOn(ctx, tx, key, route, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -430,8 +433,8 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 			return fmt.Errorf("connector: begin join: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		var key string
-		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key FROM tasks WHERE id = ? AND ended_at IS NULL`, taskID).Scan(&key); {
+		var key, route string
+		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key, route FROM tasks WHERE id = ? AND ended_at IS NULL`, taskID).Scan(&key, &route); {
 		case errors.Is(err, sql.ErrNoRows):
 			out = nil
 			return nil
@@ -442,7 +445,7 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 			out = nil
 			return nil
 		}
-		ids, err := l.joinConversation(ctx, tx, taskID, key)
+		ids, err := l.joinConversation(ctx, tx, taskID, key, route)
 		if err != nil {
 			return err
 		}
@@ -841,13 +844,61 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 }
 
 // StartableRecords returns up to limit records waiting for a worker, the
-// oldest per conversation, oldest first.
+// oldest per conversation, oldest first, whatever their route.
 func (l *Ledger) StartableRecords(ctx context.Context, limit int) ([]Record, error) {
+	return l.startable(ctx, "", nil, limit)
+}
+
+// StartableFilter narrows StartableRecordsWhere to what the dispatcher can
+// start now, in the query itself: a record it would skip must never take a
+// place in the window, or a backlog it cannot start starves everything behind
+// it.
+type StartableFilter struct {
+	// Routes are the approved directories by project, connect.json's as they
+	// are now, already narrowed to --project. A record whose (project, route)
+	// is not among them is not startable. Empty means nothing is.
+	Routes map[int64]string
+	// RouteHeld: a route with a live task holds its directory, so a record on
+	// it waits. False when every task gets a directory of its own.
+	RouteHeld bool
+	Limit     int
+}
+
+// StartableRecordsWhere is StartableRecords narrowed by f.
+func (l *Ledger) StartableRecordsWhere(ctx context.Context, f StartableFilter) ([]Record, error) {
+	if len(f.Routes) == 0 {
+		return nil, nil
+	}
+	buckets := make([]int64, 0, len(f.Routes))
+	for bucket := range f.Routes {
+		buckets = append(buckets, bucket)
+	}
+	slices.Sort(buckets)
+	var where strings.Builder
+	var args []any
+	where.WriteString(" AND (")
+	for i, bucket := range buckets {
+		if i > 0 {
+			where.WriteString(" OR ")
+		}
+		where.WriteString("(e.bucket_id = ? AND e.route = ?)")
+		args = append(args, bucket, f.Routes[bucket])
+	}
+	where.WriteString(")")
+	if f.RouteHeld {
+		where.WriteString(" AND NOT EXISTS (SELECT 1 FROM tasks h WHERE h.ended_at IS NULL AND h.route = e.route)")
+	}
+	return l.startable(ctx, where.String(), args, f.Limit)
+}
+
+// startable runs the startable query with an extra condition. extra is built
+// from this package's constants and placeholders only.
+func (l *Ledger) startable(ctx context.Context, extra string, args []any, limit int) ([]Record, error) {
 	rows, err := l.db.QueryContext(ctx, `
 SELECT MIN(e.id) FROM events e
-WHERE `+startableCondition+`
+WHERE `+startableCondition+extra+`
   AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.ended_at IS NULL AND t.conversation_key = e.conversation_key)
-GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`, limit)
+GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`, append(args, limit)...) //nolint:gosec // G202: constants and placeholders
 	if err != nil {
 		return nil, fmt.Errorf("connector: startable records: %w", err)
 	}
