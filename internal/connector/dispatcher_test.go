@@ -589,9 +589,20 @@ func TestPerTaskWorkspacesLetTwoTasksShareARoute(t *testing.T) {
 	admitOn(t, h.ledger, 1, "recording:1")
 	admitOn(t, h.ledger, 2, "recording:2")
 	h.run(t)
-	a, b := <-fake.made, <-fake.made
+	a, b := nextSession(t, fake), nextSession(t, fake)
 	assert.NotEqual(t, a.cfg.Cwd, b.cfg.Cwd)
 	close(hold)
 	h.attemptsEnded(t, 2)
 	assert.True(t, ws.recovered, "Recover runs on start")
+}
+
+func nextSession(t *testing.T, fake *fakeDriver) *fakeSession {
+	t.Helper()
+	select {
+	case s := <-fake.made:
+		return s
+	case <-time.After(5 * time.Second):
+		t.Fatal("no session was started")
+		return nil
+	}
 }
