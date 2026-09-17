@@ -56,8 +56,9 @@ import (
 //     intent is canceled — nothing was created — but its task events stay
 //     fired, so that task's workers do not acknowledge either: the
 //     acknowledgement is missing, never doubled, the spec's own preference.
-//     A later task for the event (a person's redispatch) arms afresh, since
-//     a canceled intent marks nothing fired. This is the spec's rule: a
+//     A later task for the event (a person's redispatch) has its guard armed,
+//     and the worker acknowledges itself: the intent is canceled, so nothing
+//     remains to fire that guard, and get_dispatch cancels it. This is the spec's rule: a
 //     missing acknowledgement costs less than a double one. A refusal here is
 //     Basecamp refusing the connector's own lifecycle request, recorded on
 //     the outbox row; a worker's permission refusals are another matter.
@@ -380,6 +381,16 @@ type IntentFilter struct {
 
 // Intents lists outbox intents, newest first. It only reads.
 func (l *Ledger) Intents(ctx context.Context, f IntentFilter) ([]Intent, error) {
+	var out []Intent
+	err := retryBusy(func() error {
+		var err error
+		out, err = l.intents(ctx, f)
+		return err
+	})
+	return out, err
+}
+
+func (l *Ledger) intents(ctx context.Context, f IntentFilter) ([]Intent, error) {
 	var (
 		where []string
 		args  []any
@@ -418,11 +429,15 @@ func (l *Ledger) Intents(ctx context.Context, f IntentFilter) ([]Intent, error) 
 
 // Intent reads one intent by id.
 func (l *Ledger) Intent(ctx context.Context, id int64) (Intent, error) {
-	rows, err := l.db.QueryContext(ctx, selectIntents+` WHERE id = ?`, id)
-	if err != nil {
-		return Intent{}, fmt.Errorf("connector: read outbox intent %d: %w", id, err)
-	}
-	intents, err := scanIntents(rows)
+	var intents []Intent
+	err := retryBusy(func() error {
+		rows, err := l.db.QueryContext(ctx, selectIntents+` WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("connector: read outbox intent %d: %w", id, err)
+		}
+		intents, err = scanIntents(rows)
+		return err
+	})
 	if err != nil {
 		return Intent{}, err
 	}

@@ -651,8 +651,10 @@ func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessag
 // own acknowledgement or reply.
 func (l *Ledger) workerMessage(ctx context.Context, id int64) (bool, error) {
 	var found bool
-	err := l.db.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ? OR reply_id = ? OR adopted_reply_id = ?)`, id, id, id).Scan(&found)
+	err := retryBusy(func() error {
+		return l.db.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM task_events WHERE ack_id = ? OR reply_id = ? OR adopted_reply_id = ?)`, id, id, id).Scan(&found)
+	})
 	return found, err
 }
 
@@ -660,19 +662,26 @@ func (l *Ledger) workerMessage(ctx context.Context, id int64) (bool, error) {
 // without a receipt: not yet sent, sending, or never settled — abandoned
 // included, since a person abandoning one did not prove it absent.
 func (l *Ledger) unsettledAt(ctx context.Context, dest Destination) ([]Intent, error) {
-	rows, err := l.db.QueryContext(ctx, selectIntents+`
+	var out []Intent
+	err := retryBusy(func() error {
+		rows, err := l.db.QueryContext(ctx, selectIntents+`
 WHERE message_kind = ? AND recording_id = ? AND state IN ('pending', 'sending', 'indeterminate', 'abandoned')`,
-		string(dest.Kind), dest.RecordingID)
-	if err != nil {
-		return nil, fmt.Errorf("connector: intents at %d: %w", dest.RecordingID, err)
-	}
-	return scanIntents(rows)
+			string(dest.Kind), dest.RecordingID)
+		if err != nil {
+			return fmt.Errorf("connector: intents at %d: %w", dest.RecordingID, err)
+		}
+		out, err = scanIntents(rows)
+		return err
+	})
+	return out, err
 }
 
 func (l *Ledger) receiptOwnedByOther(ctx context.Context, id int64, kind MessageKind, receipt int64) (bool, error) {
 	var owned bool
-	err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind = ? AND receipt_id = ? AND id <> ?)`,
-		string(kind), receipt, id).Scan(&owned)
+	err := retryBusy(func() error {
+		return l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind = ? AND receipt_id = ? AND id <> ?)`,
+			string(kind), receipt, id).Scan(&owned)
+	})
 	return owned, err
 }
 

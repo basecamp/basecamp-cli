@@ -337,6 +337,14 @@ func TestOutboxIntentStatesMoveAlongTheirEdges(t *testing.T) {
 	assert.Equal(t, IntentAbandoned, got.State)
 	assert.Equal(t, "person:26909558", got.ResolvedBy)
 	require.ErrorIs(t, ledger.ResolveIntent(ctx, in.ID, IntentResolution{Resolution: ResolveResend, By: "person:26909558"}), ErrNotIndeterminate)
+
+	// A person's decision reaches an indeterminate intent, and nothing else:
+	// a sent one is settled, whatever a person says about it.
+	sent := sendingHolding(t, ledger, 2, obCommentReply)
+	_, err = ledger.recordReceipt(ctx, sent.ID, 4242)
+	require.NoError(t, err)
+	require.ErrorIs(t, ledger.ResolveIntent(ctx, sent.ID, IntentResolution{Resolution: ResolveAbandon, By: "person:26909558"}), ErrNotIndeterminate)
+	assert.Equal(t, IntentSent, obIntent(t, ledger, sent.Key).State)
 	_, err = ledger.db.ExecContext(ctx, `UPDATE outbox SET state = 'pending' WHERE id = ?`, in.ID)
 	require.Error(t, err, "abandoned is final")
 }
