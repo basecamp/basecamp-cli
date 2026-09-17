@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -393,6 +394,44 @@ func TestFiltersOutOfReachOfAScanStillDoNotRun(t *testing.T) {
 	}
 }
 
+// Invariant 6, at removal: git worktree remove reads the worktree's files
+// under the task branch's own configuration, and a filter defined there does
+// not run either.
+func TestAFilterOnTheTaskBranchDoesNotRunAtRemoval(t *testing.T) {
+	h := newWorktreeHarness(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	h.write(h.repo, ".gitattributes", "*.txt filter=probe\n")
+	h.write(h.repo, "app/data.txt", "data\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "attributes")
+	workDir, _ := h.prepare(96)
+	h.write(h.home, "branch-filter.gitconfig", "[filter \"probe\"]\n\tclean = touch "+marker+"; cat\n\tsmudge = touch "+marker+"; cat\n")
+	h.git(h.repo, "config", "includeIf.onbranch:"+BranchPrefix+"**.path", filepath.Join(h.home, "branch-filter.gitconfig"))
+	// A racy index entry makes status read the file through its clean filter.
+	require.NoError(t, os.Chtimes(filepath.Join(workDir, "data.txt"), time.Now().Add(time.Hour), time.Now().Add(time.Hour)))
+
+	row := h.finish(workDir)
+	assert.False(t, exists(marker), "no filter ran")
+	assert.Equal(t, WorktreeRemoved, row.State)
+}
+
+// A filter git lfs marks required does not break the checkout once blanked.
+func TestARequiredFilterDoesNotBreakTheCheckout(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.write(h.repo, ".gitattributes", "*.bin filter=lfsish\n")
+	h.write(h.repo, "app/blob.bin", "blob\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "blob")
+	h.git(h.repo, "config", "filter.lfsish.smudge", "cat")
+	h.git(h.repo, "config", "filter.lfsish.clean", "cat")
+	h.git(h.repo, "config", "filter.lfsish.required", "true")
+
+	workDir, row := h.prepare(97)
+	assert.Equal(t, WorktreeLive, row.State)
+	assert.FileExists(t, filepath.Join(workDir, "blob.bin"))
+	assert.Equal(t, WorktreeRemoved, h.finish(workDir).State)
+}
+
 // A worktree someone moved is kept, not forgotten: its files are still
 // somewhere, and the connector cannot judge them where it cannot find them.
 func TestAMovedWorktreeIsKept(t *testing.T) {
@@ -491,10 +530,52 @@ func TestAFailedPrepareBacksOff(t *testing.T) {
 	_, err = h.wt.Prepare(ctx, route, 70)
 	require.ErrorIs(t, err, ErrPrepareBackoff, "the wait doubles")
 
-	h.wt = h.worktrees("")
-	h.wt.now = func() time.Time { return clock }
 	_, err = h.wt.Prepare(ctx, route, 71)
-	require.NoError(t, err, "another event is not held back")
+	require.ErrorIs(t, err, ErrPrepareBackoff, "the route waits, whichever event asks")
+	assert.Equal(t, []string{route}, h.wt.RoutesWaiting())
+
+	clock = clock.Add(PrepareBackoffMax)
+	assert.Empty(t, h.wt.RoutesWaiting(), "a route whose wait is over is not held")
+}
+
+// A route that cannot take a worktree never fills the window the dispatcher
+// starts records from: a healthy route's record still starts.
+func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
+	h := newWorktreeHarness(t)
+	broken := filepath.Join(t.TempDir(), "not-a-repository")
+	require.NoError(t, os.MkdirAll(broken, 0o700))
+	healthy := filepath.Join(h.repo, "app")
+	const brokenBucket = 777
+	fake := newFakeDriver()
+	d := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Ledger = h.ledger
+		o.Workspaces = h.wt
+	})
+	d.ledger = h.ledger
+	d.mu.Lock()
+	d.routes = map[int64]admission.Route{adapterBucketID: {Path: healthy}, brokenBucket: {Path: broken}}
+	d.mu.Unlock()
+	admit := func(id, bucket int64, route string) {
+		event := testEvent(id)
+		event.BucketID = bucket
+		_, err := h.ledger.RecordSeen(context.Background(), event, LanePoll)
+		require.NoError(t, err)
+		v := admittedVerdict(id, 0, "recording:"+strconv.FormatInt(id, 10))
+		v.BucketID, v.Route = bucket, route
+		_, err = h.ledger.Admission().Commit(context.Background(), v)
+		require.NoError(t, err)
+	}
+	for id := int64(100); id < 110; id++ {
+		admit(id, brokenBucket, broken)
+	}
+	admit(200, adapterBucketID, healthy)
+	d.run(t)
+	select {
+	case s := <-fake.made:
+		assert.True(t, strings.HasPrefix(s.cfg.Cwd, h.root), "the healthy route's record started in its worktree")
+	case <-time.After(10 * time.Second):
+		t.Fatal("a route that cannot take a worktree starved a healthy one")
+	}
 }
 
 // With worktrees off, a new task works in its route, and a worktree made

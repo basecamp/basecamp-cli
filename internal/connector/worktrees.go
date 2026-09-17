@@ -63,7 +63,8 @@ import (
 //     is kept unless its commits are held elsewhere, and the commit HEAD is
 //     on is kept on a branch of its own when nothing else holds it; a HEAD it
 //     cannot read is not forced. What a force does discard is a commit only
-//     the worktree's own reflog or a per-worktree ref still reaches.
+//     the worktree's own reflog, a per-worktree ref, or the reflog of a task
+//     branch deleted because its tip was held elsewhere still reaches.
 //  6. Nothing the repository or its configuration names runs: git runs with
 //     hooks, the fsmonitor and every content filter its configuration defines
 //     for the directory it runs in disabled (the new worktree's own, for its
@@ -85,11 +86,13 @@ type Worktrees struct {
 	off bool
 
 	mu       sync.Mutex
-	failures map[int64]prepareFailure
+	failures map[string]prepareFailure
 }
 
-// prepareFailure is an event whose worktree could not be made, and when to
-// try again.
+var _ WaitingWorkspaces = (*Worktrees)(nil)
+
+// prepareFailure is a route that could not take a worktree, and when to try
+// it again.
 type prepareFailure struct {
 	count int
 	until time.Time
@@ -101,9 +104,9 @@ const (
 	PrepareBackoffMax = 30 * time.Minute
 )
 
-// ErrPrepareBackoff is a Prepare for an event whose last one failed too
+// ErrPrepareBackoff is a Prepare on a route whose last worktree failed too
 // recently to try again.
-var ErrPrepareBackoff = errors.New("the last worktree for this event failed; waiting before trying again")
+var ErrPrepareBackoff = errors.New("the last worktree on this route failed; waiting before trying again")
 
 // WorktreesOptions configures Worktrees.
 type WorktreesOptions struct {
@@ -160,7 +163,7 @@ func NewWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 	})
 	return &Worktrees{
 		ledger: opts.Ledger, root: opts.Root, git: opts.Git, env: env, path: opts.Path, log: opts.Logger,
-		now: time.Now, off: opts.Off, failures: map[int64]prepareFailure{},
+		now: time.Now, off: opts.Off, failures: map[string]prepareFailure{},
 	}, nil
 }
 
@@ -193,18 +196,21 @@ func (w *Worktrees) PerTaskDirs() bool { return !w.off }
 // Prepare implements Workspaces: a new worktree on a new task branch at the
 // route's HEAD, and the route's place inside it.
 //
-// A failure is not retried at every dispatch tick: the event waits
-// PrepareBackoff, doubling up to PrepareBackoffMax, so a repository that
-// cannot take a worktree does not fill the disk or the ledger.
+// A failure holds the route, not the event: what stops a worktree (a route
+// that is not a repository, one with no commit, a full disk) stops every
+// event on it. The route waits PrepareBackoff, doubling up to
+// PrepareBackoffMax, and RoutesWaiting tells the dispatcher to leave its
+// records out, so they neither fill the disk and the ledger nor the window
+// other routes' records are started from.
 func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
 	if w.off {
 		return route, nil
 	}
 	w.mu.Lock()
-	failure, failed := w.failures[originatingEventID]
+	failure, failed := w.failures[route]
 	w.mu.Unlock()
 	if failed && w.now().Before(failure.until) {
-		return "", fmt.Errorf("connector: event %d: %w", originatingEventID, ErrPrepareBackoff)
+		return "", fmt.Errorf("connector: event %d on %s: %w", originatingEventID, route, ErrPrepareBackoff)
 	}
 	workDir, err := w.prepare(ctx, route, originatingEventID)
 	w.mu.Lock()
@@ -213,11 +219,26 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 		failure.count++
 		delay := PrepareBackoff << min(failure.count-1, 10)
 		failure.until = w.now().Add(min(delay, PrepareBackoffMax))
-		w.failures[originatingEventID] = failure
+		w.failures[route] = failure
 		return "", err
 	}
-	delete(w.failures, originatingEventID)
+	delete(w.failures, route)
 	return workDir, nil
+}
+
+// RoutesWaiting implements WaitingWorkspaces: the routes still in a Prepare
+// backoff.
+func (w *Worktrees) RoutesWaiting() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	now := w.now()
+	var out []string
+	for route, f := range w.failures {
+		if now.Before(f.until) {
+			out = append(out, route)
+		}
+	}
+	return out
 }
 
 func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
@@ -337,6 +358,13 @@ func (w *Worktrees) Finish(ctx context.Context, _ string, workDir string) error 
 // instance lock, before anything is dispatched.
 func (w *Worktrees) Recover(ctx context.Context) error {
 	unlock, err := w.lock(ctx)
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		// A prune holding the lock does not keep the connector from starting:
+		// what Recover would settle is no task's, nothing is dispatched into
+		// it, and the next start settles it.
+		w.log.Warn("connector: worktrees are locked by another process; recovery left for the next start")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -542,7 +570,9 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 		return r
 	}
 	r.State = WorktreeRemoving
-	if _, err := w.gitOut(ctx, r.Repository, "worktree", "remove", "--end-of-options", r.Path); err != nil {
+	// Removal runs git status inside the worktree, where the task branch's
+	// own configuration applies: its filters are blanked as well.
+	if _, err := w.gitIn(ctx, r.Repository, []string{r.Path}, "worktree", "remove", "--end-of-options", r.Path); err != nil {
 		// Git's own refusal (a file written since the check) or a failure:
 		// either way the worktree is kept.
 		return w.retain(ctx, r, RetainedUnverified, []WorktreeState{WorktreeRemoving})
@@ -917,6 +947,26 @@ func (w *Worktrees) gitRaw(ctx context.Context, dir string, args ...string) ([]b
 	return w.run(ctx, guard, append([]string{"-C", dir}, args...), args[0])
 }
 
+// gitIn runs git in dir with the filters of dir and of every one of also
+// blanked: for a command that reads another worktree's files.
+func (w *Worktrees) gitIn(ctx context.Context, dir string, also []string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	guard, err := w.filterOverrides(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	for _, other := range also {
+		more, err := w.filterOverrides(ctx, other)
+		if err != nil {
+			return "", err
+		}
+		guard = append(guard, more[len(safeGit):]...)
+	}
+	out, err := w.run(ctx, guard, append([]string{"-C", dir}, args...), args[0])
+	return strings.TrimSpace(string(out)), err
+}
+
 // safeGit is the configuration every git call runs with.
 var safeGit = [][2]string{{"core.hooksPath", "/dev/null"}, {"core.fsmonitor", "false"}}
 
@@ -950,6 +1000,9 @@ func (w *Worktrees) filterOverrides(ctx context.Context, dir string) ([][2]strin
 		for _, cmd := range []string{"clean", "smudge", "process"} {
 			guard = append(guard, [2]string{"filter." + name + "." + cmd, ""})
 		}
+		// A blanked filter that is also required makes git die mid-checkout
+		// (git lfs install sets required for its own).
+		guard = append(guard, [2]string{"filter." + name + ".required", "false"})
 	}
 	return guard, nil
 }
