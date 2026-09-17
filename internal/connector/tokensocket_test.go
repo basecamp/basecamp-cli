@@ -95,6 +95,9 @@ func TestARestartedMCPServerTakesTheTokenAgain(t *testing.T) {
 		assert.Positive(t, taker.PID, "the newest server is the one holding the token")
 	}
 
+	// The budget is spent, and that is said out loud: no adapter reports a
+	// server that came up without its token (card 23 measured both).
+	assert.Equal(t, HandoffSpent, <-handoffs)
 	require.True(t, s.Settled(5*time.Second), "the budget is spent and the socket is finished with")
 	_, err = fetch(t, s.Path())
 	assert.Error(t, err, "a host that restarts its server more often than that is not served forever")

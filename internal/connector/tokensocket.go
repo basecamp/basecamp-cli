@@ -206,6 +206,12 @@ const (
 	HandoffExpired Handoff = "expired"
 	// HandoffClosed: the connector closed the socket first.
 	HandoffClosed Handoff = "closed"
+	// HandoffSpent: the worker's MCP server started more times than the
+	// connector serves its token (MaxTokenHandoffs). A start after this one
+	// comes up without a token, and its Basecamp tools fail; no adapter
+	// reports that on the wire (card 23 measured both), so this is the only
+	// place it can be seen.
+	HandoffSpent Handoff = "spent"
 )
 
 // PeerCredentials are what the kernel says about the other end of a unix
@@ -453,7 +459,9 @@ func (s *TokenSocket) serve(window time.Duration) {
 		delivered = true
 	}
 	// The budget is spent: a worker whose MCP server restarts more often than
-	// this is not one the connector keeps handing its token to.
+	// this is not one the connector keeps handing its token to, and the next
+	// start of it will have no Basecamp tools. Nothing else would say so.
+	s.handed(HandoffSpent, driver.Process{}, true)
 	s.Close()
 }
 

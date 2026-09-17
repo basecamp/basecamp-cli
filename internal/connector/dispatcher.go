@@ -643,6 +643,11 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// server re-runs the bridge, which takes the token again, and the newest
 	// server is the process the release point must end.
 	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
+		if handoff == HandoffSpent {
+			log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
+				"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
+			return
+		}
 		if handoff != HandoffDelivered {
 			if afterADelivery {
 				// The socket ran out or was closed after it had already
