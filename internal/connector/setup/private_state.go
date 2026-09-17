@@ -147,6 +147,34 @@ func EnsurePrivateFile(path string) error {
 	return checkPrivateReadableFile(f, path)
 }
 
+// CheckPrivateFile holds an existing file to EnsurePrivateFile's rules without
+// creating anything: every directory on the way must be this user's alone, the
+// file must not be a symlink, and — inspected through the open descriptor — it
+// must be this user's own file that nobody else can read. A missing file, or
+// a missing directory, is an error satisfying errors.Is(err, os.ErrNotExist).
+func CheckPrivateFile(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(abs)
+	if err := checkAncestors(filepath.Dir(dir)); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(dir); err != nil {
+		return fmt.Errorf("inspect %s: %w", dir, err)
+	}
+	if err := checkPrivateDir(dir); err != nil {
+		return err
+	}
+	f, err := openNoFollow(abs)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return checkPrivateReadableFile(f, abs)
+}
+
 func checkPrivateReadableFile(f *os.File, path string) error {
 	if err := checkPrivateFile(f, path); err != nil {
 		return err

@@ -2,8 +2,11 @@ package connector
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -513,6 +516,35 @@ func TestAReportIsRecordedWhateverHappenedToTheRecord(t *testing.T) {
 	assert.Equal(t, DeliveryCompleted, receipt.Delivery)
 	assert.Equal(t, OutcomeFailed, receipt.Outcome)
 	assert.Equal(t, StateAdmitted, getRecord(t, f.ledger, 2).State)
+}
+
+// A worker's open never leaves a ledger behind where there was none: not
+// through the privacy check, and not through SQLite, whichever the file
+// disappears before.
+func TestOpenExistingLedgerCreatesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	path := filepath.Join(dir, LedgerFile)
+
+	_, err := OpenExistingLedger(context.Background(), path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "the privacy check created nothing")
+
+	// The file gone after the check: SQLite itself must refuse.
+	db, err := sql.Open("sqlite", ledgerDSN(path, false))
+	require.NoError(t, err)
+	defer db.Close()
+	require.Error(t, db.PingContext(context.Background()))
+	entries, err = os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "SQLite created nothing")
+
+	owner, err := sql.Open("sqlite", ledgerDSN(path, true))
+	require.NoError(t, err)
+	defer owner.Close()
+	require.NoError(t, owner.PingContext(context.Background()), "the connector's own open still creates")
 }
 
 func TestOpenExistingLedgerNeverCreatesOrMigrates(t *testing.T) {

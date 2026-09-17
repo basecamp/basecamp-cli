@@ -89,14 +89,32 @@ var ErrLedgerSchema = errors.New("the connector ledger's schema is not the versi
 // basecamp binary started as a worker must not change the schema under the
 // connector that holds it, so a ledger at any other schema version is
 // refused.
+//
+// Neither the privacy check nor SQLite may create the file on this path: the
+// check only inspects, and the database is opened with mode=rw, so a ledger
+// removed at any moment is an error rather than a new empty one.
 func OpenExistingLedger(ctx context.Context, path string) (*Ledger, error) {
-	if _, err := os.Lstat(path); err != nil {
-		return nil, fmt.Errorf("connector: open ledger: %w", err)
-	}
 	return openLedger(ctx, path, false)
 }
 
-func openLedger(ctx context.Context, path string, migrate bool) (*Ledger, error) {
+// ledgerDSN is the SQLite URI for the ledger at path. owner opens it the way
+// the connector does, creating it when absent; otherwise mode=rw makes SQLite
+// refuse a file that is not there.
+//
+// _txlock=immediate takes the write lock when a transaction opens rather than
+// on its first write. Without it two connectors racing on one file can both
+// start, both read, and one is refused at COMMIT with the work already done.
+func ledgerDSN(path string, owner bool) string {
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
+	if !owner {
+		dsn += "&mode=rw"
+	}
+	return dsn
+}
+
+// openLedger opens the ledger; owner is the connector itself, which creates
+// and migrates it. Any other opener does neither.
+func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
 	}
@@ -110,16 +128,11 @@ func openLedger(ctx context.Context, path string, migrate bool) (*Ledger, error)
 		// query, fragment or an escape, and open some other file.
 		return nil, fmt.Errorf("connector: ledger path %q contains a character the SQLite URI cannot carry (?, # or %%)", path)
 	}
-	if err := securePath(path); err != nil {
+	if err := securePath(path, owner); err != nil {
 		return nil, err
 	}
 
-	// _txlock=immediate takes the write lock when a transaction opens rather
-	// than on its first write. Without it two connectors racing on one file
-	// can both start, both read, and one is refused at COMMIT with the work
-	// already done.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", ledgerDSN(path, owner))
 	if err != nil {
 		return nil, fmt.Errorf("connector: open ledger: %w", err)
 	}
@@ -128,7 +141,7 @@ func openLedger(ctx context.Context, path string, migrate bool) (*Ledger, error)
 	db.SetMaxOpenConns(1)
 
 	l := &Ledger{db: db, now: time.Now}
-	if migrate {
+	if owner {
 		if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
 			_ = db.Close()
 			return nil, err
@@ -212,8 +225,12 @@ func isBusy(err error) bool {
 // a ledger whose privacy cannot be established is refused there rather than
 // opened — the same way setup refuses to write a trust file it cannot vouch
 // for.
-func securePath(path string) error {
-	if err := setup.EnsurePrivateFile(path); err != nil {
+func securePath(path string, create bool) error {
+	check := setup.CheckPrivateFile
+	if create {
+		check = setup.EnsurePrivateFile
+	}
+	if err := check(path); err != nil {
 		return fmt.Errorf("connector: secure the ledger: %w", err)
 	}
 	// One rule of the ledger's own, beyond what a trust file needs: its
