@@ -1,7 +1,7 @@
 {
   "source": "github.com/basecamp/basecamp-sdk",
-  "commit": "4523eac74cfa6452ec85ea5f8f633baa4dc487a5",
-  "ref": "go/v0.18.0-63-g4523eac7",
+  "commit": "6abe227204a465ced72969f10e32d3a06e77bcc1",
+  "ref": "go/v0.19.0",
   "files": ["behavior-model.json", "openapi.json"],
   "synced_by": "scripts/sync-mcp-model.sh",
   "patches": "binary-upload operations dropped because the toolkit refuses their non-JSON bodies (EXCLUDED_OPERATIONS) and the stream-ticket mint dropped by policy (POLICY_EXCLUDED_OPERATIONS); no tag patches applied (PATCHED_TAGS is empty — the export tags every operation) — see the sync script"

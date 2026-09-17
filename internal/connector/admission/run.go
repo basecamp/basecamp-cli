@@ -2,13 +2,13 @@ package admission
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
@@ -42,8 +42,12 @@ type RunOptions struct {
 	// Workers is the fetcher pool size; DefaultWorkers when zero.
 	Workers int
 	// Lines receives one NDJSON line per committed verdict.
-	Lines  io.Writer
-	Logger *slog.Logger
+	Lines io.Writer
+	// LineWriter, when set, is the writer the lines go through, and Lines is
+	// ignored: one sink has one writer and one lock, and a caller wiring
+	// admission beside intake passes the same writer to both.
+	LineWriter *ndjson.Writer
+	Logger     *slog.Logger
 }
 
 // Run takes ids until ctx ends, deciding and committing each. It returns nil
@@ -68,7 +72,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	lines := &lineWriter{w: opts.Lines}
+	// Built here, before the workers exist, so nothing is initialized on a
+	// path two of them can take at once.
+	lines := newLineWriter(opts.LineWriter, opts.Lines)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -178,33 +184,35 @@ func LineFor(v Verdict) Line {
 	}
 }
 
+// lineWriter is the verdict stream. It holds a writer and nothing else: no
+// flag, no once, no first-use path.
+//
+// It used to build the writer on the first verdict, which is a race the moment
+// admission has more than one worker — two of them reaching their first line
+// together read and assign the same field. Laziness is not a thing to guard
+// here; it is a thing to remove. The writer is built once, before any worker
+// starts, and injected.
 type lineWriter struct {
-	mu sync.Mutex
-	w  io.Writer
+	out *ndjson.Writer
+}
+
+// newLineWriter takes the writer a caller wiring admission beside intake
+// passes in, or builds one for the sink. There is exactly one writer per sink
+// either way: NewWriter returns the same writer for the same sink, so the one
+// lock is the one lock.
+func newLineWriter(out *ndjson.Writer, sink io.Writer) *lineWriter {
+	if out == nil && sink != nil {
+		out = ndjson.NewWriter(sink)
+	}
+	return &lineWriter{out: out}
 }
 
 func (l *lineWriter) write(v Verdict) error {
-	if l.w == nil {
+	if l.out == nil {
 		return nil
 	}
-	b, err := json.Marshal(LineFor(v))
-	if err != nil {
-		return fmt.Errorf("admission: encode line: %w", err)
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	// One line, whole: a writer that takes part of it is written the rest,
-	// and one that takes none without an error has failed. A torn line is
-	// worse than no line to whoever parses the stream.
-	for rest := append(b, '\n'); len(rest) > 0; {
-		n, err := l.w.Write(rest)
-		if err != nil {
-			return fmt.Errorf("admission: write line: %w", err)
-		}
-		if n <= 0 {
-			return fmt.Errorf("admission: write line: %w", io.ErrShortWrite)
-		}
-		rest = rest[n:]
+	if err := l.out.WriteLine(LineFor(v)); err != nil {
+		return fmt.Errorf("admission: %w", err)
 	}
 	return nil
 }
