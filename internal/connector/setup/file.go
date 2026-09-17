@@ -35,7 +35,9 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
@@ -54,8 +56,18 @@ const (
 	DriverACP   = "acp"
 )
 
+// Workers: the coding agent a driver runs.
+const (
+	WorkerClaude = "claude"
+)
+
+// Workers is every worker connect.json may name. A worker is a row here plus
+// its spawn constructor (internal/connector/driver/spawn).
+var Workers = []string{WorkerClaude}
+
 // Defaults, from the connector spec.
 const (
+	DefaultWorker      = WorkerClaude
 	DefaultDriver      = DriverSpawn
 	DefaultConcurrency = 2
 	DefaultDeadline    = 45 * time.Minute
@@ -91,7 +103,11 @@ type File struct {
 	Trust    admission.Trust           `json:"trust"`
 	Projects map[int64]admission.Route `json:"projects"`
 
-	Driver      string   `json:"driver"`
+	Driver string `json:"driver"`
+	// Worker is the coding agent the driver runs: claude, or another row of
+	// Workers. Empty reads as DefaultWorker, so a file written before the
+	// field existed means what it meant.
+	Worker      string   `json:"worker,omitempty"`
 	Concurrency int      `json:"concurrency"`
 	Deadline    Duration `json:"deadline"`
 	Worktrees   bool     `json:"worktrees"`
@@ -140,6 +156,7 @@ func New(profile string) File {
 		Trust:       admission.Trust{Mode: admission.TrustOperator},
 		Projects:    map[int64]admission.Route{},
 		Driver:      DefaultDriver,
+		Worker:      DefaultWorker,
 		Concurrency: DefaultConcurrency,
 		Deadline:    Duration(DefaultDeadline),
 	}
@@ -227,6 +244,9 @@ func (f File) Validate() error {
 	default:
 		return fmt.Errorf("connect.json driver %q is not %q or %q", f.Driver, DriverSpawn, DriverACP)
 	}
+	if f.Worker != "" && !slices.Contains(Workers, f.Worker) {
+		return fmt.Errorf("connect.json worker %q is not one of %s", f.Worker, strings.Join(Workers, ", "))
+	}
 	if f.Concurrency < 1 || f.Concurrency > MaxConcurrency {
 		return fmt.Errorf("connect.json concurrency %d is outside 1..%d", f.Concurrency, MaxConcurrency)
 	}
@@ -234,6 +254,14 @@ func (f File) Validate() error {
 		return fmt.Errorf("connect.json deadline %s is outside %s..%s", d, MinDeadline, MaxDeadline)
 	}
 	return nil
+}
+
+// WorkerName is the worker the file names, the default when it names none.
+func (f File) WorkerName() string {
+	if f.Worker == "" {
+		return DefaultWorker
+	}
+	return f.Worker
 }
 
 // Parse decodes connect.json strictly. It refuses what encoding/json would

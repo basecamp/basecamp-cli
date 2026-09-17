@@ -32,7 +32,9 @@ type Changes struct {
 	// Remove drops projects' routes.
 	Remove []int64
 
-	Driver      string
+	Driver string
+	// Worker is the coding agent, "" to keep the file's.
+	Worker      string
 	Concurrency int
 	Deadline    time.Duration
 	// Worktrees is nil to keep the file's value.
@@ -94,6 +96,12 @@ func Apply(f File, ch Changes) (File, error) {
 
 	if ch.Driver != "" {
 		out.Driver = ch.Driver
+	}
+	if ch.Worker != "" {
+		if !slices.Contains(Workers, ch.Worker) {
+			return File{}, fmt.Errorf("worker %q is not one of %s", ch.Worker, strings.Join(Workers, ", "))
+		}
+		out.Worker = ch.Worker
 	}
 	if ch.Concurrency != 0 {
 		out.Concurrency = ch.Concurrency

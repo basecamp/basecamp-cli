@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,9 +29,10 @@ import (
 
 // NewConnectCmd is the local agent connector's command group.
 func NewConnectCmd() *cobra.Command {
+	var run connectRunFlags
 	cmd := &cobra.Command{
 		Use:   "connect",
-		Short: "Set up a local agent connector for a Basecamp agent",
+		Short: "Run a local agent connector for a Basecamp agent",
 		Long: `Run a local agent connector: it listens to the account event feed as a
 Basecamp agent, admits what a trusted person asks of that agent, and hands
 the work to a local coding agent that replies in Basecamp as the agent.
@@ -38,8 +40,28 @@ the work to a local coding agent that replies in Basecamp as the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 projects to the directories their work runs in, and checks the connector is
-ready. Show prints what setup recorded.`,
+ready. Show prints what setup recorded. Then run the connector on it:
+
+  basecamp connect -P <profile> [--project <id>]... [--shadow]
+
+It runs in the foreground until interrupted. Stdout is a wire of one JSON
+object per line (events seen, verdicts, dispatches; never content), and logs
+go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
+shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
+isolated state directory and dispatches nothing. macOS and Linux only.`,
+		Example: `  basecamp connect setup -P agent --operator-profile me --route 12345=/src/app
+  basecamp connect -P agent
+  basecamp connect -P agent --project 12345 --shadow`,
+		Args: cobra.NoArgs,
+		Annotations: map[string]string{
+			"agent_notes": "Long-running; stdout is NDJSON pointer lines, logs on stderr. Not for interactive use.",
+			"stdout_wire": "connect",
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runConnect(cmd, &run)
+		},
 	}
+	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd())
 	cmd.AddCommand(newConnectShowCmd())
 	return cmd
@@ -232,6 +254,7 @@ type connectSetupFlags struct {
 	unwatch   []string
 	unroute   []string
 	driver    string
+	worker    string
 	parallel  int
 	deadline  time.Duration
 	worktrees bool
@@ -314,6 +337,7 @@ Examples:
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a routed project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
 	fl.StringVar(&f.driver, "driver", "", "How workers are run: spawn or acp (default spawn)")
+	fl.StringVar(&f.worker, "worker", "", fmt.Sprintf("The coding agent workers run: %s (default %s)", strings.Join(setup.Workers, ", "), setup.DefaultWorker))
 	fl.IntVar(&f.parallel, "concurrency", 0, fmt.Sprintf("Workers at once (default %d)", setup.DefaultConcurrency))
 	fl.DurationVar(&f.deadline, "deadline", 0, fmt.Sprintf("Deadline per task (default %s)", setup.DefaultDeadline))
 	fl.BoolVar(&f.worktrees, "worktrees", false, "Give each task its own git worktree")
@@ -748,6 +772,10 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 	default:
 		return ch, output.ErrUsage(fmt.Sprintf("Invalid --driver %q: use spawn or acp", f.driver))
 	}
+	if f.worker != "" && !slices.Contains(setup.Workers, f.worker) {
+		return ch, output.ErrUsage(fmt.Sprintf("Invalid --worker %q: use %s", f.worker, strings.Join(setup.Workers, ", ")))
+	}
+	ch.Worker = f.worker
 	// A typed zero is out of range, not a request for the default: the flags
 	// are read as typed, not as their zero values.
 	if cmd.Flags().Changed("concurrency") {

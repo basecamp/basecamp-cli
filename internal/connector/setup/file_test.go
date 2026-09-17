@@ -264,3 +264,19 @@ func TestSaveRefusesAHoldOnAnotherProfile(t *testing.T) {
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "nothing is written")
 }
+
+func TestWorkerIsOneSetupKnowsAndDefaultsToClaude(t *testing.T) {
+	f := validFile(t)
+	assert.Equal(t, WorkerClaude, f.WorkerName())
+	f.Worker = ""
+	require.NoError(t, f.Validate(), "a file written before the field existed")
+	assert.Equal(t, WorkerClaude, f.WorkerName())
+	f.Worker = "gemini"
+	assert.Error(t, f.Validate())
+
+	_, err := Apply(validFile(t), Changes{Worker: "gemini"})
+	assert.Error(t, err)
+	next, err := Apply(validFile(t), Changes{Worker: WorkerClaude})
+	require.NoError(t, err)
+	assert.Equal(t, WorkerClaude, next.Worker)
+}
