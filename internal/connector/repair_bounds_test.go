@@ -141,3 +141,31 @@ func TestACanceledRepairWalkLeavesTheLossOpenForTheNextStart(t *testing.T) {
 		})
 	}
 }
+
+// C3: a throttled repair poll waits at least as long as the server said. The
+// seam's RetryAfter is a directive, not a hint: polling again on the repair
+// cadence would answer a fifteen-minute wait every minute.
+func TestARepairWalkHonoursRetryAfter(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, time.Hour, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	polls := &scriptedPolls{
+		errs:  []error{&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}},
+		pages: []eventfeed.PollPage{{}, {Events: []eventfeed.Event{testEvent(17099838509)}, Position: "p"}},
+	}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	var waits []time.Duration
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		clock.at = clock.at.Add(d)
+		return nil
+	}
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	require.NotEmpty(t, waits)
+	assert.GreaterOrEqual(t, waits[0], 15*time.Minute,
+		"the server asked for fifteen minutes; the repair cadence does not overrule it")
+}

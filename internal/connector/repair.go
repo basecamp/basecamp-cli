@@ -26,6 +26,9 @@ type repairWalker struct {
 	polls  eventfeed.PollSource
 	// maxPages caps the pages one pass walks; zero means maxRepairPagesPerPass.
 	maxPages int
+	// retryAfter is a server-directed wait the last pass was given. It is
+	// honored exactly and is exempt from the repair cadence's own cap.
+	retryAfter time.Duration
 	// origin is the API origin every URL the walk follows must stay on.
 	origin   string
 	filters  eventfeed.Filters
@@ -101,8 +104,14 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 
 		// A missing id the walk did not serve is NOT yet a gap: `next` can end
 		// while an event is still inside the poll lane's safety delay. The
-		// walk repeats on the repair cadence until the window closes.
-		if err := w.wait(ctx, w.interval); err != nil {
+		// walk repeats on the repair cadence until the window closes — or
+		// after a server-directed wait, whichever is longer.
+		wait := w.interval
+		if w.retryAfter > wait {
+			wait = w.retryAfter
+		}
+		w.retryAfter = 0
+		if err := w.wait(ctx, wait); err != nil {
 			return err
 		}
 	}
@@ -384,7 +393,18 @@ func (w *repairWalker) pollFailure(ctx context.Context, loss *Loss, cursor event
 		}
 		return &eventfeed.Cursor{Since: strconv.FormatInt(loss.RepairSince, 10)}, nil
 
-	case eventfeed.PollTransient, eventfeed.PollThrottled, eventfeed.PollUnauthorized:
+	case eventfeed.PollThrottled:
+		// The server named a wait. It is a directive, not a hint: polling
+		// again on the repair cadence would answer a fifteen-minute
+		// Retry-After every minute.
+		if pollErr.RetryAfter > w.retryAfter {
+			w.retryAfter = pollErr.RetryAfter
+		}
+		w.log.Warn("a repair poll was throttled; waiting as the server asked",
+			"loss_id", loss.ID, "retry_after", pollErr.RetryAfter)
+		return nil, nil
+
+	case eventfeed.PollTransient, eventfeed.PollUnauthorized:
 		// A reason to try again on the next repair poll, not a reason to call
 		// the ids unrecovered. A slow or throttled walk delays nothing else.
 		w.log.Warn("a repair poll failed; retrying on the repair cadence", "loss_id", loss.ID, "failure", failureKind(err))
