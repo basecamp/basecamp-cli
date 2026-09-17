@@ -49,7 +49,7 @@ func stateOf(t *testing.T, l *Ledger, id int64) RecordState {
 func decisionsFor(t *testing.T, l *Ledger, id int64) int {
 	t.Helper()
 	var n int
-	require.NoError(t, l.db.QueryRow(`SELECT COUNT(*) FROM decisions WHERE event_id = ?`, id).Scan(&n))
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decisions WHERE event_id = ?`, id).Scan(&n))
 	return n
 }
 
@@ -84,7 +84,7 @@ func TestRedispatchAdmitsAnUnknownOutcome(t *testing.T) {
 	assert.Equal(t, 1, decisionsFor(t, l, 1))
 
 	var by string
-	require.NoError(t, l.db.QueryRow(`SELECT authorized_by FROM events WHERE id = 1`).Scan(&by))
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT authorized_by FROM events WHERE id = 1`).Scan(&by))
 	assert.Equal(t, opBy, by)
 	d, err := l.Dispatch(launch.Token, adapterAgentID)
 	require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "admitted in the transaction that ended the task")
 	var pending int
-	require.NoError(t, l.db.QueryRow(`SELECT redispatch_pending FROM events WHERE id = 1`).Scan(&pending))
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT redispatch_pending FROM events WHERE id = 1`).Scan(&pending))
 	assert.Zero(t, pending)
 	second := launchOf(t, l, 1)
 	assert.NotEqual(t, launch.TaskID, second.TaskID)
@@ -165,6 +165,8 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 
 // Invariant 6: refused for succeeded, discarded and anything live, and a
 // refusal writes nothing.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]func(t *testing.T, l *Ledger){
@@ -271,7 +273,7 @@ func TestRedispatchOfARecordHeldOverAReasonRerunsIt(t *testing.T) {
 	opAdmit(t, l, 1, "recording:1")
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
-	_, err = l.db.Exec(`UPDATE events SET reason = 'no_route' WHERE id = 1`)
+	_, err = l.db.ExecContext(context.Background(), `UPDATE events SET reason = 'no_route' WHERE id = 1`)
 	require.NoError(t, err)
 
 	got, err := l.Redispatch(ctx, 1, opBy)
@@ -348,11 +350,11 @@ func TestInvariant1ATaggedSiblingReturnedByATaskIsHeld(t *testing.T) {
 func TestInvariant1TheDatabaseHoldsATaggedRecord(t *testing.T) {
 	l := newTestLedger(t)
 	opAdmit(t, l, 1, "recording:1")
-	_, err := l.db.Exec(`UPDATE events SET state = 'blocked', reason = 'x' WHERE id = 1`)
+	_, err := l.db.ExecContext(context.Background(), `UPDATE events SET state = 'blocked', reason = 'x' WHERE id = 1`)
 	require.NoError(t, err)
-	_, err = l.db.Exec(`UPDATE events SET review = 1 WHERE id = 1`)
+	_, err = l.db.ExecContext(context.Background(), `UPDATE events SET review = 1 WHERE id = 1`)
 	require.NoError(t, err)
-	_, err = l.db.Exec(`UPDATE events SET state = 'admitted', reason = '' WHERE id = 1`)
+	_, err = l.db.ExecContext(context.Background(), `UPDATE events SET state = 'admitted', reason = '' WHERE id = 1`)
 	require.NoError(t, err)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1))
 }
@@ -438,6 +440,8 @@ func TestHoldingARecordCancelsItsPendingGuard(t *testing.T) {
 
 // Invariant 4: a terminal record leaves its state only with a decision
 // written in the same statement.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestInvariant4TheDatabaseRefusesATerminalMoveWithoutADecision(t *testing.T) {
 	ctx := context.Background()
 	t.Run("completed to admitted without a redispatch", func(t *testing.T) {
@@ -474,6 +478,8 @@ func TestInvariant4TheDatabaseRefusesATerminalMoveWithoutADecision(t *testing.T)
 
 // Done when: discard closes held, blocked and unknown records as
 // discarded(by_operator), and refuses the rest.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestDiscard(t *testing.T) {
 	ctx := context.Background()
 	accepted := map[string]func(t *testing.T, l *Ledger){

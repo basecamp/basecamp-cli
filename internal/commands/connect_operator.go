@@ -88,23 +88,23 @@ func parseEventIDArg(raw string) (int64, error) {
 
 // openConnectLedger opens the connector's ledger for a decision. It must
 // already exist: a decision is about records the connector wrote.
-func openConnectLedger(p connectProfile) (*connector.Ledger, string, error) {
+func openConnectLedger(p connectProfile) (*connector.Ledger, error) {
 	dir, err := connectStatePath(p.file, false)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	path := filepath.Join(dir, connector.LedgerFile)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil, "", output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
+		return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
 	}
 	ledger, err := connector.OpenLedger(path)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	// A verdict a redispatch writes calls for the lifecycle messages a running
 	// connector's would; the running connector's outbox sends them.
 	ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
-	return ledger, dir, nil
+	return ledger, nil
 }
 
 func decisionError(err error) error {
@@ -164,7 +164,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	if err != nil {
 		return err
 	}
-	ledger, err := connector.OpenLedgerReadOnly(filepath.Join(dir, connector.LedgerFile))
+	ledger, err := connector.OpenLedgerReadOnly(cmd.Context(), filepath.Join(dir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
 	}
@@ -357,7 +357,7 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	if err != nil {
 		return err
 	}
-	ledger, _, err := openConnectLedger(p)
+	ledger, err := openConnectLedger(p)
 	if err != nil {
 		return err
 	}
@@ -522,7 +522,7 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 			if err != nil {
 				return err
 			}
-			ledger, _, err := openConnectLedger(p)
+			ledger, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}
@@ -556,7 +556,7 @@ held records stay held until each is redispatched or discarded.`,
 			if err != nil {
 				return err
 			}
-			ledger, _, err := openConnectLedger(p)
+			ledger, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}
@@ -687,7 +687,7 @@ The file is JSON:
 				return err
 			}
 			defer func() { _ = lock.Release() }()
-			ledger, _, err := openConnectLedger(p)
+			ledger, err := openConnectLedger(p)
 			if err != nil {
 				return err
 			}

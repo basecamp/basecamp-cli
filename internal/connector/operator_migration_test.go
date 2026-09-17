@@ -93,6 +93,7 @@ func admitSeen(t *testing.T, l *Ledger, id int64) RecordState {
 	return RecordState(state)
 }
 
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestShadowPromoteRefusesARunningShadowOrAnExistingLedger(t *testing.T) {
 	ctx := context.Background()
 	t.Run("the shadow is running", func(t *testing.T) {
@@ -128,7 +129,7 @@ func TestShadowPromoteRefusesARunningShadowOrAnExistingLedger(t *testing.T) {
 // records as the fixture left them.
 func assertUntouchedShadow(t *testing.T, shadowDir string) {
 	t.Helper()
-	l, err := OpenLedgerReadOnly(filepath.Join(shadowDir, LedgerFile))
+	l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(shadowDir, LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	held, err := l.Held(context.Background())
@@ -174,7 +175,7 @@ func TestCrashHelper(t *testing.T) {
 
 func runKilled(t *testing.T, at string, env ...string) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestCrashHelper$", "-test.count=1")
+	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestCrashHelper$", "-test.count=1")
 	cmd.Env = append(append(os.Environ(), crashEnv+"="+at), env...)
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
@@ -187,6 +188,8 @@ func runKilled(t *testing.T, at string, env ...string) {
 // Invariant 7: a crash at any point of promote leaves either the untouched
 // shadow or a held ledger — never an unheld ledger at the normal path, never
 // two ledgers and never none — and promote run again finishes.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts processes")
@@ -220,7 +223,7 @@ func TestInvariant7PromoteSurvivesAKillAtEveryStep(t *testing.T) {
 
 func isHeld(t *testing.T, path string) bool {
 	t.Helper()
-	l, err := OpenLedgerReadOnly(path)
+	l, err := OpenLedgerReadOnly(context.Background(), path)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	held, err := l.Held(context.Background())
@@ -238,7 +241,7 @@ func assertHeld(t *testing.T, path string) {
 	require.True(t, held, "%s is held", path)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1), "the waiting record is held")
 	var untagged int
-	require.NoError(t, l.db.QueryRow(`SELECT COUNT(*) FROM events WHERE state NOT IN ('completed', 'discarded') AND review = 0`).Scan(&untagged))
+	require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE state NOT IN ('completed', 'discarded') AND review = 0`).Scan(&untagged))
 	assert.Zero(t, untagged, "every non-terminal record is tagged")
 }
 
@@ -280,6 +283,7 @@ func TestImportTombstonesDoneAndTagsTheRest(t *testing.T) {
 	assert.Equal(t, StateHeld, admitSeen(t, l, 5), "an unmapped record is tagged too")
 }
 
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
 	ctx := context.Background()
 	for name, entries := range map[string][]ReconciliationEntry{
@@ -296,7 +300,7 @@ func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
 			require.ErrorIs(t, err, ErrDecisionRefused)
 			assert.Equal(t, StateSeen, stateOf(t, l, 2), "nothing was applied")
 			var tagged int
-			require.NoError(t, l.db.QueryRow(`SELECT COUNT(*) FROM events WHERE review = 1`).Scan(&tagged))
+			require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE review = 1`).Scan(&tagged))
 			assert.Zero(t, tagged)
 		})
 	}
@@ -322,6 +326,8 @@ func TestParseReconciliationIsStrict(t *testing.T) {
 }
 
 // Invariant 7: an import killed mid-transaction applied nothing.
+//
+//nolint:contextcheck // subtests build their fixtures on background contexts
 func TestInvariant7ImportSurvivesAKillAtEveryStep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts processes")
@@ -344,7 +350,7 @@ func TestInvariant7ImportSurvivesAKillAtEveryStep(t *testing.T) {
 			assert.Equal(t, StateAdmitted, stateOf(t, l, 1))
 			assert.Equal(t, StateSeen, stateOf(t, l, 2))
 			var decisions int
-			require.NoError(t, l.db.QueryRow(`SELECT COUNT(*) FROM decisions`).Scan(&decisions))
+			require.NoError(t, l.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM decisions`).Scan(&decisions))
 			assert.Zero(t, decisions, fmt.Sprintf("killed at %s: nothing recorded", step))
 		})
 	}

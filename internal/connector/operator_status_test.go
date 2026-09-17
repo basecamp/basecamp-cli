@@ -34,9 +34,9 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	seenRecord(t, l, 5)
 	_, err = l.Admission().Commit(ctx, blockedVerdict(5, 0, "read_failed"))
 	require.NoError(t, err)
-	_, err = l.db.Exec(`UPDATE outbox SET state = 'sending', sending_at = ? WHERE event_id = 1`, stamp(time.Now()))
+	_, err = l.db.ExecContext(context.Background(), `UPDATE outbox SET state = 'sending', sending_at = ? WHERE event_id = 1`, stamp(time.Now()))
 	require.NoError(t, err)
-	_, err = l.db.Exec(`UPDATE outbox SET state = 'indeterminate', note = 'two candidates' WHERE event_id = 1`)
+	_, err = l.db.ExecContext(context.Background(), `UPDATE outbox SET state = 'indeterminate', note = 'two candidates' WHERE event_id = 1`)
 	require.NoError(t, err)
 	l.SetHooks(Hooks{})
 	opAdmit(t, l, 3, "recording:3")
@@ -51,7 +51,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = writer.Rollback() }()
 
-	reader, err := OpenLedgerReadOnly(path)
+	reader, err := OpenLedgerReadOnly(context.Background(), path)
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
 	s, err := reader.Status(ctx, nil)
@@ -89,7 +89,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 
 func TestOpenLedgerReadOnlyCreatesNothing(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
-	_, err := OpenLedgerReadOnly(filepath.Join(dir, LedgerFile))
+	_, err := OpenLedgerReadOnly(context.Background(), filepath.Join(dir, LedgerFile))
 	require.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Lstat(dir)
 	assert.ErrorIs(t, err, os.ErrNotExist)
@@ -97,9 +97,9 @@ func TestOpenLedgerReadOnlyCreatesNothing(t *testing.T) {
 	l, err := OpenLedger(filepath.Join(dir, LedgerFile))
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
-	reader, err := OpenLedgerReadOnly(filepath.Join(dir, LedgerFile))
+	reader, err := OpenLedgerReadOnly(context.Background(), filepath.Join(dir, LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = reader.Close() }()
-	_, err = reader.db.Exec(`DELETE FROM events`)
+	_, err = reader.db.ExecContext(context.Background(), `DELETE FROM events`)
 	assert.Error(t, err, "a read-only ledger refuses writes")
 }

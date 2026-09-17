@@ -24,6 +24,34 @@ load smoke_helper
   mark_out_of_scope "Reads the connector policy a connected profile's setup wrote — covered by Go tests in internal/commands"
 }
 
+@test "connect status is out of scope" {
+  mark_out_of_scope "Reads a local connector ledger the smoke account does not have — covered by Go tests in internal/commands and internal/connector"
+}
+
+@test "connect doctor is out of scope" {
+  mark_out_of_scope "Needs a set-up connector profile and starts its MCP server — covered by Go tests in internal/commands"
+}
+
+@test "connect redispatch is out of scope" {
+  mark_out_of_scope "Decides a record in a local connector ledger — covered by Go tests in internal/commands and internal/connector"
+}
+
+@test "connect discard is out of scope" {
+  mark_out_of_scope "Decides a record in a local connector ledger — covered by Go tests in internal/commands and internal/connector"
+}
+
+@test "connect release is out of scope" {
+  mark_out_of_scope "Clears the hold in a local connector ledger — covered by Go tests in internal/commands and internal/connector"
+}
+
+@test "connect shadow promote is out of scope" {
+  mark_out_of_scope "Moves a local shadow ledger — covered by Go tests, including a process killed at every step, in internal/connector"
+}
+
+@test "connect import is out of scope" {
+  mark_out_of_scope "Applies a reconciliation file to a local connector ledger — covered by Go tests in internal/commands and internal/connector"
+}
+
 @test "auth refresh is out of scope" {
   mark_out_of_scope "Requires OAuth credentials"
 }

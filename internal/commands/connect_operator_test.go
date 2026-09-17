@@ -161,7 +161,7 @@ func TestConnectRedispatchDiscardAndRelease(t *testing.T) {
 
 	dir, err := connectStatePath(f.file, false)
 	require.NoError(t, err)
-	l, err = connector.OpenLedgerReadOnly(filepath.Join(dir, connector.LedgerFile))
+	l, err = connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	held, err := l.Held(ctx)
@@ -209,7 +209,7 @@ func TestConnectShadowPromoteAndImport(t *testing.T) {
 
 	out, err = f.run(t, output.FormatJSON, "import", good)
 	require.NoError(t, err, out)
-	l, err := connector.OpenLedgerReadOnly(filepath.Join(dir, connector.LedgerFile))
+	l, err := connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	two, _, err := l.Get(context.Background(), 2)

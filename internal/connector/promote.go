@@ -107,7 +107,7 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 		}
 	}
 
-	ledger, err := OpenLedger(shadowPath)
+	ledger, err := OpenLedger(shadowPath) //nolint:contextcheck // OpenLedger migrates on its own context
 	if err != nil {
 		return PromoteResult{}, err
 	}
@@ -156,7 +156,7 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 
 	// Opened once more the normal way, which vets the file where it now is
 	// and puts it back in WAL mode, and read: the hold must stand.
-	moved, err := OpenLedger(statePath)
+	moved, err := OpenLedger(statePath) //nolint:contextcheck // OpenLedger migrates on its own context
 	if err != nil {
 		return PromoteResult{}, err
 	}
@@ -180,7 +180,7 @@ func promoted(ctx context.Context, statePath string) (PromoteResult, error) {
 		}
 		return PromoteResult{}, err
 	}
-	ledger, err := OpenLedgerReadOnly(statePath)
+	ledger, err := OpenLedgerReadOnly(ctx, statePath)
 	if err != nil {
 		return PromoteResult{}, err
 	}

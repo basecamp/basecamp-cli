@@ -125,7 +125,7 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 	if err != nil {
 		return []setup.Check{{Name: "Ledger", Status: setup.StatusFail, Message: errorMessage(err)}}
 	}
-	ledger, err := connector.OpenLedgerReadOnly(filepath.Join(dir, connector.LedgerFile))
+	ledger, err := connector.OpenLedgerReadOnly(ctx, filepath.Join(dir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return []setup.Check{{Name: "Ledger", Status: setup.StatusSkip, Message: "No ledger yet: the connector has not run"}}
 	}
@@ -177,8 +177,9 @@ func workerBinaries(file setup.File) []string {
 }
 
 func workerBinaryChecks(file setup.File) []setup.Check {
-	var checks []setup.Check
-	for _, bin := range workerBinaries(file) {
+	bins := workerBinaries(file)
+	checks := make([]setup.Check, 0, len(bins))
+	for _, bin := range bins {
 		c := setup.Check{Name: "Worker " + bin}
 		path, err := exec.LookPath(bin)
 		if err != nil {

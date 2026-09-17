@@ -17,7 +17,7 @@ import (
 // OpenLedger refuses it. A ledger an older binary wrote, which the running
 // connector has not yet migrated, is refused: its columns are not the ones
 // this build reads.
-func OpenLedgerReadOnly(path string) (*Ledger, error) {
+func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
 	}
@@ -39,7 +39,7 @@ func OpenLedgerReadOnly(path string) (*Ledger, error) {
 	}
 	db.SetMaxOpenConns(1)
 	l := &Ledger{db: db, now: time.Now}
-	version, err := l.SchemaVersion(context.Background())
+	version, err := l.SchemaVersion(ctx)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("connector: read the ledger's schema: %w", err)

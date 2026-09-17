@@ -38,7 +38,7 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	ctx, cancel := context.WithTimeout(ctx, mcpHandshakeTimeout)
 	defer cancel()
 
-	cmd := exec.Command(exe, args...) //nolint:gosec // this binary, with a validated profile name
+	cmd := exec.CommandContext(ctx, exe, args...) //nolint:gosec // this binary, with a validated profile name
 	cmd.Env = driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), connector.MCPServerEnv...), os.LookupEnv, nil)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	defer func() {

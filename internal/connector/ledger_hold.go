@@ -188,7 +188,7 @@ var operatorEdges = map[RecordState][]RecordState{
 }
 
 func operatorEdgesInto(target RecordState) []string {
-	var out []string
+	out := make([]string, 0, len(operatorEdges[target]))
 	for _, from := range operatorEdges[target] {
 		out = append(out, string(from))
 	}
