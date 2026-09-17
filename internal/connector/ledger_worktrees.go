@@ -34,13 +34,13 @@ CREATE TABLE worktrees (
   state                TEXT    NOT NULL
                        CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
   retained_reason      TEXT    NOT NULL DEFAULT ''
-                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified')),
+                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified', 'finished')),
   created_at           TEXT    NOT NULL,
   finished_at          TEXT,
   retained_at          TEXT,
   removed_at           TEXT,
   removed_by           TEXT    NOT NULL DEFAULT ''
-                       CHECK (removed_by IN ('', 'connector', 'prune', 'prune_forced', 'missing', 'never_created')),
+                       CHECK (removed_by IN ('', 'prune', 'prune_forced', 'missing', 'never_created')),
   CHECK (state <> 'retained' OR retained_reason <> ''),
   CHECK ((state = 'removed') = (removed_by <> ''))
 );
@@ -89,13 +89,18 @@ const (
 	// RetainedMoved is a worktree that is no longer where the ledger says:
 	// someone moved it, and its files are theirs to deal with.
 	RetainedMoved RetainedReason = "moved"
+	// RetainedFinished is a worktree whose task ended. Nothing the connector
+	// does removes a worktree, so this is why most kept worktrees are kept:
+	// the work is done with, and an operator says when it goes.
+	RetainedFinished RetainedReason = "finished"
 )
 
 // RemovedBy is who removed a worktree.
 type RemovedBy string
 
 const (
-	RemovedByConnector   RemovedBy = "connector"
+	// There is no connector: nothing the connector does of its own accord
+	// removes a worktree.
 	RemovedByPrune       RemovedBy = "prune"
 	RemovedByPruneForced RemovedBy = "prune_forced"
 	RemovedMissing       RemovedBy = "missing"

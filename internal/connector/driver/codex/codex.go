@@ -638,19 +638,22 @@ func (s *session) read() {
 		s.ended = true
 		t := s.turn
 		s.mu.Unlock()
-		if t != nil {
-			s.mu.Lock()
-			canceled := t.canceled
-			s.mu.Unlock()
-			// Whatever ended the turn, a refusal Codex only logged is read
-			// before the session is done: a cancel is where they would
-			// otherwise be lost. Its stderr is whole only once the process
-			// is gone, which closing its stdout does not say.
+		// Whatever ended the turn, and whether or not one is still in flight,
+		// a refusal Codex only logged is read before the session is done: a
+		// cancel, which finishes its turn early, is where they would
+		// otherwise be lost. The stderr is whole only once the process is
+		// gone, which closing its stdout does not say.
+		if s.worker != nil {
 			select {
 			case <-s.worker.Done():
 			case <-time.After(s.grace):
 			}
-			s.stderrRefusals()
+		}
+		s.stderrRefusals()
+		if t != nil {
+			s.mu.Lock()
+			canceled := t.canceled
+			s.mu.Unlock()
 			refusals := s.refusalsOf(t)
 			switch {
 			case canceled:

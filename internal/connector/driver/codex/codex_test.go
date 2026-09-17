@@ -998,6 +998,35 @@ func TestARefusalLoggedAfterTheOutputEndsIsStillRecorded(t *testing.T) {
 	assert.Len(t, result.Refusals, 1)
 }
 
+// A refusal Codex logged is recorded even when the turn it belonged to has
+// already ended: the reader reads the stderr of a worker that is gone, with
+// no turn left to hang it on.
+func TestARefusalIsRecordedEvenWithNoTurnLeft(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Deaf:        true,
+		Hang:        true,
+		Events:      []string{`{"type":"turn.started"}`},
+		Stderr:      "patch rejected: writing outside of the project; rejected by user approval settings",
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	// A worker that never reads its input: the prompt's write blocks, and the
+	// cancel that closes its stdin ends the turn from the write's side, not
+	// the reader's.
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("Event 1. ", 200_000)) }()
+	waitDeaf(t, h)
+	require.Eventually(t, func() bool { return strings.Contains(s.(*session).StderrTail(), "rejected") }, 10*time.Second, 20*time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	require.NoError(t, s.Close())
+	waitDone(t, s)
+
+	assert.Len(t, recorder.Recorded(), 1, "the refusal is recorded, turn or no turn")
+}
+
 // A canceled turn records what Codex logged before it went.
 func TestACanceledTurnRecordsItsRefusals(t *testing.T) {
 	recorder := &drivertest.Refusals{}

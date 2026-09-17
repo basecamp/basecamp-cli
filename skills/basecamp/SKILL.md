@@ -1457,8 +1457,8 @@ basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<di
 basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
 basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
 basecamp connect setup -P agent --worker codex --worktrees  # Run workers with Codex instead of Claude Code, and give each task its own git worktree
-basecamp connect worktrees list -P agent --json    # The worktrees the connector kept because they hold work, with why (dirty, unpushed, locked, moved, unverified)
-basecamp connect worktrees prune -P agent          # Remove the kept worktrees that no longer hold work; --force <path> removes one that does (every commit it reaches is kept under refs/basecamp-connect/retained/, not branches)
+basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk and why it is kept (finished, dirty, unpushed, locked, moved, unverified)
+basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (every commit it reaches is kept under refs/basecamp-connect/retained/, not branches)
 ```
 
 `basecamp connect` runs until it is stopped: it is not a command to call for an
@@ -1470,10 +1470,11 @@ refuses a second connector for the same agent, and takes `--project` (repeatable
 to hear and dispatch only those projects. Run it under a supervisor rather than
 from a session you will close.
 
-With worktrees on, a task's worktree is removed when the task ends only if
-nothing in it could be lost; the rest are kept and listed by `connect worktrees
-list`. Pruning is the operator's call: never pass `--force` for a path the
-operator did not name. A Codex worker cannot commit (its sandbox cannot write the
+With worktrees on, a task's worktree is kept when the task ends — the connector
+removes none of its own accord — and listed by `connect worktrees list` with its
+size. Removing them is the operator's call: `connect worktrees prune` removes
+those that hold no work, and never pass `--force` for a path the operator did not
+name. A Codex worker cannot commit (its sandbox cannot write the
 worktree's git data), so with Codex every task that edits files leaves a kept
 worktree.
 

@@ -28,15 +28,16 @@ func newConnectWorktreesCmd() *cobra.Command {
 		Use:   "worktrees",
 		Short: "List and prune the git worktrees the connector kept",
 		Long: `With worktrees on (connect setup --worktrees), each task works in a git
-worktree of its own, on a basecamp-connect/ branch. When the task ends the
-worktree is removed only if nothing in it could be lost: nothing on its disk
-but the files git tracks, unchanged, no merge or rebase in progress, not
-locked, and every commit it reaches pushed or merged. Otherwise it is kept,
-and listed here.
+worktree of its own, on a basecamp-connect/ branch. The connector never
+removes one: when the task ends its worktree is kept and listed here, with
+the task it was for and what it takes up on disk. You remove them with prune,
+which goes by what could be lost — nothing on the disk but the files git
+tracks, unchanged, no merge or rebase in progress, not locked, and every
+commit it reaches held elsewhere — and keeps what could.
 
 A Codex worker cannot commit — a worktree's git data is outside the directory
 its sandbox may write — so with Codex every task that edits anything leaves a
-kept worktree for you.`,
+worktree with work in it.`,
 	}
 	cmd.AddCommand(newConnectWorktreesListCmd(), newConnectWorktreesPruneCmd())
 	return cmd
@@ -47,9 +48,12 @@ func newConnectWorktreesListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List the worktrees kept for you to deal with",
-		Long: `List the worktrees the connector kept, with why: dirty (uncommitted work),
-unpushed (commits nothing else holds), locked, moved (no longer where the
-connector left it), or unverified (their state could not be read).`,
+		Long: `List the worktrees the connector kept, with the task each was for, its size
+on disk, and why it is kept: finished (its task ended — the connector removes
+no worktree of its own accord), dirty (uncommitted work), unpushed (commits
+nothing else holds), locked, moved (no longer where the connector left it),
+or unverified (their state could not be read). A prune says which of these a
+worktree turns out to be.`,
 		Example: `  basecamp connect worktrees list -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -82,9 +86,10 @@ func newConnectWorktreesPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Remove the kept worktrees you have dealt with",
-		Long: `Remove every kept worktree that no longer holds work: now clean, with its
-commits pushed or merged, or whose directory you removed yourself. A worktree
-that still holds work is kept and listed with why.
+		Long: `Remove every kept worktree that holds no work: clean, with every commit it
+reaches held elsewhere, or whose directory you removed yourself. This is the
+only thing that removes a worktree. One that still holds work is kept and
+listed with why.
 
 --force <path> removes that worktree even with work in it; name each one.
 Every commit it reaches that nothing else holds is first kept under
@@ -137,8 +142,11 @@ running are never touched.`,
 
 // worktreeView is a kept worktree as the commands show it.
 type worktreeView struct {
-	Path       string `json:"path"`
-	State      string `json:"state"`
+	Path  string `json:"path"`
+	State string `json:"state"`
+	// SizeBytes is what the worktree takes up on disk, so an operator can
+	// see what reclaiming it is worth; -1 when it could not be read.
+	SizeBytes  int64  `json:"size_bytes"`
 	WorkDir    string `json:"work_dir"`
 	Branch     string `json:"branch"`
 	Route      string `json:"route"`
@@ -155,10 +163,45 @@ type pruneView struct {
 	RetainedRefs []string `json:"retained_refs,omitempty"`
 }
 
+// sizeLimit bounds how long reading a worktree's size may take: a listing is
+// not worth holding for a tree that cannot be walked.
+const sizeLimit = 5 * time.Second
+
+// dirSize is what a directory takes up, in bytes, following no symlink; -1
+// when it cannot be read in time or at all.
+func dirSize(path string) int64 {
+	deadline := time.Now().Add(sizeLimit)
+	var total int64
+	err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return errors.New("the worktree could not be read in time")
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return -1
+	}
+	return total
+}
+
 func viewWorktree(w connector.Worktree) worktreeView {
 	v := worktreeView{
-		Path: w.Path, State: string(w.State), WorkDir: w.WorkDir, Branch: w.Branch, Route: w.Route,
-		Reason: string(w.RetainedReason), EventID: w.OriginatingEventID, TaskID: w.TaskID,
+		Path: w.Path, State: string(w.State), SizeBytes: dirSize(w.Path), WorkDir: w.WorkDir,
+		Branch: w.Branch, Route: w.Route, Reason: string(w.RetainedReason),
+		EventID: w.OriginatingEventID, TaskID: w.TaskID,
 	}
 	if !w.RetainedAt.IsZero() {
 		v.RetainedAt = w.RetainedAt.UTC().Format(time.RFC3339)

@@ -119,6 +119,16 @@ func (h *worktreeHarness) row(workDir string) Worktree {
 	return Worktree{}
 }
 
+// discard is what an operator does: the task ends (which only ever keeps the
+// worktree), then `worktrees prune` judges it and removes what holds nothing.
+func (h *worktreeHarness) discard(workDir string) Worktree {
+	h.t.Helper()
+	require.NoError(h.t, h.wt.Finish(context.Background(), filepath.Join(h.repo, "app"), workDir))
+	_, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(h.t, err)
+	return h.row(workDir)
+}
+
 func (h *worktreeHarness) finish(workDir string) Worktree {
 	h.t.Helper()
 	require.NoError(h.t, h.wt.Finish(context.Background(), filepath.Join(h.repo, "app"), workDir))
@@ -148,13 +158,21 @@ func TestPrepareMakesAWorktreeOnATaskBranchOutsideTheCheckout(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }
 
-// Invariant 1: a worktree with nothing to lose is removed, with its branch.
-func TestAWorktreeWithNothingToLoseIsRemoved(t *testing.T) {
+// Invariant 1: a task's end keeps its worktree, whatever is in it; the
+// operator's prune is what removes one with nothing to lose, with its branch.
+func TestATasksEndKeepsItsWorktreeAndAPruneRemovesIt(t *testing.T) {
 	h := newWorktreeHarness(t)
 	workDir, _ := h.prepare(1)
-	row := h.finish(workDir)
+
+	kept := h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, kept.State)
+	assert.Equal(t, RetainedFinished, kept.RetainedReason)
+	assert.True(t, exists(kept.Path), "the worktree is still there")
+	assert.True(t, h.branchExists(kept.Branch), "and so is its branch")
+
+	row := h.discard(workDir)
 	assert.Equal(t, WorktreeRemoved, row.State)
-	assert.Equal(t, RemovedByConnector, row.RemovedBy)
+	assert.Equal(t, RemovedByPrune, row.RemovedBy)
 	assert.False(t, exists(row.Path))
 	assert.False(t, h.branchExists(row.Branch))
 }
@@ -195,6 +213,10 @@ func TestUncommittedWorkSurvivesTheTaskAndIsRetained(t *testing.T) {
 			change(h, workDir)
 			row := h.finish(workDir)
 			assert.Equal(t, WorktreeRetained, row.State)
+			assert.Equal(t, RetainedFinished, row.RetainedReason)
+			// And an operator's prune keeps it too, now saying what is in it.
+			row = h.discard(workDir)
+			assert.Equal(t, WorktreeRetained, row.State)
 			assert.Equal(t, RetainedDirty, row.RetainedReason)
 			assert.True(t, exists(workDir))
 			assert.True(t, h.branchExists(row.Branch))
@@ -220,7 +242,7 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 		h := newWorktreeHarness(t)
 		workDir, _ := h.prepare(3)
 		commit(h, workDir, "work.txt")
-		row := h.finish(workDir)
+		row := h.discard(workDir)
 		assert.Equal(t, RetainedUnpushed, row.RetainedReason)
 		assert.True(t, exists(workDir))
 	})
@@ -229,7 +251,7 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 		workDir, row := h.prepare(4)
 		commit(h, workDir, "work.txt")
 		h.git(workDir, "push", "-q", "origin", row.Branch)
-		row = h.finish(workDir)
+		row = h.discard(workDir)
 		assert.Equal(t, WorktreeRemoved, row.State)
 		assert.False(t, h.branchExists(row.Branch))
 	})
@@ -238,7 +260,7 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 		workDir, row := h.prepare(5)
 		commit(h, workDir, "work.txt")
 		h.git(h.repo, "merge", "-q", "--ff-only", row.Branch)
-		row = h.finish(workDir)
+		row = h.discard(workDir)
 		assert.Equal(t, WorktreeRemoved, row.State)
 	})
 	t.Run("held only by another task's branch", func(t *testing.T) {
@@ -246,7 +268,7 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 		workDir, _ := h.prepare(6)
 		sha := commit(h, workDir, "work.txt")
 		h.git(h.repo, "branch", BranchPrefix+"99-other", sha)
-		row := h.finish(workDir)
+		row := h.discard(workDir)
 		assert.Equal(t, RetainedUnpushed, row.RetainedReason)
 	})
 	t.Run("detached away from an unpushed branch", func(t *testing.T) {
@@ -254,7 +276,7 @@ func TestCommitsAreKeptUntilHeldElsewhere(t *testing.T) {
 		workDir, row := h.prepare(7)
 		commit(h, workDir, "work.txt")
 		h.git(workDir, "checkout", "-q", "--detach", row.BaseCommit)
-		row = h.finish(workDir)
+		row = h.discard(workDir)
 		assert.Equal(t, RetainedUnpushed, row.RetainedReason, "the task branch's commits count, wherever HEAD is")
 	})
 }
@@ -263,7 +285,7 @@ func TestALockedWorktreeIsRetained(t *testing.T) {
 	h := newWorktreeHarness(t)
 	workDir, row := h.prepare(8)
 	h.git(h.repo, "worktree", "lock", row.Path)
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, RetainedLocked, row.RetainedReason)
 	assert.True(t, exists(workDir))
 }
@@ -285,7 +307,7 @@ func TestAFailedCheckRetains(t *testing.T) {
 	h := newWorktreeHarness(t)
 	workDir, _ := h.prepare(9)
 	h.wt = h.worktrees(fakeGit(t, `for a in "$@"; do [ "$a" = status ] && exit 128; done`))
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.Equal(t, RetainedUnverified, row.RetainedReason)
 	assert.True(t, exists(workDir))
@@ -305,7 +327,7 @@ func TestABranchThatMovedIsNotDeleted(t *testing.T) {
 	h.git(other, "commit", "-q", "-m", "moved")
 	moved := h.git(other, "rev-parse", "HEAD")
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/`+row.Branch+` `+moved+`;; esac`))
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	// The judgment no longer stands, so the worktree is kept with it.
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.Equal(t, moved, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
@@ -337,7 +359,7 @@ func TestWorkInASubmodulesDirectoryIsRetained(t *testing.T) {
 
 	workDir, _ := h.prepare(14)
 	h.write(workDir, "vendor/notes.txt", "notes\n")
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	assert.Equal(t, RetainedDirty, row.RetainedReason)
 	assert.True(t, exists(filepath.Join(workDir, "vendor", "notes.txt")))
 }
@@ -351,7 +373,7 @@ func TestACommitOnlyTheReflogReachesIsRetained(t *testing.T) {
 	h.git(workDir, "add", "c.txt")
 	h.git(workDir, "commit", "-q", "-m", "moved away from")
 	h.git(workDir, "checkout", "-q", row.Branch)
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, RetainedUnpushed, row.RetainedReason)
 }
 
@@ -399,7 +421,7 @@ func TestAFilterOnTheTaskBranchDoesNotRunAtRemoval(t *testing.T) {
 	// A racy index entry makes status read the file through its clean filter.
 	require.NoError(t, os.Chtimes(filepath.Join(workDir, "data.txt"), time.Now().Add(time.Hour), time.Now().Add(time.Hour)))
 
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	assert.False(t, exists(marker), "no filter ran")
 	assert.Equal(t, WorktreeRemoved, row.State)
 }
@@ -418,7 +440,7 @@ func TestARequiredFilterDoesNotBreakTheCheckout(t *testing.T) {
 	workDir, row := h.prepare(97)
 	assert.Equal(t, WorktreeLive, row.State)
 	assert.FileExists(t, filepath.Join(workDir, "blob.bin"))
-	assert.Equal(t, WorktreeRemoved, h.finish(workDir).State)
+	assert.Equal(t, WorktreeRemoved, h.discard(workDir).State)
 }
 
 // submoduleHarness is a worktree harness whose repository has a submodule at
@@ -454,7 +476,7 @@ func TestAFilterPlantedInASubmoduleDoesNotRun(t *testing.T) {
 	h.git(vendor, "config", "filter.probe.clean", "touch "+marker+"; cat")
 	require.NoError(t, os.Chtimes(filepath.Join(vendor, "lib.txt"), time.Now().Add(time.Hour), time.Now().Add(time.Hour)))
 
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	assert.False(t, exists(marker), "no filter ran")
 	assert.Equal(t, RetainedDirty, row.RetainedReason)
 }
@@ -470,7 +492,7 @@ func TestAForcedPruneKeepsASubmodulesCommits(t *testing.T) {
 	h.git(vendor, "add", ".")
 	h.git(vendor, "commit", "-q", "-m", "only copy")
 	subGitDir := h.git(vendor, "rev-parse", "--absolute-git-dir")
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 
 	results, err := h.wt.Prune(context.Background(), []string{row.Path})
 	require.NoError(t, err)
@@ -482,7 +504,10 @@ func TestAForcedPruneKeepsASubmodulesCommits(t *testing.T) {
 
 // A checkout that never happened leaves nothing kept: an empty worktree is
 // not work, and keeping it as dirty at every retry would fill the disk.
-func TestAnUnpopulatedWorktreeIsNotKept(t *testing.T) {
+// A checkout that never happened is still not the connector's to delete: the
+// row is kept, and the operator's prune removes it as a worktree holding
+// nothing.
+func TestAnUnpopulatedWorktreeIsKeptUntilAPrune(t *testing.T) {
 	h := newWorktreeHarness(t)
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"reset --quiet --hard"*) exit 128;; esac`))
 	_, err := h.wt.Prepare(context.Background(), filepath.Join(h.repo, "app"), 100)
@@ -490,7 +515,14 @@ func TestAnUnpopulatedWorktreeIsNotKept(t *testing.T) {
 	rows, err := h.ledger.Worktrees(context.Background())
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, WorktreeRemoved, rows[0].State)
+	assert.Equal(t, WorktreeRetained, rows[0].State)
+	assert.True(t, exists(rows[0].Path))
+
+	h.wt = h.worktrees("")
+	results, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneRemoved, results[0].Action)
 	assert.False(t, exists(rows[0].Path))
 	assert.False(t, h.branchExists(rows[0].Branch))
 }
@@ -509,7 +541,7 @@ func TestAMissingWorktreesRepositoryRecordIsLeftAlone(t *testing.T) {
 	subGitDir := h.git(vendor, "rev-parse", "--absolute-git-dir")
 	require.NoError(t, os.RemoveAll(row.Path))
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, row.State, "a record holding a submodule's commits keeps the row")
 	assert.DirExists(t, row.AdminDir)
 	assert.DirExists(t, subGitDir, "the submodule's only commits survive")
@@ -524,7 +556,7 @@ func TestAMovedWorktreeIsKept(t *testing.T) {
 	h.git(h.repo, "worktree", "move", row.Path, moved)
 	require.False(t, exists(workDir))
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.Equal(t, RetainedMoved, row.RetainedReason)
 	assert.True(t, h.branchExists(row.Branch), "the branch the moved worktree has checked out")
@@ -541,7 +573,7 @@ func TestAMovedWorktreeWithNoBranchIsKept(t *testing.T) {
 	moved := filepath.Join(t.TempDir(), "moved")
 	h.git(h.repo, "worktree", "move", row.Path, moved)
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.FileExists(t, filepath.Join(moved, "app", "README"))
 }
@@ -554,7 +586,7 @@ func TestAMovedWorktreeThatIsThenDeletedIsGone(t *testing.T) {
 	h.git(h.repo, "worktree", "move", row.Path, moved)
 	require.NoError(t, os.RemoveAll(moved))
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, WorktreeRemoved, row.State)
 	assert.Equal(t, RemovedMissing, row.RemovedBy)
 }
@@ -679,7 +711,8 @@ func TestWorktreesOffStillRecoversWhatWasMade(t *testing.T) {
 	require.NoError(t, off.Finish(ctx, route, route))
 
 	require.NoError(t, off.Recover(ctx))
-	assert.Equal(t, RetainedDirty, h.row(workDir).RetainedReason)
+	assert.Equal(t, RetainedFinished, h.row(workDir).RetainedReason)
+	assert.True(t, exists(filepath.Join(workDir, "wip.txt")), "the work is where it was")
 }
 
 // Invariant 6: a content filter the repository's configuration defines does
@@ -696,7 +729,7 @@ func TestConfiguredContentFiltersDoNotRun(t *testing.T) {
 
 	workDir, _ := h.prepare(13)
 	h.write(workDir, "data.txt", "changed\n")
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	assert.Equal(t, RetainedDirty, row.RetainedReason)
 	entries, err := os.ReadDir(markers)
 	require.NoError(t, err)
@@ -718,7 +751,7 @@ func TestRecoverSettlesWhatACrashLeft(t *testing.T) {
 	// Crashed between git and live, with work in it.
 	dirtyDir, dirty := h.prepare(21)
 	h.write(dirtyDir, "wip.txt", "wip\n")
-	// Crashed mid-removal of a clean one.
+	// Crashed mid-removal of a clean one (its names were not frozen).
 	cleanDir, clean := h.prepare(22)
 	require.NoError(t, h.ledger.MoveWorktree(ctx, clean.ID, WorktreeRemoving, WorktreeLive))
 	// A live task still works in this one.
@@ -735,11 +768,13 @@ func TestRecoverSettlesWhatACrashLeft(t *testing.T) {
 	for _, r := range rows {
 		byID[r.ID] = r
 	}
+	// Nothing on disk to keep: the row is reconciled, nothing is deleted.
 	assert.Equal(t, RemovedNeverCreated, byID[neverID].RemovedBy)
-	assert.Equal(t, RetainedDirty, byID[dirty.ID].RetainedReason)
+	// Everything that is on disk is kept, whatever is in it.
+	assert.Equal(t, RetainedFinished, byID[dirty.ID].RetainedReason)
 	assert.True(t, exists(filepath.Join(dirtyDir, "wip.txt")))
-	assert.Equal(t, WorktreeRemoved, byID[clean.ID].State)
-	assert.False(t, exists(cleanDir))
+	assert.Equal(t, WorktreeRetained, byID[clean.ID].State)
+	assert.True(t, exists(cleanDir), "a clean worktree a crash left is kept too")
 	assert.Equal(t, WorktreeLive, h.row(liveDir).State)
 }
 
@@ -841,7 +876,7 @@ func TestAForcedPruneKeepsADetachedHeadsCommit(t *testing.T) {
 	h.git(workDir, "add", "c.txt")
 	h.git(workDir, "commit", "-q", "-m", "detached")
 	commit := h.git(workDir, "rev-parse", "HEAD")
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	require.Equal(t, RetainedUnpushed, row.RetainedReason)
 
 	results, err := h.wt.Prune(context.Background(), []string{row.Path})
@@ -886,7 +921,7 @@ func TestADispatchedTasksUncommittedWorkIsRetained(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, retained, 2)
 	for _, r := range retained {
-		assert.Equal(t, RetainedDirty, r.RetainedReason)
+		assert.Equal(t, RetainedFinished, r.RetainedReason)
 		assert.NotZero(t, r.TaskID)
 		content, err := os.ReadFile(filepath.Join(r.WorkDir, "answer.txt"))
 		require.NoError(t, err)
@@ -935,7 +970,7 @@ func TestAMovedWorktreeIsFoundWithRelativePaths(t *testing.T) {
 	moved := filepath.Join(t.TempDir(), "moved")
 	h.git(h.repo, "worktree", "move", row.Path, moved)
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, RetainedMoved, row.RetainedReason)
 	assert.True(t, h.branchExists(row.Branch))
 	assert.FileExists(t, filepath.Join(moved, "app", "README"))
@@ -948,7 +983,7 @@ func TestAMovedWorktreeIsNotForced(t *testing.T) {
 	workDir, row := h.prepare(93)
 	moved := filepath.Join(t.TempDir(), "moved")
 	h.git(h.repo, "worktree", "move", row.Path, moved)
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	require.Equal(t, RetainedMoved, row.RetainedReason)
 
 	results, err := h.wt.Prune(context.Background(), []string{row.Path})
@@ -980,16 +1015,18 @@ func TestARemovalTheLedgerCouldNotRecordIsNotReportedKept(t *testing.T) {
 	h := newWorktreeHarness(t)
 	ctx := context.Background()
 	workDir, _ := h.prepare(104)
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
 	_, err := h.ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_removed BEFORE UPDATE OF state ON worktrees
 WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses'); END`)
 	require.NoError(t, err)
 
-	err = h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir)
-	require.Error(t, err)
+	results, err := h.wt.Prune(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneRemoved, results[0].Action, "gone is not reported kept")
 	row := h.row(workDir)
 	assert.Equal(t, WorktreeRemoving, row.State)
 	assert.False(t, exists(row.Path))
-
 }
 
 // A missing worktree whose record in the repository still reaches a commit
@@ -1005,7 +1042,7 @@ func TestAMissingWorktreeWhoseRecordHoldsACommitIsKept(t *testing.T) {
 	h.git(workDir, "checkout", "-q", row.Branch)
 	require.NoError(t, os.RemoveAll(row.Path))
 
-	row = h.finish(workDir)
+	row = h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, row.State)
 	assert.DirExists(t, row.AdminDir)
 }
@@ -1016,7 +1053,7 @@ func TestAForcedRemovalTheLedgerCouldNotRecordIsReportedForced(t *testing.T) {
 	ctx := context.Background()
 	workDir, _ := h.prepare(106)
 	h.write(workDir, "wip.txt", "wip\n")
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	require.Equal(t, RetainedDirty, row.RetainedReason)
 	_, err := h.ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_removed BEFORE UPDATE OF state ON worktrees
 WHEN NEW.state = 'removed' BEGIN SELECT RAISE(ABORT, 'test: the ledger refuses'); END`)
@@ -1126,9 +1163,10 @@ func TestTheWorktreeRule(t *testing.T) {
 			if tc.frozen != nil {
 				h.wt.whileFrozen = func(dir string) error { tc.frozen(t, h, dir, row); return nil }
 			}
+			// The task's end only ever keeps the worktree; the rule is what
+			// the operator's prune goes by.
 			var after Worktree
 			if tc.force {
-				// A force is prune's: the worktree is retained first.
 				h.wt.whileFrozen = nil
 				require.Equal(t, WorktreeRetained, h.finish(workDir).State)
 				results, err := h.wt.Prune(ctx, []string{row.Path})
@@ -1136,7 +1174,8 @@ func TestTheWorktreeRule(t *testing.T) {
 				require.Len(t, results, 1)
 				after = h.row(workDir)
 			} else {
-				after = h.finish(workDir)
+				require.Equal(t, WorktreeRetained, h.finish(workDir).State, "a task's end keeps its worktree")
+				after = h.discard(workDir)
 			}
 			assert.Equal(t, tc.want, after.State)
 			if tc.reason != "" {
@@ -1171,8 +1210,12 @@ func TestACrashWhileFrozenIsRestoredOnTheNextStart(t *testing.T) {
 	ctx := context.Background()
 	workDir, row := h.prepare(301)
 	h.write(workDir, "wip.txt", "wip\n")
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	// The crash happens inside an operator's prune, the only thing that
+	// freezes a worktree.
 	h.wt.whileFrozen = func(string) error { return errors.New("crash") }
-	require.Error(t, h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir))
+	_, err := h.wt.Prune(ctx, nil)
+	require.NoError(t, err)
 	require.DirExists(t, frozenName(row.Path))
 	require.Equal(t, WorktreeRemoving, h.row(workDir).State)
 
@@ -1180,7 +1223,7 @@ func TestACrashWhileFrozenIsRestoredOnTheNextStart(t *testing.T) {
 	require.NoError(t, h.wt.Recover(ctx))
 	after := h.row(workDir)
 	assert.Equal(t, WorktreeRetained, after.State)
-	assert.Equal(t, RetainedDirty, after.RetainedReason)
+	assert.Equal(t, RetainedFinished, after.RetainedReason)
 	assert.FileExists(t, filepath.Join(workDir, "wip.txt"))
 	assert.DirExists(t, row.AdminDir)
 	assert.NoDirExists(t, frozenName(row.Path))
@@ -1195,14 +1238,16 @@ func TestACrashWhileFrozenWithoutAStoredRecordIsRestored(t *testing.T) {
 	_, err := h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET admin_dir = '' WHERE id = ?`, row.ID)
 	require.NoError(t, err)
 	h.write(workDir, "wip.txt", "wip\n")
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
 	h.wt.whileFrozen = func(string) error { return errors.New("crash") }
-	require.Error(t, h.wt.Finish(ctx, filepath.Join(h.repo, "app"), workDir))
+	_, err = h.wt.Prune(ctx, nil)
+	require.NoError(t, err)
 	require.NotEmpty(t, h.row(workDir).AdminDir, "stored before the freeze")
 
 	h.wt.whileFrozen = nil
 	require.NoError(t, h.wt.Recover(ctx))
 	after := h.row(workDir)
-	assert.Equal(t, RetainedDirty, after.RetainedReason)
+	assert.Equal(t, RetainedFinished, after.RetainedReason)
 	assert.DirExists(t, row.AdminDir)
 	assert.NoFileExists(t, filepath.Join(row.AdminDir, "locked"), "the connector's lock goes with the freeze")
 }
@@ -1225,12 +1270,78 @@ func TestSignatureVerificationDoesNotRun(t *testing.T) {
 	signed := h.git(workDir, "hash-object", "-t", "commit", "-w", obj)
 	h.git(workDir, "reset", "-q", "--soft", signed)
 
-	h.finish(workDir)
+	h.discard(workDir)
 	assert.NoFileExists(t, marker, "no signature program ran")
 }
 
 // Invariant 4: a task branch is deleted in one ref transaction with a check
 // that its holder has not moved; a holder moved in between keeps the branch.
+// What holds a worktree's commits while it is being deleted is the
+// connector's own refs, not someone else's: a branch deleted between the
+// transaction and the deletion takes nothing with it.
+func TestAHolderThatGoesWhileTheRemovalRunsTakesNothingWithIt(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(310)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "checkout", "-q", row.Branch)
+	// Only this branch holds that commit, and it goes the moment the
+	// removal's transaction is through — while the directory and the record
+	// are being deleted.
+	h.git(h.repo, "branch", "keeper", sha)
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" "$@"; rc=$?; "$REAL" -C "`+h.repo+`" branch -D keeper >/dev/null 2>&1; exit $rc;; esac`))
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRemoved, after.State)
+	assert.False(t, exists(row.Path))
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run())
+	refs := h.git(h.repo, "for-each-ref", "--contains", sha, "--format=%(refname)")
+	assert.Contains(t, refs, RetainedRefPrefix, "the commit is still held by a ref of the connector's own")
+}
+
+// A repository that keeps no reflogs tells the rule nothing about what a
+// worktree reached: what cannot be read is not judged clean.
+func TestAWorktreeWithNoReflogIsNotJudgedClean(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.git(h.repo, "config", "core.logAllRefUpdates", "false")
+	workDir, row := h.prepare(308)
+	// The commit only the reflog would reach, in a repository that keeps
+	// none: the worktree and its branch are all that hold it.
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "checkout", "-q", row.Branch)
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnverified, after.RetainedReason)
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run(), "the commit is still there")
+}
+
+// A commit only the record's ORIG_HEAD reaches goes with the record: it is
+// judged like any other commit the worktree reaches.
+func TestACommitOnlyOrigHeadReachesIsKept(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(309)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "reset", "-q", "--hard", row.BaseCommit)
+	h.git(workDir, "reflog", "expire", "--expire=now", "--all")
+	require.Equal(t, sha, h.git(workDir, "rev-parse", "ORIG_HEAD"))
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnpushed, after.RetainedReason)
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run(), "the commit is still there")
+}
+
 // The judgment leans on every ref that holds a commit the worktree reaches,
 // not only the one holding its branch tip: a holder that moves between the
 // check and the removal keeps the worktree, commit and all.
@@ -1249,10 +1360,34 @@ func TestAHolderOffTheBranchTipMustNotMoveEither(t *testing.T) {
 	// Just before the removal's transaction, keeper is moved off it.
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/heads/keeper `+row.BaseCommit+`;; esac`))
 
-	after := h.finish(workDir)
+	after := h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, after.State, "the judgment no longer stands")
 	assert.True(t, exists(workDir), "the worktree is still there")
 	assert.Equal(t, off, h.git(workDir, "rev-parse", "HEAD@{1}"), "and the commit with it")
+}
+
+// The commit a worktree was made from is judged like any other: the route's
+// branch usually holds it, but a route reset since is not evidence that it
+// does, and the task branch is then the only thing reaching it.
+func TestTheBaseCommitIsNotAssumedHeld(t *testing.T) {
+	h := newWorktreeHarness(t)
+	// A commit on the route's branch that was never pushed, and the worktree
+	// made from it.
+	h.write(h.repo, "app/base.txt", "base\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "base")
+	base := h.git(h.repo, "rev-parse", "HEAD")
+	workDir, row := h.prepare(307)
+	require.Equal(t, base, row.BaseCommit)
+	// The route's branch is reset away: nothing but the task branch reaches
+	// that commit any more.
+	h.git(h.repo, "reset", "-q", "--hard", "HEAD~1")
+
+	after := h.discard(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.Equal(t, RetainedUnpushed, after.RetainedReason)
+	assert.True(t, h.branchExists(row.Branch), "the branch reaching the commit is kept")
+	assert.Equal(t, base, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
 }
 
 // A record a removal left behind after the branch its HEAD names was deleted:
@@ -1266,7 +1401,7 @@ func TestARecordWhoseHeadResolvesToNothingIsStillJudged(t *testing.T) {
 	require.NoError(t, os.RemoveAll(row.Path))
 	h.git(h.repo, "update-ref", "-d", "refs/heads/"+row.Branch)
 
-	after := h.finish(workDir)
+	after := h.discard(workDir)
 	assert.Equal(t, WorktreeRemoved, after.State)
 	assert.Equal(t, RemovedMissing, after.RemovedBy)
 }
@@ -1281,7 +1416,7 @@ func TestABranchWhoseHolderMovedIsNotDeleted(t *testing.T) {
 	// Just before the transaction, the only holder, the remote-tracking ref,
 	// is reset away.
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"update-ref --stdin"*) "$REAL" -C "`+h.repo+`" update-ref refs/remotes/origin/`+row.Branch+` `+row.BaseCommit+`;; esac`))
-	after := h.finish(workDir)
+	after := h.discard(workDir)
 	// Nothing holds the commit any more: the worktree and its branch stay.
 	assert.Equal(t, WorktreeRetained, after.State)
 	assert.True(t, h.branchExists(row.Branch), "the branch holding the commit alone is kept")
@@ -1303,7 +1438,7 @@ func TestARepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {
 	h.git(nested, "commit", "-q", "-m", "only copy")
 	commit := h.git(nested, "rev-parse", "HEAD")
 
-	row := h.finish(workDir)
+	row := h.discard(workDir)
 	require.Equal(t, RetainedDirty, row.RetainedReason)
 	results, err := h.wt.Prune(ctx, []string{row.Path})
 	require.NoError(t, err)
@@ -1316,7 +1451,7 @@ func TestARepositoryTheWorkerMadeIsNeverRemoved(t *testing.T) {
 
 // A crash between `worktree add --no-checkout` and the checkout leaves a
 // directory that was never checked out: nothing in it to lose.
-func TestAWorktreeThatWasNeverCheckedOutIsRemoved(t *testing.T) {
+func TestAWorktreeThatWasNeverCheckedOutIsKeptThenPruned(t *testing.T) {
 	h := newWorktreeHarness(t)
 	ctx := context.Background()
 	base := h.git(h.repo, "rev-parse", "HEAD")
@@ -1333,11 +1468,20 @@ func TestAWorktreeThatWasNeverCheckedOutIsRemoved(t *testing.T) {
 	h.git(h.repo, "worktree", "add", "--no-checkout", "-q", path, record.Branch)
 	require.FileExists(t, filepath.Join(path, ".git"))
 
+	// Recovery keeps it, as it keeps everything on disk.
 	require.NoError(t, h.wt.Recover(ctx))
 	rows, err := h.ledger.Worktrees(ctx)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, WorktreeRemoved, rows[0].State)
+	assert.Equal(t, WorktreeRetained, rows[0].State)
+	assert.True(t, exists(path))
+
+	// The operator's prune reads it for what it is: a checkout that never
+	// happened, holding nothing.
+	results, err := h.wt.Prune(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneRemoved, results[0].Action)
 	assert.False(t, exists(path))
 }
 
@@ -1347,7 +1491,7 @@ func TestAFrozenNameAlreadyTakenKeepsTheWorktree(t *testing.T) {
 	workDir, row := h.prepare(402)
 	require.NoError(t, os.Mkdir(frozenName(row.Path), 0o700))
 
-	after := h.finish(workDir)
+	after := h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, after.State)
 	assert.Equal(t, RetainedUnverified, after.RetainedReason)
 	assert.DirExists(t, workDir)
@@ -1364,7 +1508,7 @@ func TestALegacyRowWithRelativePathsIsRemoved(t *testing.T) {
 	_, err := h.ledger.db.ExecContext(ctx, `UPDATE worktrees SET admin_dir = '' WHERE id = ?`, row.ID)
 	require.NoError(t, err)
 
-	after := h.finish(workDir)
+	after := h.discard(workDir)
 	assert.Equal(t, WorktreeRemoved, after.State)
 	assert.False(t, exists(row.Path))
 	assert.NoDirExists(t, row.AdminDir)
