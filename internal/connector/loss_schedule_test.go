@@ -72,3 +72,35 @@ func TestALossSkippedByAFullQueueIsSweptBackIn(t *testing.T) {
 	cancel()
 	intake.repairs.Wait()
 }
+
+// The same rule inside the window: the deadline moves out the moment the
+// server asks for a wait, not only on the last attempt.
+func TestAThrottleInsideTheWindowPostponesItImmediately(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at, time.Hour, eventfeed.Filters{})
+	require.NoError(t, err)
+
+	polls := &scriptedPolls{
+		errs:  []error{&eventfeed.PollError{Kind: eventfeed.PollThrottled, RetryAfter: 15 * time.Minute}},
+		pages: []eventfeed.PollPage{{}, {Events: []eventfeed.Event{testEvent(17099838509)}, Position: "p"}},
+	}
+	walker, _ := newTestWalker(t, ledger, polls, clock)
+	var atWait time.Time
+	walker.sleep = func(_ context.Context, d time.Duration) error {
+		if atWait.IsZero() {
+			open, err := ledger.OpenLosses(context.Background())
+			require.NoError(t, err)
+			require.Len(t, open, 1)
+			atWait = open[0].DeadlineAt
+		}
+		clock.at = clock.at.Add(d)
+		return nil
+	}
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	require.False(t, atWait.IsZero(), "the walk waited")
+	assert.Equal(t, loss.DeadlineAt.Add(15*time.Minute).UTC(), atWait.UTC(),
+		"the window moved out by exactly what the server asked for")
+}
