@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // # The task token's carriage to the worker's MCP server
@@ -90,44 +93,68 @@ func TokenSocketFits(dir string) bool {
 }
 
 // TokenSocketDir is where an attempt's token socket goes: its own session
-// directory when a socket path there fits, and otherwise a private directory
-// of its own in the shortest place this machine offers. A unix socket path is
-// 103 bytes at most, and a long home, a deep XDG_STATE_HOME or large ids can
-// put a session directory past it — which would fail every dispatch rather
-// than one (card 22's review), so the connector moves the socket instead of
-// refusing the task. The directory it makes is the caller's to remove:
-// temporary is true when it made one.
+// directory when a socket path there fits, and otherwise a directory of its
+// own under shortBase. A unix socket path is 103 bytes at most, and a long
+// home, a deep XDG_RUNTIME_DIR or large ids can put a session directory past
+// it — which would fail every dispatch rather than one (card 22's review), so
+// the connector moves the socket instead of refusing the task. The directory
+// it makes is the caller's to remove: temporary is true when it made one.
 //
-// Everything else about the socket is unchanged wherever it lands: the
-// directory is owner-only, the socket is 0600, and the peer must still be
+// shortBase is the connector's own (ShortSocketBase), owner-only and swept on
+// start, so a directory a crash leaves behind is cleared rather than kept
+// forever. Everything else about the socket is unchanged wherever it lands:
+// the directory is owner-only, the socket is 0600, and the peer must still be
 // this user's process in the worker's group or below it.
-func TokenSocketDir(preferred string, lookup func(string) (string, bool)) (dir string, temporary bool, err error) {
+func TokenSocketDir(preferred, shortBase string) (dir string, temporary bool, err error) {
 	if TokenSocketFits(preferred) {
 		return preferred, false, nil
 	}
+	if shortBase == "" {
+		return "", false, fmt.Errorf("connector: a socket path under %s is longer than %d bytes and there is no short directory to use instead", preferred, MaxSocketPath)
+	}
+	// MkdirTemp makes it 0700, and the name is short on purpose.
+	made, err := os.MkdirTemp(shortBase, "s")
+	if err != nil {
+		return "", false, fmt.Errorf("connector: token socket directory: %w", err)
+	}
+	if !TokenSocketFits(made) {
+		_ = os.RemoveAll(made)
+		return "", false, fmt.Errorf("connector: no directory on this machine takes a token socket path of %d bytes or less; %s and %s are both too deep", MaxSocketPath, preferred, shortBase)
+	}
+	return made, true, nil
+}
+
+// ShortSocketBase is the directory the connector keeps for token sockets that
+// cannot live beside their session's own files: the per-user runtime
+// directory where there is one, /tmp otherwise, under a short name of this
+// connector's own (so two connectors never share one, and so a start can
+// sweep what a crash left). It is created owner-only, through the same
+// private-path check the session and state directories get.
+//
+// name is what makes it this connector's: the state directory's name, which
+// carries the account and the agent.
+func ShortSocketBase(name string, lookup func(string) (string, bool)) (string, error) {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
-	var bases []string
+	base := "/tmp"
 	if runtimeDir, ok := lookup("XDG_RUNTIME_DIR"); ok && filepath.IsAbs(runtimeDir) {
-		bases = append(bases, runtimeDir)
+		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() {
+			base = runtimeDir
+		}
 	}
-	bases = append(bases, os.TempDir(), "/tmp")
-	for _, base := range bases {
-		if info, statErr := os.Stat(base); statErr != nil || !info.IsDir() {
-			continue
-		}
-		// MkdirTemp makes it 0700, and the name is short on purpose.
-		made, mkErr := os.MkdirTemp(base, "bct")
-		if mkErr != nil {
-			continue
-		}
-		if TokenSocketFits(made) {
-			return made, true, nil
-		}
-		_ = os.RemoveAll(made)
+	// Short on purpose: what is under it must still fit in 103 bytes. The
+	// name is a digest of the connector's own, not the ids themselves, which
+	// can be 19 digits each.
+	sum := sha256.Sum256([]byte(name))
+	dir := filepath.Join(base, "bcs-"+hex.EncodeToString(sum[:4]))
+	if err := setup.EnsurePrivateDir(dir); err != nil {
+		return "", fmt.Errorf("connector: the token socket directory cannot be used: %w", err)
 	}
-	return "", false, fmt.Errorf("connector: no directory on this machine takes a token socket path of %d bytes or less; %s is too deep", MaxSocketPath, preferred)
+	if !TokenSocketFits(filepath.Join(dir, "s000000000")) {
+		return "", fmt.Errorf("connector: %s is too deep for a token socket path of %d bytes or less", dir, MaxSocketPath)
+	}
+	return dir, nil
 }
 
 // Handoff says what became of a token socket.
@@ -160,7 +187,9 @@ type TokenSocket struct {
 
 	group   chan int
 	setOnce sync.Once
-	result  chan Handoff
+	// handoff is what became of the socket, readable once done is closed.
+	handoff Handoff
+	done    chan struct{}
 	stop    chan struct{}
 	close   sync.Once
 
@@ -210,7 +239,7 @@ func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.
 	}
 	s := &TokenSocket{
 		path: path, token: token, listener: listener,
-		group: make(chan int, 1), result: make(chan Handoff, 1), stop: make(chan struct{}),
+		group: make(chan int, 1), done: make(chan struct{}), stop: make(chan struct{}),
 		peer: peer, groupOf: groupOf, parentOf: parentOf, lookup: driver.LookupProcess,
 	}
 	go s.serve(window)
@@ -247,8 +276,34 @@ func (s *TokenSocket) Close() {
 	})
 }
 
-// Result waits for what became of the socket.
-func (s *TokenSocket) Result() Handoff { return <-s.result }
+// Result waits for what became of the socket. Every caller gets the same
+// answer, however many ask.
+func (s *TokenSocket) Result() Handoff {
+	<-s.done
+	return s.handoff
+}
+
+// Settled waits up to wait for the socket to be finished with — the token
+// handed over, refused, expired or the socket closed — and reports whether it
+// is. It is what a caller asks before it reads Taker: a handoff in flight
+// while the attempt is being released would otherwise leave the process
+// holding the token unknown to the release point.
+func (s *TokenSocket) Settled(wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+// finish records what became of the socket, once.
+func (s *TokenSocket) finish(h Handoff) {
+	s.handoff = h
+	close(s.done)
+}
 
 func (s *TokenSocket) serve(window time.Duration) {
 	// Nothing is offered before the worker exists, and the window does not
@@ -258,11 +313,11 @@ func (s *TokenSocket) serve(window time.Duration) {
 	case want := <-s.group:
 		s.group <- want
 	case <-s.stop:
-		s.result <- HandoffClosed
+		s.finish(HandoffClosed)
 		return
 	case <-time.After(startWindows * window):
 		s.Close()
-		s.result <- HandoffExpired
+		s.finish(HandoffExpired)
 		return
 	}
 	deadline := time.Now().Add(window)
@@ -273,24 +328,24 @@ func (s *TokenSocket) serve(window time.Duration) {
 	s.Close()
 	if err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			s.result <- HandoffExpired
+			s.finish(HandoffExpired)
 		} else {
-			s.result <- HandoffClosed
+			s.finish(HandoffClosed)
 		}
 		return
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(deadline)
 	if !s.trusted(conn, deadline) {
-		s.result <- HandoffRefused
+		s.finish(HandoffRefused)
 		return
 	}
 	if _, err := conn.Write([]byte(s.token + "\n")); err != nil {
-		s.result <- HandoffRefused
+		s.finish(HandoffRefused)
 		return
 	}
 	s.rememberTaker(conn)
-	s.result <- HandoffDelivered
+	s.finish(HandoffDelivered)
 }
 
 // trusted reports whether the peer is this user's process in the worker's

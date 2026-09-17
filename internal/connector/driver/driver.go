@@ -178,6 +178,13 @@ type SessionConfig struct {
 	Launcher Launcher
 	// Scope is what the launcher is told the worker is for.
 	Scope Scope
+	// SocketDir is the directory holding the task token's unix socket, which
+	// the worker's MCP server dials. It is PrivateDir in the ordinary case
+	// and a short directory of the connector's own where a socket path under
+	// PrivateDir would be longer than a unix socket takes. A launcher that
+	// confines a worker must let it reach this directory, or the worker's
+	// MCP server cannot be handed its token.
+	SocketDir string
 	// PrivateDir is an owner-only directory the driver may write session
 	// files into (an MCP config, say). The driver removes what it wrote when
 	// the session is closed; the dispatcher sweeps the directory on start.

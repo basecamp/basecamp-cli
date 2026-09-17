@@ -1416,3 +1416,38 @@ func TestADeepSessionDirectoryStillGetsItsTokenAcross(t *testing.T) {
 	_, err = os.Stat(filepath.Dir(socket))
 	assert.True(t, os.IsNotExist(err), "and the directory it was moved to is removed with the attempt")
 }
+
+// Opus r6: a socket directory the connector had to make elsewhere is its own
+// to sweep, or a crash leaves one behind on every dispatch.
+func TestAShortSocketDirectoryIsSweptOnStart(t *testing.T) {
+	runtimeDir, err := os.MkdirTemp("/tmp", "bcrt-")
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(runtimeDir, 0o700))
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
+
+	deep, err := os.MkdirTemp("/tmp", "bcc-deep-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.PrivateDir = deep
+		o.Lookup = func(k string) (string, bool) {
+			if k == "XDG_RUNTIME_DIR" {
+				return runtimeDir, true
+			}
+			return "", false
+		}
+	})
+	base := h.d.shortSocketBase(filepath.Join(deep, strings.Repeat("a", AttemptIDLength)))
+	require.NotEmpty(t, base)
+	assert.True(t, strings.HasPrefix(base, runtimeDir), "under the runtime directory this connector was given: %s vs %s", base, runtimeDir)
+
+	// What a crashed run left behind.
+	leftover := filepath.Join(base, "s-from-a-crash")
+	require.NoError(t, os.Mkdir(leftover, 0o700))
+	require.NoError(t, h.d.Recover(context.Background()))
+	_, err = os.Stat(leftover)
+	assert.True(t, os.IsNotExist(err), "a start sweeps what a crash left in it")
+}
