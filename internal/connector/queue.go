@@ -189,6 +189,13 @@ func (q *Queue) deliver() {
 		return
 	}
 	q.delivering = true
+	// Cleared with a defer: a callback that panics and is recovered above
+	// would otherwise leave the drain latched and every later edge
+	// undelivered.
+	defer func() {
+		q.delivering = false
+		q.edges.Unlock()
+	}()
 	for len(q.pending) > 0 {
 		edge := q.pending[0]
 		q.pending = q.pending[1:]
@@ -198,8 +205,6 @@ func (q *Queue) deliver() {
 		}
 		q.edges.Lock()
 	}
-	q.delivering = false
-	q.edges.Unlock()
 }
 
 type queueEdge struct {

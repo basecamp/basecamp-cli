@@ -1,7 +1,9 @@
 package connector
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -162,4 +164,27 @@ func TestALossClosesAtItsAbsoluteDeadline(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{17099838509}, unrecovered, "and its ids are reported, not forgotten")
 	assert.False(t, clock.at.Before(loss.DetectedAt.Add(maxLossLifetime)), "not before the absolute deadline")
+}
+
+// A loss that was reconciled before its absolute deadline closes quietly: the
+// error line is for ids nobody could serve, not for a tidy close.
+func TestAReconciledLossPastItsDeadlineDoesNotReportUnrecovered(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	clock := &walkClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	loss, err := ledger.RecordLoss(ctx, []int64{17099838509}, clock.at.Add(-48*time.Hour), time.Minute, eventfeed.Filters{})
+	require.NoError(t, err)
+	// Served in the meantime, by the ordinary poll lane.
+	_, err = ledger.RecordSeen(ctx, testEvent(17099838509), LanePoll)
+	require.NoError(t, err)
+
+	var logs bytes.Buffer
+	walker, _ := newTestWalker(t, ledger, &scriptedPolls{}, clock)
+	walker.log = slog.New(slog.NewTextHandler(&logs, nil))
+	require.NoError(t, walker.reconcile(ctx, loss))
+
+	assert.NotContains(t, logs.String(), "unrecovered")
+	unrecovered, err := ledger.UnrecoveredIDs(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, unrecovered)
 }

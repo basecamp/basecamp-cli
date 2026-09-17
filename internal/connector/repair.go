@@ -66,8 +66,13 @@ func (w *repairWalker) reconcile(ctx context.Context, loss Loss) error {
 			if err != nil {
 				return err
 			}
-			w.log.Error("a buffer overflow reached its absolute deadline; what is still missing is unrecovered",
-				"loss_id", loss.ID, "unrecovered", unrecovered, "age", w.now().Sub(loss.DetectedAt))
+			if unrecovered > 0 {
+				w.log.Error("a buffer overflow reached its absolute deadline; what is still missing is unrecovered",
+					"loss_id", loss.ID, "unrecovered", unrecovered, "age", w.now().Sub(loss.DetectedAt))
+			} else {
+				w.log.Info("a buffer overflow was reconciled before its absolute deadline",
+					"loss_id", loss.ID, "age", w.now().Sub(loss.DetectedAt))
+			}
 			return nil
 		}
 		if !w.now().Before(loss.DeadlineAt) {
