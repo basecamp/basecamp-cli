@@ -232,7 +232,9 @@ func TestWorkersDoNotLeakDescriptors(t *testing.T) {
 		_, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/nonexistent/claude-not-here"})
 		require.ErrorIs(t, err, ErrNotStarted)
 	}
-	assert.Equal(t, before, openDescriptors(t), "fifty failed starts leave no descriptor open")
+	// At most: an earlier test's worker may release its pipes meanwhile, but
+	// fifty failed starts that each leaked would be fifty more.
+	assert.LessOrEqual(t, openDescriptors(t), before, "fifty failed starts leave no descriptor open")
 
 	for range 5 {
 		w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/bin/true", Env: []string{}})
