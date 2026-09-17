@@ -174,6 +174,16 @@ func TestAckAndCompleteOverMCP(t *testing.T) {
 	assert.True(t, isError, "outcome is required")
 	_, isError = s.call(completeDispatch, map[string]any{"event_id": 7, "outcome": "succeeded", "links": []any{1}})
 	assert.True(t, isError, "links are strings")
+
+	// In process, a caller has a []string in hand; over the wire, JSON makes
+	// []any. Both are the same list.
+	res, err := handleCompleteDispatch(context.Background(), d, map[string]any{
+		"event_id": 7, "outcome": "failed", "links": []string{"https://example.com/a"},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Len(t, d.completes, 2)
+	assert.Equal(t, []string{"https://example.com/a"}, d.completes[1].Links)
 }
 
 func TestConnectRefusalsAreNamed(t *testing.T) {

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -176,25 +177,41 @@ func handleCompleteDispatch(ctx context.Context, d Dispatch, params map[string]a
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
 	}
-	var links []string
-	if raw, ok := params["links"]; ok && raw != nil {
-		items, ok := raw.([]any)
-		if !ok {
-			return gateway.ErrorResult("parameter %q must be an array of strings", "links"), nil
-		}
-		for _, item := range items {
-			link, ok := item.(string)
-			if !ok {
-				return gateway.ErrorResult("parameter %q must be an array of strings", "links"), nil
-			}
-			links = append(links, link)
-		}
+	links, err := stringList(params, "links")
+	if err != nil {
+		return gateway.ErrorResult("%v", err), nil
 	}
 	receipt, err := d.Complete(ctx, eventID, connector.Completion{Outcome: connector.Outcome(outcome), Links: links, ReplyID: replyID})
 	if err != nil {
 		return connectFailure(err), nil
 	}
 	return gateway.JSONResult(receipt)
+}
+
+// stringList reads an array of strings. A call over the wire brings []any,
+// because that is what JSON decodes to; a caller building arguments in
+// process has a []string in hand, and there is no reason to refuse it.
+func stringList(params map[string]any, name string) ([]string, error) {
+	raw, ok := params[name]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	switch values := raw.(type) {
+	case []string:
+		return values, nil
+	case []any:
+		list := make([]string, 0, len(values))
+		for _, item := range values {
+			value, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("parameter %q must be an array of strings, got a %T in it", name, item)
+			}
+			list = append(list, value)
+		}
+		return list, nil
+	default:
+		return nil, fmt.Errorf("parameter %q must be an array of strings, got %T", name, raw)
+	}
 }
 
 func optionalID(params map[string]any, name string) (*int64, error) {
