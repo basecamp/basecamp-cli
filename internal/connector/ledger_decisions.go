@@ -166,8 +166,8 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		return RedispatchResult{}, err
 	}
 	out := RedispatchResult{EventID: eventID, FromState: record.State, FromReason: record.Reason, FromOutcome: task.outcome}
-	refuse := func(why string) (RedispatchResult, error) {
-		return RedispatchResult{}, fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
+	refuse := func(why string) error {
+		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Routed && record.Decision.ConversationKey != ""
 	now := l.timestamp()
@@ -176,22 +176,22 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 
 	switch record.State {
 	case StateSeen, StateAdmitted, StateQueued, StateDispatched:
-		return refuse(fmt.Sprintf("is %s: it is live, and runs without one", record.State))
+		return RedispatchResult{}, refuse(fmt.Sprintf("is %s: it is live, and runs without one", record.State))
 	case StateDiscarded:
-		return refuse(fmt.Sprintf("is discarded (%s)", record.Reason))
+		return RedispatchResult{}, refuse(fmt.Sprintf("is discarded (%s)", record.Reason))
 
 	case StateCompleted:
 		switch {
 		case !task.found || task.delivery != DeliveryCompleted:
-			return refuse("has no settled outcome to redispatch")
+			return RedispatchResult{}, refuse("has no settled outcome to redispatch")
 		case task.outcome == OutcomeSucceeded:
-			return refuse("succeeded; a success is not run again")
+			return RedispatchResult{}, refuse("succeeded; a success is not run again")
 		case task.outcome != OutcomeUnknown && task.outcome != OutcomeFailed:
-			return refuse(fmt.Sprintf("has outcome %q", task.outcome))
+			return RedispatchResult{}, refuse(fmt.Sprintf("has outcome %q", task.outcome))
 		case record.redispatchDecision != 0:
-			return refuse("already has a redispatch waiting for its task to end")
+			return RedispatchResult{}, refuse("already has a redispatch waiting for its task to end")
 		case !dispatchable:
-			return refuse("no longer has the snapshot and route a dispatch needs (retention dropped them, or the verdict carried none)")
+			return RedispatchResult{}, refuse("no longer has the snapshot and route a dispatch needs (retention dropped them, or the verdict carried none)")
 		}
 		if !task.superseded {
 			// The replaced worker is refused by basecamp_connect from here on
@@ -280,7 +280,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		out.Rerun = true
 
 	default:
-		return refuse(fmt.Sprintf("is in a state %q this build does not know", record.State))
+		return RedispatchResult{}, refuse(fmt.Sprintf("is in a state %q this build does not know", record.State))
 	}
 
 	if err := tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, eventID).Scan(&out.State); err != nil {
@@ -352,8 +352,8 @@ func (l *Ledger) discard(ctx context.Context, eventID int64, by string) (Discard
 		return DiscardResult{}, err
 	}
 	out := DiscardResult{EventID: eventID, FromState: record.State, FromReason: record.Reason, FromOutcome: task.outcome}
-	refuse := func(why string) (DiscardResult, error) {
-		return DiscardResult{}, fmt.Errorf("connector: discard of event %d %s: %w", eventID, why, ErrDecisionRefused)
+	refuse := func(why string) error {
+		return fmt.Errorf("connector: discard of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
 	switch record.State {
 	case StateDiscarded:
@@ -361,14 +361,14 @@ func (l *Ledger) discard(ctx context.Context, eventID int64, by string) (Discard
 			out.Already = true
 			return out, nil
 		}
-		return refuse(fmt.Sprintf("is already discarded (%s)", record.Reason))
+		return DiscardResult{}, refuse(fmt.Sprintf("is already discarded (%s)", record.Reason))
 	case StateCompleted:
 		if !task.found || task.outcome != OutcomeUnknown {
-			return refuse(fmt.Sprintf("completed with outcome %q; only an unknown outcome is discarded", task.outcome))
+			return DiscardResult{}, refuse(fmt.Sprintf("completed with outcome %q; only an unknown outcome is discarded", task.outcome))
 		}
 	case StateHeld, StateBlocked:
 	default:
-		return refuse(fmt.Sprintf("is %s: only a held, blocked or unknown record is discarded", record.State))
+		return DiscardResult{}, refuse(fmt.Sprintf("is %s: only a held, blocked or unknown record is discarded", record.State))
 	}
 
 	now := l.timestamp()

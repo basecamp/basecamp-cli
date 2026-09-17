@@ -134,7 +134,7 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 		}
 		done = func() { _ = lock.Release() }
 	}
-	ledger, err := connector.OpenLedger(path)
+	ledger, err := connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
 	if err != nil {
 		done()
 		return nil, func() {}, err
