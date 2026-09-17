@@ -478,3 +478,34 @@ func TestARefusalIsRecordedOnTheLiveAttemptAndSettledWithIt(t *testing.T) {
 	assert.ErrorIs(t, ledger.RecordRefusal(context.Background(), l.AttemptID), ErrNoLiveAttempt)
 	assert.Equal(t, 3, refusals(), "an ended attempt's count is final")
 }
+
+// Copilot: settlement ends a task and adoption runs after it, so the next
+// instruction on the conversation can already be on a task of its own. Its
+// acknowledgement still bounds what the old event may adopt.
+func TestTheAdoptionBoundaryIsTheConversationsNotTheTasks(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	first := launch(t, ledger, 1)
+	d, err := ledger.Dispatch(ctx, first.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: first.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+
+	// The next instruction on the same conversation, on a task of its own.
+	admitOn(t, ledger, 2, "recording:1")
+	second := launch(t, ledger, 2)
+	d2, err := ledger.Dispatch(ctx, second.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = d2.Ack(ctx, 2, nil)
+	require.NoError(t, err)
+
+	candidates, err := ledger.AdoptionCandidates(ctx, first.TaskID)
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.False(t, candidates[0].NextAckAt.IsZero(),
+		"the later task's acknowledgement bounds what the lost event may adopt")
+	assert.False(t, candidates[0].NextAckAt.Before(candidates[0].DeliveredAt))
+}

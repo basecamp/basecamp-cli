@@ -1096,7 +1096,8 @@ type AdoptionCandidate struct {
 	// DeliveredAt is the event's ack_dispatch.
 	DeliveredAt time.Time
 	// NextAckAt is the first acknowledgement of a later instruction on the
-	// task; zero when there is none.
+	// CONVERSATION, which may be on a task started after this one ended;
+	// zero when there is none.
 	NextAckAt time.Time
 	// AckID is the worker's own acknowledgement, which is never its reply
 	// however the clocks compare.
@@ -1108,9 +1109,15 @@ type AdoptionCandidate struct {
 func (l *Ledger) AdoptionCandidates(ctx context.Context, taskID int64) ([]AdoptionCandidate, error) {
 	rows, err := l.db.QueryContext(ctx, `
 SELECT te.event_id, e.reply_kind, e.reply_recording_id, te.delivered_at, te.ack_id,
+       -- The boundary is the conversation's, not this task's: settlement ends
+       -- the task and adoption runs after it, so the next instruction may
+       -- already be on a task of its own, and its reply is not this event's
+       -- (Copilot).
        (SELECT MIN(later.delivered_at) FROM task_events later
-        WHERE later.task_id = te.task_id AND later.event_id > te.event_id AND later.delivered_at IS NOT NULL)
-FROM task_events te JOIN events e ON e.id = te.event_id
+          JOIN tasks lt ON lt.id = later.task_id
+        WHERE lt.conversation_key = t.conversation_key
+          AND later.event_id > te.event_id AND later.delivered_at IS NOT NULL)
+FROM task_events te JOIN events e ON e.id = te.event_id JOIN tasks t ON t.id = te.task_id
 WHERE te.task_id = ? AND te.outcome = 'unknown' AND te.delivered_at IS NOT NULL
   AND te.reply_id IS NULL AND te.adopted_reply_id IS NULL
 ORDER BY te.event_id`, taskID)

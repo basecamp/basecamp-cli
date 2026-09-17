@@ -244,7 +244,17 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	// The child has its copy; this process keeps none, so the reader sees
 	// end of file once the worker and everything it started have closed it.
 	_ = writeEnd.Close()
-	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: time.Now()}
+	// The kernel's own start time for this pid, not the clock: it is what
+	// tells this worker from a later process the kernel gives the same pid,
+	// and OwnsWorker compares against it. A wall-clock stamp is only as
+	// precise as startTolerance, which under fast pid reuse is wide enough to
+	// accept a stranger (Copilot). Where the kernel cannot be asked, the
+	// stamp stands and the tolerance is what is left.
+	started := time.Now()
+	if exact, err := processStartTime(ec.Process.Pid); err == nil {
+		started = exact
+	}
+	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: started}
 	go func() {
 		err := ec.Wait()
 		w.exit = exitOf(ec, err)
@@ -295,6 +305,12 @@ func (w *Worker) Exit() Exit {
 // StderrTail is what may be passed on of the worker's stderr, through r
 // (Redactor.Stderr): never the text verbatim.
 func (w *Worker) StderrTail(r *Redactor) string { return r.Stderr(w.stderr.String()) }
+
+// StderrLines is what may be passed on of the worker's stderr when its last
+// line is not enough — a refusal the agent wrote before it wrote anything
+// else — through r (Redactor.Lines): bounded in lines and in bytes, each
+// sanitized, never the text verbatim.
+func (w *Worker) StderrLines(r *Redactor) []string { return r.Lines(w.stderr.String()) }
 
 // Terminate ends the process group: SIGTERM, grace, SIGKILL. It returns once
 // the leader is reaped. Idempotent.

@@ -137,24 +137,42 @@ func ShortSocketBase(name string, lookup func(string) (string, bool)) (string, e
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
-	base := "/tmp"
+	// In order, and the first that takes a socket path wins: the per-user
+	// runtime directory is the right home, but a deep one is exactly the
+	// case this exists for, so /tmp remains the escape hatch.
+	var bases []string
 	if runtimeDir, ok := lookup("XDG_RUNTIME_DIR"); ok && filepath.IsAbs(runtimeDir) {
-		if info, err := os.Stat(runtimeDir); err == nil && info.IsDir() {
-			base = runtimeDir
-		}
+		bases = append(bases, runtimeDir)
 	}
+	bases = append(bases, os.TempDir(), "/tmp")
+
 	// Short on purpose: what is under it must still fit in 103 bytes. The
 	// name is a digest of the connector's own, not the ids themselves, which
 	// can be 19 digits each.
 	sum := sha256.Sum256([]byte(name))
-	dir := filepath.Join(base, "bcs-"+hex.EncodeToString(sum[:4]))
-	if err := setup.EnsurePrivateDir(dir); err != nil {
-		return "", fmt.Errorf("connector: the token socket directory cannot be used: %w", err)
+	short := "bcs-" + hex.EncodeToString(sum[:4])
+	var last error
+	for _, base := range bases {
+		if info, err := os.Stat(base); err != nil || !info.IsDir() {
+			continue
+		}
+		dir := filepath.Join(base, short)
+		// MkdirTemp appends a random uint32 in decimal, so the longest name
+		// it can make under this prefix is "s" and ten digits.
+		if !TokenSocketFits(filepath.Join(dir, "s0123456789")) {
+			last = fmt.Errorf("connector: %s is too deep for a token socket path of %d bytes or less", dir, MaxSocketPath)
+			continue
+		}
+		if err := setup.EnsurePrivateDir(dir); err != nil {
+			last = fmt.Errorf("connector: the token socket directory cannot be used: %w", err)
+			continue
+		}
+		return dir, nil
 	}
-	if !TokenSocketFits(filepath.Join(dir, "s000000000")) {
-		return "", fmt.Errorf("connector: %s is too deep for a token socket path of %d bytes or less", dir, MaxSocketPath)
+	if last == nil {
+		last = errors.New("connector: no directory on this machine can hold a token socket")
 	}
-	return dir, nil
+	return "", last
 }
 
 // Handoff says what became of a token socket.
@@ -187,11 +205,15 @@ type TokenSocket struct {
 
 	group   chan int
 	setOnce sync.Once
-	// handoff is what became of the socket, readable once done is closed.
-	handoff Handoff
-	done    chan struct{}
-	stop    chan struct{}
-	close   sync.Once
+	// handoff is what became of the socket's first handoff, readable once
+	// done is closed; ended is closed when no handoff is in flight or to
+	// come.
+	handoff   Handoff
+	firstOnce sync.Once
+	done      chan struct{}
+	ended     chan struct{}
+	stop      chan struct{}
+	close     sync.Once
 
 	// peer, groupOf, parentOf and lookup read the kernel; test seams.
 	peer     func(*net.UnixConn) (PeerCredentials, error)
@@ -199,8 +221,9 @@ type TokenSocket struct {
 	parentOf func(pid int) (int, error)
 	lookup   func(pid int) (driver.Process, error)
 
-	mu    sync.Mutex
-	taker driver.Process
+	mu        sync.Mutex
+	taker     driver.Process
+	onHandoff func(Handoff, driver.Process)
 }
 
 // ServeTaskToken binds the one-use socket for token in dir, which must be the
@@ -210,10 +233,10 @@ func ServeTaskToken(dir, token string, window time.Duration) (*TokenSocket, erro
 }
 
 func serveTaskToken(dir, token string, window time.Duration, peer func(*net.UnixConn) (PeerCredentials, error), groupOf func(int) (int, error)) (*TokenSocket, error) {
-	return serveTaskTokenWith(dir, token, window, peer, groupOf, parentProcessOf)
+	return serveTaskTokenWith(dir, token, window, peer, groupOf, parentProcessOf, driver.LookupProcess)
 }
 
-func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.UnixConn) (PeerCredentials, error), groupOf, parentOf func(int) (int, error)) (*TokenSocket, error) {
+func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.UnixConn) (PeerCredentials, error), groupOf, parentOf func(int) (int, error), lookup func(int) (driver.Process, error)) (*TokenSocket, error) {
 	if token == "" {
 		return nil, errors.New("connector: a token socket needs the token")
 	}
@@ -239,8 +262,8 @@ func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.
 	}
 	s := &TokenSocket{
 		path: path, token: token, listener: listener,
-		group: make(chan int, 1), done: make(chan struct{}), stop: make(chan struct{}),
-		peer: peer, groupOf: groupOf, parentOf: parentOf, lookup: driver.LookupProcess,
+		group: make(chan int, 1), done: make(chan struct{}), ended: make(chan struct{}), stop: make(chan struct{}),
+		peer: peer, groupOf: groupOf, parentOf: parentOf, lookup: lookup,
 	}
 	go s.serve(window)
 	return s, nil
@@ -276,36 +299,68 @@ func (s *TokenSocket) Close() {
 	})
 }
 
-// Result waits for what became of the socket. Every caller gets the same
-// answer, however many ask.
+// MaxTokenHandoffs is how many times one attempt's token may be handed over.
+// An MCP host that restarts a stdio server re-runs its command, and the
+// bridge takes the token again on every start, so a socket that served once
+// and closed would leave a restarted server with no Basecamp tools and no
+// way to say so. Each handoff is a fresh accept with the same peer checks and
+// its own window; the count is what keeps a crash-looping host from spinning
+// on the socket forever.
+const MaxTokenHandoffs = 5
+
+// Result waits for what became of the socket's FIRST handoff. Every caller
+// gets the same answer, however many ask. Later handoffs are reported to the
+// function OnHandoff was given.
 func (s *TokenSocket) Result() Handoff {
 	<-s.done
 	return s.handoff
 }
 
-// Settled waits up to wait for the socket to be finished with — the token
-// handed over, refused, expired or the socket closed — and reports whether it
-// is. It is what a caller asks before it reads Taker: a handoff in flight
-// while the attempt is being released would otherwise leave the process
-// holding the token unknown to the release point.
+// OnHandoff is called for every handoff the socket makes or refuses, with the
+// process that took the token where one did. It is set before the worker is
+// named, and is how the connector keeps up with a restarted MCP server.
+func (s *TokenSocket) OnHandoff(f func(Handoff, driver.Process)) {
+	s.mu.Lock()
+	s.onHandoff = f
+	s.mu.Unlock()
+}
+
+// Settled waits up to wait for the socket to be finished with for good — no
+// handoff in flight and none to come — and reports whether it is. It is what
+// a caller asks before it reads Taker: a handoff still deciding while the
+// attempt is released would otherwise leave the process holding the token
+// unknown to the release point. Close first, or this waits out the window.
 func (s *TokenSocket) Settled(wait time.Duration) bool {
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
-	case <-s.done:
+	case <-s.ended:
 		return true
 	case <-timer.C:
 		return false
 	}
 }
 
-// finish records what became of the socket, once.
-func (s *TokenSocket) finish(h Handoff) {
-	s.handoff = h
-	close(s.done)
+// handed records one handoff: the first is what Result answers, and every one
+// goes to OnHandoff's function.
+func (s *TokenSocket) handed(h Handoff, taker driver.Process) {
+	s.mu.Lock()
+	if taker.PID > 0 {
+		s.taker = taker
+	}
+	f := s.onHandoff
+	s.mu.Unlock()
+	s.firstOnce.Do(func() {
+		s.handoff = h
+		close(s.done)
+	})
+	if f != nil {
+		f(h, taker)
+	}
 }
 
 func (s *TokenSocket) serve(window time.Duration) {
+	defer close(s.ended)
 	// Nothing is offered before the worker exists, and the window does not
 	// run while it is being started. A connection that arrives first waits in
 	// the listener's backlog, which is where the kernel keeps it.
@@ -313,39 +368,52 @@ func (s *TokenSocket) serve(window time.Duration) {
 	case want := <-s.group:
 		s.group <- want
 	case <-s.stop:
-		s.finish(HandoffClosed)
+		s.handed(HandoffClosed, driver.Process{})
 		return
 	case <-time.After(startWindows * window):
 		s.Close()
-		s.finish(HandoffExpired)
+		s.handed(HandoffExpired, driver.Process{})
 		return
 	}
+	// One handoff per start of the worker's MCP server, up to
+	// MaxTokenHandoffs: a host that restarts a stdio server re-runs it, and
+	// the bridge takes the token again. Each has its own window and the same
+	// peer checks, and anything but a delivery ends the socket — a connection
+	// that is not the worker's is not something to wait past.
+	for range MaxTokenHandoffs {
+		h, taker := s.handOne(window)
+		s.handed(h, taker)
+		if h != HandoffDelivered {
+			s.Close()
+			return
+		}
+	}
+	// The budget is spent: a worker whose MCP server restarts more often than
+	// this is not one the connector keeps handing its token to.
+	s.Close()
+}
+
+// handOne waits for one connection within its own window and hands the token
+// over, or says why it did not.
+func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 	deadline := time.Now().Add(window)
 	_ = s.listener.SetDeadline(deadline)
 	conn, err := s.listener.AcceptUnix()
-	// One connection, whatever it is: the socket is gone before anything is
-	// decided about it.
-	s.Close()
 	if err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			s.finish(HandoffExpired)
-		} else {
-			s.finish(HandoffClosed)
+			return HandoffExpired, driver.Process{}
 		}
-		return
+		return HandoffClosed, driver.Process{}
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(deadline)
 	if !s.trusted(conn, deadline) {
-		s.finish(HandoffRefused)
-		return
+		return HandoffRefused, driver.Process{}
 	}
 	if _, err := conn.Write([]byte(s.token + "\n")); err != nil {
-		s.finish(HandoffRefused)
-		return
+		return HandoffRefused, driver.Process{}
 	}
-	s.rememberTaker(conn)
-	s.finish(HandoffDelivered)
+	return HandoffDelivered, s.takerOfConn(conn)
 }
 
 // trusted reports whether the peer is this user's process in the worker's
@@ -391,19 +459,18 @@ func (s *TokenSocket) descendsFrom(pid, ancestor int) bool {
 	return false
 }
 
-// rememberTaker keeps the identity of the process the token went to, so the
+// takerOfConn is the identity of the process the token just went to, so the
 // release point can end it: it is outside the worker's process group whenever
-// the agent started it in one of its own.
-func (s *TokenSocket) rememberTaker(conn *net.UnixConn) {
+// the agent started it in one of its own. A restarted MCP server is a new
+// process, and the newest is the one holding the token.
+func (s *TokenSocket) takerOfConn(conn *net.UnixConn) driver.Process {
 	cred, err := s.peer(conn)
 	if err != nil || cred.PID <= 0 {
-		return
+		return driver.Process{}
 	}
 	taker, err := s.lookup(cred.PID)
 	if err != nil {
-		return
+		return driver.Process{}
 	}
-	s.mu.Lock()
-	s.taker = taker
-	s.mu.Unlock()
+	return taker
 }

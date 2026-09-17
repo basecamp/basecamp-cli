@@ -24,11 +24,23 @@ const connectWorkerMCPDial = 30 * time.Second
 
 // newConnectWorkerMCPCmd is the MCP server command the connector hands an
 // agent for a worker: the bridge that takes the task token from the
-// connector's one-use socket (see connector's "The task token's carriage")
-// and becomes `basecamp mcp` with the token on a pipe.
+// connector's socket (see connector's "The task token's carriage") and
+// becomes `basecamp mcp` with the token on a pipe.
 //
 // Hidden: nobody runs it by hand. It exists because an agent starts its MCP
 // servers itself and can hand them only standard I/O.
+//
+// # A restart takes the token again
+//
+// An MCP host that restarts a stdio server re-runs its command, and a pipe is
+// read once, so the bridge fetches the token from the socket on EVERY start.
+// The connector serves one handoff per start, each a fresh accept with the
+// same peer checks and its own window, up to connector.MaxTokenHandoffs — a
+// crash-looping host is cut off rather than served forever, and a server
+// restarted after its task ended gets a token the ledger refuses (a
+// superseded task has no valid token) rather than tools it should not have.
+// A bridge that cannot get a token says so and exits, so the host sees a
+// server that failed to start rather than one with no Basecamp tools.
 func newConnectWorkerMCPCmd() *cobra.Command {
 	var socket, state string
 	cmd := &cobra.Command{
@@ -94,6 +106,14 @@ func workerMCPArgs(exe, profile, state string, fd int) []string {
 
 // workerMCPEnv is the environment the bridge hands `basecamp mcp`: what the
 // connector declared for its server, and nothing an agent added to it.
+//
+// The bridge reads its own environment to build it, and an agent hands its
+// MCP servers the agent's whole environment, so a name the CONNECTOR does not
+// set would keep the agent's value — and one of them, BASECAMP_BASE_URL, is
+// where the agent's Basecamp credential would be sent. The connector pins
+// every such name (connector.MCPServerEnv, set explicitly in the server's
+// declared environment), so what survives here is the connector's value or
+// nothing at all. Pinning is what closes it, not policy.
 func workerMCPEnv() []string {
 	return driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), connector.MCPServerEnv...), os.LookupEnv, nil)
 }

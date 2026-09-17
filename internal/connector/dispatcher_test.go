@@ -1451,3 +1451,72 @@ func TestAShortSocketDirectoryIsSweptOnStart(t *testing.T) {
 	_, err = os.Stat(leftover)
 	assert.True(t, os.IsNotExist(err), "a start sweeps what a crash left in it")
 }
+
+// Copilot: a start that failed can leave its attempt held, and a held
+// attempt takes a worker slot. Capacity is asked again for every record in
+// the pass, not counted down from what it was at the top.
+func TestAHeldAttemptTakesASlotWithinTheSamePass(t *testing.T) {
+	fake := newFakeDriver()
+	// Every start fails after a process existed, and no group can be
+	// confirmed gone: each attempt is held.
+	for range 3 {
+		fake.startErr = append(fake.startErr,
+			&driver.StartError{Process: driver.Process{PID: 1 << 30, PGID: 1 << 30}, Err: errors.New("handshake failed")})
+	}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
+	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return driver.ErrGroupOutlivedLeader }
+	// Three records on three directories, so nothing but the bound stops them.
+	for i, id := range []int64{1, 2, 3} {
+		route := "/work/held" + string(rune('a'+i))
+		h.routes[adapterBucketID+int64(i)] = admission.Route{Path: route}
+		seenRecord(t, h.ledger, id)
+		v := admittedVerdict(id, 0, "recording:held"+string(rune('a'+i)))
+		v.Route = route
+		_, err := h.ledger.ledgerCommitWithBucket(v, adapterBucketID+int64(i))
+		require.NoError(t, err)
+	}
+	h.run(t)
+
+	require.Eventually(t, func() bool { return h.d.heldCount() >= 2 }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, 2, h.d.heldCount(), "two held attempts fill the window, and the third record waits")
+	var attempts int
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM attempts`).Scan(&attempts))
+	assert.Equal(t, 2, attempts, "no third worker while two are unaccounted for")
+	assert.LessOrEqual(t, h.d.free(), 0)
+}
+
+// An agent hands its MCP servers its own whole environment, so a name the
+// connector leaves unset arrives carrying the agent's value — and
+// BASECAMP_BASE_URL is where the agent's Basecamp credential would be sent.
+// Every name the server may have is pinned to this connector's value or to
+// nothing.
+func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
+	fake := newFakeDriver()
+	var cfg driver.SessionConfig
+	fake.onStart = func(c driver.SessionConfig) { cfg = c }
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.MCP.Env = []string{"BASECAMP_EXTRA_NOT_REAL"}
+		o.Lookup = func(k string) (string, bool) {
+			if k == "BASECAMP_CACHE_DIR" {
+				return "/var/cache/connector", true
+			}
+			return "", false
+		}
+	})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	h.attemptsEnded(t, 1)
+
+	env := cfg.MCPServers[0].Env
+	require.NotEmpty(t, env)
+	for _, name := range append(append([]string{}, MCPServerEnv...), "BASECAMP_EXTRA_NOT_REAL") {
+		value, ok := env[name]
+		assert.Truef(t, ok, "%s is not pinned, so the agent's own value would reach the server", name)
+		if name == "BASECAMP_CACHE_DIR" {
+			assert.Equal(t, "/var/cache/connector", value)
+		} else {
+			assert.Empty(t, value, "%s", name)
+		}
+	}
+}
