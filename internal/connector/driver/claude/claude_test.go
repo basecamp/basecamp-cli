@@ -76,6 +76,13 @@ func fakeClaude(scenario string) {
 	}
 	writeReport()
 
+	// A worker that writes a secret it was handed to its own stderr, which
+	// the connector reads and may log.
+	secret := os.Getenv("FAKE_CLAUDE_SECRET")
+	if secret != "" {
+		fmt.Fprintln(os.Stderr, "claude: failed while using "+secret)
+	}
+
 	out := bufio.NewWriter(os.Stdout)
 	emit := func(v any) {
 		data, _ := json.Marshal(v)
@@ -87,6 +94,10 @@ func fakeClaude(scenario string) {
 		sessionID = argAfter(args, "--resume")
 	}
 	mode := argAfter(args, "--permission-mode")
+	if scenario == "handshake-secret" {
+		// An agent that reports a mode carrying what it was handed.
+		mode = secret
+	}
 	if scenario == "badmode" {
 		mode = "bypassPermissions"
 	}
@@ -95,7 +106,7 @@ func fakeClaude(scenario string) {
 		status = "failed"
 	}
 
-	if scenario == "deaf" {
+	if scenario == "deaf" || scenario == "deaf-secret" {
 		// Reads nothing, ever: the pipe fills and a write blocks.
 		select {}
 	}
@@ -142,6 +153,19 @@ func fakeClaude(scenario string) {
 			if _, err := os.Stat(mcpPath); err == nil {
 				report.Extra["mcp_after_init"] = "present"
 			}
+		}
+		if scenario == "denial-secret" {
+			// A refusal and a failed turn, both named after the secret.
+			emit(map[string]any{"type": "system", "subtype": "permission_denied", "tool_name": secret, "tool_use_id": secret})
+			emit(map[string]any{"type": "assistant", "message": map[string]any{"content": []any{
+				map[string]any{"type": "tool_use", "id": secret, "name": secret},
+			}}})
+			emit(map[string]any{"type": "result", "subtype": "error_" + secret, "is_error": true, "session_id": sessionID,
+				"permission_denials": []any{map[string]any{"tool_name": secret, "tool_use_id": secret + "-late"}}})
+			continue
+		}
+		if scenario == "die-secret" {
+			os.Exit(3)
 		}
 		switch scenario {
 		case "hang":
@@ -629,4 +653,94 @@ func TestAnAgentThatStopsReadingCannotHoldCancelOrClose(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close waited on a worker that stopped reading")
 	}
+}
+
+// redactionSecret is the value fed through every error path. It is obviously
+// fake, and is planted everywhere a real secret would be: in the worker's
+// environment, in its MCP server's environment, in the name of its private
+// directory, and in what the agent writes back.
+const redactionSecret = "test-token-not-real-c9f2b1"
+
+func redactionFixture(t *testing.T, scenario string) fixture {
+	t.Helper()
+	f := newFixture(t, scenario)
+	private := filepath.Join(t.TempDir(), redactionSecret)
+	require.NoError(t, os.Mkdir(private, 0o700))
+	f.cfg.PrivateDir = private
+	f.cfg.Env = append(f.cfg.Env, "FAKE_CLAUDE_SECRET="+redactionSecret)
+	f.cfg.MCPServers[0].Env["BASECAMP_CONNECT_TASK_TOKEN"] = redactionSecret
+	f.cfg.Redaction = driver.Redaction{Secrets: []string{redactionSecret}}
+	return f
+}
+
+func stderrTail(s driver.Session) string {
+	if tail, ok := s.(interface{ StderrTail() string }); ok {
+		return tail.StderrTail()
+	}
+	return ""
+}
+
+// The redaction rule (driver's redact.go): nothing the driver hands back
+// carries the secret, whichever way the session fails.
+func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
+	drivertest.RequireRedacted(t, redactionSecret, []drivertest.RedactionPath{
+		{Name: "start", Run: func(t *testing.T) drivertest.Crossing {
+			f := redactionFixture(t, "ok")
+			// A private directory the driver cannot write its MCP config in:
+			// the failure names the path, and the path carries the secret.
+			require.NoError(t, os.Remove(f.cfg.PrivateDir))
+			_, err := f.driver.NewSession(context.Background(), f.cfg)
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "handshake", Run: func(t *testing.T) drivertest.Crossing {
+			f := redactionFixture(t, "handshake-secret")
+			s := start(t, f)
+			result, err := s.Prompt(context.Background(), "hello")
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+			<-s.Done()
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: drain(s), Texts: []string{stderrTail(s)}}
+		}},
+		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
+			f := redactionFixture(t, "denial-secret")
+			s := start(t, f)
+			result, err := s.Prompt(context.Background(), "hello")
+			require.Error(t, err)
+			updates := make(chan []driver.Update, 1)
+			go func() { updates <- drain(s) }()
+			require.NoError(t, s.Close())
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: <-updates, Texts: []string{stderrTail(s)}}
+		}},
+		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
+			f := redactionFixture(t, "deaf-secret")
+			f.driver.opts.CloseGrace = 300 * time.Millisecond
+			s := start(t, f)
+			go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("x", 1<<20)) }()
+			require.Eventually(t, func() bool { return len(ss(s).slot) == 1 }, 10*time.Second, 5*time.Millisecond)
+			err := s.Cancel(context.Background())
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}, Texts: []string{stderrTail(s)}}
+		}},
+		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
+			f := redactionFixture(t, "die-secret")
+			s := start(t, f)
+			_, err := s.Prompt(context.Background(), "hello")
+			require.Error(t, err, "the worker died in the turn")
+			closeErr := s.Close()
+			after, afterErr := s.Prompt(context.Background(), "again")
+			return drivertest.Crossing{Errors: []error{err, closeErr, afterErr}, Results: []driver.PromptResult{after},
+				Updates: drain(s), Texts: []string{stderrTail(s)}}
+		}},
+	})
+}
+
+// drain is every update a closed session emitted.
+func drain(s driver.Session) []driver.Update {
+	var updates []driver.Update
+	for u := range s.Updates() {
+		updates = append(updates, u)
+	}
+	return updates
 }

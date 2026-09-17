@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -57,20 +56,4 @@ func EnvMap(env []string) map[string]string {
 		}
 	}
 	return out
-}
-
-var (
-	emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
-	// bearerPattern is a credential-shaped run: a bearer header value or a
-	// long unbroken token.
-	bearerPattern = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/\-]+=*|\b[A-Za-z0-9_\-]{40,}\b`)
-)
-
-// Redact is the sink's filter for anything taken from an agent stream that is
-// logged or stored: agents volunteer the logged-in account's email unprompted,
-// and a tool result can carry a token. It is a backstop, not a license: the
-// connector logs kinds and ids, not stream text.
-func Redact(s string) string {
-	s = emailPattern.ReplaceAllString(s, "[email redacted]")
-	return bearerPattern.ReplaceAllString(s, "[credential redacted]")
 }

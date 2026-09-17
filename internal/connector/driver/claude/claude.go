@@ -84,17 +84,36 @@ func (d *Driver) Capabilities() driver.Capabilities {
 func (d *Driver) NewSession(ctx context.Context, cfg driver.SessionConfig) (driver.Session, error) {
 	id, err := newUUID()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
+		return nil, d.redactor(cfg).Err(fmt.Errorf("%w: %w", driver.ErrNotStarted, err))
 	}
-	return d.start(ctx, cfg, id, false)
+	s, err := d.start(ctx, cfg, id, false)
+	return s, d.redactor(cfg).Err(err)
 }
 
 // LoadSession implements driver.Driver.
 func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sessionID string) (driver.Session, error) {
 	if !validUUID(sessionID) {
-		return nil, fmt.Errorf("%w: %w: session id %q is not a Claude Code session id", driver.ErrNotStarted, driver.ErrUnusable, sessionID)
+		return nil, d.redactor(cfg).Err(fmt.Errorf("%w: %w: session id %q is not a Claude Code session id", driver.ErrNotStarted, driver.ErrUnusable, sessionID))
 	}
-	return d.start(ctx, cfg, sessionID, true)
+	s, err := d.start(ctx, cfg, sessionID, true)
+	return s, d.redactor(cfg).Err(err)
+}
+
+// env is the worker's whole environment: the dispatcher's, plus the variables
+// this driver names for its agent.
+func (d *Driver) env(cfg driver.SessionConfig) []string {
+	return mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
+}
+
+// redactor is what every error and text of a session passes through: the
+// dispatcher's Redaction, plus the environment this driver builds, its MCP
+// servers' environments and its private directory.
+func (d *Driver) redactor(cfg driver.SessionConfig) *driver.Redactor {
+	more := driver.Redaction{Env: d.env(cfg), Dirs: []string{cfg.PrivateDir}}
+	for _, server := range cfg.MCPServers {
+		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
+	}
+	return driver.NewRedactor(cfg.Redaction.With(more))
 }
 
 // modeIDs maps the connector's permission modes to Claude Code's.
@@ -180,7 +199,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 		// again: it is configuration.
 		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 	}
-	env := mergeEnv(cfg.Env, driver.BuildEnv(Env, d.opts.Lookup, nil))
+	env := d.env(cfg)
 	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
 	if err != nil {
 		_ = os.Remove(mcpPath)
@@ -196,6 +215,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 		updates:   make(chan driver.Update, 256),
 		slot:      make(chan struct{}, 1),
 		readerEnd: make(chan struct{}),
+		red:       d.redactor(cfg),
 	}
 	go s.read()
 	return s, nil
@@ -287,6 +307,9 @@ type session struct {
 
 	updates   chan driver.Update
 	readerEnd chan struct{}
+	// red is what every error, update text and stderr tail of this session
+	// passes through before it leaves the driver.
+	red *driver.Redactor
 
 	// beforePromptWrite runs between a turn's registration and its write; a
 	// test seam.
@@ -332,8 +355,16 @@ func (s *session) Updates() <-chan driver.Update { return s.updates }
 func (s *session) Done() <-chan struct{}         { return s.worker.Done() }
 func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
 
+// StderrTail is what may be passed on of the agent's stderr.
+func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
+
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
+	result, err := s.prompt(ctx, prompt)
+	return result, s.red.Err(err)
+}
+
+func (s *session) prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
 	// The turn is registered and its message written under the write lock,
 	// so a Cancel that sees the turn writes its interrupt after the prompt,
 	// never before it, where it would interrupt nothing.
@@ -398,6 +429,10 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 // can register and be written in between and take the interrupt meant for
 // another turn.
 func (s *session) Cancel(ctx context.Context) error {
+	return s.red.Err(s.cancel(ctx))
+}
+
+func (s *session) cancel(ctx context.Context) error {
 	if err := s.takeSlot(ctx, s.grace); err != nil {
 		// The worker is not reading its input; the connector's next step is
 		// to close the session, which ends it whatever it is doing.
@@ -524,6 +559,8 @@ func (s *session) end(err error) {
 
 func (s *session) emit(u driver.Update) {
 	u.At = time.Now()
+	u.Tool = s.red.Sanitize(u.Tool)
+	u.ToolCallID = s.red.Sanitize(u.ToolCallID)
 	select {
 	case s.updates <- u:
 	default:
@@ -684,7 +721,7 @@ func (s *session) handleInit(m streamMessage) {
 func (s *session) refused(toolUseID, tool string) {
 	s.mu.Lock()
 	if s.turn != nil {
-		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: toolUseID, Tool: tool})
+		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: s.red.Sanitize(toolUseID), Tool: s.red.Sanitize(tool)})
 	}
 	s.mu.Unlock()
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: toolUseID, Tool: tool, ToolKind: toolKind(tool), Allowed: false})
@@ -710,12 +747,12 @@ func (s *session) handleResult(m streamMessage) {
 	canceled := t.canceled
 	s.mu.Unlock()
 	for _, d := range m.PermissionDenials {
-		if slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == d.ToolUseID }) {
+		if slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == s.red.Sanitize(d.ToolUseID) }) {
 			continue
 		}
 		// A refusal the stream did not announce is still the driver's own
 		// record, and is reported both ways (invariant 3).
-		refusals = append(refusals, driver.Refusal{ToolCallID: d.ToolUseID, Tool: d.ToolName})
+		refusals = append(refusals, driver.Refusal{ToolCallID: s.red.Sanitize(d.ToolUseID), Tool: s.red.Sanitize(d.ToolName)})
 		s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: d.ToolUseID, Tool: d.ToolName, ToolKind: toolKind(d.ToolName), Allowed: false})
 	}
 	result := driver.PromptResult{Refusals: refusals}

@@ -3,7 +3,9 @@ package connector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -1143,4 +1145,65 @@ func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
 	h.run(t)
 	s := nextSession(t, fake)
 	assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
+}
+
+// The redaction rule at the connector's end (driver's redact.go): the task's
+// own token, taken from the socket by the worker, comes back in what the
+// driver reports, and nothing the dispatcher writes carries it.
+func TestNothingTheDispatcherWritesCarriesASecret(t *testing.T) {
+	fake := newFakeDriver()
+	fake.process = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
+	var cfg driver.SessionConfig
+	fake.onStart = func(c driver.SessionConfig) { cfg = c }
+	got := make(chan string, 1)
+	fake.turn = func(s *fakeSession, n int, _ string) (driver.PromptResult, error) {
+		socket := cfg.MCPServers[0].Args[len(cfg.MCPServers[0].Args)-1]
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		conn, err := dialer.DialContext(context.Background(), "unix", socket)
+		require.NoError(t, err)
+		data, _ := io.ReadAll(conn)
+		_ = conn.Close()
+		token := strings.TrimSpace(string(data))
+		got <- token
+		s.updates <- driver.Update{Kind: driver.UpdatePermission, Tool: "mcp__basecamp__" + token, Allowed: false}
+		// Everything the rule names, the way an agent reports a failure.
+		return driver.PromptResult{}, fmt.Errorf("agent failed: token %s, ledger %s, as someone@example.com",
+			token, filepath.Join("/state/2914079-52007412", "ledger.db"))
+	}
+	var logs safeBuffer
+	lines := &safeBuffer{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		o.Lines = ndjson.NewWriter(lines)
+		dir, err := os.MkdirTemp("/tmp", "bc-sess-")
+		require.NoError(t, err)
+		require.NoError(t, os.Chmod(dir, 0o700))
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		o.PrivateDir = dir
+	})
+	// The worker's group is this test's own: confirming it gone would kill
+	// the test.
+	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return nil }
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	h.attemptsEnded(t, 1)
+
+	token := <-got
+	require.NotEmpty(t, token)
+	written := logs.String() + lines.String()
+	require.Contains(t, written, "prompt failed", "the failure was logged at all")
+	assert.NotContains(t, written, token, "the task token")
+	assert.NotContains(t, written, "/state/2914079-52007412", "a path under the state directory")
+	assert.NotContains(t, written, "someone@example.com", "an address the agent volunteered")
+	assert.NotContains(t, written, h.d.opts.PrivateDir, "a path under the runtime directory")
+}
+
+// A task's redaction knows the task's token, whatever else it knows.
+func TestATasksRedactionCarriesItsToken(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	r := h.d.taskRedaction(Launch{Token: "test-token-not-real"}, driver.SessionConfig{Env: []string{"A=alpha-not-real"}})
+	assert.Contains(t, r.Secrets, "test-token-not-real")
+	assert.Contains(t, r.Env, "A=alpha-not-real")
+	assert.Contains(t, r.Dirs, h.d.opts.PrivateDir)
+	assert.Contains(t, r.Dirs, h.d.opts.MCP.StateDir)
 }
