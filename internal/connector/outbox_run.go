@@ -20,9 +20,15 @@ type Poster interface {
 	Post(ctx context.Context, dest Destination, body string) (int64, error)
 	// List returns every message of dest.Kind the agent created at dest since
 	// since, exhaustively: a listing that could not reach back that far is an
-	// error, never a shorter answer.
+	// error, never a shorter answer. An error wrapping ErrUnlistable says no
+	// later listing will answer either.
 	List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error)
 }
+
+// ErrUnlistable is a destination that cannot be listed and will not become
+// listable by waiting: gone, forbidden, or too busy to reach back to the
+// sending time. An intent whose destination is unlistable is indeterminate.
+var ErrUnlistable = errors.New("the destination cannot be listed")
 
 // PostedMessage is one of the agent's messages at a destination.
 type PostedMessage struct {
@@ -43,6 +49,12 @@ const (
 	DefaultReconcileSlack = 2 * time.Minute
 	// DefaultPostTimeout bounds one request.
 	DefaultPostTimeout = time.Minute
+	// A listing that fails is tried again after DefaultReconcileBackoff,
+	// doubling up to MaxReconcileBackoff, and after MaxReconcileFailures the
+	// intent is indeterminate.
+	DefaultReconcileBackoff = 30 * time.Second
+	MaxReconcileBackoff     = 30 * time.Minute
+	MaxReconcileFailures    = 10
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -112,14 +124,12 @@ func NewOutbox(opts OutboxOptions) (*Outbox, error) {
 	return &Outbox{opts: opts, ledger: opts.Ledger, log: opts.Logger}, nil
 }
 
-// Run reconciles every intent a previous process left sending, then sends due
-// intents and reconciles stale sending ones until ctx ends. It does not flush
-// on the way out: call Flush once whatever settles attempts on shutdown is
-// done, so their completion notices go out.
+// Run sends due intents and reconciles sending ones until ctx ends. On start
+// every sending intent is a previous process's; each is reconciled once it is
+// ReconcileAfter old, so a request that was still landing when that process
+// died has landed. It does not flush on the way out: call Flush once whatever
+// settles attempts on shutdown is done, so their completion notices go out.
 func (o *Outbox) Run(ctx context.Context) error {
-	if err := o.Recover(ctx); err != nil && ctx.Err() == nil {
-		o.log.Warn("connector: outbox recovery", "error", err)
-	}
 	ticker := time.NewTicker(o.opts.Tick)
 	defer ticker.Stop()
 	for {
@@ -137,8 +147,8 @@ func (o *Outbox) Run(ctx context.Context) error {
 	}
 }
 
-// Recover reconciles every sending intent, whatever its age. On start every
-// one of them is a previous process's.
+// Recover reconciles every sending intent whose listing is due, whatever its
+// age.
 func (o *Outbox) Recover(ctx context.Context) error {
 	_, err := o.reconcileStale(ctx, 0)
 	return err
@@ -191,7 +201,14 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 	}
 
 	// Invariant 3: the sending row is committed; only now is a request made.
-	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.opts.PostTimeout)
+	// A request is not abandoned because ctx ends mid-flight — its answer is
+	// the receipt — but it is bounded, and never outlives a deadline ctx
+	// carries (the shutdown flush's).
+	timeout := o.opts.PostTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = min(timeout, time.Until(deadline))
+	}
+	postCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	receipt, postErr := o.opts.Poster.Post(postCtx, intent.Destination, intent.Body)
 	cancel()
 	if postErr != nil {
@@ -316,12 +333,16 @@ func (o *Outbox) reconcileStale(ctx context.Context, age time.Duration) (int, er
 	if err != nil {
 		return 0, err
 	}
-	cutoff := o.ledger.now().Add(-age)
+	now := o.ledger.now()
+	cutoff := now.Add(-age)
 	settled := 0
 	var firstErr error
 	for i := len(intents) - 1; i >= 0; i-- {
 		in := intents[i]
 		if in.SendingAt != nil && in.SendingAt.After(cutoff) {
+			continue
+		}
+		if in.ReconcileAt != nil && in.ReconcileAt.After(now) {
 			continue
 		}
 		done, err := o.reconcile(ctx, in)
@@ -350,6 +371,17 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 	since = since.Add(-o.opts.ReconcileSlack)
 	listed, err := o.opts.Poster.List(ctx, in.Destination, since)
 	if err != nil {
+		if ctx.Err() != nil {
+			return false, err
+		}
+		updated, settled, recErr := o.ledger.listingFailed(ctx, in, err)
+		if recErr != nil {
+			return false, recErr
+		}
+		if settled {
+			o.line(updated)
+			return true, nil
+		}
 		return false, err
 	}
 	candidate, note, err := o.ledger.adoptable(ctx, in, listed)
@@ -364,15 +396,42 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 	return true, nil
 }
 
+// listingFailed records a failed listing: the next is due after a backoff,
+// and an unlistable destination or too many failures make the intent
+// indeterminate. It reports whether the intent was settled.
+func (l *Ledger) listingFailed(ctx context.Context, in Intent, listErr error) (Intent, bool, error) {
+	failures := in.ReconcileFailures + 1
+	if errors.Is(listErr, ErrUnlistable) || failures >= MaxReconcileFailures {
+		note := "listing failed " + strconv.Itoa(failures) + " times"
+		if errors.Is(listErr, ErrUnlistable) {
+			note = "destination cannot be listed"
+		}
+		updated, err := l.settleReconciled(ctx, in.ID, 0, note)
+		return updated, err == nil, err
+	}
+	backoff := DefaultReconcileBackoff << (failures - 1)
+	if backoff <= 0 || backoff > MaxReconcileBackoff {
+		backoff = MaxReconcileBackoff
+	}
+	err := retryBusy(func() error {
+		_, err := l.db.ExecContext(ctx, `UPDATE outbox SET reconcile_failures = ?, reconcile_at = ? WHERE id = ? AND state = 'sending'`,
+			failures, stamp(l.now().Add(backoff)), in.ID)
+		return err
+	})
+	return Intent{}, false, err
+}
+
 // adoptable picks the one message a sending intent may adopt, or says why
 // there is none.
 func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessage) (int64, string, error) {
 	want := MessageText(in.Body)
 	var matches []int64
+	seen := map[int64]bool{}
 	for _, m := range listed {
-		if MessageText(m.Content) != want {
+		if seen[m.ID] || MessageText(m.Content) != want {
 			continue
 		}
+		seen[m.ID] = true
 		owned, err := l.receiptOwnedByOther(ctx, in.ID, in.Destination.Kind, m.ID)
 		if err != nil {
 			return 0, "", err
@@ -384,7 +443,10 @@ func (l *Ledger) adoptable(ctx context.Context, in Intent, listed []PostedMessag
 	if len(matches) != 1 {
 		return 0, strconv.Itoa(len(matches)) + " matching messages at the destination", nil
 	}
-	rivals, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending, IntentSending, IntentIndeterminate}})
+	// Rivals are every intent at the destination whose message may exist
+	// without a receipt: not yet sent, sending, or never settled — abandoned
+	// included, since a person abandoning one did not prove it absent.
+	rivals, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending, IntentSending, IntentIndeterminate, IntentAbandoned}})
 	if err != nil {
 		return 0, "", err
 	}
@@ -439,9 +501,12 @@ func (l *Ledger) settleReconciled(ctx context.Context, id, receipt int64, note s
 	return l.Intent(ctx, id)
 }
 
-// IsLifecycleMessage says whether a comment or chat line id is one of the
-// connector's own lifecycle messages, for the adopted-reply rule. An error
-// answers yes: a reply is not adopted on a guess.
+// IsLifecycleMessage says whether a comment or chat line id may be one of the
+// connector's own lifecycle messages, for the adopted-reply rule. It is yes
+// for a receipt, and yes for any id while a comment or chat line intent is
+// sending, indeterminate or abandoned: such a message may exist without an id
+// the ledger knows. An error answers yes too: a reply is not adopted on a
+// guess.
 func (o *Outbox) IsLifecycleMessage(id int64) bool {
 	return IsLifecycleMessageIn(o.ledger)(id)
 }
@@ -451,13 +516,12 @@ func (o *Outbox) IsLifecycleMessage(id int64) bool {
 func IsLifecycleMessageIn(l *Ledger) func(id int64) bool {
 	return func(id int64) bool {
 		ctx := context.Background()
-		for _, kind := range []MessageKind{MessageComment, MessageChatLine} {
-			found, err := l.IsLifecycleReceipt(ctx, kind, id)
-			if err != nil || found {
-				return true
-			}
-		}
-		return false
+		var maybe bool
+		err := l.db.QueryRowContext(ctx, `
+SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id = ?)
+    OR EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id IS NULL
+               AND state IN ('sending', 'indeterminate', 'abandoned'))`, id).Scan(&maybe)
+		return err != nil || maybe
 	}
 }
 

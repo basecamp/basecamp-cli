@@ -66,6 +66,10 @@ CREATE TABLE outbox (
   receipt_id   INTEGER,
   note         TEXT    NOT NULL DEFAULT '',
   resolved_by  TEXT    NOT NULL DEFAULT '',
+  -- A reconciliation listing that failed is tried again at reconcile_at,
+  -- backing off; reconcile_failures counts the failures.
+  reconcile_failures INTEGER NOT NULL DEFAULT 0,
+  reconcile_at       TEXT,
   CHECK ((state = 'sent') = (receipt_id IS NOT NULL)),
   CHECK (state IN ('pending', 'canceled') OR sending_at IS NOT NULL)
 );
@@ -197,6 +201,10 @@ type Intent struct {
 	Note string
 	// ResolvedBy names the person who resolved an indeterminate intent.
 	ResolvedBy string
+	// ReconcileFailures counts listings that failed for a sending intent;
+	// ReconcileAt is when the next is due, nil when none failed.
+	ReconcileFailures int
+	ReconcileAt       *time.Time
 }
 
 // Intent keys.
@@ -276,7 +284,8 @@ func nullableString(s string) any {
 
 const selectIntents = `
 SELECT id, intent_key, kind, state, COALESCE(event_id, 0), COALESCE(task_id, 0), COALESCE(attempt_id, ''), occurrence,
-       bucket_id, message_kind, recording_id, body, created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by
+       bucket_id, message_kind, recording_id, body, created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by,
+       reconcile_failures, reconcile_at
 FROM outbox`
 
 func scanIntents(rows *sql.Rows) ([]Intent, error) {
@@ -288,11 +297,12 @@ func scanIntents(rows *sql.Rows) ([]Intent, error) {
 			kind, state, messageKind string
 			created, notBefore       string
 			sendingAt, finishedAt    sql.NullString
+			reconcileAt              sql.NullString
 			receipt                  sql.NullInt64
 		)
 		if err := rows.Scan(&in.ID, &in.Key, &kind, &state, &in.EventID, &in.TaskID, &in.AttemptID, &in.Occurrence,
 			&in.Destination.BucketID, &messageKind, &in.Destination.RecordingID, &in.Body, &created, &notBefore,
-			&sendingAt, &finishedAt, &receipt, &in.Note, &in.ResolvedBy); err != nil {
+			&sendingAt, &finishedAt, &receipt, &in.Note, &in.ResolvedBy, &in.ReconcileFailures, &reconcileAt); err != nil {
 			return nil, fmt.Errorf("connector: read outbox: %w", err)
 		}
 		in.Kind, in.State, in.Destination.Kind = IntentKind(kind), IntentState(state), MessageKind(messageKind)
@@ -307,6 +317,9 @@ func scanIntents(rows *sql.Rows) ([]Intent, error) {
 			return nil, err
 		}
 		if in.FinishedAt, err = parseNullStamp(finishedAt); err != nil {
+			return nil, err
+		}
+		if in.ReconcileAt, err = parseNullStamp(reconcileAt); err != nil {
 			return nil, err
 		}
 		if receipt.Valid {

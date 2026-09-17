@@ -69,9 +69,24 @@ const linePageLimit = 50
 // Boosts and comments are listed whole; chat lines newest first, page by page,
 // until a page reaches back past since.
 func (p *BasecampPoster) List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
+	out, err := p.list(ctx, dest, since)
+	if err == nil {
+		return out, nil
+	}
+	if e := basecamp.AsError(err); e != nil && (e.Code == basecamp.CodeNotFound || e.Code == basecamp.CodeForbidden) {
+		return nil, fmt.Errorf("connector: list %s at %d: %w: %w", dest.Kind, dest.RecordingID, ErrUnlistable, err)
+	}
+	return out, err
+}
+
+func (p *BasecampPoster) list(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {
 	var out []PostedMessage
+	// Newest-first paging shifts lines across pages as new ones arrive, so
+	// one line can be served twice; it is one message.
+	seen := map[int64]bool{}
 	keep := func(creator *basecamp.Person, id int64, created time.Time, content string) {
-		if creator != nil && creator.ID == p.agentID && !created.Before(since) {
+		if creator != nil && creator.ID == p.agentID && !created.Before(since) && !seen[id] {
+			seen[id] = true
 			out = append(out, PostedMessage{ID: id, CreatedAt: created, Content: content})
 		}
 	}
@@ -122,7 +137,7 @@ func (p *BasecampPoster) List(ctx context.Context, dest Destination, since time.
 				return out, nil
 			}
 		}
-		return nil, fmt.Errorf("connector: the Campfire listing did not reach back to %s within %d pages", since.UTC().Format(time.RFC3339), linePageLimit)
+		return nil, fmt.Errorf("connector: the Campfire listing did not reach back to %s within %d pages: %w", since.UTC().Format(time.RFC3339), linePageLimit, ErrUnlistable)
 	}
 	return nil, fmt.Errorf("connector: %q is not a message kind", dest.Kind)
 }

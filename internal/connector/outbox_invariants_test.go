@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -524,4 +525,136 @@ func TestOutboxFlushNeverClaimsAnIntentTwice(t *testing.T) {
 	}
 	require.Error(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 	assert.Equal(t, 1, basecamp.postCount())
+}
+
+// A listing that keeps failing backs off, and gives up as indeterminate —
+// never a request a second, never a resend.
+func TestOutboxAFailingListingBacksOffThenGivesUp(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.listErr = errWire
+	ob := obOutbox(t, ledger, basecamp)
+
+	lists := func() int { basecamp.mu.Lock(); defer basecamp.mu.Unlock(); return basecamp.lists }
+	require.Error(t, ob.Recover(ctx))
+	require.Equal(t, 1, lists())
+	for range 5 {
+		_, _ = ob.reconcileStale(ctx, 0)
+	}
+	assert.Equal(t, 1, lists(), "not tried again before its backoff")
+	got := obIntent(t, ledger, in.Key)
+	require.Equal(t, IntentSending, got.State)
+	require.NotNil(t, got.ReconcileAt)
+	assert.Equal(t, DefaultReconcileBackoff, got.ReconcileAt.Sub(clock.Now()))
+
+	for i := 2; i <= MaxReconcileFailures; i++ {
+		clock.Advance(MaxReconcileBackoff)
+		_, _ = ob.reconcileStale(ctx, 0)
+		assert.Equal(t, i, lists())
+	}
+	got = obIntent(t, ledger, in.Key)
+	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Zero(t, basecamp.postCount())
+}
+
+// A destination that cannot be listed settles at once as indeterminate.
+func TestOutboxAnUnlistableDestinationIsIndeterminate(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.listErr = fmt.Errorf("gone: %w", ErrUnlistable)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+	got := obIntent(t, ledger, in.Key)
+	assert.Equal(t, IntentIndeterminate, got.State)
+	assert.Equal(t, "destination cannot be listed", got.Note)
+}
+
+// On start, a sending intent younger than ReconcileAfter is left to land.
+func TestOutboxRunLeavesAYoungSendingIntentToLand(t *testing.T) {
+	ledger, clock := obLedger(t)
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: basecamp, Tick: time.Millisecond})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	require.NoError(t, ob.Run(ctx))
+	assert.Zero(t, basecamp.lists)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, in.Key).State)
+}
+
+// Rivals: an intent left indeterminate or abandoned at the destination with
+// the same body may own the only match, so nothing is adopted.
+func TestOutboxUnsettledRivalsBlockAdoption(t *testing.T) {
+	for _, rivalState := range []IntentState{IntentIndeterminate, IntentAbandoned} {
+		t.Run(string(rivalState), func(t *testing.T) {
+			ledger, clock := obLedger(t)
+			ctx := context.Background()
+			obAdmit(t, ledger, 1, "recording:10304028989")
+			obAdmit(t, ledger, 2, "recording:10304028989")
+			clock.Advance(DefaultGuardDelay)
+			first, ok, err := ledger.claimIntent(ctx)
+			require.NoError(t, err)
+			require.True(t, ok)
+			basecamp := newFakeBasecamp(clock.Now)
+			// The first guard's request never got an answer; nothing listed yet.
+			require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+			require.Equal(t, IntentIndeterminate, obIntent(t, ledger, first.Key).State)
+			if rivalState == IntentAbandoned {
+				require.NoError(t, ledger.ResolveIntent(ctx, first.ID, IntentResolution{Resolution: ResolveAbandon, By: "person:26909558"}))
+			}
+
+			// The first boost shows up late; the second guard went sending.
+			second, ok, err := ledger.claimIntent(ctx)
+			require.NoError(t, err)
+			require.True(t, ok)
+			basecamp.add(second.Destination, adapterAgentID, second.Body)
+			require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+			assert.Equal(t, IntentIndeterminate, obIntent(t, ledger, second.Key).State)
+		})
+	}
+}
+
+// A lifecycle message whose receipt the ledger does not hold yet is not
+// adopted as the worker's reply.
+func TestOutboxAnUnreceiptedNoticeIsNeverAdopted(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	landed := basecamp.add(in.Destination, adapterAgentID, in.Body)
+	isLifecycle := IsLifecycleMessageIn(ledger)
+	assert.True(t, isLifecycle(landed), "sending: its message may be any id")
+
+	require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
+	require.Equal(t, IntentSent, obIntent(t, ledger, in.Key).State)
+	assert.True(t, isLifecycle(landed))
+	assert.False(t, isLifecycle(landed+1), "once every notice has its receipt, other replies are adoptable")
+}
+
+// blockingPoster answers nothing until its request's context ends.
+type blockingPoster struct{ *fakeBasecamp }
+
+func (b blockingPoster) Post(ctx context.Context, _ Destination, _ string) (int64, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+// A flush with a deadline — the shutdown's — is not held past it by a request.
+func TestOutboxFlushHonoursItsDeadline(t *testing.T) {
+	ledger, clock := obLedger(t)
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	ob := obOutbox(t, ledger, blockingPoster{newFakeBasecamp(clock.Now)})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_ = ob.Flush(ctx)
+	assert.Less(t, time.Since(started), 5*time.Second)
+	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State, "cut off mid-flight: reconciled later, never resent")
 }

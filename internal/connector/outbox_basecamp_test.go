@@ -34,6 +34,7 @@ type obServer struct {
 	// with it and stores nothing.
 	beforeStore func(r *http.Request) int
 	pageSize    int
+	pageHook    func(page int)
 }
 
 type obServerMessage struct {
@@ -98,8 +99,12 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.mu.Lock()
 		all := append([]obServerMessage(nil), s.messages[dest]...)
-		pageSize := s.pageSize
+		pageSize, hook := s.pageSize, s.pageHook
 		s.mu.Unlock()
+		if hook != nil && kind == MessageChatLine {
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			defer hook(page)
+		}
 		if kind == MessageChatLine {
 			sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
 			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -130,6 +135,12 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 func (s *obServer) setOnPost(fn func(r *http.Request, id int64) int) {
 	s.mu.Lock()
 	s.onPost = fn
+	s.mu.Unlock()
+}
+
+func (s *obServer) setPageHook(fn func(page int)) {
+	s.mu.Lock()
+	s.pageHook = fn
 	s.mu.Unlock()
 }
 
@@ -264,4 +275,41 @@ func TestBasecampPosterRefusesAShortCampfireListing(t *testing.T) {
 	}
 	_, err := poster.List(context.Background(), dest, since)
 	require.Error(t, err)
+}
+
+// A line served on two pages is one message.
+func TestBasecampPosterListsALineOnce(t *testing.T) {
+	server := newOBServer(t)
+	server.setPageSize(1)
+	dest := Destination{Kind: MessageChatLine, RecordingID: obCampfire}
+	since := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	server.addAt(dest, obOtherPersonID, "before", since.Add(-time.Minute))
+	id := server.addAt(dest, adapterAgentID, "mine", since.Add(time.Minute))
+	server.setPageHook(func(page int) {
+		if page == 1 {
+			// A line arrives between pages, pushing "mine" onto page 2.
+			server.addAt(dest, obOtherPersonID, "late", since.Add(2*time.Minute))
+		}
+	})
+	listed, err := server.poster(t).List(context.Background(), dest, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, id, listed[0].ID)
+}
+
+// A destination that is gone or forbidden is unlistable, not a failure to
+// try again.
+func TestBasecampPosterMarksAGoneDestinationUnlistable(t *testing.T) {
+	server := newOBServer(t)
+	poster := server.poster(t)
+	_, err := poster.List(context.Background(), Destination{Kind: MessageComment, RecordingID: 1}, time.Now())
+	require.NoError(t, err, "an empty listing is an answer")
+
+	gone := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(gone.Close)
+	client := basecamp.NewClient(&basecamp.Config{BaseURL: gone.URL}, &basecamp.StaticTokenProvider{Token: "test-token-not-real"})
+	p, err := NewBasecampPoster(client.ForAccount("999"), adapterAgentID)
+	require.NoError(t, err)
+	_, err = p.List(context.Background(), Destination{Kind: MessageComment, RecordingID: 1}, time.Now())
+	require.ErrorIs(t, err, ErrUnlistable)
 }
