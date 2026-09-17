@@ -55,6 +55,9 @@ const (
 	DefaultReconcileBackoff = 30 * time.Second
 	MaxReconcileBackoff     = 30 * time.Minute
 	MaxReconcileFailures    = 10
+	// MinPostWindow is the least time a flush with a deadline needs left to
+	// claim another intent.
+	MinPostWindow = 5 * time.Second
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -170,6 +173,12 @@ func (o *Outbox) Flush(ctx context.Context) error {
 				return nil
 			}
 		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < min(MinPostWindow, o.opts.PostTimeout) {
+			// Too little time left for a request to be answered: a claim now
+			// would only leave the intent for a person. It stays pending and
+			// goes out on the next start.
+			return nil
+		}
 		id, err := o.sendNext(ctx, claimed)
 		if err != nil {
 			return err
@@ -213,8 +222,10 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, e
 	cancel()
 	if postErr != nil {
 		// The request may have reached Basecamp. The intent stays sending and
-		// is reconciled once it has had time to land; it is never posted
-		// again (invariant 4).
+		// is reconciled once it has had time to land — counted from now, not
+		// from the claim, since a request that timed out may land later
+		// still; it is never posted again (invariant 4).
+		o.ledger.deferReconcile(context.WithoutCancel(ctx), intent.ID, o.opts.ReconcileAfter)
 		o.log.Warn("connector: a lifecycle message may not have been posted; it will be reconciled, not resent",
 			"intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		return intent.ID, nil
@@ -396,6 +407,16 @@ func (o *Outbox) reconcile(ctx context.Context, in Intent) (bool, error) {
 	return true, nil
 }
 
+// deferReconcile makes a sending intent's first reconciliation due after wait
+// from now. Best effort: without it the intent is reconciled a little early,
+// which can only make it indeterminate, never send it.
+func (l *Ledger) deferReconcile(ctx context.Context, id int64, wait time.Duration) {
+	_ = retryBusy(func() error {
+		_, err := l.db.ExecContext(ctx, `UPDATE outbox SET reconcile_at = ? WHERE id = ? AND state = 'sending'`, stamp(l.now().Add(wait)), id)
+		return err
+	})
+}
+
 // listingFailed records a failed listing: the next is due after a backoff,
 // and an unlistable destination or too many failures make the intent
 // indeterminate. It reports whether the intent was settled.
@@ -501,12 +522,11 @@ func (l *Ledger) settleReconciled(ctx context.Context, id, receipt int64, note s
 	return l.Intent(ctx, id)
 }
 
-// IsLifecycleMessage says whether a comment or chat line id may be one of the
-// connector's own lifecycle messages, for the adopted-reply rule. It is yes
-// for a receipt, and yes for any id while a comment or chat line intent is
-// sending, indeterminate or abandoned: such a message may exist without an id
-// the ledger knows. An error answers yes too: a reply is not adopted on a
-// guess.
+// IsLifecycleMessage says whether a comment or chat line id is the receipt of
+// one of the connector's own lifecycle messages, for the adopted-reply rule.
+// A notice whose receipt the ledger does not hold yet is recognized by its
+// words instead, where the replies are listed: LifecycleFilteredReplies. An
+// error answers yes: a reply is not adopted on a guess.
 func (o *Outbox) IsLifecycleMessage(id int64) bool {
 	return IsLifecycleMessageIn(o.ledger)(id)
 }
@@ -515,14 +535,74 @@ func (o *Outbox) IsLifecycleMessage(id int64) bool {
 // built without a sender.
 func IsLifecycleMessageIn(l *Ledger) func(id int64) bool {
 	return func(id int64) bool {
-		ctx := context.Background()
-		var maybe bool
-		err := l.db.QueryRowContext(ctx, `
-SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id = ?)
-    OR EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id IS NULL
-               AND state IN ('sending', 'indeterminate', 'abandoned'))`, id).Scan(&maybe)
-		return err != nil || maybe
+		var found bool
+		err := l.db.QueryRowContext(context.Background(),
+			`SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind IN ('comment', 'chat_line') AND receipt_id = ?)`, id).Scan(&found)
+		return err != nil || found
 	}
+}
+
+// LifecycleFilteredReplies lists the agent's replies at a destination for the
+// adopted-reply rule, without the connector's own notices: a message is left
+// out when its id is a lifecycle receipt, or when its words are those of a
+// comment or chat line intent at the same destination that has no receipt —
+// one still sending, say, or left for a person. Notice bodies name their event
+// or attempt, so the match is exact and scoped to the destination; a notice in
+// flight elsewhere never hides a reply here.
+type LifecycleFilteredReplies struct {
+	// Lister lists the agent's messages with their content (a Poster does).
+	Lister interface {
+		List(ctx context.Context, dest Destination, since time.Time) ([]PostedMessage, error)
+	}
+	Ledger *Ledger
+}
+
+var _ ReplyLister = LifecycleFilteredReplies{}
+
+// AgentReplies implements ReplyLister.
+func (r LifecycleFilteredReplies) AgentReplies(ctx context.Context, bucketID int64, kind string, recordingID int64, since time.Time) ([]AgentReply, error) {
+	messageKind, ok := destinationKind(kind)
+	if !ok {
+		return nil, fmt.Errorf("connector: no reply listing for %q", kind)
+	}
+	dest := Destination{BucketID: bucketID, Kind: messageKind, RecordingID: recordingID}
+	listed, err := r.Lister.List(ctx, dest, since)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.Ledger.db.QueryContext(ctx, `
+SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
+	if err != nil {
+		return nil, fmt.Errorf("connector: lifecycle messages at %d: %w", recordingID, err)
+	}
+	receipts := map[int64]bool{}
+	unreceipted := map[string]bool{}
+	for rows.Next() {
+		var (
+			receipt sql.NullInt64
+			body    string
+		)
+		if err := rows.Scan(&receipt, &body); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if receipt.Valid {
+			receipts[receipt.Int64] = true
+		} else {
+			unreceipted[MessageText(body)] = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]AgentReply, 0, len(listed))
+	for _, m := range listed {
+		if receipts[m.ID] || unreceipted[MessageText(m.Content)] {
+			continue
+		}
+		out = append(out, AgentReply{ID: m.ID, CreatedAt: m.CreatedAt})
+	}
+	return out, nil
 }
 
 func (o *Outbox) line(in Intent) {

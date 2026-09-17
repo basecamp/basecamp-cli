@@ -619,20 +619,42 @@ func TestOutboxUnsettledRivalsBlockAdoption(t *testing.T) {
 }
 
 // A lifecycle message whose receipt the ledger does not hold yet is not
-// adopted as the worker's reply.
+// adopted as the worker's reply; it is recognized by its words at its own
+// destination, so a notice in flight elsewhere, or one left for a person,
+// never hides a reply.
 func TestOutboxAnUnreceiptedNoticeIsNeverAdopted(t *testing.T) {
 	ledger, clock := obLedger(t)
 	ctx := context.Background()
 	in := sendingHolding(t, ledger, 1, obCommentReply)
 	basecamp := newFakeBasecamp(clock.Now)
-	landed := basecamp.add(in.Destination, adapterAgentID, in.Body)
-	isLifecycle := IsLifecycleMessageIn(ledger)
-	assert.True(t, isLifecycle(landed), "sending: its message may be any id")
+	since := clock.Now().Add(-time.Minute)
+	landed := basecamp.add(in.Destination, adapterAgentID, `<div dir="auto">`+in.Body+`</div>`)
+	reply := basecamp.add(in.Destination, adapterAgentID, "<div>Done: the fix is on the branch.</div>")
+	replies := LifecycleFilteredReplies{Lister: basecamp, Ledger: ledger}
 
-	require.NoError(t, obOutbox(t, ledger, basecamp).Recover(ctx))
-	require.Equal(t, IntentSent, obIntent(t, ledger, in.Key).State)
-	assert.True(t, isLifecycle(landed))
-	assert.False(t, isLifecycle(landed+1), "once every notice has its receipt, other replies are adoptable")
+	listed, err := replies.AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the sending notice is left out by its words")
+	assert.Equal(t, reply, listed[0].ID)
+
+	// Elsewhere, an abandoned notice hides nothing.
+	other := admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 555}
+	abandoned := sendingHolding(t, ledger, 2, other)
+	require.NoError(t, obOutbox(t, ledger, newFakeBasecamp(clock.Now)).Recover(ctx))
+	require.NoError(t, ledger.ResolveIntent(ctx, abandoned.ID, IntentResolution{Resolution: ResolveAbandon, By: "person:26909558"}))
+	listed, err = replies.AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+
+	// That recovery listed an empty Basecamp, so the first notice is
+	// indeterminate too, and still left out by its words. A person then finds
+	// it and records its receipt, which identifies it from then on.
+	require.Equal(t, IntentIndeterminate, obIntent(t, ledger, in.Key).State)
+	require.NoError(t, ledger.ResolveIntent(ctx, in.ID, IntentResolution{Resolution: ResolveSent, ReceiptID: landed, By: "person:26909558"}))
+	assert.True(t, IsLifecycleMessageIn(ledger)(landed))
+	assert.False(t, IsLifecycleMessageIn(ledger)(reply))
+	id, ok := AdoptableReply(AdoptionCandidate{DeliveredAt: since}, []AgentReply{{ID: landed, CreatedAt: clock.Now()}}, IsLifecycleMessageIn(ledger))
+	assert.False(t, ok, "adopted %d", id)
 }
 
 // blockingPoster answers nothing until its request's context ends.
@@ -643,20 +665,25 @@ func (b blockingPoster) Post(ctx context.Context, _ Destination, _ string) (int6
 	return 0, ctx.Err()
 }
 
-// A flush with a deadline — the shutdown's — is not held past it by a request.
+// A flush with a deadline — the shutdown's — is not held past it by a request,
+// and claims nothing it has no time left to send.
 func TestOutboxFlushHonoursItsDeadline(t *testing.T) {
 	ledger, clock := obLedger(t)
-	seenRecord(t, ledger, 1)
-	_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(1, 0, obCommentReply))
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(context.Background(), obNoRouteVerdict(id, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	ob, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: blockingPoster{newFakeBasecamp(clock.Now)}, PostTimeout: 300 * time.Millisecond})
 	require.NoError(t, err)
-	ob := obOutbox(t, ledger, blockingPoster{newFakeBasecamp(clock.Now)})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 	defer cancel()
 	started := time.Now()
 	_ = ob.Flush(ctx)
 	assert.Less(t, time.Since(started), 5*time.Second)
 	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State, "cut off mid-flight: reconciled later, never resent")
+	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(2)).State, "not claimed with too little time left")
 }
 
 // A person's resend starts the request's reconciliation afresh: the failures
@@ -683,4 +710,24 @@ func TestOutboxAResendStartsReconciliationAfresh(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	_, _ = ob.reconcileStale(ctx, 0)
 	assert.Equal(t, IntentSending, obIntent(t, ledger, in.Key).State, "one failed listing is the first of a fresh budget")
+}
+
+// A request that failed — a timeout, say — is given ReconcileAfter from its
+// failure to land, not from its claim.
+func TestOutboxAFailedPostIsGivenTimeToLand(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error {
+		clock.Advance(DefaultPostTimeout) // the request ran out its whole timeout
+		return context.DeadlineExceeded
+	}
+	ob := obOutbox(t, ledger, basecamp)
+	require.NoError(t, ob.Flush(ctx))
+	_, _ = ob.reconcileStale(ctx, ob.opts.ReconcileAfter)
+	assert.Zero(t, basecamp.lists, "not listed straight after the failure")
+	assert.Equal(t, IntentSending, obIntent(t, ledger, holdingKey(1)).State)
 }
