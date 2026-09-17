@@ -65,7 +65,7 @@ func fakeClaude(w *fakeWorker) int {
 	for name, s := range config.MCPServers {
 		names = append(names, name)
 		if name == MCPServerName {
-			if err := w.Bind(driver.MCPServer{Name: name, Command: s.Command, Args: s.Args, Env: s.Env}); err != nil {
+			if err := w.Bind(context.Background(), driver.MCPServer{Name: name, Command: s.Command, Args: s.Args, Env: s.Env}); err != nil {
 				return 12
 			}
 		}

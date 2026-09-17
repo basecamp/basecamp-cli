@@ -287,7 +287,10 @@ func runHarnessConnector(dir string) error {
 	outbox, err := NewOutbox(OutboxOptions{
 		Ledger: ledger, Poster: storePoster{dir: dir, kill: kill},
 		Paused: ledger.Held, Lines: lines, Logger: logger,
-		Tick: 20 * time.Millisecond, ReconcileAfter: time.Hour,
+		// A sending intent a previous process left is reconciled once it is
+		// this old, so a restart settles it rather than waiting out the
+		// production minute.
+		Tick: 20 * time.Millisecond, ReconcileAfter: 200 * time.Millisecond,
 	})
 	if err != nil {
 		return err
@@ -357,7 +360,7 @@ func runHarnessConnector(dir string) error {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the ledger never reached %q", until)
+			return fmt.Errorf("the ledger never reached %q; %s", until, unsettled(ctx, ledger))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -432,6 +435,30 @@ func harnessPredicate(ctx context.Context, dir string, l *Ledger, until string) 
 		return len(open) == 0, err
 	}
 	return false, fmt.Errorf("unknown predicate %q", until)
+}
+
+// unsettled says what a run that never reached its predicate was still
+// holding, so a failure names it rather than the timeout alone.
+func unsettled(ctx context.Context, l *Ledger) string {
+	var out []string
+	rows, err := l.db.QueryContext(ctx, `SELECT state, COUNT(*) FROM events GROUP BY state`)
+	if err != nil {
+		return "the ledger could not be read: " + err.Error()
+	}
+	for rows.Next() {
+		var state string
+		var n int
+		if rows.Scan(&state, &n) == nil {
+			out = append(out, fmt.Sprintf("%s=%d", state, n))
+		}
+	}
+	_ = rows.Close()
+	attempts, _ := l.LiveAttempts(ctx)
+	intents, _ := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending, IntentSending}})
+	for _, in := range intents {
+		out = append(out, fmt.Sprintf("intent %d %s %s not_before=%s", in.ID, in.Kind, in.State, in.NotBefore.Format(time.RFC3339)))
+	}
+	return fmt.Sprintf("records %v, live attempts %d", out, len(attempts))
 }
 
 // ledgerSettled is a connector with nothing left to do: every event the feed

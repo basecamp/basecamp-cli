@@ -98,7 +98,7 @@ func (w *fakeWorker) BadMode() bool {
 // Bind takes the worker's task from the MCP server declaration its driver
 // handed the agent: the state directory in its arguments and the token in its
 // environment, as `basecamp mcp --connect-state` reads them.
-func (w *fakeWorker) Bind(server driver.MCPServer) error {
+func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if server.Name != MCPServerName {
 		return fmt.Errorf("the MCP server is %q, not %q", server.Name, MCPServerName)
 	}
@@ -114,7 +114,7 @@ func (w *fakeWorker) Bind(server driver.MCPServer) error {
 	if err != nil {
 		return err
 	}
-	d, err := l.Dispatch(token, harnessAgent)
+	d, err := l.Dispatch(ctx, token, harnessAgent)
 	if err != nil {
 		_ = l.Close()
 		return err
