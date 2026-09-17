@@ -21,3 +21,5 @@ keyring(bcq
 legacy bcq
 # RELEASING.md — actual GitHub App name
 bcq-release-bot
+# npm integrity hashes are base64 and can contain any letters
+./internal/connector/driver/acp/adapters/package-lock.json

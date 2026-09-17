@@ -5345,6 +5345,7 @@ FLAG basecamp config untrust --styled type=bool
 FLAG basecamp config untrust --todolist type=string
 FLAG basecamp config untrust --verbose type=count
 FLAG basecamp connect --account type=string
+FLAG basecamp connect --acp-adapters type=string
 FLAG basecamp connect --agent type=bool
 FLAG basecamp connect --cache-dir type=string
 FLAG basecamp connect --count type=bool

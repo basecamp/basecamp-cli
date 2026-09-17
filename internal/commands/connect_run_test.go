@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
@@ -192,4 +193,28 @@ func TestTheDoctorCheckReadsTheProfilesConnectorLayout(t *testing.T) {
 	require.NotNil(t, check)
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Hint, "XDG_RUNTIME_DIR", "and says what to do about it")
+}
+
+func TestConnectDriverRunsTheWorkersPinnedACPAdapterFromWhereItWasInstalled(t *testing.T) {
+	d, err := connectDriver(setup.DriverSpawn, setup.WorkerClaude, "")
+	require.NoError(t, err)
+	assert.Equal(t, setup.WorkerClaude, d.Name())
+
+	dir := t.TempDir()
+	_, err = connectDriver(setup.DriverACP, setup.WorkerClaude, dir)
+	require.ErrorIs(t, err, acp.ErrAdapterMissing, "an adapter that is not installed is never fetched")
+
+	pkg := filepath.Join(dir, "node_modules", filepath.FromSlash(acp.ClaudeAgentACP.Package))
+	require.NoError(t, os.MkdirAll(pkg, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "package.json"),
+		[]byte(`{"name":"`+acp.ClaudeAgentACP.Package+`","version":"`+acp.ClaudeAgentACP.Version+`"}`), 0o600))
+	bin := filepath.Join(dir, "node_modules", ".bin")
+	require.NoError(t, os.MkdirAll(bin, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(bin, acp.ClaudeAgentACP.Name), []byte("#!/bin/sh\n"), 0o700))
+	d, err = connectDriver(setup.DriverACP, setup.WorkerClaude, dir)
+	require.NoError(t, err)
+	assert.Equal(t, acp.Name, d.Name())
+
+	_, err = connectDriver(setup.DriverACP, "nobody", dir)
+	assert.Error(t, err)
 }

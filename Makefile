@@ -130,6 +130,26 @@ qa-report:
 		echo ""; \
 	fi
 
+# The connector's acp driver runs pinned ACP adapters, installed here once by
+# an operator and never downloaded at dispatch time.
+ACP_ADAPTERS_DIR ?= $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/basecamp/acp-adapters
+
+# Install the pinned ACP adapters (internal/connector/driver/acp/adapters)
+.PHONY: acp-adapters
+acp-adapters:
+	@mkdir -p "$(ACP_ADAPTERS_DIR)"
+	cp internal/connector/driver/acp/adapters/package.json internal/connector/driver/acp/adapters/package-lock.json "$(ACP_ADAPTERS_DIR)/"
+	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund
+
+# The ACP adapter-compatibility test: four checks through the acp driver
+# against each installed adapter. Sends real prompts (model quota); skipped
+# for an adapter that is not installed. ACP_TRANSCRIPTS=<dir> keeps redacted
+# JSON-RPC transcripts.
+.PHONY: test-acp-compat
+test-acp-compat: check-toolchain
+	BASECAMP_ACP_ADAPTERS_DIR="$(ACP_ADAPTERS_DIR)" BASECAMP_ACP_TRANSCRIPTS="$(ACP_TRANSCRIPTS)" \
+		$(GOTEST) -tags acpcompat -run TestAdapterCompat -count=1 -timeout 30m -v ./internal/connector/driver/acp/
+
 # Run tests with race detector
 .PHONY: race-test
 race-test: check-toolchain
