@@ -257,6 +257,9 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 			out.Admitted = target == StateAdmitted
 			break
 		}
+		// A held record carries no reason today (events_review_is_held clears
+		// it), but the spec's "held over a blocking reason" is a record a
+		// migration may yet write, and it re-runs what blocked it.
 		reason := record.Reason
 		if reason == "" {
 			reason = "held_incomplete"

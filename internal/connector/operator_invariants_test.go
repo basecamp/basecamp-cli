@@ -951,3 +951,22 @@ func TestARedispatchOntoBlockedIsAuthorizedForThatBlock(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int64{1}, ids)
 }
+
+// A person who redispatches and then discards the same record has decided
+// twice: the discard stands, and the redispatch waiting for the task's end is
+// withdrawn with it.
+func TestADiscardWithdrawsARedispatchWaitingForItsTask(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	launch := pendingRedispatch(t, l)
+	_, err := l.db.ExecContext(ctx, `UPDATE task_events SET outcome = 'unknown' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	_, err = l.Discard(ctx, 1, opBy)
+	require.NoError(t, err)
+	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+	record := getRecord(t, l, 1)
+	assert.Equal(t, StateDiscarded, record.State, "the task's end does not reopen what a person closed")
+	assert.Equal(t, ReasonByOperator, record.Reason)
+}
