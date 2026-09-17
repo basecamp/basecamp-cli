@@ -388,3 +388,18 @@ func TestInvariant7ImportSurvivesAKillAtEveryStep(t *testing.T) {
 }
 
 func timeNow() time.Time { return time.Now() }
+
+// A promote run again after its rename finishes the move rather than refusing
+// it, and does not mind a shadow directory a person has cleared away.
+func TestPromoteRunAgainFinishesAMoveWithoutItsShadow(t *testing.T) {
+	shadowDir, stateDir := shadowFixture(t)
+	ctx := context.Background()
+	_, err := PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(shadowDir))
+
+	got, err := PromoteShadow(ctx, promoteOptions(shadowDir, stateDir))
+	require.NoError(t, err)
+	assert.True(t, got.Already)
+	assertHeld(t, filepath.Join(stateDir, LedgerFile))
+}

@@ -991,3 +991,40 @@ func TestAHeldRecordsCanceledGuardIsFinished(t *testing.T) {
 	assert.Equal(t, IntentCanceled, guard.State)
 	assert.NotNil(t, guard.FinishedAt, "a canceled intent says when it was finished")
 }
+
+// Invariant 2, for the worker a crashed connector left running: while the hold
+// stands, get_dispatch hands out nothing it had not already handed out.
+func TestInvariant2AWorkerIsHandedNothingNewUnderTheHold(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
+	launch := launchOf(t, l, 1)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	first, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	// The instruction it already holds is answered again; the sibling it never
+	// pulled is not handed over.
+	repeat, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, first.EventID, repeat.EventID)
+	_, _, err = d.Get(ctx, 2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "held")
+	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "held")
+
+	_, err = l.Release(ctx, opBy)
+	require.NoError(t, err)
+	_, ok, err = d.Get(ctx, 2)
+	require.NoError(t, err)
+	assert.True(t, ok, "released, the follow-up is handed over")
+}

@@ -164,8 +164,8 @@ func newConnectStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show what the connector heard, holds and ran",
-		Long: `Show the connector's ledger: whether it is running, the hold, the feed
-position (whether one is held, never the position), the last poll-served id,
+		Long: `Show the connector's ledger: what its instance lock file says, the hold, the
+feed position (whether one is held, never the position), the last poll-served id,
 gaps and losses, queue depths, live tasks, retained worktrees, lifecycle
 messages waiting for a person, held records, and the last 20 dispatches with
 their outcomes.
@@ -186,19 +186,22 @@ record's recording URL is shown so a person can open what was asked.`,
 
 // connectStatusReport is status's output.
 type connectStatusReport struct {
-	Profile string           `json:"profile"`
-	Shadow  bool             `json:"shadow"`
-	Running *connectRunning  `json:"running,omitempty"`
-	Status  connector.Status `json:"status"`
+	Profile    string             `json:"profile"`
+	Shadow     bool               `json:"shadow"`
+	LockHolder *connectLockHolder `json:"lock_holder,omitempty"`
+	Status     connector.Status   `json:"status"`
 }
 
-// connectRunning is what the instance lock's holder wrote. Alive says a
-// process with that pid exists now; after a crash the file stays behind, and
-// the pid may since belong to another process.
-type connectRunning struct {
+// connectLockHolder is what a connector wrote beside its instance lock. It is
+// diagnostic, not an answer: the metadata is written best effort after the
+// lock is taken, it stays behind after a crash, and a pid may since belong to
+// another process. Status never takes the lock, so it cannot say more.
+type connectLockHolder struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
-	Alive     bool   `json:"alive"`
+	// PIDExists is kill(pid, 0): a process with that pid is there, not
+	// necessarily that connector.
+	PIDExists bool `json:"pid_exists"`
 }
 
 func runConnectStatus(cmd *cobra.Command, shadow bool) error {
@@ -231,7 +234,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
-		report.Running = &connectRunning{PID: holder.PID, StartedAt: holder.StartedAt, Alive: processAlive(holder.PID)}
+		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDExists: processAlive(holder.PID)}
 	}
 	if p.app.Output.EffectiveFormat() == output.FormatStyled {
 		renderConnectStatus(cmd.OutOrStdout(), report)
@@ -263,10 +266,14 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	fmt.Fprintf(w, "%s\n\n", title)
 
 	switch {
-	case r.Running != nil && r.Running.Alive:
-		fmt.Fprintf(w, "  Running        pid %d since %s (as its lock file says)\n", r.Running.PID, clean(r.Running.StartedAt))
+	case r.LockHolder != nil && r.LockHolder.PIDExists:
+		fmt.Fprintf(w, "  Lock file      pid %d since %s, and a process with that pid is there (diagnostic: status takes no lock)\n",
+			r.LockHolder.PID, clean(r.LockHolder.StartedAt))
+	case r.LockHolder != nil:
+		fmt.Fprintf(w, "  Lock file      pid %d since %s, and no process has that pid (left behind by a crash, or ended)\n",
+			r.LockHolder.PID, clean(r.LockHolder.StartedAt))
 	default:
-		fmt.Fprintf(w, "  Running        no\n")
+		fmt.Fprintf(w, "  Lock file      none beside the ledger\n")
 	}
 	if s.Connection != nil {
 		fmt.Fprintf(w, "  Last run       %s at %s", clean(s.Connection.State), stamp(s.Connection.ChangedAt))

@@ -76,7 +76,7 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 
 	if _, err := os.Lstat(opts.ShadowDir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return promoted(ctx, statePath)
+			return promoted(ctx, opts, statePath)
 		}
 		return PromoteResult{}, fmt.Errorf("connector: inspect the shadow state: %w", err)
 	}
@@ -94,7 +94,7 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 
 	if _, err := os.Lstat(shadowPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return promoted(ctx, statePath)
+			return promoted(ctx, opts, statePath)
 		}
 		return PromoteResult{}, fmt.Errorf("connector: inspect the shadow ledger: %w", err)
 	}
@@ -172,8 +172,11 @@ func PromoteShadow(ctx context.Context, opts PromoteOptions) (PromoteResult, err
 }
 
 // promoted answers a promote with no shadow ledger left: an earlier promote
-// finished when the normal ledger stands under a promote's hold.
-func promoted(ctx context.Context, statePath string) (PromoteResult, error) {
+// finished when the normal ledger stands under a promote's hold. It finishes
+// what that promote may not have: a crash after the rename leaves the move
+// without its durability barrier, so both directories are synced again before
+// this says it is done.
+func promoted(ctx context.Context, opts PromoteOptions, statePath string) (PromoteResult, error) {
 	if _, err := os.Lstat(statePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return PromoteResult{}, fmt.Errorf("connector: %w", ErrNoShadowLedger)
@@ -198,6 +201,11 @@ func promoted(ctx context.Context, statePath string) (PromoteResult, error) {
 	if !ok || !promotedHere {
 		return PromoteResult{}, fmt.Errorf("connector: %w", ErrNoShadowLedger)
 	}
+	for _, dir := range []string{opts.StateDir, opts.ShadowDir} {
+		if err := syncDirectory(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return PromoteResult{}, err
+		}
+	}
 	return PromoteResult{Already: true, Hold: hold, Ledger: statePath}, nil
 }
 
@@ -221,6 +229,10 @@ func checkpointToOneFile(ctx context.Context, db *sql.DB) error {
 
 func syncDirectory(dir string) error {
 	f, err := os.Open(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		// A shadow directory a person has already cleared away.
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("connector: sync %s: %w", dir, err)
 	}

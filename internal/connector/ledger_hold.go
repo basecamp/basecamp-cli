@@ -24,13 +24,14 @@ import (
 //     by a task's end returning it, by anything — is written held instead, by
 //     a trigger, in the same statement. A held record is not startable.
 //  2. The hold marker stops dispatch and posting at the database. While it
-//     stands no attempt row can be written, no task takes a follow-up and no
-//     outbox intent can move to sending. It lives in the ledger, so every
+//     stands no attempt row can be written, no task takes a follow-up, no
+//     event is handed to a worker for the first time — get_dispatch included,
+//     so a worker a crashed connector left running is told nothing new — and
+//     no outbox intent can move to sending. It lives in the ledger, so every
 //     start respects it, and only Release clears it. What it does not stop is
-//     a worker a crashed connector left running: it holds its own task token
-//     until a start recovers that attempt, and what it does in Basecamp is
-//     its own. Ending it is the one-owner rule's (driver/worker.go), and a
-//     person can hurry it with redispatch.
+//     what such a worker already holds: an instruction it was handed before
+//     the hold, and its own Basecamp credential. Ending it is the one-owner
+//     rule's (driver/worker.go), and a person can hurry it with redispatch.
 //  3. A hold is one transaction: the marker, a new intake generation, the
 //     review tag on every non-terminal record of the generations before it
 //     (clearing any earlier authorization, a redispatch still waiting for its
@@ -133,6 +134,13 @@ BEFORE INSERT ON attempts
 WHEN EXISTS (SELECT 1 FROM hold_marker)
 BEGIN
   SELECT RAISE(ABORT, 'the connector is held: nothing is dispatched until basecamp connect release');
+END;
+
+CREATE TRIGGER task_events_exposure_refused_under_hold
+BEFORE UPDATE OF delivery ON task_events
+WHEN OLD.delivery = 'admitted' AND NEW.delivery = 'exposed' AND EXISTS (SELECT 1 FROM hold_marker)
+BEGIN
+  SELECT RAISE(ABORT, 'the connector is held: no instruction is handed to a worker until basecamp connect release');
 END;
 
 CREATE TRIGGER outbox_refused_under_hold
