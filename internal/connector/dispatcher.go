@@ -1027,6 +1027,13 @@ func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 			return 0, false, err
 		}
 		exposed, err := r.d.ledger.ExposeEvent(ctx, r.launch.AttemptID, ids[0])
+		if errors.Is(err, ErrHeld) {
+			// A hold: nothing more is handed to this worker, and the task
+			// finishes rather than failing. Its unexposed events wait for a
+			// person (ledger_hold.go).
+			r.log.Info("connector: the connector is held; no more instructions are handed to this worker", "task_id", r.launch.TaskID)
+			return 0, false, nil
+		}
 		if err != nil {
 			return 0, false, err
 		}

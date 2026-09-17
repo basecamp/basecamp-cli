@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // The operator decisions and the hold (ledger_hold.go). Each test names the
@@ -1042,4 +1043,40 @@ func TestAHoldRefusesAnExposureAsHeldNotAsAFailure(t *testing.T) {
 
 	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
 	require.ErrorIs(t, err, ErrHeld)
+}
+
+// Through the dispatcher: a hold that lands while a task runs withholds the
+// next instruction and lets the task finish, rather than failing it.
+//
+//nolint:contextcheck // the harness builds its fixtures on background contexts
+func TestAHoldWithholdsTheNextInstructionWithoutFailingTheTask(t *testing.T) {
+	ctx := context.Background()
+	release := make(chan struct{})
+	fake := newFakeDriver()
+	var h *dispatchHarness
+	fake.turn = func(_ *fakeSession, n int, _ string) (driver.PromptResult, error) {
+		if n == 1 {
+			<-release
+		}
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	h = newDispatchHarness(t, fake, nil)
+	opAdmit(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	s := <-fake.made
+	opAdmit(t, h.ledger, 2, "recording:1")
+	require.Eventually(t, func() bool {
+		var n int
+		_ = h.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE event_id = 2`).Scan(&n)
+		return n == 1
+	}, 5*time.Second, 10*time.Millisecond, "the follow-up joined the task")
+
+	_, err := h.ledger.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	close(release)
+
+	rows := h.attemptsEnded(t, 1)
+	assert.Equal(t, "finished", rows[0].StopReason, "a held connector is not a failed task")
+	assert.Len(t, s.promptList(), 1, "nothing more was handed over")
+	assert.Equal(t, StateHeld, stateOf(t, h.ledger, 2), "the follow-up waits for a person")
 }
