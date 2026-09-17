@@ -81,6 +81,12 @@
 // ledger key on (attempt, tool call) would buy nothing, and this is settled,
 // not open.
 //
+// Where a refusal can be seen differs by agent: Claude Code announces it in
+// its stream and repeats it in the turn's result, and an agent that writes
+// refusals only to stderr is read through Worker.StderrLines, not
+// StderrTail — the tail is the last line, and whatever the agent prints next
+// would bury the refusal.
+//
 // Where this can still be broken: a refusal the agent never reports — a tool
 // it declined to ask for, or a denial its stream does not carry — is not a
 // refusal the driver can record.
@@ -181,9 +187,8 @@ type SessionConfig struct {
 	// SocketDir is the directory holding the task token's unix socket, which
 	// the worker's MCP server dials. It is PrivateDir in the ordinary case
 	// and a short directory of the connector's own where a socket path under
-	// PrivateDir would be longer than a unix socket takes. A launcher that
-	// confines a worker must let it reach this directory, or the worker's
-	// MCP server cannot be handed its token.
+	// PrivateDir would be longer than a unix socket takes. It is in Scope
+	// too, which is what a launcher is given.
 	SocketDir string
 	// PrivateDir is an owner-only directory the driver may write session
 	// files into (an MCP config, say). The driver removes what it wrote when
@@ -444,7 +449,14 @@ type Scope struct {
 	EventIDs []int64
 	// WorkDir is the approved working directory the record carries.
 	WorkDir string
-	Class   string
+	// SocketDir holds the task token's unix socket, which the worker's MCP
+	// server dials. A launcher that confines a worker must let it reach this
+	// directory, or the worker's MCP server cannot be handed its token. It is
+	// SessionConfig.PrivateDir in the ordinary case, and a short directory of
+	// the connector's own where a socket path under PrivateDir would be
+	// longer than a unix socket takes.
+	SocketDir string
+	Class     string
 }
 
 // Command is a process to run: path, argv (without the path) and the whole

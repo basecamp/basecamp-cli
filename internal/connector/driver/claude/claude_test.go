@@ -80,7 +80,12 @@ func fakeClaude(scenario string) {
 	// the connector reads and may log.
 	secret := os.Getenv("FAKE_CLAUDE_SECRET")
 	if secret != "" {
+		// The secret first, then the noise that would bury it: a driver that
+		// reads only the LAST line would miss it, and one that reads the
+		// lines raw would pass it on.
 		fmt.Fprintln(os.Stderr, "claude: failed while using "+secret)
+		fmt.Fprintln(os.Stderr, "claude: retrying in 2s")
+		fmt.Fprintln(os.Stderr, "claude: giving up")
 	}
 
 	out := bufio.NewWriter(os.Stdout)
@@ -687,11 +692,18 @@ func redactionFixture(t *testing.T, scenario string) fixture {
 	return f
 }
 
-func stderrTail(s driver.Session) string {
+// stderrText is everything of a session's stderr a driver would pass on: the
+// tail and every bounded line, which is where a refusal written before the
+// noise is read (driver's "Refusals").
+func stderrText(s driver.Session) []string {
+	var out []string
 	if tail, ok := s.(interface{ StderrTail() string }); ok {
-		return tail.StderrTail()
+		out = append(out, tail.StderrTail())
 	}
-	return ""
+	if lines, ok := s.(interface{ StderrLines() []string }); ok {
+		out = append(out, lines.StderrLines()...)
+	}
+	return out
 }
 
 // The redaction rule (driver's redact.go): nothing the driver hands back
@@ -714,7 +726,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			require.ErrorIs(t, err, driver.ErrUnsafeMode)
 			<-s.Done()
 			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
-				Updates: drain(s), Texts: []string{stderrTail(s)}}
+				Updates: drain(s), Texts: stderrText(s)}
 		}},
 		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "denial-secret")
@@ -725,7 +737,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			go func() { updates <- drain(s) }()
 			require.NoError(t, s.Close())
 			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
-				Updates: <-updates, Texts: []string{stderrTail(s)}}
+				Updates: <-updates, Texts: stderrText(s)}
 		}},
 		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "deaf-secret")
@@ -735,7 +747,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			require.Eventually(t, func() bool { return len(ss(s).slot) == 1 }, 10*time.Second, 5*time.Millisecond)
 			err := s.Cancel(context.Background())
 			require.Error(t, err)
-			return drivertest.Crossing{Errors: []error{err}, Texts: []string{stderrTail(s)}}
+			return drivertest.Crossing{Errors: []error{err}, Texts: stderrText(s)}
 		}},
 		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "die-secret")
@@ -745,7 +757,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			closeErr := s.Close()
 			after, afterErr := s.Prompt(context.Background(), "again")
 			return drivertest.Crossing{Errors: []error{err, closeErr, afterErr}, Results: []driver.PromptResult{after},
-				Updates: drain(s), Texts: []string{stderrTail(s)}}
+				Updates: drain(s), Texts: stderrText(s)}
 		}},
 	})
 }

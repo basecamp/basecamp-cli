@@ -362,8 +362,12 @@ func (s *session) Updates() <-chan driver.Update { return s.updates }
 func (s *session) Done() <-chan struct{}         { return s.worker.Done() }
 func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
 
-// StderrTail is what may be passed on of the agent's stderr.
+// StderrTail is what may be passed on of the agent's stderr: its last line.
 func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
+
+// StderrLines is every bounded line of it, which is where a refusal written
+// before the agent's later output is read (driver's "Refusals").
+func (s *session) StderrLines() []string { return s.worker.StderrLines(s.red) }
 
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
@@ -584,6 +588,18 @@ func (s *session) read() {
 		s.mu.Lock()
 		t := s.turn
 		s.mu.Unlock()
+		s.mu.Lock()
+		verified := s.verified
+		s.mu.Unlock()
+		// A session that ended without ever confirming what it was is not a
+		// worker that merely went away: it may have run a turn in a mode this
+		// driver never saw (invariant 2, and Copilot's reading of it). The
+		// dispatcher settles ErrSessionUnverified as failed rather than lost.
+		why := errors.Join(driver.ErrSessionEnded)
+		if !verified {
+			why = fmt.Errorf("%w: %w: the agent closed its output before it confirmed the session",
+				driver.ErrSessionUnverified, driver.ErrSessionEnded)
+		}
 		if t != nil {
 			// Copilot: the turn ends with nothing to report but what it
 			// refused, which the ledger already has, and which its caller
@@ -591,11 +607,11 @@ func (s *session) read() {
 			s.mu.Lock()
 			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
-			s.finish(t, driver.PromptResult{Refusals: refusals}, driver.ErrSessionEnded)
+			s.finish(t, driver.PromptResult{Refusals: refusals}, why)
 		}
 		// Whatever comes next: there is no reader to finish a turn, so a
 		// later prompt is answered rather than left waiting.
-		s.end(driver.ErrSessionEnded)
+		s.end(why)
 		close(s.readerEnd)
 	}()
 	scanner := bufio.NewScanner(s.worker.Stdout())
