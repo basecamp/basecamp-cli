@@ -1330,6 +1330,82 @@ func TestAHolderThatGoesWhileTheRemovalRunsTakesNothingWithIt(t *testing.T) {
 	assert.Contains(t, refs, RemovingRefPrefix, "the commit is still held by a ref of the connector's own")
 }
 
+// A repository a worker made is git data wherever it is, including the
+// directory the task worked in: a force discards files, never commits.
+func TestARepositoryMadeWhereGitTracksFilesIsNeverRemoved(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(321)
+	// A repository made where git tracks files: the worktree's own root,
+	// which the walk starts at and which is tracked by definition.
+	h.git(workDir, "init", "-q", "--bare", row.Path)
+	require.True(t, isGitDir(row.Path))
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.True(t, results[0].ForceRefused)
+	assert.True(t, exists(filepath.Join(row.Path, "objects")), "the repository a worker made is still there")
+}
+
+// A row whose repository is gone: an operator who names it gets it closed,
+// because there is nothing left anywhere to delete or to keep it for.
+func TestAForceClosesARowWhoseRepositoryIsGone(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(322)
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	require.NoError(t, os.RemoveAll(row.Path))
+	require.NoError(t, os.RemoveAll(h.repo))
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action, "a row nothing can read is not a row nothing can close")
+	assert.Equal(t, WorktreeRemoved, h.row(workDir).State)
+}
+
+// A row that never stored where git's record is does not get closed on the
+// strength of not knowing: the repository is asked, and a record that is
+// there keeps the row.
+func TestARowThatDoesNotKnowWhereItsRecordIsKeepsIt(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(323)
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	_, err := h.ledger.db.ExecContext(context.Background(), `UPDATE worktrees SET admin_dir = '' WHERE id = ?`, row.ID)
+	require.NoError(t, err)
+	// The directory and the branch go; git's record of the worktree stays.
+	require.NoError(t, os.RemoveAll(row.Path))
+	h.git(h.repo, "update-ref", "-d", "refs/heads/"+row.Branch)
+
+	results, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action)
+	assert.Equal(t, RetainedOrphaned, results[0].Reason, "the record is still there")
+}
+
+// A force on an orphan says where the branch stood, because nothing worked
+// out what it reached.
+func TestAForcedOrphanSaysWhereItsBranchStood(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(324)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	tip := h.git(workDir, "rev-parse", "HEAD")
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	require.NoError(t, os.RemoveAll(row.Path))
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action)
+	assert.Equal(t, tip, results[0].BranchDeletedAt, "what an operator needs to put it back")
+	assert.False(t, h.branchExists(row.Branch))
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", tip+"^{commit}").Run())
+}
+
 // A force on an orphan whose branch could not be deleted keeps the row: an
 // operator is never left with something nothing lists.
 func TestAnOrphanWhoseBranchStaysKeepsItsRow(t *testing.T) {

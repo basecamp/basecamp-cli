@@ -1458,7 +1458,7 @@ basecamp connect -P agent                          # Run the connector in the fo
 basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
 basecamp connect setup -P agent --worker codex --worktrees  # Run workers with Codex instead of Claude Code, and give each task its own git worktree
 basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk, git's record of it, and why it is kept (finished, dirty, unpushed, locked, moved, unverified, orphaned)
-basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (every commit it reaches is kept under refs/basecamp-connect/retained/, not branches)
+basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (on disk: every commit it reaches is kept under refs/basecamp-connect/retained/; orphaned: the task branch goes and the commit it stood at is reported)
 ```
 
 `basecamp connect` runs until it is stopped: it is not a command to call for an
