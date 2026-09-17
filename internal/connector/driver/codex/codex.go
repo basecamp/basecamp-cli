@@ -519,7 +519,16 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	}
 	s.writeMu.Unlock()
 	if err != nil {
-		s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
+		// A cancel that closed the worker's stdin is what made the write
+		// fail: the turn is canceled, not a session that ended on its own.
+		s.mu.Lock()
+		canceled := t.canceled
+		s.mu.Unlock()
+		if canceled {
+			s.finishCanceled(t, nil)
+		} else {
+			s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
+		}
 	}
 	select {
 	case <-t.done:

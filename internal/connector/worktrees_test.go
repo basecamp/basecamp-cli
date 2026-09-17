@@ -398,6 +398,34 @@ func TestFiltersOutOfReachOfAScanStillDoNotRun(t *testing.T) {
 	}
 }
 
+// Invariant 1: a task branch the connector did not create is never deleted,
+// however that worktree ends.
+func TestABranchTheConnectorDidNotMakeIsNotDeleted(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	base := h.git(h.repo, "rev-parse", "HEAD")
+	branch := BranchPrefix + "80-taken"
+	h.git(h.repo, "branch", branch, base)
+
+	record := Worktree{
+		Path: filepath.Join(h.root, "repo", "80-taken"), WorkDir: filepath.Join(h.root, "repo", "80-taken"),
+		Route: filepath.Join(h.repo, "app"), Repository: h.repo, Branch: branch, BaseCommit: base,
+		OriginatingEventID: 80, State: WorktreeCreating,
+	}
+	id, err := h.ledger.BeginWorktree(ctx, record)
+	require.NoError(t, err)
+	record.ID = id
+	require.Error(t, h.wt.add(ctx, record), "the branch is already someone's")
+
+	unlock, err := h.wt.lock(ctx)
+	require.NoError(t, err)
+	settled := h.wt.settle(ctx, record, RemovedByConnector)
+	unlock()
+	assert.Equal(t, WorktreeRemoved, settled.State)
+	assert.True(t, h.branchExists(branch), "someone else's branch survives")
+	assert.False(t, h.row(record.WorkDir).BranchCreated)
+}
+
 // A worktree that cannot be made is not attempted again at every dispatch
 // tick: each failure leaves a row and maybe a partial checkout.
 func TestAFailedPrepareBacksOff(t *testing.T) {

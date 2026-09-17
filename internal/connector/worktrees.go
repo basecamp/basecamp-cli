@@ -280,10 +280,19 @@ func (w *Worktrees) add(ctx context.Context, r Worktree) error {
 	if err := setup.EnsurePrivateDir(filepath.Dir(r.Path)); err != nil {
 		return err
 	}
+	// The branch is created before the worktree and only if it does not
+	// exist, so the row's branch is this task's and deleting it later can
+	// never delete a branch someone else made (invariant 1).
+	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "--end-of-options", "refs/heads/"+r.Branch, r.BaseCommit, ""); err != nil {
+		return err
+	}
+	if err := w.ledger.WorktreeBranchCreated(ctx, r.ID); err != nil {
+		return err
+	}
 	// The checkout runs in the new worktree, so the filters blanked are the
 	// ones its own configuration defines (an include on its branch among
 	// them), not the checkout's the route is in.
-	if _, err := w.gitOut(ctx, r.Repository, "worktree", "add", "--no-checkout", "-b", r.Branch, "--end-of-options", r.Path, r.BaseCommit); err != nil {
+	if _, err := w.gitOut(ctx, r.Repository, "worktree", "add", "--no-checkout", "--end-of-options", r.Path, r.Branch); err != nil {
 		return err
 	}
 	_, err := w.gitOut(ctx, r.Path, "reset", "--quiet", "--hard", "--end-of-options", r.BaseCommit)
@@ -439,6 +448,16 @@ func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 		return kept
 	}
 	branchKept := !w.deleteBranchIfHeld(ctx, r)
+	if branchKept && headBranch != "" {
+		// The task branch kept the commit anyway: the anchor is redundant.
+		if tip, err := w.branchTip(ctx, r); err == nil && tip != "" {
+			if anchor, err := w.gitOut(ctx, r.Repository, "rev-parse", "--verify", "--end-of-options", "refs/heads/"+headBranch); err == nil && anchor == tip {
+				if _, err := w.gitOut(ctx, r.Repository, "update-ref", "-d", "refs/heads/"+headBranch, anchor); err == nil {
+					headBranch = ""
+				}
+			}
+		}
+	}
 	if err := w.ledger.RemovedWorktree(ctx, r.ID, RemovedByPruneForced, WorktreeRemoving); err != nil {
 		return kept
 	}
@@ -455,19 +474,14 @@ func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	tip, err := w.branchTip(ctx, r)
-	if err != nil {
-		return "", err
-	}
-	if head == tip {
-		return "", nil
-	}
 	held, err := w.held(ctx, r, head)
 	if err != nil || held {
 		return "", err
 	}
+	// Anchored even when HEAD is the task branch's own tip: another process
+	// can move that branch between this check and the removal.
 	branch := r.Branch + "-head"
-	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "refs/heads/"+branch, head, ""); err != nil {
+	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "--end-of-options", "refs/heads/"+branch, head, ""); err != nil {
 		return "", err
 	}
 	return branch, nil
@@ -480,7 +494,9 @@ func (w *Worktrees) settle(ctx context.Context, r Worktree, by RemovedBy) Worktr
 	if _, err := os.Lstat(r.Path); errors.Is(err, os.ErrNotExist) {
 		// Nothing on disk. A branch git made stays unless it still points at
 		// the base, which holds nothing of the task's.
-		w.deleteBranchAt(ctx, r, r.BaseCommit)
+		if r.BranchCreated {
+			w.deleteBranchAt(ctx, r, r.BaseCommit)
+		}
 		gone := RemovedMissing
 		if r.State == WorktreeCreating {
 			gone = RemovedNeverCreated
@@ -745,9 +761,10 @@ func (w *Worktrees) locked(ctx context.Context, r Worktree) (bool, error) {
 }
 
 // deleteBranchAt deletes the task branch only while it still points at
-// commit, which was verified held (invariant 2).
+// commit, which was verified held (invariant 2), and only when this row made
+// it.
 func (w *Worktrees) deleteBranchAt(ctx context.Context, r Worktree, commit string) {
-	if commit == "" || !strings.HasPrefix(r.Branch, BranchPrefix) {
+	if commit == "" || !r.BranchCreated || !strings.HasPrefix(r.Branch, BranchPrefix) {
 		return
 	}
 	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "-d", "refs/heads/"+r.Branch, commit); err != nil {

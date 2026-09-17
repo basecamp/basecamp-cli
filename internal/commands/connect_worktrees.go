@@ -74,10 +74,10 @@ commits pushed or merged, or whose directory you removed yourself. A worktree
 that still holds work is kept and listed with why.
 
 --force <path> removes that worktree even with work in it; name each one.
-Its branch is kept unless its commits are held elsewhere, and a detached HEAD
-on a commit nothing else holds gets a branch of its own (head_branch), so a
-commit is never lost to a forced prune; one only the worktree's reflog still
-reaches is. A locked worktree is never forced: unlock it
+Its branch is kept unless its commits are held elsewhere, and the commit its
+HEAD is on, if nothing else holds it, gets a branch of its own (head_branch).
+What --force does discard is a commit only the worktree's own reflog still
+reaches: one the worker made and then moved away from. A locked worktree is never forced: unlock it
 first. Worktrees of tasks still running are never touched.`,
 		Example: `  basecamp connect worktrees prune -P agent
   basecamp connect worktrees prune -P agent --force ~/.local/state/basecamp/connect/2914079-52007412/worktrees/app-1a2b3c4d/17-a1b2c3`,

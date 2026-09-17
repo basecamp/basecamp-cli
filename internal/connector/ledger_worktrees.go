@@ -28,6 +28,7 @@ CREATE TABLE worktrees (
   branch               TEXT    NOT NULL,
   base_commit          TEXT    NOT NULL,
   originating_event_id INTEGER NOT NULL,
+  branch_created       INTEGER NOT NULL DEFAULT 0,
   task_id              INTEGER REFERENCES tasks (id),
   state                TEXT    NOT NULL
                        CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
@@ -109,6 +110,9 @@ type Worktree struct {
 	Branch             string
 	BaseCommit         string
 	OriginatingEventID int64
+	// BranchCreated is this row's proof that the connector made the task
+	// branch, so deleting it can never delete someone else's.
+	BranchCreated bool
 	// TaskID is the task that last worked in it; zero before one launched.
 	TaskID         int64
 	State          WorktreeState
@@ -120,7 +124,7 @@ type Worktree struct {
 	RemovedBy      RemovedBy
 }
 
-const worktreeColumns = `id, path, work_dir, route, repository, branch, base_commit, originating_event_id, COALESCE(task_id, 0),
+const worktreeColumns = `id, path, work_dir, route, repository, branch, base_commit, originating_event_id, branch_created, COALESCE(task_id, 0),
 state, retained_reason, created_at, finished_at, retained_at, removed_at, removed_by`
 
 func scanWorktree(row interface{ Scan(...any) error }) (Worktree, error) {
@@ -129,7 +133,7 @@ func scanWorktree(row interface{ Scan(...any) error }) (Worktree, error) {
 		state, reason, removedBy, created string
 		finished, retained, removed       sql.NullString
 	)
-	if err := row.Scan(&w.ID, &w.Path, &w.WorkDir, &w.Route, &w.Repository, &w.Branch, &w.BaseCommit, &w.OriginatingEventID, &w.TaskID,
+	if err := row.Scan(&w.ID, &w.Path, &w.WorkDir, &w.Route, &w.Repository, &w.Branch, &w.BaseCommit, &w.OriginatingEventID, &w.BranchCreated, &w.TaskID,
 		&state, &reason, &created, &finished, &retained, &removed, &removedBy); err != nil {
 		return Worktree{}, err
 	}
@@ -174,6 +178,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?, 'creating', ?)`,
 		return err
 	})
 	return id, err
+}
+
+// WorktreeBranchCreated records that the connector created the task branch
+// for a worktree, which is what lets it be deleted again.
+func (l *Ledger) WorktreeBranchCreated(ctx context.Context, id int64) error {
+	return retryBusy(func() error {
+		_, err := l.db.ExecContext(ctx, `UPDATE worktrees SET branch_created = 1 WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("connector: worktree %d: %w", id, err)
+		}
+		return nil
+	})
 }
 
 // MoveWorktree moves a worktree from one of from to state. It reports
