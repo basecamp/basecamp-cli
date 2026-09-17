@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
@@ -32,111 +33,68 @@ var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{} }
 // the server refuses to start, so nothing is led to hand it over that way.
 const connectTaskTokenEnv = "BASECAMP_CONNECT_TASK_TOKEN"
 
-// takenTaskToken is the token TakeConnectTaskToken read, and whether it ran.
-// The descriptor is read before the command tree runs at all, so nothing this
-// process starts on the way — a config hardening pass, an update check, a
-// keychain helper — can inherit it.
-var takenTaskToken struct {
-	token string
-	err   error
-	taken bool
-}
+// connectTokenEnvRefused records that a task token was found in the
+// environment at startup. It is taken out there and refused when the server
+// would serve the connect domain: the environment is not a way in.
+var connectTokenEnvRefused bool
 
-// TakeConnectTaskToken reads the connector task token from the descriptor the
-// arguments name, and closes it, before anything else in the process runs.
+// PrepareConnectToken makes a connector-started worker's task token safe to
+// read later, and takes any stale token out of the environment. It runs before
+// the command tree is built, and it reads nothing.
 //
-// Cobra runs the root command's persistent hooks before any command's own
-// RunE, and those hooks load configuration, tighten directories and may start
-// a background update check. A descriptor still open then is one a child could
-// inherit, so the read happens ahead of all of it. What it found — the token,
-// or the refusal — is the mcp command's to use when it runs.
+// The hazard it closes is inheritance: the root command's persistent hooks
+// load configuration, tighten directories and may start a background update
+// check, and a child started then would inherit an open descriptor. Marking
+// the descriptor close-on-exec ends that, without consuming it — so the token
+// is still there to be read by the command itself, once cobra has decided the
+// invocation is one that serves. Reading it here instead would drain a
+// one-shot pipe for every invocation cobra goes on to refuse.
 //
-// Which arguments mean what is cobra's answer and pflag's, never a scan of our
-// own: root finds the command the way it will when it executes, and the same
-// flag types parse what is left. A hand-written scan reads a descriptor for an
-// invocation the command then refuses, or misses one it accepts.
-func TakeConnectTaskToken(root *cobra.Command, args []string) {
-	fd, ok := connectTokenFD(root, args)
-	if !ok {
-		return
-	}
-	takenTaskToken.taken = true
-	// The environment is refused before the descriptor is read, so a stale
-	// token there does not cost the connector its handoff, and it is out of
-	// the environment before the hooks that could pass it to a child.
+// The scan is deliberately loose, because what it does is harmless: a
+// descriptor that is not a token pipe is no worse for being close-on-exec in
+// a process that is about to serve MCP on stdio, and one that is not ours is
+// not touched, since the flag has to be there to be found.
+func PrepareConnectToken(args []string) {
 	if _, set := os.LookupEnv(connectTaskTokenEnv); set {
 		_ = os.Unsetenv(connectTaskTokenEnv)
-		takenTaskToken.err = output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
-			"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
-		return
+		connectTokenEnvRefused = true
 	}
-	takenTaskToken.token, takenTaskToken.err = readTaskToken(fd)
+	if fd, ok := connectTokenFDArg(args); ok {
+		markCloseOnExec(fd)
+	}
 }
 
-// discardedValue stands in for a flag this read does not care about: it keeps
-// the flag's shape, so the arguments parse as the command will parse them, and
-// keeps none of its value.
-type discardedValue struct{ kind string }
-
-func (discardedValue) String() string   { return "" }
-func (discardedValue) Set(string) error { return nil }
-func (v discardedValue) Type() string   { return v.kind }
+// connectTokenFDArg finds a --connect-token-fd value in the arguments of an
+// mcp command. It decides nothing about the invocation: the command's own flag
+// parsing does that, and this only says which descriptor to keep from a child.
+func connectTokenFDArg(args []string) (int, bool) {
+	if !slices.Contains(args, "mcp") {
+		return 0, false
+	}
+	for i, arg := range args {
+		value, isFlag := strings.CutPrefix(arg, "--connect-token-fd")
+		switch {
+		case !isFlag:
+			continue
+		case strings.HasPrefix(value, "="):
+			value = value[1:]
+		case value != "":
+			continue
+		case i+1 < len(args):
+			value = args[i+1]
+		default:
+			continue
+		}
+		if fd, err := strconv.ParseInt(value, 0, 64); err == nil && fd >= 3 && fd <= math.MaxInt32 {
+			return int(fd), true
+		}
+	}
+	return 0, false
+}
 
 // connectStateGiven is the one rule for whether a state directory was given,
-// used by the startup read and by the command, so they never disagree about
-// an invocation.
+// so the startup step and the command never disagree about an invocation.
 func connectStateGiven(state string) bool { return strings.TrimSpace(state) != "" }
-
-// connectTokenFD reports the descriptor to read: this command, serving the
-// connect domain, with a descriptor given. A read-only server serves no
-// connect domain, and a descriptor without a state directory is refused by the
-// command, so neither reads anything.
-func connectTokenFD(root *cobra.Command, args []string) (int, bool) {
-	target, rest, err := root.Find(args)
-	if err != nil || target == nil || target.Name() != "mcp" || target.Parent() == nil {
-		return 0, false
-	}
-
-	// This command's own flags, on a command of its own: the definitions are
-	// the real ones, so a flag it does not accept, or a value it needs and
-	// does not get, fails here exactly as it will there — and nothing the
-	// command will actually run is touched, because binding to the live
-	// command's flags would set its values and count its counters twice.
-	// The root's flags are unknown here and are skipped rather than guessed.
-	flags := NewMCPCmd().Flags()
-	flags.Init("mcp", pflag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	flags.BoolP("help", "h", false, "")
-	// The root's flags may appear anywhere, and what they are is the root's
-	// business: each is copied by shape alone — name, shorthand, and whether
-	// it takes a value — onto a value that keeps nothing. So this parse
-	// accepts exactly what the command will accept, and a flag neither of
-	// them knows is refused here as it will be there.
-	target.Root().PersistentFlags().VisitAll(func(f *pflag.Flag) {
-		if flags.Lookup(f.Name) != nil {
-			return
-		}
-		copied := flags.VarPF(discardedValue{kind: f.Value.Type()}, f.Name, f.Shorthand, f.Usage)
-		copied.NoOptDefVal = f.NoOptDefVal
-	})
-	if err := flags.Parse(rest); err != nil {
-		return 0, false
-	}
-	if flags.NArg() > 0 {
-		return 0, false // cobra.NoArgs refuses it
-	}
-	if help, _ := flags.GetBool("help"); help {
-		return 0, false // cobra prints help and serves nothing
-	}
-
-	readOnly, _ := flags.GetBool("read-only")
-	state, _ := flags.GetString("connect-state")
-	fd, err := flags.GetInt("connect-token-fd")
-	if err != nil || readOnly || !connectStateGiven(state) || !flags.Changed("connect-token-fd") {
-		return 0, false
-	}
-	return fd, true
-}
 
 // maxTaskTokenBytes bounds what is read from the token descriptor. A token is
 // 43 characters; anything near this is not one.
@@ -186,10 +144,10 @@ func NewMCPCmd() *cobra.Command {
 			// anything else runs: authentication can start helper processes,
 			// and a child started then would inherit an open descriptor.
 			var taskToken string
-			// A token in the environment is taken out and refused whatever
-			// the flags: it is not a way in for any server.
-			if _, set := os.LookupEnv(connectTaskTokenEnv); set {
-				_ = os.Unsetenv(connectTaskTokenEnv)
+			// A token in the environment was taken out at startup, before the
+			// hooks that could have passed it to a child. It is refused here:
+			// the environment is not a way in for any server.
+			if connectTokenEnvRefused {
 				return output.ErrUsageHint("$"+connectTaskTokenEnv+" is not read",
 					"Hand the task token over on an inherited descriptor with --connect-token-fd, so it never sits in an environment.")
 			}
@@ -202,7 +160,10 @@ func NewMCPCmd() *cobra.Command {
 					// the token or the ledger is touched.
 					return output.ErrUsage("--connect-state cannot be combined with --read-only: every basecamp_connect action records what the worker did")
 				}
-				token, err := connectTaskToken(connectTokenFD)
+				// Read here, once cobra has accepted the invocation: the
+				// descriptor has been close-on-exec since startup, so nothing
+				// the hooks started could have inherited it.
+				token, err := readTaskToken(connectTokenFD)
 				if err != nil {
 					return err
 				}
@@ -283,19 +244,6 @@ func stateDirHint(refusal *connector.StateDirError) string {
 // agent's id comes from, and a ledger for another account is refused rather
 // than served. The ledger must already exist — a worker's server reads the
 // connector's ledger, it never starts one.
-// connectTaskToken is what TakeConnectTaskToken read before the command tree
-// ran. Nothing reads the descriptor here: by now the persistent hooks have
-// run, and a descriptor still open through them is one a child could have
-// inherited. A server whose token was not taken at startup does not start.
-func connectTaskToken(fd int) (string, error) {
-	if takenTaskToken.taken {
-		return takenTaskToken.token, takenTaskToken.err
-	}
-	if fd >= 0 {
-		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d was not read at startup; the token descriptor is read before anything else runs", fd))
-	}
-	return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
-}
 
 func openConnectDispatch(ctx context.Context, stateDir, accountID, token string) (*connector.TaskDispatch, func(), error) {
 

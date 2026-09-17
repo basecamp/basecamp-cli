@@ -4,7 +4,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"golang.org/x/sys/unix"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -191,172 +190,12 @@ func TestMCPCommandDoesNotWaitOnAWriteEndLeftOpen(t *testing.T) {
 	assert.Less(t, time.Since(started), 5*time.Second)
 }
 
-// The token is read before the command tree runs at all: Cobra's root
-// persistent hooks load config, tighten directories and may start an update
-// check, and a descriptor still open then is one a child could inherit.
-func TestTakeConnectTaskTokenReadsBeforeTheCommandTree(t *testing.T) {
-	fd := tokenPipe(t, "a-task-token\n")
-	dev, ino, _ := fdIdentity(t, fd)
-	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
-
-	TakeConnectTaskToken(testRootForMCP(t), []string{"mcp", "--connect-state", "/somewhere", "--connect-token-fd", strconv.Itoa(fd)})
-
-	require.True(t, takenTaskToken.taken)
-	require.NoError(t, takenTaskToken.err)
-	assert.Equal(t, "a-task-token", takenTaskToken.token)
-	if nowDev, nowIno, open := fdIdentity(t, fd); open {
-		assert.False(t, nowDev == dev && nowIno == ino, "the descriptor is closed already")
-	}
-}
-
-func TestTakeConnectTaskTokenIgnoresEverythingElse(t *testing.T) {
-	t.Cleanup(func() { takenTaskToken.taken, takenTaskToken.token, takenTaskToken.err = false, "", nil })
-	for name, args := range map[string][]string{
-		"another command":             {"search", "list", "--connect-token-fd", "3"},
-		"no flag":                     {"mcp", "--connect-state", "/x"},
-		"a flag that starts the same": {"mcp", "--connect-state", "/x", "--connect-token-fdx", "3"},
-		"no state directory":          {"mcp", "--connect-token-fd", "3"},
-		"read-only":                   {"mcp", "--connect-state", "/x", "--read-only", "--connect-token-fd", "3"},
-		"read-only, spelled out":      {"mcp", "--connect-state", "/x", "--read-only=true", "--connect-token-fd", "3"},
-		"nothing after it":            {"mcp", "--connect-state", "/x", "--connect-token-fd"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			takenTaskToken.taken = false
-			TakeConnectTaskToken(testRootForMCP(t), args)
-			assert.False(t, takenTaskToken.taken, "left to Cobra and the command to report")
-		})
-	}
-
-	// Both spellings of the flag are read, with the state directory given.
-	fd := tokenPipe(t, "token\n")
-	takenTaskToken.taken = false
-	TakeConnectTaskToken(testRootForMCP(t), []string{"mcp", "--connect-state", "/x", "--connect-token-fd=" + strconv.Itoa(fd)})
-	require.True(t, takenTaskToken.taken)
-	assert.Equal(t, "token", takenTaskToken.token)
-}
-
-// A server whose token was not taken at startup does not read the descriptor
-// late: by then the root hooks have run, and a descriptor still open through
-// them is one a child could have inherited. It refuses instead.
-func TestTheMCPCommandRefusesATokenNotTakenAtStartup(t *testing.T) {
-	t.Setenv("BASECAMP_TOKEN", "test-token")
-	app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
-	dir, grant, _ := connectStateWithTask(t)
-	fd := tokenPipe(t, grant.Token+"\n")
-	dev, ino, _ := fdIdentity(t, fd)
-
-	// The command on its own, as if startup had not scanned the arguments.
-	cmd := NewMCPCmd()
-	cmd.SetArgs([]string{"--connect-state", dir, "--connect-token-fd", strconv.Itoa(fd)})
-	cmd.SetContext(appctx.WithApp(context.Background(), app))
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	err := cmd.Execute()
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "was not read at startup")
-	nowDev, nowIno, open := fdIdentity(t, fd)
-	assert.True(t, open && nowDev == dev && nowIno == ino, "and it does not read the descriptor now")
-}
-
-// The startup scan and the flag parser must read --connect-token-fd the same
-// way. Where they disagree, one descriptor is drained and closed while the
-// command serves from another — or the scan misses a spelling and the read
-// falls to a point where a child could already have inherited it.
-func TestTheTokenPreScanAgreesWithTheFlagParser(t *testing.T) {
-	for _, argv := range [][]string{
-		{"mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd=3"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd=0x3"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd=010"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--connect-token-fd", "4"},
-		{"mcp", "--connect-state=/x", "--connect-token-fd=3", "--connect-token-fd=4"},
-		{"--json", "mcp", "--connect-state", "/x", "--connect-token-fd", "5"},
-		{"-v", "mcp", "--connect-state", "/x", "--connect-token-fd", "5"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fdx", "3"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd", "three"},
-		{"mcp", "--connect-state", "/x", "--connect-token-fd"},
-		{"mcp", "--read-only"},
-	} {
-		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			scanned, found := connectTokenFD(testRootForMCP(t), argv)
-
-			// What the command itself will see, from the flags it declares.
-			root := testRootForMCP(t)
-			target, rest, err := root.Find(argv)
-			require.NoError(t, err)
-			flags := target.Flags()
-			flags.AddFlagSet(root.PersistentFlags())
-			parseErr := flags.Parse(rest)
-			readOnly, _ := flags.GetBool("read-only")
-			state, _ := flags.GetString("connect-state")
-			parsed, _ := flags.GetInt("connect-token-fd")
-			wants := parseErr == nil && target.Name() == "mcp" && !readOnly &&
-				state != "" && flags.Changed("connect-token-fd")
-
-			if !wants {
-				assert.False(t, found, "the scan read a descriptor this invocation would not")
-				return
-			}
-			require.True(t, found, "the command will read a descriptor the scan missed")
-			assert.Equal(t, parsed, scanned)
-		})
-	}
-}
-
-// A bare -- ends the flags for pflag, so nothing after it is a descriptor to
-// read: cobra.NoArgs then refuses the command outright.
-func TestTheTokenPreScanStopsAtADoubleDash(t *testing.T) {
-	_, found := connectTokenFD(testRootForMCP(t), []string{"mcp", "--connect-state", "/x", "--", "--connect-token-fd", "3"})
-	assert.False(t, found)
-}
-
-// "mcp" has to be the command, not a word somewhere in the arguments, and a
-// read-only server reads no token: it serves no connect domain.
-func TestTheTokenPreScanReadsOnlyThisCommandsDescriptor(t *testing.T) {
-	for name, args := range map[string][]string{
-		"another command's argument": {"search", "--", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
-		"a query that says mcp":      {"search", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"},
-		"a root bool flag before it": {"--json", "search", "mcp", "--connect-token-fd", "3"},
-		"read-only":                  {"mcp", "--connect-state", "/x", "--read-only", "--connect-token-fd", "3"},
-		"read-only as a value":       {"mcp", "--connect-state", "/x", "--read-only=1", "--connect-token-fd", "3"},
-		"a descriptor past a --":     {"mcp", "--connect-state", "/x", "--", "--connect-token-fd", "3"},
-		"no state directory":         {"mcp", "--connect-token-fd", "3"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, found := connectTokenFD(testRootForMCP(t), args)
-			assert.False(t, found)
-		})
-	}
-	fd, found := connectTokenFD(testRootForMCP(t), []string{"--json", "mcp", "--connect-state", "/x", "--connect-token-fd", "3"})
-	require.True(t, found, "a root flag before the command is the root's, not a value")
-	assert.Equal(t, 3, fd)
-}
-
 // A descriptor number no descriptor could have is refused where every other
 // bad one is: at the read, by asking the operating system about it.
 func TestABadDescriptorNumberIsRefusedAtTheRead(t *testing.T) {
 	_, err := readTaskToken(99999999)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not open")
-}
-
-// Nothing is read for an invocation that serves nothing: help, a flag the
-// command does not accept, or a state directory that is only whitespace —
-// which the command reads as absent too, so the two never disagree.
-func TestNothingIsReadForAnInvocationThatServesNothing(t *testing.T) {
-	for name, args := range map[string][]string{
-		"help":              {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--help"},
-		"help, short":       {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "-h"},
-		"a flag it refuses": {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--bogus"},
-		"a missing value":   {"mcp", "--connect-state", "/x", "--connect-token-fd", "3", "--domains"},
-		"blank state":       {"mcp", "--connect-state", "   ", "--connect-token-fd", "3"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, found := connectTokenFD(testRootForMCP(t), args)
-			assert.False(t, found)
-		})
-	}
 }
 
 // And the command reads a whitespace state directory as absent as well, so it
@@ -372,4 +211,60 @@ func TestABlankStateDirectoryIsNoStateDirectory(t *testing.T) {
 	assert.Contains(t, err.Error(), "--connect-token-fd is only for a server started with --connect-state")
 	nowDev, nowIno, open := fdIdentity(t, fd)
 	assert.True(t, open && nowDev == dev && nowIno == ino, "and the descriptor was not touched")
+}
+
+// Startup keeps the token descriptor out of anything the process starts, and
+// reads nothing: the command reads it once cobra has accepted the invocation,
+// so a one-shot pipe is never drained for a run that never serves.
+func TestPrepareConnectTokenMarksTheDescriptorCloseOnExec(t *testing.T) {
+	fd := tokenPipe(t, "a-task-token\n")
+	before, err := fcntlGetFD(fd)
+	require.NoError(t, err)
+	require.Zero(t, before&unix.FD_CLOEXEC, "inherited descriptors arrive without it")
+
+	PrepareConnectToken([]string{"mcp", "--connect-state", "/x", "--connect-token-fd", strconv.Itoa(fd)})
+
+	after, err := fcntlGetFD(fd)
+	require.NoError(t, err)
+	assert.NotZero(t, after&unix.FD_CLOEXEC, "no child of this process inherits it")
+	assert.True(t, fdOpen(fd), "and it is still there for the command to read")
+}
+
+func TestPrepareConnectTokenLooksOnlyWhereItShould(t *testing.T) {
+	fd := tokenPipe(t, "token\n")
+	for name, args := range map[string][]string{
+		"another command": {"search", "--connect-token-fd", strconv.Itoa(fd)},
+		"no flag":         {"mcp", "--connect-state", "/x"},
+		"standard input":  {"mcp", "--connect-token-fd", "0"},
+		"not a number":    {"mcp", "--connect-token-fd", "three"},
+		"nothing after":   {"mcp", "--connect-token-fd"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, found := connectTokenFDArg(args)
+			assert.False(t, found)
+		})
+	}
+	for name, args := range map[string][]string{
+		"a value of its own": {"mcp", "--connect-token-fd", strconv.Itoa(fd)},
+		"joined with an =":   {"mcp", "--connect-token-fd=" + strconv.Itoa(fd)},
+		"after a root flag":  {"--json", "mcp", "--connect-token-fd", strconv.Itoa(fd)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, found := connectTokenFDArg(args)
+			require.True(t, found)
+			assert.Equal(t, fd, got)
+		})
+	}
+}
+
+// A stale token in the environment is taken out at startup, before the hooks
+// that could pass it to a child, and the command then refuses to serve.
+func TestPrepareConnectTokenTakesAStaleEnvironmentTokenOut(t *testing.T) {
+	t.Setenv("BASECAMP_CONNECT_TASK_TOKEN", "stale")
+	t.Cleanup(func() { connectTokenEnvRefused = false })
+
+	PrepareConnectToken([]string{"mcp", "--connect-state", "/x"})
+
+	assert.Empty(t, os.Getenv("BASECAMP_CONNECT_TASK_TOKEN"))
+	assert.True(t, connectTokenEnvRefused)
 }
