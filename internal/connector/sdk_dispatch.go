@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,11 @@ const AdoptionScanLimit = 500
 // AdoptionScanTimeout bounds the listing in time as well, since settlement
 // runs on a context a shutdown does not cancel.
 const AdoptionScanTimeout = 30 * time.Second
+
+// ErrRepliesTruncated is a listing the scan limit cut short. The adopted-reply
+// rule needs to know there is exactly one candidate, and a cut listing cannot
+// say that, so nothing is adopted.
+var ErrRepliesTruncated = errors.New("the reply listing was truncated")
 
 // SDKReplies lists the agent's replies at a destination through the SDK, for
 // the adopted-reply rule.
@@ -46,6 +52,9 @@ func (r SDKReplies) AgentReplies(ctx context.Context, _ int64, kind string, reco
 		if err != nil {
 			return nil, err
 		}
+		if result.Meta.Truncated {
+			return nil, fmt.Errorf("connector: %w: %d comments on recording %d", ErrRepliesTruncated, AdoptionScanLimit, recordingID)
+		}
 		for _, c := range result.Comments {
 			keep(c.ID, c.Creator, c.CreatedAt)
 		}
@@ -57,6 +66,9 @@ func (r SDKReplies) AgentReplies(ctx context.Context, _ int64, kind string, reco
 		})
 		if err != nil {
 			return nil, err
+		}
+		if result.Meta.Truncated {
+			return nil, fmt.Errorf("connector: %w: %d lines in campfire %d", ErrRepliesTruncated, AdoptionScanLimit, recordingID)
 		}
 		for _, l := range result.Lines {
 			keep(l.ID, l.Creator, l.CreatedAt)

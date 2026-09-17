@@ -45,9 +45,12 @@ func (p Policy) Decide(_ context.Context, req driver.PermissionRequest) driver.P
 		return driver.PermissionDecision{Allow: true}
 	}
 	switch {
-	case slices.Contains(policyAllowedKinds, req.Kind):
-		return driver.PermissionDecision{Allow: p.inside(req.Locations)}
-	case req.Kind == driver.ToolEdit:
+	case req.Kind == driver.ToolThink:
+		// The only allowed kind that touches no file.
+		return driver.PermissionDecision{Allow: true}
+	case slices.Contains(policyAllowedKinds, req.Kind), req.Kind == driver.ToolEdit:
+		// A call on the filesystem that names no path is one the policy
+		// cannot place inside the working directory, so it is refused.
 		return driver.PermissionDecision{Allow: len(req.Locations) > 0 && p.inside(req.Locations)}
 	}
 	return driver.PermissionDecision{Allow: false}
@@ -77,7 +80,7 @@ func resolveExisting(path string) (string, bool) {
 
 // inside reports whether every location is within the working directory, as
 // the filesystem resolves it: a symlink inside the directory that points out
-// of it is outside. No locations means nothing outside is touched.
+// of it is outside.
 func (p Policy) inside(locations []string) bool {
 	root, err := filepath.EvalSymlinks(filepath.Clean(p.WorkDir))
 	if err != nil {
