@@ -34,9 +34,10 @@ which goes by what could be lost — nothing on the disk but the files git
 tracks, unchanged, no merge or rebase in progress, not locked, and every
 commit it reaches held elsewhere — and keeps what could.
 
-A Codex worker cannot commit — a worktree's git data is outside the directory
-its sandbox may write — so with Codex every task that edits anything leaves a
-worktree with work in it.`,
+They add up: every task leaves one, so prune is part of running a connector
+with worktrees on. A Codex worker cannot commit — a worktree's git data is
+outside the directory its sandbox may write — so with Codex every task that
+edits anything leaves a worktree with work in it.`,
 	}
 	cmd.AddCommand(newConnectWorktreesListCmd(), newConnectWorktreesPruneCmd())
 	return cmd
@@ -167,43 +168,62 @@ type pruneView struct {
 // not worth holding for a tree that cannot be walked.
 const sizeLimit = 5 * time.Second
 
-// sizeOf is what a worktree takes up on disk. A worktree that is gone takes
-// up nothing, and is not walked for an answer.
+// sizeOf is what a worktree takes up on disk. A worktree that is not there
+// takes up nothing, and is not walked for an answer; one a removal has
+// frozen is under its removing name.
 func sizeOf(w connector.Worktree) int64 {
-	if w.State == connector.WorktreeRemoved {
-		return 0
+	for _, path := range []string{w.Path, w.Path + connector.RemovingSuffix} {
+		switch _, err := os.Lstat(path); {
+		case err == nil:
+			return dirSize(path)
+		case !errors.Is(err, os.ErrNotExist):
+			return -1
+		}
 	}
-	return dirSize(w.Path)
+	return 0
 }
 
 // dirSize is what a directory takes up, in bytes, following no symlink; -1
-// when it cannot be read in time or at all.
+// when it cannot be read in time or at all. The walk runs apart from the
+// answer: a filesystem call that never returns — a mount a worker left —
+// keeps only its own goroutine, and never the listing.
 func dirSize(path string) int64 {
 	deadline := time.Now().Add(sizeLimit)
-	var total int64
-	err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if time.Now().After(deadline) {
-			return errors.New("the worktree could not be read in time")
-		}
-		if d.IsDir() {
+	walked := make(chan int64, 1)
+	go func() {
+		var total int64
+		err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if time.Now().After(deadline) {
+				return errors.New("the worktree could not be read in time")
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				total += info.Size()
+			}
 			return nil
-		}
-		info, err := d.Info()
+		})
 		if err != nil {
-			return err
+			total = -1
 		}
-		if info.Mode().IsRegular() {
-			total += info.Size()
-		}
-		return nil
-	})
-	if err != nil {
+		walked <- total
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case total := <-walked:
+		return total
+	case <-timer.C:
 		return -1
 	}
-	return total
 }
 
 func viewWorktree(w connector.Worktree) worktreeView {

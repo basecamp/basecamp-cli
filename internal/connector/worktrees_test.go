@@ -997,7 +997,10 @@ func TestAMovedWorktreeIsNotForced(t *testing.T) {
 
 // A branch the connector made for a worktree that then failed to appear is
 // its own to clean up.
-func TestAFailedAddLeavesNoBranchBehind(t *testing.T) {
+// A `worktree add` that failed leaves a branch and no directory. The
+// connector deletes neither: the row is kept, and an operator's prune clears
+// both once the branch reaches nothing that is not held.
+func TestAFailedAddKeepsItsBranchUntilAPrune(t *testing.T) {
 	h := newWorktreeHarness(t)
 	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
 	_, err := h.wt.Prepare(context.Background(), filepath.Join(h.repo, "app"), 94)
@@ -1006,7 +1009,15 @@ func TestAFailedAddLeavesNoBranchBehind(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.True(t, rows[0].BranchCreated)
-	assert.False(t, h.branchExists(rows[0].Branch), "the branch it made goes with it")
+	assert.Equal(t, WorktreeRetained, rows[0].State)
+	assert.True(t, h.branchExists(rows[0].Branch), "the branch it made is not the connector's to delete")
+
+	h.wt = h.worktrees("")
+	results, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneMissing, results[0].Action)
+	assert.False(t, h.branchExists(rows[0].Branch), "the operator's prune clears it")
 }
 
 // A removal the ledger could not record is still reported as a removal, and
@@ -1299,7 +1310,7 @@ func TestAHolderThatGoesWhileTheRemovalRunsTakesNothingWithIt(t *testing.T) {
 	assert.False(t, exists(row.Path))
 	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run())
 	refs := h.git(h.repo, "for-each-ref", "--contains", sha, "--format=%(refname)")
-	assert.Contains(t, refs, RetainedRefPrefix, "the commit is still held by a ref of the connector's own")
+	assert.Contains(t, refs, RemovingRefPrefix, "the commit is still held by a ref of the connector's own")
 }
 
 // A repository that keeps no reflogs tells the rule nothing about what a
@@ -1392,6 +1403,53 @@ func TestTheBaseCommitIsNotAssumedHeld(t *testing.T) {
 	assert.Equal(t, base, h.git(h.repo, "rev-parse", "refs/heads/"+row.Branch))
 }
 
+// The connector deletes no ref of its own accord either: a task whose
+// directory is gone keeps its branch, and with it the commits only that
+// branch's reflog reaches.
+func TestATaskEndDeletesNoBranchOfItsOwnAccord(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(312)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	// The branch is back at its base, and only its own reflog reaches that
+	// commit; the directory is gone when the task ends.
+	h.git(h.repo, "update-ref", "refs/heads/"+row.Branch, row.BaseCommit)
+	require.NoError(t, os.RemoveAll(row.Path))
+
+	after := h.finish(workDir)
+	assert.Equal(t, WorktreeRetained, after.State)
+	assert.True(t, h.branchExists(row.Branch), "the branch is the operator's to lose, not the connector's")
+	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run())
+	assert.Equal(t, sha, h.git(h.repo, "rev-parse", row.Branch+"@{1}"), "its reflog still reaches the commit")
+}
+
+// A prune of the same worktree is judged on what holds its commits, not on
+// what a removal that stopped halfway left behind.
+func TestAnAbandonedRemovalsRefsDoNotPassTheNextJudgment(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(313)
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "c")
+	sha := h.git(workDir, "rev-parse", "HEAD")
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+	// A removal that got as far as holding the commits and then stopped: the
+	// refs it made are still there.
+	held, err := h.wt.anchor(context.Background(), row, []string{sha})
+	require.NoError(t, err)
+	require.Len(t, held, 1)
+	require.Equal(t, sha, h.git(h.repo, "rev-parse", held[0]))
+
+	results, err := h.wt.Prune(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneKept, results[0].Action, "the commit is still unpushed")
+	assert.Equal(t, RetainedUnpushed, results[0].Reason, "a ref the connector left behind holds nothing for anybody else")
+	assert.True(t, exists(row.Path))
+}
+
 // A worktree an operator deleted by hand, whose record still reaches a commit
 // through its own ORIG_HEAD: the row is kept, because deleting the task
 // branch would leave that commit for git to discard.
@@ -1410,7 +1468,7 @@ func TestAMissingWorktreeWhoseRecordHoldsACommitInOrigHeadIsKept(t *testing.T) {
 
 	after := h.discard(workDir)
 	assert.Equal(t, WorktreeRetained, after.State)
-	assert.Equal(t, RetainedUnverified, after.RetainedReason)
+	assert.Equal(t, RetainedUnpushed, after.RetainedReason)
 	assert.True(t, h.branchExists(row.Branch), "the branch is not deleted under a commit nothing else holds")
 	assert.NoError(t, exec.CommandContext(context.Background(), "git", "-C", h.repo, "cat-file", "-e", sha+"^{commit}").Run())
 }
