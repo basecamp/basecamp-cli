@@ -458,6 +458,28 @@ func TestPruneRemovesOnlyWhatTheOperatorDealtWith(t *testing.T) {
 	assert.True(t, exists(filepath.Join(liveDir, "wip.txt")))
 }
 
+// Invariant 5: a forced prune keeps a commit only a detached HEAD holds, on a
+// branch of its own.
+func TestAForcedPruneKeepsADetachedHeadsCommit(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(45)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "detached")
+	commit := h.git(workDir, "rev-parse", "HEAD")
+	row = h.finish(workDir)
+	require.Equal(t, RetainedUnpushed, row.RetainedReason)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action)
+	require.NotEmpty(t, results[0].HeadBranch)
+	assert.Equal(t, commit, h.git(h.repo, "rev-parse", "refs/heads/"+results[0].HeadBranch))
+	assert.False(t, exists(row.Path))
+}
+
 // The card's done-when, through the dispatcher: a worker leaves uncommitted
 // work, its task ends, and the worktree is retained and listed.
 func TestADispatchedTasksUncommittedWorkIsRetained(t *testing.T) {

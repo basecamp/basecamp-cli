@@ -51,7 +51,9 @@ import (
 //     remove one worktree twice, and prune touches only retained worktrees.
 //  5. Prune refuses work. A retained worktree still holding work is removed
 //     only when the operator names it with --force, and even then its branch
-//     is kept unless its commits are held elsewhere.
+//     is kept unless its commits are held elsewhere, and a detached HEAD's
+//     unheld commit is kept on a branch of its own; a HEAD it cannot read is
+//     not forced.
 //  6. Nothing the repository or its configuration names runs: git runs with
 //     hooks, the fsmonitor and every configured content filter disabled, and
 //     a fixed environment.
@@ -279,6 +281,9 @@ type PruneResult struct {
 	// BranchKept is a forced removal's branch, kept because its commits are
 	// held nowhere else.
 	BranchKept bool
+	// HeadBranch is a branch a forced removal made for a detached HEAD whose
+	// commit nothing else held.
+	HeadBranch string
 }
 
 // ErrNotRetained is a --force naming a path that is no retained worktree.
@@ -344,6 +349,12 @@ func (w *Worktrees) pruneOne(ctx context.Context, r Worktree, force bool) PruneR
 // branch unless its commits are held elsewhere.
 func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 	kept := PruneResult{Worktree: r, Action: PruneKept, Reason: r.RetainedReason}
+	headBranch, err := w.anchorHead(ctx, r)
+	if err != nil {
+		// A HEAD that cannot be read or kept is not forced away.
+		w.log.Warn("connector: forced worktree removal refused; kept", "path", r.Path, "error", err)
+		return kept
+	}
 	if err := w.ledger.MoveWorktree(ctx, r.ID, WorktreeRemoving, WorktreeRetained); err != nil {
 		return kept
 	}
@@ -358,7 +369,34 @@ func (w *Worktrees) forceRemove(ctx context.Context, r Worktree) PruneResult {
 		return kept
 	}
 	r.State, r.RemovedBy = WorktreeRemoved, RemovedByPruneForced
-	return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept}
+	return PruneResult{Worktree: r, Action: PruneForced, BranchKept: branchKept, HeadBranch: headBranch}
+}
+
+// anchorHead makes sure the commit a worktree's HEAD is on survives its
+// removal: a HEAD on the task branch, at a held commit, needs nothing; a
+// detached HEAD whose commit nothing holds gets a branch of its own, created
+// only if absent. It returns that branch, or "".
+func (w *Worktrees) anchorHead(ctx context.Context, r Worktree) (string, error) {
+	head, err := w.gitOut(ctx, r.Path, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
+	if err != nil {
+		return "", err
+	}
+	tip, err := w.branchTip(ctx, r)
+	if err != nil {
+		return "", err
+	}
+	if head == tip {
+		return "", nil
+	}
+	held, err := w.held(ctx, r, head)
+	if err != nil || held {
+		return "", err
+	}
+	branch := r.Branch + "-head"
+	if _, err := w.gitOut(ctx, r.Repository, "update-ref", "refs/heads/"+branch, head, ""); err != nil {
+		return "", err
+	}
+	return branch, nil
 }
 
 // settle judges one worktree and removes or retains it (invariants 1 to 3).

@@ -74,8 +74,10 @@ commits pushed or merged, or whose directory you removed yourself. A worktree
 that still holds work is kept and listed with why.
 
 --force <path> removes that worktree even with work in it; name each one.
-Its branch is kept unless its commits are held elsewhere, so a commit is
-never lost to a forced prune. A locked worktree is never forced: unlock it
+Its branch is kept unless its commits are held elsewhere, and a detached HEAD
+on a commit nothing else holds gets a branch of its own (head_branch), so a
+commit is never lost to a forced prune; one only the worktree's reflog still
+reaches is. A locked worktree is never forced: unlock it
 first. Worktrees of tasks still running are never touched.`,
 		Example: `  basecamp connect worktrees prune -P agent
   basecamp connect worktrees prune -P agent --force ~/.local/state/basecamp/connect/2914079-52007412/worktrees/app-1a2b3c4d/17-a1b2c3`,
@@ -103,7 +105,7 @@ first. Worktrees of tasks still running are never touched.`,
 			out := make([]pruneView, 0, len(results))
 			removed, kept := 0, 0
 			for _, r := range results {
-				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), BranchKept: r.BranchKept})
+				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), BranchKept: r.BranchKept, HeadBranch: r.HeadBranch})
 				if r.Action == connector.PruneKept {
 					kept++
 				} else {
@@ -133,6 +135,7 @@ type pruneView struct {
 	worktreeView
 	Action     string `json:"action"`
 	BranchKept bool   `json:"branch_kept,omitempty"`
+	HeadBranch string `json:"head_branch,omitempty"`
 }
 
 func viewWorktree(w connector.Worktree) worktreeView {
