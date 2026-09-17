@@ -72,7 +72,6 @@ BEGIN
 END;
 
 ALTER TABLE task_events ADD COLUMN exposed_attempt_id TEXT;
-ALTER TABLE task_events ADD COLUMN withdrawn_at       TEXT;
 ALTER TABLE task_events ADD COLUMN adopted_reply_id   INTEGER;
 
 CREATE TABLE attempts (
@@ -696,6 +695,9 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 		return Settlement{}, err
 	}
 
+	// Withdrawals wait for the supersession: #736's withdrawExposure takes an
+	// exposure only on a task already superseded.
+	var withdrawals []int
 	for _, r := range events {
 		se := SettledEvent{EventID: r.eventID}
 		switch {
@@ -712,10 +714,8 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 			se.Returned = true
 		case end.SpawnFailed && r.exposedBy.Valid && r.exposedBy.String == end.AttemptID:
 			// Exposed by this attempt, whose driver proved nothing ran
-			// (invariant 4).
-			if err := l.withdraw(ctx, tx, taskID, r.eventID, end.NoAutomaticRetry, &se); err != nil {
-				return Settlement{}, err
-			}
+			// (invariant 4): withdrawn once the task is superseded, below.
+			withdrawals = append(withdrawals, len(settlement.Events))
 		default:
 			moved, err := l.move(ctx, tx, transition{id: r.eventID, state: StateCompleted, from: []RecordState{StateDispatched}})
 			if err != nil {
@@ -743,6 +743,11 @@ UPDATE task_events SET delivery = 'completed', completed_at = ?, outcome = ? WHE
 	if err := l.supersedeTask(ctx, tx, taskID); err != nil {
 		return Settlement{}, err
 	}
+	for _, i := range withdrawals {
+		if err := l.withdraw(ctx, tx, taskID, settlement.Events[i].EventID, end.NoAutomaticRetry, &settlement.Events[i]); err != nil {
+			return Settlement{}, err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET ended_at = ? WHERE id = ?`, now, taskID); err != nil {
 		return Settlement{}, fmt.Errorf("connector: end task %d: %w", taskID, err)
 	}
@@ -765,20 +770,15 @@ func (l *Ledger) withdraw(ctx context.Context, tx *sql.Tx, taskID, eventID int64
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE event_id = ? AND withdrawn_at IS NOT NULL`, eventID).Scan(&earlier); err != nil {
 		return fmt.Errorf("connector: withdraw event %d: %w", eventID, err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = ? WHERE task_id = ? AND event_id = ?`, l.timestamp(), taskID, eventID); err != nil {
-		return fmt.Errorf("connector: withdraw event %d: %w", eventID, err)
-	}
-	t := transition{id: eventID, state: StateAdmitted, from: []RecordState{StateDispatched}}
+	to, reason := StateAdmitted, ""
 	if earlier > 0 || noRetry {
-		t = transition{id: eventID, state: StateBlocked, reason: ReasonSpawnFailed, from: []RecordState{StateDispatched}}
+		to, reason = StateBlocked, ReasonSpawnFailed
 		se.Blocked = true
 	}
-	moved, err := l.move(ctx, tx, t)
-	if err != nil {
+	// #736's one withdrawal: the marker, then the record's move, refused by
+	// the database for anything but a launch exposure no worker pulled.
+	if err := l.withdrawExposure(ctx, tx, taskID, eventID, to, reason); err != nil {
 		return err
-	}
-	if !moved {
-		return fmt.Errorf("connector: withdraw event %d: %w", eventID, ErrNotDispatchable)
 	}
 	se.Withdrawn = true
 	return nil
