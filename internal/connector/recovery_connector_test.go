@@ -271,13 +271,13 @@ func runHarnessConnector(dir string) error {
 	// Generous: a loaded box (the harness runs its own tests concurrently in
 	// CI, and a mutation sweep runs dozens at once) must fail on what the
 	// ledger says, never on how long the machine took.
-	runFor := 2 * time.Minute
+	runFor := harnessRunFor
 	if d.Real {
+		runFor = harnessRealRunFor
 		// The real `basecamp mcp`, holding a token that reaches no Basecamp:
 		// the worker's basecamp_connect calls are real, its Basecamp calls
 		// fail.
 		mcp.Command, mcp.Env = os.Getenv(harnessRealBasecampEnv), []string{"BASECAMP_TOKEN"}
-		runFor = 5 * time.Minute
 	}
 	failures, _ := strconv.Atoi(os.Getenv(harnessSpawnFailEnv))
 	working := d.New(filepath.Join(dir, "agent"))
@@ -497,6 +497,16 @@ func harnessPredicate(ctx context.Context, dir string, l *Ledger, until string) 
 	}
 	return false, fmt.Errorf("unknown predicate %q", until)
 }
+
+// How long a run may take before it fails on its predicate, and how long the
+// harness waits for the process itself. A real agent calls a model, so it
+// gets longer; the harness's own cap is longer than either, so a run always
+// fails on what the ledger says.
+const (
+	harnessRunFor     = 2 * time.Minute
+	harnessRealRunFor = 5 * time.Minute
+	harnessRunCap     = 7 * time.Minute
+)
 
 // harnessReconcileAfter is how old a sending intent must be before it is
 // reconciled: the production minute, shortened so a restart can settle one.

@@ -117,20 +117,33 @@ func (w *fakeWorker) BadMode() bool {
 }
 
 // Bind takes the worker's task from the MCP server declaration its driver
-// handed the agent, exactly as `basecamp mcp --connect-state` does
-// (internal/commands/mcp.go): the state directory is resolved by location and
-// name, which is where the agent's id comes from; the token comes from the
-// environment; and the ledger is opened as it is, never created and never
-// migrated — the connector owns it.
+// handed the agent, as the two commands behind that declaration do:
+//
+//   - the declaration must name the bridge (`basecamp connect worker-mcp`)
+//     with the agent's profile, its state directory and its token socket,
+//     since the real bridge refuses without any of them
+//     (internal/commands/connect_worker_mcp.go);
+//   - the task token comes from that one-use socket, never from the
+//     environment;
+//   - the state directory is resolved by location and name, which is where
+//     the agent's id comes from, and the ledger is opened as it is, never
+//     created and never migrated — the connector owns it
+//     (internal/commands/mcp.go).
 func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if server.Name != MCPServerName {
 		return fmt.Errorf("the MCP server is %q, not %q", server.Name, MCPServerName)
 	}
-	i := slices.Index(server.Args, "--connect-state")
-	if i < 0 || i+1 >= len(server.Args) {
+	if len(server.Args) < 2 || server.Args[0] != "connect" || server.Args[1] != "worker-mcp" {
+		return fmt.Errorf("the MCP server is not the connector's bridge: %v", server.Args)
+	}
+	if profile := flagValue(server.Args, "--profile"); profile == "" {
+		return errors.New("the MCP server names no profile, which the bridge refuses to start without")
+	}
+	stateArg := flagValue(server.Args, "--connect-state")
+	if stateArg == "" {
 		return errors.New("the MCP server has no --connect-state")
 	}
-	stateDir := server.Args[i+1]
+	stateDir := stateArg
 	// The server resolves the directory against its own state home, which
 	// is the environment the driver declared for it, not this agent's: a
 	// declaration without one would send the real server elsewhere.
@@ -150,6 +163,18 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if err != nil {
 		return err
 	}
+	// The socket is the token's one carriage: the declaration that named the
+	// socket must not also carry the token.
+	for key, value := range server.Env {
+		if strings.Contains(value, token) {
+			w.log(0, 0, "secret-declared:env "+key)
+		}
+	}
+	for _, arg := range server.Args {
+		if strings.Contains(arg, token) {
+			w.log(0, 0, "secret-declared:argv")
+		}
+	}
 	l, err := OpenExistingLedger(ctx, filepath.Join(stateDir, LedgerFile))
 	if err != nil {
 		return err
@@ -163,18 +188,28 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	return w.watchToken(token)
 }
 
+// flagValue is the value after name in a command line, empty when it is not
+// there.
+func flagValue(args []string, name string) string {
+	i := slices.Index(args, name)
+	if i < 0 || i+1 >= len(args) {
+		return ""
+	}
+	return args[i+1]
+}
+
 // takeToken takes the task token from the connector's one-use socket, as the
 // bridge the connector names does (`basecamp connect worker-mcp`, see
 // internal/commands/connect_worker_mcp.go): the socket path is in the
 // server's arguments, the token is a line on the socket, and it is served
 // only to the worker's own process group — which this agent leads.
 func (w *fakeWorker) takeToken(ctx context.Context, args []string) (string, error) {
-	i := slices.Index(args, "--socket")
-	if i < 0 || i+1 >= len(args) {
+	socket := flagValue(args, "--socket")
+	if socket == "" {
 		return "", errors.New("the MCP server has no --socket")
 	}
 	dialer := net.Dialer{Timeout: 30 * time.Second}
-	conn, err := dialer.DialContext(ctx, "unix", args[i+1])
+	conn, err := dialer.DialContext(ctx, "unix", socket)
 	if err != nil {
 		return "", fmt.Errorf("the connector's token socket: %w", err)
 	}
@@ -192,9 +227,11 @@ func (w *fakeWorker) takeToken(ctx context.Context, args []string) (string, erro
 }
 
 // watchToken keeps the task token where the parent test can read it back, and
-// watches the working directories, for as long as this worker lives, for a
-// file the token is written to. Whatever it finds is logged when the worker
-// ends.
+// watches, for as long as this worker lives, the places the credential rule
+// names: the working directories and the attempt's session directory, where
+// the driver writes what it hands the agent and where a file is removed as
+// soon as the agent has started its servers — so only a watcher can see it.
+// Whatever it finds is logged when the worker ends.
 //
 // Not the state directory: this process holds the ledger open, and reading
 // the ledger's own files by another descriptor drops SQLite's POSIX locks on
@@ -216,7 +253,8 @@ func (w *fakeWorker) watchToken(token string) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	w.stopWatch = drivertest.WatchForSecretFiles(token, filepath.Join(w.dir, "work"), filepath.Join(w.dir, "work-other"))
+	w.stopWatch = drivertest.WatchForSecretFiles(token,
+		filepath.Join(w.dir, "work"), filepath.Join(w.dir, "work-other"), filepath.Join(w.dir, "sessions"))
 	return nil
 }
 

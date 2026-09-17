@@ -377,7 +377,11 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	if r.StateDir == "" {
 		r.StateDir = h.state
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	// Longer than any run's own deadline (runHarnessConnector's runFor), so
+	// a connector that overruns fails saying the ledger never got there
+	// rather than being killed by this timeout — which wait would otherwise
+	// be unable to tell from the kill a row asked for.
+	ctx, cancel := context.WithTimeout(context.Background(), harnessRunCap)
 	h.t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRecoveryConnector$", "-test.count=1", "-test.v")
 	cmd.Env = append(os.Environ(),
@@ -403,7 +407,11 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 
 func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
 	h.t.Helper()
+	started := time.Now()
 	err := cmd.Wait()
+	// exec.CommandContext kills with SIGKILL as well, and wait must not read
+	// that as the kill a row asked for.
+	require.Less(h.t, time.Since(started), harnessRunCap, "the connector outran the harness's own deadline\n%s", out.String())
 	defer h.requireNoTaskTokenLeaked(out)
 	if path := os.Getenv("BASECAMP_RECOVERY_DEBUG"); path != "" {
 		// Appended: a test is several runs, and the one that matters is
@@ -484,6 +492,9 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 		if found, ok := strings.CutPrefix(e.Step, "secret-file:"); ok {
 			t.Errorf("a worker saw a task token written to %s", found)
 		}
+		if where, ok := strings.CutPrefix(e.Step, "secret-declared:"); ok {
+			t.Errorf("a worker's MCP server declaration carried the task token in %s", where)
+		}
 	}
 	places.Texts = append(places.Texts, out.String())
 	for _, name := range []string{linesFile, storeFile, pollsFile, workspaceFile, agentLogFile} {
@@ -491,7 +502,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
 		require.NoError(t, err)
 		places.Texts = append(places.Texts, string(data))
 	}
-	places.Dirs = []string{h.workDir(), filepath.Join(h.dir, "work-other")}
+	places.Dirs = []string{h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions")}
 	for _, e := range entries {
 		token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name()))
 		require.NoError(t, err)
