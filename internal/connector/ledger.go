@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"modernc.org/sqlite" // database/sql driver "sqlite", pure Go: no cgo on any of the five release targets.
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // isInMemory reports a path SQLite would read as its in-memory database
@@ -158,58 +159,40 @@ func isBusy(err error) bool {
 // securePath makes the ledger private or refuses it.
 //
 // The ledger holds feed positions — signed tokens that resume the account's
-// feed — and every event's metadata. Its directory must be 0700 and the file
-// 0600. A directory or file that already exists with looser permissions is
-// refused rather than tightened: something else chose those permissions, and
-// silently changing them could break it or hide that the ledger was exposed.
+// feed — and every event's metadata, so it is a credential file and is
+// treated as one. The check is the same one the connector's trust file and
+// instance lock get: every directory on the way must be this user's own and
+// unwritable by anyone else, and the ledger itself is opened without
+// following symlinks and inspected through that descriptor rather than by
+// name. Validating the name would validate whatever the name pointed at when
+// it was asked, which is not necessarily what SQLite then opens.
+//
+// A file or directory that already exists with looser permissions is refused
+// rather than tightened: something else chose those permissions, and silently
+// changing them could break it or hide that the ledger was exposed.
+//
+// The check cannot be made on a platform without POSIX owners and modes, and
+// a ledger whose privacy cannot be established is refused there rather than
+// opened — the same way setup refuses to write a trust file it cannot vouch
+// for.
 func securePath(path string) error {
+	if err := setup.EnsurePrivateFile(path); err != nil {
+		return fmt.Errorf("connector: secure the ledger: %w", err)
+	}
+	// One rule of the ledger's own, beyond what a trust file needs: its
+	// directory must be 0700, not merely unwritable by others. SQLite writes
+	// -wal and -shm beside the database, and a directory other users can read
+	// is one whose entries they can list. The directory is already known not
+	// to be a symlink, so Lstat here inspects the directory itself.
 	dir := filepath.Dir(path)
-	switch info, err := os.Stat(dir); {
-	case os.IsNotExist(err):
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("connector: create ledger directory: %w", err)
-		}
-		if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // a directory needs its search bit; 0700 is owner-only
-			return fmt.Errorf("connector: secure ledger directory: %w", err)
-		}
-	case err != nil:
+	info, err := os.Lstat(dir)
+	if err != nil {
 		return fmt.Errorf("connector: inspect ledger directory: %w", err)
-	case !info.IsDir():
-		return fmt.Errorf("connector: ledger directory %s is not a directory", dir)
-	case looserThan(info.Mode(), 0o700):
-		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", dir, info.Mode().Perm())
 	}
-
-	switch f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600); {
-	case err == nil:
-		if err := f.Close(); err != nil {
-			return fmt.Errorf("connector: create ledger: %w", err)
-		}
-		if err := os.Chmod(path, 0o600); err != nil {
-			return fmt.Errorf("connector: secure ledger: %w", err)
-		}
-		return nil
-	case !os.IsExist(err):
-		return fmt.Errorf("connector: create ledger: %w", err)
-	}
-	// It exists — perhaps created a moment ago by another process opening the
-	// same fresh ledger. Its permissions decide, not who created it.
-	switch info, err := os.Stat(path); {
-	case err != nil:
-		return fmt.Errorf("connector: inspect ledger: %w", err)
-	case looserThan(info.Mode(), 0o600):
-		return fmt.Errorf("connector: ledger %s is readable by other users (mode %04o); it must be 0600", path, info.Mode().Perm())
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", dir, perm)
 	}
 	return nil
-}
-
-// looserThan reports permission bits beyond limit. Windows has no POSIX bits
-// to speak of; access there is the ACL of the user's profile directory.
-func looserThan(mode os.FileMode, limit os.FileMode) bool {
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	return mode.Perm()&^limit != 0
 }
 
 // Close releases the ledger's handle.

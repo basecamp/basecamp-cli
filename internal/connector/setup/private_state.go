@@ -94,3 +94,57 @@ func checkHeldLockFile(path string) error {
 	defer f.Close()
 	return checkPrivateFile(f, path)
 }
+
+// EnsurePrivateFile creates path owner-only when it is missing, and refuses it
+// when it is not this user's own regular file reached through directories only
+// this user can change.
+//
+// It is stricter than the check connect.json gets in one way: a file another
+// user can merely READ is refused too. It exists for the connector's ledger,
+// which holds the account's feed positions — resumable tokens, so credentials
+// — and there a readable file is already the leak.
+//
+// What is validated is the descriptor, not the name: the file is opened
+// without following symlinks and inspected through that open file, so the
+// thing checked is the thing the caller will go on to use. Creation is
+// exclusive for the same reason — O_CREAT|O_EXCL refuses a symlink outright
+// rather than following it somewhere else.
+func EnsurePrivateFile(path string) error {
+	if err := EnsurePrivateDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	f, err := openNoFollow(path)
+	if errors.Is(err, os.ErrNotExist) {
+		created, createErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		switch {
+		case createErr == nil:
+			defer created.Close()
+			return checkPrivateReadableFile(created, path)
+		case !errors.Is(createErr, os.ErrExist):
+			return fmt.Errorf("create %s: %w", path, createErr)
+		}
+		// Something appeared between the open and the create — including,
+		// possibly, a symlink, which is why this reopen still refuses to
+		// follow one.
+		f, err = openNoFollow(path)
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return checkPrivateReadableFile(f, path)
+}
+
+func checkPrivateReadableFile(f *os.File, path string) error {
+	if err := checkPrivateFile(f, path); err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("%w: %s can be read by other users (mode %04o); it must be 0600", ErrNotPrivate, path, perm)
+	}
+	return nil
+}

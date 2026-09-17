@@ -92,3 +92,63 @@ func TestRequeueingStopsOnShutdownAndLeavesTheRest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, remaining, 3, "nothing is consumed by being queued; the next start sees them all")
 }
+
+// The restart is not the only answer. A repair walk is the case that makes it
+// urgent: the commit resolves the loss's missing id, so the reconciliation
+// that follows sees nothing missing and closes, and a connector that runs for
+// weeks would never mention the event again. Every commit goes through one
+// handover path, and a failure on it is remembered and retried in process.
+func TestAnEventWhoseHandOffFailedIsSweptWithoutARestart(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	intake, _, queue := newTestIntakeOn(t, ledger, failingWriter{})
+
+	require.Error(t, intake.ingest(ctx, testEvent(17099838500), LaneRepair))
+	require.Zero(t, queue.Depth(), "the id never reached the queue")
+
+	// The ledger's dedupe now suppresses the event on every later delivery of
+	// itself, so nothing but the sweep can hand it over.
+	fresh, err := ledger.RecordSeen(ctx, testEvent(17099838500), LaneRepair)
+	require.NoError(t, err)
+	require.False(t, fresh)
+
+	intake.sweepStranded(ctx)
+
+	require.Equal(t, 1, queue.Depth())
+	id, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(17099838500), id)
+
+	// Exactly once: a second sweep has nothing left to offer.
+	intake.sweepStranded(ctx)
+	assert.Zero(t, queue.Depth())
+}
+
+// A sweep that cannot hand an id over leaves it for the next one, and for the
+// next start after that.
+func TestASweepThatCannotHandOverKeepsTheStrandedID(t *testing.T) {
+	ctx := context.Background()
+	intake, _, _ := newTestIntakeOn(t, newTestLedger(t), failingWriter{})
+	full, err := NewQueue(1, 1)
+	require.NoError(t, err)
+	intake.queue = full
+
+	require.Error(t, intake.ingest(ctx, testEvent(42), LaneLive))
+	require.NoError(t, full.Offer(ctx, 99)) // no room for anything else
+
+	stopped, cancel := context.WithCancel(ctx)
+	cancel()
+	intake.sweepStranded(stopped)
+	assert.Equal(t, 1, full.Depth(), "the sweep waited for room and gave up, keeping the id")
+
+	waiting, err := full.Take(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(99), waiting)
+
+	intake.sweepStranded(ctx)
+	bounded, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	id, err := full.Take(bounded)
+	require.NoError(t, err, "the id the earlier sweep kept should be handed over now")
+	assert.Equal(t, int64(42), id)
+}

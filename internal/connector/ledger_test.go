@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 func newTestLedger(t *testing.T) *Ledger {
@@ -190,4 +193,48 @@ func TestCheckpointsAreKeyedByFilterDigest(t *testing.T) {
 	_, ok, err := ledger.Load(ctx, wide)
 	require.NoError(t, err)
 	assert.False(t, ok, "a filter change re-enters under its own lineage")
+}
+
+// The ledger holds feed positions, which resume the account's feed. A path
+// that can be redirected is a ledger that can be read, so what is validated
+// is the file that gets opened, not the name that was asked for.
+func TestLedgerRefusesASymlinkedPath(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o700))
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.db")
+	require.NoError(t, os.WriteFile(elsewhere, nil, 0o600))
+	path := filepath.Join(dir, "connector.db")
+	require.NoError(t, os.Symlink(elsewhere, path))
+
+	_, err := OpenLedger(path)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, setup.ErrNotPrivate)
+}
+
+func TestLedgerRefusesASymlinkedParent(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "target")
+	require.NoError(t, os.Mkdir(target, 0o700))
+	link := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.Symlink(target, link))
+
+	_, err := OpenLedger(filepath.Join(link, "connector.db"))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, setup.ErrNotPrivate)
+}
+
+// A 0700 directory under an ancestor anyone can write is not private: the
+// ancestor's owner can rename it away and put their own in its place.
+func TestLedgerRefusesALooseAncestor(t *testing.T) {
+	loose := filepath.Join(t.TempDir(), "loose")
+	require.NoError(t, os.Mkdir(loose, 0o700))
+	require.NoError(t, os.Chmod(loose, 0o777)) // after the umask, not through it
+	dir := filepath.Join(loose, "state")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+
+	_, err := OpenLedger(filepath.Join(dir, "connector.db"))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, setup.ErrNotPrivate)
 }

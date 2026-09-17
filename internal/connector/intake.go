@@ -172,6 +172,12 @@ type Intake struct {
 	// the feed somewhere unsafe.
 	abortErr error
 
+	// stranded holds ids this process committed to the ledger and then failed
+	// to hand over. They are the one thing the ledger's own dedupe would hide:
+	// the row is there, so every retry of the event is suppressed as a
+	// duplicate, and without this the id would wait for a restart.
+	stranded map[int64]struct{}
+
 	repairs     sync.WaitGroup
 	repairQueue chan Loss
 	// repairQueueSize and repairSweep override the pool's defaults in tests.
@@ -529,10 +535,15 @@ func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) 
 		return nil
 	}
 
+	// Past this line the row is committed, so the event is invisible to every
+	// later delivery of itself: it is this process's to finish handing over,
+	// or to remember that it did not. Both failures below are that.
 	if err := in.pointer.write(event, lane); err != nil {
+		in.strand(event.ID)
 		return err
 	}
 	if err := in.queue.Offer(ctx, event.ID); err != nil {
+		in.strand(event.ID)
 		return err
 	}
 	// Only once the id is handed over: the reconnect cancels the connection
@@ -768,6 +779,53 @@ func entryClassOf(resumeURL string) EntryClass {
 	}
 }
 
+// strand remembers an id the ledger has but the queue does not.
+//
+// Every commit goes through ingest, and every handover failure after a commit
+// goes through here, so there is one place an event can be stranded and one
+// place that answers for it. A crash loses the list, and nothing is lost with
+// it: the next start offers every record still in seen.
+func (in *Intake) strand(id int64) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.stranded == nil {
+		in.stranded = map[int64]struct{}{}
+	}
+	in.stranded[id] = struct{}{}
+}
+
+// sweepStranded offers the ids a failed handover left behind.
+//
+// A restart is not an answer for a connector that runs for weeks, and a
+// repair walk is the case that makes it urgent: its failure closes nothing
+// downstream, the id's loss row is already resolved by the commit, and the
+// reconciliation that follows sees nothing missing. The event would be
+// recorded, never judged, and never mentioned again.
+//
+// It offers and only then forgets: an offer refused by a canceled context
+// leaves the id stranded for the next sweep, or for the next start.
+func (in *Intake) sweepStranded(ctx context.Context) {
+	in.mu.Lock()
+	ids := make([]int64, 0, len(in.stranded))
+	for id := range in.stranded {
+		ids = append(ids, id)
+	}
+	in.mu.Unlock()
+	if len(ids) == 0 {
+		return
+	}
+	slices.Sort(ids) // oldest first, as the feed served them
+	for _, id := range ids {
+		if err := in.queue.Offer(ctx, id); err != nil {
+			in.log.Warn("an event the ledger holds could not be handed over; it stays for the next sweep", "event_id", id, "error", err)
+			return
+		}
+		in.mu.Lock()
+		delete(in.stranded, id)
+		in.mu.Unlock()
+	}
+}
+
 // requeueSeen hands every record still in seen to the queue.
 //
 // The ledger row is written before the pointer line and before the hand-off,
@@ -799,6 +857,11 @@ func (in *Intake) requeueSeen(ctx context.Context) error {
 			after = record.ID
 		}
 		if len(records) < requeueBatch {
+			// Everything in seen has just been offered, the ids a previous
+			// run stranded included.
+			in.mu.Lock()
+			in.stranded = nil
+			in.mu.Unlock()
 			return nil
 		}
 	}
@@ -891,7 +954,9 @@ func (in *Intake) startRepairWorkers(ctx context.Context) {
 	go in.sweepLosses(ctx)
 }
 
-// sweepLosses offers every open loss nothing is already walking.
+// sweepLosses is the periodic repair of both things that can be left behind:
+// an event committed but never handed over, and an open loss nothing is
+// walking.
 //
 // The queue is bounded, so an overloaded connector can turn one away; and a
 // walk can end early, leaving its loss open. Neither may leave a loss with
@@ -911,6 +976,7 @@ func (in *Intake) sweepLosses(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			in.sweepStranded(ctx)
 			losses, err := in.ledger.OpenLosses(ctx)
 			if err != nil {
 				in.log.Warn("could not read the open losses", "error", err)
