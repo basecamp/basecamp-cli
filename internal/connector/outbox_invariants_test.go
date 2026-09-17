@@ -497,3 +497,31 @@ func TestOutboxPausedHoldsSending(t *testing.T) {
 	assert.Equal(t, IntentSent, obIntent(t, ledger, in.Key).State)
 	assert.Equal(t, IntentPending, obIntent(t, ledger, holdingKey(2)).State)
 }
+
+// Invariant 4, defended in the sender too: should an intent it already
+// claimed ever come back as pending within one flush, the flush stops rather
+// than post it a second time.
+func TestOutboxFlushNeverClaimsAnIntentTwice(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `DROP TRIGGER outbox_state_edges`)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	reset := false
+	basecamp.beforePost = func(Destination, string) error {
+		if !reset {
+			// Something outside the rules puts the row back to pending
+			// mid-send, once.
+			reset = true
+			_, err := ledger.db.ExecContext(ctx, `UPDATE outbox SET state = 'pending', sending_at = NULL WHERE intent_key = ?`, holdingKey(1))
+			require.NoError(t, err)
+		}
+		return errWire
+	}
+	require.Error(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Equal(t, 1, basecamp.postCount())
+}

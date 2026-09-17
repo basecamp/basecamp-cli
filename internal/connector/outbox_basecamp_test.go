@@ -98,6 +98,7 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		s.mu.Lock()
 		all := append([]obServerMessage(nil), s.messages[dest]...)
+		pageSize := s.pageSize
 		s.mu.Unlock()
 		if kind == MessageChatLine {
 			sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
@@ -105,12 +106,12 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 			if page < 1 {
 				page = 1
 			}
-			start := (page - 1) * s.pageSize
+			start := (page - 1) * pageSize
 			switch {
 			case start >= len(all):
 				all = nil
-			case start+s.pageSize < len(all):
-				all = all[start : start+s.pageSize]
+			case start+pageSize < len(all):
+				all = all[start : start+pageSize]
 			default:
 				all = all[start:]
 			}
@@ -124,6 +125,18 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *obServer) setOnPost(fn func(r *http.Request, id int64) int) {
+	s.mu.Lock()
+	s.onPost = fn
+	s.mu.Unlock()
+}
+
+func (s *obServer) setPageSize(n int) {
+	s.mu.Lock()
+	s.pageSize = n
+	s.mu.Unlock()
 }
 
 func (s *obServer) add(dest Destination, creator int64, content string) int64 {
@@ -205,7 +218,7 @@ func TestBasecampPosterPostsEachKindAsTheAgent(t *testing.T) {
 // a retry would be a second message.
 func TestBasecampPosterMakesOneRequestPerPost(t *testing.T) {
 	server := newOBServer(t)
-	server.onPost = func(*http.Request, int64) int { return http.StatusServiceUnavailable }
+	server.setOnPost(func(*http.Request, int64) int { return http.StatusServiceUnavailable })
 	poster := server.poster(t)
 
 	for _, kind := range []MessageKind{MessageBoost, MessageComment, MessageChatLine} {
@@ -242,7 +255,7 @@ func TestBasecampPosterListsOnlyTheAgentsMessagesSince(t *testing.T) {
 // never a shorter answer that would read as "nothing was posted".
 func TestBasecampPosterRefusesAShortCampfireListing(t *testing.T) {
 	server := newOBServer(t)
-	server.pageSize = 1
+	server.setPageSize(1)
 	poster := server.poster(t)
 	dest := Destination{Kind: MessageChatLine, RecordingID: obCampfire}
 	since := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)

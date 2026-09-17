@@ -86,7 +86,7 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 			server := newOBServer(t)
 			stored := make(chan struct{}, 1)
 			release := make(chan struct{})
-			server.onPost = func(r *http.Request, _ int64) int {
+			server.setOnPost(func(r *http.Request, _ int64) int {
 				// Answer nothing until the client is gone: the receipt never
 				// reaches the process.
 				stored <- struct{}{}
@@ -95,7 +95,7 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 				case <-release:
 				}
 				return http.StatusServiceUnavailable
-			}
+			})
 			t.Cleanup(func() { close(release) })
 
 			marker := filepath.Join(t.TempDir(), "sending")
@@ -143,9 +143,7 @@ func TestOutboxKillBetweenSendingAndReceipt(t *testing.T) {
 
 			// Restart: a fresh outbox on the same ledger, Basecamp answering
 			// normally now.
-			server.mu.Lock()
-			server.onPost = nil
-			server.mu.Unlock()
+			server.setOnPost(nil)
 			postsBefore := server.postCount()
 			restarted, err := NewOutbox(OutboxOptions{Ledger: ledger, Poster: server.poster(t)})
 			require.NoError(t, err)

@@ -145,8 +145,11 @@ func (o *Outbox) Recover(ctx context.Context) error {
 }
 
 // Flush sends every intent that is due, one at a time, and returns when none
-// is left or ctx ends.
+// is left or ctx ends. One flush claims an intent at most once: a claim that
+// came back for an intent already claimed would be a second send, and stops
+// the flush instead.
 func (o *Outbox) Flush(ctx context.Context) error {
+	claimed := map[int64]bool{}
 	for ctx.Err() == nil {
 		if o.opts.Paused != nil {
 			paused, err := o.opts.Paused(ctx)
@@ -157,30 +160,34 @@ func (o *Outbox) Flush(ctx context.Context) error {
 				return nil
 			}
 		}
-		sent, err := o.sendNext(ctx)
+		id, err := o.sendNext(ctx, claimed)
 		if err != nil {
 			return err
 		}
-		if !sent {
+		if id == 0 {
 			return nil
 		}
 	}
 	return nil
 }
 
-// sendNext claims the oldest due intent and sends it. It reports whether it
-// claimed one.
-func (o *Outbox) sendNext(ctx context.Context) (bool, error) {
+// sendNext claims the oldest due intent and sends it. It returns the id it
+// claimed, zero when none was due.
+func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	intent, ok, err := o.ledger.claimIntent(ctx)
 	if err != nil || !ok {
-		return false, err
+		return 0, err
 	}
+	if claimed[intent.ID] {
+		return 0, fmt.Errorf("connector: outbox intent %d was claimed twice in one flush; not sending it again", intent.ID)
+	}
+	claimed[intent.ID] = true
 	o.line(intent)
 	if intent.State != IntentSending {
 		// Claiming canceled it.
-		return true, nil
+		return intent.ID, nil
 	}
 
 	// Invariant 3: the sending row is committed; only now is a request made.
@@ -193,20 +200,20 @@ func (o *Outbox) sendNext(ctx context.Context) (bool, error) {
 		// again (invariant 4).
 		o.log.Warn("connector: a lifecycle message may not have been posted; it will be reconciled, not resent",
 			"intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
-		return true, nil
+		return intent.ID, nil
 	}
 	if receipt <= 0 {
 		o.log.Warn("connector: a lifecycle message was posted without an id; it will be reconciled", "intent_id", intent.ID)
-		return true, nil
+		return intent.ID, nil
 	}
 	recorded, err := o.ledger.recordReceipt(context.WithoutCancel(ctx), intent.ID, receipt)
 	if err != nil {
 		// The message exists; reconciliation finds it by its body.
 		o.log.Warn("connector: could not record a lifecycle message's receipt; it will be reconciled", "intent_id", intent.ID, "error", err)
-		return true, nil
+		return intent.ID, nil
 	}
 	o.line(recorded)
-	return true, nil
+	return intent.ID, nil
 }
 
 // claimIntent moves the oldest due pending intent to sending and commits, or,
