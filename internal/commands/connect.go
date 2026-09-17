@@ -862,12 +862,12 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 	}
 	bound, err := canonicalAccount(p.AccountID)
 	if err != nil {
-		// The account is bound by the command that stores the credential —
-		// there is no command that binds one on its own — so the remedy is
-		// to store it again, which rewrites the entry with an account.
-		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q is not bound to an account", name),
-			"Bind it where the credential is stored: basecamp auth agent connect -P "+shellQuote(name)+
-				" takes the agent's own account, and on the bot-user path basecamp auth login -P "+shellQuote(name)+" --account <id> binds the one you name.")
+		// An entry that names an account nothing can use is not an unbound
+		// profile: say what is wrong with the account it does name.
+		if p.AccountID != "" {
+			return "", err
+		}
+		return "", unboundProfileError(name)
 	}
 	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
 		return "", output.ErrUsageHint(
@@ -875,6 +875,30 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 			"Setup works in the profile's own account. Drop --account (or BASECAMP_ACCOUNT_ID).")
 	}
 	return bound, nil
+}
+
+// unboundProfileError refuses a profile that names no account, with the
+// remedy that will work for this one.
+//
+// Nothing binds an account on its own — `profile` has no command for it. The
+// account is written by whichever command stores the credential, so the
+// remedy is normally to store it again. But both of those refuse an
+// accountless entry that is not the global config's, because the entry they
+// would write would stay shadowed by the system, repo or local config that
+// defines it (auth.go and auth_agent.go both say so). For that profile the
+// only remedy is the file the entry comes from.
+func unboundProfileError(name string) error {
+	message := fmt.Sprintf("Profile %q is not bound to an account", name)
+	profile := shellQuote(name)
+	// A global config that cannot be read is no reason to fail here: the
+	// commands named below report that themselves, in full.
+	if unbound, err := globalProfileIsUnbound(name); err == nil && !unbound {
+		return output.ErrUsageHint(message,
+			"This entry is not the global config's, so storing the credential again cannot bind it. Add account_id to the config file that defines it.")
+	}
+	return output.ErrUsageHint(message,
+		"Bind it where the credential is stored: basecamp auth agent connect -P "+profile+
+			" takes the agent's own account, and on the bot-user path basecamp auth login -P "+profile+" --account <id> binds the one you name.")
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,

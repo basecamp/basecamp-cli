@@ -80,21 +80,24 @@ session, stop and run it first.
 *references* still exist in the `.surface` snapshot. It catches stale references, not
 missing coverage, so adding a command breaks none of them.
 
-A reference has to resolve exactly, so removing a nested subcommand is caught too:
-`basecamp setup <removed>` no longer passes by falling back to `basecamp setup`. Words
-past a resolved command are allowed only where they cannot name a subcommand — after a
-command that takes positional arguments, and after a leaf that has none — so argument
-values and prose still pass. What `.surface` cannot say is whether a group runs bare
-(`basecamp skill` prints the skill file) or only dispatches (`basecamp profile`), and
-hidden commands are not in `.surface` at all; acknowledge either in
-`.surface-skill-drift` as `CMD <path>`. `make test-skill-drift` runs the check against
-fixtures that hold this behavior.
+A reference has to resolve exactly: `basecamp setup <removed>` no longer passes by
+falling back to `basecamp setup`. Words past a resolved command are allowed only where
+they cannot name a subcommand — after a command that takes positional arguments, and
+after a leaf that has none — so argument values and prose still pass. Those two escapes
+cannot tell an argument value from a subcommand we dropped, so a word naming a command
+in `.surface-breaking` fails before either escape can read it as prose; that file is the
+record of removals, which is why removal is caught at all. What `.surface` cannot say is
+whether a group runs bare (`basecamp skill` prints the skill file) or only dispatches
+(`basecamp profile`), and hidden commands are not in `.surface` at all; acknowledge
+either in `.surface-skill-drift` as `CMD <path>`. `make test-skill-drift` runs the check
+against fixtures that hold all of this.
 
 Hints in Go code are covered by a test rather than by this script:
 `TestHintCommandsResolve` resolves every command named in a hint across
-`internal/commands`, and every command named in any string in `connect.go`, against the
-real command tree. A hint is an instruction an operator is about to run, so it is held to
-the same exactness. Update the skill the change actually affects;
+`internal/commands` — including hints built into a variable first — and every command
+named in any string in `connect.go`, against the real command tree, by the same rule.
+A hint is an instruction an operator is about to run, so it is held to the same
+exactness. Update the skill the change actually affects;
 basecamp-doctor deliberately covers only doctor, setup and auth remediation;
 basecamp-connect covers `basecamp auth agent connect` and `basecamp connect`, and its
 evals run against its own SKILL.md (`make -C skill-evals eval-connect`).

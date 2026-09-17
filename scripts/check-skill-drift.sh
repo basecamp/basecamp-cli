@@ -6,6 +6,9 @@ set -euo pipefail
 SKILL="${1:-skills/basecamp/SKILL.md}"
 SURFACE="${2:-.surface}"
 BASELINE="${3:-.surface-skill-drift}"
+# Removals are acknowledged in .surface-breaking before they can land, so it
+# is the record of what the CLI used to have and no longer does.
+BREAKING="${4:-.surface-breaking}"
 
 # Built-in flags not tracked in the surface
 BUILTINS="--help --version"
@@ -58,6 +61,11 @@ resolve_cmd() {
 # of its subcommands. That word is an invented subcommand, or a reference
 # this check cannot verify. Either way it fails.
 #
+# Those two escapes cannot tell an argument value from a subcommand we
+# removed — "basecamp recordings archive" reads as the [type] argument once
+# `archive` is gone — so a word that names a removed command fails first,
+# whichever escape would otherwise have taken it.
+#
 # Prints "<resolved command>|<word it does not have>" and returns 0 when the
 # candidate is verified, 1 when it is not. On a failure the resolved command
 # is the deepest one that does exist — empty when not even the root does.
@@ -77,6 +85,12 @@ verify_cmd() {
     return 0
   fi
 
+  # A word that names a command we removed is drift whatever else it could
+  # be, so it is refused before the escapes below could read it as prose.
+  if [ -f "$BREAKING" ] && grep -qxF "CMD ${matched} ${parts[$depth]}" "$BREAKING"; then
+    echo "${matched}|${parts[$depth]}"
+    return 1
+  fi
   # Leftover words are argument values when the command takes arguments.
   if grep -qE "^ARG ${matched} [0-9]{2} " "$SURFACE"; then
     echo "$matched|"
@@ -123,7 +137,11 @@ while IFS= read -r candidate; do
       message="command not in surface: $candidate"
       key="CMD ${candidate}"
     else
-      message="cannot verify \"$candidate\": ${resolved} has no subcommand \"${word}\""
+      if grep -qxF "CMD ${resolved} ${word}" "$BREAKING" 2>/dev/null; then
+        message="removed command: \"$candidate\" — ${resolved} no longer has \"${word}\""
+      else
+        message="cannot verify \"$candidate\": ${resolved} has no subcommand \"${word}\""
+      fi
       key="CMD ${resolved} ${word}"
     fi
     if is_baselined "$key"; then

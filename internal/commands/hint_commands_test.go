@@ -34,6 +34,7 @@ import (
 // way.
 func TestHintCommandsResolve(t *testing.T) {
 	root := buildRootWithAllCommands()
+	removed := removedCommands(t)
 	fset := token.NewFileSet()
 
 	entries, err := os.ReadDir(".")
@@ -55,9 +56,13 @@ func TestHintCommandsResolve(t *testing.T) {
 			}
 			for _, phrase := range commandPhrases(text) {
 				checked++
-				resolved, word, ok := resolveCommandPhrase(root, phrase)
-				assert.Truef(t, ok, "%s: hint names %q, and %q has no subcommand %q",
-					fset.Position(lit.Pos()), phrase, resolved, word)
+				resolved, word, ok := resolveCommandPhrase(root, removed, phrase)
+				reason := "has no subcommand"
+				if removed[resolved+" "+word] {
+					reason = "no longer has"
+				}
+				assert.Truef(t, ok, "%s: hint names %q, and %q %s %q",
+					fset.Position(lit.Pos()), phrase, resolved, reason, word)
 			}
 		}
 	}
@@ -70,12 +75,25 @@ func TestHintCommandsResolve(t *testing.T) {
 // meant to read: the hint argument of the hint-carrying error constructors,
 // the Hint field of an output.Error, and — when everything is wanted — every
 // string literal in the file.
+//
+// A hint is not always written where it is passed: some are built into a
+// variable first (boost.go builds one, then adds --event to it). So the
+// names a hint expression mentions are collected too, and a second pass
+// takes the literals assigned to them anywhere in the file. Over-reaching
+// there costs nothing: a literal with no command in it is scanned and
+// passes.
 func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 	var lits []*ast.BasicLit
+	names := map[string]bool{}
 	collect := func(n ast.Node) {
 		ast.Inspect(n, func(n ast.Node) bool {
-			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				lits = append(lits, lit)
+			switch node := n.(type) {
+			case *ast.BasicLit:
+				if node.Kind == token.STRING {
+					lits = append(lits, node)
+				}
+			case *ast.Ident:
+				names[node.Name] = true
 			}
 			return true
 		})
@@ -106,7 +124,60 @@ func hintLiterals(file *ast.File, everything bool) []*ast.BasicLit {
 		}
 		return true
 	})
+
+	// Second pass: whatever was assigned to a name a hint is built from.
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch node := n.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range node.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && names[id.Name] {
+					for _, rhs := range node.Rhs {
+						collectStrings(rhs, &lits)
+					}
+					break
+				}
+			}
+		case *ast.ValueSpec:
+			for _, id := range node.Names {
+				if names[id.Name] {
+					for _, v := range node.Values {
+						collectStrings(v, &lits)
+					}
+					break
+				}
+			}
+		}
+		return true
+	})
 	return lits
+}
+
+func collectStrings(n ast.Node, into *[]*ast.BasicLit) {
+	ast.Inspect(n, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+			*into = append(*into, lit)
+		}
+		return true
+	})
+}
+
+// removedCommands is every command path .surface-breaking records the CLI as
+// having dropped. A word past a resolved command that names one of these is
+// drift whatever else it could be — without it, "basecamp recordings archive"
+// reads as the [type] argument the moment `archive` is removed, which is the
+// hole the nearest-ancestor fallback used to leave everywhere.
+func removedCommands(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := os.ReadFile("../../.surface-breaking")
+	require.NoError(t, err)
+
+	removed := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "CMD "); ok {
+			removed[path] = true
+		}
+	}
+	return removed
 }
 
 // commandPhrase matches a command reference the way scripts/check-skill-drift.sh
@@ -120,7 +191,7 @@ func commandPhrases(text string) []string {
 // resolveCommandPhrase walks a command phrase down the tree. It reports the
 // deepest command the phrase reaches, the first word past it that command
 // does not have, and whether the phrase resolves.
-func resolveCommandPhrase(root *cobra.Command, phrase string) (resolved, word string, ok bool) {
+func resolveCommandPhrase(root *cobra.Command, removed map[string]bool, phrase string) (resolved, word string, ok bool) {
 	words := strings.Fields(phrase)
 	cmd := root
 	i := 1 // words[0] is the binary name
@@ -133,6 +204,9 @@ func resolveCommandPhrase(root *cobra.Command, phrase string) (resolved, word st
 	}
 	if i == len(words) {
 		return cmd.CommandPath(), "", true
+	}
+	if removed[cmd.CommandPath()+" "+words[i]] {
+		return cmd.CommandPath(), words[i], false
 	}
 	// Leftover words cannot be an invented subcommand when the command runs
 	// as it stands — they are its arguments, or prose about running it — nor

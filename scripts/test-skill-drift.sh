@@ -50,6 +50,14 @@ EOF
 
 : > "${work}/baseline"
 
+# What the CLI used to have. Removals reach .surface-breaking before they can
+# land, so the check reads it to tell an argument value from a command we
+# dropped.
+cat > "${work}/breaking" <<'EOF'
+CMD basecamp recordings vaults
+CMD basecamp todos list stale
+EOF
+
 # write_skill <name> <body line>...
 write_skill() {
   local name="$1"; shift
@@ -62,7 +70,7 @@ write_skill() {
 # run_check <skill name> [baseline file] — prints output, sets $status
 run_check() {
   local name="$1" baseline="${2:-${work}/baseline}"
-  out=$("$DRIFT_SCRIPT" "${work}/${name}.md" "${work}/surface" "$baseline" 2>&1)
+  out=$("$DRIFT_SCRIPT" "${work}/${name}.md" "${work}/surface" "$baseline" "${work}/breaking" 2>&1)
   status=$?
 }
 
@@ -109,6 +117,16 @@ assert_passes argvalue 'an argument value after a command that takes arguments p
 
 write_skill prose 'Run `basecamp todos list` without a project and it fails.'
 assert_passes prose 'prose after a leaf command passes'
+
+# --- A subcommand we removed, where an escape would otherwise read it as prose ---
+
+write_skill removed_under_args 'Run `basecamp recordings vaults` for the vaults.'
+assert_fails removed_under_args 'removed command' \
+  'a removed subcommand fails even where the parent takes an argument'
+
+write_skill removed_under_leaf 'Run `basecamp todos list stale` for the stale ones.'
+assert_fails removed_under_leaf 'removed command' \
+  'a removed subcommand fails even under a command with no subcommands left'
 
 # --- What already failed, and still has to ---
 
