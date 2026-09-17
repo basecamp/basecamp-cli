@@ -247,7 +247,12 @@ type harness struct {
 
 func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	t.Helper()
-	dir := t.TempDir()
+	// Not t.TempDir: its name carries the test's, and the attempt's token
+	// socket lives under it — a unix socket path is 103 characters, and the
+	// connector refuses a longer one.
+	dir, err := os.MkdirTemp("", "bcrh")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	require.NoError(t, os.Chmod(dir, 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "sessions"), 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o700))
@@ -256,8 +261,8 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	h := &harness{t: t, dir: dir, state: harnessStateDir(t, dir), driver: d, sc: sc}
 	h.writeScenario()
 
-	exe, err := os.Executable()
-	require.NoError(t, err)
+	exe, exeErr := os.Executable()
+	require.NoError(t, exeErr)
 	h.agent = filepath.Join(dir, "agent")
 	wrapper := "#!/bin/sh\n" +
 		harnessAgentEnv + "=" + shellQuote(d.Name) + " " + harnessDirEnv + "=" + shellQuote(dir) + " exec " + shellQuote(exe) + ` "$@"` + "\n"

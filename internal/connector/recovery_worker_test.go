@@ -3,10 +3,12 @@
 package connector
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -143,9 +145,10 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	if err != nil {
 		return err
 	}
-	token := server.Env[TaskTokenEnv]
-	if token == "" {
-		return errors.New("the MCP server's environment carries no task token")
+
+	token, err := w.takeToken(server.Args)
+	if err != nil {
+		return err
 	}
 	l, err := OpenExistingLedger(ctx, filepath.Join(stateDir, LedgerFile))
 	if err != nil {
@@ -158,6 +161,34 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	}
 	w.ledger, w.dispatch = l, d
 	return w.watchToken(token)
+}
+
+// takeToken takes the task token from the connector's one-use socket, as the
+// bridge the connector names does (`basecamp connect worker-mcp`, see
+// internal/commands/connect_worker_mcp.go): the socket path is in the
+// server's arguments, the token is a line on the socket, and it is served
+// only to the worker's own process group — which this agent leads.
+func (w *fakeWorker) takeToken(args []string) (string, error) {
+	i := slices.Index(args, "--socket")
+	if i < 0 || i+1 >= len(args) {
+		return "", errors.New("the MCP server has no --socket")
+	}
+	dialer := net.Dialer{Timeout: 30 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "unix", args[i+1])
+	if err != nil {
+		return "", fmt.Errorf("the connector's token socket: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	line, err := bufio.NewReaderSize(conn, 256).ReadString('\n')
+	token := strings.TrimSpace(line)
+	if token == "" {
+		if err == nil {
+			err = errors.New("empty")
+		}
+		return "", fmt.Errorf("the connector handed over no token: %w", err)
+	}
+	return token, nil
 }
 
 // watchToken keeps the task token where the parent test can read it back, and
