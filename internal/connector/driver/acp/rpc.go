@@ -28,9 +28,10 @@ var maxLine = 64 << 20
 // maxHandlers bounds the agent requests answered at once, and maxBusy the
 // refusals waiting to be written. A variable so tests need not send a
 // thousand requests.
-const maxHandlers = 16
-
-var maxBusy = 256
+var (
+	maxHandlers = 16
+	maxBusy     = 256
+)
 
 // JSON-RPC error codes the client sends.
 const (
@@ -108,6 +109,9 @@ type conn struct {
 
 	done chan struct{}
 
+	// red is what every text of this connection that reaches an error or a
+	// log passes through.
+	red *driver.Redactor
 	// trace, set only by this package's tests, sees every line in each
 	// direction ("->" to the agent, "<-" from it).
 	trace func(dir string, line []byte)
@@ -261,6 +265,7 @@ func (c *conn) call(ctx context.Context, method string, params, out any) error {
 
 // pendingCall is a request on the wire, waiting for its response.
 type pendingCall struct {
+	c      *conn
 	id     int64
 	method string
 	ch     chan wireMessage
@@ -272,7 +277,7 @@ func (c *conn) register(method string) *pendingCall {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.nextID++
-	p := &pendingCall{id: c.nextID, method: method, ch: make(chan wireMessage, 1)}
+	p := &pendingCall{c: c, id: c.nextID, method: method, ch: make(chan wireMessage, 1)}
 	if c.closed {
 		close(p.ch)
 	} else {
@@ -298,7 +303,7 @@ func (p *pendingCall) result() (json.RawMessage, error) {
 		return nil, errConnClosed
 	}
 	if m.Error != nil {
-		return nil, &rpcError{Method: p.method, Code: m.Error.Code, Message: agentText(m.Error.Message)}
+		return nil, &rpcError{Method: p.method, Code: m.Error.Code, Message: p.c.agentText(m.Error.Message)}
 	}
 	return m.Result, nil
 }
@@ -380,13 +385,13 @@ func (c *conn) closeWrite(closer io.Closer) {
 // agentText is text the agent wrote, made fit for an error string that ends
 // up in a log: redacted (driver invariant 6), stripped of the escapes and
 // controls a terminal would act on, on one line, and short.
-func agentText(s string) string {
+func (c *conn) agentText(s string) string {
 	// Cut first: a line from the agent may be megabytes, and none of it past
 	// the first few hundred bytes reaches the error anyway.
 	if len(s) > 4<<10 {
 		s = s[:4<<10]
 	}
-	out := []rune(richtext.SanitizeSingleLine(driver.Redact(s)))
+	out := []rune(richtext.SanitizeSingleLine(c.red.Sanitize(s)))
 	if len(out) > 120 {
 		out = out[:120]
 	}

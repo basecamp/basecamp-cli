@@ -131,6 +131,7 @@ func (e compatEnv) driverFor(t *testing.T, part string) *Driver {
 	if err != nil {
 		t.Fatal(err)
 	}
+	redactor := driver.NewRedactor(driver.Redaction{})
 	if tdir := os.Getenv("BASECAMP_ACP_TRANSCRIPTS"); tdir != "" {
 		if err := os.MkdirAll(tdir, 0o700); err != nil {
 			t.Fatal(err)
@@ -152,7 +153,7 @@ func (e compatEnv) driverFor(t *testing.T, part string) *Driver {
 			mu.Lock()
 			defer mu.Unlock()
 			// Redacted at the sink: the adapters volunteer the account email.
-			_, _ = fmt.Fprintf(f, "{\"t\":%q,\"dir\":%q,\"msg\":%s}\n", time.Now().UTC().Format("15:04:05.000"), dir, driver.Redact(string(line)))
+			_, _ = fmt.Fprintf(f, "{\"t\":%q,\"dir\":%q,\"msg\":%s}\n", time.Now().UTC().Format("15:04:05.000"), dir, redactor.Sanitize(string(line)))
 		}
 	}
 	return d

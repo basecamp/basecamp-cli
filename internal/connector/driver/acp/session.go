@@ -56,9 +56,16 @@ type session struct {
 	unsafe   error
 	// mcpStatus, mcpNames and mcpConfirmed are how the session learns its MCP
 	// servers connected (Adapter.MCPStatus).
-	mcpStatus     MCPStatus
-	mcpNames      []string
-	mcpConfirmed  bool
+	mcpStatus    MCPStatus
+	mcpNames     []string
+	mcpConfirmed bool
+	// red is what every error, update text and stderr tail of this session
+	// passes through.
+	red *driver.Redactor
+	// recorder records each refusal once, as it is made (driver's
+	// "Refusals"); recorded is the tool call ids already recorded.
+	recorder      driver.RefusalRecorder
+	recorded      map[string]bool
 	replaying     bool
 	updatesClosed bool
 	closed        bool
@@ -89,21 +96,42 @@ type turn struct {
 
 var _ driver.Session = (*session)(nil)
 
-func newSession(worker *driver.Worker, policy driver.PermissionPolicy, askMode string, grace time.Duration, trace func(string, []byte)) *session {
+// sessionOptions is everything a session is given before it reads a line:
+// nothing is set on it once its reader has started.
+type sessionOptions struct {
+	Worker    *driver.Worker
+	Policy    driver.PermissionPolicy
+	AskMode   string
+	Grace     time.Duration
+	Redactor  *driver.Redactor
+	MCPStatus MCPStatus
+	MCPNames  []string
+	Refusals  driver.RefusalRecorder
+	trace     func(string, []byte)
+}
+
+func newSession(opts sessionOptions) *session {
+	worker, red, trace := opts.Worker, opts.Redactor, opts.trace
 	s := &session{
 		worker:    worker,
-		policy:    policy,
-		askMode:   askMode,
-		grace:     grace,
+		policy:    opts.Policy,
+		askMode:   opts.AskMode,
+		grace:     opts.Grace,
+		mcpStatus: opts.MCPStatus,
+		mcpNames:  opts.MCPNames,
+		recorder:  opts.Refusals,
 		updates:   make(chan driver.Update, 256),
 		readerEnd: make(chan struct{}),
 		modeSeen:  make(chan struct{}),
 		promptSem: make(chan struct{}, 1),
 		decisions: make(chan struct{}, maxDecisions),
 		tools:     map[string]toolInfo{},
+		recorded:  map[string]bool{},
 	}
 	s.endUnsafe = func() { worker.Terminate(0) }
 	s.conn = newConn(worker.Stdin())
+	s.conn.red = red
+	s.red = red
 	s.conn.trace = trace
 	s.conn.onNotification = s.onNotification
 	s.conn.onRequest = s.onRequest
@@ -182,7 +210,7 @@ func (s *session) initialize(ctx context.Context, a Adapter) (agentCaps, error) 
 		if r.AgentInfo != nil {
 			name, ver = r.AgentInfo.Name, r.AgentInfo.Version
 		}
-		return agentCaps{}, fmt.Errorf("%w: it reports %s@%s, pinned is %s@%s", ErrWrongAdapter, agentText(name), agentText(ver), a.Package, a.Version)
+		return agentCaps{}, fmt.Errorf("%w: it reports %s@%s, pinned is %s@%s", ErrWrongAdapter, s.conn.agentText(name), s.conn.agentText(ver), a.Package, a.Version)
 	}
 	resume := len(r.AgentCapabilities.SessionCapabilities.Resume) > 0 && string(r.AgentCapabilities.SessionCapabilities.Resume) != "null"
 	return agentCaps{LoadSession: r.AgentCapabilities.LoadSession, Resume: resume}, nil
@@ -354,7 +382,7 @@ func (s *session) enterAskingMode(ctx context.Context, st sessionState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.mode != s.askMode {
-		return fmt.Errorf("%w: asked for mode %q, the agent reports %q", driver.ErrUnsafeMode, s.askMode, agentText(s.mode))
+		return fmt.Errorf("%w: asked for mode %q, the agent reports %q", driver.ErrUnsafeMode, s.askMode, s.conn.agentText(s.mode))
 	}
 	s.verified = true
 	return nil
@@ -399,10 +427,17 @@ func (s *session) reportModeSince(id string, since int64) {
 	s.mode = id
 	close(s.modeSeen)
 	s.modeSeen = make(chan struct{})
-	unsafe := s.verified && id != s.askMode
+	claimed := false
+	if s.verified && id != s.askMode {
+		// Claimed here, under the lock that saw the mode change: nothing
+		// starts a turn against an agent already known to have left it.
+		claimed = s.failLocked(fmt.Errorf("%w: the agent left mode %q for %q", driver.ErrUnsafeMode, s.askMode, s.conn.agentText(id)))
+	}
+	t := s.turn
+	end := s.endUnsafe
 	s.mu.Unlock()
-	if unsafe {
-		s.fail(fmt.Errorf("%w: the agent left mode %q for %q", driver.ErrUnsafeMode, s.askMode, agentText(id)))
+	if claimed {
+		s.endAfterTurn(t, end)
 	}
 }
 
@@ -410,16 +445,36 @@ func (s *session) reportModeSince(id string, since int64) {
 // worker is ended after. The first failure is the one reported.
 func (s *session) fail(err error) {
 	s.mu.Lock()
-	if s.unsafe != nil {
-		s.mu.Unlock()
-		return
-	}
-	s.unsafe = err
+	claimed := s.failLocked(err)
 	t := s.turn
 	end := s.endUnsafe
 	s.mu.Unlock()
-	// The turn is failed first and the worker ended after, so whoever waits
-	// on both hears err before the worker is gone.
+	if claimed {
+		s.endAfterTurn(t, end)
+	}
+}
+
+// failLocked claims the session's failure under the caller's own lock, so
+// nothing starts a turn between seeing the reason and recording it. It
+// reports whether this caller is the one that ends the session.
+func (s *session) failLocked(err error) bool {
+	if s.unsafe != nil {
+		return false
+	}
+	s.unsafe = err
+	return true
+}
+
+// failure is why the session ended, when it ended for a reason of its own.
+func (s *session) failure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unsafe
+}
+
+// endAfterTurn fails the turn first and ends the worker after, so whoever
+// waits on both hears the reason before the worker is gone.
+func (s *session) endAfterTurn(t *turn, end func()) {
 	go func() {
 		if t != nil {
 			s.conn.abandon(t.call)
@@ -442,7 +497,7 @@ func (s *session) reportMCPServers(statuses map[string]string) {
 	s.mu.Unlock()
 	for _, name := range names {
 		if status := statuses[name]; status != "connected" {
-			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, agentText(status)))
+			s.fail(fmt.Errorf("%w: %q is %q", ErrMCPServerNotConnected, name, s.conn.agentText(status)))
 			return
 		}
 	}
@@ -534,7 +589,7 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	if refuse != nil {
 		s.mu.Unlock()
 		<-s.promptSem
-		return driver.PromptResult{}, refuse
+		return driver.PromptResult{}, s.red.Err(refuse)
 	}
 	t := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
 	// A cancel that arrived before the turn it was meant for ends this one,
@@ -613,13 +668,13 @@ func (s *session) finishTurn(t *turn, answer *pendingCall, sendErr error) {
 		err = unsafe
 	case err != nil:
 	default:
-		result.Stop, err = stopOf(resp.StopReason, canceled, len(refusals))
+		result.Stop, err = s.stopOf(resp.StopReason, canceled, len(refusals))
 		if err == nil && resp.Usage != nil {
 			u := result.Usage
 			s.emit(driver.Update{Kind: driver.UpdateUsage, Usage: &u})
 		}
 	}
-	t.result, t.err = result, err
+	t.result, t.err = result, s.red.Err(err)
 	close(t.done)
 }
 
@@ -654,7 +709,7 @@ func (s *session) claim(method string) any {
 }
 
 // stopOf maps ACP's stop reason to the driver's (invariant 4).
-func stopOf(reason string, canceled bool, refusals int) (driver.TurnStop, error) {
+func (s *session) stopOf(reason string, canceled bool, refusals int) (driver.TurnStop, error) {
 	switch driver.TurnStop(reason) {
 	case driver.TurnEndTurn, driver.TurnMaxTokens, driver.TurnMaxTurnRequests, driver.TurnRefusal:
 		return driver.TurnStop(reason), nil
@@ -668,7 +723,7 @@ func stopOf(reason string, canceled bool, refusals int) (driver.TurnStop, error)
 		}
 		return "", errors.New("acp: the agent ended the turn as canceled, and the connector asked for no cancel")
 	}
-	return "", fmt.Errorf("acp: the agent ended the turn with an unknown stop reason %q", agentText(reason))
+	return "", fmt.Errorf("acp: the agent ended the turn with an unknown stop reason %q", s.conn.agentText(reason))
 }
 
 // Cancel implements driver.Session: session/cancel for the turn in flight.
@@ -767,14 +822,11 @@ func (s *session) abort() {
 
 // stderrNote is the end of the adapter's stderr, redacted, for an error.
 func (s *session) stderrNote() string {
-	tail := strings.TrimSpace(s.worker.StderrTail())
+	tail := s.worker.StderrTail(s.red)
 	if tail == "" {
 		return ""
 	}
-	if i := strings.LastIndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
-	}
-	return " (adapter stderr: " + agentText(tail) + ")"
+	return " (adapter stderr: " + tail + ")"
 }
 
 // ---------------------------------------------------------------- from the agent
@@ -1137,19 +1189,33 @@ func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *tu
 // as nil is looked up: a refusal the session made before it read the turn
 // still belongs to the turn in flight.
 func (s *session) record(req driver.PermissionRequest, t *turn) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t == nil {
-		t = s.turn
-	}
-	if t == nil || s.turn != t || len(t.refusals) >= maxRefusals {
-		return
-	}
 	id := req.ToolCallID
 	if len(id) > maxToolCallID {
 		id = id[:maxToolCallID]
 	}
-	t.refusals = append(t.refusals, driver.Refusal{ToolCallID: id, Tool: refusalTool(req)})
+	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(refusalTool(req))}
+
+	s.mu.Lock()
+	first := !s.recorded[refusal.ToolCallID]
+	if first {
+		s.recorded[refusal.ToolCallID] = true
+	}
+	if t == nil {
+		t = s.turn
+	}
+	if t != nil && s.turn == t && len(t.refusals) < maxRefusals {
+		t.refusals = append(t.refusals, refusal)
+	}
+	recorder := s.recorder
+	s.mu.Unlock()
+
+	// The ledger, not a session's memory, is where a refusal is kept: a
+	// worker that exits before its result, or a turn cut short, ends that
+	// memory. Once per tool call id (driver's "Refusals"); the recorder owns
+	// what happens when the ledger refuses the write.
+	if first && recorder != nil {
+		_ = recorder.RecordRefusal(context.Background(), refusal)
+	}
 }
 
 // chooseOption selects by kind, never by id or label (invariant 3).

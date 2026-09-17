@@ -1190,7 +1190,7 @@ func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
 		_, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i)
 		require.NoError(t, err)
 	}
-	require.Eventually(t, func() bool { return inFlight.Load() == maxHandlers }, 10*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return int(inFlight.Load()) == maxHandlers }, 10*time.Second, 5*time.Millisecond)
 	time.Sleep(200 * time.Millisecond)
 	assert.Equal(t, int32(maxHandlers), peak.Load(), "no more goroutines than the bound, whatever arrives")
 	close(release)
@@ -1289,7 +1289,7 @@ func TestARefusalRecordIsBounded(t *testing.T) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	assert.Len(t, tr.refusals, maxRefusals)
-	assert.Len(t, tr.refusals[0].ToolCallID, maxToolCallID)
+	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID, "a recorded id is cut, and then redacted")
 	s.turn = nil
 }
 
@@ -1566,31 +1566,64 @@ func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
 }
 
 // An agent that asks faster than its refusals can be written has stopped
-// working with this client: the session ends rather than leaving requests
-// unanswered for ever.
+// working with this client: the connection says so, and the session ends
+// rather than leaving requests unanswered for ever.
 func TestAnAgentThatOutrunsEvenItsRefusalsEndsTheSession(t *testing.T) {
-	old := maxBusy
-	maxBusy = 2
-	t.Cleanup(func() { maxBusy = old })
-	h := newHarness(t)
-	release := make(chan struct{})
-	h.policy.allow = func(driver.PermissionRequest) bool {
-		<-release
-		return true
-	}
-	t.Cleanup(func() { close(release) })
-	h.turns(turnScript{
-		FloodPermissions: 64,
-		FloodCall:        permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
-		Stop:             "end_turn",
+	t.Run("the connection reports the overflow", func(t *testing.T) {
+		oldBusy, oldHandlers := maxBusy, maxHandlers
+		maxBusy, maxHandlers = 2, 2
+		t.Cleanup(func() { maxBusy, maxHandlers = oldBusy, oldHandlers })
+
+		// A writer nobody reads: refusals queue up rather than going out.
+		_, toAgent := io.Pipe()
+		toClient, fromAgent := io.Pipe()
+		t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+		c := newConn(toAgent)
+		release := make(chan struct{})
+		defer close(release)
+		c.onRequest = func(json.RawMessage, string, json.RawMessage, any) { <-release }
+		overflowed := make(chan struct{})
+		var once sync.Once
+		c.onOverflow = func() { once.Do(func() { close(overflowed) }) }
+		go func() { _ = c.read(toClient) }()
+
+		go func() {
+			for i := range 64 {
+				if _, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i); err != nil {
+					return
+				}
+			}
+		}()
+		select {
+		case <-overflowed:
+		case <-time.After(20 * time.Second):
+			t.Fatal("an agent outrunning every bound was never reported")
+		}
 	})
-	s := h.open()
-	_, err := s.Prompt(context.Background(), "go")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unanswered")
-	select {
-	case <-s.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("the worker was not ended")
-	}
+
+	t.Run("the session ends", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Hang: true})
+		s := h.open()
+		answers := make(chan error, 1)
+		go func() {
+			_, err := s.Prompt(context.Background(), "go")
+			answers <- err
+		}()
+		require.Eventually(t, func() bool { return slices.Contains(h.record().Methods, "session/prompt") },
+			10*time.Second, 50*time.Millisecond)
+		s.(*session).conn.onOverflow()
+		select {
+		case err := <-answers:
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unanswered")
+		case <-time.After(10 * time.Second):
+			t.Fatal("the turn did not end")
+		}
+		select {
+		case <-s.Done():
+		case <-time.After(10 * time.Second):
+			t.Fatal("the worker was not ended")
+		}
+	})
 }

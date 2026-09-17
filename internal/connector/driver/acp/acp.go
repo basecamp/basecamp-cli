@@ -62,6 +62,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -208,21 +209,38 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 
 	env := mergeEnv(cfg.Env, driver.BuildEnv(d.opts.Adapter.Env, d.opts.Lookup, nil))
 	env = setEnv(env, d.opts.Adapter.SetEnv)
+	// Everything this session says passes through the dispatcher's redaction,
+	// plus the environment built here, its MCP servers' environments and its
+	// private directory.
+	more := driver.Redaction{Env: slices.Clone(env), Dirs: []string{cfg.PrivateDir}}
+	for _, server := range cfg.MCPServers {
+		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
+	}
+	red := driver.NewRedactor(cfg.Redaction.With(more))
 	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{
 		Path: d.opts.Binary, Args: append([]string{}, d.opts.Args...), Env: env, Dir: cfg.Cwd,
 	})
 	if err != nil {
-		return nil, err
+		return nil, red.Err(err)
 	}
-	s := newSession(worker, cfg.Policy, mode, d.opts.CloseGrace, d.opts.trace)
-	s.mcpStatus = d.opts.Adapter.MCPStatus
+	names := make([]string, 0, len(cfg.MCPServers))
 	for _, srv := range cfg.MCPServers {
-		s.mcpNames = append(s.mcpNames, srv.Name)
+		names = append(names, srv.Name)
 	}
+	s := newSession(sessionOptions{
+		Worker: worker, Policy: cfg.Policy, AskMode: mode, Grace: d.opts.CloseGrace, Redactor: red,
+		MCPStatus: d.opts.Adapter.MCPStatus, MCPNames: names, Refusals: cfg.Refusals, trace: d.opts.trace,
+	})
 	hctx, cancel := context.WithTimeout(ctx, d.opts.HandshakeTimeout)
 	defer cancel()
 	if err := s.handshake(hctx, d, cfg, servers, loadID); err != nil {
 		s.abort()
+		// A session ended for a reason of its own — an MCP server that did
+		// not connect, a mode it left — reports that reason, not the closed
+		// stream it caused.
+		if own := s.failure(); own != nil {
+			err = own
+		}
 		if ctxErr := hctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
 			err = fmt.Errorf("%w (%w)", err, ctxErr)
 		}
@@ -235,7 +253,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		}
 		// A start that launched a process says which (driver invariant 4):
 		// the connector confirms its group gone before it settles anything.
-		return nil, &driver.StartError{Process: worker.Process(), Err: fmt.Errorf("%w%s", err, s.stderrNote())}
+		return nil, &driver.StartError{Process: worker.Process(), Err: red.Err(fmt.Errorf("%w%s", err, s.stderrNote()))}
 	}
 	return s, nil
 }
