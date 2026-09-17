@@ -1,8 +1,10 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -149,4 +151,52 @@ func TestSeamCallerCancellationIsNotATransportFailure(t *testing.T) {
 	_, err := polls.Poll(ctx, eventfeed.Cursor{Position: "p"}, eventfeed.Filters{})
 	var pollErr *eventfeed.PollError
 	assert.False(t, errors.As(err, &pollErr))
+}
+
+// Reasons filter the inbox — why an event reached you — and the account feed
+// does not carry them. The refusal is here rather than at the feed, because
+// Run starts the repair workers before the feed exists: a loss walking under
+// a filter set the lane cannot honor reads WIDER than the caller asked for.
+func TestIntakeRefusesAnInboxOnlyFilter(t *testing.T) {
+	queue, err := NewQueue(DefaultBacklogWarn, DefaultBacklogPause)
+	require.NoError(t, err)
+
+	_, err = New(Options{
+		Origin:            "https://3.basecampapi.com",
+		AccountID:         "2914079",
+		ConsumerNamespace: "connector-test",
+		Ledger:            newTestLedger(t),
+		Queue:             queue,
+		Minter:            stubMinter{},
+		Polls:             &scriptedPolls{},
+		Filters:           eventfeed.Filters{Reasons: []string{"mention"}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reasons filter the inbox")
+}
+
+// The queue reports a callback that panicked, and intake owns the logger that
+// says where.
+func TestIntakeGivesTheQueueItsLogger(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	queue, err := NewQueue(1, 4)
+	require.NoError(t, err)
+	_, err = New(Options{
+		Origin:            "https://3.basecampapi.com",
+		AccountID:         "2914079",
+		ConsumerNamespace: "connector-test",
+		Ledger:            newTestLedger(t),
+		Queue:             queue,
+		Minter:            stubMinter{},
+		Polls:             &scriptedPolls{},
+		Logger:            log,
+	})
+	require.NoError(t, err)
+
+	queue.OnWarn = func(int) { panic("a callback panics") }
+	require.NoError(t, queue.Offer(context.Background(), 1))
+
+	assert.Contains(t, logs.String(), "a backlog callback panicked")
 }

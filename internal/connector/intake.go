@@ -223,6 +223,16 @@ func New(opts Options) (*Intake, error) {
 	if err := opts.Filters.Validate(); err != nil {
 		return nil, fmt.Errorf("connector: intake filters: %w", err)
 	}
+	if len(opts.Filters.Reasons) > 0 {
+		// Reasons is the inbox lane's dimension — why an event reached YOU —
+		// and the account feed does not carry it. The SDK refuses it when the
+		// feed is built, but that is too late: Run starts the repair workers
+		// before the feed exists, so an open loss could walk under a filter
+		// set the account lane cannot honor, and a dropped dimension widens a
+		// read rather than narrowing it. Configuration that cannot mean what
+		// it says fails here, before any wire work.
+		return nil, errors.New("connector: intake filters: reasons filter the inbox, which the account feed does not carry")
+	}
 	// The filter set is the checkpoint's identity, and it is also what every
 	// subscription, recorded loss and repair walk runs under. A caller that
 	// kept its slices could change all of those while the key stays frozen on
@@ -243,6 +253,12 @@ func New(opts Options) (*Intake, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
+	}
+	if opts.Queue.Logger == nil {
+		// The queue reports a callback that panicked, and a queue built by a
+		// caller who did not think about that would report it nowhere. One
+		// owner, one logger.
+		opts.Queue.Logger = opts.Logger
 	}
 	if opts.RepairInterval <= 0 {
 		opts.RepairInterval = DefaultRepairInterval
