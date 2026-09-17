@@ -329,3 +329,23 @@ func TestClosingALedgerTwiceReleasesItOnce(t *testing.T) {
 
 	assert.Equal(t, checks, securePathRuns.Load(), "the first handle still holds the file")
 }
+
+// An aliased open that arrives while the first opener's check is still
+// running must find that file's entry: that check is the one that opens the
+// file, and it is what the whole mechanism exists to hold off.
+func TestAnAliasClaimedDuringTheFirstCheckFindsTheSameFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "connector.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	link := filepath.Join(dir, "hard.db")
+	require.NoError(t, os.Link(path, link))
+
+	// The first opener has claimed the file; its check has not run yet.
+	first := claimLedger(path)
+	defer releaseLedger(first)
+	second := claimLedger(link)
+	defer releaseLedger(second)
+
+	assert.Same(t, first, second, "one file, one entry, whatever it is called")
+}

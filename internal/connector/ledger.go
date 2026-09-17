@@ -272,8 +272,12 @@ func securePath(path string, create bool) error {
 // released once, so a defensive extra call cannot take the entry away from
 // another Ledger still holding the same file.
 func (l *Ledger) Close() error {
+	// The database first, the entry after: between the two, an open racing
+	// this close must still find the entry, or its check would open the file
+	// while this connection still holds locks on it.
+	err := l.db.Close()
 	l.closed.Do(func() { releaseLedger(l.file) })
-	return l.db.Close()
+	return err
 }
 
 // Opening one ledger file more than once in a process, safely.
@@ -311,8 +315,13 @@ type openLedgerFile struct {
 	// mu serializes the check itself, so opens that race each other on a
 	// fresh file do not verify against a check that has not run yet.
 	mu sync.Mutex
-	// info is the file as the descriptor check saw it, nil until it has run.
+	// info is the file this entry is for, recorded when it was claimed, so
+	// another name for the same file finds this entry even before the check
+	// has run. It is nil only when the file did not exist yet.
 	info os.FileInfo
+	// checked says the descriptor check has run for this file; info is then
+	// what that check saw.
+	checked bool
 }
 
 // securePathRuns counts the checks that open the file. A test pins that a
@@ -333,7 +342,11 @@ func claimLedger(path string) *openLedgerFile {
 	}
 	file := openLedgers.files[path]
 	if file == nil {
-		if info, err := os.Lstat(path); err == nil {
+		// Recorded at claim time, not at check time: an aliased open that
+		// arrives while the first one's check is still running must find this
+		// entry, since that check is the file-opening one.
+		info, err := os.Lstat(path)
+		if err == nil {
 			for _, open := range openLedgers.files {
 				if open.info != nil && os.SameFile(open.info, info) {
 					file = open
@@ -341,10 +354,10 @@ func claimLedger(path string) *openLedgerFile {
 				}
 			}
 		}
-	}
-	if file == nil {
-		file = &openLedgerFile{key: path}
-		openLedgers.files[path] = file
+		if file == nil {
+			file = &openLedgerFile{key: path, info: info}
+			openLedgers.files[path] = file
+		}
 	}
 	file.refs++
 	return file
@@ -363,18 +376,19 @@ func releaseLedger(file *openLedgerFile) {
 func checkLedgerFile(file *openLedgerFile, path, abs string, owner bool) error {
 	file.mu.Lock()
 	defer file.mu.Unlock()
-	if file.info != nil {
+	if file.checked {
 		return verifySameFile(abs, file.info)
 	}
 	securePathRuns.Add(1)
 	if err := securePath(path, owner); err != nil {
 		return err
 	}
+	// The check may have created the file, so what it saw is recorded now.
 	info, err := os.Lstat(abs)
 	if err != nil {
 		return fmt.Errorf("connector: inspect the ledger: %w", err)
 	}
-	file.info = info
+	file.info, file.checked = info, true
 	return nil
 }
 
