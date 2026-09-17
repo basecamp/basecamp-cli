@@ -382,6 +382,13 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 	})
 }
 
+// measuredTokenizerRatio is how far estimateTokens undercounts a real
+// tokenizer on the dispatch prompt: Claude Opus 5 counted the production-sized
+// prompt below at 322 tokens where the estimate says 230 (measured with
+// Claude Code's reported input usage, against the same session with a
+// one-character prompt). The budget is asserted on the estimate scaled by it.
+const measuredTokenizerRatio = 1.5
+
 // The dispatch prompt is measured as the worker received it, through each
 // driver's wire, at production-sized ids, and at its worst case: the largest
 // ids and the longest recording URL the prompt repeats.
@@ -409,8 +416,9 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 		require.Contains(t, prompts, followUp)
 		for id, prompt := range prompts {
 			tokens := estimateTokens(prompt)
-			t.Logf("%s: prompt for event %d: %d bytes, %d tokens (pessimistic estimate), budget %d", d.Name, id, len(prompt), tokens, MaxPromptTokens)
-			assert.Less(t, tokens, MaxPromptTokens)
+			t.Logf("%s: prompt for event %d: %d bytes, %d tokens estimated, %d scaled to a real tokenizer, budget %d",
+				d.Name, id, len(prompt), tokens, int(float64(tokens)*measuredTokenizerRatio), MaxPromptTokens)
+			assert.Less(t, float64(tokens)*measuredTokenizerRatio, float64(MaxPromptTokens))
 			assert.NotContains(t, prompt, "please do the thing", "no content in the prompt")
 		}
 		if out := os.Getenv("BASECAMP_RECOVERY_PROMPT_OUT"); out != "" {
@@ -424,9 +432,10 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 		prompt := DispatchPrompt(Launch{TaskID: math.MaxInt64}, record)
 		require.Contains(t, prompt, longest, "the longest URL the prompt repeats")
 		tokens := estimateTokens(prompt)
-		t.Logf("worst-case dispatch prompt: %d bytes, %d tokens (pessimistic estimate), budget %d", len(prompt), tokens, MaxPromptTokens)
-		assert.Less(t, tokens, MaxPromptTokens)
+		t.Logf("worst-case dispatch prompt: %d bytes, %d tokens estimated, %d scaled to a real tokenizer, budget %d",
+			len(prompt), tokens, int(float64(tokens)*measuredTokenizerRatio), MaxPromptTokens)
+		assert.Less(t, float64(tokens)*measuredTokenizerRatio, float64(MaxPromptTokens))
 		followUp := FollowUpPrompt(math.MaxInt64)
-		assert.Less(t, estimateTokens(followUp), MaxPromptTokens)
+		assert.Less(t, float64(estimateTokens(followUp))*measuredTokenizerRatio, float64(MaxPromptTokens))
 	})
 }
