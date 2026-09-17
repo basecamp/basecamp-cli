@@ -17,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
+	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 )
 
 // fakeDriver hands out fakeSessions and lets a test script each turn.
@@ -948,4 +949,84 @@ func TestAStoppedTurnStillCountsItsRefusals(t *testing.T) {
 	var refusals int
 	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts`).Scan(&refusals))
 	assert.Equal(t, 2, refusals)
+}
+
+// Copilot r4: recovery releases nothing until the recorded group is confirmed
+// gone, whatever the terminate step reported.
+func TestRecoveryReleasesNothingWhileTheRecordedGroupSurvives(t *testing.T) {
+	work := t.TempDir()
+	worker, grandchild := drivertest.SurvivingWorker(t, work)
+
+	fake := newFakeDriver()
+	ws := &fakeWorkspaces{}
+	lines := &safeBuffer{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Workspaces = ws
+		o.Lines = ndjson.NewWriter(lines)
+		o.CancelGrace = 100 * time.Millisecond
+	})
+	h.routes[adapterBucketID] = admission.Route{Path: work}
+	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
+	l, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: work, Driver: "fake"})
+	require.NoError(t, err)
+	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{
+		PID: worker.PID, PGID: worker.PGID, StartedAt: worker.StartedAt, SessionID: "s",
+	}))
+	// The terminate step reports it signaled the group, as it does for a
+	// worker that ignores every signal.
+	h.d.terminateRecorded = func(driver.Process, time.Duration) (bool, error) { return true, nil }
+	h.d.confirmGroupGone = func(p driver.Process, _ time.Duration) error {
+		if driver.GroupMembersRemain(p) {
+			return driver.ErrGroupOutlivedLeader
+		}
+		return nil
+	}
+
+	require.NoError(t, h.d.Recover(context.Background()))
+	assert.Equal(t, "running", readAttempt(t, h.ledger, l.AttemptID).State, "the record is not terminal")
+	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
+	assert.True(t, drivertest.Alive(grandchild))
+	ws.mu.Lock()
+	assert.Zero(t, ws.finished, "the working directory is not released")
+	ws.mu.Unlock()
+	assert.NotContains(t, lines.String(), `"state":"ended"`, "and no end is reported")
+}
+
+// Copilot r4: a settlement that cannot be written releases nothing either.
+func TestASettlementThatCannotBeWrittenReleasesNothing(t *testing.T) {
+	fake := newFakeDriver()
+	ws := &fakeWorkspaces{}
+	lines := &safeBuffer{}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Workspaces = ws
+		o.Lines = ndjson.NewWriter(lines)
+	})
+	h.ledger.SetHooks(Hooks{AttemptEnded: func(context.Context, Tx, Settlement) error {
+		return errors.New("the outbox refuses every time")
+	}})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+
+	// The run gives up on the settlement and lets the attempt go, still live.
+	require.Eventually(t, func() bool {
+		return strings.Contains(lines.String(), `"state":"running"`) && liveRuns(h) == 0
+	}, 10*time.Second, 50*time.Millisecond)
+	attempts, err := h.ledger.LiveAttempts(context.Background())
+	require.NoError(t, err)
+	require.Len(t, attempts, 1, "the attempt stays live")
+	assert.Zero(t, ws.finishedCount(), "its directory is not released")
+	assert.NotContains(t, lines.String(), `"state":"ended"`, "and no end is reported")
+	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
+}
+
+func (w *fakeWorkspaces) finishedCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.finished
+}
+
+func liveRuns(h *dispatchHarness) int {
+	h.d.mu.Lock()
+	defer h.d.mu.Unlock()
+	return len(h.d.live)
 }

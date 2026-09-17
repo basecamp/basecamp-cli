@@ -36,7 +36,11 @@
 //     start error after which the connector retries on its own, so a driver
 //     returns it only when it can prove nothing ran; any doubt is some other
 //     error. A configuration no retry can fix wraps ErrUnusable as well, and
-//     is not retried.
+//     is not retried. Whatever the error, a start that fails leaves no
+//     process behind: either none was started, or the driver ended the one it
+//     started — through Terminate, so the whole group goes — before
+//     returning. A driver that cannot promise that returns a Session the
+//     connector can Close instead of an error.
 //  5. A worker is ended by the process group the driver started, never by
 //     name. Close is idempotent and leaves no process of the session behind.
 //  6. Content stays in the stream. Updates carry kinds, ids, tool names and
