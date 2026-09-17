@@ -35,7 +35,8 @@
 //  4. ErrNotStarted means no worker process ever existed. It is the only
 //     start error after which the connector retries on its own, so a driver
 //     returns it only when it can prove nothing ran; any doubt is some other
-//     error.
+//     error. A configuration no retry can fix wraps ErrUnusable as well, and
+//     is not retried.
 //  5. A worker is ended by the process group the driver started, never by
 //     name. Close is idempotent and leaves no process of the session behind.
 //  6. Content stays in the stream. Updates carry kinds, ids, tool names and
@@ -369,7 +370,10 @@ type Launcher interface {
 type Scope struct {
 	TaskID    int64
 	AttemptID string
-	EventIDs  []int64
+	// EventIDs are the events the task may cover. Only the originating event
+	// has been handed to the worker when the session starts; the others are
+	// exposed as they are prompted.
+	EventIDs []int64
 	// WorkDir is the approved working directory the record carries.
 	WorkDir string
 	Class   string
@@ -431,6 +435,11 @@ var (
 	// existed (invariant 4): the binary is missing, the launcher refused, the
 	// fork failed. Only this is retried automatically.
 	ErrNotStarted = errors.New("driver: the worker was not started")
+	// ErrUnusable wraps ErrNotStarted for a configuration no retry can fix:
+	// a mode the driver cannot express, a policy for another directory, an
+	// MCP server without a command. No process existed, and starting again
+	// would fail the same way, so the connector does not retry it.
+	ErrUnusable = errors.New("driver: the session's configuration cannot start a worker")
 	// ErrUnsafeMode is an agent that did not confirm the permission mode the
 	// policy asked for (invariant 2). The session is ended.
 	ErrUnsafeMode = errors.New("driver: the agent did not confirm the permission mode asked for")

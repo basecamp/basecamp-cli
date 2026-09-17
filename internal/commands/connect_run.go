@@ -24,6 +24,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/spawn"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
@@ -49,17 +50,17 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn)")
 }
 
-// connectStateHome is where connector state lives: $XDG_STATE_HOME, or
-// ~/.local/state.
+// connectStateHome is the directory holding the connector's state root, from
+// connector.StateRoot so the connector and the worker's MCP server agree on
+// one place.
 func connectStateHome() (string, error) {
-	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" && filepath.IsAbs(dir) {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
+	root, err := connector.StateRoot()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".local", "state"), nil
+	// StateRoot is <home>/basecamp/connect; the chain is created from its
+	// grandparent so each directory is made owner-only.
+	return filepath.Dir(filepath.Dir(root)), nil
 }
 
 // ensurePrivateChain creates each missing directory from root down to dir
@@ -247,19 +248,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
-		dispatcher, err = connector.NewDispatcher(connector.DispatcherOptions{
-			Ledger:       ledger,
-			Driver:       worker,
-			Routes:       routes.Current,
-			Concurrency:  file.Concurrency,
-			Deadline:     time.Duration(file.Deadline),
-			MCP:          connector.WorkerMCP{Command: exe, Profile: name, StateDir: stateDir},
-			PrivateDir:   sessions,
-			Replies:      connector.SDKReplies{Client: accountClient, AgentID: agentID},
-			Lines:        lines,
-			Logger:       logger,
-			StillRunning: connector.DefaultStillRunning,
-		})
+		dispatcher, err = connector.NewDispatcher(connectDispatcherOptions(connectDispatch{
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
+			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
+			Replies: connector.SDKReplies{Client: accountClient, AgentID: agentID},
+			Lines:   lines, Logger: logger,
+		}))
 		if err != nil {
 			return err
 		}
@@ -398,6 +392,44 @@ func (r *connectRoutes) reload() {
 	r.routes = make(map[int64]admission.Route, len(file.Projects))
 	for bucket, route := range file.Projects {
 		r.routes[bucket] = route
+	}
+}
+
+// connectDispatch is what the run knows when it builds the dispatcher.
+type connectDispatch struct {
+	File    setup.File
+	Buckets []int64
+	Ledger  *connector.Ledger
+	Driver  driver.Driver
+	Routes  func() map[int64]admission.Route
+
+	Profile     string
+	Executable  string
+	StateDir    string
+	SessionsDir string
+
+	Replies connector.ReplyLister
+	Lines   *ndjson.Writer
+	Logger  *slog.Logger
+}
+
+// connectDispatcherOptions is the dispatcher the run starts: connect.json's
+// concurrency and deadline, the projects this run hears, and the worker's own
+// MCP server. Built here so what the command wires is what a test can read.
+func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
+	return connector.DispatcherOptions{
+		Ledger:       d.Ledger,
+		Driver:       d.Driver,
+		Routes:       d.Routes,
+		Concurrency:  d.File.Concurrency,
+		Deadline:     time.Duration(d.File.Deadline),
+		Buckets:      d.Buckets,
+		MCP:          connector.WorkerMCP{Command: d.Executable, Profile: d.Profile, StateDir: d.StateDir},
+		PrivateDir:   d.SessionsDir,
+		Replies:      d.Replies,
+		Lines:        d.Lines,
+		Logger:       d.Logger,
+		StillRunning: connector.DefaultStillRunning,
 	}
 }
 

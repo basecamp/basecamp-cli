@@ -503,6 +503,8 @@ func TestARestartSettlesWhatAPreviousProcessLeftLive(t *testing.T) {
 	h := newDispatchHarness(t, fake, nil)
 	admitOn(t, h.ledger, 1, "recording:1")
 	l := launch(t, h.ledger, 1)
+	// A pid above the kernel's maximum: no process, nothing to signal.
+	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{PID: 1 << 30, PGID: 1 << 30, StartedAt: time.Now(), SessionID: "s"}))
 	leftover := filepath.Join(h.d.opts.PrivateDir, l.AttemptID)
 	require.NoError(t, os.Mkdir(leftover, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(leftover, "mcp.json"), []byte(`{"env":"test-token-not-real"}`), 0o600))
@@ -756,4 +758,76 @@ func TestASettlementThatFailsIsRetried(t *testing.T) {
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
 	assert.Equal(t, "finished", h.attemptsEnded(t, 1)[0].StopReason)
+}
+
+// Copilot r2: a route revoked while a task runs stops follow-ups joining it.
+func TestAFollowUpDoesNotJoinATaskWhoseRouteWasRevoked(t *testing.T) {
+	fake := newFakeDriver()
+	release := make(chan struct{})
+	fake.turn = func(*fakeSession, int, string) (driver.PromptResult, error) {
+		<-release
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	s := nextSession(t, fake)
+
+	h.mu.Lock()
+	h.routes = map[int64]admission.Route{}
+	h.mu.Unlock()
+	admitOn(t, h.ledger, 2, "recording:1")
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, StateQueued, getRecord(t, h.ledger, 2).State, "not handed to a worker in a directory no longer approved")
+	close(release)
+	h.attemptsEnded(t, 1)
+	assert.Len(t, s.promptList(), 1)
+}
+
+// Copilot r2: a crash mid-launch leaves a worker nobody can name.
+func TestAnAttemptLeftMidLaunchKeepsItsDirectoryHeld(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+
+	require.NoError(t, h.d.Recover(context.Background()))
+	assert.Equal(t, "launching", readAttempt(t, h.ledger, l.AttemptID).State, "not settled around a worker that cannot be named")
+	h.run(t)
+	time.Sleep(150 * time.Millisecond)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	assert.Empty(t, fake.sessions)
+}
+
+// Review r2 and card 23's review: a configuration no retry can fix is not
+// retried.
+func TestAnUnusableConfigurationIsNotRetried(t *testing.T) {
+	fake := newFakeDriver()
+	fake.startErr = []error{errors.Join(driver.ErrNotStarted, driver.ErrUnusable)}
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	rows := h.attemptsEnded(t, 1)
+	assert.True(t, rows[0].SpawnFailed)
+	require.Eventually(t, func() bool { return getRecord(t, h.ledger, 1).State == StateBlocked }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	var attempts int
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM attempts`).Scan(&attempts))
+	assert.Equal(t, 1, attempts, "no automatic retry of a configuration error")
+}
+
+// Card 23's review: a session the driver says has ended is lost, not failed.
+func TestASessionTheDriverSaysHasEndedIsLost(t *testing.T) {
+	fake := newFakeDriver()
+	fake.turn = func(*fakeSession, int, string) (driver.PromptResult, error) {
+		return driver.PromptResult{Refusals: []driver.Refusal{{ToolCallID: "t1", Tool: "Bash"}}}, driver.ErrSessionEnded
+	}
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	assert.Equal(t, "lost", h.attemptsEnded(t, 1)[0].StopReason)
+	var refusals int
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts`).Scan(&refusals))
+	assert.Equal(t, 1, refusals, "refusals are counted whatever ended the turn")
 }

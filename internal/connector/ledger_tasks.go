@@ -925,6 +925,26 @@ GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
 	return out, nil
 }
 
+// StrandedRecords counts the records waiting for a worker whose (project,
+// route) no approved pair covers: work admitted under a route connect.json no
+// longer has, which nothing will start until a person routes it again or
+// discards it.
+func (l *Ledger) StrandedRecords(ctx context.Context, approved map[int64]string) (int, error) {
+	var where strings.Builder
+	var args []any
+	for bucket, route := range approved {
+		where.WriteString(" AND NOT (e.bucket_id = ? AND e.route = ?)")
+		args = append(args, bucket, route)
+	}
+	//nolint:gosec // G202: the condition is this package's constants and placeholders, never a value
+	query := `SELECT COUNT(*) FROM events e WHERE ` + startableCondition + where.String()
+	var n int
+	if err := l.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("connector: count stranded records: %w", err)
+	}
+	return n, nil
+}
+
 // RecordProgress stamps the live attempt's last progress, which still-running
 // reads.
 func (l *Ledger) RecordProgress(ctx context.Context, attemptID string) error {
@@ -997,13 +1017,16 @@ type AdoptionCandidate struct {
 	// NextAckAt is the first acknowledgement of a later instruction on the
 	// task; zero when there is none.
 	NextAckAt time.Time
+	// AckID is the worker's own acknowledgement, which is never its reply
+	// however the clocks compare.
+	AckID int64
 }
 
 // AdoptionCandidates lists a settled task's events a reply could be adopted
 // for.
 func (l *Ledger) AdoptionCandidates(ctx context.Context, taskID int64) ([]AdoptionCandidate, error) {
 	rows, err := l.db.QueryContext(ctx, `
-SELECT te.event_id, e.reply_kind, e.reply_recording_id, te.delivered_at,
+SELECT te.event_id, e.reply_kind, e.reply_recording_id, te.delivered_at, te.ack_id,
        (SELECT MIN(later.delivered_at) FROM task_events later
         WHERE later.task_id = te.task_id AND later.event_id > te.event_id AND later.delivered_at IS NOT NULL)
 FROM task_events te JOIN events e ON e.id = te.event_id
@@ -1019,7 +1042,8 @@ ORDER BY te.event_id`, taskID)
 		c := AdoptionCandidate{TaskID: taskID}
 		var delivered string
 		var next sql.NullString
-		if err := rows.Scan(&c.EventID, &c.ReplyKind, &c.ReplyRecordingID, &delivered, &next); err != nil {
+		var ackID sql.NullInt64
+		if err := rows.Scan(&c.EventID, &c.ReplyKind, &c.ReplyRecordingID, &delivered, &ackID, &next); err != nil {
 			return nil, err
 		}
 		if c.DeliveredAt, err = parseStamp(delivered); err != nil {
@@ -1029,6 +1053,9 @@ ORDER BY te.event_id`, taskID)
 			if c.NextAckAt, err = parseStamp(next.String); err != nil {
 				return nil, err
 			}
+		}
+		if ackID.Valid {
+			c.AckID = ackID.Int64
 		}
 		out = append(out, c)
 	}
@@ -1048,6 +1075,11 @@ type AgentReply struct {
 func AdoptableReply(c AdoptionCandidate, replies []AgentReply, lifecycle func(id int64) bool) (int64, bool) {
 	var found []int64
 	for _, r := range replies {
+		if r.ID == c.AckID {
+			// The worker's acknowledgement is not the worker's reply, and
+			// the server's clock is not this machine's.
+			continue
+		}
 		if !r.CreatedAt.After(c.DeliveredAt) {
 			continue
 		}

@@ -10,6 +10,15 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
+// AdoptionScanLimit bounds a reply listing: the adopted-reply rule needs the
+// replies after an acknowledgement, not a conversation's whole history, and a
+// settlement must not page a busy Campfire from its beginning.
+const AdoptionScanLimit = 500
+
+// AdoptionScanTimeout bounds the listing in time as well, since settlement
+// runs on a context a shutdown does not cancel.
+const AdoptionScanTimeout = 30 * time.Second
+
 // SDKReplies lists the agent's replies at a destination through the SDK, for
 // the adopted-reply rule.
 type SDKReplies struct {
@@ -23,6 +32,8 @@ var _ ReplyLister = SDKReplies{}
 // adopts only when exactly one reply matches, and a page left unread could
 // hold the second.
 func (r SDKReplies) AgentReplies(ctx context.Context, _ int64, kind string, recordingID int64, since time.Time) ([]AgentReply, error) {
+	ctx, cancel := context.WithTimeout(ctx, AdoptionScanTimeout)
+	defer cancel()
 	var out []AgentReply
 	keep := func(id int64, creator *basecamp.Person, created time.Time) {
 		if creator != nil && creator.ID == r.AgentID && created.After(since) {
@@ -31,7 +42,7 @@ func (r SDKReplies) AgentReplies(ctx context.Context, _ int64, kind string, reco
 	}
 	switch admission.ReplyKind(kind) {
 	case admission.ReplyComment:
-		result, err := r.Client.Comments().List(ctx, recordingID, &basecamp.CommentListOptions{Limit: -1})
+		result, err := r.Client.Comments().List(ctx, recordingID, &basecamp.CommentListOptions{Limit: AdoptionScanLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +50,11 @@ func (r SDKReplies) AgentReplies(ctx context.Context, _ int64, kind string, reco
 			keep(c.ID, c.Creator, c.CreatedAt)
 		}
 	case admission.ReplyChatLine:
-		result, err := r.Client.Campfires().ListLines(ctx, recordingID, &basecamp.CampfireLineListOptions{Limit: -1})
+		// Newest first: the replies the rule cares about are the ones after
+		// the acknowledgement, not the beginning of the room.
+		result, err := r.Client.Campfires().ListLines(ctx, recordingID, &basecamp.CampfireLineListOptions{
+			Limit: AdoptionScanLimit, Sort: "created_at", Direction: "desc",
+		})
 		if err != nil {
 			return nil, err
 		}

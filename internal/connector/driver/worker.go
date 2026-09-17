@@ -130,7 +130,8 @@ func (w *Worker) Stdin() io.WriteCloser { return w.stdin }
 // Stdout is the worker's standard output. Read it to end of file.
 func (w *Worker) Stdout() io.Reader { return w.stdout }
 
-// CloseStdout abandons the worker's output: a reader blocked on it returns.
+// CloseStdout closes the worker's output: a reader blocked on it returns, and
+// the descriptor is released.
 // For a worker that is gone while a descendant that left its group still
 // holds the pipe.
 func (w *Worker) CloseStdout() { _ = w.stdout.Close() }

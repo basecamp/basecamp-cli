@@ -131,6 +131,11 @@ func fakeClaude(scenario string) {
 			continue
 		case "die":
 			os.Exit(3)
+		case "late-denial":
+			// A denial the stream never announced, only the result.
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID,
+				"permission_denials": []any{map[string]any{"tool_name": "Bash", "tool_use_id": "toolu_late"}}})
+			continue
 		case "escape":
 			// A descendant in a session of its own, holding stdout.
 			pid, _ := syscall.ForkExec("/bin/sleep", []string{"sleep", "300"}, &syscall.ProcAttr{
@@ -448,4 +453,36 @@ func TestCloseReturnsWhenADescendantOutsideTheGroupHoldsTheOutput(t *testing.T) 
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close waited on output held by a process outside the worker's group")
 	}
+}
+
+// Copilot r2: a refusal only the result reports is still reported both ways.
+func TestARefusalOnlyTheResultReportsIsAlsoAnUpdate(t *testing.T) {
+	f := newFixture(t, "late-denial")
+	s := start(t, f)
+	var updates []driver.Update
+	done := make(chan struct{})
+	go func() {
+		for u := range s.Updates() {
+			updates = append(updates, u)
+		}
+		close(done)
+	}()
+	result, err := s.Prompt(context.Background(), "hello")
+	require.NoError(t, err)
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "toolu_late", Tool: "Bash"}}, result.Refusals)
+	require.NoError(t, s.Close())
+	<-done
+	assert.True(t, slices.ContainsFunc(updates, func(u driver.Update) bool {
+		return u.Kind == driver.UpdatePermission && u.ToolCallID == "toolu_late" && !u.Allowed
+	}), "the refusal is an update too")
+}
+
+// Review r2: a cancel that arrives before the turn cancels that turn.
+func TestACancelBeforeAnyTurnCancelsTheNextOne(t *testing.T) {
+	f := newFixture(t, "hang")
+	s := start(t, f)
+	require.NoError(t, s.Cancel(context.Background()))
+	result, err := s.Prompt(context.Background(), "hello")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnCanceled, result.Stop)
 }
