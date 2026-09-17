@@ -5,6 +5,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -192,7 +193,14 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 	assert.Equal(t, []int64{straggler, deleted}, missing)
 	assert.LessOrEqual(t, h.positionID(l, eventfeed.Filters{}), int64(103), "no live id moved the checkpoint")
 
+	// Every checkpoint the ledger holds while the walk runs, not only the one
+	// it ends with: a walk that wrote its own cursor there would be overwritten
+	// by the feed's next page.
+	positions := h.watchCheckpoints()
 	h.run(harnessRun{Until: "losses-closed"})
+	for _, position := range positions() {
+		assert.True(t, strings.HasPrefix(position, "feed-"), "the feed's checkpoint only ever holds a feed position, saw %q", position)
+	}
 
 	for _, id := range []int64{104, 105, 106} {
 		r, ok, err := l.Get(context.Background(), id)
@@ -229,6 +237,53 @@ func TestRecoveryABufferOverflowIsReconciledAcrossACrash(t *testing.T) {
 		}
 		id, _ := strconv.ParseInt(strings.TrimPrefix(p.Position, "feed-"), 10, 64)
 		assert.False(t, id >= straggler && id < 104, "the feed never jumped a live id ahead of the range behind it")
+	}
+}
+
+// watchCheckpoints samples the feed's stored position until the returned
+// function is called, which returns everything it saw.
+func (h *harness) watchCheckpoints() func() []string {
+	stop := make(chan struct{})
+	done := make(chan []string, 1)
+	go func() {
+		seen := map[string]bool{}
+		for {
+			select {
+			case <-stop:
+				out := make([]string, 0, len(seen))
+				for position := range seen {
+					out = append(out, position)
+				}
+				done <- out
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
+			l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(h.dir, LedgerFile))
+			if err != nil {
+				continue
+			}
+			rows, err := l.db.QueryContext(context.Background(), `SELECT position FROM checkpoints`)
+			if err == nil {
+				for rows.Next() {
+					var position string
+					if rows.Scan(&position) == nil {
+						seen[position] = true
+					}
+				}
+				_ = rows.Close()
+			}
+			_ = l.Close()
+		}
+	}()
+	return func() []string {
+		close(stop)
+		select {
+		case out := <-done:
+			return out
+		case <-time.After(10 * time.Second):
+			h.t.Fatal("the checkpoint watcher did not stop")
+			return nil
+		}
 	}
 }
 
