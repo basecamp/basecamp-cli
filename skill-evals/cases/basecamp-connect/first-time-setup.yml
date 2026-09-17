@@ -11,6 +11,10 @@ context: >-
   connection.
 tags: [connect]
 mocks:
+  - match: 'auth status.*jorge'
+    output: '{"ok":true,"data":{"profile":"jorge","authenticated":true,"oauth_type":"launchpad","account_id":"999","storage":"keyring","user_email":"jorge@example.com"}}'
+  - match: '^me .*jorge'
+    output: '{"ok":true,"data":{"identity":{"id":6001,"first_name":"Jorge","last_name":"M","email_address":"jorge@example.com"},"accounts":[{"id":999,"name":"Acme","current":true}],"person":{"id":1001,"name":"Jorge M"}}}'
   - match: 'connect show'
     output: '{"ok":false,"code":"not_found","error":"connect.json for profile not found: helper","hint":"The profile has not been set up. Set it up: basecamp connect setup -P helper --operator-profile <your profile> --route <project-id>=<dir>"}'
   - match: 'auth status'

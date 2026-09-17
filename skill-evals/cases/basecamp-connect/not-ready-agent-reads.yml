@@ -6,6 +6,10 @@ context: >-
   the operator; my own profile is jorge. The directory exists.
 tags: [connect]
 mocks:
+  - match: 'auth status.*jorge'
+    output: '{"ok":true,"data":{"profile":"jorge","authenticated":true,"oauth_type":"launchpad","account_id":"999","storage":"keyring","user_email":"jorge@example.com"}}'
+  - match: '^me .*jorge'
+    output: '{"ok":true,"data":{"identity":{"id":6001,"first_name":"Jorge","last_name":"M","email_address":"jorge@example.com"},"accounts":[{"id":999,"name":"Acme","current":true}],"person":{"id":1001,"name":"Jorge M"}}}'
   - match: 'connect show'
     output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","version":1,"profile":"helper","account_id":"999","agent":{"person_id":4001,"kind":"agent"},"trust":{"mode":"operator","operator_id":1001},"projects":{"111":{"path":"/home/me/Work/marketing"}},"driver":"spawn","concurrency":2,"deadline":"45m0s","worktrees":false},"summary":"Profile \"helper\": trust operator, 1 routed project(s)"}'
   - match: 'auth status'

@@ -223,7 +223,12 @@ could look up:
 Work through these in order, asking only what you cannot find out.
 
 **1. Profile and credential.** Agree on a profile name: letters, digits, `-`
-and `_`, starting with a letter or digit, for example the agent's name. Inspect it (steps 1 to 3 above).
+and `_`, starting with a letter or digit, for example the agent's name.
+Inspect it, all five steps above. If `basecamp connect show` prints a policy,
+the profile is already set up: say what it holds — the operator, the trust mode
+and each routed project — and go to Changing the setup later instead. Setup
+keeps everything you do not pass, so adding a route to a profile you have not
+looked at leaves trust and routes in place that nobody mentioned.
 
 - **The profile does not exist, Agent person** (the normal path): run
   `basecamp auth agent connect -P '<profile>'` as described under Interactive
