@@ -21,7 +21,7 @@ import (
 )
 
 // mcpHandshakeTimeout bounds doctor's MCP handshake.
-const mcpHandshakeTimeout = 30 * time.Second
+var mcpHandshakeTimeout = 30 * time.Second
 
 func newConnectDoctorCmd() *cobra.Command {
 	return &cobra.Command{

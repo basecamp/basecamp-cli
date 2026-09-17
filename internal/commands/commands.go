@@ -146,7 +146,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "bonfire", Category: "additional", Description: "Multi-chat orchestration", Actions: []string{"split", "layout"}, Experimental: true, DevOnly: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
 				{Name: "mcp", Category: "additional", Description: "Serve Basecamp to MCP clients over stdio"},
-				{Name: "connect", Category: "additional", Description: "Set up a local agent connector for a Basecamp agent", Actions: []string{"setup", "show"}},
+				{Name: "connect", Category: "additional", Description: "Run a local agent connector for a Basecamp agent, and see and decide what it runs", Actions: []string{"setup", "show", "status", "doctor", "redispatch", "discard", "release", "shadow", "import"}},
 				{Name: "help", Category: "additional", Description: "Show help"},
 				{Name: "version", Category: "additional", Description: "Show version"},
 			},

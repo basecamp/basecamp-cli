@@ -8,7 +8,9 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -271,6 +273,18 @@ const fakeMCPServerArg = "fake-basecamp-mcp"
 func TestFakeMCPServer(t *testing.T) {
 	if !strings.Contains(strings.Join(flag.Args(), " "), fakeMCPServerArg) {
 		t.Skip("started by the doctor's handshake test")
+	}
+	for _, arg := range flag.Args() {
+		if pidFile, ok := strings.CutPrefix(arg, "spawn-child="); ok {
+			// A server that starts a descendant in its group and then hangs
+			// without ever answering the handshake.
+			child := exec.CommandContext(context.Background(), "/bin/sleep", "300")
+			if err := child.Start(); err != nil {
+				os.Exit(2)
+			}
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+			select {}
+		}
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "0"}, nil)
 	type none struct{}

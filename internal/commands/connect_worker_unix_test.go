@@ -112,3 +112,25 @@ func TestRedispatchDoesNotCallAWorkerOutsideItsGroupStopped(t *testing.T) {
 	assert.True(t, signaled)
 	assert.Equal(t, workerUnverified, got.state, got.note)
 }
+
+// A handshake that never completes ends the server's whole group, a
+// descendant it started included, before doctor returns.
+func TestDoctorsFailedHandshakeLeavesNoDescendant(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "child")
+	orig, origTimeout := mcpServerCommand, mcpHandshakeTimeout
+	mcpServerCommand = func(string) (string, []string, error) {
+		return os.Args[0], []string{"-test.run=^TestFakeMCPServer$", "--", fakeMCPServerArg, "spawn-child=" + pidFile}, nil
+	}
+	mcpHandshakeTimeout = 2 * time.Second
+	t.Cleanup(func() { mcpServerCommand, mcpHandshakeTimeout = orig, origTimeout })
+
+	c := mcpHandshakeCheck(context.Background(), "agent")
+	assert.Equal(t, "fail", c.Status)
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("the fake server never started its child: %v", err)
+	}
+	child, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	assert.Eventually(t, func() bool { return !drivertest.Alive(child) }, 3*time.Second, 20*time.Millisecond, "the descendant went with its group")
+}

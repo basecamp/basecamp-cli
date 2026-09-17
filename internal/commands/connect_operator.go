@@ -389,9 +389,9 @@ the running connector dispatches what it admits.`,
 // connectRedispatchReport is redispatch's output.
 type connectRedispatchReport struct {
 	connector.RedispatchResult
-	// WorkerStopped says the replaced worker's recorded process group was
-	// signaled.
-	WorkerStopped bool `json:"worker_stopped,omitempty"`
+	// WorkerSignaled says a signal was sent to the replaced worker's recorded
+	// process group; WorkerState says whether it is gone.
+	WorkerSignaled bool `json:"worker_signaled,omitempty"`
 	// WorkerState is what became of it: stopped, gone, held (its group still
 	// runs and was not proven this task's to signal), unverified, or
 	// not_recorded (the attempt had no worker process recorded yet).
@@ -428,7 +428,7 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 		stop := stopReplacedWorker(driver.Process{
 			PID: res.Worker.Process.PID, PGID: res.Worker.Process.PGID, StartedAt: res.Worker.Process.StartedAt,
 		}, driver.DefaultGrace)
-		report.WorkerStopped, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
+		report.WorkerSignaled, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
 	}
 	if res.Rerun {
 		verdict, reason, err := rerunPrerequisite(ctx, p, ledger, id)

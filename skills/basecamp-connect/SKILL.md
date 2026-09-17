@@ -5,11 +5,14 @@ description: |
   connector's setup: the agent's credential (basecamp auth agent connect),
   connect.json (who may drive the agent, which project routes to which
   directory), and readiness (basecamp connect setup). Explains every setup
-  result and failure. Starting and supervising the connector is not in this
-  skill yet.
+  result and failure. Also reads what the connector ran (status, doctor) and
+  carries out a person's decisions on its records (redispatch, discard,
+  release, the cutover's shadow promote and import). Starting and supervising
+  the connector is not in this skill yet.
   Use when asked to connect an agent, set up or change the connector, add or
-  remove a project, change who can drive the agent, or find out why setup
-  says the connector is not ready.
+  remove a project, change who can drive the agent, find out why setup says
+  the connector is not ready, or see, retry, close or release what the
+  connector holds.
 triggers:
   - /basecamp-connect
   - connect an agent
@@ -20,6 +23,11 @@ triggers:
   - route a project to a directory
   - who can drive the agent
   - connector not ready
+  - basecamp connect status
+  - basecamp connect doctor
+  - redispatch an event
+  - held records
+  - release the hold
 ---
 
 # Basecamp connector: connect an agent and manage its setup
@@ -70,7 +78,8 @@ explain the result. This skill is the reference you do that from.
   computer. Show them in this conversation only; never post them to Basecamp,
   chat, a file or anywhere else. Whoever approves that code chooses which agent
   this computer acts as.
-- Setup and the connection refuse to run while `BASECAMP_TOKEN` is set. Tell the
+- Setup, the connection, doctor and redispatch refuse to run while
+  `BASECAMP_TOKEN` is set. Tell the
   person to unset it in their shell; do not set, print or work around it.
 
 **Identity.** Never set up a profile whose identity you have not confirmed with
@@ -111,7 +120,7 @@ the link and code while it waits; then wait for it to finish.
 | Credential | The CLI's credential store, under the profile. `basecamp auth status -P '<profile>' --json` describes it (see Inspecting). Never open it. |
 | connect.json | `$XDG_CONFIG_HOME/basecamp/connect/<profile>/connect.json`, default `~/.config/basecamp/connect/<profile>/connect.json`. Setup's JSON result gives the exact `path`. |
 | Setup lock | `.connect.lock` beside connect.json. One setup per profile at a time. |
-| Connector runtime state (ledger, checkpoint, lock) | Does not exist yet: it comes with the connector run (card 24, behind step 21). Do not look for it. |
+| Connector runtime state (ledger, checkpoint, lock) | `$XDG_STATE_HOME/basecamp/connect/<account>-<agent person id>/`, default under `~/.local/state`; a shadow run's is under `connect-shadow/` instead. Read it only through `basecamp connect status` and `basecamp connect doctor`; never open or copy the files. |
 
 The CLI's configuration, its profiles and (when it uses files) its credential
 store also live under `$XDG_CONFIG_HOME/basecamp`, so pointing
@@ -408,21 +417,27 @@ that record or that step.
   poll, the ledger, the worker binary, and a handshake with the agent's MCP
   server. Nothing is written or posted.
 - `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
-  run again or for the first time. Accepted for an unknown or failed outcome, a
-  blocked record and a held one; refused for a success, a discarded record and
-  anything live. It stops the replaced worker only when that process is
-  provably still it, and says what became of it.
+  run again or for the first time. Accepted for an unknown or failed outcome
+  (one whose task is still running waits for that task to end), a blocked
+  record and a held one; refused for a success, a discarded record and a record
+  that is itself still on its way to a worker. It stops the replaced worker
+  only when that process is provably still it, and says what became of it.
 - `basecamp connect discard -P '<profile>' <event_id>`: close a held, blocked
   or unknown record without running it.
-- `basecamp connect -P '<profile>' --hold` starts the connector held: nothing
-  dispatches or posts, and earlier records wait for review.
-  `basecamp connect release -P '<profile>'` clears the hold; held records stay
-  held until each is redispatched or discarded.
-- Cutover only, with both the shadow run and the connector stopped:
-  `basecamp connect shadow promote -P '<profile>'` makes the shadow ledger the
-  connector's, held, and `basecamp connect import -P '<profile>' <file>`
-  applies a reconciliation file. Run these only when the person is doing a
-  cutover and asks for them.
+- `basecamp connect release -P '<profile>'`: clear the hold that a start with
+  `--hold` or a shadow promote set. Held records stay held until each is
+  redispatched or discarded.
+- Cutover only: `basecamp connect shadow promote -P '<profile>'` makes the
+  shadow ledger the connector's, held, and needs both the shadow run and the
+  connector stopped; `basecamp connect import -P '<profile>' <file>` applies a
+  reconciliation file and needs the connector stopped. Run these only when the
+  person is doing a cutover and asks for them.
+
+Doctor exits `not_ready` (exit 7) when a check fails; explain each failed check.
+Follow a hint from these commands only as the rules above allow: one that says
+to reconnect the agent's profile rotates its secret and needs the person's
+consent, and one that says to run or stop the connector is the person's to do,
+since starting it is not part of this skill.
 
 ## Not built yet
 
