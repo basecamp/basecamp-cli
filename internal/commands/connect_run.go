@@ -98,18 +98,18 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
-// configuration that carries a task token until the worker's servers start.
-// Never under the state directory or a working directory, which outlive the
-// session and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
-// memory-backed directory made for exactly this, or the system temporary
-// directory where there is none. Owner-only, and swept when the connector
-// starts.
+// configuration, and the one-use socket that hands over a task token. Never
+// under the state directory or a working directory, which outlive the session
+// and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
+// memory-backed directory made for exactly this, or /tmp where there is none.
+// Not the platform's temporary directory: on macOS that path is too long for
+// a unix socket inside it. Owner-only, and swept when the connector starts.
 func connectSessionsDir(file setup.File) (string, error) {
 	base := os.Getenv("XDG_RUNTIME_DIR")
 	if info, err := os.Stat(base); base == "" || !filepath.IsAbs(base) || err != nil || !info.IsDir() {
-		base = os.TempDir()
+		base = "/tmp"
 	}
-	dir := filepath.Join(base, "basecamp-connect-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	dir := filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
 	if err := setup.EnsurePrivateDir(dir); err != nil {
 		return "", fmt.Errorf("the connector's session directory cannot be used: %w", err)
 	}
