@@ -758,10 +758,21 @@ func (s *session) unsafe(err error) {
 	s.mu.Lock()
 	t := s.turn
 	s.mu.Unlock()
-	if t != nil {
-		s.finish(t, driver.PromptResult{}, err)
+	if t == nil {
+		s.worker.Terminate(0)
+		return
 	}
+	s.finishUnsafe(t, err)
+}
+
+// finishUnsafe ends a turn whose session did not run under the policy it was
+// asked to: the worker goes first, then its last word is read, so the result
+// carries the refusals it made and logged before it was stopped, as every
+// other ending does.
+func (s *session) finishUnsafe(t *turn, err error) {
 	s.worker.Terminate(0)
+	s.lastWord()
+	s.finish(t, driver.PromptResult{Refusals: s.refusalsOf(t)}, err)
 }
 
 // failedVerification is a turn that ended some other way than completed: once
@@ -939,8 +950,7 @@ func (s *session) turnCompleted(e event) {
 		return
 	}
 	if err := s.verified(); err != nil {
-		s.finish(t, driver.PromptResult{}, err)
-		s.worker.Terminate(0)
+		s.finishUnsafe(t, err)
 		return
 	}
 	// Codex exits right after the turn it completed, and its stderr is whole
@@ -987,8 +997,7 @@ func (s *session) turnFailed() {
 	s.stderrRefusals()
 	refusals := s.refusalsOf(t)
 	if err := s.failedVerification(); err != nil {
-		s.finish(t, driver.PromptResult{Refusals: refusals}, err)
-		s.worker.Terminate(0)
+		s.finishUnsafe(t, err)
 		return
 	}
 	s.finish(t, driver.PromptResult{Refusals: refusals}, errors.New("codex: the turn failed"))

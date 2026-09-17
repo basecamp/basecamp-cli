@@ -998,6 +998,26 @@ func TestARefusalLoggedAfterTheOutputEndsIsStillRecorded(t *testing.T) {
 	assert.Len(t, result.Refusals, 1)
 }
 
+// A session stopped for running under a policy it was not asked to run under
+// still reports the refusals it made: they are the ledger's and the result's.
+func TestAnUnsafeSessionStillReportsItsRefusals(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	denial := `{"type":"item.completed","item":{"id":"item_9","type":"mcp_tool_call","server":"other","tool":"write","error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	unsafe := safeTurnContext()
+	unsafe["approval_policy"] = "on-request"
+	h := newHarness(t, scenario{
+		TurnContext: unsafe,
+		Events:      []string{`{"type":"turn.started"}`, denial, turnCompleted()},
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, result, err := h.run(context.Background(), cfg)
+	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+	waitDone(t, s)
+	assert.Len(t, recorder.Recorded(), 1)
+	assert.Len(t, result.Refusals, 1, "the result carries what the ledger carries")
+}
+
 // Codex logs its sandbox refusals and keeps writing: each one is recorded,
 // not only whatever it said last.
 func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {

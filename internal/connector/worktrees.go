@@ -515,10 +515,12 @@ const RemovingRefPrefix = "refs/basecamp-connect/removing/"
 var ErrNotRetained = errors.New("not a retained worktree")
 
 // Prune removes the retained worktrees the operator has dealt with: those now
-// clean with every commit held elsewhere, and those whose directory is gone.
-// A worktree still holding work is kept unless its path is in force, and a
-// path in force that is no retained worktree refuses the whole prune before
-// anything is removed.
+// clean, with every commit they reach held elsewhere. It is the only thing
+// that removes a worktree. One still holding work is kept unless its path is
+// in force, and so is one whose directory something else removed — that row
+// is kept as orphaned, with git's record and the task branch left as they
+// are, until its path is in force. A path in force that is no retained
+// worktree refuses the whole prune before anything is removed.
 func (w *Worktrees) Prune(ctx context.Context, force []string) ([]PruneResult, error) {
 	unlock, err := w.lock(ctx)
 	if err != nil {

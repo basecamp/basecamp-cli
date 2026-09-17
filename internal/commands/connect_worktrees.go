@@ -136,7 +136,10 @@ found, which in a repository that keeps no reflogs may not be all of them.`,
 			out := make([]pruneView, 0, len(results))
 			removed, kept := 0, 0
 			for _, r := range results {
-				out = append(out, pruneView{worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), ForceRefused: r.ForceRefused, RetainedRefs: r.RetainedRefs})
+				out = append(out, pruneView{
+					worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), ForceRefused: r.ForceRefused,
+					RetainedRefs: r.RetainedRefs, BranchDeletedAt: r.BranchDeletedAt,
+				})
 				if r.Action == connector.PruneKept {
 					kept++
 				} else {
@@ -177,6 +180,10 @@ type pruneView struct {
 	Action       string   `json:"action"`
 	ForceRefused bool     `json:"force_refused,omitempty"`
 	RetainedRefs []string `json:"retained_refs,omitempty"`
+	// BranchDeletedAt is where the task branch stood when a force on an
+	// orphaned worktree deleted it: nothing worked out what it reached, so
+	// this is what puts it back (git branch <name> <commit>).
+	BranchDeletedAt string `json:"branch_deleted_at,omitempty"`
 }
 
 // sizeLimit bounds how long reading a worktree's size may take: a listing is
