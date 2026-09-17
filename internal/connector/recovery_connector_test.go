@@ -5,6 +5,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -308,7 +309,7 @@ func runHarnessConnector(dir string) error {
 		// A sending intent a previous process left is reconciled once it is
 		// this old, so a restart settles it rather than waiting out the
 		// production minute.
-		Tick: 20 * time.Millisecond, ReconcileAfter: 200 * time.Millisecond,
+		Tick: 20 * time.Millisecond, ReconcileAfter: harnessReconcileAfter,
 	})
 	if err != nil {
 		return err
@@ -349,7 +350,14 @@ func runHarnessConnector(dir string) error {
 	)
 	part := func(name string, fn func(context.Context) error) {
 		wg.Go(func() {
-			if err := fn(ctx); err != nil && ctx.Err() == nil {
+			err := fn(ctx)
+			if ctx.Err() == nil {
+				// As the run command holds it: a part that stops while the
+				// others run, failed or not, is a connector doing half its
+				// job.
+				if err == nil {
+					err = errors.New("stopped on its own")
+				}
 				errMu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("%s: %w", name, err)
@@ -359,21 +367,33 @@ func runHarnessConnector(dir string) error {
 			cancel()
 		})
 	}
+	// In the run command's order: status learns the connector stopped
+	// however it ends; the outbox settles what a previous process left and
+	// sends what is due before anything transitions; only then do the parts
+	// start.
+	defer func() { _ = ledger.NoteConnection(context.Background(), ConnectionStopped, "") }()
+	dispatching := !shadow && os.Getenv(harnessNoDispatchEnv) != "true"
+	posting := dispatching && os.Getenv(harnessNoOutboxEnv) != "true"
+	if posting {
+		startCtx, stopStart := context.WithTimeout(ctx, 2*time.Minute)
+		err := outbox.Start(startCtx)
+		stopStart()
+		if err != nil {
+			return err
+		}
+	}
+	if err := ledger.NoteConnection(ctx, ConnectionRunning, ""); err != nil {
+		logger.Warn("recovery harness: note connection", "error", err)
+	}
 	part("intake", intake.Run)
 	part("admission", func(ctx context.Context) error {
 		return RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
 	})
-	dispatching := !shadow && os.Getenv(harnessNoDispatchEnv) != "true"
 	if dispatching {
 		part("dispatch", dispatcher.Run)
-		part("outbox", outbox.Run)
 	}
-	if !shadow {
-		// As the run command does, so status sees a connector come and go.
-		if err := ledger.NoteConnection(ctx, ConnectionStarting, ""); err != nil {
-			return err
-		}
-		defer func() { _ = ledger.NoteConnection(context.Background(), ConnectionStopped, "") }()
+	if posting {
+		part("outbox", outbox.Run)
 	}
 
 	until := os.Getenv(harnessUntilEnv)
@@ -394,6 +414,7 @@ func runHarnessConnector(dir string) error {
 			logger.Warn("recovery harness: predicate", "error", err)
 		}
 		if done {
+			logger.Info("recovery harness: the ledger reached its predicate", "until", until, "state", unsettled(ctx, ledger))
 			break
 		}
 		if time.Now().After(deadline) {
@@ -405,7 +426,7 @@ func runHarnessConnector(dir string) error {
 	wg.Wait()
 	flushCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if dispatching {
+	if posting {
 		if err := outbox.Flush(flushCtx); err != nil {
 			return err
 		}
@@ -473,6 +494,10 @@ func harnessPredicate(ctx context.Context, dir string, l *Ledger, until string) 
 	}
 	return false, fmt.Errorf("unknown predicate %q", until)
 }
+
+// harnessReconcileAfter is how old a sending intent must be before it is
+// reconciled: the production minute, shortened so a restart can settle one.
+const harnessReconcileAfter = 200 * time.Millisecond
 
 // harnessWorkspaces is the working directory a task gets: the route itself,
 // as the run command's default does. It records every preparation and every

@@ -76,7 +76,8 @@ func fakeClaude(w *fakeWorker) int {
 		sessionID = flag("--resume")
 	}
 	mode := flag("--permission-mode")
-	if w.BadMode() {
+	badMode := w.BadMode()
+	if badMode {
 		mode = "bypassPermissions"
 	}
 
@@ -114,6 +115,15 @@ func fakeClaude(w *fakeWorker) int {
 				servers = append(servers, map[string]string{"name": name, "status": "connected"})
 			}
 			emit(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID, "permissionMode": mode, "mcp_servers": servers})
+			if badMode {
+				// It reported the wrong mode and waits to be ended. Whether a
+				// real agent would already have acted is exactly what the
+				// connector cannot know; this one acting would only race the
+				// driver's kill.
+				w.log(0, 0, "bad-mode")
+				time.Sleep(2 * time.Minute)
+				return 9
+			}
 		}
 		if err := w.Turn(context.Background(), msg.Message.Content); err != nil {
 			emit(map[string]any{"type": "result", "subtype": "error_during_execution", "is_error": true, "session_id": sessionID})

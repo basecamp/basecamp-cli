@@ -3,10 +3,13 @@
 package connector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // The integrated recovery harness (plan step 22).
@@ -152,6 +156,8 @@ const (
 	harnessShadowEnv     = "BASECAMP_RECOVERY_SHADOW"
 	harnessFaultEnv      = "BASECAMP_RECOVERY_FAULT"
 	harnessNoDispatchEnv = "BASECAMP_RECOVERY_NO_DISPATCH"
+	harnessNoOutboxEnv   = "BASECAMP_RECOVERY_NO_OUTBOX"
+	harnessScanEnv       = "BASECAMP_RECOVERY_SECRET_SCAN"
 	// harnessRealEnv opts into the run against the real agent binaries, and
 	// harnessRealBasecampEnv names the basecamp binary built from this tree
 	// whose `mcp` the real workers start.
@@ -164,6 +170,9 @@ const (
 func TestMain(m *testing.M) {
 	if name := os.Getenv(harnessAgentEnv); name != "" {
 		os.Exit(runFakeAgent(name))
+	}
+	if os.Getenv(harnessScanEnv) != "" {
+		os.Exit(runSecretScan(os.Args[1:]))
 	}
 	os.Exit(m.Run())
 }
@@ -293,6 +302,9 @@ const (
 	agentLogFile  = "agent.jsonl"
 	liveFile      = "live.jsonl"
 	workspaceFile = "workspaces.jsonl"
+	// tokensDir holds the task tokens the fake workers were handed, so the
+	// parent can look for them everywhere a token must not be.
+	tokensDir = "tokens"
 	// connectorFile is the running connector's own identity: the pid a fake
 	// worker kills, so no process this harness did not start is signaled.
 	connectorFile = "connector.json"
@@ -335,6 +347,10 @@ type harnessRun struct {
 	// outbox: a connector that dies after admitting, before its dispatcher
 	// could have seen the record, without racing one that might.
 	NoDispatch bool
+	// NoOutbox runs the dispatcher without the outbox: a connector that dies
+	// after settling an attempt, before anything could have claimed its
+	// notice.
+	NoOutbox bool
 	// Shadow runs intake and admission only, and installs no hooks: a
 	// `--shadow` run.
 	Shadow bool
@@ -371,6 +387,7 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 		harnessShadowEnv+"="+strconv.FormatBool(r.Shadow),
 		harnessFaultEnv+"="+r.Fault,
 		harnessNoDispatchEnv+"="+strconv.FormatBool(r.NoDispatch),
+		harnessNoOutboxEnv+"="+strconv.FormatBool(r.NoOutbox),
 	)
 	cmd.Env = append(cmd.Env, r.Env...)
 	out := &lockedBuffer{}
@@ -379,28 +396,10 @@ func (h *harness) start(r harnessRun) (*exec.Cmd, *lockedBuffer) {
 	return cmd, out
 }
 
-// runUntilLog starts the connector, waits for a line of its log, and kills it:
-// the way to watch a connector that is meant to keep running — one holding an
-// attempt it cannot verify has nothing left to settle, so no ledger predicate
-// can say it is done.
-func (h *harness) runUntilLog(r harnessRun, substring string) {
-	h.t.Helper()
-	r.Until, r.Killed = "never", true
-	cmd, out := h.start(r)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if err := waitFor(ctx, func() (bool, error) { return strings.Contains(out.String(), substring), nil }); err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		h.t.Fatalf("the connector never said %q:\n%s", substring, out.String())
-	}
-	require.NoError(h.t, cmd.Process.Kill())
-	h.wait(cmd, out, r)
-}
-
 func (h *harness) wait(cmd *exec.Cmd, out *lockedBuffer, r harnessRun) {
 	h.t.Helper()
 	err := cmd.Wait()
+	defer h.requireNoTaskTokenLeaked(out)
 	if path := os.Getenv("BASECAMP_RECOVERY_DEBUG"); path != "" {
 		_ = os.WriteFile(path, []byte(out.String()), 0o600)
 	}
@@ -451,6 +450,92 @@ func (h *harness) killAgents() {
 			_ = syscall.Kill(child.PID, syscall.SIGKILL)
 		}
 	}
+}
+
+// requireNoTaskTokenLeaked holds every run to the credential rule, for every
+// task token any worker was handed so far: not in an agent's argv or
+// environment, not in anything the connector wrote (its stdout lines, its
+// log, the lifecycle messages it posted, the polls it made, the workspace
+// records), not in any file under a working directory or the state directory
+// — and no worker saw one appear in those files while it ran.
+func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer) {
+	t := h.t
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(h.dir, tokensDir))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	require.NoError(t, err)
+	log := h.agentLog()
+	var places drivertest.Places
+	for _, e := range log {
+		places.Env = append(places.Env, e.Env...)
+		places.Args = append(places.Args, e.Args...)
+		if found, ok := strings.CutPrefix(e.Step, "secret-file:"); ok {
+			t.Errorf("a worker saw a task token written to %s", found)
+		}
+	}
+	places.Texts = append(places.Texts, out.String())
+	for _, name := range []string{linesFile, storeFile, pollsFile, workspaceFile, agentLogFile} {
+		data, err := os.ReadFile(filepath.Join(h.dir, name))
+		require.NoError(t, err)
+		places.Texts = append(places.Texts, string(data))
+	}
+	places.Dirs = []string{h.workDir(), filepath.Join(h.dir, "work-other")}
+	for _, e := range entries {
+		token, err := os.ReadFile(filepath.Join(h.dir, tokensDir, e.Name()))
+		require.NoError(t, err)
+		drivertest.RequireNoSecret(t, string(token), places)
+		// The state directory holds the ledger this test may have open, so
+		// it is read by another process (see scanForSecret).
+		for _, found := range scanForSecret(t, string(token), filepath.Join(h.dir, "state")) {
+			t.Errorf("a task token is in a file under the state directory: %s", found)
+		}
+	}
+}
+
+// scanForSecret lists the files under dirs that contain secret, read by a
+// process of its own. Reading a SQLite database's files by another descriptor
+// in a process that holds the database open drops SQLite's POSIX advisory
+// locks on them; another process closing the database then resets the WAL
+// under the held handle, which reads stale or fails. The secret goes over
+// stdin, never argv.
+func scanForSecret(t *testing.T, secret string, dirs ...string) []string {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), os.Args[0], dirs...)
+	cmd.Env = append(os.Environ(), harnessScanEnv+"=1")
+	cmd.Stdin = strings.NewReader(secret)
+	out, err := cmd.Output()
+	require.NoError(t, err, "the secret scan ran")
+	var found []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			found = append(found, line)
+		}
+	}
+	return found
+}
+
+// runSecretScan is the scanning process: the secret on stdin, the directories
+// as arguments, a path per line for every file that contains the secret.
+func runSecretScan(dirs []string) int {
+	secret, err := io.ReadAll(os.Stdin)
+	if err != nil || len(secret) == 0 {
+		return 2
+	}
+	for _, dir := range dirs {
+		_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || !d.Type().IsRegular() {
+				return nil //nolint:nilerr // a file that cannot be read cannot be found to carry the secret either
+			}
+			data, err := os.ReadFile(path)
+			if err == nil && bytes.Contains(data, secret) {
+				fmt.Println(path)
+			}
+			return nil
+		})
+	}
+	return 0
 }
 
 // workspaces is every preparation and release of a task's working directory.

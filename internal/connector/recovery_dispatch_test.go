@@ -157,6 +157,9 @@ type crashRow struct {
 	// noDispatch kills a connector running without its dispatcher, so the
 	// record is left admitted rather than racing a launch.
 	noDispatch bool
+	// noOutbox kills a connector running without its outbox, so a notice
+	// the settlement wrote is left pending rather than racing its claim.
+	noOutbox bool
 }
 
 var crashRows = []crashRow{
@@ -176,7 +179,7 @@ var crashRows = []crashRow{
 		handed: 1, outcome: OutcomeSucceeded, stop: StopLost},
 	{name: "worker gone, settlement not committed", kill: "tx:attempt-ended", plan: completedWork,
 		handed: 1, outcome: OutcomeSucceeded, stop: StopLost},
-	{name: "settled, completion notice due", kill: "line:dispatch:ended", plan: []string{"get", "ack", "fail"},
+	{name: "settled, completion notice due", kill: "line:dispatch:ended", plan: []string{"get", "ack", "fail"}, noOutbox: true,
 		handed: 1, outcome: OutcomeFailed, stop: StopFinished, notices: 1},
 	{name: "completion notice sending, not posted", kill: "post-before", plan: []string{"get", "ack", "fail"},
 		handed: 1, outcome: OutcomeFailed, stop: StopFinished, indeterminate: 1},
@@ -194,7 +197,7 @@ func TestRecoveryAtEveryLedgerState(t *testing.T) {
 				raceSubset(t, row.race)
 				h := newHarness(t, d, harnessScenario{Plans: map[string][]string{"101#1": row.plan}})
 				h.publish(feedEntry{Event: todoEvent(101, 5001)})
-				h.run(harnessRun{Kill: row.kill, Killed: true, NoDispatch: row.noDispatch})
+				h.run(harnessRun{Kill: row.kill, Killed: true, NoDispatch: row.noDispatch, NoOutbox: row.noOutbox})
 				if kind, ok := strings.CutPrefix(row.kill, "line:"); ok {
 					lines := h.lines()
 					require.NotEmpty(t, lines)
@@ -464,16 +467,13 @@ func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 	})
 }
 
-// measuredTokenizerRatio is how far estimateTokens undercounts a real
-// tokenizer on the dispatch prompt, measured with Claude's; other agents'
-// tokenizers are not measured. It is a one-off measurement, not something
-// this test can re-derive: Claude Opus 5 counted the production-sized prompt
-// below at 322 tokens where the estimate says 230 — Claude Code's reported
-// input usage for the prompt, minus the same session with a one-character
-// prompt (2840 - 2518), on 2026-09-17. The budget is asserted on the estimate
-// scaled by it, so the number this test prints is an estimate, and the number
-// on the card is the measurement.
-const measuredTokenizerRatio = 1.5
+// measuredDispatchPromptTokens is the production-sized dispatch prompt below
+// counted by a real tokenizer, once: Claude Opus 5 counted it at 322 tokens —
+// Claude Code's reported input usage for the prompt, minus the same session
+// with a one-character prompt (2840 - 2518), on 2026-09-17. Other agents'
+// tokenizers are not measured. The test cannot re-derive it; estimateTokens
+// is the bound the budget is asserted on, and it has to stay above this.
+const measuredDispatchPromptTokens = 322
 
 // The dispatch prompt is measured as the worker received it, through each
 // driver's wire, at production-sized ids, and at its worst case: the largest
@@ -502,9 +502,11 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 		require.Contains(t, prompts, followUp)
 		for id, prompt := range prompts {
 			tokens := estimateTokens(prompt)
-			t.Logf("%s: prompt for event %d: %d bytes, %d tokens estimated, %d scaled to a real tokenizer, budget %d",
-				d.Name, id, len(prompt), tokens, int(float64(tokens)*measuredTokenizerRatio), MaxPromptTokens)
-			assert.Less(t, float64(tokens)*measuredTokenizerRatio, float64(MaxPromptTokens))
+			t.Logf("%s: prompt for event %d: %d bytes, %d tokens by the bound, budget %d", d.Name, id, len(prompt), tokens, MaxPromptTokens)
+			assert.Less(t, tokens, MaxPromptTokens)
+			if id == event {
+				assert.Greater(t, tokens, measuredDispatchPromptTokens, "the bound is above what a real tokenizer counted for this prompt")
+			}
 			assert.NotContains(t, prompt, "please do the thing", "no content in the prompt")
 		}
 		if out := os.Getenv("BASECAMP_RECOVERY_PROMPT_OUT"); out != "" {
@@ -518,11 +520,10 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 		prompt := DispatchPrompt(Launch{TaskID: math.MaxInt64}, record)
 		require.Contains(t, prompt, longest, "the longest URL the prompt repeats")
 		tokens := estimateTokens(prompt)
-		t.Logf("worst-case dispatch prompt: %d bytes, %d tokens estimated, %d scaled to a real tokenizer, budget %d",
-			len(prompt), tokens, int(float64(tokens)*measuredTokenizerRatio), MaxPromptTokens)
-		assert.Less(t, float64(tokens)*measuredTokenizerRatio, float64(MaxPromptTokens))
+		t.Logf("worst-case dispatch prompt: %d bytes, %d tokens by the bound, budget %d", len(prompt), tokens, MaxPromptTokens)
+		assert.Less(t, tokens, MaxPromptTokens)
 		followUp := FollowUpPrompt(math.MaxInt64)
-		assert.Less(t, float64(estimateTokens(followUp))*measuredTokenizerRatio, float64(MaxPromptTokens))
+		assert.Less(t, estimateTokens(followUp), MaxPromptTokens)
 	})
 }
 
@@ -552,11 +553,16 @@ func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 		// other project has been dispatched and finished: proof that its
 		// recovery returned and its dispatcher went on, not merely that it
 		// logged a decision.
-		for i, other := range []int64{102, 103} {
+		// A further event in the held project, on another recording, needs the
+		// held directory: it waits.
+		h.publish(feedEntry{Event: todoEvent(104, 5004)})
+		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
 			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
 			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other))
 		}
+		assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
+		assert.Equal(t, 0, h.handed(104))
 		assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record stays live: nobody may act on it but a person")
 		assert.Equal(t, 0, h.handed(101), "no worker was ever given the event")
 		attempts = harnessAttempts(t, l)
@@ -641,14 +647,19 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		worker := attempts[0].process
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(ctx, worker.PID), nil }), "the worker itself exited")
+		// Exited and reaped, not a zombie: a zombie still has the start time
+		// the ledger recorded, and recovery would rightly take it for the
+		// worker.
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return syscall.Kill(worker.PID, 0) != nil, nil }), "the worker itself exited and was reaped")
 		require.False(t, processGone(context.Background(), grandchild.PID), "its grandchild did not")
 		drivertest.RequireGroupHeld(t, worker)
 
-		for i, other := range []int64{102, 103} {
+		h.publish(feedEntry{Event: todoEvent(104, 5004)})
+		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
 			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed"})
 			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other), "work that does not need the held directory still runs")
+			assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
 
 			assert.Equal(t, string(AttemptRunning), attemptState(t, l, attempts[0].id), "the attempt stays live while its tree runs")
 			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
@@ -661,7 +672,8 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 
 		// The tree ends; the next restart may settle and release.
 		killRecorded(t, grandchild)
-		require.NoError(t, waitFor(ctx, func() (bool, error) { return processGone(ctx, grandchild.PID), nil }))
+		// Reaped, not merely dead: a zombie is still a member of the group.
+		require.NoError(t, waitFor(ctx, func() (bool, error) { return syscall.Kill(grandchild.PID, 0) != nil, nil }))
 		h.run(harnessRun{})
 		assert.Equal(t, string(AttemptEnded), attemptState(t, l, attempts[0].id))
 		assert.Equal(t, StateCompleted, stateOf(t, l, 101))
@@ -669,7 +681,49 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		assert.True(t, h.releasedDir(h.workDir()), "released once the tree is gone")
 		assert.Len(t, h.notices(101), 1)
 		assert.Equal(t, 1, h.handed(101), "and never run again")
+		assert.Equal(t, 1, h.handed(104), "the directory released, the waiting event runs")
 		h.assertNoWorkerOutlivedItsRecord()
+	})
+}
+
+// On start, the outbox settles what a previous process left sending before
+// anything else runs: a notice whose receipt the crash lost is adopted before
+// the restarted connector dispatches new work.
+func TestRecoveryReconcilesLifecycleMessagesBeforeAnythingRuns(t *testing.T) {
+	forEachDriver(t, func(t *testing.T, d harnessDriver) {
+		raceSubset(t, false)
+		h := newHarness(t, d, harnessScenario{Plans: map[string][]string{"101#1": {"get", "ack", "fail"}}})
+		h.publish(feedEntry{Event: todoEvent(101, 5001)})
+		h.run(harnessRun{Kill: "post-after", Killed: true})
+
+		// A start leaves a request younger than ReconcileAfter to land; this
+		// one is older, so the start must settle it.
+		l := h.ledger()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		require.NoError(t, waitFor(ctx, func() (bool, error) {
+			sending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentSending}})
+			return len(sending) == 1 && sending[0].SendingAt != nil && time.Since(*sending[0].SendingAt) > harnessReconcileAfter, err
+		}))
+
+		h.publish(feedEntry{Event: otherTodoEvent(102, 6001)})
+		before := len(h.lines())
+		h.run(harnessRun{})
+
+		lines := h.lines()[before:]
+		reconciled, launched := -1, -1
+		for i, line := range lines {
+			if line.Type == "outbox" && line.Kind == string(IntentCompletion) && line.State == string(IntentSent) && reconciled < 0 {
+				reconciled = i
+			}
+			if line.Type == "dispatch" && line.State == string(AttemptLaunching) && slices.Contains(line.EventIDs, 102) && launched < 0 {
+				launched = i
+			}
+		}
+		require.GreaterOrEqual(t, reconciled, 0, "the notice was adopted")
+		require.GreaterOrEqual(t, launched, 0, "the new event ran")
+		assert.Less(t, reconciled, launched, "the notice was settled before anything new was dispatched")
+		assert.Len(t, h.notices(101), 1, "adopted, not posted again")
 	})
 }
 

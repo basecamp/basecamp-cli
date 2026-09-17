@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 )
 
 // The fake worker: what every fake agent does with a prompt, whatever its wire.
@@ -29,6 +30,8 @@ type fakeWorker struct {
 	sc       harnessScenario
 	ledger   *Ledger
 	dispatch *TaskDispatch
+	// stopWatch ends the watch for the task token in files.
+	stopWatch func() []string
 
 	replies map[int64]int64
 }
@@ -41,6 +44,9 @@ type agentLogEntry struct {
 	Event     int64     `json:"event,omitempty"`
 	N         int       `json:"n,omitempty"`
 	Step      string    `json:"step"`
+	// Args and Env are the agent's own, on its "start" entry.
+	Args []string `json:"args,omitempty"`
+	Env  []string `json:"env,omitempty"`
 	// Child is the pid of the process a "grandchild" step started.
 	Child int `json:"child,omitempty"`
 	// Prompt is the prompt as the agent received it, on a "prompt" step.
@@ -56,11 +62,21 @@ func newFakeWorker(dir string) (*fakeWorker, error) {
 		return nil, err
 	}
 	w := &fakeWorker{dir: dir, sc: sc, replies: map[int64]int64{}}
-	w.log(0, 0, "start")
+	pgid, _ := syscall.Getpgid(0)
+	// What this agent was started with, for the parent to check no task
+	// token is in either.
+	_ = appendJSONLine(filepath.Join(dir, agentLogFile), agentLogEntry{
+		PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Step: "start", Args: os.Args[1:], Env: os.Environ(),
+	})
 	return w, nil
 }
 
 func (w *fakeWorker) close() {
+	if w.stopWatch != nil {
+		for _, found := range w.stopWatch() {
+			w.log(0, 0, "secret-file:"+found)
+		}
+	}
 	if w.ledger != nil {
 		_ = w.ledger.Close()
 	}
@@ -114,11 +130,14 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 	}
 	stateDir := server.Args[i+1]
 	// The server resolves the directory against its own state home, which
-	// is the environment the driver declared for it, not this agent's.
-	if home, ok := server.Env["XDG_STATE_HOME"]; ok {
-		if err := os.Setenv("XDG_STATE_HOME", home); err != nil {
-			return err
-		}
+	// is the environment the driver declared for it, not this agent's: a
+	// declaration without one would send the real server elsewhere.
+	home, ok := server.Env["XDG_STATE_HOME"]
+	if !ok || home == "" {
+		return errors.New("the MCP server's environment declares no XDG_STATE_HOME")
+	}
+	if err := os.Setenv("XDG_STATE_HOME", home); err != nil {
+		return err
 	}
 	agentID, err := ResolveStateDir(stateDir, harnessAccount)
 	if err != nil {
@@ -138,6 +157,35 @@ func (w *fakeWorker) Bind(ctx context.Context, server driver.MCPServer) error {
 		return err
 	}
 	w.ledger, w.dispatch = l, d
+	return w.watchToken(token)
+}
+
+// watchToken keeps the task token where the parent test can read it back, and
+// watches the working directories, for as long as this worker lives, for a
+// file the token is written to. Whatever it finds is logged when the worker
+// ends.
+//
+// Not the state directory: this process holds the ledger open, and reading
+// the ledger's own files by another descriptor drops SQLite's POSIX locks on
+// them, after which the connector's close can reset the WAL under this
+// handle. The parent scans the state directory from a process of its own.
+func (w *fakeWorker) watchToken(token string) error {
+	tokens := filepath.Join(w.dir, tokensDir)
+	if err := os.MkdirAll(tokens, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(tokens, "task-*.token")
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(token); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	w.stopWatch = drivertest.WatchForSecretFiles(token, filepath.Join(w.dir, "work"), filepath.Join(w.dir, "work-other"))
 	return nil
 }
 

@@ -90,9 +90,11 @@ func TestRecoveryAgainstRealAgents(t *testing.T) {
 						}
 					}
 					if row.held {
-						for range 2 {
-							h.runUntilLog(harnessRun{StateDir: stateDir, Env: env}, "cannot be identified")
-						}
+						// Run until a real worker has finished an event in the
+						// other project: recovery returned and the dispatcher
+						// went on around the held attempt.
+						h.publish(feedEntry{Event: otherTodoEvent(102, 6001)})
+						h.run(harnessRun{StateDir: stateDir, Env: env, Until: "state:102=completed"})
 						attempts := harnessAttempts(t, l)
 						require.Len(t, attempts, 1)
 						assert.Equal(t, string(AttemptLaunching), attempts[0].State, "held, not settled")
