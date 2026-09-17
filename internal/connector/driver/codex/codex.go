@@ -507,6 +507,11 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 	case s.prompted:
 		s.mu.Unlock()
 		return driver.PromptResult{}, errOnePrompt
+	case s.ended:
+		// The worker's output ended while this prompt was on its way in: a
+		// turn installed now would wait for a result nobody is left to write.
+		s.mu.Unlock()
+		return driver.PromptResult{}, driver.ErrSessionEnded
 	case s.cancelEarly:
 		// Cancel came before the prompt: nothing is written, and the worker
 		// is ended.
@@ -624,6 +629,7 @@ func (s *session) read() {
 		// panic, not a dropped update.
 		defer close(s.updates)
 		s.mu.Lock()
+		s.ended = true
 		t := s.turn
 		s.mu.Unlock()
 		if t != nil {
