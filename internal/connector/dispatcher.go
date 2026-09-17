@@ -532,6 +532,8 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	cfg, tokens, cleanup, err := d.sessionConfig(launch, record)
 	cfg.Redaction = d.taskRedaction(launch, cfg)
 	log := d.taskLog(cfg.Redaction)
+	refusals := &refusalRecorder{ledger: d.ledger, attemptID: launch.AttemptID, log: log}
+	cfg.Refusals = refusals
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
@@ -564,7 +566,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
-	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log}
+	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals}
 	d.mu.Lock()
 	d.live[launch.AttemptID] = run
 	d.mu.Unlock()
@@ -793,8 +795,8 @@ type taskRun struct {
 	// log is the dispatcher's logger under this task's redaction.
 	log *slog.Logger
 
-	mu       sync.Mutex
-	refusals int
+	// refusals records the session's refusals as they happen.
+	refusals *refusalRecorder
 }
 
 // supervise prompts the worker, delivers follow-ups, and settles the attempt
@@ -831,9 +833,9 @@ func (r *taskRun) supervise(ctx context.Context) {
 	}
 	<-updatesDone
 	r.cleanup()
-	r.mu.Lock()
-	refusals := r.refusals
-	r.mu.Unlock()
+	// Every update is drained, so every refusal the driver read has been
+	// through the recorder; what the ledger would not take is settled now.
+	unrecorded := r.refusals.unrecorded()
 
 	if stop != StopFinished {
 		if tail, ok := r.session.(interface{ StderrTail() string }); ok {
@@ -848,7 +850,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 
 	// Through the one release point: it confirms the worker's group is gone
 	// before the attempt is settled or its directory released.
-	d.release(settleCtx, r.launch, r.session.Process(), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, Refusals: refusals}, r)
+	d.release(settleCtx, r.launch, r.session.Process(), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt
@@ -942,9 +944,9 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 	stopFor := func(reason StopReason) (driver.PromptResult, StopReason, bool) {
 		_ = r.session.Cancel(context.WithoutCancel(ctx))
 		select {
-		case a := <-answers:
-			// The turn the stop cut short still refused what it refused.
-			r.addRefusals(len(a.result.Refusals))
+		case <-answers:
+			// The turn the stop cut short recorded its refusals as they
+			// happened.
 		case <-r.session.Done():
 		case <-time.After(d.opts.CancelGrace):
 		}
@@ -975,14 +977,13 @@ func (r *taskRun) turn(ctx context.Context, prompt string, deadline, stillRunnin
 	}
 }
 
-// answered reads a finished prompt: its refusals are counted whatever it
-// says, and an error is classified (invariant 4). An unsafe session the driver
+// answered reads a finished prompt: an error is classified (invariant 4). Its
+// refusals were recorded as they happened. An unsafe session the driver
 // ended is failed. A worker that is gone is classified by how it went: one
 // that exited on its own with a non-zero status failed, and one that vanished
 // — signaled by someone else, or gone with no status the connector saw — is
 // lost. Any other error waits briefly to see whether the worker is gone.
 func (r *taskRun) answered(result driver.PromptResult, err error) (driver.PromptResult, StopReason, bool) {
-	r.addRefusals(len(result.Refusals))
 	switch {
 	case err == nil:
 		return result, "", false
@@ -1021,10 +1022,44 @@ func (r *taskRun) authorized() bool {
 	return r.d.approvedRoutes()[r.record.BucketID] == r.launch.Route
 }
 
-func (r *taskRun) addRefusals(n int) {
+// refusalRecorder is the dispatcher's driver.RefusalRecorder for one attempt:
+// each refusal is written to the attempt's row as it happens, and one the
+// ledger will not take is kept for the attempt's settlement (driver's
+// "Refusals").
+type refusalRecorder struct {
+	ledger    *Ledger
+	attemptID string
+	log       *slog.Logger
+
+	mu      sync.Mutex
+	pending int
+}
+
+// refusalWriteTimeout bounds a refusal's write, which runs on the goroutine
+// reading the agent's stream.
+const refusalWriteTimeout = 10 * time.Second
+
+// RecordRefusal implements driver.RefusalRecorder.
+func (r *refusalRecorder) RecordRefusal(ctx context.Context, refusal driver.Refusal) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalWriteTimeout)
+	defer cancel()
+	r.log.Info("connector: a permission was refused", "attempt_id", r.attemptID, "tool", richtext.SanitizeSingleLine(refusal.Tool))
+	err := r.ledger.RecordRefusal(ctx, r.attemptID)
+	if err != nil {
+		r.mu.Lock()
+		r.pending++
+		r.mu.Unlock()
+		r.log.Warn("connector: a refusal could not be recorded when it happened; it is settled with its attempt",
+			"attempt_id", r.attemptID, "error", err)
+	}
+	return err
+}
+
+// unrecorded is how many refusals the ledger did not take.
+func (r *refusalRecorder) unrecorded() int {
 	r.mu.Lock()
-	r.refusals += n
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	return r.pending
 }
 
 // drainUpdates reads the session's progress: liveness for the ledger, counts
@@ -1032,15 +1067,12 @@ func (r *taskRun) addRefusals(n int) {
 func (r *taskRun) drainUpdates(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
 	var last time.Time
-	for u := range r.session.Updates() {
+	for range r.session.Updates() {
 		if time.Since(last) >= r.d.opts.ProgressInterval {
 			last = time.Now()
 			if err := r.d.ledger.RecordProgress(ctx, r.launch.AttemptID); err != nil {
 				r.log.Debug("connector: progress", "error", err)
 			}
-		}
-		if u.Kind == driver.UpdatePermission && !u.Allowed {
-			r.log.Info("connector: a permission was refused", "attempt_id", r.launch.AttemptID, "tool", richtext.SanitizeSingleLine(u.Tool))
 		}
 	}
 }

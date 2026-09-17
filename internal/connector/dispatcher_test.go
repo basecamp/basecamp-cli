@@ -865,8 +865,10 @@ func TestAnUnusableConfigurationIsNotRetried(t *testing.T) {
 // Card 23's review: a session the driver says has ended is lost, not failed.
 func TestASessionTheDriverSaysHasEndedIsLost(t *testing.T) {
 	fake := newFakeDriver()
-	fake.turn = func(*fakeSession, int, string) (driver.PromptResult, error) {
-		return driver.PromptResult{Refusals: []driver.Refusal{{ToolCallID: "t1", Tool: "Bash"}}}, driver.ErrSessionEnded
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		refusal := driver.Refusal{ToolCallID: "t1", Tool: "Bash"}
+		_ = s.cfg.Refusals.RecordRefusal(context.Background(), refusal)
+		return driver.PromptResult{Refusals: []driver.Refusal{refusal}}, driver.ErrSessionEnded
 	}
 	h := newDispatchHarness(t, fake, nil)
 	admitOn(t, h.ledger, 1, "recording:1")
@@ -970,10 +972,12 @@ func liveAttemptID(t *testing.T, ledger *Ledger) string {
 func TestAStoppedTurnStillCountsItsRefusals(t *testing.T) {
 	fake := newFakeDriver()
 	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		refusals := []driver.Refusal{{ToolCallID: "t1", Tool: "Bash"}, {ToolCallID: "t2", Tool: "WebFetch"}}
+		for _, r := range refusals {
+			_ = s.cfg.Refusals.RecordRefusal(context.Background(), r)
+		}
 		<-s.canceled
-		return driver.PromptResult{Stop: driver.TurnCanceled, Refusals: []driver.Refusal{
-			{ToolCallID: "t1", Tool: "Bash"}, {ToolCallID: "t2", Tool: "WebFetch"},
-		}}, nil
+		return driver.PromptResult{Stop: driver.TurnCanceled, Refusals: refusals}, nil
 	}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Deadline = 100 * time.Millisecond })
 	admitOn(t, h.ledger, 1, "recording:1")
@@ -1206,4 +1210,43 @@ func TestATasksRedactionCarriesItsToken(t *testing.T) {
 	assert.Contains(t, r.Env, "A=alpha-not-real")
 	assert.Contains(t, r.Dirs, h.d.opts.PrivateDir)
 	assert.Contains(t, r.Dirs, h.d.opts.MCP.StateDir)
+}
+
+// The refusal rule (driver's "Refusals"): a refusal is in the ledger while
+// the worker still runs, and a worker that exits before its result keeps it.
+// The result's own list is not counted again.
+func TestARefusalIsInTheLedgerBeforeTheWorkerGoes(t *testing.T) {
+	fake := newFakeDriver()
+	recorded := make(chan struct{})
+	exit := make(chan struct{})
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		_ = s.cfg.Refusals.RecordRefusal(context.Background(), driver.Refusal{ToolCallID: "t1", Tool: "Bash"})
+		close(recorded)
+		<-exit
+		s.exitWith(driver.Exit{Code: 3})
+		return driver.PromptResult{Refusals: []driver.Refusal{{ToolCallID: "t1", Tool: "Bash"}}}, driver.ErrSessionEnded
+	}
+	h := newDispatchHarness(t, fake, nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+
+	<-recorded
+	var refusals int
+	var state string
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals, state FROM attempts`).Scan(&refusals, &state))
+	assert.Equal(t, 1, refusals, "recorded at the moment, not at the end")
+	assert.NotEqual(t, "ended", state)
+
+	close(exit)
+	h.attemptsEnded(t, 1)
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts`).Scan(&refusals))
+	assert.Equal(t, 1, refusals, "settled with the attempt, once")
+}
+
+// A refusal the ledger will not take is kept for the attempt's settlement.
+func TestARefusalTheLedgerRefusedIsCarriedToTheSettlement(t *testing.T) {
+	ledger := newTestLedger(t)
+	r := &refusalRecorder{ledger: ledger, attemptID: "no-such-attempt", log: slog.New(slog.DiscardHandler)}
+	assert.Error(t, r.RecordRefusal(context.Background(), driver.Refusal{ToolCallID: "t1", Tool: "Bash"}))
+	assert.Equal(t, 1, r.unrecorded())
 }

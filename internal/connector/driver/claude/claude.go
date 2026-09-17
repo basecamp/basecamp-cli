@@ -216,8 +216,10 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 		slot:      make(chan struct{}, 1),
 		readerEnd: make(chan struct{}),
 		red:       d.redactor(cfg),
+		recorder:  cfg.Refusals,
+		recorded:  map[string]bool{},
 	}
-	go s.read()
+	go s.read() //nolint:contextcheck // the reader outlives the start's context: it runs as long as the worker does
 	return s, nil
 }
 
@@ -310,6 +312,11 @@ type session struct {
 	// red is what every error, update text and stderr tail of this session
 	// passes through before it leaves the driver.
 	red *driver.Redactor
+	// recorder records each refusal once, as it is read (driver's
+	// "Refusals"); recorded is the tool call ids already recorded. Both are
+	// touched only by the reader goroutine.
+	recorder driver.RefusalRecorder
+	recorded map[string]bool
 
 	// beforePromptWrite runs between a turn's registration and its write; a
 	// test seam.
@@ -719,12 +726,34 @@ func (s *session) handleInit(m streamMessage) {
 }
 
 func (s *session) refused(toolUseID, tool string) {
+	refusal, first := s.record(toolUseID, tool)
+	if !first {
+		// A stream that announces one refusal twice refused once.
+		return
+	}
 	s.mu.Lock()
 	if s.turn != nil {
-		s.turn.refusals = append(s.turn.refusals, driver.Refusal{ToolCallID: s.red.Sanitize(toolUseID), Tool: s.red.Sanitize(tool)})
+		s.turn.refusals = append(s.turn.refusals, refusal)
 	}
 	s.mu.Unlock()
 	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: toolUseID, Tool: tool, ToolKind: toolKind(tool), Allowed: false})
+}
+
+// record is the moment a refusal is read from the stream: it is recorded
+// through the session's recorder before anything else is done with it, and
+// only the first time its tool call id is seen (driver's "Refusals").
+func (s *session) record(toolUseID, tool string) (driver.Refusal, bool) {
+	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(toolUseID), Tool: s.red.Sanitize(tool)}
+	if s.recorded[toolUseID] {
+		return refusal, false
+	}
+	s.recorded[toolUseID] = true
+	if s.recorder != nil {
+		// The recorder owns what happens when the ledger refuses the write;
+		// the refusal happened either way.
+		_ = s.recorder.RecordRefusal(context.Background(), refusal)
+	}
+	return refusal, true
 }
 
 func (s *session) handleResult(m streamMessage) {
@@ -752,7 +781,11 @@ func (s *session) handleResult(m streamMessage) {
 		}
 		// A refusal the stream did not announce is still the driver's own
 		// record, and is reported both ways (invariant 3).
-		refusals = append(refusals, driver.Refusal{ToolCallID: s.red.Sanitize(d.ToolUseID), Tool: s.red.Sanitize(d.ToolName)})
+		refusal, first := s.record(d.ToolUseID, d.ToolName)
+		if !first {
+			continue
+		}
+		refusals = append(refusals, refusal)
 		s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: d.ToolUseID, Tool: d.ToolName, ToolKind: toolKind(d.ToolName), Allowed: false})
 	}
 	result := driver.PromptResult{Refusals: refusals}

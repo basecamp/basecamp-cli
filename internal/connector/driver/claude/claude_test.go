@@ -167,6 +167,20 @@ func fakeClaude(scenario string) {
 		if scenario == "die-secret" {
 			os.Exit(3)
 		}
+		if scenario == "denied-twice" {
+			// One refusal the stream announces twice and the result repeats.
+			for range 2 {
+				emit(map[string]any{"type": "system", "subtype": "permission_denied", "tool_name": "Bash", "tool_use_id": "toolu_twice"})
+			}
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID,
+				"permission_denials": []any{map[string]any{"tool_name": "Bash", "tool_use_id": "toolu_twice"}}})
+			continue
+		}
+		if scenario == "deny-then-die" {
+			// Refused, and gone before any result could repeat it.
+			emit(map[string]any{"type": "system", "subtype": "permission_denied", "tool_name": "Bash", "tool_use_id": "toolu_dead"})
+			os.Exit(3)
+		}
 		switch scenario {
 		case "hang":
 			continue
@@ -743,4 +757,33 @@ func drain(s driver.Session) []driver.Update {
 		updates = append(updates, u)
 	}
 	return updates
+}
+
+// The refusal rule (driver's "Refusals"): each refusal is recorded once, as
+// it is read, whether the result repeats it, announces it late, or never
+// comes.
+func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
+	for _, tc := range []struct {
+		scenario string
+		want     []driver.Refusal
+	}{
+		{"ok", []driver.Refusal{{ToolCallID: "toolu_1", Tool: "Bash"}}},
+		{"late-denial", []driver.Refusal{{ToolCallID: "toolu_late", Tool: "Bash"}}},
+		{"deny-then-die", []driver.Refusal{{ToolCallID: "toolu_dead", Tool: "Bash"}}},
+		{"denied-twice", []driver.Refusal{{ToolCallID: "toolu_twice", Tool: "Bash"}}},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			f := newFixture(t, tc.scenario)
+			recorder := &drivertest.Refusals{}
+			f.cfg.Refusals = recorder
+			s := start(t, f)
+			go func() {
+				for range s.Updates() {
+				}
+			}()
+			_, _ = s.Prompt(context.Background(), "hello")
+			require.NoError(t, s.Close())
+			assert.Equal(t, tc.want, recorder.Recorded())
+		})
+	}
 }

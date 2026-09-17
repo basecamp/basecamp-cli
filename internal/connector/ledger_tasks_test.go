@@ -454,3 +454,27 @@ func TestAnAcknowledgementIsNeverAdoptedAsTheReply(t *testing.T) {
 	_, ok := AdoptableReply(c, []AgentReply{{ID: 7, CreatedAt: acked.Add(time.Second)}}, nil)
 	assert.False(t, ok)
 }
+
+// The refusal rule (driver's "Refusals"): a refusal is on the attempt's row
+// the moment it is recorded, and settled with the attempt.
+func TestARefusalIsRecordedOnTheLiveAttemptAndSettledWithIt(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	refusals := func() int {
+		var n int
+		require.NoError(t, ledger.db.QueryRowContext(context.Background(), `SELECT refusals FROM attempts WHERE id = ?`, l.AttemptID).Scan(&n))
+		return n
+	}
+
+	require.NoError(t, ledger.RecordRefusal(context.Background(), l.AttemptID))
+	require.NoError(t, ledger.RecordRefusal(context.Background(), l.AttemptID))
+	assert.Equal(t, 2, refusals(), "written as they happen, not at the end")
+
+	_, err := ledger.EndAttempt(context.Background(), AttemptEnd{AttemptID: l.AttemptID, Stop: StopLost, UnrecordedRefusals: 1})
+	require.NoError(t, err)
+	assert.Equal(t, 3, refusals(), "what could not be written then is settled with the attempt")
+
+	assert.ErrorIs(t, ledger.RecordRefusal(context.Background(), l.AttemptID), ErrNoLiveAttempt)
+	assert.Equal(t, 3, refusals(), "an ended attempt's count is final")
+}
