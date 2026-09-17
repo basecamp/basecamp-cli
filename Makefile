@@ -457,6 +457,7 @@ check-surface-compat: build
 check-skill-drift:
 	@scripts/check-skill-drift.sh
 	@scripts/check-skill-drift.sh skills/basecamp-doctor/SKILL.md
+	@scripts/check-skill-drift.sh skills/basecamp-connect/SKILL.md
 
 # Verify group commands show help bare (no RunE on parents with subcommands)
 .PHONY: check-bare-groups
@@ -555,6 +556,7 @@ tools:
 .PHONY: skill-eval
 skill-eval:
 	$(MAKE) -C skill-evals eval
+	$(MAKE) -C skill-evals eval-connect
 
 # Sync skills to basecamp/skills distribution repo
 # Usage: make sync-skills TAG=v1.2.3

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -36,10 +38,182 @@ the work to a local coding agent that replies in Basecamp as the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 projects to the directories their work runs in, and checks the connector is
-ready.`,
+ready. Show prints what setup recorded.`,
 	}
 	cmd.AddCommand(newConnectSetupCmd())
+	cmd.AddCommand(newConnectShowCmd())
 	return cmd
+}
+
+// newConnectShowCmd shows a profile's connect.json, read the way the
+// connector reads it: through setup.Load's safety checks, so a symlink, a
+// file someone else could have written, or anything oversized is refused
+// before a byte of it is shown.
+func newConnectShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Show a profile's connector setup without changing it",
+		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
+trust mode, each routed project and the worker settings.
+
+The file is read through the same checks setup and the connector apply:
+it is refused, and nothing of it shown, when it is a symlink, is not a
+regular file, could have been changed by another user, or does not parse.
+Nothing is changed and nothing is fetched: show reads no credential and
+makes no request. To check readiness, run setup again.
+
+A profile that does not exist is refused before this runs, naming the
+profiles there are, as it is for every command; a profile that exists and
+has never been set up is reported as not found.
+
+Examples:
+  basecamp connect show -P agent
+  basecamp connect show -P agent --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			return runConnectShow(app)
+		},
+	}
+}
+
+func runConnectShow(app *appctx.App) error {
+	name := app.Config.ActiveProfile
+	if name == "" {
+		return output.ErrUsageHint("Show needs the agent's profile", "Pass -P/--profile <name>.")
+	}
+	if !isValidProfileName(name) {
+		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
+	}
+	path, err := setup.Path(config.GlobalConfigDir(), name)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+	f, err := setup.Load(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return output.ErrNotFoundHint("connect.json for profile", name,
+			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile '<your profile>' --route '<project-id>=<dir>'")
+	case err != nil && runtime.GOOS == "windows":
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
+	case err != nil:
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+	}
+	if f.Profile != name {
+		// A policy copied from another profile's directory is not this
+		// profile's, however valid it is on its own: setup refuses it too.
+		return output.ErrUsageHint(fmt.Sprintf("%s names profile %q, not %q", richtext.SanitizeSingleLine(path), f.Profile, name),
+			"Nothing of it was shown. Remove "+richtext.SanitizeSingleLine(path)+" and run setup again for this profile.")
+	}
+
+	// The generic object renderer drops nested maps, which is where the
+	// agent, the trust and the routes live, so a person's formats get them
+	// flattened to one line each; JSON keeps the file's own shape.
+	markdown := app.Output.EffectiveFormat() == output.FormatMarkdown
+	return app.OK(connectShowResult{Path: path, File: f},
+		output.WithDisplayData(connectShowDisplay(path, f, markdown)),
+		output.WithSummary(fmt.Sprintf("Connector setup for profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
+}
+
+// connectShowDisplay is show's data for a person: every setting connect.json
+// records as a flat field, one per route. Paths are shown exactly: quoted,
+// or as a code span in Markdown, so nothing in one renders as formatting or
+// reaches a terminal as a control byte.
+func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any {
+	exact := func(s string) string {
+		// strconv.Quote escapes controls and backslashes; "<" is escaped too,
+		// or the renderer would take a path holding "<b>" for HTML and
+		// rewrite it.
+		return strings.ReplaceAll(strconv.Quote(s), "<", `\x3c`)
+	}
+	if markdown {
+		exact = func(s string) string { return markdownCode(escapeControls(s)) }
+	}
+	agent := fmt.Sprintf("person %d (%s)", f.Agent.PersonID, f.Agent.Kind)
+	if f.Agent.IdentityID != 0 {
+		agent += fmt.Sprintf(", identity %d", f.Agent.IdentityID)
+	}
+	trust := string(f.Trust.Mode)
+	if len(f.Trust.AllowlistIDs) > 0 {
+		ids := make([]string, len(f.Trust.AllowlistIDs))
+		for i, id := range f.Trust.AllowlistIDs {
+			ids[i] = strconv.FormatInt(id, 10)
+		}
+		trust += ": people " + strings.Join(ids, ", ")
+	}
+	worktrees := "off"
+	if f.Worktrees {
+		worktrees = "on"
+	}
+	d := map[string]any{
+		"file":     exact(path),
+		"account":  f.AccountID,
+		"agent":    agent,
+		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
+		"trust":    trust,
+		"workers":  fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees),
+		"projects": strconv.Itoa(len(f.Projects)) + " routed",
+	}
+	for id, r := range f.Projects {
+		route := exact(r.Path)
+		if r.Class != "" {
+			route += ", class " + r.Class
+		}
+		if r.WatchCompletions {
+			route += ", watches completions"
+		}
+		d[fmt.Sprintf("route_%d", id)] = route
+	}
+	return d
+}
+
+// escapeControls writes every control or non-printable rune in s, the
+// backslash and "<" (which the renderer would read as HTML) as a Go escape
+// (\x1b, \u009b, \\, \x3c), so a path can reach a
+// terminal or a pager without a single control byte and still reads exactly:
+// an escape in the output never stands for text the path already held.
+func escapeControls(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '<' {
+			b.WriteString(`\x3c`)
+			continue
+		}
+		if r == '\\' || unicode.IsControl(r) || !unicode.IsPrint(r) {
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// markdownCode is s as a Markdown code span, fenced with one more backtick
+// than the longest run inside it so no backtick in s can close it.
+func markdownCode(s string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	fence := strings.Repeat("`", longest+1)
+	return fence + " " + s + " " + fence
+}
+
+// connectShowResult is show's data: where the file is, and what it holds.
+type connectShowResult struct {
+	Path string `json:"path"`
+	setup.File
 }
 
 // connectSetupFlags are setup's flags, as typed.

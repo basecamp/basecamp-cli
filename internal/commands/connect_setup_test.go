@@ -1234,3 +1234,219 @@ func TestConnectSetupClassifiesCancellationUnderTheLock(t *testing.T) {
 		})
 	}
 }
+
+func runConnectShowCmd(t *testing.T, app *appctx.App, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewConnectCmd()
+	cmd.SetArgs(append([]string{"show"}, args...))
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// Show prints what setup recorded, and changes nothing.
+func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	path := connectSetupPath(t, "agent")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	app := newConnectSetupApp(t, s, "agent")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	require.NoError(t, err, out)
+
+	var envelope struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Path     string                    `json:"path"`
+			Profile  string                    `json:"profile"`
+			Agent    setup.Agent               `json:"agent"`
+			Trust    admission.Trust           `json:"trust"`
+			Projects map[int64]admission.Route `json:"projects"`
+			Deadline string                    `json:"deadline"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.True(t, envelope.OK)
+	assert.Equal(t, path, envelope.Data.Path)
+	assert.Equal(t, "agent", envelope.Data.Profile)
+	assert.Equal(t, setup.Agent{PersonID: setupAgentPerson, Kind: setup.KindAgent}, envelope.Data.Agent)
+	assert.Equal(t, setupOperatorPerson, envelope.Data.Trust.OperatorID)
+	assert.Contains(t, envelope.Data.Projects, setupProject)
+	assert.Equal(t, "45m0s", envelope.Data.Deadline)
+	assert.NotContains(t, buf.String(), fakeConnectSecret)
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "show changes nothing")
+}
+
+// A profile that exists and has never been set up is not found. A profile
+// that does not exist at all never reaches this command: the root refuses an
+// unknown -P for every command, which is what tells a typo from a profile
+// with no connector policy.
+func TestConnectShowOnAProfileNeverSetUpIsNotFound(t *testing.T) {
+	s := startConnectSetupServer(t)
+	app := connectSetupApp(t, s, "agent")
+	out, err := runConnectShowCmd(t, app)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr, out)
+	assert.Equal(t, output.CodeNotFound, apiErr.Code)
+	assert.Contains(t, apiErr.Hint, "basecamp connect setup -P agent")
+}
+
+// A connect.json that is a symlink, or that someone else could have written,
+// is refused before any of it is shown: show is not a way to print an
+// arbitrary local file.
+func TestConnectShowRefusesAnUnsafeConnectJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		plant func(t *testing.T, path string)
+	}{
+		{"a symlink to another file", func(t *testing.T, path string) {
+			// A well-formed policy, so only the refusal to follow the link
+			// stops it being shown.
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			target := filepath.Join(t.TempDir(), "elsewhere.json")
+			require.NoError(t, os.WriteFile(target, data, 0o600))
+			require.NoError(t, os.Remove(path))
+			require.NoError(t, os.Symlink(target, path))
+		}},
+		{"a file others can write", func(t *testing.T, path string) {
+			require.NoError(t, os.Chmod(path, 0o666))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			firstSetup(t, s)
+			tc.plant(t, connectSetupPath(t, "agent"))
+
+			app := newConnectSetupApp(t, s, "agent")
+			var buf bytes.Buffer
+			app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+			out, err := runConnectShowCmd(t, app)
+			var apiErr *output.Error
+			require.ErrorAs(t, err, &apiErr, out)
+			assert.Equal(t, output.CodeUsage, apiErr.Code)
+			assert.NotContains(t, out+buf.String()+apiErr.Message+apiErr.Hint, `"projects"`, "nothing of the file is shown")
+		})
+	}
+}
+
+// A person reading show in a terminal or as Markdown sees what matters: the
+// agent, the operator, the trust and every route, which the generic object
+// renderer would drop, through the same output pipeline as every command.
+func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	var route string
+	for _, r := range f.Projects {
+		route = r.Path
+	}
+
+	for _, format := range []output.Format{output.FormatStyled, output.FormatMarkdown} {
+		app := newConnectSetupApp(t, s, "agent")
+		var buf bytes.Buffer
+		app.Output = output.New(output.Options{Format: format, Writer: &buf})
+		out, err := runConnectShowCmd(t, app)
+		require.NoError(t, err, out)
+		shown := buf.String()
+		for _, want := range []string{
+			fmt.Sprintf("person %d (agent)", setupAgentPerson),
+			fmt.Sprintf("person %d", setupOperatorPerson),
+			"operator",
+			fmt.Sprintf("Route %d", setupProject),
+			route,
+			"deadline 45m0s",
+		} {
+			assert.Contains(t, shown, want, "format %v", format)
+		}
+	}
+}
+
+// A valid policy copied in from another profile is not this profile's: show
+// refuses it rather than label it as this profile's setup.
+func TestConnectShowRefusesAnotherProfilesPolicy(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	data, err := os.ReadFile(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	other := connectSetupPath(t, "other")
+	require.NoError(t, os.MkdirAll(filepath.Dir(other), 0o700))
+	require.NoError(t, os.WriteFile(other, data, 0o600))
+
+	app := newConnectSetupApp(t, s, "other")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr, out)
+	assert.Equal(t, output.CodeUsage, apiErr.Code)
+	assert.Contains(t, apiErr.Message, `names profile "agent", not "other"`)
+	assert.NotContains(t, out+buf.String(), `"projects"`)
+}
+
+// A route path is a clean absolute path, which may still hold control
+// characters: human output shows them escaped, never raw.
+func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
+	path := "/home/me/Work/Q3 \x1b[31mred\u009b $launch"
+	f := setup.New("agent")
+	f.AccountID = "999"
+	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
+	f.Trust.OperatorID = 1001
+	f.Projects[222] = admission.Route{Path: path}
+	for _, markdown := range []bool{false, true} {
+		route := connectShowDisplay("/x/connect.json", f, markdown)["route_222"].(string)
+		assert.NotContains(t, route, "\x1b", "markdown %v", markdown)
+		assert.NotContains(t, route, "\u009b", "markdown %v", markdown)
+		assert.Contains(t, route, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
+	}
+}
+
+// The file's own path is shown as literally as the routes: a configuration
+// directory holding Markdown syntax or a backslash does not render as a link
+// or read as an escape.
+func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
+	f := setup.New("agent")
+	file := connectShowDisplay("/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)["file"]
+	assert.Equal(t, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``", file)
+}
+
+// A route path holding what looks like HTML or Markdown survives the real
+// renderers: nothing in it is converted, dropped or rendered.
+func TestConnectShowKeepsAPathThatLooksLikeMarkup(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	dir := filepath.Join(t.TempDir(), "Q3 <b>bold<i> [x](y) `tick`")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--route", fmt.Sprintf("%d=%s", setupProject, dir))
+	require.NoError(t, err, out)
+
+	for format, want := range map[output.Format]string{
+		output.FormatStyled:   `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
+		output.FormatMarkdown: `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
+	} {
+		app := newConnectSetupApp(t, s, "agent")
+		var buf bytes.Buffer
+		app.Output = output.New(output.Options{Format: format, Writer: &buf})
+		out, err := runConnectShowCmd(t, app)
+		require.NoError(t, err, out)
+		assert.Contains(t, buf.String(), want, "format %v", format)
+	}
+}
+
+func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
+	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
+	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
+}

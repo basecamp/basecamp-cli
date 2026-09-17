@@ -1,0 +1,32 @@
+task: >-
+  Add our project called "Launch $(date)" to my agent's connector. Its work
+  lives in /home/me/Work/Q3 $launch.
+context: >-
+  The agent's profile is helper; it is already connected, its identity is
+  confirmed, and it was set up before with me as the operator (my profile is
+  jorge). The directory exists. Don't stop to ask.
+tags: [connect]
+mocks:
+  - match: 'auth status.*jorge'
+    output: '{"ok":true,"data":{"profile":"jorge","authenticated":true,"oauth_type":"launchpad","account_id":"999","storage":"keyring","user_email":"jorge@example.com"}}'
+  - match: '^me .*jorge'
+    output: '{"ok":true,"data":{"identity":{"id":6001,"first_name":"Jorge","last_name":"M","email_address":"jorge@example.com"},"accounts":[{"id":999,"name":"Acme","current":true}],"person":{"id":1001,"name":"Jorge M"}}}'
+  - match: 'connect show'
+    output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","version":1,"profile":"helper","account_id":"999","agent":{"person_id":4001,"kind":"agent"},"trust":{"mode":"operator","operator_id":1001},"projects":{"111":{"path":"/home/me/Work/marketing"}},"driver":"spawn","concurrency":2,"deadline":"45m0s","worktrees":false},"summary":"Profile \"helper\": trust operator, 1 routed project(s)"}'
+  - match: 'auth status'
+    output: '{"ok":true,"data":{"profile":"helper","authenticated":true,"oauth_type":"agent","account_id":"999","storage":"keyring"}}'
+  - match: 'projects list'
+    output: '{"ok":true,"data":[{"id":111,"name":"Marketing"},{"id":222,"name":"Launch $(date)"}],"summary":"2 projects"}'
+  - match: 'connect setup'
+    output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","profile":"helper","account_id":"999","agent_person_id":4001,"agent_kind":"agent","operator_id":1001,"trust_mode":"operator","routes":2,"written":true,"ready":true,"checks":[{"name":"Project 222","status":"pass","message":"Readable by the agent, routed to /home/me/Work/Q3 $launch"}]},"summary":"connect.json written; all passed"}'
+accept:
+  - 'connect setup .*(-P|--profile)[ =]''?helper\b'
+  - 'connect setup .*--route[ =](''222=/home/me/Work/Q3 \$launch''|222=''/home/me/Work/Q3 \$launch'')'
+reject:
+  # The name never reaches a command; only its id does.
+  - '\$\(date\)'
+  - 'Launch'
+  # Unquoted, or double-quoted (where $launch would still expand).
+  - '--route[ =]222=/home'
+  - '--route[ =]"'
+  - '222="'

@@ -75,16 +75,18 @@ Run it early and often — after finishing a feature, after fixing a bug, before
 pushing. If you're about to `git push` and haven't run `bin/ci` in this
 session, stop and run it first.
 
-**Skill drift**: `make check-skill-drift` runs over both `skills/basecamp/SKILL.md`
-and `skills/basecamp-doctor/SKILL.md`, checking that the commands and flags each one
+**Skill drift**: `make check-skill-drift` runs over `skills/basecamp/SKILL.md`,
+`skills/basecamp-doctor/SKILL.md` and `skills/basecamp-connect/SKILL.md`, checking that the commands and flags each one
 *references* still exist in the `.surface` snapshot. It catches stale references, not
-missing coverage, so adding a command breaks neither skill.
+missing coverage, so adding a command breaks none of them.
 
 Removal is only partly caught. `resolve_cmd` walks up to the nearest existing ancestor,
 so dropping a nested subcommand leaves the reference resolving against its parent and the
 check still passes — `basecamp setup <removed>` resolves as `basecamp setup`. Removing a
 top-level command is caught; removing a subcommand is not. Don't lean on CI for this. Update the skill the change actually affects;
-basecamp-doctor deliberately covers only doctor, setup and auth remediation.
+basecamp-doctor deliberately covers only doctor, setup and auth remediation;
+basecamp-connect covers `basecamp auth agent connect` and `basecamp connect`, and its
+evals run against its own SKILL.md (`make -C skill-evals eval-connect`).
 
 ```bash
 bin/ci                # The single command — run this

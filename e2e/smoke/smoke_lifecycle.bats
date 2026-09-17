@@ -20,6 +20,10 @@ load smoke_helper
   mark_out_of_scope "Needs a connected agent profile and writes local connector policy — covered by Go tests in internal/commands and internal/connector/setup"
 }
 
+@test "connect show is out of scope" {
+  mark_out_of_scope "Reads the connector policy a connected profile's setup wrote — covered by Go tests in internal/commands"
+}
+
 @test "auth refresh is out of scope" {
   mark_out_of_scope "Requires OAuth credentials"
 }
