@@ -296,15 +296,15 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 	return c
 }
 
-// RouteChecks reads each routed project the way admission will, as the
+// ProjectChecks reads each served project the way admission will, as the
 // agent: the project, and its people (project trust mode's membership read).
-func RouteChecks(ctx context.Context, r Reader, f File) []Check {
+func ProjectChecks(ctx context.Context, r Reader, f File) []Check {
 	if len(f.Projects) == 0 {
 		return []Check{{
-			Name:    "Routes",
+			Name:    "Projects",
 			Status:  StatusFail,
-			Message: "No project is routed: every mention would get a holding reply and no work",
-			Hint:    "Add one: basecamp connect setup -P " + f.Profile + " --route <project-id>=<dir>",
+			Message: "No project is served: every mention would get a holding reply and no work",
+			Hint:    "Serve one: basecamp connect setup -P " + f.Profile + " --serve <project-id>",
 		}}
 	}
 	ids := make([]int64, 0, len(f.Projects))
@@ -315,22 +315,13 @@ func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 
 	checks := make([]Check, 0, len(ids))
 	for _, id := range ids {
-		checks = append(checks, routeCheck(ctx, r, f.Agent.Kind, id, f.Projects[id].Path))
+		checks = append(checks, projectCheck(ctx, r, f.Agent.Kind, id))
 	}
 	return checks
 }
 
-func routeCheck(ctx context.Context, r Reader, kind string, id int64, path string) Check {
+func projectCheck(ctx context.Context, r Reader, kind string, id int64) Check {
 	c := Check{Name: fmt.Sprintf("Project %d", id)}
-	// The directory is checked as a new route's is, whether the route was
-	// passed now or kept from connect.json: it must still resolve to itself,
-	// an existing directory.
-	if resolved, err := ResolveDir(path); err != nil || resolved != path {
-		c.Status = StatusFail
-		c.Message = "The route's directory is no longer usable: " + richtext.SanitizeSingleLine(path)
-		c.Hint = fmt.Sprintf("Route the project again: --route %d=<dir>, or remove it: --remove-route %d.", id, id)
-		return c
-	}
 	for _, read := range []struct {
 		what string
 		run  func(context.Context, int64) error
@@ -356,7 +347,7 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 		return c
 	}
 	c.Status = StatusPass
-	c.Message = "Readable by the agent, routed to " + richtext.SanitizeSingleLine(path)
+	c.Message = "Readable by the agent"
 	return c
 }
 

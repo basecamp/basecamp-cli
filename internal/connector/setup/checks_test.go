@@ -9,8 +9,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -53,11 +51,11 @@ func status(code int) error {
 // The known bc3 limitation: an Agent identity is refused the reads admission
 // makes. Setup has to say so, rather than write a file the connector would
 // start on and then block every event against.
-func TestRouteChecksNameTheAgentReadRefusal(t *testing.T) {
+func TestProjectChecksNameTheAgentReadRefusal(t *testing.T) {
 	f := validFile(t)
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusForbidden)}}
 
-	checks := RouteChecks(context.Background(), r, f)
+	checks := ProjectChecks(context.Background(), r, f)
 	require.Len(t, checks, 2)
 	byName := map[string]Check{}
 	for _, c := range checks {
@@ -72,12 +70,12 @@ func TestRouteChecksNameTheAgentReadRefusal(t *testing.T) {
 	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", otherProj)].Status)
 }
 
-func TestRouteChecksReadProjectPeopleToo(t *testing.T) {
+func TestProjectChecksReadProjectPeopleToo(t *testing.T) {
 	f := validFile(t)
 	r := &fakeReader{projectPplErr: map[int64]error{otherProj: status(http.StatusForbidden)}}
 
 	var failed []Check
-	for _, c := range RouteChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f) {
 		if c.Status == StatusFail {
 			failed = append(failed, c)
 		}
@@ -87,12 +85,12 @@ func TestRouteChecksReadProjectPeopleToo(t *testing.T) {
 	assert.Contains(t, failed[0].Message, "people")
 }
 
-func TestRouteChecksForABotUserSayToAddTheAgent(t *testing.T) {
+func TestProjectChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	f := validFile(t)
 	f.Agent = Agent{PersonID: agentID, Kind: KindBotUser, IdentityID: 99}
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusNotFound)}}
 
-	for _, c := range RouteChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f) {
 		if c.Status != StatusFail {
 			continue
 		}
@@ -103,12 +101,12 @@ func TestRouteChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	t.Fatal("the refused project did not fail")
 }
 
-func TestRouteChecksWarnWithNoRoutes(t *testing.T) {
+func TestProjectChecksFailWithNoServedProject(t *testing.T) {
 	f := validFile(t)
-	f.Projects = map[int64]admission.Route{}
-	checks := RouteChecks(context.Background(), &fakeReader{}, f)
+	f.Projects = map[int64]admission.Project{}
+	checks := ProjectChecks(context.Background(), &fakeReader{}, f)
 	require.Len(t, checks, 1)
-	assert.Equal(t, StatusFail, checks[0].Status, "a connector with no route does no work, so it is not ready")
+	assert.Equal(t, StatusFail, checks[0].Status, "a connector serving no project does no work, so it is not ready")
 }
 
 func TestTicketCheck(t *testing.T) {
@@ -256,17 +254,6 @@ func TestSDKReaderMintsAndDiscardsTheTicket(t *testing.T) {
 	}
 }
 
-// A route directory's name reaches a one-line terminal sink; control
-// characters in it must not restyle or break that line.
-func TestRouteChecksSanitizeThePath(t *testing.T) {
-	f := validFile(t)
-	f.Projects = map[int64]admission.Route{projectID: {Path: "/work/evil\x1b[31m\nFAKE ✓ line"}}
-	checks := RouteChecks(context.Background(), &fakeReader{}, f)
-	require.Len(t, checks, 1)
-	assert.NotContains(t, checks[0].Message, "\x1b")
-	assert.NotContains(t, checks[0].Message, "\n")
-}
-
 // ErrorText is the one formatter for read errors: an HTTP answer is its
 // status and nothing the server wrote.
 func TestErrorTextKeepsNothingTheServerWrote(t *testing.T) {
@@ -302,25 +289,6 @@ func TestScopeCheck(t *testing.T) {
 			assert.Equal(t, tc.want, ScopeCheck(tc.oauthType, tc.granted).Status, "unknown scopes are never full")
 		})
 	}
-}
-
-// A route kept from connect.json is checked as a new one is: a directory
-// that has since gone is not ready.
-func TestRouteChecksCheckEveryRoutesDirectory(t *testing.T) {
-	f := validFile(t)
-	gone := f.Projects[otherProj].Path
-	require.NoError(t, os.Remove(gone))
-	file := filepath.Join(t.TempDir(), "file")
-	require.NoError(t, os.WriteFile(file, nil, 0o600))
-	f.Projects[777] = admission.Route{Path: file}
-
-	byName := map[string]Check{}
-	for _, c := range RouteChecks(context.Background(), &fakeReader{}, f) {
-		byName[c.Name] = c
-	}
-	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", projectID)].Status)
-	assert.Equal(t, StatusFail, byName[fmt.Sprintf("Project %d", otherProj)].Status, "a directory that is gone")
-	assert.Equal(t, StatusFail, byName["Project 777"].Status, "a file where the directory was")
 }
 
 // The lifetime bound is compared in whole seconds, so no value wraps past

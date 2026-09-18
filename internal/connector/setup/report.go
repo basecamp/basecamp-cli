@@ -17,8 +17,9 @@ type Report struct {
 	AgentKind     string
 	OperatorID    int64
 	TrustMode     string
-	Routes        int
-	Written       bool
+	// Projects is how many Basecamp projects the file serves.
+	Projects int
+	Written  bool
 
 	checks []Check
 }
@@ -57,9 +58,9 @@ func (r *Report) MarshalJSON() ([]byte, error) {
 		AgentKind     string  `json:"agent_kind"`
 		OperatorID    int64   `json:"operator_id"`
 		TrustMode     string  `json:"trust_mode"`
-		Routes        int     `json:"routes"`
+		Projects      int     `json:"projects"`
 		Written       bool    `json:"written"`
 		Ready         bool    `json:"ready"`
 		Checks        []Check `json:"checks"`
-	}{r.Path, r.Profile, r.AccountID, r.AgentPersonID, r.AgentKind, r.OperatorID, r.TrustMode, r.Routes, r.Written, r.Ready(), r.Checks()})
+	}{r.Path, r.Profile, r.AccountID, r.AgentPersonID, r.AgentKind, r.OperatorID, r.TrustMode, r.Projects, r.Written, r.Ready(), r.Checks()})
 }

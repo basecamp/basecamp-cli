@@ -12,13 +12,13 @@ func TestParsePolicy(t *testing.T) {
   "driver": "spawn",
   "trust": {"operator_id": 26909558},
   "projects": {
-    "48699913": {"path": "/work/connector", "class": "internal", "watch_completions": true},
-    "555": {"path": "/work/other"}
+    "48699913": {"class": "internal", "watch_completions": true},
+    "555": {}
   }
 }`))
 	require.NoError(t, err)
 	assert.Equal(t, TrustOperator, p.Trust.Mode, "operator is the default mode")
-	assert.Equal(t, Route{Path: "/work/connector", Class: "internal", WatchCompletions: true}, p.Projects[48699913])
+	assert.Equal(t, Project{Class: "internal", WatchCompletions: true}, p.Projects[48699913])
 	assert.False(t, p.Projects[555].WatchCompletions)
 
 	p.AgentID = agentID
@@ -35,9 +35,8 @@ func TestValidateFailsClosed(t *testing.T) {
 		"non-positive allowlist id": func(p *Policy) {
 			p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{0}}
 		},
-		"route without a path":   func(p *Policy) { p.Projects[routedProj] = Route{Class: "internal"} },
-		"route for a non-bucket": func(p *Policy) { p.Projects[-1] = Route{Path: "/x"} },
-		"agent as operator":      func(p *Policy) { p.Trust.OperatorID = agentID },
+		"served project that is not a bucket": func(p *Policy) { p.Projects[-1] = Project{} },
+		"agent as operator":                   func(p *Policy) { p.Trust.OperatorID = agentID },
 		"agent in the allowlist": func(p *Policy) {
 			p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{agentID}}
 		},

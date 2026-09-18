@@ -146,10 +146,11 @@ const (
 )
 
 // NextBlockedRetry returns when a blocked record should next be re-run, and
-// false when it waits for something other than time: a route (no_route), or
-// a person's redispatch once the window has passed. notBefore is a throttled
-// record's Verdict.RetryAt; no retry is scheduled before it, and a deadline
-// past the window hands the record to redispatch rather than asking early.
+// false when it waits for something other than time: the operator serving the
+// project (no_route), or a person's redispatch once the window has passed.
+// notBefore is a throttled record's Verdict.RetryAt; no retry is scheduled
+// before it, and a deadline past the window hands the record to redispatch
+// rather than asking early.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
 	switch reason {
 	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:

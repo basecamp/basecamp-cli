@@ -29,18 +29,33 @@ type Trust struct {
 	AllowlistIDs []int64 `json:"allowlist_ids,omitempty"`
 }
 
-// Route is one project's entry in connect.json: where its work runs and how
-// admission treats it. Routes are local: nothing read from Basecamp can add or
-// change one.
-type Route struct {
-	// Path is the approved working directory the project maps to.
-	Path string `json:"path"`
+// Project is one served project's entry in connect.json: a project the agent
+// may be driven from, and how admission treats it. The entries are local:
+// nothing read from Basecamp can add or change one, which is what makes the
+// list an answer to "which projects may drive this agent" that only the
+// operator writes. It matters most under TrustProject, where any non-client
+// member of a served project can drive the agent.
+//
+// No directory is associated with a project. The connector runs where it was
+// started; a task that needs a clone or a directory of its own is the agent's
+// business to make.
+type Project struct {
 	// Class is the project's classification, carried on the record.
 	Class string `json:"class,omitempty"`
 	// WatchCompletions makes the agent a driver of the project: every trusted
 	// completion in it is admitted as trigger completed, without the agent
 	// being assigned or subscribed.
 	WatchCompletions bool `json:"watch_completions,omitempty"`
+
+	// LegacyPath is the directory a connector that routed projects to
+	// directories ran this project's work in. Nothing reads it: a task runs
+	// where the connector was started. It is still a field because
+	// setup.Parse refuses an unknown key, and every connect.json written
+	// before the paths went has "path" on every project — deleting the field
+	// outright would stop every connector already set up. setup.Parse zeroes
+	// it, and omitempty keeps it out of everything written from here, so the
+	// next `connect setup` writes the key away for good.
+	LegacyPath string `json:"path,omitempty"`
 }
 
 // Policy is what admission reads from connect.json, plus the two facts that
@@ -58,8 +73,8 @@ type Policy struct {
 	Buckets []int64 `json:"-"`
 
 	Trust Trust `json:"trust"`
-	// Projects maps a bucket id to its route.
-	Projects map[int64]Route `json:"projects,omitempty"`
+	// Projects maps a bucket id to the entry for the project it serves.
+	Projects map[int64]Project `json:"projects,omitempty"`
 }
 
 // ParsePolicy decodes the admission part of connect.json. Unknown keys are
@@ -107,12 +122,9 @@ func (p Policy) Validate() error {
 	default:
 		return fmt.Errorf("admission: unknown trust mode %q", p.Trust.Mode)
 	}
-	for bucket, route := range p.Projects {
+	for bucket := range p.Projects {
 		if bucket <= 0 {
-			return fmt.Errorf("admission: route for bucket %d: not a bucket id", bucket)
-		}
-		if route.Path == "" {
-			return fmt.Errorf("admission: route for bucket %d has no path", bucket)
+			return fmt.Errorf("admission: served project %d: not a bucket id", bucket)
 		}
 	}
 	return nil
@@ -123,8 +135,8 @@ func (p Policy) inScope(bucket int64) bool {
 	return len(p.Buckets) == 0 || slices.Contains(p.Buckets, bucket)
 }
 
-// route returns the bucket's route, if connect.json has one.
-func (p Policy) route(bucket int64) (Route, bool) {
+// served returns the bucket's entry, if connect.json serves the project.
+func (p Policy) served(bucket int64) (Project, bool) {
 	r, ok := p.Projects[bucket]
 	return r, ok
 }

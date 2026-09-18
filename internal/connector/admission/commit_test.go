@@ -303,14 +303,14 @@ func (s *syncBuffer) String() string {
 func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 	f := newFakeReads()
 	const secret = "the body of the instruction"
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>"+secret+" "+mentionOf(t, agentID)+"</div>")
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>"+secret+" "+mentionOf(t, agentID)+"</div>")
 	ledger := newFakeLedger()
 	out := &syncBuffer{}
 	source := &sliceSource{ids: []int64{3, 1, 2, 1}}
 
 	records := mapRecords{
-		1: {ID: 1, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID},
-		2: {ID: 2, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID},
+		1: {ID: 1, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID},
+		2: {ID: 2, EventType: "card.moved", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID},
 		// 3 is no longer seen: skipped.
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -346,7 +346,7 @@ func TestRunDecidesCommitsAndReportsWithoutContent(t *testing.T) {
 	}
 	assert.Equal(t, map[string]any{
 		"type": "event", "event_id": float64(1), "event_type": "card.created", "trigger": "mentioned",
-		"class": "internal", "route": "/work/connector", "bucket_id": float64(routedProj), "recording_id": float64(recordingID),
+		"class": "internal", "bucket_id": float64(servedProj), "recording_id": float64(recordingID),
 		"recording_url": "https://app.basecamp.com/2914079/buckets/1/recordings/1", "requester_id": float64(operatorID), "state": "admitted",
 	}, lines[1])
 	assert.Equal(t, "discarded", lines[2]["state"])
@@ -422,7 +422,6 @@ func TestLinesCannotCarryTerminalControls(t *testing.T) {
 		EventID:      1,
 		EventType:    "card.created" + esc + "]0;owned" + bel,
 		RecordingURL: "https://app.basecamp.com/x" + csi + "31m" + esc + "[2J",
-		Route:        "/work" + esc + "[1m",
 		State:        StateDiscarded,
 		Reason:       ReasonNotInMatrix,
 	}))
@@ -441,7 +440,7 @@ func TestRunStopsOnACommitFailure(t *testing.T) {
 	ledger.failure = errors.New("disk I/O error")
 	err := Run(ctx, RunOptions{
 		Source:    &sliceSource{ids: []int64{1}},
-		Records:   mapRecords{1: {ID: 1, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}},
+		Records:   mapRecords{1: {ID: 1, EventType: "card.moved", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}},
 		Admitter:  newAdmitter(t, basePolicy(), newFakeReads()),
 		Committer: NewCommitter(ledger),
 	})
@@ -462,12 +461,12 @@ func TestRunStopsOnALoadFailure(t *testing.T) {
 	require.ErrorContains(t, err, "database is locked")
 }
 
-func TestLinesKeepLocalPathsAsWritten(t *testing.T) {
+func TestLinesKeepWhitespaceAsWritten(t *testing.T) {
 	var b strings.Builder
-	require.NoError(t, newLineWriter(nil, &b).write(Verdict{EventID: 1, State: StateAdmitted, Route: " /work/My  Projects\tA", Class: "in ternal"}))
+	require.NoError(t, newLineWriter(nil, &b).write(Verdict{EventID: 1, State: StateAdmitted, EventType: " card.  created\tx", Class: "in ternal"}))
 	var m map[string]any
 	require.NoError(t, json.Unmarshal([]byte(b.String()), &m))
-	assert.Equal(t, " /work/My  Projects\tA", m["route"], "whitespace in a path is not a terminal control")
+	assert.Equal(t, " card.  created\tx", m["event_type"], "whitespace is not a terminal control")
 	assert.Equal(t, "in ternal", m["class"])
 }
 

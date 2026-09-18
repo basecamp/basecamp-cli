@@ -347,13 +347,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		routes := newConnectRoutes(path, file, logger)
+		served := newConnectServed(path, file, logger)
 		worker, err := connectDriver(driverName, file.WorkerName(), f.adapters)
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
 		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -538,11 +538,11 @@ func connectUnsupportedOSError(goos string) error {
 	return output.ErrUsage(fmt.Sprintf("basecamp connect runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
 }
 
-// connectRoutes is connect.json's routes as they are now, not as they were at
-// start: a route removed by `connect setup --unroute` stops authorizing
-// dispatch without a restart. A file that no longer loads, or that now names
-// another agent or account, authorizes nothing.
-type connectRoutes struct {
+// connectServed is connect.json's served projects as they are now, not as
+// they were at start: a project removed by `connect setup --unserve` stops
+// authorizing dispatch without a restart. A file that no longer loads, or
+// that now names another agent or account, authorizes nothing.
+type connectServed struct {
 	path     string
 	agent    setup.Agent
 	account  string
@@ -550,32 +550,32 @@ type connectRoutes struct {
 	now      func() time.Time
 	mu       sync.Mutex
 	loadedAt time.Time
-	routes   map[int64]admission.Route
+	projects map[int64]admission.Project
 	failing  bool
 }
 
-// connectRoutesTTL is how long a read of connect.json is reused.
-const connectRoutesTTL = 2 * time.Second
+// connectServedTTL is how long a read of connect.json is reused.
+const connectServedTTL = 2 * time.Second
 
-func newConnectRoutes(path string, file setup.File, log *slog.Logger) *connectRoutes {
-	return &connectRoutes{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
+func newConnectServed(path string, file setup.File, log *slog.Logger) *connectServed {
+	return &connectServed{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
 }
 
-// Current returns a copy of the routes connect.json approves now.
-func (r *connectRoutes) Current() map[int64]admission.Route {
+// Current returns a copy of the projects connect.json serves now.
+func (r *connectServed) Current() map[int64]admission.Project {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.routes == nil || r.now().Sub(r.loadedAt) >= connectRoutesTTL {
+	if r.projects == nil || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
 	}
-	out := make(map[int64]admission.Route, len(r.routes))
-	for k, v := range r.routes {
+	out := make(map[int64]admission.Project, len(r.projects))
+	for k, v := range r.projects {
 		out[k] = v
 	}
 	return out
 }
 
-func (r *connectRoutes) reload() {
+func (r *connectServed) reload() {
 	r.loadedAt = r.now()
 	file, err := setup.Load(r.path)
 	switch {
@@ -589,16 +589,16 @@ func (r *connectRoutes) reload() {
 			r.log.Error("connector: dispatching nothing until connect.json is usable again", "error", err)
 		}
 		r.failing = true
-		r.routes = map[int64]admission.Route{}
+		r.projects = map[int64]admission.Project{}
 		return
 	}
 	if r.failing {
 		r.log.Info("connector: connect.json is usable again")
 	}
 	r.failing = false
-	r.routes = make(map[int64]admission.Route, len(file.Projects))
-	for bucket, route := range file.Projects {
-		r.routes[bucket] = route
+	r.projects = make(map[int64]admission.Project, len(file.Projects))
+	for bucket, project := range file.Projects {
+		r.projects[bucket] = project
 	}
 }
 
@@ -608,7 +608,7 @@ type connectDispatch struct {
 	Buckets []int64
 	Ledger  *connector.Ledger
 	Driver  driver.Driver
-	Routes  func() map[int64]admission.Route
+	Served  func() map[int64]admission.Project
 
 	Profile     string
 	Executable  string
@@ -628,7 +628,7 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 	return connector.DispatcherOptions{
 		Ledger:             d.Ledger,
 		Driver:             d.Driver,
-		Routes:             d.Routes,
+		Served:             d.Served,
 		Concurrency:        d.File.Concurrency,
 		Deadline:           time.Duration(d.File.Deadline),
 		Buckets:            d.Buckets,

@@ -1453,7 +1453,7 @@ BASECAMP_NONINTERACTIVE=1 basecamp auth login --device-code  # The only OAuth lo
 basecamp auth login --with-token -P bot --account <id>  # Import a personal access token from stdin (pipe it in)
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
-basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<dir>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
+basecamp connect setup -P agent --operator-profile <me> --serve <project-id>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
 basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
 basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
 basecamp connect setup -P agent --worker codex     # Run workers with Codex instead of Claude Code
@@ -1469,10 +1469,10 @@ there. It refuses a second connector for the same agent, and takes `--project`
 (repeatable) to hear and dispatch only those projects. Run it under a
 supervisor rather than from a session you will close.
 
-A task runs in the directory its project is routed to, and the connector
-prepares nothing: it makes no directory, no clone and no branch. Work that
-needs one of its own is the agent's to make, from its own skills and
-instructions.
+A task runs in the directory the connector itself was started in, and the
+connector prepares nothing: no directory is associated with a project, and it
+makes no directory, no clone and no branch. Work that needs one of its own is
+the agent's to make, from its own skills and instructions.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

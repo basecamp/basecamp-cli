@@ -17,7 +17,6 @@ import (
 // collide with the dispatcher's own test helpers.
 
 const (
-	obRoute           = "/work/connector"
 	obEventRecording  = int64(10304028972) // testEvent's recording
 	obReplyRecording  = int64(10304028989) // admittedVerdict's reply destination
 	obCampfire        = int64(10304030000)
@@ -61,18 +60,18 @@ func obAdmit(t *testing.T, ledger *Ledger, id int64, key string) {
 	require.NoError(t, err)
 }
 
-// obNoRouteVerdict is a mention in a project with no route.
+// obNoRouteVerdict is a mention in a project the connector does not serve.
 func obNoRouteVerdict(id, revision int64, reply admission.ReplyDestination) admission.Verdict {
 	v := admittedVerdict(id, revision, "recording:10304028989")
 	v.State, v.Reason = admission.StateBlocked, admission.ReasonNoRoute
-	v.Routed, v.Route, v.Class, v.Snapshot = false, "", "", nil
+	v.Served, v.Class, v.Snapshot = false, "", nil
 	v.Reply = &reply
 	return v
 }
 
 func obLaunch(t *testing.T, ledger *Ledger, id int64) Launch {
 	t.Helper()
-	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Route: obRoute, Driver: "fake", Deadline: time.Hour})
+	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Driver: "fake", Deadline: time.Hour})
 	require.NoError(t, err)
 	return l
 }

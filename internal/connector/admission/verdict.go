@@ -81,10 +81,10 @@ type Verdict struct {
 	// for a comment, the Campfire for a chat line, the recording otherwise.
 	ConversationKey string
 	Reply           *ReplyDestination
-	// Route and Class come from connect.json; Routed is false when the
-	// project has none.
-	Routed bool
-	Route  string
+	// Served is whether connect.json serves the record's project, and Class
+	// is that entry's classification. No directory comes from connect.json:
+	// the connector runs where it was started.
+	Served bool
 	Class  string
 	// RecordingURL is the recording's app URL, once read. A URL, not content.
 	RecordingURL string
@@ -256,8 +256,8 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 
 	v.RecordingURL = summary.AppURL
-	if route, ok := a.policy.route(ev.BucketID); ok {
-		v.Routed, v.Route, v.Class = true, route.Path, route.Class
+	if project, ok := a.policy.served(ev.BucketID); ok {
+		v.Served, v.Class = true, project.Class
 	}
 
 	rule, state, reason, err := d.match(ctx, ev, gate.Rules, summary)
@@ -271,11 +271,12 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
 	v.address(summary)
 
-	if !v.Routed {
-		// Mentioned and assigned are answered in an unmapped project rather
+	if !v.Served {
+		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination
-		// for the holding reply, and is read again when a route appears. The
-		// gate already discarded every trigger that requires a route.
+		// for the holding reply, and is read again once the operator serves
+		// the project. The gate already discarded every trigger that requires
+		// a served project.
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted
@@ -366,8 +367,8 @@ func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			}
 
 		case TriggerCompleted:
-			route, routed := a.policy.route(ev.BucketID)
-			if routed && route.WatchCompletions {
+			project, served := a.policy.served(ev.BucketID)
+			if served && project.WatchCompletions {
 				return rule, "", "", nil
 			}
 			if assigned(summary, agent) {

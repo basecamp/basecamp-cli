@@ -327,8 +327,8 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))
 	for _, t := range s.Tasks {
-		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v  in %s\n",
-			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
+		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v\n",
+			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs)
 	}
 	fmt.Fprintf(w, "  Indeterminate  %d lifecycle messages wait for a person\n", len(s.Indeterminate))
 	for _, in := range s.Indeterminate {
@@ -377,7 +377,7 @@ and who authorized it is recorded.
 
 A completed or held record is admitted at once (a completed one whose task is
 still running, when that task ends). A blocked record keeps its state and
-runs what blocked it again — the read, the events lookup, the route check —
+runs what blocked it again — the read, the events lookup, the served check —
 and is admitted the moment that succeeds; if it blocks again, the record stays
 blocked with the authorization, and redispatch runs it again. While the hold
 stands the record is authorized and nothing launches until release.

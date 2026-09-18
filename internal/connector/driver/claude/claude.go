@@ -118,11 +118,11 @@ func (d *Driver) redactor(cfg driver.SessionConfig) *driver.Redactor {
 
 // modeIDs maps the connector's permission modes to Claude Code's.
 var modeIDs = map[driver.PermissionMode]string{
-	driver.ModeEditsInWorkDir: "acceptEdits",
+	driver.ModeEdits: "acceptEdits",
 }
 
 // kindTools are Claude Code's built-in tools for each kind the policy can
-// allow. Edits are acceptEdits's, confined to the working directory.
+// allow. Edits are acceptEdits's.
 var kindTools = map[driver.ToolKind][]string{
 	driver.ToolRead:   {"Read"},
 	driver.ToolSearch: {"Glob", "Grep"},
@@ -138,9 +138,6 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 	if !ok {
 		return nil, fmt.Errorf("claude: no Claude Code mode for policy mode %q", rules.Mode)
 	}
-	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
-		return nil, fmt.Errorf("claude: the policy's working directory %q is not the session's %q", rules.WorkDir, cfg.Cwd)
-	}
 	tools := slices.Clone(kindTools[driver.ToolEdit])
 	var allowed []string
 	for _, kind := range rules.AllowKinds {
@@ -148,9 +145,8 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 		if !ok {
 			return nil, fmt.Errorf("claude: no Claude Code tools for kind %q", kind)
 		}
-		// The tools exist in the session but get no allow rule: an allow
-		// rule for Read is a read anywhere on disk, where the policy allows
-		// reads in the working directory, which the mode already grants.
+		// The tools exist in the session but get no allow rule: the mode
+		// already grants them, and an allow rule would only widen it.
 		tools = append(tools, names...)
 	}
 	for _, server := range rules.AllowMCPServers {

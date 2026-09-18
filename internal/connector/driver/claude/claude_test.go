@@ -280,7 +280,7 @@ func newFixture(t *testing.T, scenario string) fixture {
 				Name: "basecamp", Command: "/usr/local/bin/basecamp", Args: []string{"mcp", "--profile", "agent"},
 				Env: map[string]string{"BASECAMP_CONNECT_TASK_TOKEN": "test-token-not-real"},
 			}},
-			Policy:     policy{workDir: work},
+			Policy:     policy{},
 			Scope:      driver.Scope{WorkDir: work},
 			PrivateDir: private,
 		},
@@ -305,7 +305,7 @@ func (f fixture) report_() (fakeReport, error) {
 	return r, json.Unmarshal(data, &r)
 }
 
-type policy struct{ workDir string }
+type policy struct{}
 
 func (p policy) Decide(context.Context, driver.PermissionRequest) driver.PermissionDecision {
 	return driver.PermissionDecision{}
@@ -313,7 +313,7 @@ func (p policy) Decide(context.Context, driver.PermissionRequest) driver.Permiss
 
 func (p policy) Rules() driver.PermissionRules {
 	return driver.PermissionRules{
-		Mode: driver.ModeEditsInWorkDir, WorkDir: p.workDir,
+		Mode:       driver.ModeEdits,
 		AllowKinds: []driver.ToolKind{driver.ToolRead, driver.ToolSearch}, AllowMCPServers: []string{"basecamp"},
 	}
 }
@@ -342,12 +342,8 @@ func TestArgsFreezeThePolicyAndCarryNoSecret(t *testing.T) {
 	assert.NotContains(t, tools, "Bash")
 	assert.NotContains(t, tools, "WebFetch")
 	assert.Equal(t, "mcp__basecamp", argAfter(args, "--allowed-tools"), "no read tool is an allow rule: that would allow reads anywhere")
-	assert.Contains(t, tools, "Read", "the tool exists; the mode confines it to the working directory")
+	assert.Contains(t, tools, "Read", "the tool exists, with no allow rule of its own")
 	assert.NotContains(t, strings.Join(args, " "), "test-token-not-real")
-
-	f.cfg.Cwd = "/elsewhere"
-	_, err = Args(f.cfg, "11111111-2222-4333-8444-555555555555", false, "/private/mcp.json", "")
-	assert.Error(t, err, "a policy for another directory is not this session's")
 }
 
 func TestASessionRunsAVerifiedTurnAndRecordsRefusals(t *testing.T) {

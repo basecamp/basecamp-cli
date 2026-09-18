@@ -143,8 +143,10 @@ func (w LiveWorker) Identity() driver.Process {
 //
 //   - completed with outcome unknown or failed: the task's token is
 //     superseded; admitted at once when the task has ended, otherwise when it
-//     ends. Refused without a snapshot or a route.
-//   - held with its snapshot and route and no blocking reason: admitted.
+//     ends. Refused without a snapshot, or in a project connect.json does
+//     not serve.
+//   - held with its snapshot, in a served project and with no blocking
+//     reason: admitted.
 //   - blocked, or held over a blocking reason: authorized as blocked, and
 //     Rerun asks the caller to run what blocked it.
 //   - succeeded, discarded, and anything live (seen, admitted, queued,
@@ -181,7 +183,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 	refuse := func(why string) error {
 		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
-	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Routed && record.Decision.ConversationKey != ""
+	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Served && record.Decision.ConversationKey != ""
 	at := l.now()
 	now := stamp(at)
 	authorize := []assignment{{column: "authorized_at", value: now}, {column: "authorized_by", value: by}}
@@ -204,7 +206,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		case record.redispatchDecision != 0:
 			return RedispatchResult{}, refuse("already has a redispatch waiting for its task to end")
 		case !dispatchable:
-			return RedispatchResult{}, refuse("no longer has the snapshot and route a dispatch needs (retention dropped them, or the verdict carried none)")
+			return RedispatchResult{}, refuse("no longer has the snapshot and served project a dispatch needs (retention dropped them, or the verdict carried none)")
 		}
 		if !task.superseded {
 			// The replaced worker is refused by basecamp_connect from here on

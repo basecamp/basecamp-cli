@@ -164,7 +164,6 @@ type TaskStatus struct {
 	AttemptID string `json:"attempt_id"`
 	State     string `json:"state"`
 	Driver    string `json:"driver"`
-	WorkDir   string `json:"work_dir"`
 	PID       int    `json:"pid,omitempty"`
 	PGID      int    `json:"pgid,omitempty"`
 	// ProcessStartedAt is the start time recorded with the pid: with it, the
@@ -434,7 +433,7 @@ SELECT
 
 func statusTasks(ctx context.Context, tx *sql.Tx, s *Status) error {
 	rows, err := tx.QueryContext(ctx, `
-SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started,
+SELECT t.id, a.id, a.state, a.driver, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started,
        COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started, a.taker_unaccounted, a.launched_at, t.deadline_at
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
@@ -450,7 +449,7 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 			started  sql.NullString
 			taken    sql.NullString
 		)
-		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &t.PGID, &started,
+		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.PID, &t.PGID, &started,
 			&t.TakerPID, &t.TakerPGID, &taken, &t.TakerUnaccounted, &launched, &deadline); err != nil {
 			_ = rows.Close()
 			return err

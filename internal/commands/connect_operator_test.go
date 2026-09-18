@@ -72,7 +72,7 @@ func (f operatorFixture) ledger(t *testing.T, shadow bool) *connector.Ledger {
 	_, err = l.Admission().Commit(ctx, admission.Verdict{
 		EventID: 1, EventType: "comment.created", BucketID: setupProject, RecordingID: 77, RequesterID: setupOperatorPerson,
 		State: admission.StateAdmitted, Trigger: admission.TriggerMentioned, Acknowledge: true, ConversationKey: "recording:70",
-		Reply: &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 70}, Routed: true, Route: "/work/app",
+		Reply: &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 70}, Served: true,
 		RecordingURL: "https://app.basecamp.com/999/buckets/1/recordings/77",
 		Snapshot:     &admission.Snapshot{Type: "Comment", Content: operatorSecretContent, UpdatedAt: time.Now()},
 	})
@@ -536,26 +536,28 @@ func preflightCheck(t *testing.T, checks []setup.Check) (setup.Check, bool) {
 	return setup.Check{}, false
 }
 
-// codexProfile is an acp/codex profile whose routes are dirs under one root,
-// with HOME (and so ~/.codex) pointed at a home of its own: the machine
-// state the Codex preflight reads, and nothing of the person running the
-// test.
-func codexProfile(t *testing.T, routes int) (setup.File, string, []string) {
+// codexProfile is an acp/codex profile, with HOME (and so ~/.codex) pointed
+// at a home of its own and the process's working directory at a repository
+// of its own: the machine state the Codex preflight reads, and nothing of
+// the person running the test. Doctor checks the directory it runs in, so
+// the test runs in one it owns.
+func codexProfile(t *testing.T) (file setup.File, home, dir string) {
 	t.Helper()
-	home := t.TempDir()
+	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("CODEX_HOME", "")
-	file := setup.New("agent")
+	dir = filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	t.Chdir(dir)
+	// Doctor names the directory as the kernel reports it, which on a Mac is
+	// the resolved path under /private.
+	resolved, err := os.Getwd()
+	require.NoError(t, err)
+	file = setup.New("agent")
 	file.Driver = setup.DriverACP
 	file.Worker = setup.WorkerCodex
-	paths := make([]string, 0, routes)
-	for i := range routes {
-		dir := filepath.Join(t.TempDir(), "repo")
-		require.NoError(t, os.MkdirAll(dir, 0o755))
-		file.Projects[int64(i+1)] = admission.Route{Path: dir}
-		paths = append(paths, dir)
-	}
-	return file, home, paths
+	file.Projects[1] = admission.Project{}
+	return file, home, resolved
 }
 
 func writeCodexConfig(t *testing.T, dir, body string) string {
@@ -571,25 +573,30 @@ func writeCodexConfig(t *testing.T, dir, body string) string {
 // machine is blocked with a notice on the card. Doctor runs that same
 // refusal: a profile whose adapter is installed and on the pin is not ready
 // if no session it would start could run.
-func TestConnectDoctorRunsTheAdaptersPreflightAgainstEveryRoutedDirectory(t *testing.T) {
-	file, home, _ := codexProfile(t, 2)
+//
+// It runs it in the directory doctor itself was started in. That is where a
+// dispatch would run a session only if the connector was started in the same
+// place — the connector runs where it is started and records nowhere — so
+// the check names the directory it checked.
+func TestConnectDoctorRunsTheAdaptersPreflightInItsOwnDirectory(t *testing.T) {
+	file, home, dir := codexProfile(t)
 
 	checks := workerBinaryChecks(file)
 	c, ok := preflightCheck(t, checks)
 	require.True(t, ok, "the codex adapter's preflight is a check of its own")
 	assert.Equal(t, setup.StatusPass, c.Status)
-	assert.Contains(t, c.Message, "2 checked", "it says how many routed directories it ran in")
+	assert.Contains(t, c.Message, dir, "it says which directory it ran in")
 
-	// The user's own layer: shared by every route, and the one anybody who
-	// uses Codex with MCP servers at all has.
+	// The user's own layer: the one anybody who uses Codex with MCP servers
+	// at all has.
 	userConfig := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
 
 	c, ok = preflightCheck(t, workerBinaryChecks(file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusFail, c.Status, "doctor never calls a profile ready that would not start")
 	assert.Contains(t, c.Message, userConfig, "the person reading this has to know which file")
-	assert.Contains(t, c.Message, "any routed directory", "one reason every route shares is reported once")
-	assert.Equal(t, 1, strings.Count(c.Message, userConfig), "and named once, not once per route")
+	assert.Contains(t, c.Message, dir, "and which directory it was checked in")
+	assert.Equal(t, 1, strings.Count(c.Message, userConfig), "and named once")
 	assert.Contains(t, c.Hint, "CODEX_HOME", "and what to do about it")
 
 	// And that is what the command exits with: the file is on the error a
@@ -599,35 +606,6 @@ func TestConnectDoctorRunsTheAdaptersPreflightAgainstEveryRoutedDirectory(t *tes
 	assert.Contains(t, err.Error(), userConfig)
 }
 
-// One route can carry a project layer another has not, so the check runs in
-// every routed directory and reports every route that would not start, not
-// the first.
-func TestConnectDoctorPreflightNamesEveryRouteThatWouldNotStart(t *testing.T) {
-	file, _, paths := codexProfile(t, 3)
-	writeCodexConfig(t, paths[1], "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-	writeCodexConfig(t, paths[2], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Contains(t, c.Message, filepath.Join(paths[1], ".codex", "config.toml"))
-	assert.Contains(t, c.Message, filepath.Join(paths[2], ".codex", "config.toml"),
-		"the second route's own layer is reported too, not only the first's")
-	assert.NotContains(t, c.Message, "any routed directory", "the clean route is not called blocked")
-	assert.NotContains(t, c.Message, filepath.Join(paths[0], ".codex"), "the route that would start is not named")
-}
-
-// With no route there is no directory a session would run in, and nothing
-// dispatches anyway: the check says so rather than passing on a machine it
-// never looked at.
-func TestConnectDoctorPreflightSkipsWithNoRoute(t *testing.T) {
-	file, _, _ := codexProfile(t, 0)
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusSkip, c.Status)
-	assert.Contains(t, c.Message, "No project is routed")
-}
-
 // claude-agent-acp has nothing on this machine to refuse a session over, so
 // it gets no row: a check that does not exist must not report that it
 // passed.
@@ -635,7 +613,7 @@ func TestConnectDoctorHasNoPreflightRowForAnAdapterWithoutOne(t *testing.T) {
 	file := setup.New("agent")
 	file.Driver = setup.DriverACP
 	file.Worker = setup.WorkerClaude
-	file.Projects[1] = admission.Route{Path: t.TempDir()}
+	file.Projects[1] = admission.Project{}
 	_, ok := preflightCheck(t, workerBinaryChecks(file))
 	assert.False(t, ok)
 }
@@ -648,23 +626,9 @@ func TestConnectDoctorHasNoPreflightRowUnderTheSpawnDriver(t *testing.T) {
 	file := setup.New("agent")
 	file.Driver = setup.DriverSpawn
 	file.Worker = setup.WorkerCodex
-	file.Projects[1] = admission.Route{Path: t.TempDir()}
+	file.Projects[1] = admission.Project{}
 	_, ok := preflightCheck(t, workerBinaryChecks(file))
 	assert.False(t, ok)
-}
-
-// With one route there is no "every route" to speak of: the message names
-// the directory, because a person with one route reads the path, not a
-// quantifier over it.
-func TestConnectDoctorPreflightNamesTheOnlyRoute(t *testing.T) {
-	file, home, paths := codexProfile(t, 1)
-	writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Contains(t, c.Message, paths[0])
-	assert.NotContains(t, c.Message, "any routed directory")
 }
 
 // A config layer that cannot be read refuses every session too — nothing
@@ -675,7 +639,7 @@ func TestConnectDoctorPreflightSaysWhatToDoAboutAnUnreadableConfig(t *testing.T)
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a file whatever its mode says")
 	}
-	file, home, _ := codexProfile(t, 1)
+	file, home, _ := codexProfile(t)
 	config := writeCodexConfig(t, home, "model = \"gpt-5\"\n")
 	require.NoError(t, os.Chmod(config, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(config, 0o600) })
@@ -693,37 +657,19 @@ func TestConnectDoctorPreflightSaysWhatToDoAboutAnUnreadableConfig(t *testing.T)
 }
 
 // And one run names every layer a person has to change, not the first: the
-// shared layers are read before a route's own, so stopping at the first
-// would hide the route's until the shared one was fixed and doctor run
+// user's layer is read before the directory's own, so stopping at the first
+// would hide the directory's until the user's was fixed and doctor run
 // again.
 func TestConnectDoctorPreflightNamesEveryLayerInOneRun(t *testing.T) {
-	file, home, paths := codexProfile(t, 1)
+	file, home, dir := codexProfile(t)
 	user := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-	project := writeCodexConfig(t, paths[0], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
+	project := writeCodexConfig(t, dir, "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
 
 	c, ok := preflightCheck(t, workerBinaryChecks(file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusFail, c.Status)
 	assert.Contains(t, c.Message, user)
-	assert.Contains(t, c.Message, project, "the route's own layer is named in the same run as the shared one")
-}
-
-// A layer every route shares is reported once for all of them even when one
-// route has a second reason of its own: they are grouped one refusal at a
-// time, not by the whole of what a route was refused for.
-func TestConnectDoctorPreflightGroupsEachRefusalOnItsOwn(t *testing.T) {
-	file, home, paths := codexProfile(t, 2)
-	user := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-	project := writeCodexConfig(t, paths[1], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Equal(t, 1, strings.Count(c.Message, user), "the shared layer is named once")
-	assert.Contains(t, c.Message, "any routed directory", "and named as every route's")
-	assert.Equal(t, 1, strings.Count(c.Message, project), "the second route's own layer is named too, once")
-	assert.Contains(t, c.Message, "start in "+paths[1]+":", "and named as that route's alone")
-	assert.NotContains(t, c.Message, "start in "+paths[0], "the route with only the shared reason is not named on its own")
+	assert.Contains(t, c.Message, project, "the directory's own layer is named in the same run as the user's")
 }
 
 // The hint carries what to do about every reason reported, most pressing
@@ -734,7 +680,7 @@ func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a file whatever its mode says")
 	}
-	file, home, _ := codexProfile(t, 1)
+	file, home, _ := codexProfile(t)
 	// config.toml is read before managed_config.toml, so the layer that
 	// cannot be read is the one this would hint about by order alone.
 	unreadable := writeCodexConfig(t, home, "model = \"gpt-5\"\n")

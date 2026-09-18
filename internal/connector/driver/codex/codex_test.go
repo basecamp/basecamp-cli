@@ -108,7 +108,6 @@ func (h *harness) scenario(sc scenario) {
 }
 
 type testPolicy struct {
-	workDir string
 	kinds   []driver.ToolKind
 	servers []string
 	mode    driver.PermissionMode
@@ -121,9 +120,9 @@ func (p testPolicy) Decide(context.Context, driver.PermissionRequest) driver.Per
 func (p testPolicy) Rules() driver.PermissionRules {
 	mode := p.mode
 	if mode == "" {
-		mode = driver.ModeEditsInWorkDir
+		mode = driver.ModeEdits
 	}
-	return driver.PermissionRules{Mode: mode, WorkDir: p.workDir, AllowKinds: p.kinds, AllowMCPServers: p.servers}
+	return driver.PermissionRules{Mode: mode, AllowKinds: p.kinds, AllowMCPServers: p.servers}
 }
 
 func (h *harness) config() driver.SessionConfig {
@@ -136,7 +135,7 @@ func (h *harness) config() driver.SessionConfig {
 			Args:    []string{"-c", `env > "$MCP_ENV_OUT"`},
 			Env:     map[string]string{"MCP_ENV_OUT": h.mcpOut, "SERVER_ONLY_NOT_SECRET": serverOnly, "PATH": os.Getenv("PATH")},
 		}},
-		Policy:     connector.DefaultPolicy(h.workDir),
+		Policy:     connector.DefaultPolicy(),
 		Scope:      driver.Scope{WorkDir: h.workDir},
 		PrivateDir: h.private,
 	}
@@ -171,7 +170,7 @@ func turnCompleted() string {
 func TestArgsHoldThePolicy(t *testing.T) {
 	cfg := driver.SessionConfig{
 		Cwd:    "/work/app",
-		Policy: connector.DefaultPolicy("/work/app"),
+		Policy: connector.DefaultPolicy(),
 		MCPServers: []driver.MCPServer{
 			{Name: "basecamp", Command: "/bin/basecamp", Args: []string{"connect", "worker-mcp", "--socket", "/run/token.sock"}, Env: map[string]string{"HOME": "/home/op", "BASECAMP_NO_KEYRING": `a"quoted\value`}},
 			{Name: "other", Command: "/bin/other"},
@@ -217,13 +216,12 @@ func TestArgsHoldThePolicy(t *testing.T) {
 func TestArgsRefuseAPolicyCodexCannotHold(t *testing.T) {
 	server := []driver.MCPServer{{Name: "basecamp", Command: "/bin/basecamp"}}
 	for name, cfg := range map[string]driver.SessionConfig{
-		"another mode":       {Cwd: "/w", Policy: testPolicy{workDir: "/w", mode: "anything"}, MCPServers: server},
-		"another workdir":    {Cwd: "/w", Policy: testPolicy{workDir: "/elsewhere"}, MCPServers: server},
-		"execute allowed":    {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolExecute}}, MCPServers: server},
-		"fetch allowed":      {Cwd: "/w", Policy: testPolicy{workDir: "/w", kinds: []driver.ToolKind{driver.ToolFetch}}, MCPServers: server},
-		"unkeyable server":   {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "a.b", Command: "/bin/x"}}},
-		"no command":         {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "other"}}},
-		"unkeyable env name": {Cwd: "/w", Policy: testPolicy{workDir: "/w"}, MCPServers: []driver.MCPServer{{Name: "other", Command: "/bin/x", Env: map[string]string{"A=B": "x"}}}},
+		"another mode":       {Cwd: "/w", Policy: testPolicy{mode: "anything"}, MCPServers: server},
+		"execute allowed":    {Cwd: "/w", Policy: testPolicy{kinds: []driver.ToolKind{driver.ToolExecute}}, MCPServers: server},
+		"fetch allowed":      {Cwd: "/w", Policy: testPolicy{kinds: []driver.ToolKind{driver.ToolFetch}}, MCPServers: server},
+		"unkeyable server":   {Cwd: "/w", Policy: testPolicy{}, MCPServers: []driver.MCPServer{{Name: "a.b", Command: "/bin/x"}}},
+		"no command":         {Cwd: "/w", Policy: testPolicy{}, MCPServers: []driver.MCPServer{{Name: "other"}}},
+		"unkeyable env name": {Cwd: "/w", Policy: testPolicy{}, MCPServers: []driver.MCPServer{{Name: "other", Command: "/bin/x", Env: map[string]string{"A=B": "x"}}}},
 	} {
 		_, err := Args(cfg, "", "")
 		assert.ErrorIs(t, err, driver.ErrUnusable, name)

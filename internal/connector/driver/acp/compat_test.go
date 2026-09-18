@@ -173,7 +173,7 @@ type compatPolicy struct {
 
 func (p *compatPolicy) Rules() driver.PermissionRules {
 	return driver.PermissionRules{
-		Mode: driver.ModeEditsInWorkDir, WorkDir: p.workDir,
+		Mode:            driver.ModeEdits,
 		AllowKinds:      []driver.ToolKind{driver.ToolRead, driver.ToolSearch, driver.ToolThink},
 		AllowMCPServers: []string{compatServer},
 	}

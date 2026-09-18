@@ -33,8 +33,8 @@ func validFile(t *testing.T) File {
 	f.AccountID = "2914079"
 	f.Agent = Agent{PersonID: agentID, Kind: KindAgent}
 	f.Trust.OperatorID = operatorID
-	f.Projects[projectID] = admission.Route{Path: t.TempDir(), Class: "internal", WatchCompletions: true}
-	f.Projects[otherProj] = admission.Route{Path: t.TempDir()}
+	f.Projects[projectID] = admission.Project{Class: "internal", WatchCompletions: true}
+	f.Projects[otherProj] = admission.Project{}
 	return f
 }
 
@@ -98,16 +98,16 @@ func TestLoadReportsAMissingFileAsNotExist(t *testing.T) {
 }
 
 // A misspelled key silently ignored is a setting the operator believes is on
-// and is not; for trust and routes that is not a harmless typo.
+// and is not; for trust and served projects that is not a harmless typo.
 func TestParseRefusesUnknownKeys(t *testing.T) {
 	data, err := json.Marshal(validFile(t))
 	require.NoError(t, err)
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(data, &raw))
 	projects := raw["projects"].(map[string]any)
-	route := projects["48699913"].(map[string]any)
-	delete(route, "watch_completions")
-	route["watch_completion"] = true
+	served := projects["48699913"].(map[string]any)
+	delete(served, "watch_completions")
+	served["watch_completion"] = true
 	data, err = json.Marshal(raw)
 	require.NoError(t, err)
 
@@ -143,6 +143,37 @@ func TestParseAcceptsAndForgetsTheWorktreesSettingOfAnOlderFile(t *testing.T) {
 	assert.NotContains(t, out, "worktrees")
 }
 
+// A connect.json written while projects were routed to directories still
+// opens. Every one of them has "path" on every project, and the parse is
+// strict, so the key has to stay known for the file to load at all —
+// deleting the field outright would have stopped every connector already
+// set up.
+func TestParseAcceptsAndForgetsTheProjectPathsOfAnOlderFile(t *testing.T) {
+	data, err := json.Marshal(validFile(t))
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	projects := raw["projects"].(map[string]any)
+	for id, project := range projects {
+		entry := project.(map[string]any)
+		require.NotContains(t, entry, "path", "nothing written now carries it")
+		entry["path"] = "/work/" + id
+	}
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+
+	f, err := Parse(data)
+	require.NoError(t, err, "a file written by a connector that routed projects still opens")
+	for id, project := range f.Projects {
+		assert.Empty(t, project.LegacyPath, "project %d: the path is read, then forgotten", id)
+	}
+
+	// And writing that file back takes the key out for good.
+	again, err := json.Marshal(f)
+	require.NoError(t, err)
+	assert.NotContains(t, string(again), `"path"`)
+}
+
 func TestValidateFailsClosed(t *testing.T) {
 	for name, mutate := range map[string]func(*File){
 		"wrong version":             func(f *File) { f.Version = 2 },
@@ -161,17 +192,14 @@ func TestValidateFailsClosed(t *testing.T) {
 		"agent in the allowlist": func(f *File) {
 			f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{agentID}}
 		},
-		"relative route":       func(f *File) { f.Projects[projectID] = admission.Route{Path: "work/app"} },
-		"unclean route":        func(f *File) { f.Projects[projectID] = admission.Route{Path: "/work/../etc"} },
-		"route without a path": func(f *File) { f.Projects[projectID] = admission.Route{} },
-		"class with spaces":    func(f *File) { f.Projects[projectID] = admission.Route{Path: "/work", Class: "a b"} },
+		"class with spaces":    func(f *File) { f.Projects[projectID] = admission.Project{Class: "a b"} },
 		"unknown driver":       func(f *File) { f.Driver = "fork" },
 		"no concurrency":       func(f *File) { f.Concurrency = 0 },
 		"too much concurrency": func(f *File) { f.Concurrency = MaxConcurrency + 1 },
 		"deadline too short":   func(f *File) { f.Deadline = Duration(time.Second) },
 		"deadline too long":    func(f *File) { f.Deadline = Duration(48 * time.Hour) },
-		"route for a non-project": func(f *File) {
-			f.Projects[-1] = admission.Route{Path: "/work"}
+		"served project that is not a project": func(f *File) {
+			f.Projects[-1] = admission.Project{}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -206,16 +234,16 @@ func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
 	require.NoError(t, err)
 
 	for name, doc := range map[string]string{
-		"trailing ]":             string(data) + "]",
-		"trailing }":             string(data) + "}",
-		"trailing object":        string(data) + "{}",
-		"duplicate top-level":    `{"driver":"acp",` + string(data[1:]),
-		"duplicate operator_id":  strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
-		"duplicate nested route": strings.Replace(string(data), `"48699913":{`, `"48699913":{"path":"/elsewhere",`, 1),
-		"case variant key":       strings.Replace(string(data), `"trust":`, `"Trust":`, 1),
-		"long s variant key":     strings.Replace(string(data), `"concurrency"`, `"concurrencſ"`, 1),
-		"padded project id":      strings.Replace(string(data), `"48699913":{`, `"048699913":{`, 1),
-		"signed project id":      strings.Replace(string(data), `"48699913":{`, `"+48699913":{`, 1),
+		"trailing ]":            string(data) + "]",
+		"trailing }":            string(data) + "}",
+		"trailing object":       string(data) + "{}",
+		"duplicate top-level":   `{"driver":"acp",` + string(data[1:]),
+		"duplicate operator_id": strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
+		"duplicate nested key":  strings.Replace(string(data), `"48699913":{`, `"48699913":{"class":"other",`, 1),
+		"case variant key":      strings.Replace(string(data), `"trust":`, `"Trust":`, 1),
+		"long s variant key":    strings.Replace(string(data), `"concurrency"`, `"concurrencſ"`, 1),
+		"padded project id":     strings.Replace(string(data), `"48699913":{`, `"048699913":{`, 1),
+		"signed project id":     strings.Replace(string(data), `"48699913":{`, `"+48699913":{`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.NotEqual(t, string(data), doc, "the fixture changed the document")

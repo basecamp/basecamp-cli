@@ -17,10 +17,7 @@ import (
 // The operator decisions and the hold (ledger_hold.go). Each test names the
 // invariant it holds.
 
-const (
-	opRoute = "/work/connector"
-	opBy    = "local:tester"
-)
+const opBy = "local:tester"
 
 // opAdmit writes id seen and commits an admitted verdict on conversation key,
 // returning the state the ledger wrote.
@@ -29,7 +26,6 @@ func opAdmit(t *testing.T, l *Ledger, id int64, key string) RecordState {
 	ctx := context.Background()
 	record := seenRecord(t, l, id)
 	v := admittedVerdict(id, record.Revision, key)
-	v.Route = opRoute
 	state, err := l.Admission().Commit(ctx, v)
 	require.NoError(t, err)
 	return RecordState(state)
@@ -37,7 +33,7 @@ func opAdmit(t *testing.T, l *Ledger, id int64, key string) RecordState {
 
 func launchOf(t *testing.T, l *Ledger, id int64) Launch {
 	t.Helper()
-	launch, err := l.LaunchTask(context.Background(), LaunchSpec{EventID: id, Route: opRoute, Driver: "claude"})
+	launch, err := l.LaunchTask(context.Background(), LaunchSpec{EventID: id, Driver: "claude"})
 	require.NoError(t, err)
 	return launch
 }
@@ -143,7 +139,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 
 	_, _, err = d.Get(ctx, 2)
 	assert.ErrorIs(t, err, ErrTaskTokenRefused, "the old worker is refused at once")
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Route: opRoute, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
 	assert.ErrorIs(t, err, ErrNotStartable, "no second task while the first is live")
 	startable, err := l.StartableRecords(ctx, 10)
 	require.NoError(t, err)
@@ -236,13 +232,12 @@ func TestRedispatchOfABlockedRecordRerunsItsPrerequisite(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	v := admittedVerdict(1, ev.Revision, "recording:1")
-	v.Route = opRoute
 	written, err := l.Admission().Commit(ctx, v)
 	require.NoError(t, err)
 	assert.Equal(t, admission.StateAdmitted, written, "authorized, so admitted though tagged for review")
 
 	// Under the hold it is authorized and not launched.
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Route: opRoute, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "held")
 	_, err = l.Release(ctx, opBy)
@@ -250,7 +245,8 @@ func TestRedispatchOfABlockedRecordRerunsItsPrerequisite(t *testing.T) {
 	launchOf(t, l, 1)
 }
 
-// Done when: a held record with its snapshot and route is admitted at once.
+// Done when: a held record with its snapshot, in a served project, is
+// admitted at once.
 func TestRedispatchAdmitsAHeldRecord(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
@@ -382,7 +378,7 @@ func TestInvariant2AHeldLedgerSurvivesRestartUntilRelease(t *testing.T) {
 	startable, err := l.StartableRecords(ctx, 10)
 	require.NoError(t, err)
 	assert.Empty(t, startable, "the dispatcher is offered nothing while the hold stands")
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Route: opRoute, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
 	require.Error(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "the refused launch rolled back")
 

@@ -60,11 +60,12 @@ type Decision struct {
 	ConversationKey  string
 	ReplyKind        string
 	ReplyRecordingID int64
-	Routed           bool
-	Route            string
-	Class            string
-	RecordingURL     string
-	RequesterID      int64
+	// Served is whether connect.json served the record's project when
+	// admission decided it.
+	Served       bool
+	Class        string
+	RecordingURL string
+	RequesterID  int64
 	// Snapshot is the recording's content as admission read it, JSON. An
 	// admitted verdict writes it, as admitted or queued; it stays through
 	// dispatch and completion until retention drops it, and any move to
@@ -486,7 +487,7 @@ SET details = NULL, event_type = '', kind = '', action = '', bucket_id = 0,
     creator_id = 0, performed_by_id = NULL, recording_id = 0, actor_type = '',
     visible_to_clients = NULL, content_dropped = 1, updated_at = updated_at,
     snapshot = NULL, trigger_name = '', acknowledge = 0, conversation_key = '',
-    reply_kind = '', reply_recording_id = 0, routed = 0, route = '', class = '',
+    reply_kind = '', reply_recording_id = 0, served = 0, class = '',
     recording_url = '', requester_id = 0
 WHERE content_dropped = 0 AND redispatch_decision IS NULL
   AND ((state = ? AND updated_at < ?) OR (state = ? AND updated_at < ?))`,
@@ -507,7 +508,7 @@ SELECT id, state, reason, lane, event_type, kind, action, bucket_id, creator_id,
        performed_by_id, recording_id, details, actor_type, visible_to_clients,
        created_at, seen_at, updated_at, content_dropped, revision, decided_at,
        blocked_at, retry_at, trigger_name, acknowledge, conversation_key,
-       reply_kind, reply_recording_id, routed, route, class, recording_url,
+       reply_kind, reply_recording_id, served, class, recording_url,
        requester_id, snapshot
 FROM events`
 
@@ -526,7 +527,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			visibleToClients             sql.NullBool
 			decidedAt, blockedAt         sql.NullString
 			retryAt                      sql.NullString
-			acknowledge, routed          int
+			acknowledge, served          int
 			snapshot                     []byte
 			d                            = &r.Decision
 		)
@@ -535,7 +536,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			&details, &r.ActorType, &visibleToClients, &createdAt, &seenAt,
 			&updatedAt, &contentDropped, &r.Revision, &decidedAt, &blockedAt,
 			&retryAt, &d.Trigger, &acknowledge, &d.ConversationKey, &d.ReplyKind,
-			&d.ReplyRecordingID, &routed, &d.Route, &d.Class, &d.RecordingURL,
+			&d.ReplyRecordingID, &served, &d.Class, &d.RecordingURL,
 			&d.RequesterID, &snapshot); err != nil {
 			return nil, fmt.Errorf("connector: scan event record: %w", err)
 		}
@@ -563,7 +564,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			return nil, err
 		}
 		r.ContentDropped = contentDropped != 0
-		d.Acknowledge, d.Routed = acknowledge != 0, routed != 0
+		d.Acknowledge, d.Served = acknowledge != 0, served != 0
 		if len(snapshot) > 0 {
 			d.Snapshot = json.RawMessage(snapshot)
 		}

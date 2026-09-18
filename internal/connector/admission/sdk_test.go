@@ -243,7 +243,7 @@ func (l *listing) set(people string) {
 
 func (l *listing) client(t *testing.T) *basecamp.AccountClient {
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, fmt.Sprintf("/999/projects/%d/people.json", routedProj), r.URL.Path)
+		assert.Equal(t, fmt.Sprintf("/999/projects/%d/people.json", servedProj), r.URL.Path)
 		l.calls.Add(1)
 		l.mu.Lock()
 		defer l.mu.Unlock()
@@ -262,7 +262,7 @@ func TestMembershipExcludesClientsAndAgents(t *testing.T) {
 		id   int64
 		want bool
 	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}} {
-		got, err := members.NonClientMember(context.Background(), routedProj, tc.id, seen)
+		got, err := members.NonClientMember(context.Background(), servedProj, tc.id, seen)
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, got, "person %d", tc.id)
 	}
@@ -275,19 +275,19 @@ func TestAPersonAddedAfterACachedListingIsHeldThenAdmitted(t *testing.T) {
 	c := &clock{now: testNow}
 	members := NewMembers(l.client(t), c.Now)
 
-	_, err := members.NonClientMember(context.Background(), routedProj, operatorID, testNow)
+	_, err := members.NonClientMember(context.Background(), servedProj, operatorID, testNow)
 	require.NoError(t, err)
 
 	// Bob is added and posts ten seconds later; the cached listing predates
 	// his event, and the floor forbids reading it again yet.
 	c.advance(10 * time.Second)
 	l.set(fmt.Sprintf(`[{"id":%d,"client":false},{"id":%d,"client":false}]`, operatorID, memberID))
-	_, err = members.NonClientMember(context.Background(), routedProj, memberID, c.Now())
+	_, err = members.NonClientMember(context.Background(), servedProj, memberID, c.Now())
 	require.ErrorIs(t, err, ErrMembershipUnverified, "held, not refused")
 
 	// On the blocked schedule's retry, past the floor, a fresh listing names him.
 	c.advance(MembershipRefreshFloor)
-	got, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow.Add(10*time.Second))
+	got, err := members.NonClientMember(context.Background(), servedProj, memberID, testNow.Add(10*time.Second))
 	require.NoError(t, err)
 	assert.True(t, got)
 	assert.EqualValues(t, 2, l.calls.Load())
@@ -299,14 +299,14 @@ func TestARefusalFromAListingOlderThanTheEventIsReadAgain(t *testing.T) {
 	c := &clock{now: testNow}
 	members := NewMembers(l.client(t), c.Now)
 
-	got, err := members.NonClientMember(context.Background(), routedProj, clientID, testNow)
+	got, err := members.NonClientMember(context.Background(), servedProj, clientID, testNow)
 	require.NoError(t, err)
 	assert.False(t, got)
 
 	// Promoted from client to member, then posts, after the floor.
 	c.advance(MembershipRefreshFloor)
 	l.set(fmt.Sprintf(`[{"id":%d,"client":false}]`, clientID))
-	got, err = members.NonClientMember(context.Background(), routedProj, clientID, c.Now())
+	got, err = members.NonClientMember(context.Background(), servedProj, clientID, c.Now())
 	require.NoError(t, err)
 	assert.True(t, got)
 	assert.EqualValues(t, 2, l.calls.Load())
@@ -320,7 +320,7 @@ func TestOneListingAnswersABurstSeenBeforeIt(t *testing.T) {
 
 	for i := range 50 {
 		seen := testNow.Add(-time.Duration(50-i) * time.Second)
-		got, err := members.NonClientMember(context.Background(), routedProj, clientID+int64(i%3), seen)
+		got, err := members.NonClientMember(context.Background(), servedProj, clientID+int64(i%3), seen)
 		require.NoError(t, err)
 		assert.False(t, got)
 	}
@@ -335,14 +335,14 @@ func TestAMemberIsServedFromCacheForItsTTL(t *testing.T) {
 
 	for _, after := range []time.Duration{0, time.Minute, MembershipTTL - time.Second} {
 		c.now = testNow.Add(after)
-		got, err := members.NonClientMember(context.Background(), routedProj, memberID, c.now)
+		got, err := members.NonClientMember(context.Background(), servedProj, memberID, c.now)
 		require.NoError(t, err)
 		assert.True(t, got)
 	}
 	assert.EqualValues(t, 1, l.calls.Load())
 
 	c.advance(time.Second)
-	_, err := members.NonClientMember(context.Background(), routedProj, memberID, c.Now())
+	_, err := members.NonClientMember(context.Background(), servedProj, memberID, c.Now())
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, l.calls.Load(), "someone removed from the project stops being trusted within the TTL")
 }
@@ -365,7 +365,7 @@ func TestConcurrentRefreshesForAProjectAreOne(t *testing.T) {
 			if i%2 == 1 {
 				id = strangerID
 			}
-			got, err := members.NonClientMember(context.Background(), routedProj, id, seen)
+			got, err := members.NonClientMember(context.Background(), servedProj, id, seen)
 			assert.NoError(t, err)
 			results[i] = got
 		})
@@ -384,16 +384,16 @@ func TestAListingIsDatedWhenItWasAskedFor(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `[{"id":%d,"client":false}]`, operatorID)
 	}))
 	members := NewMembers(client, c.Now)
-	_, err := members.NonClientMember(context.Background(), routedProj, operatorID, testNow)
+	_, err := members.NonClientMember(context.Background(), servedProj, operatorID, testNow)
 	require.NoError(t, err)
 
 	// Someone added and posting two seconds into that request is not known
 	// to be refused by it.
-	_, err = members.NonClientMember(context.Background(), routedProj, memberID, testNow.Add(2*time.Second))
+	_, err = members.NonClientMember(context.Background(), servedProj, memberID, testNow.Add(2*time.Second))
 	require.ErrorIs(t, err, ErrMembershipUnverified)
 
 	// Seen exactly when it was asked for: covered.
-	got, err := members.NonClientMember(context.Background(), routedProj, strangerID, testNow)
+	got, err := members.NonClientMember(context.Background(), servedProj, strangerID, testNow)
 	require.NoError(t, err)
 	assert.False(t, got)
 }
@@ -419,9 +419,9 @@ func TestMembershipFailureIsNotCached(t *testing.T) {
 	}))
 	members := NewMembers(client, time.Now)
 
-	_, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow)
+	_, err := members.NonClientMember(context.Background(), servedProj, memberID, testNow)
 	require.Error(t, err)
-	got, err := members.NonClientMember(context.Background(), routedProj, memberID, testNow)
+	got, err := members.NonClientMember(context.Background(), servedProj, memberID, testNow)
 	require.NoError(t, err)
 	assert.True(t, got)
 }

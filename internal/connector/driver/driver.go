@@ -442,13 +442,18 @@ type PermissionDecision struct {
 }
 
 // PermissionRules is a policy pre-decided.
+//
+// It names no directory. The connector's policy bounded edits to the working
+// directory while a project was routed to one; with the routes gone the only
+// directory left is wherever the operator started the connector, and a bound
+// that moves with that is a guarantee in name and an accident in behavior.
+// What confines a worker to a directory now is the agent's own sandbox
+// (Codex's workspace-write) or the sandbox launcher being built separately —
+// not this.
 type PermissionRules struct {
 	// Mode is the asking mode the agent must run in and confirm.
 	Mode PermissionMode
-	// WorkDir is where edits are allowed; everything outside it is refused.
-	WorkDir string
-	// AllowKinds are the tool kinds allowed without asking, besides edits
-	// inside WorkDir.
+	// AllowKinds are the tool kinds allowed without asking, besides edits.
 	AllowKinds []ToolKind
 	// AllowMCPServers are the MCP servers whose every tool is allowed.
 	AllowMCPServers []string
@@ -460,9 +465,10 @@ type PermissionRules struct {
 type PermissionMode string
 
 const (
-	// ModeEditsInWorkDir allows edits inside the working directory, and
-	// refuses, without asking anyone, whatever the rules do not allow.
-	ModeEditsInWorkDir PermissionMode = "edits_in_workdir"
+	// ModeEdits allows edits, and refuses, without asking anyone, whatever
+	// the rules do not allow. It bounds where an edit may land no further
+	// than the agent's own sandbox does.
+	ModeEdits PermissionMode = "edits"
 )
 
 // Launcher wraps the worker command: the seam where a sandbox launcher
@@ -485,7 +491,9 @@ type Scope struct {
 	// has been handed to the worker when the session starts; the others are
 	// exposed as they are prompted.
 	EventIDs []int64
-	// WorkDir is the approved working directory the record carries.
+	// WorkDir is the directory the worker runs in: the connector's own, the
+	// one it was started in. It is where the process starts, not a bound on
+	// where it may write.
 	WorkDir string
 	// SocketDir holds the task token's unix socket, which the worker's MCP
 	// server dials. A launcher that confines a worker must let it reach this

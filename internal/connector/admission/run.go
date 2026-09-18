@@ -150,7 +150,6 @@ type Line struct {
 	EventType    string  `json:"event_type"`
 	Trigger      Trigger `json:"trigger,omitempty"`
 	Class        string  `json:"class,omitempty"`
-	Route        string  `json:"route,omitempty"`
 	BucketID     int64   `json:"bucket_id"`
 	RecordingID  int64   `json:"recording_id"`
 	RecordingURL string  `json:"recording_url,omitempty"`
@@ -165,8 +164,7 @@ func LineFor(v Verdict) Line {
 	// it is also what a person watching the connector sees, and the event
 	// type and URL come from Basecamp: JSON escapes C0 controls but passes C1
 	// controls such as U+009B (CSI) through as raw UTF-8. Whitespace is left
-	// alone — JSON escapes newlines and tabs, and a route is a local path that
-	// must survive as written.
+	// alone: JSON escapes newlines and tabs.
 	clean := richtext.SanitizeTerminal
 	return Line{
 		Type:         "event",
@@ -174,7 +172,6 @@ func LineFor(v Verdict) Line {
 		EventType:    clean(v.EventType),
 		Trigger:      Trigger(clean(string(v.Trigger))),
 		Class:        clean(v.Class),
-		Route:        clean(v.Route),
 		BucketID:     v.BucketID,
 		RecordingID:  v.RecordingID,
 		RecordingURL: clean(v.RecordingURL),

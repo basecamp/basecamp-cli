@@ -30,7 +30,7 @@ func TestConnectSetupSeesTheGlobalBindingThroughALocalEntry(t *testing.T) {
 	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"project_id":"42"}}}`, s.srv.URL))
 
 	app := newConnectSetupApp(t, s, "agent")
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestConnectSetupNamesTheFileThatHidesTheGlobalBinding(t *testing.T) {
 	connectSetupApp(t, s, "agent")
 	local := trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, elsewhereBaseURL))
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "not bound to an account")
 	hint := hintOf(t, err)
@@ -189,7 +189,7 @@ func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
 
 func assertSetupReportsTheGlobalConfig(t *testing.T, s *connectSetupServer) {
 	t.Helper()
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	hint := hintOf(t, err)
 	assert.NotContains(t, hint, "not the global config", "the global config was skipped, so it is no evidence")

@@ -15,25 +15,25 @@ import (
 
 // People in the fixtures. The ids are arbitrary; what matters is who is who.
 const (
-	agentID     int64 = 52007412
-	operatorID  int64 = 26909558
-	allowedID   int64 = 1001
-	memberID    int64 = 1002
-	clientID    int64 = 1003
-	strangerID  int64 = 1004
-	otherAgent  int64 = 1005
-	routedProj  int64 = 48699913
-	unmapped    int64 = 777
-	watchedProj int64 = 555
+	agentID      int64 = 52007412
+	operatorID   int64 = 26909558
+	allowedID    int64 = 1001
+	memberID     int64 = 1002
+	clientID     int64 = 1003
+	strangerID   int64 = 1004
+	otherAgent   int64 = 1005
+	servedProj   int64 = 48699913
+	unservedProj int64 = 777
+	watchedProj  int64 = 555
 )
 
 func basePolicy() Policy {
 	return Policy{
 		AgentID: agentID,
 		Trust:   Trust{Mode: TrustOperator, OperatorID: operatorID},
-		Projects: map[int64]Route{
-			routedProj:  {Path: "/work/connector", Class: "internal"},
-			watchedProj: {Path: "/work/board", Class: "internal", WatchCompletions: true},
+		Projects: map[int64]Project{
+			servedProj:  {Class: "internal"},
+			watchedProj: {Class: "internal", WatchCompletions: true},
 		},
 	}
 }

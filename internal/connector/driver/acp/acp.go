@@ -204,9 +204,6 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 	if !ok {
 		return nil, fmt.Errorf("%w: %w: %w: %s has no asking mode for policy mode %q", driver.ErrNotStarted, driver.ErrUnusable, driver.ErrUnsafeMode, d.opts.Adapter.Name, rules.Mode)
 	}
-	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
-		return nil, fmt.Errorf("%w: %w: the policy's working directory is not the session's", driver.ErrNotStarted, driver.ErrUnusable)
-	}
 	servers, err := wireServers(cfg.MCPServers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)

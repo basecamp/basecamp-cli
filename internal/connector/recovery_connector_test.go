@@ -262,18 +262,19 @@ func runHarnessConnector(dir string) error {
 	}
 	intake.repairSweep = 50 * time.Millisecond
 
-	// Two routed projects, each its own working directory, so a test can show
-	// the dispatcher still runs work in one while the other's is held.
+	// Two served projects, so a test can show the dispatcher still runs work
+	// in one while the other's attempt is held. Both run in the connector's
+	// own directory, as everything does now.
 	work := filepath.Join(dir, "work")
-	routes := map[int64]admission.Route{
-		harnessBucket:      {Path: work, Class: "internal"},
-		harnessOtherBucket: {Path: filepath.Join(dir, "work-other"), Class: "internal"},
+	served := map[int64]admission.Project{
+		harnessBucket:      {Class: "internal"},
+		harnessOtherBucket: {Class: "internal"},
 	}
 	reads := storeReads{dir: dir, gate: sc.ReadGate, kill: kill}
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID:  harnessAgent,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: harnessOperator},
-		Projects: routes,
+		Projects: served,
 	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads})
 	if err != nil {
 		return err
@@ -299,7 +300,8 @@ func runHarnessConnector(dir string) error {
 	worker := &failingSpawns{Driver: working, broken: d.New(filepath.Join(dir, "no-such-agent")), failures: failures}
 	dispatcher, err := NewDispatcher(DispatcherOptions{
 		Ledger: ledger, Driver: worker,
-		Routes:      func() map[int64]admission.Route { return routes },
+		Served:      func() map[int64]admission.Project { return served },
+		WorkDir:     work,
 		Concurrency: 2,
 		Deadline:    time.Hour,
 		MCP:         mcp,

@@ -291,7 +291,7 @@ const (
 	IntentGuardAck IntentKind = "guard_ack"
 	// IntentHoldingReply answers a request the connector is not going to
 	// start work on until a person changes something: a mention or
-	// assignment in a project with no route. One per event.
+	// assignment in a project the connector does not serve. One per event.
 	IntentHoldingReply IntentKind = "holding_reply"
 	// IntentStillRunning is one still-running notice. One per attempt and
 	// occurrence.
@@ -393,7 +393,7 @@ func holdingKey(eventID int64) string {
 }
 
 // legacyRefusedStartKey is the key a connector that made worktrees gave the
-// holding reply for a record whose route could take no worktree. Nothing
+// holding reply for a record whose directory could take no worktree. Nothing
 // writes one now — the refusal that called for it went with worktrees — but
 // an upgraded ledger still holds the ones that build wrote, pending or sent,
 // over records still blocked legacyReasonRouteUnusable. They are read as they

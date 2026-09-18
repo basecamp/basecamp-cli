@@ -59,7 +59,7 @@ func TestConnectRunsOnLinuxOnly(t *testing.T) {
 }
 
 // Copilot: dispatch authorization follows connect.json as it is now.
-func TestConnectRoutesFollowConnectJSON(t *testing.T) {
+func TestServedProjectsFollowConnectJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "connect")
 	require.NoError(t, os.Mkdir(dir, 0o700))
 	path := filepath.Join(dir, "connect.json")
@@ -67,7 +67,7 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	file.AccountID = "2914079"
 	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
 	file.Trust.OperatorID = 26909558
-	file.Projects = map[int64]admission.Route{48929974: {Path: "/work/repo"}}
+	file.Projects = map[int64]admission.Project{48929974: {Class: "internal"}}
 	write := func(f setup.File) {
 		data, err := json.Marshal(f)
 		require.NoError(t, err)
@@ -76,25 +76,26 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	write(file)
 
 	clock := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
-	routes := newConnectRoutes(path, file, slog.New(slog.DiscardHandler))
-	routes.now = func() time.Time { return clock }
-	assert.Equal(t, "/work/repo", routes.Current()[48929974].Path)
+	served := newConnectServed(path, file, slog.New(slog.DiscardHandler))
+	served.now = func() time.Time { return clock }
+	require.Contains(t, served.Current(), int64(48929974))
+	assert.Equal(t, "internal", served.Current()[48929974].Class)
 
-	unrouted := file
-	unrouted.Projects = map[int64]admission.Route{}
-	write(unrouted)
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "an unrouted project stops authorizing dispatch without a restart")
+	unserved := file
+	unserved.Projects = map[int64]admission.Project{}
+	write(unserved)
+	clock = clock.Add(connectServedTTL)
+	assert.Empty(t, served.Current(), "a project no longer served stops authorizing dispatch without a restart")
 
 	other := file
 	other.Agent.PersonID = 1
 	write(other)
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file naming another agent authorizes nothing")
+	clock = clock.Add(connectServedTTL)
+	assert.Empty(t, served.Current(), "a file naming another agent authorizes nothing")
 
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file that no longer loads authorizes nothing")
+	clock = clock.Add(connectServedTTL)
+	assert.Empty(t, served.Current(), "a file that no longer loads authorizes nothing")
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.
@@ -174,7 +175,7 @@ func TestTheDoctorCheckReadsTheProfilesConnectorLayout(t *testing.T) {
 	file.AccountID = "2914079"
 	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
 	file.Trust.OperatorID = 26909558
-	file.Projects = map[int64]admission.Route{48929974: {Path: "/work/repo"}}
+	file.Projects = map[int64]admission.Project{48929974: {}}
 	path, err := setup.Path(config.GlobalConfigDir(), "agent")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))

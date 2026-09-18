@@ -19,11 +19,12 @@ type Rule struct {
 	// whatever the trust mode. Assignments run the agent against a recording
 	// on the assigner's say-so, so no broadened mode extends to them.
 	OperatorOnly bool
-	// RequiresRoute discards the rule at the gate when the project has no
-	// route. Only mentioned and assigned are answered in an unmapped project
-	// (blocked(no_route) and a holding reply); every other trigger is
-	// discarded there, so it is cheaper to discard it before any read.
-	RequiresRoute bool
+	// RequiresServed discards the rule at the gate when connect.json does not
+	// serve the project. Only mentioned and assigned are answered in an
+	// unserved project (blocked(no_route) and a holding reply); every other
+	// trigger is discarded there, so it is cheaper to discard it before any
+	// read.
+	RequiresServed bool
 	// Acknowledge says a person asked for something, so the worker's
 	// acknowledgement and the thirty-second guard apply. A completion or a
 	// subscription comment is not a request.
@@ -37,9 +38,9 @@ type Matrix map[string][]Rule
 
 var (
 	ruleMentioned  = Rule{Trigger: TriggerMentioned, Acknowledge: true}
-	ruleSubscribed = Rule{Trigger: TriggerSubscribed, RequiresRoute: true}
+	ruleSubscribed = Rule{Trigger: TriggerSubscribed, RequiresServed: true}
 	ruleAssigned   = Rule{Trigger: TriggerAssigned, OperatorOnly: true, Acknowledge: true}
-	ruleCompleted  = Rule{Trigger: TriggerCompleted, RequiresRoute: true}
+	ruleCompleted  = Rule{Trigger: TriggerCompleted, RequiresServed: true}
 )
 
 // V1Matrix returns the version-1 trigger matrix. Every other cataloged type
@@ -135,7 +136,14 @@ const (
 	// retried on a timer; only a redispatch re-runs it.
 	ReasonUnroutable Reason = "unroutable"
 	// ReasonNoRoute: shared by both states — a mentioned or assigned record in
-	// a project with no route is blocked (and answered with a holding reply);
-	// any other trigger there is discarded.
+	// a project connect.json does not serve is blocked (and answered with a
+	// holding reply); any other trigger there is discarded.
+	//
+	// The stored value stays "no_route", the word a served project was called
+	// by when it also named a directory. It is not renamed with the concept:
+	// it is written onto the record, and both the holding reply and the
+	// retraction that answers it read the record's reason back (askStillOpen,
+	// holdingReplyReason). A ledger in use carries rows and pending outbox
+	// intents written with this value, and a row is read as it was written.
 	ReasonNoRoute Reason = "no_route"
 )

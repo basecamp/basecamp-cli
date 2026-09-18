@@ -208,11 +208,8 @@ func Args(cfg driver.SessionConfig, resumeID, model string) ([]string, error) {
 		return nil, errors.New("codex: a session needs a policy")
 	}
 	rules := cfg.Policy.Rules()
-	if rules.Mode != driver.ModeEditsInWorkDir {
+	if rules.Mode != driver.ModeEdits {
 		return nil, fmt.Errorf("%w: codex: no Codex sandbox for policy mode %q", driver.ErrUnusable, rules.Mode)
-	}
-	if filepath.Clean(rules.WorkDir) != filepath.Clean(cfg.Cwd) {
-		return nil, fmt.Errorf("%w: codex: the policy's working directory %q is not the session's %q", driver.ErrUnusable, rules.WorkDir, cfg.Cwd)
 	}
 	for _, kind := range rules.AllowKinds {
 		if !slices.Contains(allowedKinds, kind) {

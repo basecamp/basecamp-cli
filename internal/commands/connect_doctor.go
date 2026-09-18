@@ -39,8 +39,8 @@ losses, hold and messages waiting for a person), the
 worker the driver runs — the worker's own CLI on PATH under the spawn driver,
 the pinned ACP adapter in the connector's adapters directory under the acp
 driver, and the adapter's own refusal of configuration on this machine that
-the connector cannot switch off, run in the directory every routed project
-would work in — and a handshake with the agent's Basecamp MCP server, started with a worker's
+the connector cannot switch off, checked in the directory this command runs
+in — and a handshake with the agent's Basecamp MCP server, started with a worker's
 environment (without the basecamp_connect domain, which only a dispatched
 task's token opens).
 
@@ -248,26 +248,23 @@ func acpAdapterCheck(worker string) setup.Check {
 }
 
 // acpPreflightCheck runs the adapter's own preflight — the refusal the acp
-// driver makes before it starts anything — for the directories a dispatch
-// would run in. It is the check a resolved adapter does not make: the
-// preflight reads configuration on this machine the connector cannot switch
-// off (a Codex config layer that declares MCP servers, which codex-acp would
-// load into the session beside the connector's), so a profile whose adapter
-// is installed and on the pin can still have every record refused with
+// driver makes before it starts anything — for the directory a dispatch would
+// run in. It is the check a resolved adapter does not make: the preflight
+// reads configuration on this machine the connector cannot switch off (a
+// Codex config layer that declares MCP servers, which codex-acp would load
+// into the session beside the connector's), so a profile whose adapter is
+// installed and on the pin can still have every record refused with
 // ErrUnusable the moment it is dispatched. There is no second check: doctor
 // refuses what the run command refuses.
 //
-// Every routed directory, not the first, and every distinct reason rather
-// than the first: the preflight walks per-directory layers as well as the
-// machine's, so one route can carry a .codex/config.toml another has not,
-// and a person fixing this wants the whole list out of one run. It costs a
-// handful of file reads per route. The layers every route shares — the
-// user's and the system's — fail identically, so an identical reason is
-// reported once, for all of them.
+// Every distinct reason rather than the first: the preflight walks the
+// directory's own layers as well as the machine's, and a person fixing this
+// wants the whole list out of one run.
 //
-// What it runs against is the directory a dispatch would give the session,
-// which is the route itself: the connector runs a task where its route
-// says, and prepares nothing.
+// It runs in this command's own working directory, which is what a dispatch
+// would give the session only if the connector was started in the same place:
+// the connector runs where it is started, and nothing records where that was.
+// Doctor says which directory it checked for that reason.
 //
 // The second return is false when there is nothing to run: an adapter with
 // no preflight (claude-agent-acp) gets no row, rather than a row saying a
@@ -278,80 +275,52 @@ func acpPreflightCheck(file setup.File) (setup.Check, bool) {
 		return setup.Check{}, false
 	}
 	c := setup.Check{Name: "Adapter " + a.Name + " preflight"}
-	ids := make([]int64, 0, len(file.Projects))
-	for id := range file.Projects {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	if len(ids) == 0 {
-		c.Status = setup.StatusSkip
-		c.Message = "No project is routed, so there is no directory a session would run in"
+	dir, err := os.Getwd()
+	if err != nil {
+		c.Status = setup.StatusFail
+		c.Message = "This command's own working directory could not be read, and it is where a session would start: " + errorMessage(err)
 		return c, true
 	}
+	where := richtext.SanitizeSingleLine(dir)
 
-	type failure struct {
-		reason string
-		routes []string
-		hint   string
-		rank   int
-	}
-	var failures []*failure
-	seen := map[string]*failure{}
-	for _, id := range ids {
-		path := file.Projects[id].Path
-		// Each refusal apart, not the session's whole refusal: a layer every
-		// route shares is one reason for all of them, and a route that has a
-		// second one of its own must not turn the shared one into a reason
-		// of its own too.
-		errs := acp.Refusals(acp.Preflight(a, path, nil, nil))
-		for _, err := range errs {
-			if err == nil {
-				continue
-			}
-			reason := preflightReason(err)
-			f, ok := seen[reason]
-			if !ok {
-				hint, rank := preflightHint(err)
-				f = &failure{reason: reason, hint: hint, rank: rank}
-				seen[reason] = f
-				failures = append(failures, f)
-			}
-			f.routes = append(f.routes, richtext.SanitizeSingleLine(path))
+	// Each refusal apart, not the session's whole refusal, so a directory
+	// with a second layer of its own does not fold into the machine's.
+	var reasons []string
+	var ranked []error
+	for _, err := range acp.Refusals(acp.Preflight(a, dir, nil, nil)) {
+		if err == nil {
+			continue
 		}
+		reason := preflightReason(err)
+		if slices.Contains(reasons, reason) {
+			continue
+		}
+		reasons = append(reasons, reason)
+		ranked = append(ranked, err)
 	}
-	if len(failures) == 0 {
+	if len(reasons) == 0 {
 		c.Status = setup.StatusPass
-		c.Message = fmt.Sprintf("%s would start in every routed directory (%d checked)", a.Name, len(ids))
+		c.Message = fmt.Sprintf("%s would start in %s", a.Name, where)
 		return c, true
 	}
 
 	c.Status = setup.StatusFail
-	parts := make([]string, 0, len(failures))
-	for i, f := range failures {
-		where := strings.Join(f.routes, ", ")
-		if len(ids) > 1 && len(f.routes) == len(ids) {
-			// Every route, one reason: the user's or the system's layer,
-			// which no route escapes by being somewhere else.
-			where = "any routed directory"
-		}
-		lead := "no session would start in"
-		if i == 0 {
-			lead = "No session would start in"
-		}
-		parts = append(parts, fmt.Sprintf("%s %s: %s", lead, where, f.reason))
-	}
-	c.Message = strings.Join(parts, "; ")
+	c.Message = fmt.Sprintf("No session would start in %s: %s", where, strings.Join(reasons, "; "))
 	// Every distinct remedy, most pressing first: the message names more
 	// than one reason, and a person fixing them needs what to do about each.
 	// Order by rank rather than by the order the layers happen to be read
 	// in, so a file that could not be read in /etc does not come before a
 	// declaration that is certainly there.
-	ranked := slices.Clone(failures)
-	slices.SortStableFunc(ranked, func(a, b *failure) int { return a.rank - b.rank })
+	slices.SortStableFunc(ranked, func(a, b error) int {
+		_, ra := preflightHint(a)
+		_, rb := preflightHint(b)
+		return ra - rb
+	})
 	hints := make([]string, 0, len(ranked))
-	for _, f := range ranked {
-		if !slices.Contains(hints, f.hint) {
-			hints = append(hints, f.hint)
+	for _, err := range ranked {
+		hint, _ := preflightHint(err)
+		if !slices.Contains(hints, hint) {
+			hints = append(hints, hint)
 		}
 	}
 	c.Hint = strings.Join(hints, " ")

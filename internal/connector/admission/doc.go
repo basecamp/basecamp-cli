@@ -8,7 +8,7 @@
 //  1. The gate (Gate) is pure code over the pointer and the local policy: the
 //     event type is in the trigger matrix, the performer is trusted for at
 //     least one of the type's triggers, the bucket is in scope, and a trigger
-//     that would be discarded without a route has one. Most account traffic
+//     that only a served project admits is in one. Most account traffic
 //     ends here, for the price of its pointer.
 //  2. In project trust mode a performer other than the operator is confirmed
 //     as a non-client member of the project. That is a read, cached per
@@ -20,10 +20,11 @@
 //     agent's Person id is among the mention attachments — never a name),
 //     subscribed (a subscription read on the commented recording), assigned
 //     (the recording's events, at most five pages, for details.added_person_ids)
-//     or completed (trusted completer and a stake: the watch_completions route
-//     flag, an assignment, or a subscription).
-//  5. The route, class, reply destination, conversation key and content
-//     snapshot come from the policy and the summary, never from the pointer.
+//     or completed (trusted completer and a stake: the served project's
+//     watch_completions flag, an assignment, or a subscription).
+//  5. Whether the project is served, its class, the reply destination, the
+//     conversation key and the content snapshot come from the policy and the
+//     summary, never from the pointer.
 //
 // # Trust
 //

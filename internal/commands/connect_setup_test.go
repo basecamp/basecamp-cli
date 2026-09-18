@@ -288,16 +288,15 @@ func storeConnectProfileScoped(t *testing.T, s *connectSetupServer, name, token,
 	require.NoError(t, mgr.ImportToken(context.Background(), token, scope, "", "", time.Now().Add(24*time.Hour)))
 }
 
-// routeArg routes the test project to a fresh directory.
-func routeArg(t *testing.T) string {
-	t.Helper()
-	return fmt.Sprintf("--route=%d=%s", setupProject, t.TempDir())
+// serveArg serves the test project.
+func serveArg() string {
+	return fmt.Sprintf("--serve=%d", setupProject)
 }
 
 // firstSetup runs a successful first setup of the agent profile.
 func firstSetup(t *testing.T, s *connectSetupServer) {
 	t.Helper()
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 }
 
@@ -315,16 +314,15 @@ func connectSetupPath(t *testing.T, profile string) string {
 }
 
 // On a profile connected to the agent, setup leaves a connect.json with a
-// routed project that admission reads, and passing token, identity and mint
+// served project that admission reads, and passing token, identity and mint
 // checks.
 func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 	s := startConnectSetupServer(t)
 	app := connectSetupApp(t, s, "agent")
-	repo := t.TempDir()
 
 	out, err := runConnectSetupCmd(t, app,
 		"--operator", fmt.Sprint(setupOperatorPerson),
-		"--route", fmt.Sprintf("%d=%s", setupProject, repo),
+		"--serve", fmt.Sprint(setupProject),
 		"--watch-completions", fmt.Sprint(setupProject),
 		"--class", fmt.Sprintf("%d=internal", setupProject))
 	require.NoError(t, err, out)
@@ -343,9 +341,7 @@ func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 	p.AgentID = setupAgentPerson
 	require.NoError(t, p.Validate())
 	assert.Equal(t, setupOperatorPerson, p.Trust.OperatorID)
-	realRepo, err := filepath.EvalSymlinks(repo)
-	require.NoError(t, err)
-	assert.Equal(t, admission.Route{Path: realRepo, Class: "internal", WatchCompletions: true}, p.Projects[setupProject])
+	assert.Equal(t, admission.Project{Class: "internal", WatchCompletions: true}, p.Projects[setupProject])
 
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -374,7 +370,7 @@ func TestConnectSetupNamesTheAgentReadRefusal(t *testing.T) {
 	s.refuseAgentReads = true
 	app := connectSetupApp(t, s, "agent")
 
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -385,7 +381,7 @@ func TestConnectSetupNamesTheAgentReadRefusal(t *testing.T) {
 	assertNotWritten(t, "agent")
 }
 
-func TestConnectSetupWithNoRouteIsNotReady(t *testing.T) {
+func TestConnectSetupWithNoServedProjectIsNotReady(t *testing.T) {
 	s := startConnectSetupServer(t)
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson))
 	require.Error(t, err, out)
@@ -404,20 +400,20 @@ func TestConnectSetupRefusesBadInput(t *testing.T) {
 		"expect-identity on agent":  "holds an Agent's credential",
 	}
 	for name, args := range map[string][]string{
-		"missing route directory":   {"--operator", op, "--route", fmt.Sprintf("%d=/does/not/exist", setupProject)},
-		"class without a route":     {"--operator", op, "--class", fmt.Sprintf("%d=internal", setupProject)},
-		"bad trust mode":            {"--operator", op, "--trust", "domain"},
-		"allow outside allowlist":   {"--operator", op, "--trust", "project", "--allow", "7"},
-		"bad driver":                {"--operator", op, "--driver", "fork"},
-		"bad concurrency":           {"--operator", op, "--concurrency", "100"},
-		"zero concurrency":          {"--operator", op, "--concurrency", "0"},
-		"bad deadline":              {"--operator", op, "--deadline", "5s"},
-		"zero deadline":             {"--operator", op, "--deadline", "0"},
-		"malformed route":           {"--operator", op, "--route", "not-a-pair"},
-		"no operator":               {"--route", fmt.Sprintf("%d=%s", setupProject, os.TempDir())},
-		"missing operator profile":  {"--operator-profile", "nobody"},
-		"operator profile unlogged": {"--operator-profile", "unlogged"},
-		"expect-identity on agent":  {"--operator", op, "--expect-identity", "4242"},
+		"class without a served project": {"--operator", op, "--class", fmt.Sprintf("%d=internal", setupProject)},
+		"bad trust mode":                 {"--operator", op, "--trust", "domain"},
+		"allow outside allowlist":        {"--operator", op, "--trust", "project", "--allow", "7"},
+		"bad driver":                     {"--operator", op, "--driver", "fork"},
+		"bad concurrency":                {"--operator", op, "--concurrency", "100"},
+		"zero concurrency":               {"--operator", op, "--concurrency", "0"},
+		"bad deadline":                   {"--operator", op, "--deadline", "5s"},
+		"zero deadline":                  {"--operator", op, "--deadline", "0"},
+		"malformed serve":                {"--operator", op, "--serve", "not-a-number"},
+		"zero serve":                     {"--operator", op, "--serve", "0"},
+		"no operator":                    {serveArg()},
+		"missing operator profile":       {"--operator-profile", "nobody"},
+		"operator profile unlogged":      {"--operator-profile", "unlogged"},
+		"expect-identity on agent":       {"--operator", op, "--expect-identity", "4242"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := startConnectSetupServer(t)
@@ -442,7 +438,7 @@ func TestConnectSetupRefusesAProfileWithNoCredential(t *testing.T) {
 	_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
 	require.NoError(t, err)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -451,7 +447,7 @@ func TestConnectSetupRefusesAProfileWithNoCredential(t *testing.T) {
 	assert.Zero(t, s.intakeCount(), "setup never starts a connection")
 	assertNotWritten(t, "agent")
 
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", routeArg(t))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", serveArg())
 	require.Error(t, err, out)
 	require.ErrorAs(t, err, &apiErr)
 	assert.Contains(t, apiErr.Hint, "basecamp auth login -P agent --expect-identity 4242")
@@ -467,7 +463,7 @@ func TestConnectSetupWorksInTheProfilesOwnAccount(t *testing.T) {
 	app := newConnectSetupApp(t, s, "agent")
 	app.Config.AccountID = "1000" // a config-wide default, not the profile's
 	app.Config.Sources["account_id"] = string(config.SourceGlobal)
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -486,7 +482,7 @@ func TestConnectSetupRefusesAZeroPersonID(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
 	s.agentID = 0
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -499,7 +495,7 @@ func TestConnectSetupRefusesAZeroPersonID(t *testing.T) {
 // with <project-id>=.
 func TestConnectSetupClearsAClass(t *testing.T) {
 	s := startConnectSetupServer(t)
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t),
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg(),
 		"--class", fmt.Sprintf("%d=internal", setupProject))
 	require.NoError(t, err, out)
 
@@ -534,7 +530,7 @@ func TestConnectSetupNeverChangesTheCredential(t *testing.T) {
 			connectSetupApp(t, s, "agent")
 			before := credential(t)
 
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 			require.Error(t, err, out)
 			var apiErr *output.Error
 			require.ErrorAs(t, err, &apiErr)
@@ -603,7 +599,7 @@ func TestConnectSetupRefusesAnotherAccountUnderTheSameProfile(t *testing.T) {
 
 func TestConnectSetupRefusesTheAgentAsItsOwnOperator(t *testing.T) {
 	s := startConnectSetupServer(t)
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupAgentPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupAgentPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "never authorizes", "refused by setup, before the file layer's own refusal")
 	assertNotWritten(t, "agent")
@@ -614,13 +610,13 @@ func TestConnectSetupRefusesTheAgentAsItsOwnOperator(t *testing.T) {
 // written.
 func TestConnectSetupVerifiesTheOperatorBeforeWriting(t *testing.T) {
 	s := startConnectSetupServer(t)
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "client")
 	assertNotWritten(t, "agent")
 
 	s.refusePeople = true
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "cannot be verified")
 	assertNotWritten(t, "agent")
@@ -635,7 +631,7 @@ func TestConnectSetupResolvesTheOperatorFromTheirProfile(t *testing.T) {
 	storeConnectProfile(t, s, "me", setupOperatorToken)
 	app := newConnectSetupApp(t, s, "agent")
 
-	out, err := runConnectSetupCmd(t, app, "--operator-profile", "me", routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator-profile", "me", serveArg())
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -650,12 +646,12 @@ func TestConnectSetupOnTheBotUserPath(t *testing.T) {
 	connectSetupApp(t, s, "bot")
 	storeConnectProfile(t, s, "bot", setupBotToken)
 
-	_, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	_, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, "a person's login without --expect-identity could be the operator's own")
 	assert.Contains(t, err.Error(), "a person's login, not an Agent's credential")
 	assertNotWritten(t, "bot")
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "1", routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "1", serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "not the 1 --expect-identity names")
 	assertNotWritten(t, "bot")
@@ -663,7 +659,7 @@ func TestConnectSetupOnTheBotUserPath(t *testing.T) {
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
 		"--operator", fmt.Sprint(setupOperatorPerson),
 		"--expect-identity", fmt.Sprint(setupBotIdentity),
-		routeArg(t))
+		serveArg())
 	require.NoError(t, err, out)
 	assert.NotContains(t, out, setupTicket)
 	f, err := setup.Load(connectSetupPath(t, "bot"))
@@ -682,7 +678,7 @@ func TestConnectSetupReadOnlyCredentialIsNotReady(t *testing.T) {
 	storeConnectProfileScoped(t, s, "bot", setupBotToken, "read")
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
-		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -695,7 +691,7 @@ func TestConnectSetupRefusesExpectIdentityForAnAgent(t *testing.T) {
 	app := connectSetupApp(t, s, "agent")
 
 	// The credential alone says it: an Agent has no identity to pin.
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "holds an Agent's credential")
 	assert.Contains(t, err.Error(), "Drop --expect-identity")
@@ -703,7 +699,7 @@ func TestConnectSetupRefusesExpectIdentityForAnAgent(t *testing.T) {
 
 	// And once connect.json says it, the file is what the remediation
 	// talks about, since a bot login would not satisfy it either.
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 	before, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -748,7 +744,7 @@ func TestConnectSetupConflictsNameACommandToRun(t *testing.T) {
 			s := startConnectSetupServer(t)
 			bareSetupApp(t, s, "agent")
 			tc.prepare(t, s)
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))...)
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append(tc.args, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())...)
 			require.Error(t, err, out)
 			assert.Contains(t, err.Error(), tc.want)
 			assertNotWritten(t, "agent")
@@ -789,7 +785,7 @@ func TestConnectSetupOperatorProfileFollowsEnvironmentPrecedence(t *testing.T) {
 				t.Setenv("BASECAMP_BASE_URL", s.srv.URL)
 			}
 
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", serveArg())
 			if tc.refused {
 				require.Error(t, err, out)
 				assert.Contains(t, err.Error(), "is on")
@@ -811,7 +807,7 @@ func TestConnectSetupReportsAnotherSetupAsBusy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -830,7 +826,7 @@ func TestConnectSetupReportsACredentialRemovedMidRunAsAuth(t *testing.T) {
 		require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
 	}
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -878,7 +874,7 @@ func TestConnectSetupRefusesAnUnreadableCredentialStore(t *testing.T) {
 	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(config.GlobalConfigDir(), "credentials.json"), []byte("{not json"), 0o600))
 
-	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assertNotWritten(t, "agent")
 }
@@ -891,10 +887,10 @@ func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", serveArg())
 	require.NoError(t, err, out)
 
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), routeArg(t))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), serveArg())
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "could not be re-read")
 	f, err := setup.Load(connectSetupPath(t, "agent"))
@@ -919,7 +915,7 @@ func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
 			connectSetupApp(t, s, "agent")
 			storeConnectProfile(t, s, "me", setupOperatorToken)
 
-			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(id), routeArg(t))
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(id), serveArg())
 			require.Error(t, err, out)
 			assert.Contains(t, err.Error(), fmt.Sprintf("Allowlist %d", id))
 			assertNotWritten(t, "agent")
@@ -929,7 +925,7 @@ func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(setupOperatorPerson+1), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(setupOperatorPerson+1), serveArg())
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -950,7 +946,7 @@ func TestConnectSetupReadsTheGrantedScopeNotTheProfiles(t *testing.T) {
 	require.NoError(t, mgr.ImportToken(context.Background(), setupBotToken, "read", "", "", time.Now().Add(24*time.Hour))) // granted read
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
-		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -975,7 +971,7 @@ func TestConnectSetupNeverPrintsATicketFromAFailedMint(t *testing.T) {
 	app := newConnectSetupApp(t, s, "agent")
 	var envelope bytes.Buffer
 	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &envelope})
-	out, err := runConnectSetupCmd(t, app, "--operator-profile", "me", routeArg(t))
+	out, err := runConnectSetupCmd(t, app, "--operator-profile", "me", serveArg())
 	require.Error(t, err, out)
 
 	assert.NotContains(t, out, canary, "command output")
@@ -1014,7 +1010,7 @@ func TestConnectSetupSanitizesThePathItPrints(t *testing.T) {
 	require.Error(t, err, out)
 	assert.NotContains(t, err.Error(), "evil\nFAKE")
 
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, routeArg(t))...)
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, serveArg())...)
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "connect.json written")
 	assert.NotContains(t, out, "evil\nFAKE")
@@ -1027,7 +1023,7 @@ func TestConnectSetupRefusesACredentialOfAnotherKind(t *testing.T) {
 	bareSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "agent", setupBotToken)
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"),
-		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), serveArg())
 	require.NoError(t, err, out)
 	before, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
@@ -1042,29 +1038,6 @@ func TestConnectSetupRefusesACredentialOfAnotherKind(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code)
-	after, err := os.ReadFile(connectSetupPath(t, "agent"))
-	require.NoError(t, err)
-	assert.Equal(t, before, after)
-}
-
-// A route kept from connect.json whose directory has gone makes a rerun not
-// ready, and connect.json is left as it was.
-func TestConnectSetupRechecksRetainedRoutes(t *testing.T) {
-	s := startConnectSetupServer(t)
-	repo := filepath.Join(t.TempDir(), "repo")
-	require.NoError(t, os.Mkdir(repo, 0o700))
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), fmt.Sprintf("--route=%d=%s", setupProject, repo))
-	require.NoError(t, err, out)
-	before, err := os.ReadFile(connectSetupPath(t, "agent"))
-	require.NoError(t, err)
-
-	require.NoError(t, os.Remove(repo))
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--concurrency", "3")
-	require.Error(t, err, out)
-	var apiErr *output.Error
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, codeNotReady, apiErr.Code)
-	assert.Contains(t, apiErr.Message, "no longer usable")
 	after, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
@@ -1086,7 +1059,7 @@ func TestConnectSetupRefusesACredentialReplacedDuringTheChecks(t *testing.T) {
 	}
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
-		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), routeArg(t))
+		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -1101,7 +1074,7 @@ func TestConnectSetupRefusesACredentialReplacedDuringTheChecks(t *testing.T) {
 // stops instead of acting as the wrong agent.
 func TestConnectSetupWritesAPolicyBoundToTheCredential(t *testing.T) {
 	s := startConnectSetupServer(t)
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 
 	f, err := setup.Load(connectSetupPath(t, "agent"))
@@ -1136,7 +1109,7 @@ func TestConnectSetupRefusesWhenTheHostCannotLock(t *testing.T) {
 	require.NoError(t, os.Chmod(locks, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(locks, 0o700) })
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "cannot lock")
 	var apiErr *output.Error
@@ -1152,7 +1125,7 @@ func TestConnectSetupRefusesToRebindToAnotherIdentity(t *testing.T) {
 	bareSetupApp(t, s, "bot")
 	storeConnectProfile(t, s, "bot", setupBotToken)
 	args := []string{"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity)}
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, routeArg(t))...)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), append(args, serveArg())...)
 	require.NoError(t, err, out)
 	before, err := os.ReadFile(connectSetupPath(t, "bot"))
 	require.NoError(t, err)
@@ -1176,7 +1149,7 @@ func TestConnectSetupBusyIsRetryable(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -1187,7 +1160,7 @@ func TestConnectSetupBusyIsRetryable(t *testing.T) {
 // A host that cannot take the setup lock is lock_unavailable, not usage.
 func TestConnectSetupClassifiesAnUnlockableHost(t *testing.T) {
 	s := startConnectSetupServer(t)
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
 	// A lock file this user cannot open at all: setup must not fall back to
 	// running without it.
@@ -1211,7 +1184,7 @@ func TestConnectSetupPropagatesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.duringMint = cancel
 
-	out, err := runConnectSetupCmdIn(ctx, t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), routeArg(t))
+	out, err := runConnectSetupCmdIn(ctx, t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assert.ErrorIs(t, err, context.Canceled)
 	assertNotWritten(t, "agent")
@@ -1266,12 +1239,12 @@ func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
 	var envelope struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			Path     string                    `json:"path"`
-			Profile  string                    `json:"profile"`
-			Agent    setup.Agent               `json:"agent"`
-			Trust    admission.Trust           `json:"trust"`
-			Projects map[int64]admission.Route `json:"projects"`
-			Deadline string                    `json:"deadline"`
+			Path     string                      `json:"path"`
+			Profile  string                      `json:"profile"`
+			Agent    setup.Agent                 `json:"agent"`
+			Trust    admission.Trust             `json:"trust"`
+			Projects map[int64]admission.Project `json:"projects"`
+			Deadline string                      `json:"deadline"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
@@ -1343,17 +1316,12 @@ func TestConnectShowRefusesAnUnsafeConnectJSON(t *testing.T) {
 }
 
 // A person reading show in a terminal or as Markdown sees what matters: the
-// agent, the operator, the trust and every route, which the generic object
-// renderer would drop, through the same output pipeline as every command.
+// agent, the operator, the trust and every served project, which the generic
+// object renderer would drop, through the same output pipeline as every
+// command.
 func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
-	f, err := setup.Load(connectSetupPath(t, "agent"))
-	require.NoError(t, err)
-	var route string
-	for _, r := range f.Projects {
-		route = r.Path
-	}
 
 	for _, format := range []output.Format{output.FormatStyled, output.FormatMarkdown} {
 		app := newConnectSetupApp(t, s, "agent")
@@ -1366,8 +1334,8 @@ func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 			fmt.Sprintf("person %d (agent)", setupAgentPerson),
 			fmt.Sprintf("person %d", setupOperatorPerson),
 			"operator",
-			fmt.Sprintf("Route %d", setupProject),
-			route,
+			fmt.Sprintf("Project %d", setupProject),
+			"1 served",
 			"deadline 45m0s",
 		} {
 			assert.Contains(t, shown, want, "format %v", format)
@@ -1397,53 +1365,31 @@ func TestConnectShowRefusesAnotherProfilesPolicy(t *testing.T) {
 	assert.NotContains(t, out+buf.String(), `"projects"`)
 }
 
-// A route path is a clean absolute path, which may still hold control
-// characters: human output shows them escaped, never raw.
-func TestConnectShowEscapesControlsInARoutePath(t *testing.T) {
-	path := "/home/me/Work/Q3 \x1b[31mred\u009b $launch"
+// connect.json's own path is the one path show still prints, and it may hold
+// control characters or what looks like markup: human output shows them
+// escaped, never raw.
+func TestConnectShowEscapesControlsInTheFilePath(t *testing.T) {
+	path := "/home/me/Q3 \x1b[31mred\u009b $launch/<b>/connect.json"
 	f := setup.New("agent")
 	f.AccountID = "999"
 	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
 	f.Trust.OperatorID = 1001
-	f.Projects[222] = admission.Route{Path: path}
 	for _, markdown := range []bool{false, true} {
-		route := connectShowDisplay("/x/connect.json", f, markdown)["route_222"].(string)
-		assert.NotContains(t, route, "\x1b", "markdown %v", markdown)
-		assert.NotContains(t, route, "\u009b", "markdown %v", markdown)
-		assert.Contains(t, route, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
+		shown := connectShowDisplay(path, f, markdown)["file"].(string)
+		assert.NotContains(t, shown, "\x1b", "markdown %v", markdown)
+		assert.NotContains(t, shown, "\u009b", "markdown %v", markdown)
+		assert.NotContains(t, shown, "<b>", "markdown %v", markdown)
+		assert.Contains(t, shown, `Q3 \x1b[31mred\u009b $launch`, "markdown %v", markdown)
 	}
 }
 
-// The file's own path is shown as literally as the routes: a configuration
+// The file's own path is shown literally: a configuration
 // directory holding Markdown syntax or a backslash does not render as a link
 // or read as an escape.
 func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
 	f := setup.New("agent")
 	file := connectShowDisplay("/home/[me](x)/`cfg`/a\\x1b/connect.json", f, true)["file"]
 	assert.Equal(t, "`` /home/[me](x)/`cfg`/a\\\\x1b/connect.json ``", file)
-}
-
-// A route path holding what looks like HTML or Markdown survives the real
-// renderers: nothing in it is converted, dropped or rendered.
-func TestConnectShowKeepsAPathThatLooksLikeMarkup(t *testing.T) {
-	s := startConnectSetupServer(t)
-	firstSetup(t, s)
-	dir := filepath.Join(t.TempDir(), "Q3 <b>bold<i> [x](y) `tick`")
-	require.NoError(t, os.Mkdir(dir, 0o700))
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--route", fmt.Sprintf("%d=%s", setupProject, dir))
-	require.NoError(t, err, out)
-
-	for format, want := range map[output.Format]string{
-		output.FormatStyled:   `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
-		output.FormatMarkdown: `Q3 \x3cb>bold\x3ci> [x](y) ` + "`tick`",
-	} {
-		app := newConnectSetupApp(t, s, "agent")
-		var buf bytes.Buffer
-		app.Output = output.New(output.Options{Format: format, Writer: &buf})
-		out, err := runConnectShowCmd(t, app)
-		require.NoError(t, err, out)
-		assert.Contains(t, buf.String(), want, "format %v", format)
-	}
 }
 
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {

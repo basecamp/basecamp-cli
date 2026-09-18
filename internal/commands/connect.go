@@ -40,7 +40,7 @@ the work to a local coding agent that replies in Basecamp as the agent.
 
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
-projects to the directories their work runs in, and checks the connector is
+which Basecamp projects it serves, and checks the connector is
 ready. Show prints what setup recorded. Then run the connector on it:
 
   basecamp connect -P <profile> [--project <id>]... [--shadow]
@@ -61,7 +61,7 @@ wait for review, until basecamp connect release. Linux only.
   basecamp connect release            clear the hold
   basecamp connect shadow promote     make the shadow ledger the connector's, held
   basecamp connect import <file>      apply a cutover reconciliation file`,
-		Example: `  basecamp connect setup -P agent --operator-profile me --route 12345=/src/app
+		Example: `  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,
 		Args: cobra.NoArgs,
@@ -88,7 +88,7 @@ func newConnectShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Show a profile's connector setup without changing it",
 		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
-trust mode, each routed project and the worker settings.
+trust mode, each served project and the worker settings.
 
 The file is read through the same checks setup and the connector apply:
 it is refused, and nothing of it shown, when it is a symlink, is not a
@@ -130,7 +130,7 @@ func runConnectShow(app *appctx.App) error {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return output.ErrNotFoundHint("connect.json for profile", name,
-			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile '<your profile>' --route '<project-id>=<dir>'")
+			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile '<your profile>' --serve <project-id>")
 	case err != nil && runtime.GOOS == "windows":
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
 			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
@@ -146,18 +146,18 @@ func runConnectShow(app *appctx.App) error {
 	}
 
 	// The generic object renderer drops nested maps, which is where the
-	// agent, the trust and the routes live, so a person's formats get them
+	// agent, the trust and the served projects live, so a person's formats get them
 	// flattened to one line each; JSON keeps the file's own shape.
 	markdown := app.Output.EffectiveFormat() == output.FormatMarkdown
 	return app.OK(connectShowResult{Path: path, File: f},
 		output.WithDisplayData(connectShowDisplay(path, f, markdown)),
-		output.WithSummary(fmt.Sprintf("Connector setup for profile %q: trust %s, %d routed project(s)", name, f.Trust.Mode, len(f.Projects))))
+		output.WithSummary(fmt.Sprintf("Connector setup for profile %q: trust %s, %d served project(s)", name, f.Trust.Mode, len(f.Projects))))
 }
 
 // connectShowDisplay is show's data for a person: every setting connect.json
-// records as a flat field, one per route. Paths are shown exactly: quoted,
-// or as a code span in Markdown, so nothing in one renders as formatting or
-// reaches a terminal as a control byte.
+// records as a flat field, one per served project. The file's own path is
+// shown exactly — quoted, or as a code span in Markdown — so nothing in it
+// renders as formatting or reaches a terminal as a control byte.
 func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any {
 	exact := func(s string) string {
 		// strconv.Quote escapes controls and backslashes; "<" is escaped too,
@@ -191,17 +191,17 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		// existed still means the default, which is what a person reading
 		// show needs to see.
 		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline)),
-		"projects": strconv.Itoa(len(f.Projects)) + " routed",
+		"projects": strconv.Itoa(len(f.Projects)) + " served",
 	}
 	for id, r := range f.Projects {
-		route := exact(r.Path)
+		settings := "served"
 		if r.Class != "" {
-			route += ", class " + r.Class
+			settings += ", class " + r.Class
 		}
 		if r.WatchCompletions {
-			route += ", watches completions"
+			settings += ", watches completions"
 		}
-		d[fmt.Sprintf("route_%d", id)] = route
+		d[fmt.Sprintf("project_%d", id)] = settings
 	}
 	return d
 }
@@ -260,11 +260,11 @@ type connectSetupFlags struct {
 	trust string
 	allow []string
 
-	routes   []string
+	serve    []string
 	classes  []string
 	watch    []string
 	unwatch  []string
-	unroute  []string
+	unserve  []string
 	driver   string
 	worker   string
 	parallel int
@@ -276,7 +276,7 @@ func newConnectSetupCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Choose who may drive a connected agent, route projects, and check readiness",
+		Short: "Choose who may drive a connected agent, serve projects, and check readiness",
 		Long: `Set up the connector for the agent a profile holds: record the trusted
 operator, write connect.json, and check what can be checked before the
 connector runs.
@@ -300,10 +300,15 @@ the people passed with --allow. project: the operator and any non-client
 member of the event's project. Assignments are the operator's alone in every
 mode.
 
-Routes. connect.json is the only authority for which directory a project's
-work runs in: --route <project-id>=<dir>. A project with no route gets a
-holding reply and no work. --watch-completions <project-id> makes the agent
-hear every trusted completion in that project without being assigned.
+Projects. connect.json is the local list of Basecamp projects this agent
+serves: --serve <project-id>, --unserve <project-id>. A project it does not
+serve gets a holding reply and no work. --watch-completions <project-id>
+makes the agent hear every trusted completion in that project without being
+assigned.
+
+No directory is associated with a project. The connector runs where it is
+started, every worker runs there too, and a task that needs a clone or a
+directory of its own is the agent's own business to make.
 
 connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
@@ -322,9 +327,9 @@ Run setup again to change any of it; what you do not pass is kept.
 
 Examples:
   basecamp auth agent connect -P agent
-  basecamp connect setup -P agent --operator-profile me --route 12345=~/Work/app
+  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
-  basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --route 12345=~/Work/app
+  basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
   basecamp connect setup -P agent --class 12345=internal --deadline 90m`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -342,10 +347,10 @@ Examples:
 	fl.StringVar(&f.operatorProfile, "operator-profile", "", "Profile whose identity is the operator")
 	fl.StringVar(&f.trust, "trust", "", "Who may drive the agent: operator, allowlist or project")
 	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust besides the operator (repeatable; implies --trust allowlist)")
-	fl.StringArrayVar(&f.routes, "route", nil, "Route a project to a directory: <project-id>=<dir> (repeatable)")
-	fl.StringArrayVar(&f.unroute, "remove-route", nil, "Remove a project's route (repeatable)")
-	fl.StringArrayVar(&f.classes, "class", nil, "Classify a routed project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
-	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a routed project (repeatable)")
+	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
+	fl.StringArrayVar(&f.unserve, "unserve", nil, "Stop serving a project (repeatable)")
+	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
+	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
 	fl.StringVar(&f.driver, "driver", "", "How workers are run: spawn or acp (default spawn)")
 	fl.StringVar(&f.worker, "worker", "", fmt.Sprintf("The coding agent workers run: %s (default %s)", strings.Join(setup.Workers, ", "), setup.DefaultWorker))
@@ -551,11 +556,11 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		AgentKind:     kind,
 		OperatorID:    next.Trust.OperatorID,
 		TrustMode:     string(next.Trust.Mode),
-		Routes:        len(next.Projects),
+		Projects:      len(next.Projects),
 	}
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
-	report.Add(setup.RouteChecks(ctx, reader, next)...)
+	report.Add(setup.ProjectChecks(ctx, reader, next)...)
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {
@@ -741,10 +746,15 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 		}
 	}
 
-	var err error
-	if ch.Routes, err = parseProjectPairs("--route", f.routes); err != nil {
-		return ch, err
+	for _, raw := range f.serve {
+		id, err := parsePositiveID("--serve", raw)
+		if err != nil || id == 0 {
+			return ch, output.ErrUsage(fmt.Sprintf("Invalid --serve %q: expected a project id", raw))
+		}
+		ch.Serve = append(ch.Serve, id)
 	}
+
+	var err error
 	if ch.Classes, err = parseProjectPairsAllowEmpty("--class", f.classes); err != nil {
 		return ch, err
 	}
@@ -767,10 +777,10 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 			ch.WatchCompletions[id] = list.on
 		}
 	}
-	for _, raw := range f.unroute {
-		id, err := parsePositiveID("--remove-route", raw)
+	for _, raw := range f.unserve {
+		id, err := parsePositiveID("--unserve", raw)
 		if err != nil || id == 0 {
-			return ch, output.ErrUsage(fmt.Sprintf("Invalid --remove-route %q: expected a project id", raw))
+			return ch, output.ErrUsage(fmt.Sprintf("Invalid --unserve %q: expected a project id", raw))
 		}
 		ch.Remove = append(ch.Remove, id)
 	}
@@ -802,18 +812,11 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 	return ch, nil
 }
 
-// parseProjectPairs parses repeatable <project-id>=<value> flags.
-func parseProjectPairs(flag string, raw []string) (map[int64]string, error) {
-	return parseProjectPairsWith(flag, raw, false)
-}
-
-// parseProjectPairsAllowEmpty is parseProjectPairs where <project-id>= (an
-// empty value) is meaningful: it clears the setting.
+// parseProjectPairsAllowEmpty parses repeatable <project-id>=<value> flags.
+// <project-id>= (an empty value) is meaningful: it clears the setting. The
+// only such flag left is --class, and only it ever had an empty value to
+// mean anything.
 func parseProjectPairsAllowEmpty(flag string, raw []string) (map[int64]string, error) {
-	return parseProjectPairsWith(flag, raw, true)
-}
-
-func parseProjectPairsWith(flag string, raw []string, allowEmpty bool) (map[int64]string, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -821,7 +824,7 @@ func parseProjectPairsWith(flag string, raw []string, allowEmpty bool) (map[int6
 	for _, pair := range raw {
 		idText, value, ok := strings.Cut(pair, "=")
 		id, err := parsePositiveID(flag, strings.TrimSpace(idText))
-		if !ok || err != nil || id == 0 || (value == "" && !allowEmpty) {
+		if !ok || err != nil || id == 0 {
 			return nil, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <project-id>=<value>", flag, pair))
 		}
 		if _, dup := out[id]; dup {

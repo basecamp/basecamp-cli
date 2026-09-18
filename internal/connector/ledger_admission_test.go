@@ -61,8 +61,7 @@ func admittedVerdict(id, revision int64, key string) admission.Verdict {
 		Acknowledge:     true,
 		ConversationKey: key,
 		Reply:           &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 10304028989},
-		Routed:          true,
-		Route:           "/work/connector",
+		Served:          true,
 		Class:           "internal",
 		RecordingURL:    "https://app.basecamp.com/2914079/buckets/48699913/recordings/10304028972",
 		Snapshot: &admission.Snapshot{
@@ -163,8 +162,7 @@ func TestAdmissionCommitWritesTheVerdictOntoTheRecord(t *testing.T) {
 	assert.Equal(t, "recording:10304028989", d.ConversationKey)
 	assert.Equal(t, "comment", d.ReplyKind)
 	assert.Equal(t, int64(10304028989), d.ReplyRecordingID)
-	assert.True(t, d.Routed)
-	assert.Equal(t, "/work/connector", d.Route)
+	assert.True(t, d.Served)
 	assert.Equal(t, "internal", d.Class)
 	assert.Equal(t, v.RecordingURL, d.RecordingURL)
 	assert.Equal(t, adapterOperatorID, d.RequesterID)
@@ -639,7 +637,7 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID:  adapterAgentID,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-		Projects: map[int64]admission.Route{adapterBucketID: {Path: "/work/connector", Class: "internal"}},
+		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
 	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads})
 	require.NoError(t, err)
 

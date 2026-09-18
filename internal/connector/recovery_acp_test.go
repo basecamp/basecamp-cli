@@ -54,7 +54,7 @@ func init() {
 // the fake worker has passed the same handshake a real one does.
 func fakeACPAdapter(w *fakeWorker) int {
 	adapter := acp.ClaudeAgentACP
-	askMode := adapter.Modes[driver.ModeEditsInWorkDir]
+	askMode := adapter.Modes[driver.ModeEdits]
 	const sessionID = "recovery-harness"
 
 	out := bufio.NewWriter(os.Stdout)

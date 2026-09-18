@@ -3,8 +3,6 @@ package setup
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -13,23 +11,23 @@ import (
 )
 
 // Changes is what one setup run asks to change. A zero field leaves the
-// file's value alone, so setup can be run again to add a route without
-// restating everything else.
+// file's value alone, so setup can be run again to serve another project
+// without restating everything else.
 type Changes struct {
 	// Trust is the trust mode, "" to keep the file's.
 	Trust admission.TrustMode
 	// Allow replaces the allowlist when non-empty; it implies allowlist mode.
 	Allow []int64
 
-	// Routes maps a project (bucket) id to the directory its work runs in,
-	// as the operator typed it; ResolveDir makes it the approved entry.
-	Routes map[int64]string
-	// Classes sets a routed project's class; an empty class clears it.
+	// Serve are the project (bucket) ids to serve. A project already served
+	// keeps its class and watch_completions.
+	Serve []int64
+	// Classes sets a served project's class; an empty class clears it.
 	Classes map[int64]string
 	// WatchCompletions turns watch_completions on (true) or off (false) for
-	// a routed project.
+	// a served project.
 	WatchCompletions map[int64]bool
-	// Remove drops projects' routes.
+	// Remove stops serving projects.
 	Remove []int64
 
 	Driver string
@@ -44,7 +42,7 @@ type Changes struct {
 // pass Validate, which Save runs.
 func Apply(f File, ch Changes) (File, error) {
 	out := f
-	out.Projects = make(map[int64]admission.Route, len(f.Projects))
+	out.Projects = make(map[int64]admission.Project, len(f.Projects))
 	for id, r := range f.Projects {
 		out.Projects[id] = r
 	}
@@ -55,27 +53,25 @@ func Apply(f File, ch Changes) (File, error) {
 	}
 
 	for _, id := range ch.Remove {
-		if _, routed := ch.Routes[id]; routed {
-			return File{}, fmt.Errorf("project %d is both routed and removed in one run", id)
+		if slices.Contains(ch.Serve, id) {
+			return File{}, fmt.Errorf("project %d is both served and removed in one run", id)
 		}
-		delete(out.Projects, id) // removing a route that is not there is already done
+		delete(out.Projects, id) // no longer serving a project that was not served is already done
 	}
-	for id, raw := range ch.Routes {
+	for _, id := range ch.Serve {
 		if id <= 0 {
-			return File{}, fmt.Errorf("route: %d is not a project id", id)
+			return File{}, fmt.Errorf("serve: %d is not a project id", id)
 		}
-		dir, err := ResolveDir(raw)
-		if err != nil {
-			return File{}, fmt.Errorf("route for project %d: %w", id, err)
+		if _, served := out.Projects[id]; !served {
+			// A project already served keeps its class and watch_completions;
+			// serving it again is not a reset.
+			out.Projects[id] = admission.Project{}
 		}
-		r := out.Projects[id]
-		r.Path = dir
-		out.Projects[id] = r
 	}
 	for id, class := range ch.Classes {
 		r, ok := out.Projects[id]
 		if !ok {
-			return File{}, fmt.Errorf("class for project %d: the project has no route; add one with --route %d=<dir>", id, id)
+			return File{}, fmt.Errorf("class for project %d: the project is not served; serve it with --serve %d", id, id)
 		}
 		if class != "" && !ValidClass(class) {
 			return File{}, fmt.Errorf("class %q for project %d: use lowercase letters, digits, - or _, at most 40", class, id)
@@ -86,7 +82,7 @@ func Apply(f File, ch Changes) (File, error) {
 	for id, on := range ch.WatchCompletions {
 		r, ok := out.Projects[id]
 		if !ok {
-			return File{}, fmt.Errorf("watch_completions for project %d: the project has no route; add one with --route %d=<dir>", id, id)
+			return File{}, fmt.Errorf("watch_completions for project %d: the project is not served; serve it with --serve %d", id, id)
 		}
 		r.WatchCompletions = on
 		out.Projects[id] = r
@@ -141,39 +137,4 @@ func applyTrust(t *admission.Trust, ch Changes) error {
 	}
 	t.Mode = mode
 	return nil
-}
-
-// ResolveDir turns a route directory as typed into the entry connect.json
-// approves: ~ expanded, absolute, symlinks resolved, and required to be an
-// existing directory. Resolving symlinks means the approved entry names the
-// directory work will really run in, so a link retargeted later does not
-// move the route with it.
-func ResolveDir(raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return "", errors.New("the directory is empty")
-	}
-	path := raw
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("expand ~: %w", err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", abs, err)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("%s is not a directory", resolved)
-	}
-	return filepath.Clean(resolved), nil
 }

@@ -86,7 +86,7 @@ var ClaudeAgentACP = Adapter{
 	Version: "0.78.0",
 	Env:     append([]string{}, claude.Env...),
 	Modes: map[driver.PermissionMode]string{
-		driver.ModeEditsInWorkDir: "default",
+		driver.ModeEdits: "default",
 	},
 	SessionMeta: map[string]any{
 		"claudeCode": map[string]any{
@@ -147,7 +147,7 @@ var CodexACP = Adapter{
 	// the agent what it can call), so it is named here and nothing else is.
 	Readback: Readback{Command: "/mcp", Parse: codexMCPReport, BuiltIn: []string{"codex_apps"}},
 	Modes: map[driver.PermissionMode]string{
-		driver.ModeEditsInWorkDir: "read-only",
+		driver.ModeEdits: "read-only",
 	},
 	LoadSession: true,
 }
