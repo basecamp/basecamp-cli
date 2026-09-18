@@ -27,6 +27,8 @@ reject:
   # on.
   - '\$\(date\)'
   - 'Launch'
-  # No directory is associated with a project any more.
+  # No directory is associated with a project any more, and no flag takes
+  # one. Matched as an id followed by a path, so a legitimate --class
+  # '222=internal' is not caught by it.
   - '--route'
-  - '222='
+  - '222=[~/.]'
