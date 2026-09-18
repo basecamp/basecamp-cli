@@ -88,7 +88,11 @@ import (
 // # Delivery (task_events.delivery), per event on a task
 //
 //	admitted → exposed    worker (get_dispatch), dispatcher at launch
-//	exposed  → delivered  worker (ack_dispatch)
+//	exposed  → delivered  worker (ack_dispatch); the id the worker points at,
+//	                      when it has one, is written with this move or never
+//	                      (task_events_acknowledgement_settles_once), so an id
+//	                      arriving after the acknowledgement is a second
+//	                      report and refused
 //	exposed  → completed  worker (complete_dispatch)
 //	exposed  → completed  dispatcher settlement (worker gone before ack)
 //	delivered → completed worker (complete_dispatch), dispatcher settlement
@@ -115,9 +119,15 @@ import (
 // # Invariants
 //
 //  1. One live task per event: task_events_one_live_task.
-//  2. One task per conversation: an event joins a task only if every
-//     dispatched record on its conversation joins the same task, and no live
-//     task carries any of that conversation's events (createTask).
+//  2. One task per conversation, and in the conversation's order: an event
+//     joins a task only if no live task holds its conversation, no record on
+//     that conversation is dispatched outside this task, and no admitted
+//     record older than it is waiting there — admission queues a record
+//     precisely because an earlier one is next, and a queued record does not
+//     go around it (conversationsAreFree, and
+//     task_events_one_live_task_per_conversation). The conversation a task
+//     holds is written on the task's own rows, because retention clears a
+//     terminal record's conversation_key while its task is still live.
 //  3. The token is valid only while its task is live, checked inside every
 //     worker call's own transaction.
 //  4. Nothing leaves dispatched while a worker may still act: a record with a
@@ -262,12 +272,13 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	// Read first, write after: a refusal leaves the caller's transaction as
 	// it found it, whatever the caller then does with it.
 	guards := make([]string, 0, len(eventIDs))
+	conversations := make([]string, 0, len(eventIDs))
 	for _, id := range eventIDs {
 		var (
 			acknowledge, hasInstruction int
-			state                       string
+			state, conversation         string
 		)
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL AND length(snapshot) > 0, state FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state); {
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL AND length(snapshot) > 0, state, conversation_key FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state, &conversation); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
@@ -296,40 +307,14 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 			guard = "armed"
 		}
 		guards = append(guards, guard)
+		conversations = append(conversations, conversation)
 	}
 
-	// One task per conversation: every dispatched record on the events'
-	// conversations must be among the events this task takes. Checked before
-	// anything is written, so a refusal leaves the caller's transaction
-	// untouched, and before any record moves, so the records this call
-	// dispatches never count.
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
-	args := make([]any, 0, len(eventIDs)*2)
-	for _, id := range eventIDs {
-		args = append(args, id)
-	}
-	for _, id := range eventIDs {
-		args = append(args, id)
-	}
-	var busy int64
-	//nolint:gosec // G202: placeholders, not values
-	//
-	// Busy is a record still dispatched on the conversation, or one a live
-	// task still carries: a task stays live until it is superseded, whatever
-	// became of its records, and two live tasks on one conversation would be
-	// two workers on it.
-	switch err := tx.QueryRowContext(ctx, `
-SELECT other.id FROM events other
-JOIN events mine ON mine.conversation_key = other.conversation_key
-WHERE mine.id IN (`+placeholders+`) AND mine.conversation_key <> ''
-  AND other.id NOT IN (`+placeholders+`)
-  AND (other.state = 'dispatched'
-       OR EXISTS (SELECT 1 FROM task_events WHERE event_id = other.id AND retired_at IS NULL))
-LIMIT 1`, args...).Scan(&busy); {
-	case err == nil:
-		return TaskGrant{}, fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", busy, ErrConversationBusy)
-	case !errors.Is(err, sql.ErrNoRows):
-		return TaskGrant{}, fmt.Errorf("connector: read conversations: %w", err)
+	// One task per conversation (invariant 2), asked as two questions, both
+	// before anything is written: a refusal leaves the caller's transaction
+	// untouched, and the records this call dispatches never count themselves.
+	if err := l.conversationsAreFree(ctx, tx, eventIDs, conversations); err != nil {
+		return TaskGrant{}, err
 	}
 
 	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
@@ -341,7 +326,7 @@ LIMIT 1`, args...).Scan(&busy); {
 		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
 	}
 	for i, id := range eventIDs {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guards[i]); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard, conversation_key) VALUES (?, ?, ?, ?)`, taskID, id, guards[i], conversations[i]); err != nil {
 			if isConstraint(err) {
 				return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
 			}
@@ -364,11 +349,77 @@ LIMIT 1`, args...).Scan(&busy); {
 	return TaskGrant{ID: taskID, Token: token}, nil
 }
 
+// conversationsAreFree asks whether the conversations these events are on are
+// free for a task of their own.
+//
+// Two questions, because the answer lives in two places. A record waiting for
+// a worker or still dispatched is in events: admitted means admission decided
+// it goes next and a queued sibling may not jump ahead of it, and dispatched
+// means work a worker may still be holding, whether or not a live task
+// carries it (invariant 7). A conversation a live task already holds is in
+// task_events, which keeps the conversation of every row it was written for —
+// the record's own conversation_key is cleared once retention reaches it, and
+// a task whose records are all terminal is still a worker's task until it is
+// superseded.
+func (l *Ledger) conversationsAreFree(ctx context.Context, tx *sql.Tx, eventIDs []int64, conversations []string) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
+	for i, conversation := range conversations {
+		if conversation == "" {
+			continue
+		}
+		args := make([]any, 0, len(eventIDs)+1)
+		args = append(args, conversation)
+		for _, id := range eventIDs {
+			args = append(args, id)
+		}
+
+		var (
+			other      int64
+			otherState string
+		)
+		//nolint:gosec // G202: placeholders, not values
+		//
+		// An older admitted sibling is next on its conversation, and a queued
+		// one does not go around it: admission queues a record precisely
+		// because an earlier one holds the conversation. A dispatched sibling
+		// counts whatever its id, because a worker may still be holding it.
+		switch err := tx.QueryRowContext(ctx, `
+SELECT id, state FROM events
+WHERE conversation_key = ? AND id NOT IN (`+placeholders+`)
+  AND (state = 'dispatched' OR (state = 'admitted' AND id < ?))
+ORDER BY id LIMIT 1`, append(args, eventIDs[i])...).Scan(&other, &otherState); {
+		case err == nil && RecordState(otherState) == StateDispatched:
+			return fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", other, ErrConversationBusy)
+		case err == nil:
+			return fmt.Errorf("connector: event %d is admitted ahead of event %d on the same conversation: %w", other, eventIDs[i], ErrConversationBusy)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("connector: read conversations: %w", err)
+		}
+
+		var task int64
+		//nolint:gosec // G202: placeholders, not values
+		switch err := tx.QueryRowContext(ctx, `
+SELECT task_id FROM task_events
+WHERE conversation_key = ? AND retired_at IS NULL AND event_id NOT IN (`+placeholders+`)
+ORDER BY task_id LIMIT 1`, args...).Scan(&task); {
+		case err == nil:
+			return fmt.Errorf("connector: task %d is live on the conversation of event %d: %w", task, eventIDs[i], ErrConversationBusy)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("connector: read live tasks: %w", err)
+		}
+	}
+	return nil
+}
+
 // SupersedeTask retires a task: its token is refused from then on, and its
-// events are free to join a new task. An event the task never exposed returns
-// to admitted, to be dispatched again once its conversation is free; an event
-// a worker was handed stays dispatched, because that worker may have acted on
-// it, and waits for its settlement or a person's redispatch.
+// events are free to join a new task. An event this task never exposed
+// returns to admitted, to be dispatched again once its conversation is free —
+// unless something else still holds it dispatched, which invariant 4 decides
+// and this call does not override: an earlier task's exposure that was never
+// withdrawn keeps the record dispatched, waiting for its outcome, and a
+// record a person or a later verdict has moved stays where it was put. An
+// event a worker was handed stays dispatched for the same reason: that worker
+// may have acted on it, and it waits for its settlement or a redispatch.
 func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 	return retryBusy(func() error {
 		tx, err := l.db.BeginTx(ctx, nil)
@@ -421,8 +472,11 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
 	}
 	for _, id := range unexposed {
-		// Only a record still dispatched moves: one a person or a later
-		// verdict already moved stays where it was put.
+		// Only a record still dispatched moves, and only if nothing else
+		// holds it: move's own refusals — a worker holding it on another
+		// task, a record a person or a later verdict moved — are the answer,
+		// not an error, so the result is read for what it is and not acted
+		// on.
 		if _, err := l.move(ctx, tx, transition{id: id, state: StateAdmitted, from: []RecordState{StateDispatched}}); err != nil {
 			return err
 		}
@@ -747,12 +801,17 @@ func (d *TaskDispatch) Ack(ctx context.Context, eventID int64, ackID *int64) (Re
 			if ackID != nil && te.ackID.Valid && te.ackID.Int64 != *ackID {
 				return false, fmt.Errorf("connector: event %d acknowledged as %d: %w", eventID, te.ackID.Int64, ErrReportConflict)
 			}
-			if ackID != nil && !te.ackID.Valid && te.delivery == DeliveryCompleted {
-				// The outcome stands, and so does what was reported with it:
-				// an acknowledgement arriving after it is not written.
-				return false, fmt.Errorf("connector: event %d is completed: %w", eventID, ErrReportConflict)
+			if ackID != nil && !te.ackID.Valid && te.delivery != DeliveryExposed {
+				// The acknowledgement settles with the delivery, id and all:
+				// this event was acknowledged with nothing to point at, and
+				// an id arriving afterwards is a second, different report,
+				// not the same call retried.
+				return false, fmt.Errorf("connector: event %d was acknowledged without an acknowledgement id: %w", eventID, ErrReportConflict)
 			}
-			if te.delivery != DeliveryExposed && (ackID == nil || te.ackID.Valid) {
+			if te.delivery != DeliveryExposed {
+				// Acknowledged already, and by whatever this call says: an
+				// id equal to the one recorded, or none to record. The
+				// receipt is the answer.
 				return false, nil
 			}
 			_, err := tx.ExecContext(ctx, `

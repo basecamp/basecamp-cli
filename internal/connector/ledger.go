@@ -605,6 +605,11 @@ CREATE TABLE tasks (
 CREATE TABLE task_events (
   task_id      INTEGER NOT NULL REFERENCES tasks (id),
   event_id     INTEGER NOT NULL REFERENCES events (id),
+  -- The conversation the event is on, copied from the record when the row is
+  -- written: retention clears a terminal record's conversation_key, and a
+  -- task outlives its records' payloads, so the conversation a live task
+  -- holds has to be written where it stays readable.
+  conversation_key TEXT NOT NULL DEFAULT '',
   delivery     TEXT    NOT NULL DEFAULT 'admitted'
                CHECK (delivery IN ('admitted', 'exposed', 'delivered', 'completed')),
   guard        TEXT    NOT NULL DEFAULT ''
@@ -624,6 +629,7 @@ CREATE TABLE task_events (
 
 CREATE UNIQUE INDEX task_events_one_live_task ON task_events (event_id) WHERE retired_at IS NULL;
 CREATE INDEX task_events_event ON task_events (event_id, delivery);
+CREATE INDEX task_events_conversation ON task_events (conversation_key) WHERE retired_at IS NULL;
 
 CREATE TRIGGER tasks_supersession_is_final
 BEFORE UPDATE OF superseded_at ON tasks
@@ -716,6 +722,15 @@ BEGIN
   SELECT RAISE(ABORT, 'a record is dispatched exactly while a live task carries it');
 END;
 
+-- The acknowledgement settles with the delivery: the id a worker points at is
+-- written when it acknowledges, or never.
+CREATE TRIGGER task_events_acknowledgement_settles_once
+BEFORE UPDATE OF ack_id ON task_events
+WHEN NEW.ack_id IS NOT OLD.ack_id AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed')
+BEGIN
+  SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
+END;
+
 CREATE TRIGGER task_events_guard_settles_once
 BEFORE UPDATE OF guard ON task_events
 WHEN NEW.guard <> OLD.guard AND NOT (OLD.guard = 'armed' AND NEW.guard IN ('canceled', 'fired'))
@@ -734,6 +749,27 @@ WHEN EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id AND superseded_at IS NOT
   OR NOT EXISTS (SELECT 1 FROM events WHERE id = NEW.event_id AND state IN ('admitted', 'queued', 'dispatched'))
 BEGIN
   SELECT RAISE(ABORT, 'only work waiting for a worker joins a task, and only a live one');
+END;
+
+-- One live task per conversation (invariant 2), as a rule about the rows
+-- rather than about the records: two workers on one conversation would answer
+-- each other's work, and a conversation whose records have since been
+-- retained must still count.
+CREATE TRIGGER task_events_one_live_task_per_conversation
+BEFORE INSERT ON task_events
+WHEN NEW.conversation_key <> '' AND NEW.retired_at IS NULL AND EXISTS (
+  SELECT 1 FROM task_events live
+  WHERE live.conversation_key = NEW.conversation_key
+    AND live.retired_at IS NULL AND live.task_id <> NEW.task_id)
+BEGIN
+  SELECT RAISE(ABORT, 'one live task per conversation');
+END;
+
+CREATE TRIGGER task_events_conversation_does_not_move
+BEFORE UPDATE OF conversation_key ON task_events
+WHEN NEW.conversation_key <> OLD.conversation_key
+BEGIN
+  SELECT RAISE(ABORT, 'a task event stays on the conversation it was written for');
 END;
 
 CREATE TRIGGER task_events_do_not_move
@@ -761,9 +797,31 @@ BEGIN
   SELECT RAISE(ABORT, 'a worker acknowledges and completes what it pulled; anything else is the dispatcher settling a completed record');
 END;
 `,
-	// Migration 6. The dispatcher's side of a task: what it runs in, its
+	// 6. The acknowledgement id settles with the acknowledgement.
+	//
+	// Migration 5 shipped a trigger that read only the row as it was, so a
+	// statement could write the id and leave the row exposed — an id in the
+	// receipt that no worker ever reported. A ledger already at version 5
+	// keeps that trigger, so replacing it is its own migration rather than an
+	// edit to one that has shipped.
+	`
+DROP TRIGGER task_events_acknowledgement_settles_once;
+
+CREATE TRIGGER task_events_acknowledgement_settles_once
+BEFORE UPDATE OF ack_id ON task_events
+WHEN NEW.ack_id IS NOT OLD.ack_id
+ AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed' OR NEW.delivery <> 'delivered')
+BEGIN
+  SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
+END;
+`,
+	// Migration 7. The dispatcher's side of a task: what it runs in, its
 	// attempts, and how each ended. See ledger_tasks.go for the invariants
 	// these tables hold.
+	//
+	// This was migration 6 while it sat on #736's head; main took 6 for the
+	// acknowledgement trigger before this branch landed, and a shipped
+	// migration is never renumbered under a ledger that has applied it.
 	migrationTasksAndAttempts,
 }
 

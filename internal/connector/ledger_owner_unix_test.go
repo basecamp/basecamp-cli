@@ -66,3 +66,23 @@ func TestASecondOpenVetsTheDirectoryChain(t *testing.T) {
 	assert.Contains(t, err.Error(), "secure the ledger")
 	assert.Equal(t, checks, securePathRuns.Load(), "and the file was not opened to find that out")
 }
+
+// And a second open vets the ledger file's own mode: a file another user can
+// read is not one to read from, whatever it was when the first open checked.
+func TestASecondOpenVetsTheFileMode(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	path := filepath.Join(dir, "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	checks := securePathRuns.Load()
+
+	require.NoError(t, os.Chmod(path, 0o644))
+
+	_, err = OpenExistingLedger(context.Background(), path)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "can be read by other users (mode 0644)")
+	assert.Equal(t, checks, securePathRuns.Load(), "and the file was not opened to find that out")
+}

@@ -169,14 +169,22 @@ func restoreSpan(input string, removed [][2]int, keep [2]int) string {
 }
 
 // isOneMentionElement reports a removed span that is one bc-attachment
-// element: it opens with that tag, and every end tag inside it either closes
-// something the span itself opened or is the element's own closing tag. A span that
+// element: it opens with that tag and ends where that element ends — at the
+// start tag itself when the tag closes itself, and otherwise where every end
+// tag inside it either closes something the span opened or is the element's
+// own closing tag. A span that
 // ran past its element and swallowed a "</p>" from the text around it fails
 // here.
 func isOneMentionElement(element string) bool {
 	first, ok := nextMarkup(element, 0)
 	if !ok || first.isEnd || !strings.EqualFold(first.name, "bc-attachment") || first.start != 0 {
 		return false
+	}
+	if strings.HasSuffix(element[first.start:first.end], "/>") {
+		// A tag that closes itself is the whole element. A span that ran on
+		// from one to some later closing tag swallowed the text between them,
+		// so it is not one element however that text ends.
+		return first.end == len(element)
 	}
 	var open []string
 	for at := first.end; at < len(element); {

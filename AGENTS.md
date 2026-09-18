@@ -80,13 +80,36 @@ session, stop and run it first.
 *references* still exist in the `.surface` snapshot. It catches stale references, not
 missing coverage, so adding a command breaks none of them.
 
-Removal is only partly caught. `resolve_cmd` walks up to the nearest existing ancestor,
-so dropping a nested subcommand leaves the reference resolving against its parent and the
-check still passes — `basecamp setup <removed>` resolves as `basecamp setup`. Removing a
-top-level command is caught; removing a subcommand is not. Don't lean on CI for this. Update the skill the change actually affects;
+A reference has to resolve exactly: `basecamp setup <removed>` no longer passes by
+falling back to `basecamp setup`. Words past a resolved command are allowed only where
+they cannot name a subcommand — after a command that takes positional arguments, and
+after a leaf that has none — so argument values and prose still pass; a word that runs
+on into a filename or key (`upload report.pdf`, `config set project_id`) is read as the
+argument it is. A word naming a command in `.surface-breaking`, the record of removals,
+fails before either escape can take it, which is how removal is caught. Two limits
+remain. Under a command that has both arguments and subcommands (`basecamp recordings`),
+a subcommand that never existed passes as an argument value. And `.surface` cannot say
+whether a group also runs bare (`basecamp skill` prints the skill file), so a word after
+one fails even where the CLI would accept it; hidden commands are not in `.surface` at
+all. Acknowledge a deliberate case with the baseline entry its DRIFT line names, in
+`.surface-skill-drift`. `make test-skill-drift` runs the check against fixtures that hold
+all of this.
+
+Update the skill the change actually affects;
 basecamp-doctor deliberately covers only doctor, setup and auth remediation;
 basecamp-connect covers `basecamp auth agent connect` and `basecamp connect`, and its
 evals run against its own SKILL.md (`make -C skill-evals eval-connect`).
+
+**Hint commands**: a hint is an instruction an operator is about to run, so
+`TestHintCommandsResolve` holds the commands hints name to the same exactness, against
+the real command tree rather than `.surface`. It reads hint text in `internal/commands`
+and `internal/connector/setup` — hints written inline, built into a variable, returned
+by a helper, passed through a wrapper, or assigned to a hint-named field — and every
+string in `connect.go`. Asking
+the command lets it be exact where the script cannot: a word after a group passes only
+if the group is not the root, runs, and its own argument validator accepts the word — which a subcommand
+that never existed can still satisfy, under a group like `recordings` that takes one. It
+checks commands, not flags.
 
 ```bash
 bin/ci                # The single command — run this

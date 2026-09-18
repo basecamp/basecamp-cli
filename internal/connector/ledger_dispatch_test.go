@@ -1261,3 +1261,110 @@ func TestAWithdrawnExposureDoesNotFollowTheRetry(t *testing.T) {
 	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT delivery FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&delivery))
 	assert.Equal(t, "exposed", delivery)
 }
+
+// A queued record does not go around the admitted one that holds its
+// conversation: admission queued it precisely because that one is next.
+func TestAQueuedRecordDoesNotJumpItsConversation(t *testing.T) {
+	ctx := context.Background()
+	ledger, err := OpenLedger(filepath.Join(t.TempDir(), "state", "connector.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(id, 0, "recording:10304028989"))
+		require.NoError(t, err)
+	}
+	require.Equal(t, StateQueued, getRecord(t, ledger, 2).State)
+
+	_, err = ledger.CreateTask(ctx, []int64{2})
+
+	require.ErrorIs(t, err, ErrConversationBusy)
+	assert.Contains(t, err.Error(), "event 1 is admitted ahead of event 2")
+	_, err = ledger.CreateTask(ctx, []int64{1})
+	assert.NoError(t, err, "and the record that is next dispatches")
+}
+
+// A task is its worker's until it is superseded, even after retention has
+// cleared what its records said: the conversation a task holds is written on
+// the task's own rows, where retention does not reach.
+func TestRetentionDoesNotFreeALiveTasksConversation(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		_, _, err := f.d.Get(ctx, id)
+		require.NoError(t, err)
+		_, err = f.d.Complete(ctx, id, Completion{Outcome: OutcomeSucceeded})
+		require.NoError(t, err)
+	}
+	dropped, err := f.ledger.DropContent(ctx, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 2, dropped, "the records' payloads are gone, conversation and all")
+
+	seenRecord(t, f.ledger, 3)
+	_, err = f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:10304028989"))
+	require.NoError(t, err)
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+
+	require.ErrorIs(t, err, ErrConversationBusy)
+	assert.Contains(t, err.Error(), "is live on the conversation of event 3")
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	assert.NoError(t, err, "and the conversation is free once the task is not")
+}
+
+// An acknowledgement with an id, after one without, is a second report, not
+// the same call retried: the receipt stands and nothing is written.
+func TestAnAcknowledgementIdAfterTheAcknowledgementIsRefused(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+
+	late := int64(4242)
+	_, err = f.d.Ack(ctx, 1, &late)
+
+	require.ErrorIs(t, err, ErrReportConflict)
+	assert.Contains(t, err.Error(), "acknowledged without an acknowledgement id")
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	assert.Nil(t, ack, "nothing was written")
+}
+
+// A retry that has nothing to point at answers the receipt it already has: no
+// id is not a different id.
+func TestAnAcknowledgementWithoutAnIdAfterOneWithItIsTheSameReceipt(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	posted := int64(4242)
+	first, err := f.d.Ack(ctx, 1, &posted)
+	require.NoError(t, err)
+
+	again, err := f.d.Ack(ctx, 1, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, first, again)
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	require.NotNil(t, ack)
+	assert.Equal(t, posted, *ack, "and the id it did report is still there")
+}
+
+// The same rule holds for anything else writing to the file: an id is written
+// with the acknowledgement or not at all.
+func TestTheSchemaKeepsAnAcknowledgementIdWithItsAcknowledgement(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET ack_id = 4242 WHERE event_id = 1`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "written with the acknowledgement, once")
+}

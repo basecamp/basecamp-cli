@@ -17,10 +17,20 @@ import (
 // the only ways to make one, so anything holding a Descriptor holds a number
 // that converts safely.
 //
-// It says nothing about which descriptors are appropriate for a given job.
-// Whether standard input may be read as a token, for instance, belongs where
-// the flag is read, not here.
+// It says nothing about whether a descriptor is appropriate for a given job.
+// Whether a task token may be read from a pipe rather than a file, for
+// instance, belongs where the flag is read, not here.
 type Descriptor int
+
+// FirstNonStandard is the first descriptor that is not standard input,
+// output or error — the one fact about which descriptors are which that the
+// two sides of the credential handover both need, and are only ever right
+// about together. Startup seals every descriptor from here up, because below
+// it are the three a child is meant to share; the mcp command refuses a task
+// token below it, because there the token would be arriving on the MCP wire
+// or the log. One line, drawn once: a token accepted below where the seal
+// starts would be a credential nothing had sealed.
+const FirstNonStandard Descriptor = 3
 
 // maxDescriptor is the portable ceiling: int is 32 bits on a 32-bit build, so
 // a number that fits in int64 is not necessarily one this process can hold.
