@@ -97,11 +97,23 @@ func TestAMalformedLegacyPathIsRefusedBeforeItIsDiscarded(t *testing.T) {
 		"relative":     `{"path":"work/app"}`,
 		"unclean":      `{"path":"/work/../etc"}`,
 		"not a string": `{"path":42}`,
+		// A filesystem path cannot hold a NUL: the kernel refuses one
+		// outright, since a path reaches it as a NUL-terminated string. So
+		// no connector ever wrote this, whatever path.IsAbs and path.Clean
+		// make of it — both are happy with it.
+		"a NUL byte": `{"path":"/work/\u0000app"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Error(t, policy(entry), "the old validation refused this file, and so must reading it")
 		})
 	}
+
+	// Only a NUL, though. A Linux path may hold a newline, a tab or an
+	// escape — those are bytes a connector really could have written, and
+	// refusing them would be new strictness rather than a restored check,
+	// which is the mistake this branch already made once elsewhere.
+	require.NoError(t, policy(`{"path":"/work/a\nb"}`), "a newline is legal in a path, so a writer could have produced it")
+	require.NoError(t, policy(`{"path":"/work/a\tb"}`), "and a tab")
 
 	// The shape is the writer's, not this host's. A connector runs on Linux
 	// only, so this key is a POSIX path — and this package builds

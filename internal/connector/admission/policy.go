@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strings"
 )
 
 // TrustMode names who, besides the operator, may drive the agent.
@@ -137,6 +138,19 @@ func checkLegacyPath(data []byte) error {
 	// A compatibility check validates what the old writer could produce, not
 	// what this reader would accept. Those are the same thing only when the
 	// format and the host agree, and a path is where they do not.
+	if strings.ContainsRune(legacy, 0) {
+		// A NUL is the one byte a filesystem path cannot hold: a path
+		// reaches the kernel as a NUL-terminated string, so os.Stat on this
+		// value is "invalid argument" and no connector could have written
+		// it. path.IsAbs and path.Clean are both content-blind and take it
+		// happily (Copilot on #765).
+		//
+		// Only a NUL. A Linux path may hold a newline, a tab or an escape,
+		// and those are bytes a connector really could have written —
+		// refusing them would be new strictness rather than a restored
+		// check, which is a mistake this branch has already been shown once.
+		return errors.New(`the "path" of a connector that routed projects contains a NUL, which no filesystem path can`)
+	}
 	if legacy == "" || !path.IsAbs(legacy) || path.Clean(legacy) != legacy {
 		return fmt.Errorf(`the "path" of a connector that routed projects is %q, which is not the clean absolute POSIX path such a connector wrote`, legacy)
 	}

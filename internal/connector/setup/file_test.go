@@ -365,10 +365,11 @@ func TestParseRefusesANullProjectEntry(t *testing.T) {
 // files a person edits by hand (Copilot on #765).
 func TestParseRefusesAMalformedLegacyPath(t *testing.T) {
 	for name, path := range map[string]any{
-		"null":     nil,
-		"empty":    "",
-		"relative": "work/app",
-		"unclean":  "/work/../etc",
+		"null":       nil,
+		"empty":      "",
+		"relative":   "work/app",
+		"unclean":    "/work/../etc",
+		"a NUL byte": "/work/\x00app",
 	} {
 		t.Run(name, func(t *testing.T) {
 			data, err := json.Marshal(validFile(t))
