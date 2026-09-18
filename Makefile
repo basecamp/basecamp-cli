@@ -130,6 +130,33 @@ qa-report:
 		echo ""; \
 	fi
 
+# The connector's acp driver runs pinned ACP adapters, installed here once by
+# an operator and never downloaded at dispatch time.
+# Where basecamp connect looks by default: an absolute $XDG_DATA_HOME, else
+# ~/.local/share (a relative XDG_DATA_HOME is ignored there too).
+ACP_ADAPTERS_DIR ?= $(if $(filter /%,$(XDG_DATA_HOME)),$(XDG_DATA_HOME),$(HOME)/.local/share)/basecamp/acp-adapters
+
+# Install the pinned ACP adapters (internal/connector/driver/acp/adapters).
+# --engine-strict: an adapter whose Node version requirement this machine does
+# not meet fails the install, not the first dispatch.
+.PHONY: acp-adapters
+acp-adapters:
+	@mkdir -p "$(ACP_ADAPTERS_DIR)"
+	cp internal/connector/driver/acp/adapters/package.json internal/connector/driver/acp/adapters/package-lock.json "$(ACP_ADAPTERS_DIR)/"
+	npm ci --prefix "$(ACP_ADAPTERS_DIR)" --ignore-scripts --no-audit --no-fund --engine-strict
+
+# The ACP adapter-compatibility test: eight checks through the acp driver
+# against each installed adapter (the spike's four, the worker shell's
+# environment, a decoy MCP server in the working directory, the task
+# token's bridge, and what an adapter does when a session's MCP server dies
+# mid-session). Sends real prompts (model quota); skipped
+# for an adapter that is not installed. ACP_TRANSCRIPTS=<dir> keeps redacted
+# JSON-RPC transcripts.
+.PHONY: test-acp-compat
+test-acp-compat: check-toolchain
+	BASECAMP_ACP_ADAPTERS_DIR="$(ACP_ADAPTERS_DIR)" BASECAMP_ACP_TRANSCRIPTS="$(ACP_TRANSCRIPTS)" \
+		$(GOTEST) -tags acpcompat -run TestAdapterCompat -count=1 -timeout 30m -v ./internal/connector/driver/acp/
+
 # Run tests with race detector
 .PHONY: race-test
 race-test: check-toolchain
@@ -294,6 +321,9 @@ provenance-check:
 .PHONY: vet
 vet: check-toolchain
 	$(GOVET) $(BUILD_TAGS) ./...
+	@# The adapter-compatibility test builds only with its own tag, so
+	@# nothing else would notice it rotting.
+	$(GOVET) -tags acpcompat ./internal/connector/driver/acp/
 
 # Format code
 .PHONY: fmt

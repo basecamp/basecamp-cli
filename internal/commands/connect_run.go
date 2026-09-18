@@ -25,6 +25,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/spawn"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
@@ -38,6 +39,7 @@ type connectRunFlags struct {
 	shadow   bool
 	since    int64
 	driver   string
+	adapters string
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -47,7 +49,8 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project the agent can see)")
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
-	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn)")
+	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
+	fl.StringVar(&f.adapters, "acp-adapters", "", "Where the pinned ACP adapters are installed, for --driver acp (default $XDG_DATA_HOME/basecamp/acp-adapters)")
 }
 
 // connectStateHome is the directory holding the connector's state root, from
@@ -148,6 +151,23 @@ const connectShutdownFlush = 15 * time.Second
 // lifecycle messages a previous process left, before intake and dispatch run.
 const connectStartBound = 2 * time.Minute
 
+// connectDriver is the driver connect.json (or --driver) names for its
+// worker. The acp driver runs the worker's pinned ACP adapter, found where it
+// was installed; nothing is downloaded here.
+func connectDriver(name, worker, adaptersDir string) (driver.Driver, error) {
+	if name != setup.DriverACP {
+		return spawn.New(worker, spawn.Options{})
+	}
+	if adaptersDir != "" && !filepath.IsAbs(adaptersDir) {
+		abs, err := filepath.Abs(adaptersDir)
+		if err != nil {
+			return nil, err
+		}
+		adaptersDir = abs
+	}
+	return acp.ForWorker(worker, adaptersDir, nil)
+}
+
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
 		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
@@ -185,8 +205,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if f.driver != "" {
 		driverName = f.driver
 	}
-	if !f.shadow && driverName != setup.DriverSpawn {
-		return output.ErrUsage(fmt.Sprintf("driver %q is not available yet; use %q", driverName, setup.DriverSpawn))
+	if !f.shadow && driverName != setup.DriverSpawn && driverName != setup.DriverACP {
+		return output.ErrUsage(fmt.Sprintf("driver %q is not %q or %q", driverName, setup.DriverSpawn, setup.DriverACP))
 	}
 
 	account, err := connectAccount(app, name)
@@ -306,7 +326,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return err
 		}
 		routes := newConnectRoutes(path, file, logger)
-		worker, err := spawn.New(file.WorkerName(), spawn.Options{})
+		worker, err := connectDriver(driverName, file.WorkerName(), f.adapters)
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
