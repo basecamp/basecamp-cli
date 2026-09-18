@@ -200,9 +200,16 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		}
 		if !task.superseded {
 			// The replaced worker is refused by basecamp_connect from here on
-			// (invariant 5).
-			if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = ? WHERE id = ? AND superseded_at IS NULL`, now, task.taskID); err != nil {
-				return RedispatchResult{}, fmt.Errorf("connector: supersede task %d: %w", task.taskID, err)
+			// (invariant 5). Through supersedeTask and not a bare write to
+			// superseded_at: the supersession retires the task's rows in the
+			// same statement (tasks_supersession_retires_its_events), so an
+			// event this task never exposed has to be returned to admitted
+			// here or it is never returned at all — the settlement at the
+			// attempt's end reads only rows that are still live, and finds
+			// none. A returned event is not startable while the task it left
+			// has not ended, so nothing runs beside the worker being stopped.
+			if err := l.supersedeTask(ctx, tx, task.taskID); err != nil {
+				return RedispatchResult{}, err
 			}
 			out.SupersededTaskID = task.taskID
 		}

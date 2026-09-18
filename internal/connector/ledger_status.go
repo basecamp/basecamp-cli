@@ -5,12 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // OpenLedgerReadOnly opens an existing ledger for reading only: no migration,
@@ -29,40 +26,48 @@ func OpenLedgerReadOnly(ctx context.Context, path string) (*Ledger, error) {
 	if isInMemory(path) || strings.ContainsAny(path, "?#%") {
 		return nil, fmt.Errorf("connector: ledger path %q cannot be opened as a file", path)
 	}
-	// Vetted as the writer's open vets it, without creating the file: a ledger
-	// that vanishes under a reader (a promote renaming it) is not recreated
-	// empty.
-	if err := setup.CheckPrivateFile(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		return nil, fmt.Errorf("connector: secure the ledger: %w", err)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("connector: ledger path %q: %w", path, err)
 	}
-	if info, err := os.Lstat(filepath.Dir(path)); err != nil {
+	// Vetted as the writer's open vets it, through the same per-file entry and
+	// without creating the file: a ledger that vanishes under a reader (a
+	// promote renaming it) is not recreated empty. The entry matters even for
+	// a reader — the privacy check opens a descriptor and closes it, and that
+	// close drops every lock this process holds on the file, including the
+	// ones a Ledger open beside it is holding. Going through claimLedger runs
+	// the descriptor check once per file per process and verifies every later
+	// open with Stat instead.
+	file := claimLedger(abs)
+	if file.key != abs {
+		releaseLedger(file)
+		return nil, fmt.Errorf("connector: %s and %s are one file: %w", abs, file.key, ErrLedgerUnderAnotherName)
+	}
+	if err := checkLedgerFile(file, path, abs, false); err != nil {
+		releaseLedger(file)
 		return nil, err
-	} else if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("connector: ledger directory %s is readable by other users (mode %04o); it must be 0700", filepath.Dir(path), info.Mode().Perm())
 	}
 	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		releaseLedger(file)
 		return nil, fmt.Errorf("connector: open ledger: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	l := &Ledger{db: db, now: time.Now}
+	l := &Ledger{db: db, file: file, now: time.Now}
 	version, err := l.SchemaVersion(ctx)
 	if err != nil {
-		_ = db.Close()
+		_ = l.Close()
 		return nil, fmt.Errorf("connector: read the ledger's schema: %w", err)
 	}
 	switch {
 	case version < len(migrations):
-		_ = db.Close()
+		_ = l.Close()
 		return nil, fmt.Errorf("connector: the ledger is at schema %d and this build reads %d: %w", version, len(migrations), ErrLedgerOutOfDate)
 	case version > len(migrations):
 		// A newer build wrote it: its columns are not this build's to read,
 		// and no decision of this build's may be written into it.
-		_ = db.Close()
+		_ = l.Close()
 		return nil, fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", version, len(migrations), ErrLedgerSchema)
 	}
 	return l, nil

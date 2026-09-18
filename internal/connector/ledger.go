@@ -836,9 +836,15 @@ END;
 	// this to 8. The numbers move only because nothing has shipped them yet;
 	// once a ledger has applied one, its number is fixed.
 	migrationOutbox,
-	// Migration 8. The hold marker, intake generations, the review tag and
+	// Migration 9. The hold marker, intake generations, the review tag and
 	// people's decisions on records. See ledger_hold.go for the invariants
 	// they hold.
+	//
+	// This was migration 8 while it sat on card 20's head, behind the tasks
+	// and attempts at 6 and the outbox at 7. Main took 6 for the
+	// acknowledgement trigger, which pushed those two to 7 and 8 and this to
+	// 9. The numbers move only because nothing has shipped them yet; once a
+	// ledger has applied one, its number is fixed.
 	migrationOperator,
 }
 

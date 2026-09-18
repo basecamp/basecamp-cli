@@ -103,6 +103,7 @@ func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 	launch := launchOf(t, l, 1)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
@@ -127,6 +128,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: started}))
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 
@@ -186,6 +188,7 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
+			pulled(t, d, 1)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
 			require.NoError(t, err)
 			_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
@@ -567,6 +570,7 @@ func TestDiscard(t *testing.T) {
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
+			pulled(t, d, 1)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 			require.NoError(t, err)
 		},
@@ -619,6 +623,17 @@ func rawDecision(t *testing.T, l *Ledger, eventID int64, action, at string) int6
 	return id
 }
 
+// pulled hands the worker its dispatch for eventID, as a real worker does
+// before it acknowledges or completes: a record is exposed at launch, but the
+// ledger refuses an acknowledgement or a completion until the worker has
+// pulled it.
+func pulled(t *testing.T, d *TaskDispatch, eventID int64) {
+	t.Helper()
+	_, ok, err := d.Get(context.Background(), eventID)
+	require.NoError(t, err)
+	require.True(t, ok, "the worker is handed event %d", eventID)
+}
+
 // pendingRedispatch leaves event 1 completed(failed) on a live task with a
 // redispatch waiting for the task to end, and returns the task's launch.
 func pendingRedispatch(t *testing.T, l *Ledger) Launch {
@@ -628,6 +643,7 @@ func pendingRedispatch(t *testing.T, l *Ledger) Launch {
 	launch := launchOf(t, l, 1)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 	got, err := l.Redispatch(ctx, 1, opBy)
@@ -902,6 +918,7 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	launch := launchOf(t, l, 2)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 2)
 	reply := int64(77)
 	_, err = d.Complete(ctx, 2, Completion{Outcome: OutcomeSucceeded, ReplyID: &reply})
 	require.NoError(t, err)
