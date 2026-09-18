@@ -1465,10 +1465,11 @@ basecamp connect worktrees prune -P agent          # The only thing that removes
 answer. Stdout is a wire of one JSON object per line (events seen, verdicts,
 dispatches — ids and states, never content) and the logs are on stderr, so read
 the lines rather than the log. SIGINT and SIGTERM cancel whatever workers are
-running, settle them, and exit 130 and 143. It runs on macOS and Linux only,
-refuses a second connector for the same agent, and takes `--project` (repeatable)
-to hear and dispatch only those projects. Run it under a supervisor rather than
-from a session you will close.
+running, settle them, and exit 130 and 143. It runs on Linux only: the task
+token's hand-over onto a descriptor the next program inherits is sealed only
+there. It refuses a second connector for the same agent, and takes `--project`
+(repeatable) to hear and dispatch only those projects. Run it under a
+supervisor rather than from a session you will close.
 
 With worktrees on, a task's worktree is kept when the task ends — the connector
 removes none of its own accord — and listed by `connect worktrees list` with its
