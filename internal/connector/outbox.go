@@ -149,8 +149,13 @@ const (
 	// IntentGuardAck is the fixed-form acknowledgement a guard posts when no
 	// worker called get_dispatch in time. One per event.
 	IntentGuardAck IntentKind = "guard_ack"
-	// IntentHoldingReply answers a mention or assignment in a project with no
-	// route. One per event.
+	// IntentHoldingReply answers a request the connector is not going to
+	// start work on until a person changes something: a mention or
+	// assignment in a project with no route (holdingKey), and one whose
+	// route no task can be given a working directory in (refusedStartKey).
+	// One of each per event, because the second can follow the first — a
+	// route added, and the directory it names not one a worktree can be made
+	// in — and an event told the first thing is owed the second.
 	IntentHoldingReply IntentKind = "holding_reply"
 	// IntentStillRunning is one still-running notice. One per attempt and
 	// occurrence.
@@ -242,6 +247,13 @@ func guardKey(eventID int64) string {
 
 func holdingKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":event:" + strconv.FormatInt(eventID, 10)
+}
+
+// refusedStartKey is the holding reply for a record the dispatcher refused
+// to start. It is not holdingKey: an event can be told there is no route and
+// then, once there is one, that no worktree can be made in it.
+func refusedStartKey(eventID int64) string {
+	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
 }
 
 func completionKey(attemptID string) string {

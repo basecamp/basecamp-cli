@@ -162,6 +162,13 @@ const OutcomeUnknown Outcome = "unknown"
 // second time. It waits for a person's redispatch.
 const ReasonSpawnFailed = "spawn_failed"
 
+// ReasonRouteUnusable blocks an event no task could be given a working
+// directory for: with worktrees on, a route that is not in a git repository
+// or has no commit to branch from. It is not on a timer — the directory is
+// what has to change — so it waits for a person's redispatch, like every
+// other reason a machine, not a moment, is the cause of.
+const ReasonRouteUnusable = "route_unusable"
+
 // Errors from the task ledger.
 var (
 	// ErrNotStartable is a launch for a record that is not waiting for a
@@ -199,6 +206,17 @@ type Hooks struct {
 	AttemptEnded func(ctx context.Context, tx Tx, s Settlement) error
 	// StillRunning runs in StillRunning's transaction.
 	StillRunning func(ctx context.Context, tx Tx, tick StillRunningTick) error
+	// StartRefused runs in RefuseStart's transaction, after the record is
+	// blocked: where the reply saying nothing will be started is called for.
+	StartRefused func(ctx context.Context, tx Tx, r RefusedStart) error
+}
+
+// RefusedStart is what StartRefused is told. Everything else about the
+// record — where a reply goes, and whether it asked for one — the hook reads
+// in the transaction, as the verdict hook does.
+type RefusedStart struct {
+	EventID int64
+	Reason  string
 }
 
 // SetHooks installs hooks. Not safe concurrently with ledger use.
@@ -250,6 +268,57 @@ type Launch struct {
 	LaunchedAt      time.Time
 	// DeadlineAt is zero when the task has no deadline.
 	DeadlineAt time.Time
+}
+
+// RefuseStart blocks a record no task could be started for, with the reason
+// why, and calls for the reply that says so. It is the dispatcher's word for
+// a machine only a person can change: nothing ran, nothing will until the
+// machine changes, and the ledger, `connect status` and the recording that
+// asked all say the same thing.
+//
+// It is not a failure to be retried, and it is not silence. A record whose
+// start cannot even be attempted has nowhere else to go: it is not
+// dispatched, so no attempt settles it and no completion notice is rendered
+// for it, and leaving it admitted is leaving it to be tried again forever
+// against a directory that will not change on its own.
+//
+// Only a record still waiting for a worker is refused. One that moved on
+// since the dispatcher read it — discarded, or started by another path — is
+// left where it is and the refusal is reported to the caller.
+func (l *Ledger) RefuseStart(ctx context.Context, eventID int64, reason string) error {
+	if reason == "" {
+		return errors.New("connector: a refused start needs a reason")
+	}
+	return retryBusy(func() error { return l.refuseStart(ctx, eventID, reason) })
+}
+
+func (l *Ledger) refuseStart(ctx context.Context, eventID int64, reason string) error {
+	tx, err := l.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("connector: begin refusal of %d: %w", eventID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	moved, err := l.move(ctx, tx, transition{
+		id: eventID, state: StateBlocked, reason: reason,
+		from: []RecordState{StateAdmitted, StateQueued},
+	})
+	if err != nil {
+		return err
+	}
+	if !moved {
+		_ = tx.Rollback()
+		return l.explainRefusal(ctx, eventID, StateBlocked)
+	}
+	if l.hooks.StartRefused != nil {
+		if err := l.hooks.StartRefused(ctx, tx, RefusedStart{EventID: eventID, Reason: reason}); err != nil {
+			return fmt.Errorf("connector: refusal hook for %d: %w", eventID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("connector: commit refusal of %d: %w", eventID, err)
+	}
+	return nil
 }
 
 // LaunchTask writes a task, its first attempt as launching, and its

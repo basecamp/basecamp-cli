@@ -570,7 +570,20 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	workDir := route
 	if d.opts.Workspaces != nil {
 		dir, err := d.opts.Workspaces.Prepare(ctx, route, record.ID)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrRouteUnusable):
+			// The route is not a condition that passes: it is a directory a
+			// person has to change. Waiting for it is what made this
+			// invisible — the route backed off, the records stayed admitted,
+			// and nobody was told anything — so the record is blocked with
+			// the reason, which `connect status` counts and a redispatch
+			// clears, and the recording that asked is answered once.
+			d.log.Error("connector: no task can be given a working directory on this route", "event_id", record.ID, "error", err)
+			if err := d.ledger.RefuseStart(ctx, record.ID, ReasonRouteUnusable); err != nil {
+				return err
+			}
+			return nil
+		case err != nil:
 			d.log.Warn("connector: could not prepare a working directory", "event_id", record.ID, "error", err)
 			return nil
 		}

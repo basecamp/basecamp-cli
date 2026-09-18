@@ -294,6 +294,16 @@ func routeArg(t *testing.T) string {
 	return fmt.Sprintf("--route=%d=%s", setupProject, t.TempDir())
 }
 
+// repositoryRouteArg routes the project to a directory in a repository, for
+// a setup that turns worktrees on: every task then branches from the route,
+// and setup refuses a route no worktree could be made in.
+func repositoryRouteArg(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".git"), 0o700))
+	return fmt.Sprintf("--route=%d=%s", setupProject, dir)
+}
+
 // firstSetup runs a successful first setup of the agent profile.
 func firstSetup(t *testing.T, s *connectSetupServer) {
 	t.Helper()
@@ -670,8 +680,10 @@ func TestConnectSetupOnTheBotUserPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, setup.Agent{PersonID: setupBotPerson, Kind: setup.KindBotUser, IdentityID: setupBotIdentity}, f.Agent)
 
-	// The pinned identity is remembered: a rerun need not restate it.
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--worktrees")
+	// The pinned identity is remembered: a rerun need not restate it. The
+	// route is restated because this rerun turns worktrees on, and a route
+	// with no repository takes no worktree.
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--worktrees", repositoryRouteArg(t))
 	require.NoError(t, err, out)
 }
 

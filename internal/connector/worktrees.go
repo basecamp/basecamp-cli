@@ -157,6 +157,32 @@ const (
 // recently to try again.
 var ErrPrepareBackoff = errors.New("the last worktree on this route failed; waiting before trying again")
 
+// ErrRouteUnusable is a Prepare that failed on what the route is, rather
+// than on something that happened while it was read: there is no repository
+// at or above it, it is not inside the repository git named, or that
+// repository has no commit to branch from. Waiting changes none of those, so
+// a Prepare that wraps it is not backed off and tried again — the dispatcher
+// refuses the record, names the reason in the ledger and answers the
+// recording that asked.
+//
+// The distinction is proved, never read out of git's words: absence of a
+// repository by walking the disk (setup.NoRepositoryAt), absence of a commit
+// by the exit status rev-parse --quiet keeps for a name that is valid and
+// resolves to nothing. Anything a proof does not cover — git missing, a
+// directory that could not be entered, a timeout — is left as it was and
+// retried, because a route that is momentarily unreadable is not a route
+// that is misconfigured.
+var ErrRouteUnusable = errors.New("no worktree can be made on this route until its directory is changed")
+
+// unusable marks err as ErrRouteUnusable when the cause is proved to be the
+// route itself, and leaves it alone otherwise.
+func unusable(proved bool, err error) error {
+	if !proved {
+		return err
+	}
+	return fmt.Errorf("%w: %w", err, ErrRouteUnusable)
+}
+
 // WorktreesOptions configures Worktrees.
 type WorktreesOptions struct {
 	Ledger *Ledger
@@ -249,12 +275,18 @@ func (w *Worktrees) PerTaskDirs() bool { return !w.off }
 // Prepare implements Workspaces: a new worktree on a new task branch at the
 // route's HEAD, and the route's place inside it.
 //
-// A failure holds the route, not the event: what stops a worktree (a route
-// that is not a repository, one with no commit, a full disk) stops every
-// event on it. The route waits PrepareBackoff, doubling up to
+// A failure holds the route, not the event: what stops a worktree (a full
+// disk, a git that will not run, a directory that cannot be read) stops
+// every event on it. The route waits PrepareBackoff, doubling up to
 // PrepareBackoffMax, and RoutesWaiting tells the dispatcher to leave its
 // records out, so they neither fill the disk and the ledger nor the window
 // other routes' records are started from.
+//
+// A failure the route itself is (ErrRouteUnusable: no repository, no commit)
+// is not waited on. Waiting is for a condition that may pass, and this one
+// passes only when a person changes the directory; the error is returned
+// with no backoff armed, and the dispatcher refuses the record rather than
+// leaving the route to back off in silence.
 func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
 	if w.off {
 		return route, nil
@@ -268,6 +300,14 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 	workDir, err := w.prepare(ctx, route, originatingEventID)
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if errors.Is(err, ErrRouteUnusable) {
+		// Not a wait. A backoff would hold every other record on the route
+		// out of the dispatcher's window and answer one of them every half
+		// hour at most; the route is not going to become a repository on its
+		// own, so each record is refused as it comes and told once.
+		delete(w.failures, route)
+		return "", err
+	}
 	if err != nil {
 		failure.count++
 		delay := PrepareBackoff << min(failure.count-1, 10)
@@ -300,16 +340,16 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 	}
 	top, err := w.gitOut(ctx, route, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", fmt.Errorf("connector: route %s is not in a git repository: %w", route, err)
+		return "", unusable(setup.NoRepositoryAt(route), fmt.Errorf("connector: route %s is not in a git repository: %w", route, err))
 	}
 	repository := filepath.Clean(top)
 	rel, err := filepath.Rel(realPath(repository), realPath(route))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("connector: route %s is not inside its repository", route)
+		return "", fmt.Errorf("connector: route %s is not inside its repository: %w", route, ErrRouteUnusable)
 	}
 	base, err := w.gitOut(ctx, repository, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("connector: route %s has no commit to branch from: %w", route, err)
+		return "", unusable(w.hasNoCommit(ctx, repository), fmt.Errorf("connector: route %s has no commit to branch from: %w", route, err))
 	}
 	suffix := make([]byte, 3)
 	if _, err := rand.Read(suffix); err != nil {
@@ -353,6 +393,17 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 		return "", fmt.Errorf("connector: create a worktree for event %d: %w", originatingEventID, err)
 	}
 	return workDir, nil
+}
+
+// hasNoCommit proves a repository has no commit HEAD reaches. rev-parse
+// --quiet exits 1 for a name that is valid and resolves to nothing, which is
+// exactly an empty repository, and 128 for everything that went wrong on the
+// way there; anything but the 1 proves nothing and the failure stays one to
+// retry.
+func (w *Worktrees) hasNoCommit(ctx context.Context, repository string) bool {
+	_, err := w.gitOut(ctx, repository, "rev-parse", "--quiet", "--verify", "--end-of-options", "HEAD^{commit}")
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 1
 }
 
 func (w *Worktrees) add(ctx context.Context, r *Worktree) error {
