@@ -24,13 +24,15 @@ import (
 //     by a task's end returning it, by anything — is written held instead, by
 //     a trigger, in the same statement. A held record is not startable.
 //  2. The hold marker stops dispatch and posting at the database. While it
-//     stands no attempt row can be written, no task takes a follow-up and no
-//     outbox intent can move to sending. It lives in the ledger, so every
+//     stands no attempt row can be written, no task takes a follow-up, no
+//     event is handed to a worker for the first time — neither a first
+//     exposure nor a first pull of an event the launch exposed, so a worker a
+//     crashed connector left running is told nothing new — and no outbox
+//     intent can move to sending. It lives in the ledger, so every
 //     start respects it, and only Release clears it. What it does not stop is
-//     a worker a crashed connector left running: it holds its own task token
-//     until a start recovers that attempt, and what it does in Basecamp is
-//     its own. Ending it is the one-owner rule's (driver/worker.go), and a
-//     person can hurry it with redispatch.
+//     what such a worker already holds: an instruction it was handed before
+//     the hold, and its own Basecamp credential. Ending it is the one-owner
+//     rule's (driver/worker.go), and a person can hurry it with redispatch.
 //  3. A hold is one transaction: the marker, a new intake generation, the
 //     review tag on every non-terminal record of the generations before it
 //     (clearing any earlier authorization, a redispatch still waiting for its
@@ -124,7 +126,8 @@ CREATE TRIGGER events_held_cancels_guard
 AFTER UPDATE OF state ON events
 WHEN NEW.state = 'held' AND OLD.state <> 'held'
 BEGIN
-  UPDATE outbox SET state = 'canceled', note = 'held'
+  UPDATE outbox SET state = 'canceled', note = 'held',
+    finished_at = strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now')
   WHERE intent_key = 'guard_ack:event:' || NEW.id AND state = 'pending';
 END;
 
@@ -133,6 +136,24 @@ BEFORE INSERT ON attempts
 WHEN EXISTS (SELECT 1 FROM hold_marker)
 BEGIN
   SELECT RAISE(ABORT, 'the connector is held: nothing is dispatched until basecamp connect release');
+END;
+
+CREATE TRIGGER task_events_exposure_refused_under_hold
+BEFORE UPDATE OF delivery ON task_events
+WHEN OLD.delivery = 'admitted' AND NEW.delivery = 'exposed' AND EXISTS (SELECT 1 FROM hold_marker)
+BEGIN
+  SELECT RAISE(ABORT, 'the connector is held: no instruction is handed to a worker until basecamp connect release');
+END;
+
+-- The other first hand-off: an event the launch exposed carries only a
+-- pointer until a worker pulls its instruction, so a first pull is new work
+-- reaching that worker and the hold refuses it too. A repeat — a worker
+-- asking again for what it already pulled — is answered.
+CREATE TRIGGER task_events_pull_refused_under_hold
+BEFORE UPDATE OF pulled_at ON task_events
+WHEN OLD.pulled_at IS NULL AND NEW.pulled_at IS NOT NULL AND EXISTS (SELECT 1 FROM hold_marker)
+BEGIN
+  SELECT RAISE(ABORT, 'the connector is held: no instruction is handed to a worker until basecamp connect release');
 END;
 
 CREATE TRIGGER outbox_refused_under_hold
@@ -194,6 +215,10 @@ BEGIN
     AND id IN (SELECT event_id FROM task_events WHERE task_id = NEW.id);
 END;
 `
+
+// ErrHeld is the hold marker refusing to hand a worker something new. It is
+// not a failure of the task: nothing more is handed over until release.
+var ErrHeld = errors.New("the connector is held")
 
 // Reasons a person's decision writes.
 const (
@@ -399,6 +424,13 @@ func (l *Ledger) Release(ctx context.Context, by string) (ReleaseResult, error) 
 		return nil
 	})
 	return out, err
+}
+
+// isHeld reports whether the hold marker stands, inside a caller's
+// transaction: what a refused write asks before it calls itself a failure.
+func isHeld(ctx context.Context, q rowQuerier) (bool, error) {
+	_, ok, err := readHold(ctx, q)
+	return ok, err
 }
 
 // Held reports whether the hold marker stands. Its signature is

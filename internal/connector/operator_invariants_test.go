@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // The operator decisions and the hold (ledger_hold.go). Each test names the
@@ -102,6 +103,7 @@ func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 	launch := launchOf(t, l, 1)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
@@ -126,6 +128,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: started}))
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 
@@ -185,6 +188,7 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
+			pulled(t, d, 1)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
 			require.NoError(t, err)
 			_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
@@ -566,6 +570,7 @@ func TestDiscard(t *testing.T) {
 			launch := launchOf(t, l, 1)
 			d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 			require.NoError(t, err)
+			pulled(t, d, 1)
 			_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 			require.NoError(t, err)
 		},
@@ -618,6 +623,17 @@ func rawDecision(t *testing.T, l *Ledger, eventID int64, action, at string) int6
 	return id
 }
 
+// pulled hands the worker its dispatch for eventID, as a real worker does
+// before it acknowledges or completes: a record is exposed at launch, but the
+// ledger refuses an acknowledgement or a completion until the worker has
+// pulled it.
+func pulled(t *testing.T, d *TaskDispatch, eventID int64) {
+	t.Helper()
+	_, ok, err := d.Get(context.Background(), eventID)
+	require.NoError(t, err)
+	require.True(t, ok, "the worker is handed event %d", eventID)
+}
+
 // pendingRedispatch leaves event 1 completed(failed) on a live task with a
 // redispatch waiting for the task to end, and returns the task's launch.
 func pendingRedispatch(t *testing.T, l *Ledger) Launch {
@@ -627,6 +643,7 @@ func pendingRedispatch(t *testing.T, l *Ledger) Launch {
 	launch := launchOf(t, l, 1)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 	got, err := l.Redispatch(ctx, 1, opBy)
@@ -901,6 +918,7 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	launch := launchOf(t, l, 2)
 	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
 	require.NoError(t, err)
+	pulled(t, d, 2)
 	reply := int64(77)
 	_, err = d.Complete(ctx, 2, Completion{Outcome: OutcomeSucceeded, ReplyID: &reply})
 	require.NoError(t, err)
@@ -972,4 +990,141 @@ func TestADiscardWithdrawsARedispatchWaitingForItsTask(t *testing.T) {
 	var waiting bool
 	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT redispatch_decision IS NOT NULL FROM events WHERE id = 1`).Scan(&waiting))
 	assert.False(t, waiting, "the authorization went with the record")
+}
+
+// A canceled guard is finished like every other intent the ledger closes.
+func TestAHeldRecordsCanceledGuardIsFinished(t *testing.T) {
+	l := newTestLedger(t)
+	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	guards, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentGuardAck}})
+	require.NoError(t, err)
+	require.Len(t, guards, 1)
+
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	guard, err := l.Intent(ctx, guards[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, IntentCanceled, guard.State)
+	assert.NotNil(t, guard.FinishedAt, "a canceled intent says when it was finished")
+}
+
+// Invariant 2, for the worker a crashed connector left running: while the hold
+// stands, get_dispatch hands out nothing it had not already handed out.
+func TestInvariant2AWorkerIsHandedNothingNewUnderTheHold(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
+	launch := launchOf(t, l, 1)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	first, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	// The instruction it already holds is answered again; the sibling it never
+	// pulled is not handed over.
+	repeat, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, first.EventID, repeat.EventID)
+	_, _, err = d.Get(ctx, 2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "held")
+	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "held")
+
+	_, err = l.Release(ctx, opBy)
+	require.NoError(t, err)
+	_, ok, err = d.Get(ctx, 2)
+	require.NoError(t, err)
+	assert.True(t, ok, "released, the follow-up is handed over")
+}
+
+// A hold arriving mid-task is not a failure of that task: the exposure is
+// refused as held, and the dispatcher's follow-up loop stops asking.
+func TestAHoldRefusesAnExposureAsHeldNotAsAFailure(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:9")
+	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"))
+	launch := launchOf(t, l, 1)
+	_, err := l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
+	require.ErrorIs(t, err, ErrHeld)
+}
+
+// Through the dispatcher: a hold that lands while a task runs withholds the
+// next instruction and lets the task finish, rather than failing it.
+//
+//nolint:contextcheck // the harness builds its fixtures on background contexts
+func TestAHoldWithholdsTheNextInstructionWithoutFailingTheTask(t *testing.T) {
+	ctx := context.Background()
+	release := make(chan struct{})
+	fake := newFakeDriver()
+	var h *dispatchHarness
+	fake.turn = func(_ *fakeSession, n int, _ string) (driver.PromptResult, error) {
+		if n == 1 {
+			<-release
+		}
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	h = newDispatchHarness(t, fake, nil)
+	opAdmit(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	s := <-fake.made
+	opAdmit(t, h.ledger, 2, "recording:1")
+	require.Eventually(t, func() bool {
+		var n int
+		_ = h.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE event_id = 2`).Scan(&n)
+		return n == 1
+	}, 5*time.Second, 10*time.Millisecond, "the follow-up joined the task")
+
+	_, err := h.ledger.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	close(release)
+
+	rows := h.attemptsEnded(t, 1)
+	assert.Equal(t, "finished", rows[0].StopReason, "a held connector is not a failed task")
+	assert.Len(t, s.promptList(), 1, "nothing more was handed over")
+	assert.Equal(t, StateHeld, stateOf(t, h.ledger, 2), "the follow-up waits for a person")
+}
+
+// Invariant 2: an event the launch exposed carries only a pointer until a
+// worker pulls its instruction, so the hold refuses that first pull too —
+// the case a crash during launch and a restart under --hold leaves behind.
+func TestInvariant2AFirstPullIsRefusedUnderTheHold(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	opAdmit(t, l, 1, "recording:1")
+	launch := launchOf(t, l, 1)
+	d, err := l.Dispatch(ctx, launch.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+
+	_, _, err = d.Get(ctx, 1)
+	require.ErrorIs(t, err, ErrHeld, "the instruction is not handed over under the hold")
+
+	_, err = l.Release(ctx, opBy)
+	require.NoError(t, err)
+	first, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// Pulled once, a repeat is answered even if a hold lands after it.
+	_, err = l.SetHold(ctx, opBy, HoldByOperator)
+	require.NoError(t, err)
+	repeat, ok, err := d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, first.EventID, repeat.EventID)
 }

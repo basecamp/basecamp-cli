@@ -524,6 +524,11 @@ func (l *Ledger) ExposeEvent(ctx context.Context, attemptID string, eventID int6
 		if _, err := tx.ExecContext(ctx, `
 UPDATE task_events SET delivery = 'exposed', exposed_at = ?, exposed_attempt_id = ?
 WHERE task_id = ? AND event_id = ? AND delivery = 'admitted'`, l.timestamp(), attemptID, taskID, eventID); err != nil {
+			// A hold refuses a first hand-off (ledger_hold.go). That is not a
+			// failure of the task: nothing more is handed over until release.
+			if held, holdErr := isHeld(ctx, tx); holdErr == nil && held {
+				return fmt.Errorf("connector: expose event %d: %w", eventID, ErrHeld)
+			}
 			return fmt.Errorf("connector: expose event %d: %w", eventID, err)
 		}
 		if err := tx.Commit(); err != nil {

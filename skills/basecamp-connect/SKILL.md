@@ -411,13 +411,15 @@ the person's decisions, so run the deciding ones only when the person asks for
 that record or that step.
 
 - `basecamp connect status -P '<profile>'` (`--shadow` for a shadow run's
-  ledger; `--json` for fields): whether it runs, the hold, the feed position
+  ledger; `--json` for fields): what its lock file says (diagnostic, never
+  proof that it runs), the hold, the feed position
   (held or not, never the position), gaps, queues, live tasks and their workers,
   lifecycle messages waiting for a person, held records, the last dispatches.
   Read-only and safe while the connector runs. It shows no content.
 - `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
   poll, the ledger, the worker binary, and a handshake with the agent's MCP
-  server. Nothing is written or posted.
+  server. It writes nothing to the ledger and posts nothing to Basecamp,
+  though it may renew the profile's credential as any command does.
 - `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
   run again or for the first time. Accepted for an unknown or failed outcome
   (one whose task is still running waits for that task to end), a blocked

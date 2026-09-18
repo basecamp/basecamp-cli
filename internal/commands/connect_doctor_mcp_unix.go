@@ -24,9 +24,9 @@ var mcpServerCommand = func(profile string) (string, []string, error) {
 	return exe, []string{"mcp", "--profile", profile}, err
 }
 
-// mcpHandshakeCheck starts the agent's Basecamp MCP server with what the
-// dispatcher gives a worker's — this binary's mcp command on the profile, the
-// same allowlisted environment, its own process group — completes the MCP
+// mcpHandshakeCheck starts the agent's Basecamp MCP server with the
+// environment and process group the dispatcher gives a worker's, through this
+// binary's ordinary mcp command rather than the worker subcommand, completes the MCP
 // handshake and lists its tools, then ends the group it started. It does not
 // serve the basecamp_connect domain: that needs a live task's token, which
 // only a dispatch mints, and doctor starts no task. The connector's ledger,
@@ -98,6 +98,6 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server lists no tools"
 		return c
 	}
-	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", profile, tools)
+	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", shellQuote(profile), tools)
 	return c
 }

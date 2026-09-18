@@ -244,6 +244,14 @@ func TestConnectDoctorWorkerBinaries(t *testing.T) {
 	checks := driverChecks(connectProfile{name: "agent", file: file})
 	require.Len(t, checks, 1)
 	assert.Equal(t, setup.StatusFail, checks[0].Status, "a driver the run command refuses is not ready")
+
+	// Worktrees are the run command's other refusal.
+	worktrees := setup.New("agent")
+	worktrees.Worktrees = true
+	checks = driverChecks(connectProfile{name: "agent", file: worktrees})
+	require.Len(t, checks, 1)
+	assert.Equal(t, "Worktrees", checks[0].Name)
+	assert.Equal(t, setup.StatusFail, checks[0].Status, "what the connector refuses to start with is not ready")
 }
 
 func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {
@@ -432,4 +440,20 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, `"still_held"`)
 	assert.NotContains(t, out, `"StillHeld"`)
+}
+
+// Until the worktree driver lands, status says the retained worktrees are
+// unavailable — never that there are none.
+func TestStatusSaysWorktreesAreUnavailableNotNone(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err, styled)
+	assert.Contains(t, styled, "Worktrees      unavailable")
+	assert.NotContains(t, styled, "0 retained")
+
+	out, err := f.run(t, output.FormatJSON, "status")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"worktrees_known": false`)
 }
