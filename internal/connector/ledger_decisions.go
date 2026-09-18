@@ -526,12 +526,28 @@ WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
 //
 // A record a person has already authorized is left out: that is the
 // redispatch path's, and both offering it would decide it twice.
-func (l *Ledger) DueBlockedRetries(ctx context.Context, now time.Time, limit int) ([]int64, error) {
+//
+// buckets is the run's --project scope; empty means every project. It is not
+// a narrowing for tidiness: re-offering a record outside this run's scope
+// would have admission discard it out_of_scope, which is terminal, so the
+// retry built to avoid a permanent discard would cause one — for a record
+// that was only ever waiting, and that a differently scoped run is supposed
+// to pick up (Copilot on #765).
+func (l *Ledger) DueBlockedRetries(ctx context.Context, now time.Time, buckets []int64, limit int) ([]int64, error) {
+	where := ""
+	args := make([]any, 0, len(buckets))
+	if len(buckets) > 0 {
+		where = " AND bucket_id IN (" + placeholders(len(buckets)) + ")"
+		for _, b := range buckets {
+			args = append(args, b)
+		}
+	}
+	//nolint:gosec // G202: the condition is this package's constants and placeholders, never a value
 	rows, err := l.db.QueryContext(ctx, `
 SELECT id, reason, blocked_at, decided_at, retry_at FROM events
 WHERE state = 'blocked' AND content_dropped = 0 AND blocked_at IS NOT NULL
-  AND (authorized_at IS NULL OR authorized_at < blocked_at)
-ORDER BY id`)
+  AND (authorized_at IS NULL OR authorized_at < blocked_at)`+where+`
+ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: due blocked retries: %w", err)
 	}

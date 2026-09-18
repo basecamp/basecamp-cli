@@ -862,8 +862,24 @@ func (in *Intake) sweepStranded(ctx context.Context) {
 // Offering one costs at most a second decision, never a second verdict: the
 // queue carries ids, and a commit applies only at the revision its decision
 // loaded. A queue that will not take one leaves it for the next sweep.
+//
+// # What a re-decision may do to a record, and why only one of them is a bug
+//
+// Re-deciding runs the whole of admission again, against the world as it is
+// now, so a re-offered record can end terminally. Most of those are the point
+// rather than a hazard — a recording trashed since is stale, a comment that
+// turns out not to address the agent is not_addressed, a performer the
+// operator has stopped trusting is untrusted_performer, a project they have
+// stopped serving loses its subscription rule. Each is the verdict a fresh
+// event would get, and each reflects a decision somebody made.
+//
+// out_of_scope is the exception, and it is why this passes the run's buckets
+// down. --project is one run's narrowing, not a policy: the projects it
+// leaves out are another run's to dispatch, and discarding their records here
+// would destroy work nothing else will do again. That would make the retry
+// built to avoid a permanent discard the cause of one (Copilot on #765).
 func (in *Intake) sweepBlockedRetries(ctx context.Context) {
-	due, err := in.ledger.DueBlockedRetries(ctx, in.now(), blockedRetryBatch)
+	due, err := in.ledger.DueBlockedRetries(ctx, in.now(), in.opts.Filters.Buckets, blockedRetryBatch)
 	if err != nil {
 		in.log.Warn("could not read the blocked records due to be decided again", "error", err)
 		return

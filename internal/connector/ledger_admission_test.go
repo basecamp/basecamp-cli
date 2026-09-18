@@ -779,6 +779,17 @@ func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
 		}))
 	require.NoError(t, err)
 
+	// The intake is the thing under test as much as the ledger is: its sweep
+	// is what offers a due record, and a test that offered by hand would
+	// stay green with the sweep deleted (Copilot on #765).
+	clock := &fixedClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
+	intake, err := New(Options{
+		Origin: "https://3.basecampapi.com", AccountID: "2914079",
+		ConsumerNamespace: "connector-test", Ledger: ledger, Queue: queue,
+		Minter: stubMinter{}, Polls: &scriptedPolls{}, Clock: clock.now,
+	})
+	require.NoError(t, err)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -798,26 +809,22 @@ func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "held while the file cannot be read")
 	require.Equal(t, string(admission.ReasonConfigUnreadable), getRecord(t, ledger, ev.ID).Reason)
 
-	// Nothing is due yet: the interval has not passed, so a sweep now would
-	// offer nothing and the record would sit exactly as a no_route one does.
-	dueNow, err := ledger.DueBlockedRetries(ctx, time.Now(), 10)
-	require.NoError(t, err)
-	assert.Empty(t, dueNow, "not due until the interval has passed")
+	// A sweep before the interval offers nothing: the record sits exactly as
+	// a no_route one does until it is due.
+	intake.sweepBlockedRetries(ctx)
+	time.Sleep(100 * time.Millisecond)
+	require.Equal(t, StateBlocked, getRecord(t, ledger, ev.ID).State, "not due until the interval has passed")
 
-	// The operator repairs the file. The record is due once the interval is
-	// up, and the sweep offers it — no redispatch anywhere in this test.
+	// The operator repairs the file, and the interval passes. Nothing here
+	// offers the record: the sweep does, which is the join this test exists
+	// to cover.
 	broken = false
-	later := time.Now().Add(admission.BlockedRetryInterval + time.Minute)
-	due, err := ledger.DueBlockedRetries(ctx, later, 10)
-	require.NoError(t, err)
-	require.Equal(t, []int64{ev.ID}, due, "the repair is decided by the timer, not by a person")
+	clock.advance(admission.BlockedRetryInterval + time.Minute)
+	intake.sweepBlockedRetries(ctx)
 
-	for _, id := range due {
-		require.NoError(t, queue.Offer(ctx, id))
-	}
 	require.Eventually(t, func() bool {
 		return getRecord(t, ledger, ev.ID).State == StateAdmitted
-	}, 5*time.Second, 10*time.Millisecond, "and it runs once the file is back")
+	}, 5*time.Second, 10*time.Millisecond, "the repair is decided by the sweep, not by a person and not by this test")
 
 	// Two days blocked, attempted a moment ago: a transient read failure is
 	// given up on and handed to a person at that point, and a configuration
