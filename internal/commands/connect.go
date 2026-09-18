@@ -560,7 +560,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
-	report.Add(setup.ProjectChecks(ctx, reader, next)...)
+	report.Add(setup.ProjectChecks(ctx, reader, next, !exists)...)
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {

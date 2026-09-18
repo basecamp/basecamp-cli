@@ -360,7 +360,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return output.ErrUsage(err.Error())
 		}
 		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Dispatchable,
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -580,7 +580,11 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.projects == nil || r.err != nil || r.now().Sub(r.loadedAt) >= connectServedTTL {
+	// A failure is cached for the TTL exactly as an answer is. Reloading on
+	// every call while the file is broken would read it once per event in
+	// admission and once per tick in dispatch (Copilot on #765); the answer
+	// would not change, and the log line is written once either way.
+	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
 	}
 	if r.err != nil {
@@ -591,18 +595,6 @@ func (r *connectServed) Current() (map[int64]admission.Project, error) {
 		out[k] = v
 	}
 	return out, nil
-}
-
-// Dispatchable is the served projects for dispatch, where a file that cannot
-// be read authorizes nothing: no launch, no join. Nothing is posted on that
-// path, so there is nothing false to say — the record simply waits, and the
-// error is already on the log.
-func (r *connectServed) Dispatchable() map[int64]admission.Project {
-	projects, err := r.Current()
-	if err != nil {
-		return map[int64]admission.Project{}
-	}
-	return projects
 }
 
 func (r *connectServed) reload() {
@@ -639,7 +631,7 @@ type connectDispatch struct {
 	Buckets []int64
 	Ledger  *connector.Ledger
 	Driver  driver.Driver
-	Served  func() map[int64]admission.Project
+	Served  func() (map[int64]admission.Project, error)
 
 	Profile     string
 	Executable  string

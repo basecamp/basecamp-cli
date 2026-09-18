@@ -300,7 +300,7 @@ func runHarnessConnector(dir string) error {
 	worker := &failingSpawns{Driver: working, broken: d.New(filepath.Join(dir, "no-such-agent")), failures: failures}
 	dispatcher, err := NewDispatcher(DispatcherOptions{
 		Ledger: ledger, Driver: worker,
-		Served:      func() map[int64]admission.Project { return served },
+		Served:      func() (map[int64]admission.Project, error) { return served, nil },
 		WorkDir:     work,
 		Concurrency: 2,
 		Deadline:    time.Hour,

@@ -298,14 +298,30 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 
 // ProjectChecks reads each served project the way admission will, as the
 // agent: the project, and its people (project trust mode's membership read).
-func ProjectChecks(ctx context.Context, r Reader, f File) []Check {
+//
+// firstSetup says there is no connect.json yet. Serving no project is two
+// different questions depending on it, and answering both with one rule left
+// the operator no way to turn the agent off through the interface that
+// turned it on: an explicit --unserve of the last project produced a valid
+// empty file that the readiness check then refused to write (Copilot on
+// #765). A first setup that serves nothing has not been set up, and is
+// refused. Withdrawing the last project is a thing an operator may mean —
+// it is how you stop the agent working anywhere without editing the trust
+// anchor by hand — so it is written, and warned about.
+func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Check {
 	if len(f.Projects) == 0 {
-		return []Check{{
-			Name:    "Projects",
-			Status:  StatusFail,
-			Message: "No project is served: every mention would get a holding reply and no work",
-			Hint:    "Serve one: basecamp connect setup -P " + f.Profile + " --serve <project-id>",
-		}}
+		c := Check{
+			Name:   "Projects",
+			Status: StatusWarn,
+			Message: "No project is served: this agent is handed no work at all, and every mention gets a holding reply. " +
+				"The connector will start and do nothing.",
+			Hint: "Serve one: basecamp connect setup -P " + f.Profile + " --serve <project-id>",
+		}
+		if firstSetup {
+			c.Status = StatusFail
+			c.Message = "No project is served: every mention would get a holding reply and no work"
+		}
+		return []Check{c}
 	}
 	ids := make([]int64, 0, len(f.Projects))
 	for id := range f.Projects {

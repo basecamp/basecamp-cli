@@ -78,8 +78,15 @@ type DispatcherOptions struct {
 	// Driver starts workers.
 	Driver driver.Driver
 	// Served is connect.json's served projects as they are now, by project
-	// id.
-	Served func() map[int64]admission.Project
+	// id, and the reason they could not be read when that is the answer.
+	//
+	// A failure is not an empty map. Everything that decides on this set
+	// fails closed either way, but the two are different things to say out
+	// loud, and one consumer says something: reportStranded. Telling an
+	// operator that their projects are no longer served, when what happened
+	// is that nothing could read the file, is the same false claim the
+	// holding reply used to make on a card (Copilot on #765).
+	Served func() (map[int64]admission.Project, error)
 	// TokenWindow is how long a task token's socket waits for the worker's
 	// MCP server; DefaultTokenWindow when zero.
 	TokenWindow time.Duration
@@ -413,7 +420,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	d.mu.Unlock()
 
-	served := d.servedBuckets()
+	served, servedErr := d.servedBuckets()
 	// Follow-ups first: an event on a live conversation joins its task, while
 	// connect.json still serves that task's project. The served set goes to
 	// the ledger as well as being checked here, so what joins is held to the
@@ -444,7 +451,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d.reportStranded(ctx, served)
+	d.reportStranded(ctx, served, servedErr)
 	for _, record := range records {
 		// Asked again on every record, not counted down: a start that failed
 		// can have held its attempt, and a held attempt takes a slot as a
@@ -452,7 +459,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		if d.free() <= 0 {
 			break
 		}
-		if err := d.start(ctx, record); err != nil {
+		if err := d.start(ctx, record, served); err != nil {
 			if errors.Is(err, ErrNotStartable) {
 				continue
 			}
@@ -480,11 +487,20 @@ const StrandedInterval = 10 * time.Minute
 // connector no longer serves — one the operator has taken out of connect.json
 // since the record was admitted — and says so, rather than leaving them
 // silently unstarted.
-func (d *Dispatcher) reportStranded(ctx context.Context, served []int64) {
+func (d *Dispatcher) reportStranded(ctx context.Context, served []int64, servedErr error) {
 	if time.Since(d.strandedAt) < StrandedInterval {
 		return
 	}
 	d.strandedAt = time.Now()
+	if servedErr != nil {
+		// Nothing read which projects are served, so nothing here can say a
+		// record's project is not among them. Counting against an empty set
+		// would call every startable record stranded and tell the operator
+		// to serve or discard projects that may be served already.
+		d.log.Warn("connector: admitted work is waiting, and which projects are served could not be read; nothing is stranded until it can be",
+			"error", servedErr)
+		return
+	}
 	stranded, err := d.ledger.StrandedRecords(ctx, served, d.opts.Buckets)
 	if err != nil {
 		d.log.Warn("connector: counting stranded records", "error", err)
@@ -498,26 +514,37 @@ func (d *Dispatcher) reportStranded(ctx context.Context, served []int64) {
 
 // servedBuckets is the projects connect.json serves now, narrowed to the ones
 // this run hears.
-func (d *Dispatcher) servedBuckets() []int64 {
+func (d *Dispatcher) servedBuckets() ([]int64, error) {
+	projects, err := d.opts.Served()
+	if err != nil {
+		// Nothing is authorized while the answer cannot be read. Every
+		// caller but reportStranded wants exactly that and nothing more,
+		// which is why the empty set and the error travel together.
+		return nil, err
+	}
 	var served []int64
-	for bucket := range d.opts.Served() {
+	for bucket := range projects {
 		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
 			served = append(served, bucket)
 		}
 	}
 	slices.Sort(served)
-	return served
+	return served, nil
 }
 
 // start launches a task for record: the ledger first, then the driver, and
 // the release point on every path that fails after it. Capacity is the
 // caller's question (free), not this one's.
-func (d *Dispatcher) start(ctx context.Context, record Record) error {
+//
+// served is the snapshot the record was chosen against, handed down rather
+// than read again: one pass of the dispatcher decides from one reading of
+// connect.json, as one verdict does (admission's policyNow).
+func (d *Dispatcher) start(ctx context.Context, record Record, served []int64) error {
 	// Nothing is prepared and nothing is resolved: the worker runs where the
 	// connector was started, and a task that needs a clone or a directory of
 	// its own is the agent's business to make.
 	launch, err := d.ledger.LaunchTask(ctx, LaunchSpec{
-		EventID: record.ID, Served: d.servedBuckets(),
+		EventID: record.ID, Served: served,
 		Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
 	})
 	if err != nil {
@@ -1156,7 +1183,8 @@ func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
 	}
-	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID, r.d.servedBuckets()); err != nil {
+	served, _ := r.d.servedBuckets()
+	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 		return 0, false, err
 	}
 	for {
@@ -1284,7 +1312,11 @@ func (r *taskRun) goneStop() StopReason {
 // authorized reports whether connect.json still serves this task's project,
 // among the projects this run hears.
 func (r *taskRun) authorized() bool {
-	return slices.Contains(r.d.servedBuckets(), r.record.BucketID)
+	served, err := r.d.servedBuckets()
+	if err != nil {
+		return false
+	}
+	return slices.Contains(served, r.record.BucketID)
 }
 
 // refusalRecorder is the dispatcher's driver.RefusalRecorder for one attempt:

@@ -97,13 +97,13 @@ func TestServedProjectsFollowConnectJSON(t *testing.T) {
 	clock = clock.Add(connectServedTTL)
 	_, err = served.Current()
 	assert.Error(t, err, "a file naming another agent is a failure to read the answer, not the answer")
-	assert.Empty(t, served.Dispatchable(), "and it authorizes no dispatch")
+	assert.Empty(t, current, "and it authorizes no dispatch")
 
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
 	clock = clock.Add(connectServedTTL)
 	_, err = served.Current()
 	assert.Error(t, err, "a file that no longer loads is reported as unreadable, never as an empty served set")
-	assert.Empty(t, served.Dispatchable(), "and it authorizes no dispatch")
+	assert.Empty(t, current, "and it authorizes no dispatch")
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.

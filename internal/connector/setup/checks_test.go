@@ -55,7 +55,7 @@ func TestProjectChecksNameTheAgentReadRefusal(t *testing.T) {
 	f := validFile(t)
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusForbidden)}}
 
-	checks := ProjectChecks(context.Background(), r, f)
+	checks := ProjectChecks(context.Background(), r, f, false)
 	require.Len(t, checks, 2)
 	byName := map[string]Check{}
 	for _, c := range checks {
@@ -75,7 +75,7 @@ func TestProjectChecksReadProjectPeopleToo(t *testing.T) {
 	r := &fakeReader{projectPplErr: map[int64]error{otherProj: status(http.StatusForbidden)}}
 
 	var failed []Check
-	for _, c := range ProjectChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f, false) {
 		if c.Status == StatusFail {
 			failed = append(failed, c)
 		}
@@ -90,7 +90,7 @@ func TestProjectChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	f.Agent = Agent{PersonID: agentID, Kind: KindBotUser, IdentityID: 99}
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusNotFound)}}
 
-	for _, c := range ProjectChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f, false) {
 		if c.Status != StatusFail {
 			continue
 		}
@@ -101,12 +101,31 @@ func TestProjectChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	t.Fatal("the refused project did not fail")
 }
 
-func TestProjectChecksFailWithNoServedProject(t *testing.T) {
+// Serving no project is two different questions. A first setup that serves
+// none has not been set up, and is refused. Withdrawing the last one from an
+// existing setup is a thing an operator may mean — it is how the agent is
+// turned off through the interface that turned it on — so it is written, and
+// warned about (Copilot on #765).
+func TestProjectChecksSeparateAFirstSetupFromWithdrawingTheLastProject(t *testing.T) {
 	f := validFile(t)
 	f.Projects = map[int64]admission.Project{}
-	checks := ProjectChecks(context.Background(), &fakeReader{}, f)
-	require.Len(t, checks, 1)
-	assert.Equal(t, StatusFail, checks[0].Status, "a connector serving no project does no work, so it is not ready")
+
+	first := ProjectChecks(context.Background(), &fakeReader{}, f, true)
+	require.Len(t, first, 1)
+	assert.Equal(t, StatusFail, first[0].Status, "a first setup that serves nothing has not been set up")
+
+	withdrawn := ProjectChecks(context.Background(), &fakeReader{}, f, false)
+	require.Len(t, withdrawn, 1)
+	assert.Equal(t, StatusWarn, withdrawn[0].Status, "and withdrawing the last one is written, not refused")
+	assert.Contains(t, withdrawn[0].Message, "no work at all")
+	assert.Contains(t, withdrawn[0].Hint, "--serve")
+
+	// A warn is not a failure, so nothing about it stops the file being
+	// written.
+	r := &Report{Written: true}
+	r.Add(withdrawn...)
+	assert.Empty(t, r.Failed())
+	assert.True(t, r.Ready())
 }
 
 func TestTicketCheck(t *testing.T) {

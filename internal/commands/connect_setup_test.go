@@ -391,6 +391,37 @@ func TestConnectSetupWithNoServedProjectIsNotReady(t *testing.T) {
 }
 
 // Bad input is refused before anything is read or written.
+// Copilot on #765: the operator can turn the agent off through the interface
+// that turned it on.
+//
+// An explicit --unserve of the last project produces a valid empty file, and
+// the readiness check used to refuse to write it — so the only way to
+// withdraw the agent's last authorization was to edit or delete connect.json
+// by hand, which is the trust anchor. It is written now, with a warning that
+// says plainly what it leaves behind.
+func TestConnectSetupCanWithdrawTheLastServedProject(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--unserve", fmt.Sprint(setupProject))
+	require.NoError(t, err, out)
+
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Empty(t, f.Projects, "the withdrawal is on disk, not just reported")
+
+	// And the operator is told what they are now left with.
+	assert.Contains(t, out, "no work at all")
+
+	// A first setup still has to serve something: that is the other question.
+	require.NoError(t, os.Remove(connectSetupPath(t, "agent")))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, codeNotReady, apiErr.Code)
+}
+
 func TestConnectSetupRefusesBadInput(t *testing.T) {
 	op := fmt.Sprint(setupOperatorPerson)
 	wantMessage := map[string]string{

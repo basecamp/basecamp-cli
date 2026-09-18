@@ -165,7 +165,9 @@ type dispatchHarness struct {
 	fake   *fakeDriver
 	d      *Dispatcher
 	served map[int64]admission.Project
-	mu     sync.Mutex
+	// servedErr stands in for a connect.json that cannot be read.
+	servedErr error
+	mu        sync.Mutex
 }
 
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
@@ -180,14 +182,17 @@ func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOp
 	opts := DispatcherOptions{
 		Ledger: h.ledger,
 		Driver: fake,
-		Served: func() map[int64]admission.Project {
+		Served: func() (map[int64]admission.Project, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			if h.servedErr != nil {
+				return nil, h.servedErr
+			}
 			out := map[int64]admission.Project{}
 			for k, v := range h.served {
 				out[k] = v
 			}
-			return out
+			return out, nil
 		},
 		WorkDir:     testWorkDir,
 		Concurrency: 2,
@@ -1580,4 +1585,35 @@ func TestAShutdownDoesNotWaitOutTheAdoptionBudget(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("a shutdown waited on the adoption budget")
 	}
+}
+
+// Copilot on #765: an unreadable connect.json is not "no project is served"
+// for the dispatcher either. The holding reply stopped making that claim on
+// a card; the stranded report would have gone on making it in the log,
+// counting every startable record and telling the operator to serve or
+// discard a project that may be served already.
+func TestAnUnreadableConfigStrandsNothingAndSaysWhy(t *testing.T) {
+	var logged safeBuffer
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
+
+	h.mu.Lock()
+	h.servedErr = errors.New("connect.json cannot be read")
+	h.mu.Unlock()
+
+	h.run(t)
+	time.Sleep(200 * time.Millisecond)
+
+	fake.mu.Lock()
+	sessions := len(fake.sessions)
+	fake.mu.Unlock()
+	assert.Zero(t, sessions, "nothing is authorized while the answer cannot be read")
+
+	out := logged.String()
+	assert.Contains(t, out, "could not be read", "the operator is told what actually happened")
+	assert.NotContains(t, out, "no longer serves",
+		"and not told their project was unserved, which nothing established")
 }
