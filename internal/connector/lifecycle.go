@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // Lifecycle messages are fixed forms. Every word comes from this file; every
@@ -172,7 +170,7 @@ func renderRetraction(kind MessageKind, eventID int64, others []int64, postedAt 
 //
 // The question is asked of the notice that made the ask, not of the record in
 // general, because "waiting" is not one state. A holding reply answers one
-// blocked reason, as its own claim does: a record whose
+// blocked reason, as its own claim does (holdingReplyReason): a record whose
 // rerun replaced no_route with read_failed or throttled is not waiting on a
 // person at all — those reasons come round again on their own — so that ask
 // is answered and the record moving between them is the answer. A completion
@@ -185,7 +183,7 @@ func askStillOpen(ctx context.Context, q Tx, source Intent, eventID int64) (open
 	switch source.Kind {
 	case IntentHoldingReply:
 		query = `SELECT state = 'blocked' AND reason = ?2 FROM events WHERE id = ?1`
-		args = append(args, string(admission.ReasonNoRoute))
+		args = append(args, holdingReplyReason(source))
 	case IntentCompletion:
 		query = `
 SELECT e.state = 'completed' AND e.redispatch_decision IS NULL

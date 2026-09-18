@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // The outbox: every message the connector itself posts to Basecamp — the
@@ -388,6 +390,36 @@ func guardKey(eventID int64) string {
 
 func holdingKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":event:" + strconv.FormatInt(eventID, 10)
+}
+
+// legacyRefusedStartKey is the key a connector that made worktrees gave the
+// holding reply for a record whose route could take no worktree. Nothing
+// writes one now — the refusal that called for it went with worktrees — but
+// an upgraded ledger still holds the ones that build wrote, pending or sent,
+// over records still blocked legacyReasonRouteUnusable. They are read as they
+// were written; only new rows are written the new way.
+func legacyRefusedStartKey(eventID int64) string {
+	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
+}
+
+// legacyReasonRouteUnusable is the blocked reason those records carry.
+// Nothing blocks a record with it any more, and nothing clears it on their
+// behalf: a record an upgraded ledger carries is still waiting for the person
+// its notice asked, and both the send and the retraction have to know that.
+const legacyReasonRouteUnusable = "route_unusable"
+
+// holdingReplyReason is the blocked reason a holding reply answers for. Its
+// key says which: the one an older build wrote answers route_unusable, and
+// everything written now answers no_route. Reading every holding reply as
+// no_route cancels a legacy reply that is still called for, and tells a
+// person an ask is answered while its record is still blocked on it — a
+// redispatch of a blocked record leaves it blocked, so the reason is the
+// whole of the question.
+func holdingReplyReason(in Intent) string {
+	if in.Key == legacyRefusedStartKey(in.EventID) {
+		return legacyReasonRouteUnusable
+	}
+	return string(admission.ReasonNoRoute)
 }
 
 func completionKey(attemptID string) string {

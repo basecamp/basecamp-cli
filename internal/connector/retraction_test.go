@@ -908,3 +908,88 @@ func TestAsksRedispatchReadsTheAskExactly(t *testing.T) {
 	require.NotEmpty(t, reporting)
 	assert.False(t, asksRedispatch(reporting, 1), "succeeded with no reply reported asks for nothing")
 }
+
+// An upgraded ledger's legacy refused-start reply, in both states it can be
+// left in, over a record still blocked route_unusable — a reason nothing
+// produces any more and nothing clears on the record's behalf.
+//
+// Both cases turn on the same thing: which blocked reason a holding reply
+// answers for is its key's to say. Reading every holding reply as no_route
+// is right for everything written now and wrong for everything that build
+// wrote, and it is wrong in the direction that says nothing or says the
+// wrong thing rather than the direction that says too much.
+func TestALegacyRefusedStartReplyIsReadAsTheReasonItWasWrittenFor(t *testing.T) {
+	// Pending: the connector stopped between writing the reply and sending
+	// it. The record is still blocked and still needs the person the reply
+	// was going to ask, so the reply is still called for.
+	t.Run("pending, and still called for", func(t *testing.T) {
+		ctx := context.Background()
+		clock := &obClock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
+		ledger := obUpgradedLedger(t, clock, func(t *testing.T, old *sql.DB) {
+			t.Helper()
+			seedLegacyRefusedStart(ctx, t, old, IntentPending)
+		})
+		basecamp := newFakeBasecamp(clock.Now)
+		ob := obOutbox(t, ledger, basecamp)
+		require.NoError(t, ob.Flush(ctx))
+
+		in := obIntent(t, ledger, legacyRefusedStartKey(1))
+		assert.Equal(t, IntentSent, in.State, "a reply whose record is still blocked on its own reason is sent, not canceled")
+		assert.Empty(t, in.Note)
+		assert.Len(t, basecamp.at(in.Destination), 1)
+	})
+
+	// Sent, then redispatched. A redispatch of a blocked record leaves it
+	// blocked — it authorizes the thing that blocked it to run again — so
+	// the ask is still open at the retraction's claim, and a retraction sent
+	// now tells a person that a record still waiting for them is not.
+	t.Run("sent, and its ask still open after a redispatch", func(t *testing.T) {
+		ctx := context.Background()
+		clock := &obClock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
+		ledger := obUpgradedLedger(t, clock, func(t *testing.T, old *sql.DB) {
+			t.Helper()
+			seedLegacyRefusedStart(ctx, t, old, IntentSent)
+		})
+		basecamp := newFakeBasecamp(clock.Now)
+		ob := obOutbox(t, ledger, basecamp)
+
+		sent := obIntent(t, ledger, legacyRefusedStartKey(1))
+		require.Equal(t, IntentSent, sent.State)
+
+		clock.Advance(12 * time.Minute)
+		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		require.NoError(t, err)
+		require.Equal(t, StateBlocked, getRecord(t, ledger, 1).State, "authorized, and still blocked on route_unusable")
+
+		clock.Advance(RetractionWait)
+		require.NoError(t, ob.Flush(ctx))
+		assert.Equal(t, IntentPending, obRetraction(t, ledger, sent, 1).State,
+			"the ask is still open, so nothing says it is answered")
+		assert.Empty(t, basecamp.at(sent.Destination), "and nothing is posted under it")
+	})
+}
+
+// seedLegacyRefusedStart writes the record and the reply a connector that
+// made worktrees left behind: an event blocked route_unusable, and the
+// refused-start holding reply for it in state.
+func seedLegacyRefusedStart(ctx context.Context, t *testing.T, old *sql.DB, state IntentState) {
+	t.Helper()
+	_, err := old.ExecContext(ctx, `
+INSERT INTO events (id, state, reason, lane, event_type, kind, action, bucket_id, creator_id, recording_id,
+                    created_at, seen_at, updated_at)
+VALUES (1, 'blocked', 'route_unusable', 'import', '', '', '', 48699913, 26909558, 10304028972,
+        '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z')`)
+	require.NoError(t, err)
+
+	sendingAt, finishedAt, receiptID := "NULL", "NULL", "NULL"
+	if state == IntentSent {
+		sendingAt, finishedAt, receiptID = `'2026-09-17T11:31:00.000000000Z'`, `'2026-09-17T11:32:00.000000000Z'`, "556"
+	}
+	_, err = old.ExecContext(ctx, `
+INSERT INTO outbox (id, intent_key, kind, state, event_id, bucket_id, message_kind, recording_id, body,
+                    created_at, not_before, sending_at, finished_at, receipt_id)
+VALUES (8, 'holding_reply:refused:event:1', 'holding_reply', ?1, 1, 48699913, 'comment', 10304028989, ?2,
+        '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:30:00.000000000Z', `+sendingAt+`, `+finishedAt+`, `+receiptID+`)`,
+		string(state), refusedStartReplyAsItWentOut(1))
+	require.NoError(t, err)
+}
