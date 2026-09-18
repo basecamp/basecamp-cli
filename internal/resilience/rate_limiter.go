@@ -110,6 +110,20 @@ func (rl *RateLimiter) take() (allowed bool, wait time.Duration, blocked bool) {
 // consumed by whichever process reaches the lock first anyway.
 const minRefillWait = 5 * time.Millisecond
 
+// sleepWithin is how long to wait before the next attempt at the bucket:
+// wait, floored at minRefillWait and jittered so that processes which woke
+// together do not retry in lockstep. Jitter never pushes the sleep past the
+// remaining budget — a wake there would be rejected unheard after having
+// waited out the very refill or block it was waiting for — so when the
+// jittered sleep would not fit, the bare wait is used.
+func sleepWithin(wait, remaining time.Duration) time.Duration {
+	sleep := jittered(max(wait, minRefillWait))
+	if sleep > remaining {
+		return wait
+	}
+	return sleep
+}
+
 // Wait consumes tokens for one request, sleeping for refills or for a
 // Retry-After block to lift, until deadline. It returns nil when the request
 // may proceed, a *GateError when the deadline would pass first, or ctx.Err().
@@ -139,14 +153,7 @@ func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time)
 		if wait > remaining {
 			return rl.gateError(blocked, wait, rl.now().Sub(start))
 		}
-		// Jitter never pushes the sleep to the deadline: a wake there would be
-		// rejected unheard after having waited out the very refill or block
-		// it was waiting for.
-		sleep := jittered(max(wait, minRefillWait))
-		if sleep > remaining {
-			sleep = wait
-		}
-		if err := pause(ctx, sleep); err != nil {
+		if err := pause(ctx, sleepWithin(wait, remaining)); err != nil {
 			return err
 		}
 	}

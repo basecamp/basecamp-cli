@@ -329,22 +329,30 @@ func TestRateLimiterWaitReportsALongRetryAfterImmediately(t *testing.T) {
 	assert.Less(t, time.Since(start), 100*time.Millisecond, "did not burn the budget on a block it cannot outlast")
 }
 
-// The jitter that spreads retries must not stretch a sleep to or past the
-// budget: a block that lifts just inside the deadline is waited out and the
-// token taken, not overshot or rejected at the wire. Pinned to the maximum
-// jitter, which unchecked would overshoot by half.
+// The jitter that spreads retries must not stretch a sleep past the budget: a
+// block that lifts just inside the deadline is waited out and the token taken,
+// not overshot and rejected at the wire. Pinned to the maximum jitter, which
+// unchecked would overshoot by half.
+//
+// What is checked is the sleep the gate asks for, not the wall clock around a
+// real one. This test used to run Wait against a 200ms block with a 220ms
+// budget and time it: a sleep has no upper bound on a loaded machine, so a
+// wake-up 20ms late spent the budget and Wait returned the client-limit error
+// it is not about. Waiting out a block end to end is covered, with a budget
+// that is not a stopwatch, by TestRateLimiterWaitOutlastsAShortRetryAfter.
 func TestRateLimiterWaitNeverSleepsPastTheDeadline(t *testing.T) {
 	previous := jitter
 	jitter = func(d time.Duration) time.Duration { return d / 2 }
 	t.Cleanup(func() { jitter = previous })
 
-	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
-	require.NoError(t, rl.SetRetryAfterDuration(200*time.Millisecond))
-
-	start := time.Now()
-	budget := 220 * time.Millisecond
-	require.NoError(t, rl.Wait(context.Background(), start.Add(budget)))
-	assert.Less(t, time.Since(start), budget+60*time.Millisecond)
+	assert.Equal(t, 300*time.Millisecond, sleepWithin(200*time.Millisecond, time.Second),
+		"room to spare: the jitter is added")
+	assert.Equal(t, 200*time.Millisecond, sleepWithin(200*time.Millisecond, 220*time.Millisecond),
+		"no room: the bare wait, not the 300ms that would wake past the deadline")
+	assert.Equal(t, minRefillWait*3/2, sleepWithin(time.Microsecond, time.Second),
+		"a deficit of microseconds still waits out minRefillWait, jitter and all")
+	assert.Equal(t, time.Microsecond, sleepWithin(time.Microsecond, time.Millisecond),
+		"nor does the floor itself overshoot a budget shorter than it")
 }
 
 func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
