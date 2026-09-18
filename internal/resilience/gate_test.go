@@ -367,6 +367,113 @@ func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
 	assert.Equal(t, "Wait 41s, then re-run.", gateErr.Hint)
 }
 
+// heldClock is a clock a test moves, and the gate's own sleeps move it:
+// pause does not wait, it advances the clock by the sleep it was asked for
+// plus the lateness every real wake-up has. A gate only ever reaches a spent
+// budget by waking past its deadline, and that is the one thing a test
+// cannot ask a real timer for — the 20ms margin measured on an idle box and
+// spent by the scheduler on a loaded one is the defect this card came from.
+// Here the overshoot is a fact of the test.
+type heldClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+// holdClock freezes time and hands every sleep the given lateness. The
+// jitter goes to zero with it, so a sleep for a wait is exactly that wait.
+func holdClock(t *testing.T, lateness time.Duration) *heldClock {
+	t.Helper()
+	clock := &heldClock{t: time.Now()}
+
+	previousJitter, previousPause := jitter, pause
+	jitter = func(time.Duration) time.Duration { return 0 }
+	pause = func(ctx context.Context, d time.Duration) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		clock.advance(d + lateness)
+		return nil
+	}
+	t.Cleanup(func() { jitter, pause = previousJitter, previousPause })
+
+	return clock
+}
+
+func (c *heldClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *heldClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// A budget spent on the server's block says so. Blaming the client limit
+// here reads as "lower your parallelism", which is advice about a knob that
+// had nothing to do with a wait the server asked of everybody.
+//
+// The gate sleeps a 10s block out against a 10s budget and wakes a
+// millisecond late, which is the shape the CI failure in #763 had and the
+// only way a spent budget is ever reached on a block.
+func TestRateLimiterBudgetSpentOnTheServersBlockNamesTheServer(t *testing.T) {
+	clock := holdClock(t, time.Millisecond)
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+	rl.clock = clock.Now
+	start := clock.Now()
+	require.NoError(t, rl.SetRetryAfter(start.Add(DefaultMaxWait)))
+
+	err := rl.waitSince(context.Background(), start, start.Add(DefaultMaxWait))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
+	assert.Equal(t, "Rate limited by the server; waited 10s", gateErr.Message)
+	assert.Equal(t, "Re-run.", gateErr.Hint)
+	assert.Equal(t, start.Add(DefaultMaxWait+time.Millisecond), clock.Now(), "slept the block out and woke late")
+}
+
+// The store is shared, so the Retry-After it holds when a gate gives up is
+// no evidence that this gate waited on one. Here another invocation's 429
+// lands while this gate sleeps for a refill of its own — the write happens
+// inside the sleep, so the order is the test's and not the scheduler's — and
+// the wait our own bucket imposed keeps its own name, and the advice that
+// goes with it.
+func TestRateLimiterBudgetSpentOnOurOwnRefillNamesTheClientLimit(t *testing.T) {
+	clock := holdClock(t, time.Millisecond)
+	store := NewStore(t.TempDir())
+	rl := NewRateLimiter(store, RateLimiterConfig{MaxTokens: 1, RefillRate: 1, TokensPerRequest: 1})
+	rl.clock = clock.Now
+	start := clock.Now()
+
+	allowed, err := rl.Allow()
+	require.NoError(t, err)
+	require.True(t, allowed, "the bucket's one token")
+
+	sleep := pause
+	pause = func(ctx context.Context, d time.Duration) error {
+		//nolint:contextcheck // lock acquisition is context-independent by design
+		require.NoError(t, rl.SetRetryAfterDuration(30*time.Second), "someone else's 429, mid-sleep")
+		return sleep(ctx, d)
+	}
+
+	// The budget ends with the refill of the token this gate is waiting for.
+	err = rl.waitSince(context.Background(), start, start.Add(time.Second))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
+	assert.Equal(t, "Too many requests (client limit 1/s); waited 1s", gateErr.Message)
+	assert.Equal(t, "Re-run, or lower parallelism.", gateErr.Hint)
+
+	state, err := store.Load()
+	require.NoError(t, err)
+	require.True(t, state.RateLimiter.RetryAfterUntil.After(start),
+		"the block really did land, and a gate reading the store back would have called this the server's")
+}
+
 func TestCeilSeconds(t *testing.T) {
 	assert.Equal(t, 41*time.Second, ceilSeconds(40*time.Second+time.Millisecond))
 	assert.Equal(t, 40*time.Second, ceilSeconds(40*time.Second))
