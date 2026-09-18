@@ -450,8 +450,9 @@ func harnessConnector(dir string) (driver.Process, error) {
 		return driver.Process{}, fmt.Errorf("the connector recorded pid %d, which is nothing this harness may signal", running.PID)
 	}
 	// The group is only asked about when the process is gone; the kill is of
-	// the pid alone.
-	return driver.Process{PID: running.PID, PGID: running.PID, StartedAt: running.StartedAt}, nil
+	// the pid alone. The stamp is the kernel's, which is what makes this an
+	// identity the one-owner rule will answer about at all.
+	return driver.Process{PID: running.PID, PGID: running.PID, StartedAt: running.StartedAt, StartedExact: true}, nil
 }
 
 func waitFor(ctx context.Context, cond func() (bool, error)) error {

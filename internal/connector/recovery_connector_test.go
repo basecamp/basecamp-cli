@@ -335,7 +335,17 @@ func runHarnessConnector(dir string) error {
 
 	// Who is running, for a fake worker that is to kill it: written before
 	// anything can be dispatched, removed when this process leaves cleanly.
-	identity, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": time.Now().UTC()})
+	//
+	// The start time is the kernel's own, as a real recorded worker's is.
+	// A wall-clock stamp is not an identity — the one-owner rule answers
+	// driver.ErrIdentityUnknown to it — so a fixture that wrote one could
+	// never be confirmed, and the worker that is to kill this connector
+	// would refuse to signal it.
+	self, err := driver.LookupProcess(os.Getpid())
+	if err != nil {
+		return err
+	}
+	identity, err := json.Marshal(map[string]any{"pid": self.PID, "started_at": self.StartedAt.UTC()})
 	if err != nil {
 		return err
 	}

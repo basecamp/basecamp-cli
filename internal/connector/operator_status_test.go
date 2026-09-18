@@ -185,3 +185,49 @@ func TestStatusReportsAWorktreeListingThatFailedAsUnavailable(t *testing.T) {
 	assert.Contains(t, s.WorktreesUnavailable, "the worktrees table cannot be read")
 	assert.Empty(t, s.Worktrees)
 }
+
+// Every process read back out of the ledger is an identity the one-owner
+// rule will answer about. The stamp stored is the kernel's — startedStamp
+// writes no other — so each read-back path marks it exact. A path that
+// rebuilds driver.Process by hand loses that bit, and the rule then calls a
+// live worker neither gone nor running (driver.ErrIdentityUnknown): status
+// reported every worker "unverified" and a redispatch refused to stop the
+// worker it replaced.
+func TestEveryProcessReadBackOutOfTheLedgerIsAnIdentity(t *testing.T) {
+	at := time.Now().UTC()
+	assert.True(t, AttemptProcess{PID: 7, PGID: 7, StartedAt: at, StartedExact: true}.Identity().StartedExact)
+	assert.True(t, LiveWorker{PID: 7, PGID: 7, StartedAt: at}.Identity().StartedExact)
+	assert.True(t, TaskStatus{PID: 7, PGID: 7, ProcessStartedAt: &at}.WorkerIdentity().StartedExact)
+	assert.True(t, TaskStatus{TakerPID: 7, TakerPGID: 7, TakerStartedAt: &at}.TakerIdentity().StartedExact)
+
+	// And a record with no stamp is no identity at all, rather than one the
+	// rule would answer about.
+	assert.False(t, AttemptProcess{PID: 7, PGID: 7}.Identity().StartedExact)
+	assert.False(t, TaskStatus{PID: 7, PGID: 7}.WorkerIdentity().StartedExact)
+	assert.False(t, TaskStatus{TakerPID: 7, TakerPGID: 7}.TakerIdentity().StartedExact)
+}
+
+// A token whose holder could not be accounted for is held, and status is
+// where the person who must settle it reads that. The zero taker cannot say
+// it: "nothing took the token" and "the token is out and nobody can name who
+// has it" are opposite facts, and the ledger carries the difference the
+// release point acts on (TokenHolder.Unaccounted) all the way out.
+func TestStatusCarriesATokenHolderThatCannotBeAccountedFor(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	opAdmit(t, l, 1, "recording:1")
+	launch := launchOf(t, l, 1)
+	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now(), StartedExact: true}))
+
+	before, err := l.Status(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, before.Tasks, 1)
+	assert.False(t, before.Tasks[0].TakerUnaccounted, "nothing has taken the token yet")
+
+	require.NoError(t, l.MarkTakerUnaccounted(ctx, launch.AttemptID))
+	after, err := l.Status(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, after.Tasks, 1)
+	assert.True(t, after.Tasks[0].TakerUnaccounted, "the held attempt says its token is out")
+	assert.Zero(t, after.Tasks[0].TakerPID, "and there is no process to name")
+}

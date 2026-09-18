@@ -585,7 +585,23 @@ func recordedProcess(p driver.Process, sessionID string) AttemptProcess {
 // Identity is the process the record names, for the one-owner rule. A start
 // time in the ledger is the kernel's, since nothing else is written.
 func (p AttemptProcess) Identity() driver.Process {
-	return driver.Process{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, StartedExact: !p.StartedAt.IsZero()}
+	return recordedIdentity(p.PID, p.PGID, p.StartedAt)
+}
+
+// recordedIdentity is the one way a process read back out of the ledger
+// becomes an identity the one-owner rule can act on (driver.OwnsWorker).
+//
+// The exactness bit is not stored beside the stamp and does not need to be:
+// startedStamp writes a start time only when the kernel gave it, so a stamp
+// that came back out of the ledger is the kernel's by construction and a
+// record with no stamp has no identity at all. Every read-back path goes
+// through here — the attempt's worker, a redispatch's live worker, status's
+// worker and taker — because a path that rebuilds driver.Process by hand
+// drops StartedExact, and a record without it is neither gone nor running
+// (driver.ErrIdentityUnknown): status would call every live worker
+// "unverified" and a redispatch would refuse to stop the worker it replaces.
+func recordedIdentity(pid, pgid int, started time.Time) driver.Process {
+	return driver.Process{PID: pid, PGID: pgid, StartedAt: started, StartedExact: !started.IsZero()}
 }
 
 // startedStamp is the start time as the ledger writes it: the kernel's, or

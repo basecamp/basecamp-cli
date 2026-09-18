@@ -454,9 +454,11 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	report := connectRedispatchReport{RedispatchResult: res}
 	if res.Worker != nil {
-		stop := stopReplacedWorker(driver.Process{
-			PID: res.Worker.PID, PGID: res.Worker.PGID, StartedAt: res.Worker.StartedAt,
-		}, driver.DefaultGrace)
+		// The ledger's own identity, not one assembled here: without
+		// StartedExact the one-owner rule cannot tell the recorded worker
+		// from a later process that reused its pid, and a redispatch would
+		// leave the worker it replaces running.
+		stop := stopReplacedWorker(res.Worker.Identity(), driver.DefaultGrace)
 		report.WorkerSignaled, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
 	}
 	if res.Rerun {

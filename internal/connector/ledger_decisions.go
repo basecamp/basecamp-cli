@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // ErrDecisionRefused is a redispatch or discard the record's state does not
@@ -129,6 +131,11 @@ type LiveWorker struct {
 	PID       int       `json:"pid"`
 	PGID      int       `json:"pgid"`
 	StartedAt time.Time `json:"started_at"`
+}
+
+// Identity is the process the record names, for the one-owner rule.
+func (w LiveWorker) Identity() driver.Process {
+	return recordedIdentity(w.PID, w.PGID, w.StartedAt)
 }
 
 // Redispatch authorizes a record to run again, or for the first time, and

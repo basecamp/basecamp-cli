@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // OpenLedgerReadOnly opens an existing ledger for reading only: no migration,
@@ -180,6 +182,12 @@ type TaskStatus struct {
 	TakerPID       int        `json:"taker_pid,omitempty"`
 	TakerPGID      int        `json:"taker_pgid,omitempty"`
 	TakerStartedAt *time.Time `json:"taker_started_at,omitempty"`
+	// TakerUnaccounted is the case the zero taker cannot express: the token
+	// was delivered and the connector could not name the process that took
+	// it, or the kernel stopped answering whether it is gone. The attempt is
+	// held for it, and a person reading this status is the one who settles
+	// it, so it is never shown as nothing having taken the token.
+	TakerUnaccounted bool `json:"taker_unaccounted,omitempty"`
 	// Worker and Taker are whether each recorded process is still this task's,
 	// as the caller established it; the ledger read leaves them empty.
 	Worker     string     `json:"worker,omitempty"`
@@ -187,6 +195,25 @@ type TaskStatus struct {
 	LaunchedAt time.Time  `json:"launched_at"`
 	DeadlineAt *time.Time `json:"deadline_at,omitempty"`
 	EventIDs   []int64    `json:"event_ids"`
+}
+
+// WorkerIdentity is the attempt's recorded worker, for the one-owner rule.
+func (t TaskStatus) WorkerIdentity() driver.Process {
+	return statusIdentity(t.PID, t.PGID, t.ProcessStartedAt)
+}
+
+// TakerIdentity is the process the task token went to, for the same rule.
+// It says nothing about TakerUnaccounted, which is a fact of the ledger and
+// not a question for the kernel: a caller asks that first.
+func (t TaskStatus) TakerIdentity() driver.Process {
+	return statusIdentity(t.TakerPID, t.TakerPGID, t.TakerStartedAt)
+}
+
+func statusIdentity(pid, pgid int, started *time.Time) driver.Process {
+	if started == nil {
+		return driver.Process{PID: pid, PGID: pgid}
+	}
+	return recordedIdentity(pid, pgid, *started)
 }
 
 // WorktreeStatus is a retained worktree, as the worktree lister reports it.
@@ -447,7 +474,7 @@ SELECT
 func statusTasks(ctx context.Context, tx *sql.Tx, s *Status) error {
 	rows, err := tx.QueryContext(ctx, `
 SELECT t.id, a.id, a.state, a.driver, t.work_dir, COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started,
-       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started, a.launched_at, t.deadline_at
+       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started, a.taker_unaccounted, a.launched_at, t.deadline_at
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	if err != nil {
@@ -463,7 +490,7 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 			taken    sql.NullString
 		)
 		if err := rows.Scan(&t.TaskID, &t.AttemptID, &t.State, &t.Driver, &t.WorkDir, &t.PID, &t.PGID, &started,
-			&t.TakerPID, &t.TakerPGID, &taken, &launched, &deadline); err != nil {
+			&t.TakerPID, &t.TakerPGID, &taken, &t.TakerUnaccounted, &launched, &deadline); err != nil {
 			_ = rows.Close()
 			return err
 		}

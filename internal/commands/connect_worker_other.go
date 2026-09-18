@@ -19,6 +19,7 @@ const (
 	workerHeld        = "held"
 	workerUnverified  = "unverified"
 	workerNotRecorded = "not_recorded"
+	workerUnaccounted = "unaccounted"
 )
 
 type workerStop struct {
@@ -34,4 +35,9 @@ func stopReplacedWorker(driver.Process, time.Duration) workerStop {
 
 func recordedWorkerState(connector.TaskStatus) string { return workerUnverified }
 
-func recordedTakerState(connector.TaskStatus) string { return workerUnverified }
+func recordedTakerState(t connector.TaskStatus) string {
+	if t.TakerUnaccounted {
+		return workerUnaccounted
+	}
+	return workerUnverified
+}
