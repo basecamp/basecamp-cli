@@ -230,8 +230,12 @@ func Args(cfg driver.SessionConfig, resumeID, model string) ([]string, error) {
 		// and its execpolicy rules are not this session's.
 		"--ignore-user-config",
 		"--ignore-rules",
-		// connect.json approved the directory; Codex's own trust prompt has
-		// nobody to answer it.
+		// Codex refuses to run outside a git repository without this, and
+		// asks the person to trust the directory instead. Nobody is there
+		// to answer that: the connector runs where it was started, which
+		// need not be a repository at all, and connect.json has nothing to
+		// say about a directory. What bounds the writes is the sandbox two
+		// lines below, not this flag and not any check the connector makes.
 		"--skip-git-repo-check",
 		"-c", "approval_policy="+tomlString(approvalNever),
 		"-c", "sandbox_mode="+tomlString(sandboxWorkdir),
