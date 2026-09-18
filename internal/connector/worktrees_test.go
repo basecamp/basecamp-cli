@@ -90,6 +90,17 @@ func (h *worktreeHarness) git(dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitConflicting runs a git command that is meant to stop with a conflict:
+// what it leaves in the record is the point, not its exit status.
+func (h *worktreeHarness) gitConflicting(dir string, args ...string) {
+	h.t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = []string{"HOME=" + h.home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1"}
+	out, err := cmd.CombinedOutput()
+	require.Error(h.t, err, "git %v was meant to conflict: %s", args, out)
+}
+
 func (h *worktreeHarness) write(dir, name, content string) {
 	h.t.Helper()
 	require.NoError(h.t, os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o700))
@@ -1806,4 +1817,83 @@ func TestALegacyRowWithRelativePathsIsRemoved(t *testing.T) {
 	assert.Equal(t, WorktreeRemoved, after.State)
 	assert.False(t, exists(row.Path))
 	assert.NoDirExists(t, row.AdminDir)
+}
+
+// A conflicted merge leaves AUTO_MERGE naming the tree ort merged to, which
+// is an object no ref can be asked to contain. A force must still go through:
+// a tree names no history, so there is nothing there to keep.
+func TestAForcedPruneIsNotStoppedByAPseudoRefNamingATree(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(325)
+	h.git(h.repo, "branch", "theirs")
+	h.git(h.repo, "checkout", "-q", "theirs")
+	h.write(h.repo, "app/README", "theirs\n")
+	h.git(h.repo, "commit", "-q", "-am", "theirs")
+	h.git(h.repo, "checkout", "-q", "main")
+	h.write(workDir, "README", "ours\n")
+	h.git(workDir, "commit", "-q", "-am", "ours")
+	h.gitConflicting(workDir, "merge", "theirs")
+	autoMerge, err := os.ReadFile(filepath.Join(row.AdminDir, "AUTO_MERGE"))
+	require.NoError(t, err, "the conflicted merge left AUTO_MERGE in the record")
+	require.Equal(t, "tree", h.git(h.repo, "cat-file", "-t", strings.TrimSpace(string(autoMerge))))
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action, "reason: %s", results[0].Reason)
+	assert.False(t, exists(row.Path))
+}
+
+// A HEAD that names no commit — a worker's `checkout --orphan` — reaches
+// nothing through HEAD. That is not a git the connector could not run, and a
+// force is not refused over it: the worktree would otherwise be one no
+// command could ever remove.
+func TestAWorktreeWhoseHeadNamesNoCommitIsStillForced(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(326)
+	h.git(workDir, "checkout", "-q", "--detach")
+	h.write(workDir, "c.txt", "c\n")
+	h.git(workDir, "add", "c.txt")
+	h.git(workDir, "commit", "-q", "-m", "detached")
+	commit := h.git(workDir, "rev-parse", "HEAD")
+	h.git(workDir, "checkout", "-q", "--orphan", "fresh")
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action, "reason: %s", results[0].Reason)
+	assert.False(t, exists(row.Path))
+	assert.Contains(t, h.git(h.repo, "for-each-ref", "--format=%(objectname)", RetainedRefPrefix), commit,
+		"what HEAD stood at before the orphan is kept: only its reflog still reaches it")
+}
+
+// A per-worktree ref names whatever a worker put under it, and the judgment
+// is about the commit that reaches: an annotated tag is history to keep,
+// which is what asking git what contains it used to say.
+func TestAPerWorktreeRefAtAnAnnotatedTagKeepsItsCommit(t *testing.T) {
+	h := newWorktreeHarness(t)
+	workDir, row := h.prepare(327)
+	// A commit nothing else reaches: its branch and its tag ref are gone,
+	// and the tag object is left only under the worktree's own ref.
+	h.git(h.repo, "checkout", "-q", "-b", "temp")
+	h.write(h.repo, "app/t.txt", "t\n")
+	h.git(h.repo, "add", "app/t.txt")
+	h.git(h.repo, "commit", "-q", "-m", "tagged")
+	tagged := h.git(h.repo, "rev-parse", "HEAD")
+	h.git(h.repo, "tag", "-a", "-m", "kept", "kept")
+	tag := h.git(h.repo, "rev-parse", "kept")
+	h.git(h.repo, "checkout", "-q", "main")
+	h.git(h.repo, "branch", "-q", "-D", "temp")
+	h.git(h.repo, "tag", "-d", "kept")
+	h.git(workDir, "update-ref", "refs/worktree/kept", tag)
+	require.Equal(t, WorktreeRetained, h.finish(workDir).State)
+
+	results, err := h.wt.Prune(context.Background(), []string{row.Path})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, PruneForced, results[0].Action, "reason: %s", results[0].Reason)
+	assert.Contains(t, h.git(h.repo, "for-each-ref", "--format=%(objectname)", RetainedRefPrefix), tagged,
+		"the tag's commit is kept, not dropped with the tag")
 }

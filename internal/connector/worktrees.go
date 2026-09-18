@@ -1120,11 +1120,21 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 	// Every commit the worktree or its branch reaches, and that removing it
 	// would forget: HEAD, the branch, their reflogs, per-worktree refs.
 	var tips []string
-	head, err := w.gitRawIn(ctx, v, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
-	if err != nil {
+	// A HEAD that names no commit — a worker's `checkout --orphan`, or an
+	// unborn branch — reaches nothing through HEAD, and that is an answer,
+	// not doubt: what HEAD stood at before is still read from its reflog
+	// below. `--quiet` says it with exit 1 and nothing else, so a git the
+	// connector could not run still leaves the worktree unjudged.
+	head, err := w.gitRawIn(ctx, v, "rev-parse", "--quiet", "--verify", "--end-of-options", "HEAD^{commit}")
+	unborn := false
+	switch {
+	case err == nil:
+		tips = append(tips, strings.TrimSpace(string(head)))
+	case noSuchRevision(err):
+		unborn = true
+	default:
 		return judgment{reason: RetainedUnverified}
 	}
-	tips = append(tips, strings.TrimSpace(string(head)))
 	if tip != "" {
 		tips = append(tips, tip)
 		out, err := w.gitOut(ctx, r.Repository, "reflog", "show", "--format=%H", "refs/heads/"+r.Branch, "--")
@@ -1133,16 +1143,28 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 		}
 		tips = append(tips, strings.Fields(out)...)
 	}
-	for _, args := range [][]string{
-		{"reflog", "show", "--format=%H", "HEAD", "--"},
-		{"for-each-ref", "--format=%(objectname)", "refs/worktree/", "refs/bisect/", "refs/rewritten/"},
-	} {
-		out, err := w.gitRawIn(ctx, v, args...)
+	// HEAD's reflog holds every commit it stood at, and an unborn HEAD is
+	// the one HEAD `reflog show` will not name — while the file still holds
+	// what it stood at before, which nothing else reaches. So it is read as
+	// the per-worktree reflogs below are, and an orphan loses no history.
+	if unborn {
+		logged, err := reflogFileTips(filepath.Join(v.gitDir, "logs", "HEAD"))
+		if err != nil {
+			return judgment{reason: RetainedUnverified}
+		}
+		tips = append(tips, logged...)
+	} else {
+		out, err := w.gitRawIn(ctx, v, "reflog", "show", "--format=%H", "HEAD", "--")
 		if err != nil {
 			return judgment{reason: RetainedUnverified}
 		}
 		tips = append(tips, strings.Fields(string(out))...)
 	}
+	perWorktree, err := w.gitRawIn(ctx, v, "for-each-ref", "--format=%(objectname)", "refs/worktree/", "refs/bisect/", "refs/rewritten/")
+	if err != nil {
+		return judgment{reason: RetainedUnverified}
+	}
+	tips = append(tips, strings.Fields(string(perWorktree))...)
 	// Those refs' own reflogs, when the repository keeps them: git logs ref
 	// updates under refs/ only with core.logAllRefUpdates=always, and a
 	// per-worktree ref's log lives in the record and goes with it.
@@ -1182,7 +1204,15 @@ func (w *Worktrees) judge(ctx context.Context, r Worktree, v view, how removal) 
 		}
 	}
 	slices.Sort(tips)
-	decided := judgment{tip: tip, tips: slices.Compact(tips)}
+	// Only commits: a pseudo-ref or a ref pointed at a tree or a blob names
+	// no history, and asking what contains one is a question git answers
+	// with an error — which would keep the worktree for ever. A conflicted
+	// merge leaves exactly that in AUTO_MERGE.
+	commits, err := w.commitsAmong(ctx, v, slices.Compact(tips))
+	if err != nil {
+		return judgment{reason: RetainedUnverified}
+	}
+	decided := judgment{tip: tip, tips: commits}
 	for _, commit := range decided.tips {
 		// The ref that holds it, and where that ref stands: the removal
 		// verifies each one again, in the transaction that ends the branch,
@@ -1364,6 +1394,38 @@ func reflogFileTips(path string) ([]string, error) {
 	return tips, nil
 }
 
+// commitsAmong is the commits these object names reach: the name itself, or
+// what an annotated tag points at, because that is the history the name
+// keeps. A tree or a blob reaches no commit and neither does an object that
+// is no longer there, and both are dropped — there is nothing in them to
+// lose. Git answers once per name, in order; answering for fewer is an error,
+// never a quiet drop.
+func (w *Worktrees) commitsAmong(ctx context.Context, v view, oids []string) ([]string, error) {
+	if len(oids) == 0 {
+		return nil, nil
+	}
+	var asked strings.Builder
+	for _, oid := range oids {
+		asked.WriteString(oid + "^{commit}\n")
+	}
+	out, err := w.gitRawInStdin(ctx, v, asked.String(), "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	if err != nil {
+		return nil, err
+	}
+	answers := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(answers) != len(oids) {
+		return nil, fmt.Errorf("connector: git answered for %d of %d object names", len(answers), len(oids))
+	}
+	commits := make([]string, 0, len(oids))
+	for _, answer := range answers {
+		if name, kind, ok := strings.Cut(answer, " "); ok && kind == "commit" {
+			commits = append(commits, name)
+		}
+	}
+	slices.Sort(commits)
+	return slices.Compact(commits), nil
+}
+
 // pseudoRefTips is every object name the record's pseudo-refs hold: one per
 // line, first field, as git writes FETCH_HEAD and the rest. A file that is
 // not there names nothing; one that cannot be read is an error.
@@ -1420,6 +1482,14 @@ func isGitDir(path string) bool {
 // isObjectName reports whether a field is an object name and not the zero one.
 func isObjectName(field string) bool {
 	return len(field) >= 40 && strings.Trim(field, "0123456789abcdef") == "" && strings.Trim(field, "0") != ""
+}
+
+// noSuchRevision reports whether git said a revision does not resolve, which
+// `rev-parse --quiet` says with exit 1 and nothing else. Any other failure is
+// a git that could not be run, which is never an answer about work.
+func noSuchRevision(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 // exists reports whether a path is anything but proven absent: a path that
@@ -1781,6 +1851,18 @@ func (w *Worktrees) gitStdin(ctx context.Context, dir, input string, args ...str
 	}
 	_, err = w.runInput(ctx, guard, view{dir: dir}.args(args...), args[0], input)
 	return err
+}
+
+// gitRawInStdin is gitStdin for a view, and gives back what git wrote: a
+// frozen worktree is reached through its record by its frozen name.
+func (w *Worktrees) gitRawInStdin(ctx context.Context, v view, input string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	guard, err := w.filterOverrides(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	return w.runInput(ctx, guard, v.args(args...), args[0], input)
 }
 
 func (w *Worktrees) run(ctx context.Context, config [][2]string, args []string, what string) ([]byte, error) {
