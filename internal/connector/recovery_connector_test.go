@@ -286,10 +286,13 @@ func runHarnessConnector(dir string) error {
 	runFor := harnessRunFor
 	if d.Real {
 		runFor = harnessRealRunFor
-		// The real `basecamp mcp`, holding a token that reaches no Basecamp:
-		// the worker's basecamp_connect calls are real, its Basecamp calls
-		// fail.
-		mcp.Command, mcp.Env = os.Getenv(harnessRealBasecampEnv), []string{"BASECAMP_TOKEN"}
+		// The real `basecamp mcp`, holding a task token that reaches no
+		// Basecamp: the worker's basecamp_connect calls are real, its
+		// Basecamp calls fail. It gets no BASECAMP_TOKEN — MCPServerEnv
+		// leaves that name out deliberately, and the bridge rebuilds the
+		// server's environment from that list, so naming it here never did
+		// anything.
+		mcp.Command = os.Getenv(harnessRealBasecampEnv)
 	}
 	failures, _ := strconv.Atoi(os.Getenv(harnessSpawnFailEnv))
 	working := d.New(filepath.Join(dir, "agent"))

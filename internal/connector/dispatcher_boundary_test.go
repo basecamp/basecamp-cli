@@ -51,6 +51,28 @@ func TestOnlyTheReleasePointSettlesAnAttemptOrReleasesItsDirectory(t *testing.T)
 	}
 }
 
+// The one rule for reading who holds a task token, as a property of the
+// source: a holder is read through settledTaker, which closes the socket and
+// waits for a handoff in flight to finish first, and nowhere else. Reading
+// holderOf directly is how the NewSession failure path came to settle an
+// attempt around a holder the socket had not finished deciding (Copilot on
+// #738), and it is the shape a later card would repeat.
+func TestAHolderIsOnlyEverReadThroughTheSettledSocket(t *testing.T) {
+	source, err := os.ReadFile("dispatcher.go")
+	require.NoError(t, err)
+	functions := splitFunctions(string(source))
+	require.NotEmpty(t, functions)
+
+	require.Contains(t, functions["settledTaker"], "holderOf(", "settledTaker is where a holder is read")
+	for name, body := range functions {
+		if name == "settledTaker" || name == "holderOf" {
+			continue
+		}
+		assert.NotContains(t, body, "holderOf(", "%s reads a token holder without settling the socket first", name)
+		assert.NotContains(t, body, ".Holder()", "%s reads a token holder without settling the socket first", name)
+	}
+}
+
 // splitFunctions maps each top-level function or method name in a Go file to
 // its body text.
 func splitFunctions(source string) map[string]string {

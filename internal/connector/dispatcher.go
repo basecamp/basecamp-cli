@@ -166,14 +166,18 @@ type WorkerMCP struct {
 	Profile string
 	// StateDir is the connector's state directory.
 	StateDir string
-	// Env names further variables of the connector's environment the server
-	// needs besides driver.BaseEnv.
-	Env []string
 }
 
 // MCPServerEnv is what `basecamp mcp` may take from the connector's
 // environment besides driver.BaseEnv: its keyring's session bus and the CLI's
 // own non-secret settings. BASECAMP_TOKEN is deliberately absent.
+//
+// It is the whole list, and there is no option to extend it. The bridge
+// rebuilds the server's environment from driver.BaseEnv and this list after
+// it has taken the token (connect_worker_mcp.go's workerMCPEnv), so a name
+// pinned here and not there would be declared by the connector and then
+// dropped a moment later — an allowlist that reads as configuration and does
+// nothing (Copilot on #738). One list, read in both places.
 var MCPServerEnv = []string{
 	"DBUS_SESSION_BUS_ADDRESS", "BASECAMP_NO_KEYRING", "BASECAMP_BASE_URL", "BASECAMP_CACHE_DIR",
 }
@@ -599,16 +603,21 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
 	if err != nil {
-		cleanup()
 		spawnFailed := errors.Is(err, driver.ErrNotStarted)
 		// A configuration no retry can fix is proof no process existed and
 		// proof that starting again would fail the same way.
 		unusable := errors.Is(err, driver.ErrUnusable)
 		log.Warn("connector: worker did not start", "task_id", launch.TaskID, "attempt_id", launch.AttemptID,
 			"no_process", spawnFailed, "unusable", unusable, "error", err)
+		// The socket is finished with before the taker is read, as at every
+		// other release: closing it is not the same as waiting for it, and a
+		// holder read from a socket still deciding is a holder that may be
+		// about to exist (Copilot on #738).
+		taker := settledTaker(tokens, log, launch.AttemptID, d.opts.CancelGrace)
+		cleanup()
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
-		d.release(settleCtx, launch, driver.StartedProcess(err), holderOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		d.release(settleCtx, launch, driver.StartedProcess(err), taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return nil
 	}
@@ -704,8 +713,8 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// environment, so a name the connector left unset would arrive carrying
 	// the agent's value, and BASECAMP_BASE_URL decides where the agent's
 	// Basecamp credential is sent.
-	serverEnv := driver.EnvMap(driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), append(MCPServerEnv, d.opts.MCP.Env...)...), d.opts.Lookup, nil))
-	for _, name := range append(append([]string{}, MCPServerEnv...), d.opts.MCP.Env...) {
+	serverEnv := driver.EnvMap(driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), MCPServerEnv...), d.opts.Lookup, nil))
+	for _, name := range MCPServerEnv {
 		if _, ok := serverEnv[name]; !ok {
 			serverEnv[name] = ""
 		}

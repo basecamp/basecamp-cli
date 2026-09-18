@@ -1491,12 +1491,17 @@ func TestAHeldAttemptTakesASlotWithinTheSamePass(t *testing.T) {
 // BASECAMP_BASE_URL is where the agent's Basecamp credential would be sent.
 // Every name the server may have is pinned to this connector's value or to
 // nothing.
-func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
+//
+// And no name beyond those two lists is pinned. The bridge rebuilds the
+// server's environment from driver.BaseEnv and MCPServerEnv once it has
+// taken the token (connect_worker_mcp.go), so anything pinned here that is
+// not in them is declared by the connector and dropped a moment later — an
+// allowlist that reads as configuration and does nothing (Copilot on #738).
+func TestTheWorkersServerEnvironmentPinsEveryNameItMayHaveAndNoOther(t *testing.T) {
 	fake := newFakeDriver()
 	var cfg driver.SessionConfig
 	fake.onStart = func(c driver.SessionConfig) { cfg = c }
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
-		o.MCP.Env = []string{"BASECAMP_EXTRA_NOT_REAL"}
 		o.Lookup = func(k string) (string, bool) {
 			if k == "BASECAMP_CACHE_DIR" {
 				return "/var/cache/connector", true
@@ -1510,7 +1515,7 @@ func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
 
 	env := cfg.MCPServers[0].Env
 	require.NotEmpty(t, env)
-	for _, name := range append(append([]string{}, MCPServerEnv...), "BASECAMP_EXTRA_NOT_REAL") {
+	for _, name := range MCPServerEnv {
 		value, ok := env[name]
 		assert.Truef(t, ok, "%s is not pinned, so the agent's own value would reach the server", name)
 		if name == "BASECAMP_CACHE_DIR" {
@@ -1518,6 +1523,10 @@ func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
 		} else {
 			assert.Empty(t, value, "%s", name)
 		}
+	}
+	carried := append(append([]string{}, driver.BaseEnv...), MCPServerEnv...)
+	for name := range env {
+		assert.Containsf(t, carried, name, "%s is pinned here and the bridge does not carry it on", name)
 	}
 }
 
