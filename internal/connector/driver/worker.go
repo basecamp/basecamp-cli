@@ -15,11 +15,6 @@ import (
 	"time"
 )
 
-// startTolerance is how far a process's start time, as the kernel reports it,
-// may be from the time the driver recorded for it and still be the same
-// process. The driver stamps the time just after the fork returns.
-const startTolerance = 3 * time.Second
-
 // pipeWaitDelay bounds how long a worker that has exited is waited on for
 // pipes a stray descendant still holds.
 const pipeWaitDelay = 2 * time.Second
@@ -43,11 +38,15 @@ const pipeWaitDelay = 2 * time.Second
 //     its own, for a person to settle. Never terminal, never released.
 //  5. A restart reaps by the same rule (TerminateRecorded, then the same
 //     confirmation), and asks OwnsWorker first: a pid is not an identity, so
-//     ownership is the pid AND the start time recorded with it. Everything
-//     that acts on a recorded worker asks OwnsWorker rather than testing a
-//     pid of its own: in this card, recovery (through TerminateRecorded) and
-//     the release point's second confirmation; any later one — status,
-//     redispatch, discard, hold — the same way.
+//     ownership is the pid AND the kernel's own start time for it, compared
+//     exactly. Everything that acts on a recorded worker asks OwnsWorker
+//     rather than testing a pid of its own: in this card, recovery (through
+//     TerminateRecorded) and the release point's second confirmation; any
+//     later one — status, redispatch, discard, hold — the same way. Every
+//     group signal that follows the first asks again (signalRecordedGroup):
+//     ownership established before a grace period is not ownership after it,
+//     because a pid freed during the grace can be leading another group by
+//     the time the kill goes out.
 //
 // The one thing this cannot cover is a descendant that leaves the group by
 // calling setsid: it is outside every group signal, and the connector can
@@ -94,8 +93,10 @@ const pipeWaitDelay = 2 * time.Second
 // containment is the sandbox launcher's); a driver that returns an error
 // after leaving a process behind breaks the start promise, which is why it is
 // written on the method rather than left to each driver; and on a platform
-// where process start times cannot be read, OwnsWorker refuses to answer and
-// nothing may be settled — the run command refuses to start there at all.
+// where process start times cannot be read — or for a worker whose start
+// time the kernel would not give — OwnsWorker refuses to answer and nothing
+// may be settled; the run command refuses to start on such a platform at
+// all.
 //
 // ## Credentials
 //
@@ -250,15 +251,17 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	_ = writeEnd.Close()
 	// The kernel's own start time for this pid, not the clock: it is what
 	// tells this worker from a later process the kernel gives the same pid,
-	// and OwnsWorker compares against it. A wall-clock stamp is only as
-	// precise as startTolerance, which under fast pid reuse is wide enough to
-	// accept a stranger (Copilot). Where the kernel cannot be asked, the
-	// stamp stands and the tolerance is what is left.
-	started := time.Now()
-	if exact, err := processStartTime(ec.Process.Pid); err == nil {
-		started = exact
+	// and OwnsWorker compares against it exactly. Where the kernel cannot be
+	// asked, the wall-clock stamp is kept for a person to read and the
+	// identity is marked inexact: no tolerance stands in for it, because a
+	// tolerance wide enough to cover a stamp taken around a fork is wide
+	// enough to accept a stranger under fast pid reuse (Copilot). Nothing is
+	// signaled on an inexact identity and nothing of its attempt is released.
+	started, exact := time.Now(), false
+	if kernel, err := processStartTime(ec.Process.Pid); err == nil {
+		started, exact = kernel, true
 	}
-	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: started}
+	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: started, StartedExact: exact}
 	go func() {
 		err := ec.Wait()
 		w.exit = exitOf(ec, err)
@@ -323,17 +326,21 @@ func (w *Worker) Terminate(grace time.Duration) {
 		_ = w.stdin.Close()
 		select {
 		case <-w.done:
-			// The leader is gone; its group may not be.
-			_ = signalGroup(w.process.PGID, syscall.SIGKILL)
+			// The leader is gone and reaped, so its pid — which is its
+			// group's id — may be the kernel's to give away: the group is
+			// signaled only while it is still provably this worker's.
+			_ = signalRecordedGroup(w.process, syscall.SIGKILL)
 			return
 		default:
 		}
-		_ = signalGroup(w.process.PGID, syscall.SIGTERM)
+		_ = signalRecordedGroup(w.process, syscall.SIGTERM)
 		select {
 		case <-w.done:
 		case <-time.After(grace):
 		}
-		_ = signalGroup(w.process.PGID, syscall.SIGKILL)
+		// The worker may have exited and been reaped during the grace, so
+		// ownership is established again rather than assumed from before it.
+		_ = signalRecordedGroup(w.process, syscall.SIGKILL)
 		// The leader by its own pid as well: were it not a group leader, the
 		// group signal would reach nothing and Terminate would wait forever.
 		_ = w.cmd.Process.Kill()
@@ -369,10 +376,11 @@ var ErrGroupOutlivedLeader = errors.New("driver: the recorded process group outl
 //     process, and the recorded group still has members — they may be the
 //     worker's children. Nothing may be settled or released.
 //   - (false, err): the identity cannot be established here (an unreadable
-//     process table, a platform that cannot say). Nothing may be settled or
-//     released either.
+//     process table, a record with no kernel start time, a platform that
+//     cannot say). Nothing may be settled or released either.
 func OwnsWorker(p Process) (bool, error) {
-	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
+	if p.PID <= 0 || p.PGID <= 0 {
+		// There is no process here to own.
 		return false, nil
 	}
 	gone, err := ProcessGone(p)
@@ -387,11 +395,26 @@ func OwnsWorker(p Process) (bool, error) {
 	return true, nil
 }
 
+// ErrIdentityUnknown is a record the connector cannot tell from a later
+// process that reused its pid, because no kernel start time was ever
+// recorded for it. It is not "gone" and it is not "still running": it is
+// unanswerable, and the one-owner rule signals nothing and releases nothing
+// on an unanswerable identity.
+var ErrIdentityUnknown = errors.New("driver: the recorded process has no kernel start time, so it cannot be told from a later process that reused its pid")
+
 // ProcessGone reports whether the process a record names is gone: no process
 // by that pid, a zombie, or a later process the kernel gave the same pid. It
 // asks only about that process and says nothing about its group, which is
 // what a caller wants to know about a worker's MCP server — the group is the
 // agent's and outlives its servers.
+//
+// The comparison is exact. A kernel start time is read the same way every
+// time it is read, in ticks since boot, so the process that was recorded
+// answers with the value recorded for it and anything else is another
+// process. A record whose start time the kernel never gave (StartedExact
+// false) is ErrIdentityUnknown rather than a comparison against a tolerance:
+// under fast pid reuse a window wide enough to cover a wall-clock stamp is
+// wide enough to accept a stranger.
 //
 // It is the one place the question "is this still that process?" is answered;
 // OwnsWorker asks it too, and adds the group.
@@ -402,15 +425,16 @@ func ProcessGone(p Process) (bool, error) {
 	started, err := processStartTime(p.PID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// No process by that pid at all: nothing of it is left, whatever
+			// the record says about when it started.
 			return true, nil
 		}
 		return false, err
 	}
-	if p.StartedAt.IsZero() {
-		// Nothing to compare: a pid that exists is taken to be it.
-		return false, nil
+	if !p.StartedExact {
+		return false, fmt.Errorf("%w: pid %d", ErrIdentityUnknown, p.PID)
 	}
-	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
+	if !started.Equal(p.StartedAt) {
 		return true, nil
 	}
 	return false, nil
@@ -436,7 +460,57 @@ func LookupProcess(pid int) (Process, error) {
 	if err != nil {
 		return Process{}, err
 	}
-	return Process{PID: pid, PGID: pgid, StartedAt: started}, nil
+	return Process{PID: pid, PGID: pgid, StartedAt: started, StartedExact: true}, nil
+}
+
+// signalRecordedGroup is the one place a recorded worker's process group is
+// signaled, and it establishes that the group is still that worker's every
+// time — not once, before a grace period, for every signal that follows it.
+// A group signal is sent by the LEADER's pid, and a pid the kernel has taken
+// back can lead a group of its own: the worker this connector started a
+// minute later, say, which every signal held over from the last one would
+// then end.
+//
+// It signals in two cases and neither is an assumption:
+//
+//   - the recorded process is alive and is still that worker (OwnsWorker), or
+//   - the worker LED the group, no live process holds its pid any more, and
+//     the group still has members. Those members are the worker's own
+//     orphaned children: the kernel keeps a pid allocated for as long as a
+//     live process uses it as its process group id, so a group id cannot
+//     change hands while anything is still in the group.
+//
+// Everything else signals nothing. A pid that is alive and is NOT the
+// recorded process is the case this exists for: the id has changed hands,
+// and any group under it is a stranger's — the worker this connector started
+// a minute later, say. An identity that cannot be established at all
+// (ErrIdentityUnknown, an unreadable process table) is an error the caller
+// holds on rather than a signal. And a record that names a process which
+// only belonged to the group (a taker, whose pid is not the group's id)
+// proves nothing about the group once that process is gone.
+//
+// Where this can still be broken: between the observation and the signal the
+// last member can exit and the kernel can give the pid away. There is no
+// portable way to signal a group as one atomic act — pidfd is per process,
+// not per group — so that window is the syscall pair's, and it is the reason
+// the connector confirms rather than assumes.
+func signalRecordedGroup(p Process, sig syscall.Signal) error {
+	switch owns, err := OwnsWorker(p); {
+	case owns:
+	case err != nil && !errors.Is(err, ErrGroupOutlivedLeader):
+		return err
+	case p.PID != p.PGID || !pidUnheld(p.PID) || !GroupMembersRemain(p):
+		return nil
+	}
+	return signalGroup(p.PGID, sig)
+}
+
+// pidUnheld reports whether no live process holds the pid: there is none, or
+// what is left of one is a zombie, which runs nothing and keeps the id from
+// being given away until its parent reaps it.
+func pidUnheld(pid int) bool {
+	_, err := processStartTime(pid)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // TerminateRecorded ends a worker a previous connector process started, by
@@ -463,7 +537,9 @@ func TerminateRecorded(p Process, grace time.Duration) (bool, error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = signalGroup(p.PGID, syscall.SIGKILL)
+	// The worker may have gone during the grace and its pid been given to a
+	// new group leader, so this signal asks again whose group it is.
+	_ = signalRecordedGroup(p, syscall.SIGKILL)
 	return true, nil
 }
 
@@ -532,7 +608,12 @@ func ConfirmGroupGone(p Process, grace time.Duration) error {
 	if err := groupGone(p.PGID); err == nil {
 		return nil
 	}
-	_ = signalGroup(p.PGID, syscall.SIGKILL)
+	if err := signalRecordedGroup(p, syscall.SIGKILL); err != nil {
+		// The group is not proven gone and whose it is cannot be
+		// established, so it is neither signaled nor confirmed: the attempt
+		// is held for a person.
+		return err
+	}
 	deadline := time.Now().Add(grace)
 	// The wait backs off: each probe of a group that still has members reads
 	// every process's state, and a stubborn worker must not cost a busy host

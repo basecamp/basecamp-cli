@@ -103,14 +103,19 @@ func TestTerminateRecordedLeavesAReusedPidAlone(t *testing.T) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	started := time.Now()
+	// The kernel's own identity for it, which is what a record carries.
+	p, err := LookupProcess(cmd.Process.Pid)
+	require.NoError(t, err)
+	require.True(t, p.StartedExact)
 
-	signaled, err := TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started.Add(-time.Hour)}, time.Second)
+	reused := p
+	reused.StartedAt = p.StartedAt.Add(-time.Hour)
+	signaled, err := TerminateRecorded(reused, time.Second)
 	assert.False(t, signaled, "a recorded start time that does not match is another process")
 	assert.ErrorIs(t, err, ErrGroupOutlivedLeader, "and a group still holding that id is not this worker's to end")
 	assert.True(t, alive(cmd.Process.Pid))
 
-	signaled, err = TerminateRecorded(Process{PID: cmd.Process.Pid, PGID: cmd.Process.Pid, StartedAt: started}, 2*time.Second)
+	signaled, err = TerminateRecorded(p, 2*time.Second)
 	require.NoError(t, err)
 	assert.True(t, signaled)
 	_ = cmd.Wait()
@@ -236,4 +241,101 @@ func TestWorkersDoNotLeakDescriptors(t *testing.T) {
 	}
 	assert.Eventually(t, func() bool { return openDescriptors(t) <= before }, 2*pipeWaitDelay+2*time.Second, 50*time.Millisecond,
 		"a terminated worker's pipes are released without anyone else closing them")
+}
+
+// sleepInItsOwnGroup starts a process that leads a group of its own, and
+// gives back the kernel's identity for it. It stands in for whatever holds a
+// pid now: a worker of a later attempt, or any process of this user the
+// kernel gave a recycled id to.
+func sleepInItsOwnGroup(t *testing.T) (*exec.Cmd, Process) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "/bin/sleep", "300")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	p, err := LookupProcess(cmd.Process.Pid)
+	require.NoError(t, err)
+	require.True(t, p.StartedExact, "the kernel's own start time is the identity")
+	return cmd, p
+}
+
+// Copilot on #738: the driver records the kernel's start time when it can
+// get one, but the comparison accepted anything within three seconds of it,
+// so under fast pid reuse a stranger started just after the record was
+// written passed as the worker.
+func TestAProcessStartedJustAfterTheRecordIsNotTheRecordedOne(t *testing.T) {
+	cmd, p := sleepInItsOwnGroup(t)
+
+	stranger := p
+	stranger.StartedAt = p.StartedAt.Add(-time.Second)
+	gone, err := ProcessGone(stranger)
+	require.NoError(t, err)
+	assert.True(t, gone, "a second between the record and the kernel is another process, not this one")
+
+	owns, err := OwnsWorker(stranger)
+	assert.False(t, owns)
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader, "and its group is not settled around either")
+
+	signaled, err := TerminateRecorded(stranger, 100*time.Millisecond)
+	assert.False(t, signaled)
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader)
+	assert.True(t, alive(cmd.Process.Pid), "nothing is signaled on a record that does not match")
+}
+
+// The wall-clock fallback is not an identity: where the kernel would not say
+// when a process started, the rule refuses to answer rather than compare
+// against a stamp taken around a fork.
+func TestARecordWithNoKernelStartTimeIsRefused(t *testing.T) {
+	cmd, p := sleepInItsOwnGroup(t)
+
+	stamped := Process{PID: p.PID, PGID: p.PGID, StartedAt: time.Now()}
+	_, err := ProcessGone(stamped)
+	assert.ErrorIs(t, err, ErrIdentityUnknown)
+
+	owns, err := OwnsWorker(stamped)
+	assert.False(t, owns)
+	assert.ErrorIs(t, err, ErrIdentityUnknown, "neither owned nor gone: unanswerable")
+
+	signaled, err := TerminateRecorded(stamped, 100*time.Millisecond)
+	assert.False(t, signaled)
+	assert.ErrorIs(t, err, ErrIdentityUnknown)
+	assert.True(t, alive(cmd.Process.Pid))
+
+	// And a record with a pid but no start time at all — a ledger row
+	// written where the kernel could not be asked — is the same answer, not
+	// "gone, settle it".
+	owns, err = OwnsWorker(Process{PID: p.PID, PGID: p.PGID})
+	assert.False(t, owns)
+	assert.ErrorIs(t, err, ErrIdentityUnknown)
+}
+
+// Copilot on #738: group identity was checked once, before the grace period,
+// and the SIGKILL that followed went out by the saved negative pgid however
+// long the wait had been. This is what that costs once the id has changed
+// hands: the record names a pid that now leads somebody else's group.
+func TestALaterGroupSignalIsNotSentToAGroupTheRecordNoLongerOwns(t *testing.T) {
+	cmd, p := sleepInItsOwnGroup(t)
+	// What the connector recorded a while ago for the worker that had this
+	// pid before the kernel gave it away.
+	recorded := p
+	recorded.StartedAt = p.StartedAt.Add(-time.Hour)
+
+	err := ConfirmGroupGone(recorded, 100*time.Millisecond)
+	assert.ErrorIs(t, err, ErrGroupOutlivedLeader, "the group is not proven gone")
+	// Not alive(), which counts the zombie this test has not reaped: the
+	// question is whether anything of that group still runs.
+	assert.True(t, GroupMembersRemain(p), "and the group that holds the id now is left running")
+	_ = cmd
+
+	// The same rule, asked directly: nothing is signaled on a record whose
+	// identity cannot be established either.
+	assert.ErrorIs(t, signalRecordedGroup(Process{PID: p.PID, PGID: p.PGID, StartedAt: time.Now()}, syscall.SIGKILL), ErrIdentityUnknown)
+	assert.True(t, alive(cmd.Process.Pid))
+
+	// And the worker it really is may still be ended by its group.
+	require.NoError(t, signalRecordedGroup(p, syscall.SIGKILL))
+	assert.Eventually(t, func() bool { return !GroupMembersRemain(p) }, 5*time.Second, 20*time.Millisecond)
 }

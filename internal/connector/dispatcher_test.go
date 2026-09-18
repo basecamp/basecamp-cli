@@ -1342,7 +1342,7 @@ func TestARestartEndsTheProcessThatTookTheToken(t *testing.T) {
 	// A worker whose pid is above the kernel's maximum: gone, nothing to
 	// signal. Its MCP server is the one still running.
 	require.NoError(t, h.ledger.MarkRunning(ctx, l.AttemptID, AttemptProcess{PID: 1 << 30, PGID: 1 << 30, StartedAt: time.Now(), SessionID: "s"}))
-	require.NoError(t, h.ledger.RecordTaker(ctx, l.AttemptID, AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}))
+	require.NoError(t, h.ledger.RecordTaker(ctx, l.AttemptID, recordedProcess(taker, "")))
 
 	live, err := h.ledger.LiveAttempts(ctx)
 	require.NoError(t, err)

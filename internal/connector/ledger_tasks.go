@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // Tasks and attempts: the dispatcher's half of the ledger.
@@ -544,11 +546,41 @@ func liveAttemptTask(ctx context.Context, tx *sql.Tx, attemptID string) (int64, 
 
 // AttemptProcess is what MarkRunning records: the worker's process, where
 // there is one, and its session id.
+//
+// Only an identity the kernel gave is written. A start time the connector
+// guessed cannot tell a pid from a later process that reused it, so it is
+// left out of the record rather than written as if it could, and a record
+// with a pid and no start time is one a later process signals nothing on
+// (driver.ErrIdentityUnknown). What the ledger holds is therefore exact by
+// construction, which is why Identity reads it back as exact.
 type AttemptProcess struct {
 	PID       int
 	PGID      int
 	StartedAt time.Time
-	SessionID string
+	// StartedExact says StartedAt is the kernel's own start time for the pid
+	// (driver.Process.StartedExact). Only then is it written.
+	StartedExact bool
+	SessionID    string
+}
+
+// recordedProcess is p as the ledger records it.
+func recordedProcess(p driver.Process, sessionID string) AttemptProcess {
+	return AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, StartedExact: p.StartedExact, SessionID: sessionID}
+}
+
+// Identity is the process the record names, for the one-owner rule. A start
+// time in the ledger is the kernel's, since nothing else is written.
+func (p AttemptProcess) Identity() driver.Process {
+	return driver.Process{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, StartedExact: !p.StartedAt.IsZero()}
+}
+
+// startedStamp is the start time as the ledger writes it: the kernel's, or
+// nothing at all.
+func (p AttemptProcess) startedStamp() any {
+	if !p.StartedExact || p.StartedAt.IsZero() {
+		return nil
+	}
+	return stamp(p.StartedAt)
 }
 
 // RecordTaker records the process that took the attempt's task token — the
@@ -557,10 +589,7 @@ type AttemptProcess struct {
 // worker's.
 func (l *Ledger) RecordTaker(ctx context.Context, attemptID string, p AttemptProcess) error {
 	return retryBusy(func() error {
-		var started any
-		if !p.StartedAt.IsZero() {
-			started = stamp(p.StartedAt)
-		}
+		started := p.startedStamp()
 		res, err := l.db.ExecContext(ctx, `
 UPDATE attempts SET taker_pid = ?, taker_pgid = ?, taker_started = ? WHERE id = ? AND state <> 'ended'`,
 			nullableInt(p.PID), nullableInt(p.PGID), started, attemptID)
@@ -582,10 +611,7 @@ UPDATE attempts SET taker_pid = ?, taker_pgid = ?, taker_started = ? WHERE id = 
 // session.
 func (l *Ledger) MarkRunning(ctx context.Context, attemptID string, p AttemptProcess) error {
 	return retryBusy(func() error {
-		var started any
-		if !p.StartedAt.IsZero() {
-			started = stamp(p.StartedAt)
-		}
+		started := p.startedStamp()
 		res, err := l.db.ExecContext(ctx, `
 UPDATE attempts SET state = 'running', running_at = ?, pid = ?, pgid = ?, process_started = ?, session_id = ?
 WHERE id = ? AND state = 'launching'`,

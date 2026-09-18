@@ -325,7 +325,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			d.hold()
 			continue
 		}
-		worker := driver.Process{PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt}
+		worker := a.Process.Identity()
 		signaled, err := d.terminateRecorded(worker, driver.DefaultGrace)
 		if err != nil {
 			// A worker that may still be running with the operator's
@@ -342,7 +342,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
 		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
-			worker, driver.Process{PID: a.Taker.PID, PGID: a.Taker.PGID, StartedAt: a.Taker.StartedAt},
+			worker, a.Taker.Identity(),
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
 	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
@@ -586,7 +586,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	p := session.Process()
 	// The token goes only to this worker's own process group.
 	tokens.AllowGroup(p.PGID)
-	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
+	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, recordedProcess(p, session.ID())); err != nil {
 		_ = session.Close()
 		// The socket was open to the worker's group, so a handoff may be in
 		// flight: it is finished with before the taker is read, as at every
@@ -650,8 +650,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
 		d.reportHandoff(log, attemptID, handoff, taker, afterADelivery)
 		if handoff == HandoffDelivered && taker.PID > 0 {
-			if err := d.ledger.RecordTaker(recordCtx, attemptID,
-				AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
+			if err := d.ledger.RecordTaker(recordCtx, attemptID, recordedProcess(taker, "")); err != nil {
 				log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
 			}
 		}
