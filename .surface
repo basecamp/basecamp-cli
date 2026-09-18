@@ -681,13 +681,10 @@ CMD basecamp connect setup
 CMD basecamp connect shadow
 CMD basecamp connect shadow promote
 CMD basecamp connect show
-<<<<<<< HEAD
+CMD basecamp connect status
 CMD basecamp connect worktrees
 CMD basecamp connect worktrees list
 CMD basecamp connect worktrees prune
-=======
-CMD basecamp connect status
->>>>>>> origin/connect-recovery-harness
 CMD basecamp docs
 CMD basecamp docs archive
 CMD basecamp docs doc
@@ -5591,7 +5588,28 @@ FLAG basecamp connect show --stats type=bool
 FLAG basecamp connect show --styled type=bool
 FLAG basecamp connect show --todolist type=string
 FLAG basecamp connect show --verbose type=count
-<<<<<<< HEAD
+FLAG basecamp connect status --account type=string
+FLAG basecamp connect status --agent type=bool
+FLAG basecamp connect status --cache-dir type=string
+FLAG basecamp connect status --count type=bool
+FLAG basecamp connect status --help type=bool
+FLAG basecamp connect status --hints type=bool
+FLAG basecamp connect status --ids-only type=bool
+FLAG basecamp connect status --in type=string
+FLAG basecamp connect status --jq type=string
+FLAG basecamp connect status --json type=bool
+FLAG basecamp connect status --markdown type=bool
+FLAG basecamp connect status --md type=bool
+FLAG basecamp connect status --no-hints type=bool
+FLAG basecamp connect status --no-stats type=bool
+FLAG basecamp connect status --profile type=string
+FLAG basecamp connect status --project type=string
+FLAG basecamp connect status --quiet type=bool
+FLAG basecamp connect status --shadow type=bool
+FLAG basecamp connect status --stats type=bool
+FLAG basecamp connect status --styled type=bool
+FLAG basecamp connect status --todolist type=string
+FLAG basecamp connect status --verbose type=count
 FLAG basecamp connect worktrees --account type=string
 FLAG basecamp connect worktrees --agent type=bool
 FLAG basecamp connect worktrees --cache-dir type=string
@@ -5658,30 +5676,6 @@ FLAG basecamp connect worktrees prune --stats type=bool
 FLAG basecamp connect worktrees prune --styled type=bool
 FLAG basecamp connect worktrees prune --todolist type=string
 FLAG basecamp connect worktrees prune --verbose type=count
-=======
-FLAG basecamp connect status --account type=string
-FLAG basecamp connect status --agent type=bool
-FLAG basecamp connect status --cache-dir type=string
-FLAG basecamp connect status --count type=bool
-FLAG basecamp connect status --help type=bool
-FLAG basecamp connect status --hints type=bool
-FLAG basecamp connect status --ids-only type=bool
-FLAG basecamp connect status --in type=string
-FLAG basecamp connect status --jq type=string
-FLAG basecamp connect status --json type=bool
-FLAG basecamp connect status --markdown type=bool
-FLAG basecamp connect status --md type=bool
-FLAG basecamp connect status --no-hints type=bool
-FLAG basecamp connect status --no-stats type=bool
-FLAG basecamp connect status --profile type=string
-FLAG basecamp connect status --project type=string
-FLAG basecamp connect status --quiet type=bool
-FLAG basecamp connect status --shadow type=bool
-FLAG basecamp connect status --stats type=bool
-FLAG basecamp connect status --styled type=bool
-FLAG basecamp connect status --todolist type=string
-FLAG basecamp connect status --verbose type=count
->>>>>>> origin/connect-recovery-harness
 FLAG basecamp docs --account type=string
 FLAG basecamp docs --agent type=bool
 FLAG basecamp docs --cache-dir type=string
@@ -18870,13 +18864,10 @@ SUB basecamp connect setup
 SUB basecamp connect shadow
 SUB basecamp connect shadow promote
 SUB basecamp connect show
-<<<<<<< HEAD
+SUB basecamp connect status
 SUB basecamp connect worktrees
 SUB basecamp connect worktrees list
 SUB basecamp connect worktrees prune
-=======
-SUB basecamp connect status
->>>>>>> origin/connect-recovery-harness
 SUB basecamp docs
 SUB basecamp docs archive
 SUB basecamp docs doc
