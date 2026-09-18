@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -1004,6 +1005,91 @@ func TestAModeChangeFailsTheTurnBeforeTheWorkerIsGone(t *testing.T) {
 
 // ---------------------------------------------------------------- foreign MCP configuration
 
+// Preflight is how anything outside a dispatch — doctor — asks the question
+// a dispatch asks. It has to resolve the adapter's configuration the way the
+// adapter will, so it reads the environment the adapter would be given: the
+// base allowlist (HOME) and the adapter's own names (CODEX_HOME), and not
+// whatever this process happens to hold.
+func TestPreflightReadsTheEnvironmentTheAdapterWouldBeGiven(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	codexHome := filepath.Join(root, "codex-home")
+	cwd := filepath.Join(root, "repo")
+	for _, dir := range []string{filepath.Join(home, ".codex"), codexHome, cwd} {
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+	}
+	declares := []byte("[mcp_servers.linear]\ncommand = \"/bin/linear-mcp\"\n")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), declares, 0o600))
+
+	env := map[string]string{"HOME": home}
+	lookup := func(name string) (string, bool) {
+		v, ok := env[name]
+		return v, ok
+	}
+	require.NoError(t, Preflight(ClaudeAgentACP, cwd, lookup, nil), "an adapter with no preflight refuses nothing")
+
+	err := Preflight(CodexACP, cwd, lookup, nil)
+	require.ErrorIs(t, err, ErrForeignMCPConfig, "HOME reaches the preflight, so the user's own layer is read")
+	assert.Contains(t, err.Error(), filepath.Join(home, ".codex", "config.toml"), "and the refusal names the file")
+
+	env["CODEX_HOME"] = codexHome
+	require.NoError(t, Preflight(CodexACP, cwd, lookup, nil),
+		"CODEX_HOME is one of the adapter's own names, so it reaches the preflight and replaces ~/.codex")
+
+	require.NoError(t, os.WriteFile(filepath.Join(codexHome, "config.toml"), declares, 0o600))
+	require.ErrorIs(t, Preflight(CodexACP, cwd, lookup, nil), ErrForeignMCPConfig)
+}
+
+// refuseToRead reads every file but one, which no one may read: the read
+// seam stands in for a permission a test cannot count on having, or not
+// having.
+func refuseToRead(denied string) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) {
+		if name == denied {
+			return nil, fmt.Errorf("open %s: %w", name, fs.ErrPermission)
+		}
+		return os.ReadFile(name)
+	}
+}
+
+// A refusal names every layer that refuses, not the first: the layers are
+// read in a fixed order — the user's, the system's, then the project's — so
+// naming the first would have a person fix the user's config, run this
+// again, and only then learn about the project's.
+func TestTheCodexPreflightNamesEveryLayerThatRefusesTheSession(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cwd := filepath.Join(root, "repo", "sub")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".codex"), 0o700))
+	lookup := func(name string) (string, bool) {
+		if name == "HOME" {
+			return home, true
+		}
+		return "", false
+	}
+	declares := []byte("[mcp_servers.linear]\ncommand = \"/bin/linear-mcp\"\n")
+	userConfig := filepath.Join(home, ".codex", "config.toml")
+	projectConfig := filepath.Join(cwd, ".codex", "config.toml")
+	require.NoError(t, os.WriteFile(userConfig, declares, 0o600))
+	require.NoError(t, os.WriteFile(projectConfig, declares, 0o600))
+
+	err := codexPreflight(cwd, lookup, nil)
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	assert.Contains(t, err.Error(), userConfig)
+	assert.Contains(t, err.Error(), projectConfig, "the layer after the first is named too")
+	assert.Equal(t, 1, strings.Count(err.Error(), userConfig),
+		"and a layer the walk reaches twice is named once")
+
+	// One that cannot be read and one that declares them are both said, and
+	// both are what they are to errors.Is.
+	err = codexPreflight(cwd, lookup, refuseToRead(userConfig))
+	require.ErrorIs(t, err, ErrConfigUnreadable)
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	assert.Contains(t, err.Error(), "cannot be read")
+	assert.Contains(t, err.Error(), projectConfig)
+}
+
 func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -1017,28 +1103,31 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 		return "", false
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\n[projects.\"/tmp\"]\ntrust_level = \"trusted\"\n"), 0o600))
-	require.NoError(t, codexPreflight(cwd, lookup))
+	require.NoError(t, codexPreflight(cwd, lookup, nil))
 
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig)
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig)
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("['mcp_servers'.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted key declares them too")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "a quoted key declares them too")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[\"mcp\\u005fservers\".basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a key with an escape is refused rather than read")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "a key with an escape is refused rather than read")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles.\"my profile\".mcp_servers.x]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted table path declares them too")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "a quoted table path declares them too")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles . demo . mcp_servers . basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "TOML allows space around the dots")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "TOML allows space around the dots")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("\ufeff[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a byte order mark does not hide the first line")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "a byte order mark does not hide the first line")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"),
 		[]byte("profile = \"demo\"\nprofiles = { demo = { mcp_servers = { basecamp = { command = \"/bin/evil\" } } } }\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "an inline table declares them on one line, at any depth")
+	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "an inline table declares them on one line, at any depth")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
-	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
-	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o000))
-	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a config this cannot read is refused, not assumed empty")
-	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o600))
+	require.NoError(t, codexPreflight(cwd, lookup, nil), "an escape in a value is not a key")
+	// Through the read seam, not a file mode: what a mode means depends on
+	// who runs the test, and root reads a 0o000 file like any other.
+	denied := refuseToRead(filepath.Join(home, ".codex", "config.toml"))
+	unreadable := codexPreflight(cwd, lookup, denied)
+	require.ErrorIs(t, unreadable, ErrConfigUnreadable, "a config this cannot read is refused, not assumed empty")
+	require.NotErrorIs(t, unreadable, ErrForeignMCPConfig, "but it is not a declaration, and a caller must be able to tell")
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))
 	withCodexHome := func(name string) (string, bool) {
@@ -1047,15 +1136,17 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 		}
 		return lookup(name)
 	}
-	require.NoError(t, codexPreflight(cwd, withCodexHome), "CODEX_HOME replaces ~/.codex")
+	require.NoError(t, codexPreflight(cwd, withCodexHome, nil), "CODEX_HOME replaces ~/.codex")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "repo", ".codex"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "repo", ".codex", "config.toml"), []byte("mcp_servers.basecamp.command = \"/bin/evil\"\n"), 0o600))
-	require.ErrorIs(t, codexPreflight(cwd, withCodexHome), ErrForeignMCPConfig, "a project layer above the working directory counts")
+	require.ErrorIs(t, codexPreflight(cwd, withCodexHome, nil), ErrForeignMCPConfig, "a project layer above the working directory counts")
 
 	h := newHarness(t)
 	d := h.driver()
-	d.opts.Adapter.Preflight = func(string, func(string) (string, bool)) error { return ErrForeignMCPConfig }
+	d.opts.Adapter.Preflight = func(string, func(string) (string, bool), func(string) ([]byte, error)) error {
+		return ErrForeignMCPConfig
+	}
 	_, err := d.NewSession(context.Background(), h.config())
 	require.ErrorIs(t, err, ErrForeignMCPConfig)
 	require.ErrorIs(t, err, driver.ErrNotStarted)
@@ -2223,7 +2314,7 @@ func TestThePreflightReadsTheEnvironmentTheAdapterWillHave(t *testing.T) {
 	}
 	seen := make(chan string, 1)
 	d := h.driver()
-	d.opts.Adapter.Preflight = func(_ string, lookup func(string) (string, bool)) error {
+	d.opts.Adapter.Preflight = func(_ string, lookup func(string) (string, bool), _ func(string) ([]byte, error)) error {
 		v, _ := lookup("CODEX_HOME")
 		seen <- v
 		return nil

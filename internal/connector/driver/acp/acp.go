@@ -41,7 +41,8 @@
 //     is present, otherwise an error. Its history replay is not progress.
 //  6. A configuration this driver cannot run — an adapter with no asking mode
 //     for the policy's, a policy for another directory, an MCP server without
-//     an absolute command, a Codex config that declares MCP servers — is
+//     an absolute command, a Codex config that declares MCP servers or that
+//     cannot be read — is
 //     ErrUnusable beside ErrNotStarted: nothing started, and a retry would
 //     fail the same way.
 //  7. The adapter is the pinned one: initialize must report protocol version
@@ -216,7 +217,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		// Read in the environment the adapter is about to run in, not this
 		// process's: what the preflight looks for (a CODEX_HOME, a HOME) is
 		// what the adapter will resolve its own configuration against.
-		if err := d.opts.Adapter.Preflight(cfg.Cwd, lookupIn(env)); err != nil {
+		if err := d.opts.Adapter.Preflight(cfg.Cwd, lookupIn(env), nil); err != nil {
 			// Configuration on this machine: the same session would fail the
 			// same way, so it is not retried.
 			return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
