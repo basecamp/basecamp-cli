@@ -249,8 +249,11 @@ type CommittedVerdict struct {
 type LaunchSpec struct {
 	// EventID is the originating event: an admitted or queued record.
 	EventID int64
-	// Served is the projects connect.json serves now, already cut to the
-	// run's --project scope. Records on the originating record's
+	// Served is the served projects the caller decided this launch from,
+	// already cut to the run's --project scope. For the dispatcher it is the
+	// one reading of connect.json that this pass took, handed down — not a
+	// fresh read, and not a promise about what the file says at the moment
+	// the transaction commits. Records on the originating record's
 	// conversation join its task only from its own project, and only while
 	// that project is among these.
 	Served []int64
@@ -315,13 +318,24 @@ func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, attemptID stri
 		!record.Decision.Served, record.Decision.ConversationKey == "":
 		return Launch{}, fmt.Errorf("connector: launch event %d (%s): %w", spec.EventID, record.State, ErrNotStartable)
 	case !slices.Contains(spec.Served, record.BucketID):
-		// Decision.Served is what admission wrote when it decided the
-		// record, so it says the project was served then. spec.Served is
-		// what connect.json serves now. The dispatcher reads the file again
-		// between choosing a record and launching it, so a project unserved
-		// in that window would otherwise start a task the operator has just
-		// withdrawn (Copilot on #765). The set the launch is given decides,
-		// here as for the records that join it.
+		// Two different questions, and neither is "what does the file say
+		// right now". Decision.Served is what admission wrote when it
+		// decided the record, so it says the project was served then;
+		// spec.Served is the set its caller decided this launch from.
+		//
+		// What this buys, said plainly, because the comment here used to
+		// claim more. For the dispatcher it is redundant with the startable
+		// query, which filtered on the same slice — belt and braces at the
+		// ledger's own boundary, so a launch that names a set not covering
+		// its record is refused rather than trusted, and one that names no
+		// set authorizes nothing rather than defaulting open.
+		//
+		// What it does NOT do is close the window between reading
+		// connect.json and committing this transaction. An unserve landing
+		// in that window still launches this one task; a follow-up is
+		// stopped at the next tick by taskRun.authorized. That race is
+		// pre-existing in kind — the route had it too — and holding the
+		// setup lock across selection and commit is carded, not done here.
 		return Launch{}, fmt.Errorf("connector: launch event %d in project %d, which is not served: %w", spec.EventID, record.BucketID, ErrNotStartable)
 	}
 	var busy bool
@@ -1047,9 +1061,10 @@ func (l *Ledger) StartableRecords(ctx context.Context, limit int) ([]Record, err
 // place in the window, or a backlog it cannot start starves everything behind
 // it.
 type StartableFilter struct {
-	// Served are the project ids connect.json serves now, already narrowed
-	// to --project. A record in any other project is not startable. Empty
-	// means nothing is.
+	// Served are the served project ids the caller decided this query from,
+	// already narrowed to --project — one reading, not a promise about the
+	// file at any later moment. A record in any other project is not
+	// startable. Empty means nothing is.
 	Served []int64
 	Limit  int
 }

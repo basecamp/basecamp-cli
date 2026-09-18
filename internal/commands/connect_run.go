@@ -573,8 +573,11 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 	return &connectServed{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
 }
 
-// Current returns a copy of the projects connect.json serves now, or the
-// reason it could not be read. Dispatch treats an error as authorizing
+// Current returns a copy of the projects connect.json serves as of the last
+// read, or the reason it could not be read. "As of the last read" is the
+// honest span: a reading is reused for connectServedTTL, and nothing holds
+// the setup lock, so a `connect setup --unserve` can complete between any
+// read and whatever the caller goes on to do with it. Dispatch treats an error as authorizing
 // nothing; admission holds the record as a configuration error rather than
 // answering that the project is not served.
 func (r *connectServed) Current() (map[int64]admission.Project, error) {

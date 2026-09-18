@@ -39,8 +39,10 @@ type connectProfile struct {
 }
 
 // servedBucketsOf is the projects a connect.json serves, as the ledger's
-// decisions want them. Read from the file at the moment the command runs,
-// which is the only thing that can authorize an action taken now.
+// decisions want them, from the file this command loaded when it started.
+// That is a reading and not a lock: nothing stops `connect setup --unserve`
+// completing between it and the write below, and holding the setup lock
+// across both is carded rather than done here.
 func servedBucketsOf(file setup.File) []int64 {
 	served := make([]int64, 0, len(file.Projects))
 	for bucket := range file.Projects {
@@ -444,9 +446,11 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	// The projects connect.json serves now, read here rather than taken from
+	// The served projects as this command read them, rather than the bit on
 	// the record: a record admitted while its project was served is not
-	// authorization to run it after the operator stopped serving it.
+	// authorization to run it after the operator stopped serving it. Read at
+	// start-up and not re-read here, so an unserve landing in between is not
+	// caught — see servedBucketsOf.
 	res, err := ledger.Redispatch(ctx, id, operatorName(), servedBucketsOf(p.file))
 	if err != nil {
 		return decisionError(err)

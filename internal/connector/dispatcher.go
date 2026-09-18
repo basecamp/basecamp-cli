@@ -446,8 +446,8 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	if d.free() <= 0 {
 		return nil
 	}
-	// Invariant 2, in the query: only records in a project connect.json
-	// serves now, among the projects this run hears. A record the dispatcher
+	// Invariant 2, in the query: only records in a project this pass read as
+	// served, among the projects this run hears. A record the dispatcher
 	// cannot start never fills the window.
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
 		Served: served, Limit: d.opts.Concurrency * 4,
@@ -520,8 +520,10 @@ func (d *Dispatcher) reportStranded(ctx context.Context, served []int64, servedE
 	}
 }
 
-// servedBuckets is the projects connect.json serves now, narrowed to the ones
-// this run hears.
+// servedBuckets is the served projects as the reader has them — a fresh read
+// or one reused within its TTL, never a lock — narrowed to the ones this run
+// hears. One pass takes it once and hands it down, so everything that pass
+// decides is decided from the same reading.
 func (d *Dispatcher) servedBuckets() ([]int64, error) {
 	projects, err := d.opts.Served()
 	if err != nil {

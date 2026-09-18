@@ -185,10 +185,13 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, serve
 		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
 	// Decision.Served is what admission wrote when it decided the record, so
-	// it says the project was served then; served is what connect.json
-	// serves now. Both, because a redispatch that reported success and left
-	// the record for a dispatcher that will refuse to launch it is worse
-	// than one that refuses here (Copilot on #765).
+	// it says the project was served then; served is what the caller read
+	// from connect.json for this command. Both, because a redispatch that
+	// reported success and left the record for a dispatcher that will refuse
+	// to launch it is worse than one that refuses here (Copilot on #765).
+	//
+	// served is a reading, not a lock: `connect setup --unserve` landing
+	// between that read and this commit is not caught here. Carded.
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 &&
 		record.Decision.Served && slices.Contains(served, record.BucketID) &&
 		record.Decision.ConversationKey != ""
