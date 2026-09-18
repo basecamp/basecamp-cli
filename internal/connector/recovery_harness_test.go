@@ -663,21 +663,27 @@ func (h *harness) stopWatchingForTokenFiles() int {
 // log, the lifecycle messages it posted, the polls it made, the workspace
 // records), not in any file under a working directory or the state directory
 // — and no worker saw one appear in those files while it ran.
+//
+// It runs when the connector has exited, and the workers' side of it is read
+// once the workers have said their word (awaitWorkersWord): a worker's word
+// is due by its own exit, not by the connector's.
 func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	t := h.t
 	t.Helper()
 	watched := h.stopWatchingForTokenFiles()
 	tokens := h.taskTokens()
-	log := h.agentLog()
+	log := h.awaitWorkersWord(stateDir)
 	// A worker that bound to its task took a token, and the harness kept it.
 	// If it did not, this check has nothing to look for, and says so rather
 	// than passing.
-	bound, unbound := 0, 0
+	started, bound, unbound := 0, 0, 0
 	var places drivertest.Places
 	for _, e := range log {
 		places.Env = append(places.Env, e.Env...)
 		places.Args = append(places.Args, e.Args...)
 		switch {
+		case e.Step == "start":
+			started++
 		case e.Step == "bound":
 			bound++
 		case strings.HasPrefix(e.Step, "bind-failed:"):
@@ -692,7 +698,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	// whoever its worker was — a fake one, or a real agent through the
 	// bridge, which leaves no agent log at all.
 	require.Len(t, tokens, h.tasksLaunched(stateDir), "every task the connector launched left its token for this check")
-	require.Equal(t, h.workersStarted(), bound+unbound,
+	require.Equal(t, started, bound+unbound,
 		"every worker that started either took its task's token or said why it could not")
 	for _, token := range h.takenTokens() {
 		require.Contains(t, tokens, token, "a worker took a token the connector did not mint for its task")
@@ -702,7 +708,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 		// Nothing to check is a fact about the run, not a pass: a run with
 		// no worker (a kill before the spawn, a start that ran nothing) is
 		// the only way here.
-		require.Equal(t, h.workersStarted(), unbound,
+		require.Equal(t, started, unbound,
 			"a worker that started either took a token or said why it could not")
 		return
 	}
@@ -727,7 +733,8 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 		require.Positive(t, read, "the scan read files; a scan that read nothing has cleared nothing")
 		files += read
 	}
-	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on", len(tokens), files, watched)
+	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on; %d workers started, %d bound, %d said why not",
+		len(tokens), files, watched, started, bound, unbound)
 }
 
 // taskTokens is every token the connector minted for a task, as its launch
@@ -772,16 +779,91 @@ func (h *harness) tasksLaunched(dir string) int {
 	return n
 }
 
-// workersStarted counts the worker processes that reached their agent, which
-// is every worker that could have been handed a token.
-func (h *harness) workersStarted() int {
-	n := 0
-	for _, e := range h.agentLog() {
-		if e.Step == "start" {
-			n++
+// awaitWorkersWord waits for every worker of the run to have said what became
+// of its token — "bound", or "bind-failed:" and why — and returns the agent
+// log once it has. The word is the worker's, written from its own process at
+// its own pace, and it is owed by the time the worker exits: not by the time
+// the connector does, which is when the credential check runs.
+//
+// The two are not one moment. A crash row kills the connector at its
+// "running" line, written once the socket is armed and the attempt recorded,
+// while the handoff itself is still in flight on the socket's own goroutine.
+// The acp row's worker began the bind that dials it as the last act of its
+// handshake, since the socket cannot be armed before NewSession returns; it
+// learns of the death as a reset on the socket and says so a fraction of a
+// millisecond after the parent has seen the connector exit. Read at the exit,
+// the log counted that worker as one that said nothing (card 10317728733).
+// The spawn rows' workers have not even reached their agent by then — the
+// connector dies a millisecond after starting them — so read at the exit, the
+// check there ran over nobody.
+//
+// The workers owed a word are the processes the ledger recorded for the run's
+// attempts and the ones that reached their agent; a real agent row leaves no
+// agent log and is owed none. A worker that is gone without a word is still
+// one that started and said nothing, and the caller fails on it: the wait
+// ends at its exit, not at a deadline.
+func (h *harness) awaitWorkersWord(stateDir string) []agentLogEntry {
+	h.t.Helper()
+	var recorded []int
+	if !h.driver.Real {
+		recorded = h.recordedWorkerPIDs(stateDir)
+	}
+	var log []agentLogEntry
+	_ = waitFor(context.Background(), func() (bool, error) {
+		log = h.agentLog()
+		for _, pid := range workersOwingAWord(log, recorded) {
+			if !processGone(context.Background(), pid) {
+				return false, nil
+			}
+		}
+		// Whoever still owes a word is gone, and a process that is gone has
+		// written all it ever will: this reading is the one to count.
+		log = h.agentLog()
+		return true, nil
+	})
+	return log
+}
+
+// workersOwingAWord is every worker, recorded by the ledger or started as far
+// as its agent, whose word is not in log.
+func workersOwingAWord(log []agentLogEntry, recorded []int) []int {
+	said := map[int]bool{}
+	for _, e := range log {
+		if e.Step == "bound" || strings.HasPrefix(e.Step, "bind-failed:") {
+			said[e.PID] = true
 		}
 	}
-	return n
+	var owing []int
+	seen := map[int]bool{}
+	owe := func(pid int) {
+		if pid > 0 && !said[pid] && !seen[pid] {
+			seen[pid] = true
+			owing = append(owing, pid)
+		}
+	}
+	for _, pid := range recorded {
+		owe(pid)
+	}
+	for _, e := range log {
+		if e.Step == "start" {
+			owe(e.PID)
+		}
+	}
+	return owing
+}
+
+// recordedWorkerPIDs is every worker process the ledger in dir recorded for
+// an attempt, read as tasksLaunched reads the ledger: as it is, or not at all.
+func (h *harness) recordedWorkerPIDs(dir string) []int {
+	h.t.Helper()
+	ctx := context.Background()
+	l, err := OpenLedgerReadOnly(ctx, filepath.Join(dir, LedgerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	require.NoError(h.t, err)
+	defer func() { _ = l.Close() }()
+	return recordedWorkers(h.t, l)
 }
 
 // scanForSecret reads every file under dirs, in a process of its own, and
