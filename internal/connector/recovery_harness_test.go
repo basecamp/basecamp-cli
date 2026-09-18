@@ -846,21 +846,38 @@ func (h *harness) awaitWorkersWord(stateDir string) []agentLogEntry {
 	return log
 }
 
+// workerIdentity is a worker as the log and the ledger both name it: its pid
+// and the kernel's start time for it, which is what tells it from a later
+// process the kernel gave the same pid. Both write the same instant — the
+// ledger from the process the driver started, the fake from its own — so
+// one worker's entries match each other and nobody else's.
+type workerIdentity struct {
+	pid     int
+	started int64
+}
+
+func identityKey(p driver.Process) workerIdentity {
+	return workerIdentity{pid: p.PID, started: p.StartedAt.UnixNano()}
+}
+
 // workersOwingAWord is every worker, recorded by the ledger or started as far
 // as its agent, whose word is not in log — by its identity, so it can be
-// waited on and told from a later process with its pid.
+// waited on and told from a later process with its pid, and so a word an
+// earlier worker said cannot discharge a later one the kernel named alike:
+// the log and the ledger both accumulate across a harness's connector runs.
 func workersOwingAWord(log []agentLogEntry, recorded []driver.Process) []driver.Process {
-	said := map[int]bool{}
+	said := map[workerIdentity]bool{}
 	for _, e := range log {
 		if e.Step == "bound" || strings.HasPrefix(e.Step, "bind-failed:") {
-			said[e.PID] = true
+			said[identityKey(identityOf(e.PID, e.PGID, e.StartedAt))] = true
 		}
 	}
 	var owing []driver.Process
-	seen := map[int]bool{}
+	seen := map[workerIdentity]bool{}
 	owe := func(p driver.Process) {
-		if p.PID > 0 && !said[p.PID] && !seen[p.PID] {
-			seen[p.PID] = true
+		key := identityKey(p)
+		if p.PID > 0 && !said[key] && !seen[key] {
+			seen[key] = true
 			owing = append(owing, p)
 		}
 	}

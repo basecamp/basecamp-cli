@@ -121,10 +121,19 @@ func fakeACPAdapter(w *fakeWorker) int {
 	// A server that was starting when the connector died still says what
 	// became of its token: the parent checks that every worker either took
 	// one or said why it could not, and a process that exited with the bind
-	// still in flight would answer neither.
+	// still in flight would answer neither. Nor would one whose handshake
+	// never reached the read-back — a connector that died first, a session
+	// it ended on the way — so that exit says so too: no server started, no
+	// token was asked for. The spawn fakes bind before they speak and so
+	// always say a word; this one speaks last, and must not leave without.
+	said := false
 	defer func() {
 		if starting {
 			<-bound
+			return
+		}
+		if !said {
+			w.log(0, 0, "bind-failed: the session ended before its MCP servers started, so no token was asked for")
 		}
 	}()
 	awaitBind := func() error {
@@ -205,6 +214,7 @@ func fakeACPAdapter(w *fakeWorker) int {
 				reported = "bypassPermissions"
 				w.log(0, 0, "bad-mode")
 				w.log(0, 0, "bind-failed: the session ended in its handshake, before its MCP servers started")
+				said = true
 			}
 			notify("session/update", map[string]any{"sessionId": sessionID,
 				"update": map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": reported}})
