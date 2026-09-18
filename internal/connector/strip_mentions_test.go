@@ -8,13 +8,18 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 )
 
-// StripMentionsOf is held to the reader admission decides with,
-// basecamp.MentionedPersonIDs, over markup built to make two parsers
-// disagree. Three properties, for every input:
+// StripMentionsOf is held to agreement with the reader admission decides the
+// trigger with, basecamp.MentionedPersonIDs, over markup built to make two
+// parsers disagree. Four properties, for every input:
 //
 //  1. no mention of the agent survives;
 //  2. every other person the reader found is still found, in order;
-//  3. text with no mention of the agent comes back unchanged.
+//  3. text with no mention of the agent comes back unchanged;
+//  4. every removed span is a mention element and nothing more — it closes
+//     nothing it did not open, so a removal takes a mention and never the
+//     instruction around it. This is checked against the span's own text
+//     rather than against what the function meant to remove, so a span that
+//     is too long cannot hide itself.
 //
 // The pieces are combined in threes, so each hostile form meets each other in
 // both orders and inside or around an element.
@@ -85,6 +90,12 @@ func checkStrip(t *testing.T, input string) {
 		}
 	}
 
+	_, removed := stripOnce(input, adapterAgentID)
+	for _, span := range removed {
+		if element := input[span[0]:span[1]]; !isOneMentionElement(element) {
+			t.Fatalf("a removal took more than one mention element: %q\n in: %q\nout: %q", element, input, got)
+		}
+	}
 	if slices.Contains(after, adapterAgentID) {
 		t.Fatalf("the agent's mention survived\n in: %q\nout: %q", input, got)
 	}
@@ -155,4 +166,49 @@ func restoreSpan(input string, removed [][2]int, keep [2]int) string {
 	}
 	b.WriteString(input[pos:])
 	return b.String()
+}
+
+// isOneMentionElement reports a removed span that is one bc-attachment
+// element: it opens with that tag and ends where that element ends — at the
+// start tag itself when the tag closes itself, and otherwise where every end
+// tag inside it either closes something the span opened or is the element's
+// own closing tag. A span that
+// ran past its element and swallowed a "</p>" from the text around it fails
+// here.
+func isOneMentionElement(element string) bool {
+	first, ok := nextMarkup(element, 0)
+	if !ok || first.isEnd || !strings.EqualFold(first.name, "bc-attachment") || first.start != 0 {
+		return false
+	}
+	if strings.HasSuffix(element[first.start:first.end], "/>") {
+		// A tag that closes itself is the whole element. A span that ran on
+		// from one to some later closing tag swallowed the text between them,
+		// so it is not one element however that text ends.
+		return first.end == len(element)
+	}
+	var open []string
+	for at := first.end; at < len(element); {
+		t, ok := nextMarkup(element, at)
+		if !ok {
+			break
+		}
+		switch {
+		case t.isEnd && strings.EqualFold(t.name, "bc-attachment"):
+			// Its own closing tag ends it, whatever it left open inside.
+			return t.end == len(element)
+		case t.isEnd:
+			depth := len(open) - 1
+			for depth >= 0 && !strings.EqualFold(open[depth], t.name) {
+				depth--
+			}
+			if depth < 0 {
+				return false // it closed something it did not open
+			}
+			open = open[:depth]
+		case !isVoidElement(t.name):
+			open = append(open, t.name)
+		}
+		at = t.end
+	}
+	return true // the start tag stands alone
 }

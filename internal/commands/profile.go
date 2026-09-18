@@ -553,18 +553,135 @@ func globalProfileEntry(configData map[string]any, name string) map[string]any {
 	return entry
 }
 
-// globalProfileIsUnbound reports whether the global config file defines the
-// profile without an account — the one shape bindProfileAccount can act on.
-// Config layers merge per profile name, so the effective profile being
-// accountless says nothing about which file it came from; the global entry
-// itself is the evidence.
-func globalProfileIsUnbound(name string) (bool, error) {
-	configData, _, err := loadGlobalConfigFile()
-	if err != nil {
-		return false, err
+// globalBindingBlocker says why binding an accountless profile would not
+// take effect, and what to change instead; "" when it would.
+//
+// Every command that binds a profile's account (`auth agent connect`, the
+// headless logins) does it one way: bindProfileAccount writes account_id
+// into the profile's entry in the global config file. So this is the one
+// question they ask before binding, and the one the hints that send an
+// operator to them ask first.
+//
+// The write takes effect exactly when the global file is one of the layers
+// the profile is made of (config.mergeProfile has the rule): the profile has
+// no account, so no closer layer sets one, and the global file's shows
+// through. When the global file is not one of them, either a closer entry
+// for another Basecamp replaced its entry whole, or it has no entry, and the
+// account has to go into a file that is.
+func globalBindingBlocker(cfg *config.Config, name string) string {
+	if globalConfigUnusable() {
+		// A global config the loader could not read or parse was skipped,
+		// so the layers say nothing about which file defines the profile —
+		// the one that does may be the file that was skipped. Say nothing
+		// about files: the commands that bind report the unusable file
+		// itself, in full, before they write.
+		return ""
 	}
-	entry := globalProfileEntry(configData, name)
-	return entry != nil && getStringOrNumber(entry, "account_id") == "", nil
+	origin := cfg.ProfileOrigins[name]
+	if origin == nil || len(origin.Layers) == 0 {
+		// Only a config file defines a profile; an entry with no origin was
+		// made in memory, and the global file is where it belongs.
+		return "It comes from no config file, so add it, with account_id, to " +
+			richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json"))
+	}
+	if origin.Includes(config.SourceGlobal) {
+		return ""
+	}
+	closest := origin.Closest()
+	if hidden := origin.ReplacedLayer(config.SourceGlobal); hidden != nil {
+		// The entry that replaced it did so for being on another Basecamp,
+		// or for naming another account there.
+		why := fmt.Sprintf("is for %s, not %s", richtext.SanitizeSingleLine(hidden.By.BaseURL), richtext.SanitizeSingleLine(hidden.BaseURL))
+		if config.NormalizeBaseURL(hidden.By.BaseURL) == config.NormalizeBaseURL(hidden.BaseURL) {
+			why = "names another account"
+		}
+		return fmt.Sprintf("Its entry in %s %s, so it replaces the global config's entry in %s and any account bound there. Add account_id to the profile's entry in %s",
+			richtext.SanitizeSingleLine(hidden.By.Path), why, richtext.SanitizeSingleLine(hidden.Path), richtext.SanitizeSingleLine(closest.Path))
+	}
+	// The global config has no entry for this profile, so there is nothing
+	// to bind. An entry added there is refined by the ones that do define
+	// it — and the account in it holds — but only while nothing closer
+	// than the global config replaces it. Where something does, the global
+	// config is no remedy at all: a new entry would be replaced the same
+	// way. A replaced entry the system config made is no such evidence: it
+	// is farther than the global config, and a new entry there replaces it
+	// rather than the other way round.
+	if replaced := firstReplacedAfterGlobal(origin); replaced != nil {
+		return fmt.Sprintf("Its entry comes from %s, not the global config, and the entry in %s, for %s, replaces everything farther — an entry added to the global config among them. Add account_id to the profile's entry in %s",
+			richtext.SanitizeSingleLine(closest.Path), richtext.SanitizeSingleLine(replaced.By.Path),
+			richtext.SanitizeSingleLine(replaced.By.BaseURL), richtext.SanitizeSingleLine(closest.Path))
+	}
+	// Naming the global config first: a repo config is shared, and an
+	// operator's account does not belong in it (nor can they always
+	// write /etc).
+	return fmt.Sprintf("Its entry comes from %s, not the global config, so no command can bind it. Give it an entry in %s with base_url %s and an account_id — or add account_id to the entry in %s",
+		richtext.SanitizeSingleLine(closest.Path),
+		richtext.SanitizeSingleLine(filepath.Join(config.GlobalConfigDir(), "config.json")),
+		richtext.SanitizeSingleLine(closest.BaseURL),
+		richtext.SanitizeSingleLine(closest.Path))
+}
+
+// firstReplacedAfterGlobal is the farthest replaced entry a new global
+// entry would be replaced along with: one a repo or local config made,
+// which is closer than the global config. A system entry is farther, so a
+// replacement of one says nothing about an entry added to the global
+// config. Nil when there is none.
+func firstReplacedAfterGlobal(origin *config.ProfileOrigin) *config.ReplacedProfileLayer {
+	for i := range origin.Replaced {
+		if origin.Replaced[i].Source == config.SourceRepo || origin.Replaced[i].Source == config.SourceLocal {
+			return &origin.Replaced[i]
+		}
+	}
+	return nil
+}
+
+// globalConfigUnusable reports whether the global config file exists but
+// cannot be read, cannot be parsed, or holds a "profiles" value that is
+// present and not an object (null included). The loader skips such a file's profiles, so what it recorded
+// about where a profile comes from is not evidence — the entry that defines
+// it may be in the file that was skipped — and every writer refuses the
+// file, which is what the operator has to hear instead.
+func globalConfigUnusable() bool {
+	path := filepath.Join(config.GlobalConfigDir(), "config.json")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: the global config path
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	var parsed map[string]any
+	if json.Unmarshal(data, &parsed) != nil || parsed == nil {
+		return true
+	}
+	profiles, present := parsed["profiles"]
+	if !present {
+		return false
+	}
+	// A present value of any other shape, null included, is what
+	// globalProfilesMap refuses to rewrite.
+	_, isObject := profiles.(map[string]any)
+	return !isObject
+}
+
+// boundIn names the config file a profile's account came from, as " (bound
+// in <path>)" for a message about that account, and is empty for an entry
+// this invocation made rather than a file.
+func boundIn(cfg *config.Config, name string) string {
+	if path := profileFieldFile(cfg, name, "account_id"); path != "" {
+		return " (bound in " + richtext.SanitizeSingleLine(path) + ")"
+	}
+	return ""
+}
+
+// profileFieldFile is the path of the config file that set a field on a
+// profile, "" when the profile did not come from files.
+func profileFieldFile(cfg *config.Config, name, field string) string {
+	origin := cfg.ProfileOrigins[name]
+	if origin == nil {
+		return ""
+	}
+	return origin.Fields[field]
 }
 
 // bindProfileAccount sets the account on an existing profile entry in the
@@ -583,19 +700,6 @@ func bindProfileAccount(name, account string) error {
 	}
 	entry["account_id"] = account
 	return atomicWriteJSON(configPath, configData)
-}
-
-// getStringOrNumber reads a config value that may be stored as a string or
-// a JSON number, as config.loadFromFile accepts for IDs.
-func getStringOrNumber(m map[string]any, key string) string {
-	switch v := m[key].(type) {
-	case string:
-		return v
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return ""
-	}
 }
 
 // unregisterProfile removes a profile entry from the global config file,

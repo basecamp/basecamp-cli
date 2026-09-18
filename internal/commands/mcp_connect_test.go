@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package commands
 
@@ -148,9 +148,11 @@ func TestMCPCommandTakesTheTokenBeforeAuthenticating(t *testing.T) {
 	}
 }
 
-func TestMCPCommandRefusesReadOnlyBeforeTouchingTheToken(t *testing.T) {
+// A read-only server serves no connect domain, so the startup read skips it
+// entirely and the descriptor is left exactly as it was.
+func TestMCPCommandRefusesToServeConnectReadOnly(t *testing.T) {
 	app, dir, grant, _ := connectMCPApp(t, "999", "https://3.basecampapi.com")
-	fd := tokenPipe(t, grant.Token)
+	fd := tokenPipe(t, grant.Token+"\n")
 	dev, ino, _ := fdIdentity(t, fd)
 
 	err := executeMCPCommand(t, app, "--connect-state", dir, "--read-only", "--connect-token-fd", strconv.Itoa(fd))

@@ -184,6 +184,9 @@ jobs:
       - name: Test the skills sync
         run: make test-sync-skills
 
+      - name: Test the skill drift check
+        run: make test-skill-drift
+
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest

@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package commands
 
@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/sysfd"
 )
 
 // readTaskToken reads the task token from an inherited descriptor and closes
@@ -21,21 +22,26 @@ import (
 // exists at a path, in argv or in the environment; once read, the descriptor
 // is gone too, and nothing this process starts can inherit it.
 //
-// Descriptors 0 to 2 are refused: stdin and stdout are the MCP wire and stderr
-// is the log. Only a pipe or a socket is taken, and anything else is left
-// exactly as it was — not read, not closed: a regular file would be the token
-// at a path, and a wrong number could name a descriptor this process already
-// uses.
+// This file is built for Linux alone, and shares that constraint with
+// internal/cli's inherited_fds_linux.go on purpose: a credential may arrive
+// on an inherited descriptor only where startup has already sealed every
+// inherited descriptor against the children the pre-command hooks start.
+// Everywhere else mcp_token_other.go refuses the handover, and
+// TestTheTokenIsOnlyReadWhereItIsSealed holds the two constraints together.
+//
+// Descriptors below sysfd.FirstNonStandard are refused: stdin and stdout are
+// the MCP wire, and stderr is the log. Only a pipe or a socket is taken, and
+// anything else is left exactly as it was — not read, not closed: a regular
+// file would be the token at a path, and a wrong number could name a
+// descriptor this process already uses.
 //
 // The read ends at the first newline or at end of file, and is bounded in
 // size and in time, so a write end left open somewhere cannot hang startup. A
 // sender writes "token\n", or closes its end after the token.
-func readTaskToken(fd int) (string, error) {
-	switch {
-	case fd < 0:
-		return "", output.ErrUsage("--connect-state needs the task token on an inherited descriptor: pass --connect-token-fd")
-	case fd < 3:
-		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be 3 or above", fd))
+func readTaskToken(descriptor sysfd.Descriptor) (string, error) {
+	fd := descriptor.Int()
+	if descriptor < sysfd.FirstNonStandard {
+		return "", output.ErrUsage(fmt.Sprintf("--connect-token-fd %d is standard I/O; the token descriptor must be %s or above", fd, sysfd.FirstNonStandard))
 	}
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
@@ -44,14 +50,18 @@ func readTaskToken(fd int) (string, error) {
 	if kind := st.Mode & unix.S_IFMT; kind != unix.S_IFIFO && kind != unix.S_IFSOCK {
 		return "", output.ErrUsage(fmt.Sprintf("descriptor %d is not a pipe or a socket; the task token is handed over on one, never from a file", fd))
 	}
-	// Non-blocking before it is wrapped, so the runtime polls it and a read
-	// deadline applies. The flag is on the open file description, so anything
-	// else sharing it would see it too; the connector's bridge execs this
-	// server, so nothing does.
+	// Non-blocking before it is wrapped, which is the order os.NewFile needs
+	// to hand back a pollable file, and a read deadline only applies to one.
+	// The flag is on the open file description, so anything else sharing it
+	// would see it too; the connector's bridge execs this server, so nothing
+	// does. From the moment the mode is changed the descriptor is ours, so
+	// this path closes it rather than leaving it open through the hooks that
+	// follow, where a child could inherit it.
 	if err := unix.SetNonblock(fd, true); err != nil {
+		_ = unix.Close(fd)
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))
 	}
-	file := os.NewFile(uintptr(fd), "connect-token")
+	file := os.NewFile(descriptor.Uintptr(), "connect-token")
 	defer file.Close()
 	if err := file.SetReadDeadline(time.Now().Add(taskTokenReadTimeout)); err != nil {
 		return "", output.ErrUsage(fmt.Sprintf("could not read the task token from descriptor %d: %v", fd, err))
@@ -59,7 +69,7 @@ func readTaskToken(fd int) (string, error) {
 
 	var data []byte
 	buf := make([]byte, 256)
-	for len(data) <= maxTaskTokenBytes && !bytes.Contains(data, []byte("\n")) {
+	for len(data) <= maxTaskTokenBytes && bytes.IndexByte(data, '\n') < 0 {
 		n, err := file.Read(buf)
 		data = append(data, buf[:n]...)
 		if err == nil {
