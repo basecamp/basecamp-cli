@@ -456,6 +456,9 @@ func (w *Worktrees) resumeWaits(ctx context.Context) {
 // dies with the process anyway, while the reverse would leave a row with
 // nothing keeping it.
 func (w *Worktrees) ForgetWaitsExcept(ctx context.Context, keep []string) (int, error) {
+	if w.planOnly {
+		return 0, ErrPlanOnly
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	dropped, err := w.ledger.PruneRouteWaits(ctx, keep)

@@ -500,3 +500,50 @@ func TestARestartKeepsAnExpiredWaitsHistoryButNotItsDeadline(t *testing.T) {
 		"the tenth failure waits the capped wait, not the first failure's minute")
 	assert.Equal(t, []string{route}, restarted.RoutesWaiting())
 }
+
+// Doctor plans a route to learn what a dispatch would learn, and planning
+// runs the same reads Prepare runs. It must not write the diagnostic it
+// reports: a read-only surface that manufactured a wait would have status
+// naming a route nothing is waiting on, and would do it for the routes an
+// operator asked doctor about rather than the ones a task failed on.
+func TestPlanningARouteRecordsNoWait(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+
+	// A route that plans, and one that cannot: both through Plan, which is
+	// what doctor calls.
+	_, err := h.wt.Plan(ctx, filepath.Join(h.repo, "app"), "1-aaaaaa")
+	require.NoError(t, err)
+
+	outside := filepath.Join(filepath.Dir(h.repo), "no-repository-here")
+	require.NoError(t, os.MkdirAll(outside, 0o700))
+	_, err = h.wt.Plan(ctx, outside, "2-bbbbbb")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+
+	gone := filepath.Join(filepath.Dir(h.repo), "not-mounted")
+	_, err = h.wt.Plan(ctx, gone, "3-cccccc")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrRouteUnusable, "the kind of failure that does arm a backoff from Prepare")
+
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, waits, "planning decides; only a dispatch that tried and failed records a wait")
+	assert.Empty(t, h.wt.RoutesWaiting(), "and nothing is held on the strength of a plan")
+}
+
+// The same through the planner doctor actually builds, which has no ledger at
+// all: reaching for one is the nil dereference PlanWorktrees exists to rule
+// out, and a wait recorded from a plan would be reaching for one.
+func TestAPlannerPlansWithoutALedgerToRecordAWaitIn(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+
+	_, err = planner.Plan(ctx, filepath.Join(h.repo, "app"), "4-dddddd")
+	require.NoError(t, err)
+
+	gone := filepath.Join(filepath.Dir(h.repo), "not-mounted")
+	_, err = planner.Plan(ctx, gone, "5-eeeeee")
+	require.Error(t, err, "and a plan that fails the way a backoff-arming Prepare fails still writes nothing")
+}

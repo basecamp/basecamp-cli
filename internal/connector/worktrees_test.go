@@ -2144,6 +2144,8 @@ func TestAPlannerRefusesEverythingItCannotAnswer(t *testing.T) {
 	assert.ErrorIs(t, planner.Recover(ctx), ErrPlanOnly)
 	_, err = planner.Prune(ctx, nil)
 	assert.ErrorIs(t, err, ErrPlanOnly)
+	_, err = planner.ForgetWaitsExcept(ctx, nil)
+	assert.ErrorIs(t, err, ErrPlanOnly, "a planner has no ledger to drop a route's wait from")
 
 	// With worktrees off, a task works in its route and there is nothing to
 	// plan: a planner that answered anyway would answer for a dispatch that
