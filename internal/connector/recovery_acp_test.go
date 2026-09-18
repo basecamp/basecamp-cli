@@ -93,19 +93,13 @@ func fakeACPAdapter(w *fakeWorker) int {
 	// from the wire, so the adapter goes on answering while its server
 	// starts.
 	//
-	// It matters which side of the handshake that is. The connector arms the
-	// socket for the worker's process group only once Driver.NewSession has
-	// returned (Dispatcher.dispatch, TokenSocket.AllowGroup on
-	// session.Process()), and for this driver the whole handshake — the
-	// adapter's own MCP read-back turn included — runs inside NewSession. A
-	// connection that arrives before the socket is armed waits in the
-	// listener's backlog, which is what that backlog is for, so arriving
-	// early is fine; waiting for the token before answering is not. An
-	// adapter whose handshake cannot finish until its MCP servers have
-	// connected would wait on a socket the connector cannot arm until that
-	// handshake finishes, and both sides would sit there until the bridge's
-	// 30-second dial or the driver's 2-minute handshake ran out. Nothing in
-	// the connector prevents that; it is the adapters that do not do it.
+	// It matters which side of the handshake that is: a connection that
+	// arrives before the socket is armed waits in the listener's backlog,
+	// which is what that backlog is for, so arriving early is fine, while
+	// waiting for the token before answering deadlocks. This fake binds on
+	// the right side of it. The rule, why the connector does not arm the
+	// socket sooner, and what holds the pinned adapters to it are on the
+	// Adapter type in driver/acp.
 	starting := false
 	startBind := func() {
 		once.Do(func() {

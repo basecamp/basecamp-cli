@@ -18,6 +18,41 @@ import (
 // what it may take from the connector's environment, and which of its modes
 // is the asking mode for each connector permission mode. Mode ids are not
 // portable across adapters, so they are named here and nowhere else.
+//
+// # What an adapter must not do: wait for its MCP servers before it answers
+//
+// An adapter's whole handshake — initialize, session/new, session/set_mode
+// and the Readback turn — runs inside Driver.NewSession, and the connector
+// arms the task token's socket for the worker's process group only once
+// NewSession has returned (Dispatcher.dispatch, TokenSocket.AllowGroup on
+// session.Process()). The adapter starts the session's MCP servers during
+// session/new, so the connector's token bridge connects while the handshake
+// is still running. That is fine, and is meant to be: an early connection
+// waits in the listener's backlog, which is what a backlog is for.
+//
+// What is not fine is an adapter that will not FINISH its handshake until
+// those servers have connected. It would be waiting on a token the connector
+// cannot hand over until the handshake returns, and both sides would sit
+// there until the bridge's read deadline (30s) or the driver's handshake
+// timeout (2m) ran out. Every dispatch on that adapter would fail, slowly.
+// Nothing in the connector prevents it — only adapter behavior does, and
+// compatibility check 7 is what holds the pinned adapters to it, in the
+// dispatcher's own order.
+//
+// Arming the socket earlier — at the fork, rather than when NewSession
+// returns — would fix it, and is deliberately not done. The peer check
+// itself would be unchanged: it is UID plus membership of the process group
+// named, and the group is the same number at the fork as it is afterwards
+// (driver.StartWorker records PGID from the pid it just started). What
+// changes is what that number certifies. Today the connector arms for a
+// process it has already established is the adapter it meant to run, in the
+// mode it asked for: invariant 7 (initialize reports this package at this
+// version) and invariant 2 (the asking mode, set and read back) are both
+// inside the handshake. Arming at the fork would offer the socket to a
+// process group before either — to an unpinned binary on the adapter's path,
+// to a version that fails the pin, to a session about to be ended as unsafe
+// — and to everything that group holds. A stall that fails closed is worth
+// more than that.
 type Adapter struct {
 	// Name is the adapter's executable, as connect.json names it.
 	Name string

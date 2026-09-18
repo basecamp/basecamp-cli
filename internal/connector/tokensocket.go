@@ -57,6 +57,21 @@ import (
 //     unlinks, and nothing is handed over. The release point closes it too,
 //     so no handoff outlives its attempt.
 //
+// WHEN the socket is armed is part of the rule, not an accident of where the
+// call sits. AllowGroup is called once Driver.NewSession has returned, which
+// is once the driver has established that the group it names is the worker
+// it meant to start: for the acp driver, the pinned adapter at its pinned
+// version, in the asking mode it asked for, neither of which is known until
+// the handshake is over. Naming the group at the fork instead would not
+// change the peer check — same user, same group membership, and the group is
+// the same number either way — but it would change what that number
+// certifies, from a process the connector has vouched for to one it has not
+// yet looked at, and to everything that process has started. It costs
+// something: an adapter that will not finish its handshake until its MCP
+// servers have connected waits for a token this socket cannot hand it, and
+// both sides stall until a timeout. That is the better failure, and the
+// Adapter type in driver/acp is where an adapter author is told so.
+//
 // The bridge puts the token on a pipe and execs `basecamp mcp
 // --connect-token-fd`, so after the handoff the token is in no environment, no
 // argv and no file. A same-user process outside the worker's group that wins

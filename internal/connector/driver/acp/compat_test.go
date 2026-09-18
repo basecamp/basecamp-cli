@@ -566,10 +566,13 @@ func checkDecoyMCPServer(t *testing.T, e compatEnv) {
 // server is the connector's bridge (`basecamp connect worker-mcp`), the token
 // is served once on a socket in the attempt's private directory, and the
 // socket is told the worker's process group only once NewSession returns —
-// the order the dispatcher uses. The bridge must reach the socket from
-// wherever the adapter starts it, the handoff must be delivered, and the
-// token must not be in any environment, command line or file of the worker's
-// processes. No Basecamp account is involved: the bridge's profile is a dummy
+// the order the dispatcher uses. That order is the point of the check as
+// much as the carriage is: an adapter that would not finish its handshake
+// until its MCP servers had connected would deadlock here, and this is what
+// holds the pinned adapters to the rule the Adapter type states. The bridge
+// must reach the socket from wherever the adapter starts it, the handoff
+// must be delivered, and the token must not be in any environment, command
+// line or file of the worker's processes. No Basecamp account is involved: the bridge's profile is a dummy
 // in a private config, so the `basecamp mcp` it becomes cannot authenticate —
 // which is also how this checks that a session whose MCP server did not
 // connect is refused rather than run.
