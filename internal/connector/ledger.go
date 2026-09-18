@@ -796,6 +796,24 @@ BEGIN
   SELECT RAISE(ABORT, 'a worker acknowledges and completes what it pulled; anything else is the dispatcher settling a completed record');
 END;
 `,
+	// 6. The acknowledgement id settles with the acknowledgement.
+	//
+	// Migration 5 shipped a trigger that read only the row as it was, so a
+	// statement could write the id and leave the row exposed — an id in the
+	// receipt that no worker ever reported. A ledger already at version 5
+	// keeps that trigger, so replacing it is its own migration rather than an
+	// edit to one that has shipped.
+	`
+DROP TRIGGER task_events_acknowledgement_settles_once;
+
+CREATE TRIGGER task_events_acknowledgement_settles_once
+BEFORE UPDATE OF ack_id ON task_events
+WHEN NEW.ack_id IS NOT OLD.ack_id
+ AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed' OR NEW.delivery <> 'delivered')
+BEGIN
+  SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
+END;
+`,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
