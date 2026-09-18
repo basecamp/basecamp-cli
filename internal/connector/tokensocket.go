@@ -89,8 +89,23 @@ func socketDescriptor(fd uintptr) (int, bool) {
 // DefaultTokenWindow is how long a task token's socket waits for the worker's
 // MCP server once the worker exists. It covers an agent's start-up, not a
 // task's life, and it does not start until AllowGroup names the worker: a
-// launcher or a handshake that takes its time must not spend the window of
-// the worker it is still starting (card 23's review). The socket waits the
+// launcher that takes its time must not spend the window of the worker it has
+// not started yet (card 23's review).
+//
+// What the window covers moved with the arming. The connector used to name
+// the worker only once Driver.NewSession had returned, so a driver's own
+// handshake ran outside the window; it now names it as soon as the worker's
+// process exists (driver invariant 7), because a handshake that waits on its
+// MCP servers cannot otherwise be given the token those servers dial for. So
+// the handshake is inside the window now, and the window means what this
+// sentence has always said it means: once the WORKER exists, not once its
+// session is ready. That is no smaller a window for the case it is for — an
+// agent starts its MCP servers during its handshake, so their connection is
+// already waiting in the listener's backlog and is accepted the moment the
+// socket is armed — and it is deliberately not stretched to cover both: the
+// socket is armed for the worker's whole process group, which is the agent's
+// own tree, so a longer armed window is a longer window in which the agent's
+// tools could ask for the token instead of its MCP server. The socket waits the
 // same window for the worker to be named at all, so nothing waits forever.
 const DefaultTokenWindow = 2 * time.Minute
 

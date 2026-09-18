@@ -49,6 +49,15 @@
 //     counts; they never carry the agent's text or a tool's input, so a sink
 //     that logs an update cannot log content. What a sink does log from an
 //     agent stream goes through the redaction rule (redact.go).
+//  7. A worker is announced as soon as it exists, not when its session is
+//     ready. SessionConfig.Started is called with the worker's process the
+//     moment the fork returns, before any handshake the driver runs — which
+//     is what lets the connector arm the task token's socket for a worker
+//     whose handshake cannot finish until its MCP servers have connected.
+//     StartWorker calls it, so every driver that starts a process holds this
+//     by construction; a driver whose session runs somewhere the connector
+//     cannot signal announces nothing, and the connector arms on what
+//     Session.Process reports instead.
 //
 // # Refusals: where one is recorded, and when it counts as settled
 //
@@ -115,7 +124,9 @@ type Driver interface {
 	Name() string
 	// Capabilities says what the driver supports beyond NewSession and Prompt.
 	Capabilities() Capabilities
-	// NewSession starts a worker and opens a session in cfg.Cwd.
+	// NewSession starts a worker and opens a session in cfg.Cwd. The worker
+	// is announced through cfg.Started as soon as its process exists, before
+	// the session is opened on top of it (invariant 7).
 	//
 	// An error that wraps ErrNotStarted means no process ever existed, and
 	// the connector may retry the start once. Any other error from a start
@@ -207,6 +218,17 @@ type SessionConfig struct {
 	// Refusals records every refusal at the moment it is made or observed.
 	// Nil records nothing; the dispatcher always sets it.
 	Refusals RefusalRecorder
+	// Started is called once with the worker's process as soon as that
+	// process exists — the fork has returned and the group is the worker's —
+	// and before whatever handshake the driver runs on top of it (invariant
+	// 7). It is how the connector learns the process group while NewSession
+	// is still running, which is what arms the task token's socket in time
+	// for an agent that starts its MCP servers during its own handshake:
+	// arming only once NewSession returned deadlocks such an agent against a
+	// token the connector cannot hand over until the handshake it is blocking
+	// has finished. It must not block: a driver calls it on the goroutine
+	// that is starting the session. Nil announces nothing.
+	Started func(Process)
 	// Redaction is what the driver takes out of every error it returns and
 	// every text an update or a stderr tail carries (redact.go). The driver
 	// adds the environment it builds, its MCP servers' environments and

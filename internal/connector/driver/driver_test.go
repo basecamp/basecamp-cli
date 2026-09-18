@@ -34,7 +34,7 @@ func TestBuildEnvTakesExactNamesOnly(t *testing.T) {
 func TestStartWorkerNeverInheritsTheConnectorsEnvironment(t *testing.T) {
 	t.Setenv("CONNECTOR_CANARY_NOT_REAL", "leaked")
 	out := filepath.Join(t.TempDir(), "env.txt")
-	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+	w, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}},
 		Command{Path: "/bin/sh", Args: []string{"-c", "env > " + out}, Env: []string{"ONLY=this"}})
 	require.NoError(t, err)
 	<-w.Done()
@@ -44,7 +44,7 @@ func TestStartWorkerNeverInheritsTheConnectorsEnvironment(t *testing.T) {
 	assert.Contains(t, string(data), "ONLY=this")
 
 	// A nil Env is not "inherit".
-	w, err = StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+	w, err = StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}},
 		Command{Path: "/bin/sh", Args: []string{"-c", "env > " + out}})
 	require.NoError(t, err)
 	<-w.Done()
@@ -61,11 +61,11 @@ func (refusingLauncher) Launch(context.Context, LaunchRequest) (Launched, error)
 func (refusingLauncher) Receipts(context.Context, string) ([]Receipt, error) { return nil, nil }
 
 func TestAStartThatRanNothingIsErrNotStarted(t *testing.T) {
-	_, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/nonexistent/claude-not-here"})
+	_, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}}, Command{Path: "/nonexistent/claude-not-here"})
 	assert.ErrorIs(t, err, ErrNotStarted)
-	_, err = StartWorker(context.Background(), refusingLauncher{}, Scope{WorkDir: t.TempDir()}, Command{Path: "/bin/true"})
+	_, err = StartWorker(context.Background(), SessionConfig{Launcher: refusingLauncher{}, Scope: Scope{WorkDir: t.TempDir()}}, Command{Path: "/bin/true"})
 	assert.ErrorIs(t, err, ErrNotStarted)
-	_, err = StartWorker(context.Background(), nil, Scope{}, Command{Path: "/bin/true"})
+	_, err = StartWorker(context.Background(), SessionConfig{}, Command{Path: "/bin/true"})
 	assert.ErrorIs(t, err, ErrNotStarted, "the direct launcher needs the record's directory")
 }
 
@@ -76,7 +76,7 @@ func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 func startWithChild(t *testing.T) (*Worker, int) {
 	t.Helper()
 	pidFile := filepath.Join(t.TempDir(), "child")
-	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+	w, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}},
 		Command{Path: "/bin/sh", Args: []string{"-c", "sleep 300 & echo $! > " + pidFile + "; wait"}, Env: []string{"PATH=/bin:/usr/bin"}})
 	require.NoError(t, err)
 	var child int
@@ -128,7 +128,7 @@ func TestTerminateReturnsWhenADescendantLeftTheGroupHoldingTheOutput(t *testing.
 	}
 	pidFile := filepath.Join(t.TempDir(), "escaped")
 	script := "import os,sys,time\nif os.fork()==0:\n    os.setsid()\n    open(sys.argv[1],'w').write(str(os.getpid()))\n    time.sleep(300)\nelse:\n    time.sleep(300)\n"
-	w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()},
+	w, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}},
 		Command{Path: python, Args: []string{"-c", script, pidFile}, Env: []string{"PATH=/bin:/usr/bin"}})
 	require.NoError(t, err)
 	var escaped int
@@ -227,7 +227,7 @@ func openDescriptors(t *testing.T) int {
 func TestWorkersDoNotLeakDescriptors(t *testing.T) {
 	before := openDescriptors(t)
 	for range 50 {
-		_, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/nonexistent/claude-not-here"})
+		_, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}}, Command{Path: "/nonexistent/claude-not-here"})
 		require.ErrorIs(t, err, ErrNotStarted)
 	}
 	// At most: an earlier test's worker may release its pipes meanwhile, but
@@ -235,7 +235,7 @@ func TestWorkersDoNotLeakDescriptors(t *testing.T) {
 	assert.LessOrEqual(t, openDescriptors(t), before, "fifty failed starts leave no descriptor open")
 
 	for range 5 {
-		w, err := StartWorker(context.Background(), nil, Scope{WorkDir: t.TempDir()}, Command{Path: "/bin/true", Env: []string{}})
+		w, err := StartWorker(context.Background(), SessionConfig{Scope: Scope{WorkDir: t.TempDir()}}, Command{Path: "/bin/true", Env: []string{}})
 		require.NoError(t, err)
 		w.Terminate(time.Second)
 	}

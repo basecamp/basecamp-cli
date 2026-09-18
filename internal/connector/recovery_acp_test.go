@@ -93,19 +93,21 @@ func fakeACPAdapter(w *fakeWorker) int {
 	// from the wire, so the adapter goes on answering while its server
 	// starts.
 	//
-	// It matters which side of the handshake that is. The connector arms the
-	// socket for the worker's process group only once Driver.NewSession has
-	// returned (Dispatcher.dispatch, TokenSocket.AllowGroup on
-	// session.Process()), and for this driver the whole handshake — the
-	// adapter's own MCP read-back turn included — runs inside NewSession. A
-	// connection that arrives before the socket is armed waits in the
-	// listener's backlog, which is what that backlog is for, so arriving
-	// early is fine; waiting for the token before answering is not. An
-	// adapter whose handshake cannot finish until its MCP servers have
-	// connected would wait on a socket the connector cannot arm until that
-	// handshake finishes, and both sides would sit there until the bridge's
-	// 30-second dial or the driver's 2-minute handshake ran out. Nothing in
-	// the connector prevents that; it is the adapters that do not do it.
+	// It no longer matters which side of the handshake that is, and it used
+	// to. The connector armed the socket for the worker's process group only
+	// once Driver.NewSession had returned, and for this driver the whole
+	// handshake — the adapter's own MCP read-back turn included — runs inside
+	// NewSession, so an adapter that would not finish its handshake until its
+	// MCP servers had connected waited on a socket the connector could not
+	// arm until that handshake finished: both sides sat there until the
+	// bridge's 30-second dial or the driver's 2-minute handshake ran out. It
+	// is armed on the worker's process now, as soon as that process exists
+	// (driver invariant 7), so binding at session/new is served rather than
+	// deadlocked; the dispatcher's own tests hold that ordering
+	// (dispatcher_arming_test.go). This fake still binds where the real
+	// adapters do — as the handshake ends — because what this row is for is
+	// recovery, and the recovery it proves should be the one the adapters
+	// actually produce.
 	starting := false
 	startBind := func() {
 		once.Do(func() {
