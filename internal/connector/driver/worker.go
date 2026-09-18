@@ -21,9 +21,9 @@ const pipeWaitDelay = 2 * time.Second
 
 // # One owner, one release point
 //
-// This is the connector's rule for a task's process tree, its working
-// directory, and its ledger record. All three belong to one owner — the
-// attempt — and are released at one point, in this order:
+// This is the connector's rule for a task's process tree and its ledger
+// record. Both belong to one owner — the attempt — and are released at one
+// point, in this order:
 //
 //  1. Every worker starts as the leader of its own process group
 //     (StartWorker), so the tree it makes can be signaled as one.

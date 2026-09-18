@@ -75,6 +75,13 @@ type Policy struct {
 	Trust Trust `json:"trust"`
 	// Projects maps a bucket id to the entry for the project it serves.
 	Projects map[int64]Project `json:"projects,omitempty"`
+	// ProjectsUnknown says the served projects could not be read at all —
+	// connect.json is unreadable, or now names another agent. It is not the
+	// same as serving none, and the difference is what a person is told: a
+	// record whose answer turns on the list is held as a configuration
+	// error, rather than answered with a claim about the project that is
+	// false while the file is broken.
+	ProjectsUnknown bool `json:"-"`
 }
 
 // ParsePolicy decodes the admission part of connect.json. Unknown keys are

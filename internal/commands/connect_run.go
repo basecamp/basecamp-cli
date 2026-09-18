@@ -360,7 +360,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return output.ErrUsage(err.Error())
 		}
 		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Current,
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Dispatchable,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -558,7 +558,12 @@ type connectServed struct {
 	mu       sync.Mutex
 	loadedAt time.Time
 	projects map[int64]admission.Project
-	failing  bool
+	// err is why the last reload could not answer. It is kept apart from an
+	// empty map on purpose: "the operator serves no projects" and "nothing
+	// could read the file" are different answers, and only the first is
+	// safe to tell a person on a card (Copilot on #765).
+	err     error
+	failing bool
 }
 
 // connectServedTTL is how long a read of connect.json is reused.
@@ -568,18 +573,36 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 	return &connectServed{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
 }
 
-// Current returns a copy of the projects connect.json serves now.
-func (r *connectServed) Current() map[int64]admission.Project {
+// Current returns a copy of the projects connect.json serves now, or the
+// reason it could not be read. Dispatch treats an error as authorizing
+// nothing; admission holds the record as a configuration error rather than
+// answering that the project is not served.
+func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.projects == nil || r.now().Sub(r.loadedAt) >= connectServedTTL {
+	if r.projects == nil || r.err != nil || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
+	}
+	if r.err != nil {
+		return nil, r.err
 	}
 	out := make(map[int64]admission.Project, len(r.projects))
 	for k, v := range r.projects {
 		out[k] = v
 	}
-	return out
+	return out, nil
+}
+
+// Dispatchable is the served projects for dispatch, where a file that cannot
+// be read authorizes nothing: no launch, no join. Nothing is posted on that
+// path, so there is nothing false to say — the record simply waits, and the
+// error is already on the log.
+func (r *connectServed) Dispatchable() map[int64]admission.Project {
+	projects, err := r.Current()
+	if err != nil {
+		return map[int64]admission.Project{}
+	}
+	return projects
 }
 
 func (r *connectServed) reload() {
@@ -596,13 +619,14 @@ func (r *connectServed) reload() {
 			r.log.Error("connector: dispatching nothing until connect.json is usable again", "error", err)
 		}
 		r.failing = true
-		r.projects = map[int64]admission.Project{}
+		r.projects, r.err = nil, err
 		return
 	}
 	if r.failing {
 		r.log.Info("connector: connect.json is usable again")
 	}
 	r.failing = false
+	r.err = nil
 	r.projects = make(map[int64]admission.Project, len(file.Projects))
 	for bucket, project := range file.Projects {
 		r.projects[bucket] = project

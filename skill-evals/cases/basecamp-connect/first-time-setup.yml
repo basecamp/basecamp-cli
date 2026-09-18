@@ -36,7 +36,7 @@ expect_sequence:
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
   - 'connect setup .*--operator-profile[ =]''?jorge\b'
-  - 'connect setup .*--serve[ =]''?222(''|\s|$)'
+  - 'connect setup .*--serve[ =](''222''|222)(\s|$)'
 reject:
   - '--with-token'
   - '--with-client-credentials'

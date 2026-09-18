@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,20 +152,20 @@ func (w LiveWorker) Identity() driver.Process {
 //     Rerun asks the caller to run what blocked it.
 //   - succeeded, discarded, and anything live (seen, admitted, queued,
 //     dispatched) are refused with ErrDecisionRefused.
-func (l *Ledger) Redispatch(ctx context.Context, eventID int64, by string) (RedispatchResult, error) {
+func (l *Ledger) Redispatch(ctx context.Context, eventID int64, by string, served []int64) (RedispatchResult, error) {
 	if strings.TrimSpace(by) == "" {
 		return RedispatchResult{}, errors.New("connector: a redispatch records who authorized it")
 	}
 	var out RedispatchResult
 	err := retryBusy(func() error {
 		var err error
-		out, err = l.redispatch(ctx, eventID, by)
+		out, err = l.redispatch(ctx, eventID, by, served)
 		return err
 	})
 	return out, err
 }
 
-func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (RedispatchResult, error) {
+func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, served []int64) (RedispatchResult, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RedispatchResult{}, fmt.Errorf("connector: begin redispatch: %w", err)
@@ -183,7 +184,14 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 	refuse := func(why string) error {
 		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
-	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Served && record.Decision.ConversationKey != ""
+	// Decision.Served is what admission wrote when it decided the record, so
+	// it says the project was served then; served is what connect.json
+	// serves now. Both, because a redispatch that reported success and left
+	// the record for a dispatcher that will refuse to launch it is worse
+	// than one that refuses here (Copilot on #765).
+	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 &&
+		record.Decision.Served && slices.Contains(served, record.BucketID) &&
+		record.Decision.ConversationKey != ""
 	at := l.now()
 	now := stamp(at)
 	authorize := []assignment{{column: "authorized_at", value: now}, {column: "authorized_by", value: by}}

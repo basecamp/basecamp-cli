@@ -98,9 +98,10 @@ type Admitter struct {
 	policy Policy
 	matrix Matrix
 	reads  Reads
-	// served reads the projects connect.json serves now. Nil means the
-	// policy's own map, frozen at construction; WithServed makes it live.
-	served func() map[int64]Project
+	// served reads the projects connect.json serves now, and says so when it
+	// cannot. Nil means the policy's own map, frozen at construction;
+	// WithServed makes it live.
+	served func() (map[int64]Project, error)
 
 	attempts int
 	backoff  time.Duration
@@ -112,13 +113,26 @@ type Admitter struct {
 // was built with, with the served projects as they are at this moment when a
 // source for them was given. Trust and the agent's own id never move.
 //
+// It is read once per decision and passed down, never read again part-way
+// through: a verdict assembled from two snapshots could admit an event on a
+// watch_completions flag that has just been turned on and stamp it with the
+// class from the entry that flag replaced (Copilot on #765).
+//
+// A source that cannot answer marks the policy unknown rather than returning
+// an empty map, which would read as "the operator serves nothing".
+//
 // The map is the caller's to copy; it is read, never written to.
 func (a *Admitter) policyNow() Policy {
 	if a.served == nil {
 		return a.policy
 	}
 	p := a.policy
-	p.Projects = a.served()
+	projects, err := a.served()
+	if err != nil {
+		p.Projects, p.ProjectsUnknown = nil, true
+		return p
+	}
+	p.Projects = projects
 	return p
 }
 
@@ -179,7 +193,7 @@ func WithSleep(sleep func(context.Context, time.Duration) error) Option {
 // Only the projects are live. Trust is not: who may drive the agent is a
 // different kind of decision, and changing it under a running connector is
 // not something this option quietly does.
-func WithServed(served func() map[int64]Project) Option {
+func WithServed(served func() (map[int64]Project, error)) Option {
 	return func(a *Admitter) { a.served = served }
 }
 
@@ -244,6 +258,13 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	policy := a.policyNow()
 	gate := Gate(ev, policy, a.matrix)
 	if gate.Discarded() {
+		if policy.ProjectsUnknown && gate.Reason == ReasonNoRoute {
+			// The gate dropped it for want of a served project, and nothing
+			// could read which projects are served. Held rather than
+			// discarded: discarding would throw away work over a broken
+			// file, and the timer decides it again once the file is back.
+			return v.end(StateBlocked, ReasonConfigUnreadable), nil
+		}
 		return v.end(StateDiscarded, gate.Reason), nil
 	}
 
@@ -296,7 +317,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		v.Served, v.Class = true, project.Class
 	}
 
-	rule, state, reason, err := d.match(ctx, ev, gate.Rules, summary)
+	rule, state, reason, err := d.match(ctx, ev, policy, gate.Rules, summary)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -307,6 +328,13 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
 	v.address(summary)
 
+	if policy.ProjectsUnknown {
+		// Nothing could read which projects are served, so nothing here can
+		// say this one is not. Blocked as a configuration error, which posts
+		// no holding reply and comes round again on the timer, instead of
+		// telling the person on the card that their project is not served.
+		return v.end(StateBlocked, ReasonConfigUnreadable), nil
+	}
 	if !v.Served {
 		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination
@@ -328,7 +356,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 
 // match tries the gate's open rules in matrix order and returns the first
 // that admits, or the state and reason that end the event.
-func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
+func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
 	agent := a.policy.AgentID
 	mentioned := slices.Contains(summary.MentionedPersonIDs, agent)
 	endState, endReason := StateDiscarded, ReasonNotAddressed
@@ -403,7 +431,7 @@ func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			}
 
 		case TriggerCompleted:
-			project, served := a.policyNow().served(ev.BucketID)
+			project, served := policy.served(ev.BucketID)
 			if served && project.WatchCompletions {
 				return rule, "", "", nil
 			}

@@ -146,4 +146,12 @@ const (
 	// holdingReplyReason). A ledger in use carries rows and pending outbox
 	// intents written with this value, and a row is read as it was written.
 	ReasonNoRoute Reason = "no_route"
+	// ReasonConfigUnreadable: the record's answer turns on which projects
+	// connect.json serves, and connect.json could not be read. Not
+	// no_route: that says the operator has not served this project, which
+	// would be a false thing to say — and to post a holding reply about —
+	// when the truth is that nothing could read the file. Retried on a
+	// timer (NextBlockedRetry), so repairing the file decides these records
+	// without anyone redispatching them.
+	ReasonConfigUnreadable Reason = "config_unreadable"
 )

@@ -153,7 +153,8 @@ const (
 // rather than asking early.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled,
+		ReasonConfigUnreadable:
 	default:
 		return time.Time{}, false
 	}

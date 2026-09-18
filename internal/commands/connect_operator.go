@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,18 @@ type connectProfile struct {
 	app  *appctx.App
 	name string
 	file setup.File
+}
+
+// servedBucketsOf is the projects a connect.json serves, as the ledger's
+// decisions want them. Read from the file at the moment the command runs,
+// which is the only thing that can authorize an action taken now.
+func servedBucketsOf(file setup.File) []int64 {
+	served := make([]int64, 0, len(file.Projects))
+	for bucket := range file.Projects {
+		served = append(served, bucket)
+	}
+	slices.Sort(served)
+	return served
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -431,7 +444,10 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	res, err := ledger.Redispatch(ctx, id, operatorName())
+	// The projects connect.json serves now, read here rather than taken from
+	// the record: a record admitted while its project was served is not
+	// authorization to run it after the operator stopped serving it.
+	res, err := ledger.Redispatch(ctx, id, operatorName(), servedBucketsOf(p.file))
 	if err != nil {
 		return decisionError(err)
 	}

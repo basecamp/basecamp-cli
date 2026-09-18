@@ -78,24 +78,32 @@ func TestServedProjectsFollowConnectJSON(t *testing.T) {
 	clock := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	served := newConnectServed(path, file, slog.New(slog.DiscardHandler))
 	served.now = func() time.Time { return clock }
-	require.Contains(t, served.Current(), int64(48929974))
-	assert.Equal(t, "internal", served.Current()[48929974].Class)
+	current, err := served.Current()
+	require.NoError(t, err)
+	require.Contains(t, current, int64(48929974))
+	assert.Equal(t, "internal", current[48929974].Class)
 
 	unserved := file
 	unserved.Projects = map[int64]admission.Project{}
 	write(unserved)
 	clock = clock.Add(connectServedTTL)
-	assert.Empty(t, served.Current(), "a project no longer served stops authorizing dispatch without a restart")
+	current, err = served.Current()
+	require.NoError(t, err, "serving nothing is an answer, not a failure")
+	assert.Empty(t, current, "a project no longer served stops authorizing dispatch without a restart")
 
 	other := file
 	other.Agent.PersonID = 1
 	write(other)
 	clock = clock.Add(connectServedTTL)
-	assert.Empty(t, served.Current(), "a file naming another agent authorizes nothing")
+	_, err = served.Current()
+	assert.Error(t, err, "a file naming another agent is a failure to read the answer, not the answer")
+	assert.Empty(t, served.Dispatchable(), "and it authorizes no dispatch")
 
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
 	clock = clock.Add(connectServedTTL)
-	assert.Empty(t, served.Current(), "a file that no longer loads authorizes nothing")
+	_, err = served.Current()
+	assert.Error(t, err, "a file that no longer loads is reported as unreadable, never as an empty served set")
+	assert.Empty(t, served.Dispatchable(), "and it authorizes no dispatch")
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.

@@ -64,6 +64,32 @@ func unknownOutcome(t *testing.T, l *Ledger, id int64) Launch {
 	return launch
 }
 
+// Copilot on #765: a redispatch is authorized by the projects connect.json
+// serves now, not by the bit admission wrote when it decided the record.
+//
+// Without this the command reported success and admitted the record, and the
+// dispatcher then refused to launch it — so the person was told their
+// redispatch worked while the record sat stranded, with no holding reply and
+// nothing else coming.
+func TestRedispatchIsRefusedForAProjectNoLongerServed(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+	unknownOutcome(t, l, 1)
+
+	_, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID + 1})
+	require.ErrorIs(t, err, ErrDecisionRefused, "another project's served set does not authorize this record")
+	assert.Contains(t, err.Error(), "connect.json serves")
+	_, err = l.Redispatch(ctx, 1, opBy, nil)
+	require.ErrorIs(t, err, ErrDecisionRefused, "and serving nothing authorizes nothing")
+
+	assert.Equal(t, StateCompleted, stateOf(t, l, 1), "the record is left where it was, both times")
+	assert.Zero(t, decisionsFor(t, l, 1), "and nothing was recorded as decided")
+
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
+	require.NoError(t, err, "served, and the redispatch lands")
+	assert.True(t, got.Admitted)
+}
+
 // Done when: redispatch of completed(unknown) admits the record, supersedes
 // the task's token and records who authorized it.
 func TestRedispatchAdmitsAnUnknownOutcome(t *testing.T) {
@@ -71,7 +97,7 @@ func TestRedispatchAdmitsAnUnknownOutcome(t *testing.T) {
 	ctx := context.Background()
 	launch := unknownOutcome(t, l, 1)
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Admitted)
 	assert.Equal(t, StateAdmitted, got.State)
@@ -105,7 +131,7 @@ func TestRedispatchAdmitsAFailedOutcome(t *testing.T) {
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFinished})
 	require.NoError(t, err)
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Admitted)
 	assert.Equal(t, OutcomeFailed, got.FromOutcome)
@@ -128,7 +154,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Pending)
 	assert.False(t, got.Admitted)
@@ -145,7 +171,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, startable)
 
-	_, err = l.Redispatch(ctx, 1, opBy)
+	_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	assert.ErrorIs(t, err, ErrDecisionRefused, "a second redispatch while the first waits")
 
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
@@ -197,7 +223,7 @@ func TestRedispatchRefusesWhatItMustNotRun(t *testing.T) {
 			arrange(t, l)
 			before := getRecord(t, l, 1)
 
-			_, err := l.Redispatch(ctx, 1, opBy)
+			_, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 			require.ErrorIs(t, err, ErrDecisionRefused)
 			after := getRecord(t, l, 1)
 			assert.Equal(t, before.State, after.State)
@@ -219,7 +245,7 @@ func TestRedispatchOfABlockedRecordRerunsItsPrerequisite(t *testing.T) {
 	_, err = l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Rerun)
 	assert.True(t, got.Held)
@@ -256,7 +282,7 @@ func TestRedispatchAdmitsAHeldRecord(t *testing.T) {
 	assert.Equal(t, 1, res.Held)
 	require.Equal(t, StateHeld, stateOf(t, l, 1))
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Admitted)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1))
@@ -272,7 +298,7 @@ func TestRedispatchOfARecordHeldOverAReasonRerunsIt(t *testing.T) {
 	_, err = l.db.ExecContext(context.Background(), `UPDATE events SET reason = 'no_route' WHERE id = 1`)
 	require.NoError(t, err)
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.True(t, got.Rerun)
 	record := getRecord(t, l, 1)
@@ -550,7 +576,7 @@ func TestDiscard(t *testing.T) {
 			again, err := l.Discard(ctx, 1, opBy)
 			require.NoError(t, err)
 			assert.True(t, again.Already)
-			_, err = l.Redispatch(ctx, 1, opBy)
+			_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 			assert.ErrorIs(t, err, ErrDecisionRefused)
 		})
 	}
@@ -642,7 +668,7 @@ func pendingRedispatch(t *testing.T, l *Ledger) Launch {
 	pulled(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeFailed})
 	require.NoError(t, err)
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.True(t, got.Pending)
 	return launch
@@ -688,7 +714,7 @@ func TestInvariant3AHoldWithdrawsAWaitingRedispatch(t *testing.T) {
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
 	require.NoError(t, err)
 	assert.Equal(t, StateCompleted, stateOf(t, l, 1), "the authorization did not survive the hold")
-	_, err = l.Redispatch(ctx, 1, opBy)
+	_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err, "a person can authorize it again")
 }
 
@@ -746,7 +772,7 @@ func TestRedispatchQueuesAHeldRecordBehindALiveConversation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StateAdmitted, opAdmit(t, l, 2, "recording:9"), "a new generation's record on the same conversation")
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Equal(t, StateQueued, got.State)
 	assert.False(t, got.Admitted)
@@ -849,7 +875,7 @@ func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 	require.Len(t, notices, 1)
 	require.Contains(t, notices[0].Body, "redispatch 1")
 
-	got, err := l.Redispatch(ctx, 1, opBy)
+	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.True(t, got.Rerun)
 	claimed, ok, err := l.claimIntent(ctx)
@@ -883,7 +909,7 @@ func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
 			l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 			ctx := context.Background()
 			first := unknownOutcome(t, l, 1)
-			_, err := l.Redispatch(ctx, 1, opBy)
+			_, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 			require.NoError(t, err)
 			second(t, l)
 
@@ -935,7 +961,7 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	var recordedAs string
 	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT to_state FROM decisions WHERE event_id = 2 AND action = 'import'`).Scan(&recordedAs))
 	assert.Equal(t, string(StateCompleted), recordedAs, "the audit says what happened, not what would have")
-	_, err = l.Redispatch(ctx, 1, opBy)
+	_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	assert.ErrorIs(t, err, ErrDecisionRefused)
 	claimed, ok, err := l.claimIntent(ctx)
 	require.NoError(t, err)
@@ -959,7 +985,7 @@ func TestARedispatchOntoBlockedIsAuthorizedForThatBlock(t *testing.T) {
 	calls := 0
 	l.now = func() time.Time { calls++; return base.Add(time.Duration(calls) * time.Second) } // each stamp later than the last
 
-	_, err = l.Redispatch(ctx, 1, opBy)
+	_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
 	ids, err := l.AuthorizedBlocked(ctx, 10)
 	require.NoError(t, err)

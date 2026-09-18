@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -1085,7 +1086,7 @@ func TestAdmissionReadsTheServedProjectsAsTheyAreNow(t *testing.T) {
 	live := map[int64]Project{servedProj: {Class: "internal"}}
 	f := newFakeReads()
 	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
-	a := newAdmitter(t, basePolicy(), f, WithServed(func() map[int64]Project { return live }))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) { return live, nil }))
 
 	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 	v := decide(t, a, ev)
@@ -1120,10 +1121,93 @@ func TestTheGateReadsTheLiveServedSetToo(t *testing.T) {
 	summary := summaryWith(recordingID, servedProj, "Todo", operatorID, "<div>ship it</div>")
 	summary.Assignees = []basecamp.Person{{ID: agentID}}
 	f.summaries[recordingID] = summary
-	a := newAdmitter(t, basePolicy(), f, WithServed(func() map[int64]Project { return live }))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) { return live, nil }))
 
 	delete(live, servedProj)
 	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonNoRoute, v.Reason)
+}
+
+// Copilot on #765: an unreadable connect.json is not "the operator serves no
+// projects", and must not be answered as if it were.
+//
+// The served set feeds admission now, so a parse, permission or read failure
+// that came back as an empty map would make every mention blocked(no_route)
+// and post the public holding reply — telling the person on the card that
+// their project is not served, when the project is there and the file is
+// what is broken. no_route also has no timed retry, so repairing the file
+// would not reconsider those records.
+func TestAnUnreadableConfigIsHeldAsOneRatherThanAnsweredAsUnserved(t *testing.T) {
+	broken := errors.New("connect.json cannot be read")
+	fail := true
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		if fail {
+			return nil, broken
+		}
+		return map[int64]Project{servedProj: {Class: "internal"}}, nil
+	}))
+
+	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+	v := decide(t, a, ev)
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason, "not no_route: nothing read the file, so nothing can say the project is unserved")
+	assert.False(t, v.Served)
+
+	// It comes round again on its own, which no_route would not.
+	blockedAt := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	_, retried := NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
+	assert.True(t, retried, "repairing the file decides these records without anyone redispatching them")
+	_, retried = NextBlockedRetry(ReasonNoRoute, blockedAt, blockedAt, time.Time{})
+	assert.False(t, retried, "which is exactly what no_route does not do")
+
+	// And once the file is readable the record decides normally.
+	fail = false
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 1, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateAdmitted, v.State)
+}
+
+// A trigger the gate only admits in a served project is held too, not
+// discarded: throwing the work away over a file nobody could read is the one
+// outcome that cannot be undone by fixing the file.
+func TestAnUnreadableConfigHoldsWhatTheGateWouldHaveDiscarded(t *testing.T) {
+	f := newFakeReads()
+	summary := summaryWith(recordingID, servedProj, "Todo", operatorID, "<div>ship it</div>")
+	summary.Assignees = []basecamp.Person{{ID: agentID}}
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return nil, errors.New("connect.json cannot be read")
+	}))
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason)
+}
+
+// Copilot on #765: one verdict, one configuration. match used to read the
+// served map again after the admission reads, so a setting changed in that
+// window could admit the event on the new entry and stamp it with the old
+// entry's class.
+func TestAVerdictIsBuiltFromOneSnapshotOfTheServedProjects(t *testing.T) {
+	reads := 0
+	f := newFakeReads()
+	summary := summaryWith(recordingID, watchedProj, "Todo", operatorID, "<div>ship it</div>")
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		reads++
+		// A different answer every time it is asked: a decision that reads
+		// twice cannot help but mix them.
+		if reads == 1 {
+			return map[int64]Project{watchedProj: {Class: "first", WatchCompletions: true}}, nil
+		}
+		return map[int64]Project{watchedProj: {Class: "second", WatchCompletions: true}}, nil
+	}))
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: watchedProj, RecordingID: recordingID, CreatorID: operatorID})
+	require.Equal(t, StateAdmitted, v.State)
+	assert.Equal(t, 1, reads, "the served projects are read once per decision, then passed down")
+	assert.Equal(t, "first", v.Class, "and the class is the snapshot the rest of the verdict was decided from")
 }

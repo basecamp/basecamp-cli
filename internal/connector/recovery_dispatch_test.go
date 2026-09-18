@@ -325,7 +325,7 @@ func TestRecoveryPostsUnknownAndRedispatchRunsItAgain(t *testing.T) {
 		assert.Equal(t, int64(5001), notices[0].RecordingID, "on the recording that asked")
 
 		l := h.ledger()
-		got, err := l.Redispatch(context.Background(), 101, "operator")
+		got, err := l.Redispatch(context.Background(), 101, "operator", []int64{adapterBucketID})
 		require.NoError(t, err)
 		assert.False(t, got.Held)
 		h.run(harnessRun{})
