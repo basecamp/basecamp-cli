@@ -228,3 +228,31 @@ func TestConnectDriverRunsTheWorkersPinnedACPAdapterFromWhereItWasInstalled(t *t
 	_, err = connectDriver(setup.DriverACP, "nobody", dir)
 	assert.Error(t, err)
 }
+
+// Copilot on #738: intake takes only a positive --since as an override, so a
+// negative one was accepted here and then quietly ignored there — the run
+// resumed from the ledger while the person who typed it believed otherwise.
+func TestANegativeSinceIsRefusedRatherThanIgnored(t *testing.T) {
+	zero, err := connectSinceOverride(0)
+	require.NoError(t, err)
+	assert.Zero(t, zero, "the default still means: resume from the ledger")
+
+	at, err := connectSinceOverride(1234)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1234), at)
+
+	_, err = connectSinceOverride(-1)
+	require.Error(t, err)
+	var usage *output.Error
+	require.ErrorAs(t, err, &usage)
+	assert.Equal(t, output.CodeUsage, usage.Code)
+}
+
+// Copilot on #738: a shadow keeps its own ledger, lock and checkpoint, and
+// intake's contract is that two connectors in one account never share a
+// checkpoint lineage. A shadow beside the connector it watches is two.
+func TestAShadowRunHasACheckpointLineageOfItsOwn(t *testing.T) {
+	assert.Equal(t, "basecamp-connect-52007412", connectConsumerNamespace(52007412, false),
+		"and the connector's own lineage does not move")
+	assert.NotEqual(t, connectConsumerNamespace(52007412, false), connectConsumerNamespace(52007412, true))
+}
