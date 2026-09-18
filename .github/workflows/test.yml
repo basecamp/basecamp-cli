@@ -3,8 +3,10 @@ name: Test
 on:
   push:
     branches: [main]
+  # Every pull request, not only those targeting main: a stacked pull
+  # request opened against its parent branch is exactly the one that
+  # most needs checking, and it was getting none.
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions: {}
