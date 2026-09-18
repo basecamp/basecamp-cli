@@ -188,11 +188,11 @@ type Dispatcher struct {
 	mu   sync.Mutex
 	live map[string]*taskRun
 	wg   sync.WaitGroup
-	// adopting is cancelled when Run is shutting down, which is what bounds
-	// the adopted-reply rule's reads: their own context is the settlement's,
+	// stopping is closed when Run is shutting down, which is what bounds the
+	// adopted-reply rule's reads: their own context is the settlement's,
 	// which a shutdown deliberately does not cancel.
-	adopting     context.Context
-	stopAdopting context.CancelFunc
+	stopping     chan struct{}
+	stoppingOnce sync.Once
 
 	// terminateRecorded ends a previous process's worker; a test seam.
 	terminateRecorded func(driver.Process, time.Duration) (bool, error)
@@ -260,7 +260,6 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 	// Every log line passes through the redaction rule; a task's own lines
 	// through its task's (taskRedaction).
 	opts.Redaction = opts.Redaction.With(driver.Redaction{Dirs: []string{opts.PrivateDir, opts.MCP.StateDir}})
-	adopting, stopAdopting := context.WithCancel(context.Background())
 	return &Dispatcher{
 		opts:   opts,
 		ledger: opts.Ledger,
@@ -269,8 +268,7 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		lines:  opts.Lines,
 		live:   map[string]*taskRun{},
 
-		adopting:     adopting,
-		stopAdopting: stopAdopting,
+		stopping: make(chan struct{}),
 
 		terminateRecorded: driver.TerminateRecorded,
 		confirmGroupGone:  driver.ConfirmGroupGone,
@@ -374,6 +372,14 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// stopAdopting ends the adopted-reply rule's reads. Run calls it on its way
+// out: a settlement is written before adoption starts, so a shutdown drops
+// the link it might have added rather than holding the exit for the
+// adoption budget. Idempotent.
+func (d *Dispatcher) stopAdopting() {
+	d.stoppingOnce.Do(func() { close(d.stopping) })
 }
 
 // heldCount is how many attempts are held; for tests and status.
@@ -1025,8 +1031,15 @@ func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 	written := ctx
 	ctx, cancel := context.WithTimeout(ctx, AdoptionBudget)
 	defer cancel()
-	stopOnShutdown := context.AfterFunc(d.adopting, cancel)
-	defer stopOnShutdown()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-d.stopping:
+			cancel()
+		case <-finished:
+		}
+	}()
 	candidates, err := d.ledger.AdoptionCandidates(ctx, s.TaskID)
 	if err != nil {
 		d.log.Warn("connector: adoption candidates", "task_id", s.TaskID, "error", err)
