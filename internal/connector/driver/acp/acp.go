@@ -216,7 +216,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		// Read in the environment the adapter is about to run in, not this
 		// process's: what the preflight looks for (a CODEX_HOME, a HOME) is
 		// what the adapter will resolve its own configuration against.
-		if err := d.opts.Adapter.Preflight(cfg.Cwd, lookupIn(env)); err != nil {
+		if err := d.opts.Adapter.Preflight(cfg.Cwd, lookupIn(env), nil); err != nil {
 			// Configuration on this machine: the same session would fail the
 			// same way, so it is not retried.
 			return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)

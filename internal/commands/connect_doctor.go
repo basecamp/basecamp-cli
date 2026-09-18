@@ -38,8 +38,9 @@ identity, the stream ticket mint, the account feed, the ledger (its gaps, open
 losses, hold, the worktrees it kept and messages waiting for a person), the
 worker the driver runs — the worker's own CLI on PATH under the spawn driver,
 the pinned ACP adapter in the connector's adapters directory under the acp
-driver, and the adapter's own refusal of configuration on this machine that the
-connector cannot switch off, run against every routed directory — and a
+driver, and the adapter's own refusal of configuration on this machine that
+the connector cannot switch off, run in the directory every routed project
+would work in (its worktree, where a profile makes them) — and a
 handshake with the agent's Basecamp MCP server, started with a worker's
 environment (without the basecamp_connect domain, which only a dispatched
 task's token opens).
@@ -79,7 +80,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 		)
 	}
 	checks = append(checks, ledgerChecks(ctx, p)...)
-	checks = append(checks, workerBinaryChecks(p.file)...)
+	checks = append(checks, workerBinaryChecks(ctx, p.file)...)
 	checks = append(checks, mcpHandshakeCheck(ctx, p.name))
 
 	result := summarizeChecks(asDoctorChecks(checks))
@@ -204,10 +205,10 @@ func workerBinaries(file setup.File) []string {
 // doctor passes the adapter the connector would start and no other. PATH
 // would both fail a correct install and pass an unpinned build that happens
 // to be on it.
-func workerBinaryChecks(file setup.File) []setup.Check {
+func workerBinaryChecks(ctx context.Context, file setup.File) []setup.Check {
 	if file.Driver == setup.DriverACP {
 		checks := []setup.Check{acpAdapterCheck(file.WorkerName())}
-		if c, ok := acpPreflightCheck(file); ok {
+		if c, ok := acpPreflightCheck(ctx, file); ok {
 			checks = append(checks, c)
 		}
 		return checks
@@ -275,16 +276,23 @@ func acpAdapterCheck(worker string) setup.Check {
 // user's and the system's — fail identically, so an identical reason is
 // reported once, for all of them.
 //
-// It runs against the routed directory rather than the worktree a task may
-// be given under the connector's state directory. The repository's own
-// .codex/config.toml is in a worktree exactly as it is in the route; what
-// differs is the ancestors of a directory nobody configures, above the
-// user's own layer, which is checked whatever the working directory is.
+// What it runs against is the directory a dispatch would give the session,
+// which is the route only while worktrees are off. With them on the session
+// works in a worktree under the connector's state directory, and the layers
+// there are not the route's: a .codex/config.toml the route has but the
+// repository does not track is in no worktree, one above the route is not
+// above the worktree, and one above the state directory is above every
+// worktree and above no route. So the worktree is planned — the same
+// decision Prepare makes, making nothing — and the preflight runs in the
+// planned working directory, reading the files inside it from the commit
+// the checkout would be made at. A route that could take no worktree at all
+// is a route no task could run in, and fails here rather than at the first
+// dispatch.
 //
 // The second return is false when there is nothing to run: an adapter with
 // no preflight (claude-agent-acp) gets no row, rather than a row saying a
 // check that does not exist passed.
-func acpPreflightCheck(file setup.File) (setup.Check, bool) {
+func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool) {
 	a, ok := acp.AdapterForWorker(file.WorkerName())
 	if !ok || a.Preflight == nil {
 		return setup.Check{}, false
@@ -301,23 +309,27 @@ func acpPreflightCheck(file setup.File) (setup.Check, bool) {
 		return c, true
 	}
 
+	planner, plannerErr := preflightPlanner(file)
 	type failure struct {
-		reason  string
-		routes  []string
-		foreign bool
+		reason string
+		routes []string
+		hint   string
 	}
 	var failures []*failure
 	seen := map[string]*failure{}
 	for _, id := range ids {
 		path := file.Projects[id].Path
-		err := acp.Preflight(a, path, nil)
+		err := plannerErr
+		if err == nil {
+			err = preflightRoute(ctx, a, planner, path)
+		}
 		if err == nil {
 			continue
 		}
 		reason := preflightReason(err)
 		f, ok := seen[reason]
 		if !ok {
-			f = &failure{reason: reason, foreign: errors.Is(err, acp.ErrForeignMCPConfig)}
+			f = &failure{reason: reason, hint: preflightHint(err)}
 			seen[reason] = f
 			failures = append(failures, f)
 		}
@@ -325,7 +337,7 @@ func acpPreflightCheck(file setup.File) (setup.Check, bool) {
 	}
 	if len(failures) == 0 {
 		c.Status = setup.StatusPass
-		c.Message = fmt.Sprintf("%s would start in every routed directory (%d checked)", a.Name, len(ids))
+		c.Message = fmt.Sprintf("%s would start in %s (%d checked)", a.Name, preflightWhere(file, "every routed directory", "the worktree every routed project would get"), len(ids))
 		return c, true
 	}
 
@@ -336,23 +348,104 @@ func acpPreflightCheck(file setup.File) (setup.Check, bool) {
 		if len(ids) > 1 && len(f.routes) == len(ids) {
 			// Every route, one reason: the user's or the system's layer,
 			// which no route escapes by being somewhere else.
-			where = "any routed directory"
+			where = preflightWhere(file, "any routed directory", "any routed project's worktree")
 		}
 		lead := "no session would start in"
 		if i == 0 {
 			lead = "No session would start in"
 		}
 		parts = append(parts, fmt.Sprintf("%s %s: %s", lead, where, f.reason))
-		if c.Hint == "" && f.foreign {
-			c.Hint = "Take mcp_servers out of that file, or start the connector with CODEX_HOME set to a Codex home that declares none."
+		if c.Hint == "" {
+			c.Hint = f.hint
 		}
 	}
 	c.Message = strings.Join(parts, "; ")
-	if c.Hint == "" {
-		c.Hint = "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again."
-	}
 	return c, true
 }
+
+// preflightHint is what to do about one refusal.
+func preflightHint(err error) string {
+	switch {
+	case errors.Is(err, errNoWorkDir):
+		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees."
+	case errors.Is(err, acp.ErrForeignMCPConfig):
+		return "Take mcp_servers out of that file, or start the connector with CODEX_HOME set to a Codex home that declares none."
+	default:
+		return "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again."
+	}
+}
+
+// preflightWhere names the directory the check ran in: the route itself, or
+// the worktree a task on it would be given. Saying "routed directory" while
+// checking a worktree would be the same silence this check exists to end.
+func preflightWhere(file setup.File, route, worktree string) string {
+	if file.Worktrees {
+		return worktree
+	}
+	return route
+}
+
+// preflightPlanner plans the worktrees a profile with worktrees on would
+// make: nil when they are off, and the session works in the route itself.
+func preflightPlanner(file setup.File) (*connector.Worktrees, error) {
+	if !file.Worktrees {
+		return nil, nil //nolint:nilnil // no planner and no error is "the route is the working directory"
+	}
+	stateDir, err := connectStatePath(file, false)
+	if err != nil {
+		return nil, err
+	}
+	// The root the run command gives Worktrees, without making it: doctor
+	// writes nothing, and a root that does not exist yet holds no
+	// configuration either.
+	return connector.PlanWorktrees(connector.WorktreesOptions{Root: filepath.Join(stateDir, connectWorktreesDir)})
+}
+
+// preflightWorktreeName stands in for the name Prepare gives a task's
+// worktree. Any name is the same directory as far as configuration goes:
+// what a task's own name would add is one directory level that does not
+// exist until the worktree is made, and whose files are the repository's.
+const preflightWorktreeName = "doctor"
+
+// preflightRoute runs the preflight for one route, in the directory a
+// dispatch on it would use.
+func preflightRoute(ctx context.Context, a acp.Adapter, planner *connector.Worktrees, route string) error {
+	if planner == nil {
+		return acp.Preflight(a, route, nil, nil)
+	}
+	plan, err := planner.Plan(ctx, route, preflightWorktreeName)
+	if err != nil {
+		// A route that can take no worktree takes no task either: every
+		// dispatch on it waits in a backoff nothing reports.
+		return fmt.Errorf("%w: %w", errNoWorkDir, err)
+	}
+	read := func(name string) ([]byte, error) { return plan.ReadFile(ctx, name) }
+	err = acp.Preflight(a, plan.Dir, nil, read)
+	if err == nil {
+		return nil
+	}
+	// A file inside the planned worktree is the repository's, at the commit
+	// the worktree would be made from: say where a person can go and change
+	// it, not where a directory nobody has made yet would have held it. The
+	// error keeps its chain, so what it is stays the same as what it says.
+	if named := strings.ReplaceAll(err.Error(), plan.Worktree, plan.Repository); named != err.Error() {
+		return inRepositoryError{err: err, msg: named + " (committed in the repository, so every worktree of it has the file)"}
+	}
+	return err
+}
+
+// errNoWorkDir is a route no task could be given a working directory in.
+var errNoWorkDir = errors.New("no task on it would get a working directory")
+
+// inRepositoryError is a refusal over a file in a planned worktree, said as the
+// repository's file. It is the same error: only its words move.
+type inRepositoryError struct {
+	err error
+	msg string
+}
+
+func (e inRepositoryError) Error() string { return e.msg }
+func (e inRepositoryError) Unwrap() error { return e.err }
 
 // preflightReason is a preflight's refusal as a person reads it: the driver
 // package's own prefix off the front, because the check already names the

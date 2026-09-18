@@ -61,8 +61,11 @@ type Adapter struct {
 	Readback Readback
 	// Preflight refuses, before anything starts, a session the adapter would
 	// run with configuration the connector cannot switch off: nil when there is
-	// none to check.
-	Preflight func(cwd string, lookup func(string) (string, bool)) error
+	// none to check. read is how it reads a configuration file, os.ReadFile
+	// when nil — the seam a caller stands in when the session's working
+	// directory does not exist yet (doctor, which reads a planned worktree's
+	// files out of the repository it would be made from).
+	Preflight func(cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error
 }
 
 // ClaudeAgentACP is Claude Code over ACP.
@@ -281,7 +284,10 @@ var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 // configuration from layers this cannot read — an MDM profile, a cloud-managed
 // config, a plugin — so it is a guard, not a proof. What would be a proof is
 // the effective configuration the app server reports, which ACP does not carry.
-func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
+func codexPreflight(cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error {
+	if read == nil {
+		read = os.ReadFile
+	}
 	var files []string
 	home := ""
 	if v, ok := lookup("CODEX_HOME"); ok && v != "" {
@@ -304,7 +310,7 @@ func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 		}
 	}
 	for _, file := range files {
-		raw, err := os.ReadFile(file) //nolint:gosec // G304: codex's own config locations
+		raw, err := read(file)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -351,8 +357,10 @@ const codexConfig = `{"features":{"apps":false,"plugins":false,"remote_plugin":f
 // environment, which is this one plus what the dispatcher gives a session
 // (see Driver.open); anything outside a dispatch — doctor — asks here, and
 // gets the answer a dispatch would rather than one read from its own
-// environment.
-func Preflight(a Adapter, cwd string, lookup func(string) (string, bool)) error {
+// environment. read is how a configuration file is read, os.ReadFile when
+// nil: a caller checking a directory that does not exist yet reads its
+// files from wherever they will come from.
+func Preflight(a Adapter, cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error {
 	if a.Preflight == nil {
 		return nil
 	}
@@ -360,7 +368,7 @@ func Preflight(a Adapter, cwd string, lookup func(string) (string, bool)) error 
 		lookup = os.LookupEnv
 	}
 	env := mergeEnv(driver.BuildEnv(driver.BaseEnv, lookup, nil), driver.BuildEnv(a.Env, lookup, nil))
-	return a.Preflight(cwd, lookupIn(setEnv(env, a.SetEnv)))
+	return a.Preflight(cwd, lookupIn(setEnv(env, a.SetEnv)), read)
 }
 
 // Adapters are the pinned adapters the driver runs.

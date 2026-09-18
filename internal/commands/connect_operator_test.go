@@ -300,7 +300,7 @@ func TestConnectDoctorFindsTheACPAdapterWhereTheDriverDoes(t *testing.T) {
 
 	file := setup.New("agent")
 	file.Driver = setup.DriverACP
-	checks := workerBinaryChecks(file)
+	checks := workerBinaryChecks(context.Background(), file)
 	require.Len(t, checks, 1)
 	assert.Equal(t, setup.StatusFail, checks[0].Status,
 		"an unpinned executable that happens to be on PATH is not the pinned adapter")
@@ -319,7 +319,7 @@ func TestConnectDoctorFindsTheACPAdapterWhereTheDriverDoes(t *testing.T) {
 	bin := filepath.Join(binDir, adapter.Name)
 	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 
-	checks = workerBinaryChecks(file)
+	checks = workerBinaryChecks(context.Background(), file)
 	require.Len(t, checks, 1)
 	assert.Equal(t, setup.StatusPass, checks[0].Status, "the adapter make acp-adapters installed is the one doctor finds")
 	assert.Contains(t, checks[0].Message, bin)
@@ -328,7 +328,7 @@ func TestConnectDoctorFindsTheACPAdapterWhereTheDriverDoes(t *testing.T) {
 	// A version other than the pin is not the adapter the driver would run.
 	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "package.json"),
 		[]byte(fmt.Sprintf(`{"name":%q,"version":"0.0.1-not-the-pin"}`, adapter.Package)), 0o600))
-	checks = workerBinaryChecks(file)
+	checks = workerBinaryChecks(context.Background(), file)
 	require.Len(t, checks, 1)
 	assert.Equal(t, setup.StatusFail, checks[0].Status, "an adapter off the pin is not ready")
 }
@@ -635,7 +635,7 @@ func writeCodexConfig(t *testing.T, dir, body string) string {
 func TestConnectDoctorRunsTheAdaptersPreflightAgainstEveryRoutedDirectory(t *testing.T) {
 	file, home, _ := codexProfile(t, 2)
 
-	checks := workerBinaryChecks(file)
+	checks := workerBinaryChecks(context.Background(), file)
 	c, ok := preflightCheck(t, checks)
 	require.True(t, ok, "the codex adapter's preflight is a check of its own")
 	assert.Equal(t, setup.StatusPass, c.Status)
@@ -645,7 +645,7 @@ func TestConnectDoctorRunsTheAdaptersPreflightAgainstEveryRoutedDirectory(t *tes
 	// uses Codex with MCP servers at all has.
 	userConfig := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
 
-	c, ok = preflightCheck(t, workerBinaryChecks(file))
+	c, ok = preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusFail, c.Status, "doctor never calls a profile ready that would not start")
 	assert.Contains(t, c.Message, userConfig, "the person reading this has to know which file")
@@ -668,7 +668,7 @@ func TestConnectDoctorPreflightNamesEveryRouteThatWouldNotStart(t *testing.T) {
 	writeCodexConfig(t, paths[1], "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
 	writeCodexConfig(t, paths[2], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
 
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusFail, c.Status)
 	assert.Contains(t, c.Message, filepath.Join(paths[1], ".codex", "config.toml"))
@@ -683,7 +683,7 @@ func TestConnectDoctorPreflightNamesEveryRouteThatWouldNotStart(t *testing.T) {
 // never looked at.
 func TestConnectDoctorPreflightSkipsWithNoRoute(t *testing.T) {
 	file, _, _ := codexProfile(t, 0)
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusSkip, c.Status)
 	assert.Contains(t, c.Message, "No project is routed")
@@ -697,7 +697,7 @@ func TestConnectDoctorHasNoPreflightRowForAnAdapterWithoutOne(t *testing.T) {
 	file.Driver = setup.DriverACP
 	file.Worker = setup.WorkerClaude
 	file.Projects[1] = admission.Route{Path: t.TempDir()}
-	_, ok := preflightCheck(t, workerBinaryChecks(file))
+	_, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	assert.False(t, ok)
 }
 
@@ -710,7 +710,7 @@ func TestConnectDoctorHasNoPreflightRowUnderTheSpawnDriver(t *testing.T) {
 	file.Driver = setup.DriverSpawn
 	file.Worker = setup.WorkerCodex
 	file.Projects[1] = admission.Route{Path: t.TempDir()}
-	_, ok := preflightCheck(t, workerBinaryChecks(file))
+	_, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	assert.False(t, ok)
 }
 
@@ -721,9 +721,118 @@ func TestConnectDoctorPreflightNamesTheOnlyRoute(t *testing.T) {
 	file, home, paths := codexProfile(t, 1)
 	writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
 
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	require.True(t, ok)
 	assert.Equal(t, setup.StatusFail, c.Status)
 	assert.Contains(t, c.Message, paths[0])
 	assert.NotContains(t, c.Message, "any routed directory")
+}
+
+// codexWorktreeProfile is an acp/codex profile with worktrees on and one
+// route inside a git repository, with its own HOME and state home: the
+// machine state the Codex preflight reads, and nothing of the person
+// running the test. It answers the route, the repository and the connector
+// state directory the worktrees would go under.
+func codexWorktreeProfile(t *testing.T) (setup.File, string, string, string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	home := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", state)
+	t.Setenv("CODEX_HOME", "")
+
+	repo := filepath.Join(t.TempDir(), "repo")
+	route := filepath.Join(repo, "app")
+	require.NoError(t, os.MkdirAll(route, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(route, "README"), []byte("hi\n"), 0o600))
+	testGit(t, repo, home, "init", "-q", "-b", "main")
+	testGit(t, repo, home, "add", ".")
+	testGit(t, repo, home, "commit", "-q", "-m", "init")
+
+	file := setup.New("agent")
+	file.Driver = setup.DriverACP
+	file.Worker = setup.WorkerCodex
+	file.Worktrees = true
+	file.Projects[1] = admission.Route{Path: route}
+
+	stateDir, err := connectStatePath(file, false)
+	require.NoError(t, err)
+	return file, route, repo, stateDir
+}
+
+func testGit(t *testing.T, dir, home string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git",
+		append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1"}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, out)
+}
+
+// With worktrees on the session never runs in the route: it runs in a
+// worktree under the connector's state directory. A Codex config layer the
+// route has but the repository does not track is in no worktree, so it
+// blocks nothing and doctor must not refuse the profile over it.
+func TestConnectDoctorPreflightDoesNotRefuseARouteFileNoWorktreeWouldHave(t *testing.T) {
+	file, route, _, _ := codexWorktreeProfile(t)
+	writeCodexConfig(t, route, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusPass, c.Status,
+		"an untracked config in the route is in no worktree, so no dispatch reads it")
+}
+
+// And a layer above the worktrees — under the connector's state directory,
+// which is above every worktree and above no route — blocks every dispatch.
+// Checking the route would miss it, which is this card's bug again.
+func TestConnectDoctorPreflightReadsTheLayersAboveTheWorktree(t *testing.T) {
+	file, _, _, stateDir := codexWorktreeProfile(t)
+	require.NoError(t, os.MkdirAll(stateDir, 0o700))
+	config := writeCodexConfig(t, stateDir, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status, "a layer above every worktree blocks every dispatch")
+	assert.Contains(t, c.Message, config)
+}
+
+// A config the repository tracks is in every worktree made from it, so it
+// does block every dispatch — and the message names the file where a person
+// can change it, not a worktree nobody has made.
+func TestConnectDoctorPreflightNamesTheRepositoryForACommittedConfig(t *testing.T) {
+	file, route, repo, stateDir := codexWorktreeProfile(t)
+	committed := writeCodexConfig(t, route, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
+	testGit(t, repo, os.Getenv("HOME"), "add", ".")
+	testGit(t, repo, os.Getenv("HOME"), "commit", "-q", "-m", "codex config")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Contains(t, c.Message, committed, "the file a person can go and change")
+	assert.Contains(t, c.Message, "committed in the repository")
+	assert.NotContains(t, c.Message, stateDir, "not a path inside a worktree that does not exist")
+	assert.Contains(t, c.Hint, "mcp_servers", "renaming the file in the message does not lose what the refusal is")
+}
+
+// With worktrees on, a route that can take no worktree takes no task: every
+// dispatch on it waits in a backoff nothing reports. Doctor says so instead
+// of calling the profile ready.
+func TestConnectDoctorPreflightRefusesARouteThatCouldTakeNoWorktree(t *testing.T) {
+	file, route, _, _ := codexWorktreeProfile(t)
+	outside := filepath.Join(t.TempDir(), "not-a-repo")
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+	file.Projects[2] = admission.Route{Path: outside}
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Contains(t, c.Message, outside)
+	assert.Contains(t, c.Message, "would get a working directory")
+	assert.NotContains(t, c.Message, route, "the route that would run is not named")
+	assert.Contains(t, c.Hint, "without worktrees", "a route that cannot take a worktree is not fixed by editing a Codex config")
 }
