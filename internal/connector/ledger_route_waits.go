@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -17,10 +18,18 @@ import (
 // memory was a wait nobody outside the connector's stdout could see — which is
 // the whole of the problem this table exists for.
 //
-// One row per route, replaced on each failure and deleted the moment a
-// worktree is made, so the table is never longer than the routes connect.json
-// names. A row is a record of failure, not a schedule: it stands after `until`
-// has passed, because nothing has proved the route works since.
+// One row per route, updated on each failure and deleted the moment a worktree
+// is made — and pruned against connect.json's routes, so a route that is no
+// longer routed, or routed somewhere else, stops being counted rather than
+// standing in status for as long as the ledger does. A row is a record of
+// failure, not a schedule: it stands after `until` has passed, because nothing
+// has proved the route works since, and the next record on that route is what
+// tries again.
+//
+// The count is the ledger's, not the connector process's. A restart begins its
+// own in-memory tally at one, and a row overwritten with that would turn
+// fourteen failures since six this morning into one — a smaller, more
+// reassuring number than the truth, under a timestamp that says otherwise.
 const migrationRouteWaits = `
 CREATE TABLE route_waits (
   route    TEXT    PRIMARY KEY,
@@ -50,7 +59,10 @@ func (w RouteWait) Waiting(now time.Time) bool { return now.Before(w.Until) }
 
 // RecordRouteWait writes the wait a failed Prepare left. FirstAt is kept from
 // the row already there: a route that has been failing for six hours says so,
-// rather than looking like it started failing on the last attempt.
+// rather than looking like it started failing on the last attempt. So is the
+// count, which only ever goes up — a caller's number is a floor, and a row
+// that is already there is incremented past it, so a connector that restarted
+// into a fresh tally adds to what the ledger knows instead of replacing it.
 func (l *Ledger) RecordRouteWait(ctx context.Context, w RouteWait) error {
 	if w.Route == "" {
 		return fmt.Errorf("connector: a route wait needs its route")
@@ -62,7 +74,7 @@ func (l *Ledger) RecordRouteWait(ctx context.Context, w RouteWait) error {
 INSERT INTO route_waits (route, failures, reason, first_at, last_at, until)
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (route) DO UPDATE SET
-  failures = excluded.failures,
+  failures = MAX(route_waits.failures + 1, excluded.failures),
   reason   = excluded.reason,
   last_at  = excluded.last_at,
   until    = excluded.until`,
@@ -80,6 +92,36 @@ func (l *Ledger) ClearRouteWait(ctx context.Context, route string) error {
 		return fmt.Errorf("connector: clear the wait on route %s: %w", route, err)
 	}
 	return nil
+}
+
+// PruneRouteWaits drops every recorded wait whose route is not in keep, and
+// returns how many went. An empty keep drops them all.
+//
+// A wait is about a route the profile is configured for. Once connect.json
+// stops naming it — the route changed, the project was unrouted, worktrees
+// were turned off altogether — nothing is waiting on it, and a row that
+// outlives the condition is worse than no row: silence sends a person
+// looking, while a confident line about a route that no longer exists sends
+// them nowhere.
+func (l *Ledger) PruneRouteWaits(ctx context.Context, keep []string) (int, error) {
+	query := `DELETE FROM route_waits`
+	args := make([]any, 0, len(keep))
+	if len(keep) > 0 {
+		//nolint:gosec // G202: what is concatenated is placeholders, never a value
+		query += ` WHERE route NOT IN (` + strings.TrimSuffix(strings.Repeat("?, ", len(keep)), ", ") + `)`
+		for _, route := range keep {
+			args = append(args, route)
+		}
+	}
+	res, err := l.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("connector: prune route waits: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // RouteWaits is every route whose last worktree attempt failed, oldest

@@ -802,9 +802,24 @@ func (w *Worktrees) keepUnjudged(ctx context.Context, r Worktree) error {
 // kept, as a finished task's is, after a removal the crash interrupted has
 // its names restored. It removes nothing. It runs in the connector that holds
 // the instance lock, before anything is dispatched.
+//
+// It is also where a recorded wait is dropped when worktrees have been turned
+// off since it was written. Nothing waits for a worktree that is never made,
+// and Prepare in off mode hands back the route without ever reaching the
+// clear on its success path, so a run that never made a worktree would
+// otherwise keep saying routes were waiting for one.
 func (w *Worktrees) Recover(ctx context.Context) error {
+	// The planner first: it has no ledger, and everything below reaches for
+	// one.
 	if w.planOnly {
 		return ErrPlanOnly
+	}
+	if w.off {
+		if dropped, err := w.ledger.PruneRouteWaits(ctx, nil); err != nil {
+			w.log.Warn("connector: could not drop the recorded waits on routes", "error", err)
+		} else if dropped > 0 {
+			w.log.Info("connector: worktrees are off, so no route is waiting for one", "routes", dropped)
+		}
 	}
 	unlock, err := w.lock(ctx)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {

@@ -336,13 +336,13 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	if s.Review > 0 || s.AuthorizedBlocked > 0 || s.RedispatchPending > 0 {
 		fmt.Fprintf(w, "  Review         %d tagged, %d authorized and blocked, %d redispatches waiting for their task\n", s.Review, s.AuthorizedBlocked, s.RedispatchPending)
 	}
-	fmt.Fprintf(w, "  Waiting routes %d (no worktree could be made; their records wait, and the connector keeps trying)\n", len(s.Waiting))
+	fmt.Fprintf(w, "  Waiting routes %d (no worktree could be made; records on them wait, and each is tried again when its wait is over)\n", len(s.Waiting))
 	for _, wait := range s.Waiting {
-		next := "due now"
+		next := "its wait is over; the next record on it tries again"
 		if wait.Waiting(time.Now()) {
 			next = "next try " + stamp(wait.Until)
 		}
-		fmt.Fprintf(w, "    %s  %d failures since %s, %s: %s\n",
+		fmt.Fprintf(w, "    %s  %d failed attempts since %s, %s: %s\n",
 			clean(wait.Route), wait.Failures, stamp(wait.FirstAt), next, clean(wait.Reason))
 	}
 

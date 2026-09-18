@@ -212,7 +212,7 @@ func waitingRoutesMessage(waits []connector.RouteWait) string {
 	if len(waits) > 1 {
 		msg += fmt.Sprintf("; and %d other route(s)", len(waits)-1)
 	}
-	return msg + ". Records on them wait; the connector keeps trying and refuses nothing"
+	return msg + ". Records on them wait; each route is tried again when its wait is over, and none is refused"
 }
 
 // workerBinaries are the executables the spawn driver runs for the

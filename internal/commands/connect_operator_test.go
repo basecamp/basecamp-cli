@@ -379,7 +379,7 @@ func TestConnectDoctorWarnsAboutRoutesWaitingForAWorktree(t *testing.T) {
 	assert.Contains(t, byName["Waiting routes"].Message, "/work/app: 14 failed attempts at a worktree since 2026-09-18T06:00:00Z")
 	assert.Contains(t, byName["Waiting routes"].Message, "dubious ownership")
 	assert.Contains(t, byName["Waiting routes"].Message, "and 1 other route(s)")
-	assert.Contains(t, byName["Waiting routes"].Message, "the connector keeps trying and refuses nothing")
+	assert.Contains(t, byName["Waiting routes"].Message, "each route is tried again when its wait is over, and none is refused")
 	assert.Contains(t, byName["Waiting routes"].Hint, "basecamp connect status -P agent")
 }
 
@@ -592,8 +592,8 @@ func TestStatusReportsTheRoutesWaitingForAWorktree(t *testing.T) {
 
 	styled, err := f.run(t, output.FormatStyled, "status")
 	require.NoError(t, err, styled)
-	assert.Contains(t, styled, "Waiting routes 1 (no worktree could be made; their records wait, and the connector keeps trying)")
-	assert.Contains(t, styled, "/work/app  14 failures since 2026-09-18 06:00:00Z, next try ")
+	assert.Contains(t, styled, "Waiting routes 1 (no worktree could be made; records on them wait, and each is tried again when its wait is over)")
+	assert.Contains(t, styled, "/work/app  14 failed attempts since 2026-09-18 06:00:00Z, next try ")
 	assert.Contains(t, styled, "is not in a git repository")
 
 	out, err := f.run(t, output.FormatJSON, "status")
@@ -612,6 +612,23 @@ func TestStatusSaysNoRouteIsWaiting(t *testing.T) {
 		Queues: map[string]int{}, Blocked: map[string]int{},
 	}})
 	assert.Contains(t, buf.String(), "Waiting routes 0 ")
+}
+
+// A wait that has elapsed is not a retry in flight. Saying "due now" read as
+// the connector being about to act; what is true is that the next record on
+// the route is what tries again.
+func TestStatusSaysWhatAnElapsedWaitMeans(t *testing.T) {
+	var buf bytes.Buffer
+	elapsed := time.Now().Add(-time.Hour)
+	renderConnectStatus(&buf, connectStatusReport{Profile: "agent", Status: connector.Status{
+		Queues: map[string]int{}, Blocked: map[string]int{},
+		Waiting: []connector.RouteWait{{
+			Route: "/work/app", Failures: 3, Reason: "fatal: cannot chdir",
+			FirstAt: elapsed.Add(-time.Hour), LastAt: elapsed.Add(-time.Hour), Until: elapsed,
+		}},
+	}})
+	assert.Contains(t, buf.String(), "its wait is over; the next record on it tries again")
+	assert.NotContains(t, buf.String(), "next try ")
 }
 
 // Status reads card 19's worktree ledger: the worktrees the connector kept

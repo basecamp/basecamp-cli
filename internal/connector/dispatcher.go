@@ -454,6 +454,11 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		return nil
 	default:
 	}
+	// Before the capacity return, deliberately. What a route cannot do is not
+	// news that waits for a free worker slot: a connector at its concurrency
+	// would otherwise go quiet about a broken route for as long as its tasks
+	// run, which is when there is most to say and least attention to spare.
+	d.reviewWaitingRoutes(ctx)
 	if d.free() <= 0 {
 		return nil
 	}
@@ -478,7 +483,6 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		return err
 	}
 	d.reportStranded(ctx, approved)
-	d.reportWaitingRoutes(ctx)
 	for _, record := range records {
 		// Asked again on every record, not counted down: a start that failed
 		// can have held its attempt, and a held attempt takes a slot as a
@@ -532,24 +536,43 @@ func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]stri
 	}
 }
 
-// reportWaitingRoutes says which routes could not take a worktree and are
-// therefore holding their records back, on the same schedule as the stranded
-// count: a condition that persists keeps saying so, rather than being
-// mentioned once at the failure and never again.
+// reviewWaitingRoutes keeps the recorded waits true, then says which routes
+// could not take a worktree, on the same schedule as the stranded count: a
+// condition that persists keeps saying so, rather than being mentioned once
+// at the failure and never again.
 //
-// Only routes still inside their wait are named. A route whose wait has
-// elapsed is one the dispatcher will try again on its next record, so saying
-// it is waiting would be wrong — and a route nothing is routed to any more
-// would otherwise be warned about for as long as the connector ran.
+// Keeping them true comes first. A wait belongs to a route connect.json
+// names; once it stops naming that route — the route changed, the project was
+// unrouted, the profile was set up again — nothing is waiting on it, and a
+// row that outlives its condition is worse than no row at all: silence sends
+// a person looking, a confident line about a route that is not there any more
+// sends them nowhere.
+//
+// Only routes still inside their wait are named in the log. A route whose
+// wait has elapsed is one the next record on it will try, so calling it
+// waiting would be wrong.
 //
 // Nothing here escalates. The count is reported, never acted on: a route that
 // has reached the cap fifty times is still a route that may work in a minute,
 // and the connector blocks only what it can prove.
-func (d *Dispatcher) reportWaitingRoutes(ctx context.Context) {
+func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 	if time.Since(d.waitingAt) < StrandedInterval {
 		return
 	}
 	d.waitingAt = time.Now()
+	// connect.json's routes entire, not the projects this run hears: a run
+	// scoped with --project must not drop the waits on routes it was not
+	// asked about.
+	routes := d.opts.Routes()
+	keep := make([]string, 0, len(routes))
+	for _, route := range routes {
+		keep = append(keep, route.Path)
+	}
+	if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
+		d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
+	} else if dropped > 0 {
+		d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
+	}
 	waits, err := d.ledger.RouteWaits(ctx)
 	if err != nil {
 		d.log.Warn("connector: reading the routes waiting for a worktree", "error", err)
