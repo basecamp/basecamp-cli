@@ -1059,9 +1059,12 @@ func (l *heldLedger) RecordRefusal(ctx context.Context, refusal driver.Refusal) 
 // the worker died carries a result short of what the ledger goes on to hold,
 // and for a refusal that is the whole point of the ending.
 //
-// The ordering is made, not waited for. The ledger is held over its first
-// write, so the reader is provably stopped on the first of two refusals with
-// the second still unread, and the verdict lands while it is there.
+// The ordering is made, not waited for, at both ends. The refusals are held
+// behind a barrier the test releases once it has seen the turn in flight, so
+// the reader cannot reach them before there is a turn for them to be on; and
+// the ledger is held over its first write, so the reader is provably stopped
+// on the first of the two with the second still unread when the verdict
+// lands.
 func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
 	denial := func(id string) string {
 		return `{"type":"item.completed","item":{"id":"` + id + `","type":"mcp_tool_call","server":"other","tool":"write",` +
@@ -1078,11 +1081,17 @@ func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+			refusals := filepath.Join(t.TempDir(), "say-the-refusals")
 			h := newHarness(t, scenario{
 				TurnContext:            unsafe,
 				TurnContextAfterEvents: true,
-				Events:                 []string{`{"type":"turn.started"}`, denial("item_1"), denial("item_2")},
-				Deaf:                   deaf,
+				Events:                 []string{`{"type":"turn.started"}`},
+				// Held until the turn is in flight: a refusal read before
+				// there is a turn is on no turn, and the test would be
+				// asking about something that never happened.
+				LateEvents: []string{denial("item_1"), denial("item_2")},
+				LateAfter:  refusals,
+				Deaf:       deaf,
 				// No turn.completed: the worker is still working when the
 				// check ends it, which is what this ending is for.
 				Hang: true,
@@ -1108,14 +1117,21 @@ func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
 				result, err := s.Prompt(context.Background(), prompt)
 				answers <- answer{result, err}
 			}()
-			<-ledger.writing
 
-			// The reader is held on the first refusal with the second behind
-			// it, and the turn is in flight.
+			// The turn is in flight, and only then are the refusals said.
 			session := s.(*session)
-			session.mu.Lock()
-			inFlight := session.turn.done
-			session.mu.Unlock()
+			var inFlight chan struct{}
+			require.Eventually(t, func() bool {
+				session.mu.Lock()
+				defer session.mu.Unlock()
+				if session.turn == nil {
+					return false
+				}
+				inFlight = session.turn.done
+				return true
+			}, 20*time.Second, 5*time.Millisecond, "the turn never started")
+			require.NoError(t, os.WriteFile(refusals, nil, 0o600))
+			<-ledger.writing
 
 			// The turn must not finish while the reader is held — and if it
 			// does, that is the failure, so the ledger is let go the moment
@@ -1153,11 +1169,16 @@ func TestASessionClosedUnderATurnStillReportsItsRefusals(t *testing.T) {
 	ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
 	denial := `{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"other","tool":"write",` +
 		`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	refused := filepath.Join(t.TempDir(), "say-the-refusal")
 	h := newHarness(t, scenario{
 		TurnContext: safeTurnContext(),
 		Deaf:        true,
 		Hang:        true,
-		Events:      []string{`{"type":"turn.started"}`, denial},
+		Events:      []string{`{"type":"turn.started"}`},
+		// Held until the turn is in flight: a refusal read before there is
+		// a turn is on no turn, and this test is about what a turn carries.
+		LateEvents: []string{denial},
+		LateAfter:  refused,
 	})
 	cfg := h.config()
 	cfg.Refusals = ledger
@@ -1174,6 +1195,13 @@ func TestASessionClosedUnderATurnStillReportsItsRefusals(t *testing.T) {
 		answers <- answer{result, err}
 	}()
 	waitDeaf(t, h)
+	session := s.(*session)
+	require.Eventually(t, func() bool {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return session.turn != nil
+	}, 20*time.Second, 5*time.Millisecond, "the turn never started")
+	require.NoError(t, os.WriteFile(refused, nil, 0o600))
 	// The refusal is the turn's: refused puts it there before it writes it,
 	// and the write is where the reader is now held.
 	<-ledger.writing
