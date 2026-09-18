@@ -500,8 +500,11 @@ func testDeliveryNeedsAPull(t *testing.T) {
 }
 
 // A pull and a withdrawal are opposites: one says a worker has the
-// instruction, the other that none ever did. One statement cannot write both,
-// and a BEFORE trigger that read only the row as it was would let it.
+// instruction, the other that none ever did. No statement writes both, nor a
+// pull together with retirement or a move — whichever of the delivery rules
+// is the one that catches it. Which rule that is depends on the row's state;
+// TestOneWriteCannotWithdrawAndComplete pins the case where the withdrawal
+// rule's reading of the row being written is the only thing in the way.
 func TestOneWriteCannotBothPullAndWithdraw(t *testing.T) {
 	for name, statement := range map[string]string{
 		"pull and withdraw": `UPDATE task_events SET pulled_at = 'now', withdrawn_at = 'now' WHERE event_id = 1`,
@@ -521,4 +524,28 @@ func TestOneWriteCannotBothPullAndWithdraw(t *testing.T) {
 			assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 		})
 	}
+}
+
+// A withdrawal says no worker process ever existed; a completed delivery says
+// one reported an outcome. One statement does not write both — and here the
+// only thing that says so is the withdrawal rule reading the row as it is
+// being written: the task is superseded with no live row, nothing was pulled,
+// and the record was settled by the dispatcher, so every other delivery rule
+// lets this statement through.
+func TestOneWriteCannotWithdrawAndComplete(t *testing.T) {
+	ctx := context.Background()
+	f := newDispatchFixture(t)
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'now', delivery = 'completed' WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only a launch exposure no worker pulled")
+	var withdrawn *string
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT withdrawn_at FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&withdrawn))
+	assert.Nil(t, withdrawn)
+	assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 }
