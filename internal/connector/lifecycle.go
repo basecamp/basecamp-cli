@@ -57,14 +57,24 @@ func renderRefusedStart(kind MessageKind, eventID int64) string {
 	return renderLines(kind, lines)
 }
 
-// renderStillRunning is one still-running notice.
-func renderStillRunning(kind MessageKind, taskID int64, attemptID string, occurrence int, launchedAt, progressAt time.Time) string {
+// renderStillRunning is one still-running notice. It is dated rather than
+// written in the present tense, because it can be the last thing the
+// connector says on a task: an attempt whose events all succeeded with a
+// reply calls for no completion notice, so nothing follows to correct a
+// sentence that claims the work is under way now. "Working on this as of
+// 12:10 UTC" is a record of a moment, like every other lifecycle message,
+// and stays true after the task ends.
+//
+// The stamp is the connector's own — when it saw the attempt live — and not
+// the worker's last progress, which is a different fact the notice reports
+// separately: a task can be alive and quiet for an hour.
+func renderStillRunning(kind MessageKind, taskID int64, attemptID string, occurrence int, at, launchedAt, progressAt time.Time) string {
 	progress := "No progress has been reported yet."
 	if !progressAt.IsZero() {
 		progress = "Last progress at " + clock(progressAt) + "."
 	}
 	lines := []string{
-		"Still working on this: task " + strconv.FormatInt(taskID, 10) + " started at " + clock(launchedAt) + ". " + progress,
+		"Working on this as of " + clock(at) + ": task " + strconv.FormatInt(taskID, 10) + " started at " + clock(launchedAt) + ". " + progress,
 		"",
 		"Attempt " + attemptID + ", update " + strconv.Itoa(occurrence) + " · " + lifecycleSignature,
 	}
@@ -436,7 +446,7 @@ func stillRunningIntent(ctx context.Context, tx Tx, now time.Time, tick StillRun
 		attemptID:   tick.AttemptID,
 		occurrence:  tick.Occurrence,
 		destination: dest,
-		body:        renderStillRunning(dest.Kind, tick.TaskID, tick.AttemptID, tick.Occurrence, launchedAt, tick.ProgressAt),
+		body:        renderStillRunning(dest.Kind, tick.TaskID, tick.AttemptID, tick.Occurrence, now, launchedAt, tick.ProgressAt),
 	})
 	return err
 }

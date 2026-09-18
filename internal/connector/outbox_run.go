@@ -423,10 +423,11 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 		}
 		if in.Kind == IntentStillRunning {
-			// The notice says the worker is still working. If its attempt has
-			// ended in the meantime — behind a slow send, or a listing in
-			// front of it — that is no longer true, and the completion notice,
-			// if the settlement called for one, is the connector's last word.
+			// The notice reports a sighting of a live attempt. If that attempt
+			// has ended in the meantime — behind a slow send, or a listing in
+			// front of it — the sighting is not worth posting, and the
+			// completion notice, if the settlement called for one, is the
+			// connector's last word.
 			// A crashed process's attempt is not ended yet when a start
 			// flushes: the dispatcher's recovery settles it just after, and
 			// that settlement's notice follows this one.
