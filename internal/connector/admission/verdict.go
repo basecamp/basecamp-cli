@@ -261,8 +261,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		if policy.ProjectsUnknown && gate.Reason == ReasonNoRoute {
 			// The gate dropped it for want of a served project, and nothing
 			// could read which projects are served. Held rather than
-			// discarded: discarding would throw away work over a broken
-			// file, and the timer decides it again once the file is back.
+			// discarded: a discard is the one outcome repairing the file
+			// cannot reverse, and a blocked record can still be run. It
+			// waits for a person — `basecamp connect redispatch <id>` once
+			// the file is back — as every blocked record does. Nothing
+			// re-offers one on a timer.
 			return v.end(StateBlocked, ReasonConfigUnreadable), nil
 		}
 		// Every other gate discard turns on the trust set, the matrix or the
