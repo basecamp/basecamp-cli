@@ -144,6 +144,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return err
 	}
+	// Before the account is read or the feed is touched: a flag that cannot
+	// mean anything is a mistake to say so about, not one to act around.
+	since, err := connectSinceOverride(f.since)
+	if err != nil {
+		return err
+	}
 
 	path, err := setup.Path(config.GlobalConfigDir(), name)
 	if err != nil {
@@ -240,9 +246,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	intakeOpts := connector.LiveOptions(live)
 	intakeOpts.AccountID = account
-	intakeOpts.ConsumerNamespace = "basecamp-connect-" + strconv.FormatInt(agentID, 10)
+	intakeOpts.ConsumerNamespace = connectConsumerNamespace(agentID, f.shadow)
 	intakeOpts.Filters = eventfeed.Filters{Buckets: buckets, ExcludePerformers: []int64{agentID}, ActorTypes: []string{"person"}}
-	intakeOpts.SinceEventID = f.since
+	intakeOpts.SinceEventID = since
 	intakeOpts.Ledger = ledger
 	intakeOpts.Queue = queue
 	intakeOpts.Lines = lines
@@ -364,6 +370,32 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return ctx.Err()
 	}
 	return nil
+}
+
+// connectSinceOverride is the feed position --since asks for. Zero is the
+// default and means "resume from the ledger"; intake takes only a positive
+// value as an override (connector.Options.SinceEventID), so a negative one
+// would be accepted here and then quietly ignored there — the run would
+// resume from the ledger while the person who typed it believes they moved
+// the position.
+func connectSinceOverride(since int64) (int64, error) {
+	if since < 0 {
+		return 0, output.ErrUsage("--since takes the event id to enter the feed just after; the default, 0, resumes from the ledger")
+	}
+	return since, nil
+}
+
+// connectConsumerNamespace names a run's checkpoint lineage. A shadow run
+// gets its own: it has its own state directory, ledger, lock and checkpoint
+// already (connectStateDir), and intake's contract is that two connectors in
+// one account never share a lineage (connector.Options.ConsumerNamespace) —
+// a shadow running beside the connector it watches is two.
+func connectConsumerNamespace(agentID int64, shadow bool) string {
+	name := "basecamp-connect-" + strconv.FormatInt(agentID, 10)
+	if shadow {
+		return name + "-shadow"
+	}
+	return name
 }
 
 // connectSupportedOS is where the connector runs: Linux, and for now only
