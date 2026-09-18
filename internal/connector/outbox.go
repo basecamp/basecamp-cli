@@ -13,8 +13,9 @@ import (
 )
 
 // The outbox: every message the connector itself posts to Basecamp — the
-// guard acknowledgement, the holding reply, still-running and the completion
-// notice — goes through one table with one rule.
+// guard acknowledgement, the holding reply, still-running, the completion
+// notice and the retraction that answers an ask in one of them — goes through
+// one table with one rule.
 //
 // # Invariants
 //
@@ -26,7 +27,8 @@ import (
 //     together.
 //  2. One intent per thing answered for: the key is the guard or holding
 //     reply per event, the completion per attempt, still-running per attempt
-//     and occurrence. A second write for a key writes nothing.
+//     and occurrence, the retraction per posted message and the event whose
+//     ask it answers. A second write for a key writes nothing.
 //  3. Nothing is sent without a durable sending row. The only path to a
 //     request claims the intent — pending to sending, committed — first.
 //  4. Nothing sending is sent again automatically. A request is made only for
@@ -71,6 +73,18 @@ import (
 //     recorded. Start is the exception by design: it reconciles everything
 //     due before it sends, within the bound its caller sets, and stops
 //     sending at the first send that may not have landed.
+//  11. A notice is retracted by another message, never by editing or deleting
+//     the one that went out. Only an ask is retracted — a line telling a
+//     person to run something — and both halves of what the retraction claims
+//     are asked again at its claim, because a retraction that is wrong is
+//     worse than none: a reader trusts the later message, so a line saying an
+//     ask is answered under an ask that is still live means nobody acts on
+//     it. The message it answers must be known to exist — one whose notice
+//     was refused, or left indeterminate for a person, waits for that person
+//     rather than being posted where there may be nothing to answer, and is
+//     canceled once they say there is nothing (abandoned) — and the record
+//     must not be waiting for that ask any more, which is a person's decision
+//     having actually settled it and not merely having been made.
 const migrationOutbox = `
 CREATE TABLE outbox (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +158,130 @@ BEGIN
 END;
 `
 
+// migrationRetraction adds the retraction: a fifth kind, and the message it
+// answers. Both live in constraints migrationOutbox already shipped — a kind
+// this build did not know was refused by a CHECK — so the table is rebuilt
+// rather than altered, which SQLite has no statement for.
+//
+// The order matters. Three triggers on other tables name outbox in their
+// bodies — two on task_events, one on events — and SQLite re-parses every
+// trigger in the schema when a table is renamed: with the old table dropped
+// and the new one not yet named outbox, that parse fails. They are dropped
+// first and written again at the end, unchanged. The table's own triggers and
+// indexes go with the DROP and are written again too, also unchanged — the
+// hold's refusal among them, so nothing is posted under a hold after this
+// runs any more than before it.
+//
+// Ids are the outbox's own: they are copied, the AUTOINCREMENT sequence
+// follows the highest copied, and no id is ever handed out twice.
+const migrationRetraction = `
+DROP TRIGGER outbox_guard_canceled_by_get_dispatch;
+DROP TRIGGER outbox_guard_fired_before_task;
+DROP TRIGGER events_held_cancels_guard;
+
+CREATE TABLE outbox_rebuilt (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  intent_key   TEXT    NOT NULL UNIQUE,
+  kind         TEXT    NOT NULL CHECK (kind IN ('guard_ack', 'holding_reply', 'still_running', 'completion', 'retraction')),
+  state        TEXT    NOT NULL DEFAULT 'pending'
+               CHECK (state IN ('pending', 'sending', 'sent', 'indeterminate', 'canceled', 'abandoned')),
+  event_id     INTEGER REFERENCES events (id),
+  task_id      INTEGER REFERENCES tasks (id),
+  attempt_id   TEXT    REFERENCES attempts (id),
+  occurrence   INTEGER NOT NULL DEFAULT 0,
+  bucket_id    INTEGER NOT NULL,
+  message_kind TEXT    NOT NULL CHECK (message_kind IN ('boost', 'comment', 'chat_line')),
+  recording_id INTEGER NOT NULL CHECK (recording_id > 0),
+  body         TEXT    NOT NULL CHECK (body <> ''),
+  created_at   TEXT    NOT NULL,
+  not_before   TEXT    NOT NULL,
+  sending_at   TEXT,
+  finished_at  TEXT,
+  receipt_id   INTEGER,
+  note         TEXT    NOT NULL DEFAULT '',
+  resolved_by  TEXT    NOT NULL DEFAULT '',
+  reconcile_failures INTEGER NOT NULL DEFAULT 0,
+  reconcile_at       TEXT,
+  -- retracts is the intent whose posted message this one answers: set on a
+  -- retraction, on nothing else.
+  retracts     INTEGER REFERENCES outbox (id),
+  CHECK ((kind = 'retraction') = (retracts IS NOT NULL)),
+  CHECK ((state = 'sent') = (receipt_id IS NOT NULL)),
+  CHECK (state IN ('pending', 'canceled') OR sending_at IS NOT NULL)
+);
+
+INSERT INTO outbox_rebuilt (id, intent_key, kind, state, event_id, task_id, attempt_id, occurrence, bucket_id,
+  message_kind, recording_id, body, created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by,
+  reconcile_failures, reconcile_at)
+SELECT id, intent_key, kind, state, event_id, task_id, attempt_id, occurrence, bucket_id,
+  message_kind, recording_id, body, created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by,
+  reconcile_failures, reconcile_at
+FROM outbox;
+
+DROP TABLE outbox;
+ALTER TABLE outbox_rebuilt RENAME TO outbox;
+
+CREATE UNIQUE INDEX outbox_receipt ON outbox (message_kind, receipt_id) WHERE receipt_id IS NOT NULL;
+CREATE INDEX outbox_due ON outbox (state, not_before);
+CREATE INDEX outbox_destination ON outbox (message_kind, recording_id, state);
+CREATE INDEX outbox_event ON outbox (event_id, kind);
+CREATE INDEX outbox_retracts ON outbox (retracts) WHERE retracts IS NOT NULL;
+
+CREATE TRIGGER outbox_state_edges
+BEFORE UPDATE OF state ON outbox
+WHEN NEW.state <> OLD.state AND NOT (
+     (OLD.state = 'pending'       AND NEW.state IN ('sending', 'canceled'))
+  OR (OLD.state = 'sending'       AND NEW.state IN ('sent', 'indeterminate', 'canceled'))
+  OR (OLD.state = 'indeterminate' AND NEW.state IN ('sent', 'abandoned', 'pending'))
+  OR (OLD.state = 'canceled'      AND NEW.state = 'pending' AND OLD.note = 'the request was refused; no message was created')
+)
+BEGIN
+  SELECT RAISE(ABORT, 'an outbox intent never moves along that edge');
+END;
+
+CREATE TRIGGER outbox_receipt_is_final
+BEFORE UPDATE OF receipt_id ON outbox
+WHEN OLD.receipt_id IS NOT NULL AND (NEW.receipt_id IS NULL OR NEW.receipt_id <> OLD.receipt_id)
+BEGIN
+  SELECT RAISE(ABORT, 'a receipt never changes');
+END;
+
+CREATE TRIGGER outbox_guard_canceled_by_get_dispatch
+AFTER UPDATE OF guard ON task_events
+WHEN OLD.guard = 'armed' AND NEW.guard = 'canceled'
+BEGIN
+  UPDATE outbox SET state = 'canceled', note = 'get_dispatch',
+    finished_at = strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now')
+  WHERE intent_key = 'guard_ack:event:' || NEW.event_id AND state = 'pending';
+END;
+
+CREATE TRIGGER outbox_guard_fired_before_task
+AFTER INSERT ON task_events
+WHEN NEW.guard = 'armed' AND EXISTS (
+  SELECT 1 FROM outbox
+  WHERE intent_key = 'guard_ack:event:' || NEW.event_id AND state IN ('sending', 'sent', 'indeterminate', 'abandoned')
+)
+BEGIN
+  UPDATE task_events SET guard = 'fired' WHERE task_id = NEW.task_id AND event_id = NEW.event_id;
+END;
+
+CREATE TRIGGER events_held_cancels_guard
+AFTER UPDATE OF state ON events
+WHEN NEW.state = 'held' AND OLD.state <> 'held'
+BEGIN
+  UPDATE outbox SET state = 'canceled', note = 'held',
+    finished_at = strftime('%Y-%m-%dT%H:%M:%f000000Z', 'now')
+  WHERE intent_key = 'guard_ack:event:' || NEW.id AND state = 'pending';
+END;
+
+CREATE TRIGGER outbox_refused_under_hold
+BEFORE UPDATE OF state ON outbox
+WHEN NEW.state = 'sending' AND OLD.state <> 'sending' AND EXISTS (SELECT 1 FROM hold_marker)
+BEGIN
+  SELECT RAISE(ABORT, 'the connector is held: nothing is posted until basecamp connect release');
+END;
+`
+
 // IntentKind is what a lifecycle message answers for.
 type IntentKind string
 
@@ -164,6 +302,10 @@ const (
 	IntentStillRunning IntentKind = "still_running"
 	// IntentCompletion is an attempt's completion notice. One per attempt.
 	IntentCompletion IntentKind = "completion"
+	// IntentRetraction answers an ask a posted notice made: it says the thing
+	// the notice asked a person to do has been done, or been decided against.
+	// One per posted message and the event whose ask it answers.
+	IntentRetraction IntentKind = "retraction"
 )
 
 // IntentState is where an intent is.
@@ -221,6 +363,9 @@ type Intent struct {
 	TaskID     int64
 	AttemptID  string
 	Occurrence int
+	// Retracts is the intent whose posted message a retraction answers; zero
+	// on every other kind.
+	Retracts int64
 
 	Destination Destination
 	// Body is the message exactly as it is posted, rendered from records when
@@ -275,6 +420,13 @@ func stillRunningKey(attemptID string, occurrence int) string {
 	return string(IntentStillRunning) + ":attempt:" + attemptID + ":" + strconv.Itoa(occurrence)
 }
 
+// retractionKey names the posted message and the event whose ask in it is
+// answered: one message can ask for two events and have each answered on its
+// own day.
+func retractionKey(intentID, eventID int64) string {
+	return string(IntentRetraction) + ":outbox:" + strconv.FormatInt(intentID, 10) + ":event:" + strconv.FormatInt(eventID, 10)
+}
+
 // Errors from the outbox.
 var (
 	// ErrNoSuchIntent is an intent id the ledger does not hold.
@@ -294,6 +446,7 @@ type newIntent struct {
 	taskID      int64
 	attemptID   string
 	occurrence  int
+	retracts    int64
 	destination Destination
 	body        string
 	notBefore   time.Time
@@ -308,11 +461,12 @@ func writeIntent(ctx context.Context, tx Tx, now time.Time, in newIntent) error 
 		in.notBefore = now
 	}
 	_, err := tx.ExecContext(ctx, `
-INSERT INTO outbox (intent_key, kind, event_id, task_id, attempt_id, occurrence, bucket_id, message_kind, recording_id, body, created_at, not_before)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO outbox (intent_key, kind, event_id, task_id, attempt_id, occurrence, bucket_id, message_kind, recording_id, body, created_at, not_before, retracts)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (intent_key) DO NOTHING`,
 		in.key, string(in.kind), nullableID64(in.eventID), nullableID64(in.taskID), nullableString(in.attemptID), in.occurrence,
-		in.destination.BucketID, string(in.destination.Kind), in.destination.RecordingID, in.body, stamp(now), stamp(in.notBefore))
+		in.destination.BucketID, string(in.destination.Kind), in.destination.RecordingID, in.body, stamp(now), stamp(in.notBefore),
+		nullableID64(in.retracts))
 	if err != nil {
 		return fmt.Errorf("connector: write outbox intent %s: %w", in.key, err)
 	}
@@ -335,8 +489,8 @@ func nullableString(s string) any {
 
 const selectIntents = `
 SELECT id, intent_key, kind, state, COALESCE(event_id, 0), COALESCE(task_id, 0), COALESCE(attempt_id, ''), occurrence,
-       bucket_id, message_kind, recording_id, body, created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by,
-       reconcile_failures, reconcile_at
+       COALESCE(retracts, 0), bucket_id, message_kind, recording_id, body, created_at, not_before, sending_at, finished_at,
+       receipt_id, note, resolved_by, reconcile_failures, reconcile_at
 FROM outbox`
 
 func scanIntents(rows *sql.Rows) ([]Intent, error) {
@@ -351,7 +505,7 @@ func scanIntents(rows *sql.Rows) ([]Intent, error) {
 			reconcileAt              sql.NullString
 			receipt                  sql.NullInt64
 		)
-		if err := rows.Scan(&in.ID, &in.Key, &kind, &state, &in.EventID, &in.TaskID, &in.AttemptID, &in.Occurrence,
+		if err := rows.Scan(&in.ID, &in.Key, &kind, &state, &in.EventID, &in.TaskID, &in.AttemptID, &in.Occurrence, &in.Retracts,
 			&in.Destination.BucketID, &messageKind, &in.Destination.RecordingID, &in.Body, &created, &notBefore,
 			&sendingAt, &finishedAt, &receipt, &in.Note, &in.ResolvedBy, &in.ReconcileFailures, &reconcileAt); err != nil {
 			return nil, fmt.Errorf("connector: read outbox: %w", err)

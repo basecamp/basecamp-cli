@@ -182,7 +182,8 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Routed && record.Decision.ConversationKey != ""
-	now := l.timestamp()
+	at := l.now()
+	now := stamp(at)
 	authorize := []assignment{{column: "authorized_at", value: now}, {column: "authorized_by", value: by}}
 	recorded := false
 
@@ -326,6 +327,14 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 			return RedispatchResult{}, err
 		}
 	}
+	// A notice already posted that asked for this redispatch is answered by
+	// one, in this transaction, as every other lifecycle message is written
+	// in the transaction of the transition that calls for it.
+	if l.hooks.RecordDecided != nil {
+		if err := l.hooks.RecordDecided(ctx, tx, RecordDecision{EventID: eventID, Action: DecisionRedispatch, At: at}); err != nil {
+			return RedispatchResult{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return RedispatchResult{}, fmt.Errorf("connector: commit redispatch of %d: %w", eventID, err)
 	}
@@ -397,7 +406,8 @@ func (l *Ledger) discard(ctx context.Context, eventID int64, by string) (Discard
 		return DiscardResult{}, refuse(fmt.Sprintf("is %s: only a held, blocked or unknown record is discarded", record.State))
 	}
 
-	now := l.timestamp()
+	at := l.now()
+	now := stamp(at)
 	// Recorded before the move, which the database allows out of completed
 	// only against it (invariant 4).
 	if err := recordDecision(ctx, tx, decision{action: "discard", eventID: eventID, by: by, at: notBefore(now, task.completedAt),
@@ -426,6 +436,13 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 		return DiscardResult{}, err
 	}
 	out.Canceled = int(canceled)
+	// What it already said, and that asked for this decision, is retracted:
+	// the ask is answered, so it stops standing on the card as an open one.
+	if l.hooks.RecordDecided != nil {
+		if err := l.hooks.RecordDecided(ctx, tx, RecordDecision{EventID: eventID, Action: DecisionDiscard, At: at}); err != nil {
+			return DiscardResult{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return DiscardResult{}, fmt.Errorf("connector: commit discard of %d: %w", eventID, err)
 	}

@@ -76,6 +76,15 @@ const (
 	// lists in one pass.
 	RunBatch          = 16
 	RunReconcileBatch = 1
+	// RetractionWait is how long a retraction waits when the message it
+	// answers is still on its way: the request in front of it is bounded by
+	// PostTimeout, so this only decides how often the wait is asked again.
+	RetractionWait = time.Second
+	// RetractionHeld is how long it waits when the message it answers is a
+	// person's to settle — left indeterminate, or refused and resendable.
+	// Nothing but a person changes that, and a person takes minutes at best,
+	// so the question is asked far less often than of one still in flight.
+	RetractionHeld = time.Minute
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -279,7 +288,8 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 	claimed[intent.ID] = true
 	o.line(intent)
 	if intent.State != IntentSending {
-		// Claiming canceled it.
+		// Claiming canceled it, or left it pending for a later tick: either
+		// way no request is made for it, and the flush goes on to the next.
 		return intent.ID, false, nil
 	}
 
@@ -337,8 +347,9 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 }
 
 // claimIntent moves the oldest due pending intent to sending and commits, or,
-// for a guard that no longer applies, to canceled. It is the only way to
-// sending.
+// for one that no longer applies, to canceled; a retraction whose message is
+// still on its way is left pending and due again shortly. It is the only way
+// to sending.
 func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, error) {
 	var (
 		out Intent
@@ -440,6 +451,102 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 			if !live {
 				next, note = IntentCanceled, "the attempt ended before the notice went out"
+			}
+		}
+		if in.Kind == IntentRetraction {
+			// A retraction says two things, and both are asked again here,
+			// because a retraction that is wrong is worse than none: a reader
+			// trusts the later message, and a line saying an ask is answered
+			// under an ask that is still live means nobody acts on it.
+			//
+			// First, that there is a message at the destination to answer. It
+			// goes out once that message is known to be there, waits while it
+			// is on its way, and is never sent when it turned out not to
+			// exist: a refusal created nothing, and an indeterminate or
+			// abandoned intent is a person's to settle, not something to post
+			// a reply to on a guess.
+			//
+			// Sent is sent however it got there. A person resolving an
+			// indeterminate notice as sent has looked at the destination and
+			// named the message; that is the strongest form of the evidence
+			// this needs, not a reason to stay quiet, and an ask a person has
+			// just confirmed is on the card is the last one to leave standing.
+			// One who abandons it instead has said it is not to be sent, and
+			// the retraction goes with it.
+			//
+			// So a notice a person has yet to settle leaves the retraction
+			// pending, not canceled: an indeterminate one may still be
+			// resolved sent, a refused one resent, and either puts the ask on
+			// the card. Canceling on the first tick after reconciliation gave
+			// up would make the answer depend on whether a tick or the person
+			// got there first, and a person is always slower. It is asked
+			// again at RetractionHeld rather than RetractionWait, since only a
+			// person changes it. The settlement decides it either way: sent
+			// answers the ask, abandoned ends it.
+			source := Intent{}
+			var answered, sourceKind, sourceNote string
+			switch err := tx.QueryRowContext(ctx, `SELECT state, kind, intent_key, COALESCE(event_id, 0), note FROM outbox WHERE id = ?`,
+				in.Retracts).Scan(&answered, &sourceKind, &source.Key, &source.EventID, &sourceNote); {
+			case errors.Is(err, sql.ErrNoRows):
+				answered = ""
+			case err != nil:
+				return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+			}
+			source.Kind = IntentKind(sourceKind)
+			waiting, held := false, false
+			switch IntentState(answered) {
+			case IntentSent:
+				// The message is at the destination: answer it.
+			case IntentPending, IntentSending:
+				waiting = true
+			case IntentIndeterminate:
+				waiting, held = true, true
+			case IntentCanceled:
+				// A refused request created nothing and a person may send it
+				// again; any other cancellation is final.
+				if sourceNote == RefusedNote {
+					waiting, held = true, true
+				} else {
+					next, note = IntentCanceled, "the notice it answers was not posted"
+				}
+			default:
+				next, note = IntentCanceled, "the notice it answers was not posted"
+			}
+			// Second, that the ask is answered — now, not when the decision
+			// was made, and answered as the notice that made it asked. A
+			// redispatch of a blocked record authorizes it and leaves its
+			// prerequisite to run again; until that settles the block the
+			// operator is still being told to redispatch, and the retraction
+			// waits. A record that is gone answers nothing, and says nothing.
+			if next == IntentSending && !waiting {
+				open, found, err := askStillOpen(ctx, tx, source, in.EventID)
+				switch {
+				case err != nil:
+					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+				case !found:
+					next, note = IntentCanceled, "the record it answers for is gone"
+				case open:
+					waiting = true
+				}
+			}
+			if waiting {
+				// Not yet. It stays pending, due again shortly, rather than
+				// being claimed and left with nothing to say.
+				wait := RetractionWait
+				if held {
+					wait = RetractionHeld
+				}
+				due := l.now().Add(wait)
+				if _, err := tx.ExecContext(ctx, `UPDATE outbox SET not_before = ? WHERE id = ? AND state = 'pending'`,
+					stamp(due), in.ID); err != nil {
+					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("connector: commit outbox claim %d: %w", in.ID, err)
+				}
+				in.NotBefore = due
+				out, ok = in, true
+				return nil
 			}
 		}
 		if in.Kind == IntentGuardAck {
