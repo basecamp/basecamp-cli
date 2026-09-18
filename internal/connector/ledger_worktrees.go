@@ -255,10 +255,10 @@ func (l *Ledger) moveWorktree(ctx context.Context, id int64, state WorktreeState
 		}
 		defer func() { _ = tx.Rollback() }()
 		var (
-			current, workDir string
-			finished         sql.NullString
+			current, workDir, route string
+			finished                sql.NullString
 		)
-		switch err := tx.QueryRowContext(ctx, `SELECT state, work_dir, finished_at FROM worktrees WHERE id = ?`, id).Scan(&current, &workDir, &finished); {
+		switch err := tx.QueryRowContext(ctx, `SELECT state, work_dir, route, finished_at FROM worktrees WHERE id = ?`, id).Scan(&current, &workDir, &route, &finished); {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("connector: worktree %d: %w", id, ErrWorktreeState)
 		case err != nil:
@@ -294,6 +294,18 @@ UPDATE worktrees SET state = 'removing', finished_at = COALESCE(finished_at, ?),
 		}
 		if err != nil {
 			return fmt.Errorf("connector: worktree %d to %s: %w", id, state, err)
+		}
+		if state == WorktreeLive {
+			// A worktree on this route exists, which is the only proof this
+			// connector has that the route works — so the record of its
+			// failures goes with the transition that established it, in this
+			// transaction. Cleared afterwards instead, the two could come
+			// apart: a durable live worktree and a standing wait, and status
+			// reporting a route as failing that had just succeeded. Here that
+			// state cannot be written, rather than being reconciled later.
+			if _, err := tx.ExecContext(ctx, `DELETE FROM route_waits WHERE route = ?`, route); err != nil {
+				return fmt.Errorf("connector: worktree %d clearing the wait on %s: %w", id, route, err)
+			}
 		}
 		return tx.Commit()
 	})

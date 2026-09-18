@@ -343,3 +343,115 @@ func TestWaitingRoutesAreReportedWhenEveryWorkerSlotIsTaken(t *testing.T) {
 	require.NoError(t, h.d.dispatchReady(ctx))
 	assert.Contains(t, logs.String(), `"route":"`+testRoute+`"`)
 }
+
+// The wait goes with the transition that makes the worktree live, in that
+// transaction. Cleared afterwards, a crash or a failed delete between the two
+// left a durable worktree and a standing wait, and status reporting a route
+// as failing that had just succeeded.
+func TestAWorktreeGoingLiveClearsTheWaitInTheSameTransaction(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	now := time.Now()
+	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+		Route: route, Failures: 3, Reason: "fatal: cannot chdir",
+		FirstAt: now.Add(-time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
+	}))
+
+	id, err := h.ledger.BeginWorktree(ctx, Worktree{
+		Path: filepath.Join(h.root, "repo", "120-live"), WorkDir: filepath.Join(h.root, "repo", "120-live"),
+		Route: route, Repository: h.repo, Branch: BranchPrefix + "120-live", BaseCommit: "abc",
+		OriginatingEventID: 120, State: WorktreeCreating,
+	})
+	require.NoError(t, err)
+
+	// No Prepare, no clearWait call: the move alone has to do it.
+	require.NoError(t, h.ledger.MoveWorktree(ctx, id, WorktreeLive, WorktreeCreating))
+
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, waits, "a live worktree and a standing wait on its route cannot both be written")
+}
+
+// Only that transition clears it. A worktree that ends any other way proves
+// nothing about the route, so the record of its failures stands.
+func TestOtherWorktreeTransitionsLeaveTheWaitAlone(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	now := time.Now()
+	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+		Route: route, Failures: 3, FirstAt: now.Add(-time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
+	}))
+	id, err := h.ledger.BeginWorktree(ctx, Worktree{
+		Path: filepath.Join(h.root, "repo", "121-kept"), WorkDir: filepath.Join(h.root, "repo", "121-kept"),
+		Route: route, Repository: h.repo, Branch: BranchPrefix + "121-kept", BaseCommit: "abc",
+		OriginatingEventID: 121, State: WorktreeCreating,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, h.ledger.RetainWorktree(ctx, id, RetainedUnverified, WorktreeCreating))
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	assert.Len(t, waits, 1, "a worktree kept without ever going live proves nothing about the route")
+}
+
+// The row outlives the process and the map does not. A restart that did not
+// take the backoffs back read its own ledger saying a route was in a backoff
+// until half past, while RoutesWaiting said nothing was waiting and the first
+// tick started a record straight into it.
+func TestARestartTakesTheArmedBackoffsBack(t *testing.T) {
+	h := newWorktreeHarness(t)
+	h.wt = h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
+	clock := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	h.wt.now = func() time.Time { return clock }
+	route := filepath.Join(h.repo, "app")
+	ctx := context.Background()
+
+	_, err := h.wt.Prepare(ctx, route, 130)
+	require.Error(t, err)
+	require.Equal(t, []string{route}, h.wt.RoutesWaiting())
+
+	// A new process on the same ledger: its own map, empty.
+	restarted := h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
+	restarted.now = func() time.Time { return clock }
+	require.Empty(t, restarted.RoutesWaiting(), "the map does not outlive the process")
+
+	require.NoError(t, restarted.Recover(ctx))
+	assert.Equal(t, []string{route}, restarted.RoutesWaiting(),
+		"the dispatcher and the status line agree about the same route after a restart")
+	_, err = restarted.Prepare(ctx, route, 131)
+	require.ErrorIs(t, err, ErrPrepareBackoff, "and the wait the row promised is the wait that is kept")
+
+	// The count comes back with it, so the backoff goes on doubling from
+	// where it was rather than starting at a minute again on every restart.
+	clock = clock.Add(PrepareBackoffMax)
+	_, err = restarted.Prepare(ctx, route, 132)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrPrepareBackoff)
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	require.Len(t, waits, 1)
+	assert.Equal(t, 2, waits[0].Failures)
+	assert.Equal(t, PrepareBackoff*2, waits[0].Until.Sub(waits[0].LastAt), "doubled from the first, not restarted at it")
+}
+
+// A backoff that has run out is not resumed: it is a failure nothing has
+// disproved, which is what the row already says, and the route is startable.
+func TestARestartDoesNotResumeAnExpiredBackoff(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	now := time.Now()
+	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+		Route: route, Failures: 9, FirstAt: now.Add(-6 * time.Hour), LastAt: now.Add(-time.Hour), Until: now.Add(-time.Minute),
+	}))
+
+	restarted := h.worktrees("")
+	require.NoError(t, restarted.Recover(ctx))
+	assert.Empty(t, restarted.RoutesWaiting(), "an elapsed backoff holds nothing")
+
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	assert.Len(t, waits, 1, "and the record of the failures stands until a worktree disproves it")
+}

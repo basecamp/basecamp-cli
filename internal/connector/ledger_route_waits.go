@@ -11,12 +11,30 @@ import (
 // Route waits in the ledger: a route whose last attempt at a worktree failed,
 // and when the next attempt is due.
 //
-// The backoff itself lives in Worktrees, in memory, because that is where the
-// dispatcher asks it. This table is the operator's copy of it. `connect
-// status` and `connect doctor` run in another process, read the ledger
-// read-only and never speak to a running connector, so a wait that stayed in
-// memory was a wait nobody outside the connector's stdout could see — which is
-// the whole of the problem this table exists for.
+// This table is the durable record; Worktrees holds a copy of it in memory
+// because the dispatcher asks which routes are waiting on every tick, once a
+// second, and that question must not become a query on the ledger's single
+// connection — nor have to answer "I could not read it", which has no safe
+// meaning here: "nothing is waiting" starts records into a route that should
+// wait, and "everything is" stalls the connector on a bookkeeping table.
+//
+// A copy has to say where it can come apart from what it copies, so: nowhere,
+// and here is why each way is closed rather than reconciled.
+//
+//   - A worktree made. The row is deleted inside the transaction that moves
+//     the worktree to live (Ledger.moveWorktree), so a live worktree and a
+//     standing wait on its route cannot both be written.
+//   - A restart. The map does not outlive the process and the row does, so
+//     Worktrees.Recover takes the unexpired backoffs back into memory before
+//     anything is dispatched — the one moment the two can be out of step.
+//   - A route that is no longer routed, or worktrees turned off. Neither is
+//     drift: the row is right and has stopped applying, and the dispatcher's
+//     ten-minute review and Recover respectively drop it.
+//
+// It exists at all because `connect status` and `connect doctor` run in
+// another process, read the ledger read-only and never speak to a running
+// connector: a wait that stayed in memory was a wait nobody outside the
+// connector's stdout could see, which is the whole of the problem.
 //
 // One row per route, updated on each failure and deleted the moment a worktree
 // is made — and pruned against connect.json's routes, so a route that is no

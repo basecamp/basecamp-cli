@@ -383,11 +383,58 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 		w.recordWait(ctx, route, failure, now, err)
 		return "", err
 	}
+	// The recorded wait went with the transition that made the worktree live,
+	// in that transaction (Ledger.moveWorktree): a worktree exists on this
+	// route, which is the only proof this connector ever has that it works.
+	// Nothing to clear here, and no window in which a live worktree and a
+	// standing wait can both be on the disk.
 	delete(w.failures, route)
-	// The worktree is the only proof this connector ever has that the route
-	// works, so it is what clears the record of the failures.
-	w.clearWait(ctx, route)
 	return workDir, nil
+}
+
+// resumeWaits takes the backoffs a previous process armed back into memory.
+//
+// The row outlives the process; the map does not. Without this a restart read
+// its own ledger saying a route was in a backoff until half past, while
+// RoutesWaiting said nothing was waiting and the first tick started a record
+// straight into it — the status line and the dispatcher disagreeing about the
+// same route. Recovery is the only moment the two can be out of step, because
+// it runs before anything is dispatched, so reconciling here closes the gap
+// rather than narrowing it.
+//
+// Only a backoff that has not run out is resumed: a past deadline is a
+// failure nothing has disproved, not a wait, and it is what the row already
+// says. The count comes back with it, so the connector goes on doubling from
+// where it was instead of starting at a minute again on every restart.
+//
+// A restart therefore keeps the remaining wait rather than trying the route
+// at once. That is the conservative half of the trade — a connector that
+// crash-loops does not hammer a broken route on every start — and what a
+// person loses is an immediate retry after fixing the machine, which the
+// status line now gives them the deadline for.
+func (w *Worktrees) resumeWaits(ctx context.Context) {
+	waits, err := w.ledger.RouteWaits(ctx)
+	if err != nil {
+		// The backoffs stay empty, which is what a restart did before: every
+		// route is tried once and fails again into a fresh wait. Nothing is
+		// lost, so this is said and not returned.
+		w.log.Warn("connector: could not read the recorded waits on routes", "error", err)
+		return
+	}
+	now := w.now()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	resumed := 0
+	for _, wait := range waits {
+		if !wait.Waiting(now) {
+			continue
+		}
+		w.failures[wait.Route] = prepareFailure{count: wait.Failures, first: wait.FirstAt, until: wait.Until}
+		resumed++
+	}
+	if resumed > 0 {
+		w.log.Info("connector: routes whose backoff a previous run armed are still waiting it out", "routes", resumed)
+	}
 }
 
 // clearWait forgets the recorded wait on a route, if there was one.
@@ -820,6 +867,8 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 		} else if dropped > 0 {
 			w.log.Info("connector: worktrees are off, so no route is waiting for one", "routes", dropped)
 		}
+	} else {
+		w.resumeWaits(ctx)
 	}
 	unlock, err := w.lock(ctx)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
