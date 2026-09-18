@@ -666,13 +666,15 @@ func (h *harness) stopWatchingForTokenFiles() int {
 //
 // It runs when the connector has exited, and the workers' side of it is read
 // once the workers have said their word (awaitWorkersWord): a worker's word
-// is due by its own exit, not by the connector's.
+// is due by its own exit, not by the connector's. The watch for a token in a
+// file runs until then too, since a worker still running is a worker that
+// can still write one.
 func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	t := h.t
 	t.Helper()
+	log := h.awaitWorkersWord(stateDir)
 	watched := h.stopWatchingForTokenFiles()
 	tokens := h.taskTokens()
-	log := h.awaitWorkersWord(stateDir)
 	// A worker that bound to its task took a token, and the harness kept it.
 	// If it did not, this check has nothing to look for, and says so rather
 	// than passing.
@@ -798,63 +800,85 @@ func (h *harness) tasksLaunched(dir string) int {
 // check there ran over nobody.
 //
 // The workers owed a word are the processes the ledger recorded for the run's
-// attempts and the ones that reached their agent; a real agent row leaves no
-// agent log and is owed none. A worker that is gone without a word is still
-// one that started and said nothing, and the caller fails on it: the wait
-// ends at its exit, not at a deadline.
+// attempts and the ones that reached their agent, each by its identity — pid
+// and kernel start time — so a pid the kernel has since given to a stranger
+// is not waited on as if it were the worker. A real agent row leaves no
+// agent log and is owed none. Both halves are held: a worker still alive
+// without a word when the wait runs out fails, and so does one that is gone
+// without ever saying it — a process that could have been handed a token
+// and left no account of it is not a pass.
 func (h *harness) awaitWorkersWord(stateDir string) []agentLogEntry {
-	h.t.Helper()
-	var recorded []int
+	t := h.t
+	t.Helper()
+	var recorded []driver.Process
 	if !h.driver.Real {
-		recorded = h.recordedWorkerPIDs(stateDir)
+		recorded = h.recordedWorkerProcesses(stateDir)
 	}
 	var log []agentLogEntry
-	_ = waitFor(context.Background(), func() (bool, error) {
+	var alive []int
+	err := waitFor(context.Background(), func() (bool, error) {
 		log = h.agentLog()
-		for _, pid := range workersOwingAWord(log, recorded) {
-			if !processGone(context.Background(), pid) {
-				return false, nil
+		alive = alive[:0]
+		for _, p := range workersOwingAWord(log, recorded) {
+			gone, err := driver.ProcessGone(p)
+			if err != nil {
+				return false, fmt.Errorf("worker pid %d: %w", p.PID, err)
 			}
+			if !gone {
+				alive = append(alive, p.PID)
+			}
+		}
+		if len(alive) > 0 {
+			return false, nil
 		}
 		// Whoever still owes a word is gone, and a process that is gone has
 		// written all it ever will: this reading is the one to count.
 		log = h.agentLog()
 		return true, nil
 	})
+	require.NoError(t, err, "a worker still owes its word after the connector exited: pids %v", alive)
+	owing := workersOwingAWord(log, recorded)
+	silent := make([]int, 0, len(owing))
+	for _, p := range owing {
+		silent = append(silent, p.PID)
+	}
+	require.Empty(t, silent, "a worker is gone without saying whether it took its task's token: pids %v", silent)
 	return log
 }
 
 // workersOwingAWord is every worker, recorded by the ledger or started as far
-// as its agent, whose word is not in log.
-func workersOwingAWord(log []agentLogEntry, recorded []int) []int {
+// as its agent, whose word is not in log — by its identity, so it can be
+// waited on and told from a later process with its pid.
+func workersOwingAWord(log []agentLogEntry, recorded []driver.Process) []driver.Process {
 	said := map[int]bool{}
 	for _, e := range log {
 		if e.Step == "bound" || strings.HasPrefix(e.Step, "bind-failed:") {
 			said[e.PID] = true
 		}
 	}
-	var owing []int
+	var owing []driver.Process
 	seen := map[int]bool{}
-	owe := func(pid int) {
-		if pid > 0 && !said[pid] && !seen[pid] {
-			seen[pid] = true
-			owing = append(owing, pid)
+	owe := func(p driver.Process) {
+		if p.PID > 0 && !said[p.PID] && !seen[p.PID] {
+			seen[p.PID] = true
+			owing = append(owing, p)
 		}
 	}
-	for _, pid := range recorded {
-		owe(pid)
+	for _, p := range recorded {
+		owe(p)
 	}
 	for _, e := range log {
 		if e.Step == "start" {
-			owe(e.PID)
+			owe(identityOf(e.PID, e.PGID, e.StartedAt))
 		}
 	}
 	return owing
 }
 
-// recordedWorkerPIDs is every worker process the ledger in dir recorded for
-// an attempt, read as tasksLaunched reads the ledger: as it is, or not at all.
-func (h *harness) recordedWorkerPIDs(dir string) []int {
+// recordedWorkerProcesses is every worker process the ledger in dir recorded
+// for an attempt, with the identity it recorded, read as tasksLaunched reads
+// the ledger: as it is, or not at all.
+func (h *harness) recordedWorkerProcesses(dir string) []driver.Process {
 	h.t.Helper()
 	ctx := context.Background()
 	l, err := OpenLedgerReadOnly(ctx, filepath.Join(dir, LedgerFile))
@@ -863,7 +887,11 @@ func (h *harness) recordedWorkerPIDs(dir string) []int {
 	}
 	require.NoError(h.t, err)
 	defer func() { _ = l.Close() }()
-	return recordedWorkers(h.t, l)
+	var out []driver.Process
+	for _, a := range recordedAttempts(h.t, l) {
+		out = append(out, a.process)
+	}
+	return out
 }
 
 // scanForSecret reads every file under dirs, in a process of its own, and

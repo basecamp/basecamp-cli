@@ -275,8 +275,11 @@ func recordedAttempts(t *testing.T, l *Ledger) []recordedAttempt {
 		)
 		require.NoError(t, rows.Scan(&a.id, &a.state, &a.process.PID, &a.process.PGID, &started))
 		if started.Valid {
+			// The ledger writes the stamp only when it is the kernel's
+			// (AttemptProcess.startedStamp), so one read back is exact.
 			a.process.StartedAt, err = parseStamp(started.String)
 			require.NoError(t, err)
+			a.process.StartedExact = true
 		}
 		out = append(out, a)
 	}
