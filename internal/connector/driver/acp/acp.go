@@ -302,5 +302,11 @@ func (s *session) handshake(ctx context.Context, d *Driver, cfg driver.SessionCo
 	if err != nil {
 		return err
 	}
-	return s.enterAskingMode(ctx, opened)
+	if err := s.enterAskingMode(ctx, opened); err != nil {
+		return err
+	}
+	// Last, because it is the one check made on what the adapter is actually
+	// running rather than on what it was given, and it needs a session in its
+	// asking mode to ask.
+	return s.verifyMCPConfiguration(ctx, d.opts.Adapter)
 }

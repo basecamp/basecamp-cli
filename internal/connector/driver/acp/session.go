@@ -53,6 +53,9 @@ type session struct {
 	// canceled, and takes the flag with it.
 	canceled bool
 	unsafe   error
+	// readback collects the text of the agent's own answer to a read-back
+	// command, and is nil at every other moment of a session's life.
+	readback *strings.Builder
 	// earlyInit holds an account of the MCP servers that arrived before the
 	// session's id did, by the id it named.
 	earlyInit map[string]earlyAccount
@@ -874,10 +877,14 @@ type sessionUpdate struct {
 	// more paths than maxLocations, or one longer than maxLocationPath. The
 	// policy places a call by every path it names, so a call whose paths are
 	// not all here is one the policy cannot place.
-	Unplaceable   bool
-	Used          *int64
-	Size          *int64
-	Chars         int
+	Unplaceable bool
+	Used        *int64
+	Size        *int64
+	Chars       int
+	// Text is the text of a chunk, kept only so an adapter's answer to its
+	// own read-back command can be read (mcp.go). Nothing else reads it, and
+	// no update this driver emits carries it.
+	Text          string
 	CurrentModeID string
 	ConfigOptions []configOption
 }
@@ -962,6 +969,10 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 	}
 	if json.Unmarshal(fields["content"], &block) == nil {
 		u.Chars = len(block.Text)
+		u.Text = block.Text
+		if len(u.Text) > maxReadback {
+			u.Text = u.Text[:maxReadback]
+		}
 	}
 	var options []json.RawMessage
 	if json.Unmarshal(fields["configOptions"], &options) == nil {
@@ -1027,6 +1038,7 @@ func (s *session) onNotification(method string, params json.RawMessage) {
 		s.mu.Unlock()
 		s.emit(driver.Update{Kind: driver.UpdateUsage, Usage: &usage})
 	case "agent_message_chunk":
+		s.collect(u.Text)
 		s.emit(driver.Update{Kind: driver.UpdateAgentMessageChunk, Chars: u.Chars})
 	case "plan":
 		s.emit(driver.Update{Kind: driver.UpdatePlan})

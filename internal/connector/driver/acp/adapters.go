@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
@@ -53,6 +54,11 @@ type Adapter struct {
 	// MCPStatusStartupFailures (a failed startup is reported, success is
 	// not). The driver ends a session whose server did not connect.
 	MCPStatus MCPStatus
+	// Readback is how the adapter is asked for its own account of the MCP
+	// configuration the session is running, and how that answer is read. It
+	// is the session's one check on the boundary, made after the adapter is
+	// running (see mcp.go).
+	Readback Readback
 	// Preflight refuses, before anything starts, a session the adapter would
 	// run with configuration the connector cannot switch off: nil when there is
 	// none to check.
@@ -94,6 +100,7 @@ var ClaudeAgentACP = Adapter{
 	// Claude Code's init message, and only it, is forwarded: the driver
 	// reads each MCP server's name and status from it and nothing else.
 	MCPStatus:   MCPStatusInit,
+	Readback:    Readback{Command: "/mcp", Parse: claudeMCPReport},
 	LoadSession: true,
 }
 
@@ -129,10 +136,103 @@ var CodexACP = Adapter{
 	},
 	Preflight: codexPreflight,
 	MCPStatus: MCPStatusStartupFailures,
+	// codex brings its own apps connector, which its /mcp lists whatever the
+	// session declared. Its tools are not offered to the session's model
+	// (features.apps is false in codexConfig, and compatibility check 9 asks
+	// the agent what it can call), so it is named here and nothing else is.
+	Readback: Readback{Command: "/mcp", Parse: codexMCPReport, BuiltIn: []string{"codex_apps"}},
 	Modes: map[driver.PermissionMode]string{
 		driver.ModeEditsInWorkDir: "read-only",
 	},
 	LoadSession: true,
+}
+
+// Readback is how an adapter is asked what MCP configuration it is actually
+// running, and how its answer is read. Both pinned adapters answer a command
+// of their own — claude-agent-acp's and codex-acp's "/mcp" — and both answer
+// it themselves, without the model: the turn costs no tokens, and the answer
+// is the adapter's, not something a prompt could talk it into.
+type Readback struct {
+	// Command is the prompt that asks for it. Empty means the adapter cannot
+	// be asked, and a session on it can only be checked as it runs.
+	Command string
+	// Parse reads the adapter's answer. An answer it cannot read is a session
+	// this driver will not vouch for, so a parse error ends the session.
+	Parse func(text string) (MCPReport, error)
+	// BuiltIn are servers the pinned adapter brings itself, which are in its
+	// answer whatever the session declared. Each one is here because its
+	// tools are not offered to the model — proven, per adapter, by the
+	// compatibility check — and for no other reason.
+	BuiltIn []string
+}
+
+// MCPReport is an adapter's own account of the MCP configuration a session is
+// running. An adapter that names its servers fills Names; one that only counts
+// them fills Count and Unusable.
+type MCPReport struct {
+	Names    []string
+	Count    int
+	Unusable int
+}
+
+// ErrMCPReadback is an adapter whose account of its own MCP configuration
+// cannot be read, or does not match what the session declared.
+var ErrMCPReadback = fmt.Errorf("%w: the agent is not running the MCP configuration the session declared", driver.ErrSessionUnverified)
+
+// claudeMCPReport reads claude-agent-acp's answer, which counts the servers
+// rather than naming them: "1 MCP server(s): 1 connected, 0 not connected, 0
+// disabled."
+var claudeMCPCounts = regexp.MustCompile(`(\d+) MCP server\(s\): (\d+) connected, (\d+) not connected, (\d+) disabled`)
+
+func claudeMCPReport(text string) (MCPReport, error) {
+	m := claudeMCPCounts.FindStringSubmatch(text)
+	if m == nil {
+		return MCPReport{}, fmt.Errorf("%w: its answer does not count them", ErrMCPReadback)
+	}
+	total, err1 := strconv.Atoi(m[1])
+	connected, err2 := strconv.Atoi(m[2])
+	unconnected, err3 := strconv.Atoi(m[3])
+	disabled, err4 := strconv.Atoi(m[4])
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return MCPReport{}, fmt.Errorf("%w: its counts are not numbers", ErrMCPReadback)
+	}
+	if connected+unconnected+disabled != total {
+		return MCPReport{}, fmt.Errorf("%w: its counts do not add up", ErrMCPReadback)
+	}
+	return MCPReport{Count: total, Unusable: unconnected + disabled}, nil
+}
+
+// codexMCPReport reads codex-acp's answer, which names them:
+//
+//	Configured MCP servers:
+//	- codex_apps: 49 tools, 27 resources, auth=bearerToken
+//	- basecamp
+var codexMCPHeader = "Configured MCP servers:"
+
+func codexMCPReport(text string) (MCPReport, error) {
+	_, list, found := strings.Cut(text, codexMCPHeader)
+	if !found {
+		return MCPReport{}, fmt.Errorf("%w: its answer does not list them", ErrMCPReadback)
+	}
+	report := MCPReport{}
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimSpace(line)
+		name, ok := strings.CutPrefix(line, "- ")
+		if !ok {
+			continue
+		}
+		if before, _, cut := strings.Cut(name, ":"); cut {
+			name = before
+		}
+		if name = strings.TrimSpace(name); name != "" {
+			report.Names = append(report.Names, name)
+		}
+	}
+	if len(report.Names) == 0 {
+		return MCPReport{}, fmt.Errorf("%w: it listed no server at all", ErrMCPReadback)
+	}
+	report.Count = len(report.Names)
+	return report, nil
 }
 
 // MCPStatus names how an adapter reports its MCP servers' startup.

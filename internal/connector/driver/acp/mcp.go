@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,16 @@ import (
 //     DISABLE_MCP_CONFIG_FILTERING so the servers it was given reach the
 //     session whole. Both live with the adapters, in adapters.go.
 //
-//  3. What actually connected. Every account of the servers is read and
+//  3. What the adapter says it got. verifyMCPConfiguration asks the adapter
+//     what MCP configuration it is actually running — both pinned adapters
+//     answer their own "/mcp", themselves, with no model and no tokens — and
+//     ends the session unless that answer is the servers the session gave it,
+//     plus at most a server the pinned adapter brings itself whose tools are
+//     not offered to the model. Everything in 1 and 2 is what the connector
+//     asked for; this is the only place that knows what it got, so this is
+//     the guarantee and the rest is how it is usually true.
+//
+//  4. What actually connected. Every account of the servers is read and
 //     judged in this file, whichever adapter sends it and whatever shape it
 //     arrives in: Claude Code's init, forwarded as an SDK message
 //     (onSDKMessage), or codex-acp's failed mcp_startup.<server> tool calls
@@ -192,6 +202,95 @@ func (s *session) onSDKMessage(params json.RawMessage) {
 		s.mu.Unlock()
 		s.reportAccount(held)
 	}
+}
+
+// collect adds a chunk of the agent's own answer to a read-back command,
+// while one is being read and at no other time.
+func (s *session) collect(text string) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readback == nil || s.readback.Len() >= maxReadback {
+		return
+	}
+	if room := maxReadback - s.readback.Len(); len(text) > room {
+		text = text[:room]
+	}
+	s.readback.WriteString(text)
+}
+
+// verifyMCPConfiguration is the boundary check: it asks the adapter what MCP
+// configuration it is actually running and compares that with what this
+// session declared. It runs once, after the adapter is up and in its asking
+// mode and before the session is handed to anyone, and a difference ends the
+// session.
+//
+// Everything before it — the servers written into session/new, the adapter's
+// own switches, the Codex preflight — is what the connector asked for. This
+// is what the adapter says it got. Only the second can be a guarantee, so a
+// difference is ErrMCPReadback (an unverified session) whether the cause is a
+// configuration layer this driver cannot read, an adapter that filtered what
+// it was given, or an answer it cannot parse.
+//
+// The one thing allowed beyond the session's own servers is a server the
+// pinned adapter brings itself (Readback.BuiltIn), which is there because its
+// tools are not offered to the session's model at all.
+func (s *session) verifyMCPConfiguration(ctx context.Context, a Adapter) error {
+	if a.Readback.Command == "" || a.Readback.Parse == nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.readback = &strings.Builder{}
+	// The read-back is not progress: nothing of its turn is emitted, and
+	// nothing it says of a tool call is kept.
+	s.replaying = true
+	declared := slices.Clone(s.mcpNames)
+	s.mu.Unlock()
+	_, err := s.Prompt(ctx, a.Readback.Command)
+	s.mu.Lock()
+	text := s.readback.String()
+	s.readback = nil
+	s.replaying = false
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	report, err := a.Readback.Parse(text)
+	if err != nil {
+		return err
+	}
+	return matchesDeclared(report, declared, a.Readback.BuiltIn)
+}
+
+// matchesDeclared is the comparison itself: the servers the adapter says it
+// has, against the servers the session gave it and the ones its own adapter
+// brings.
+func matchesDeclared(report MCPReport, declared, builtIn []string) error {
+	allowed := append(slices.Clone(declared), builtIn...)
+	if report.Unusable > 0 {
+		return fmt.Errorf("%w: it reports %d of its servers unusable", ErrMCPReadback, report.Unusable)
+	}
+	if report.Names == nil {
+		// An adapter that counts its servers without naming them: the count
+		// is what there is to compare.
+		if report.Count != len(allowed) {
+			return fmt.Errorf("%w: it reports %d servers, the session gave %d", ErrMCPReadback, report.Count, len(allowed))
+		}
+		return nil
+	}
+	for _, name := range report.Names {
+		if !slices.Contains(allowed, name) {
+			return fmt.Errorf("%w: it has %q, which the session never gave it", ErrMCPReadback, name)
+		}
+	}
+	for _, name := range declared {
+		if !slices.Contains(report.Names, name) {
+			return fmt.Errorf("%w: it does not have %q, which the session gave it", ErrMCPReadback, name)
+		}
+	}
+	return nil
 }
 
 // earlyAccount is an account of the MCP servers that arrived before the

@@ -29,6 +29,7 @@ import "time"
 //     that outruns the last of these ends its session, and the requests
 //     dropped in that ending are neither answered nor recorded.
 //   - Per error: stderrNoteLines of the adapter's stderr.
+//   - Per read-back: maxReadback bytes of the adapter's own answer.
 //   - In time: modeConfirmWait for a mode to be confirmed, decisionDrain for
 //     the decisions still in flight when a turn ends, and Options.CloseGrace
 //     for each wait Close and Cancel make on the worker. What follows the
@@ -103,6 +104,11 @@ const (
 	maxLocationPath  = 4096
 	maxConfigOptions = 256
 )
+
+// maxReadback bounds the adapter's answer to its own read-back command, in
+// each chunk and in total. The answer is the adapter's own text and it is
+// read once, at the start of a session, so a few kilobytes is all of it.
+const maxReadback = 4 << 10
 
 // stderrNoteLines is how many of the adapter's last stderr lines an error
 // carries. The error becomes the attempt's own text, so this is a few lines

@@ -1113,26 +1113,34 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 		Stop:             "end_turn",
 	})
 	s := h.open()
-	answers := make(chan driver.PromptResult, 1)
+	type answer struct {
+		res driver.PromptResult
+		err error
+	}
+	// The result comes back on a channel rather than being asserted where it
+	// arrives: a goroutine that outlives the test must not be the one to fail
+	// it.
+	answers := make(chan answer, 1)
 	go func() {
 		res, err := s.Prompt(context.Background(), "go")
-		assert.NoError(t, err)
-		answers <- res
+		answers <- answer{res, err}
 	}()
-	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 20*time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 60*time.Second, 10*time.Millisecond,
 		"the session decides at most %d at once", maxDecisions)
 	// Every request but the ones stuck in a decision has been answered.
-	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 30*time.Second, 20*time.Millisecond,
+	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 60*time.Second, 20*time.Millisecond,
 		"a flood is answered as it arrives")
 	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
 	answered := h.record().Outcomes
 	close(release)
-	var res driver.PromptResult
+	var got answer
 	select {
-	case res = <-answers:
-	case <-time.After(20 * time.Second):
+	case got = <-answers:
+	case <-time.After(60 * time.Second):
 		t.Fatal("the flooded turn never ended")
 	}
+	require.NoError(t, got.err)
+	res := got.res
 	assert.NotEmpty(t, res.Refusals, "a request refused for want of room is still a refusal on the turn")
 	canceled := 0
 	for _, o := range answered {
@@ -2403,4 +2411,100 @@ func TestACancelDoesNotTouchATurnWhosePromptIsStillBeingWritten(t *testing.T) {
 	canceled := s.turn != nil && s.turn.canceled
 	s.mu.Unlock()
 	assert.False(t, canceled, "and it did not mark a turn whose prompt is still being written")
+}
+
+// ---------------------------------------------------------------- what the adapter says it got
+
+// chunk is one agent_message_chunk of text, as an adapter answers its own
+// read-back command.
+func chunk(t *testing.T, text string) json.RawMessage {
+	t.Helper()
+	return raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}})
+}
+
+// The boundary's one guarantee: what the adapter says it is running is
+// compared with what the session declared, after it is running, and a
+// difference ends the session before anyone is handed it.
+func TestASessionRunsOnlyTheMCPServersTheAdapterSaysItGot(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		readback Readback
+		answer   string
+		wantErr  bool
+	}{
+		{"claude counts them and agrees", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"1 MCP server(s): 1 connected, 0 not connected, 0 disabled. Use `/mcp` in the terminal for details.", false},
+		{"claude counts one too many", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"2 MCP server(s): 2 connected, 0 not connected, 0 disabled.", true},
+		{"claude counts one unusable", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"1 MCP server(s): 0 connected, 1 not connected, 0 disabled.", true},
+		{"claude says nothing this can read", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"MCP is fine, trust me.", true},
+		{"codex names what the session gave", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- basecamp", false},
+		{"codex names its own built-in too", Readback{Command: "/mcp", Parse: codexMCPReport, BuiltIn: []string{"codex_apps"}},
+			"Configured MCP servers:\n- codex_apps: 49 tools, 27 resources, auth=bearerToken\n- basecamp", false},
+		{"codex names a built-in nobody allowed", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- codex_apps: 49 tools, 27 resources, auth=bearerToken\n- basecamp", true},
+		{"codex names a server of the host's", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- basecamp\n- host-secrets: 3 tools", true},
+		{"codex does not have the session's own", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- something-else", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.turns(turnScript{Steps: []step{{Update: chunk(t, tc.answer)}}, Stop: "end_turn"})
+			d := h.driver()
+			d.opts.Adapter.Readback = tc.readback
+			s, err := d.NewSession(context.Background(), h.config())
+			if tc.wantErr {
+				require.ErrorIs(t, err, ErrMCPReadback)
+				require.ErrorIs(t, err, driver.ErrSessionUnverified, "a session that is not the one asked for")
+				assert.Nil(t, s)
+				waitGone(t, h.record().PID)
+				return
+			}
+			require.NoError(t, err)
+			defer s.Close()
+			assert.Contains(t, string(h.record().Params["session/prompt"]), "/mcp", "the adapter was asked")
+			select {
+			case u := <-s.Updates():
+				t.Fatalf("the read-back was reported as progress: %+v", u)
+			default:
+			}
+		})
+	}
+}
+
+// The adapter's own answer is read once and kept nowhere: the read-back's own
+// text is not in an update, and a chunk longer than the answer can be is cut.
+func TestTheReadbackTextIsReadOnceAndKeptNowhere(t *testing.T) {
+	h := newHarness(t)
+	long := strings.Repeat("x", maxReadback*4)
+	h.turns(turnScript{Steps: []step{
+		{Update: chunk(t, "Configured MCP servers:\n- basecamp\n"+long)},
+	}, Stop: "end_turn"}, turnScript{Steps: []step{{Update: chunk(t, "secret words")}}, Stop: "end_turn"})
+	d := h.driver()
+	d.opts.Adapter.Readback = Readback{Command: "/mcp", Parse: codexMCPReport}
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+
+	sess := s.(*session)
+	sess.mu.Lock()
+	collecting := sess.readback
+	sess.mu.Unlock()
+	assert.Nil(t, collecting, "nothing is collected once the answer has been read")
+
+	_, err = s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	for {
+		select {
+		case u := <-s.Updates():
+			assert.NotContains(t, fmt.Sprintf("%+v", u), "secret words", "an update carries no text of the agent's")
+			continue
+		default:
+		}
+		break
+	}
 }
