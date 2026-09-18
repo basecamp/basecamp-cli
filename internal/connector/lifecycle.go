@@ -40,6 +40,23 @@ func renderHoldingReply(kind MessageKind, eventID int64) string {
 	return renderLines(kind, lines)
 }
 
+// renderRefusedStart is the reply to a request whose route no task could be
+// given a working directory in. It says the same three things every holding
+// reply says: nothing ran, what has to change, and how to run it once it
+// has. What has to change is on the connector's machine and not in the
+// reader's hands, so the reply names the condition and not the path: a route
+// is a directory on someone else's computer, and the card is not where it is
+// fixed.
+func renderRefusedStart(kind MessageKind, eventID int64) string {
+	lines := []string{
+		"I can't start on this: this project's working directory on the connector's machine is not a git repository with a commit, and the connector is set up to give each task a worktree of its own, so nothing was run.",
+		"Once the directory is a repository, or the connector runs without worktrees, a person can run it with: basecamp connect redispatch " + strconv.FormatInt(eventID, 10),
+		"",
+		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
+	}
+	return renderLines(kind, lines)
+}
+
 // renderStillRunning is one still-running notice.
 func renderStillRunning(kind MessageKind, taskID int64, attemptID string, occurrence int, launchedAt, progressAt time.Time) string {
 	progress := "No progress has been reported yet."
@@ -198,7 +215,48 @@ func LifecycleHooks(l *Ledger, opts LifecycleOptions) Hooks {
 		StillRunning: func(ctx context.Context, tx Tx, tick StillRunningTick) error {
 			return stillRunningIntent(ctx, tx, l.now(), tick)
 		},
+		StartRefused: func(ctx context.Context, tx Tx, r RefusedStart) error {
+			return refusedStartIntent(ctx, tx, l.now(), r)
+		},
 	}
+}
+
+// refusedStartIntent is the holding reply for a record the dispatcher
+// refused to start. Nothing else would say anything: no attempt was made, so
+// no settlement renders a completion notice, and the guard's boost is the
+// last thing the recording heard.
+//
+// A record that asked for no acknowledgement — a subscription, a completion
+// — is not a request, and gets no reply, which is the rule the verdict hook
+// holds too.
+func refusedStartIntent(ctx context.Context, tx Tx, now time.Time, r RefusedStart) error {
+	var (
+		bucketID, replyRecordingID int64
+		replyKind                  string
+		acknowledge                bool
+	)
+	switch err := tx.QueryRowContext(ctx, `
+SELECT bucket_id, reply_kind, reply_recording_id, acknowledge FROM events WHERE id = ?`, r.EventID).
+		Scan(&bucketID, &replyKind, &replyRecordingID, &acknowledge); {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("connector: lifecycle for event %d: %w", r.EventID, ErrNoSuchRecord)
+	case err != nil:
+		return fmt.Errorf("connector: lifecycle for event %d: %w", r.EventID, err)
+	}
+	if !acknowledge {
+		return nil
+	}
+	kind, ok := destinationKind(replyKind)
+	if !ok || replyRecordingID <= 0 {
+		return nil
+	}
+	return writeIntent(ctx, tx, now, newIntent{
+		key:         refusedStartKey(r.EventID),
+		kind:        IntentHoldingReply,
+		eventID:     r.EventID,
+		destination: Destination{BucketID: bucketID, Kind: kind, RecordingID: replyRecordingID},
+		body:        renderRefusedStart(kind, r.EventID),
+	})
 }
 
 // verdictIntents writes the guard for an admitted request and the holding

@@ -298,6 +298,9 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 
 // RouteChecks reads each routed project the way admission will, as the
 // agent: the project, and its people (project trust mode's membership read).
+// With worktrees on it also asks of each route the one thing a dispatch will
+// ask of it that nothing else here does — whether it is in a git repository
+// at all — because a route that is not is a route no task ever runs in.
 func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 	if len(f.Projects) == 0 {
 		return []Check{{
@@ -315,12 +318,12 @@ func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 
 	checks := make([]Check, 0, len(ids))
 	for _, id := range ids {
-		checks = append(checks, routeCheck(ctx, r, f.Agent.Kind, id, f.Projects[id].Path))
+		checks = append(checks, routeCheck(ctx, r, f.Agent.Kind, id, f.Projects[id].Path, f.Worktrees))
 	}
 	return checks
 }
 
-func routeCheck(ctx context.Context, r Reader, kind string, id int64, path string) Check {
+func routeCheck(ctx context.Context, r Reader, kind string, id int64, path string, worktrees bool) Check {
 	c := Check{Name: fmt.Sprintf("Project %d", id)}
 	// The directory is checked as a new route's is, whether the route was
 	// passed now or kept from connect.json: it must still resolve to itself,
@@ -329,6 +332,18 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 		c.Status = StatusFail
 		c.Message = "The route's directory is no longer usable: " + richtext.SanitizeSingleLine(path)
 		c.Hint = fmt.Sprintf("Route the project again: --route %d=<dir>, or remove it: --remove-route %d.", id, id)
+		return c
+	}
+	// With worktrees on, every task branches from the route's repository. A
+	// route with no repository takes no worktree, so no task on it ever
+	// starts: it is refused here rather than one blocked record at a time.
+	// Only the absence a walk of the disk proves fails the check; a
+	// repository git might still decline to use is left to the dispatch,
+	// which reports its refusal.
+	if worktrees && NoRepositoryAt(path) {
+		c.Status = StatusFail
+		c.Message = "Worktrees are on and the route is not in a git repository, so no task on it could start: " + richtext.SanitizeSingleLine(path)
+		c.Hint = fmt.Sprintf("Route the project to a directory in a repository: --route %d=<dir>, or turn worktrees off: --worktrees=false.", id)
 		return c
 	}
 	for _, read := range []struct {
