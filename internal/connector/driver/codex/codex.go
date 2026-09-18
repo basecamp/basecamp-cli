@@ -549,7 +549,12 @@ func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResul
 		if canceled {
 			s.finishCanceled(t)
 		} else {
-			s.finish(t, driver.PromptResult{}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
+			// The refusals the turn has made are on its result, as they are
+			// on every other ending's: a session that ended under the turn
+			// still refused what it refused. They are what the reader has
+			// recorded by now, which on this ending — the reader is still
+			// reading — may be fewer than it goes on to record.
+			s.finish(t, driver.PromptResult{Refusals: s.refusalsOf(t)}, fmt.Errorf("%w: %w", driver.ErrSessionEnded, err))
 		}
 	}()
 	select {
@@ -601,16 +606,25 @@ func (s *session) Close() error {
 	case <-time.After(s.grace):
 	}
 	s.worker.Terminate(s.grace)
+	s.readerDone()
+	return nil
+}
+
+// readerDone waits for the reader to be through the worker's output. It is
+// called only from goroutines that are not the reader — Close, and the policy
+// check ending an unsafe session — because the reader cannot wait for itself.
+//
+// Past the grace, a descendant outside the worker's group is holding the
+// output open: the reading is ended rather than waited on, rather than hold
+// the attempt, its working directory and the connector's shutdown open
+// forever.
+func (s *session) readerDone() {
 	select {
 	case <-s.readerEnd:
 	case <-time.After(s.grace):
-		// The worker is gone and a descendant outside its group still holds
-		// the output: stop reading it, rather than hold the attempt, its
-		// working directory and the connector's shutdown open forever.
 		s.worker.CloseStdout()
 		<-s.readerEnd
 	}
-	return nil
 }
 
 func (s *session) finish(t *turn, result driver.PromptResult, err error) {
@@ -785,6 +799,13 @@ func (s *session) threadStarted(id string) {
 }
 
 // unsafe ends the turn in flight with err and the process group.
+//
+// It runs on the policy check's own goroutine, which is the one thing that
+// ends a turn without being the reader. The refusals Codex put on its stream
+// are the reader's to record, so the reader is given the worker's output
+// before the turn is finished: ending it the moment the worker died would
+// hand back a result short of the refusals the ledger goes on to hold, which
+// is the one thing this ending is for.
 func (s *session) unsafe(err error) {
 	s.mu.Lock()
 	t := s.turn
@@ -793,6 +814,14 @@ func (s *session) unsafe(err error) {
 		s.worker.Terminate(0)
 		return
 	}
+	// The worker goes first — the reader is not through the output until the
+	// worker has stopped writing it — and then the reader is waited for.
+	s.worker.Terminate(0)
+	s.readerDone()
+	// By now the reader has usually ended the turn itself, as unsafe: the
+	// verdict is this one, recorded before this ran. This is for the turn it
+	// did not end — one already canceled, or one whose output a descendant
+	// outside the group still holds.
 	s.finishUnsafe(t, err)
 }
 
@@ -800,6 +829,10 @@ func (s *session) unsafe(err error) {
 // asked to: the worker goes first, then its last word is read, so the result
 // carries the refusals it made and logged before it was stopped, as every
 // other ending does.
+//
+// It says what the turn's refusals are at the moment it runs. On the reader
+// that is every refusal of the turn, because the reader has parsed the stream
+// up to here; off it, unsafe waits for the reader first, for the same reason.
 func (s *session) finishUnsafe(t *turn, err error) {
 	s.worker.Terminate(0)
 	s.lastWord()
@@ -824,6 +857,12 @@ func (s *session) failedVerification() error {
 // refusals it only logged. Whatever ends a turn ends it after this, so a
 // refusal Codex wrote on its way out is in the turn's result and not only in
 // the ledger.
+//
+// That is the stderr, which this reads itself. It says nothing about the
+// refusals Codex put on its JSON stream: those are the reader's to record,
+// and a worker that is gone is not a stream that has been read. An ending
+// that is not the reader's own waits for the reader too — see unsafe — before
+// it asks a turn what its refusals are.
 func (s *session) lastWord() {
 	if s.worker != nil {
 		select {
@@ -840,8 +879,12 @@ func (s *session) lastWord() {
 // being ended by the cancel anyway.
 func (s *session) finishCanceled(t *turn) {
 	s.lastWord()
-	// The turn's refusals are read after the worker's last word, so the
-	// result carries what the ledger carries.
+	// The turn's refusals are read after the worker's last word: the ones it
+	// only logged are read by lastWord just above, and the ones it put on its
+	// stream are already the turn's when the reader is the one ending it,
+	// which it is for every cancel the worker answered. A prompt whose write
+	// failed ends its own turn from a goroutine of its own, and that one can
+	// be short of a refusal the reader has not reached.
 	refusals := s.refusalsOf(t)
 	s.mu.Lock()
 	done := s.verifyDone
