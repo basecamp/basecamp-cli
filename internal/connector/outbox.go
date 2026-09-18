@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // The outbox: every message the connector itself posts to Basecamp — the
@@ -254,6 +256,15 @@ func holdingKey(eventID int64) string {
 // then, once there is one, that no worktree can be made in it.
 func refusedStartKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
+}
+
+// holdingReplyReason is the one blocked reason a holding reply answers for:
+// its key says which of them it is.
+func holdingReplyReason(in Intent) string {
+	if in.Key == refusedStartKey(in.EventID) {
+		return ReasonRouteUnusable
+	}
+	return string(admission.ReasonNoRoute)
 }
 
 func completionKey(attemptID string) string {

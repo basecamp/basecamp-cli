@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 )
 
@@ -403,13 +402,15 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 		}
 		if in.Kind == IntentHoldingReply {
-			// The reply answers a record waiting on something only a person
-			// changes: no route, or a route no worktree can be made in. If
-			// the change was made and the record moved on — it may be running
-			// now — the answer is wrong, so it is never sent.
+			// Each reply answers one reason a record waits on something only
+			// a person changes, and is sent only while the record is still
+			// blocked on that reason — not on the other one. Two of them can
+			// be pending at once (a project with no route, then a route no
+			// worktree can be made in), and each is wrong about the world the
+			// moment its own reason is not why the record is waiting.
 			var stillBlocked bool
-			switch err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason IN (?, ?) FROM events WHERE id = ?`,
-				string(admission.ReasonNoRoute), ReasonRouteUnusable, in.EventID).Scan(&stillBlocked); {
+			switch err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = ? FROM events WHERE id = ?`,
+				holdingReplyReason(in), in.EventID).Scan(&stillBlocked); {
 			case errors.Is(err, sql.ErrNoRows):
 				// No record, nothing to answer for. Canceled rather than
 				// left to be claimed again on every tick.

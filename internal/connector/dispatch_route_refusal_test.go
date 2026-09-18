@@ -141,6 +141,53 @@ func TestAnEventToldThereIsNoRouteIsToldAgainWhenTheRouteIsUnusable(t *testing.T
 	}
 }
 
+// Two holding replies can be pending on one event at once, and each is an
+// answer to one reason only. Neither ever stands in for the other: a reply
+// that says the project is not routed must not go out once it is, even
+// though the record is blocked again for a different reason (Copilot on
+// #753).
+func TestEachHoldingReplyAnswersForItsOwnReasonOnly(t *testing.T) {
+	reply := admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: obReplyRecording}
+
+	t.Run("the no-route reply stands down once the project is routed", func(t *testing.T) {
+		ledger, clock := obLedger(t)
+		seenRecord(t, ledger, 1)
+		ctx := context.Background()
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, reply))
+		require.NoError(t, err)
+		// The route arrives and is a directory no worktree can be made in,
+		// all before the outbox got to the first reply.
+		_, err = ledger.Admission().Commit(ctx, admittedVerdict(1, 1, "recording:10304028989"))
+		require.NoError(t, err)
+		require.NoError(t, ledger.RefuseStart(ctx, 1, ReasonRouteUnusable))
+
+		basecamp := newFakeBasecamp(clock.Now)
+		require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+		stale := obIntent(t, ledger, holdingKey(1))
+		assert.Equal(t, IntentCanceled, stale.State, "the project is routed now, so that answer is false")
+		assert.Equal(t, "no longer called for", stale.Note)
+		assert.Equal(t, IntentSent, obIntent(t, ledger, refusedStartKey(1)).State)
+		assert.Equal(t, 1, basecamp.postCount(), "one answer, the true one")
+	})
+
+	t.Run("the refusal stands down once the route is taken away", func(t *testing.T) {
+		ledger, clock := obLedger(t)
+		obAdmit(t, ledger, 1, "recording:10304028989")
+		ctx := context.Background()
+		require.NoError(t, ledger.RefuseStart(ctx, 1, ReasonRouteUnusable))
+		// The project is unrouted instead of the directory being fixed, so
+		// the record waits on the other reason and the refusal is stale.
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, getRecord(t, ledger, 1).Revision, reply))
+		require.NoError(t, err)
+
+		basecamp := newFakeBasecamp(clock.Now)
+		require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+		assert.Equal(t, IntentCanceled, obIntent(t, ledger, refusedStartKey(1)).State)
+		assert.Equal(t, IntentSent, obIntent(t, ledger, holdingKey(1)).State)
+		assert.Equal(t, 1, basecamp.postCount())
+	})
+}
+
 // A record that moved on since the dispatcher read it is left where it is.
 func TestRefuseStartLeavesARecordThatMovedOn(t *testing.T) {
 	ledger, _ := obLedger(t)

@@ -343,7 +343,7 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 	if worktrees && NoRepositoryAt(path) {
 		c.Status = StatusFail
 		c.Message = "Worktrees are on and the route is not in a git repository, so no task on it could start: " + richtext.SanitizeSingleLine(path)
-		c.Hint = fmt.Sprintf("Route the project to a directory in a repository: --route %d=<dir>, or leave --worktrees off.", id)
+		c.Hint = fmt.Sprintf("Route the project to a directory in a repository: --route %d=<dir>, or turn worktrees off: --worktrees=false.", id)
 		return c
 	}
 	for _, read := range []struct {

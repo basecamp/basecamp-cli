@@ -59,7 +59,7 @@ func TestRouteChecksRefuseARouteWithNoRepositoryWhenWorktreesAreOn(t *testing.T)
 			assert.Equal(t, c.status, checks[0].Status, checks[0].Message)
 			if c.status == StatusFail {
 				assert.Contains(t, checks[0].Message, "not in a git repository")
-				assert.Contains(t, checks[0].Hint, "--worktrees off")
+				assert.Contains(t, checks[0].Hint, "--worktrees=false")
 			}
 		})
 	}
