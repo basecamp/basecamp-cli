@@ -547,3 +547,53 @@ func TestAPlannerPlansWithoutALedgerToRecordAWaitIn(t *testing.T) {
 	_, err = planner.Plan(ctx, gone, "5-eeeeee")
 	require.Error(t, err, "and a plan that fails the way a backoff-arming Prepare fails still writes nothing")
 }
+
+// A ledger that will not take the row must not leave a backoff armed with
+// nothing to show for it. The case that writes it is the likely one: a
+// worktree that failed because the disk is full is a row that will not insert
+// for the same reason, and the route would then be held for half an hour with
+// no row — the invisible wait this table exists to end, back again after the
+// operator has freed the disk.
+func TestAWaitThatCouldNotBeRecordedArmsNoBackoff(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	require.NoError(t, h.ledger.Close())
+
+	_, err := h.wt.Prepare(ctx, route, 150)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "recording the wait it left",
+		"the error says the worktree failed and that the wait could not be written")
+	assert.Empty(t, h.wt.RoutesWaiting(),
+		"nothing is held on a wait no one can read; the route is tried again, loudly, until the ledger takes it")
+}
+
+// Recovery is where the map is brought level with the ledger. Starting with
+// an empty map over a ledger that still advertises the backoffs is the split
+// this closes, at the one moment it is guaranteed to be wrong.
+func TestRecoveryRefusesToStartWhenTheRecordedWaitsCannotBeRead(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	require.NoError(t, h.ledger.Close())
+
+	err := h.wt.Recover(ctx)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "read the recorded waits on routes",
+		"and it is this read that stops it, before the lock and the worktree rows")
+}
+
+// With worktrees off nothing else ever clears these rows: Prepare hands back
+// the route without reaching the ledger. A drop that failed and was carried
+// past would leave status claiming routes wait for worktrees this run will
+// never make, for as long as the run lasts.
+func TestRecoveryRefusesToStartWhenTheWaitsCannotBeDroppedWithWorktreesOff(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	off, err := NewWorktrees(WorktreesOptions{Ledger: h.ledger, Root: h.root, Lookup: h.lookup, Off: true})
+	require.NoError(t, err)
+	require.NoError(t, h.ledger.Close())
+
+	err = off.Recover(ctx)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "drop the recorded waits on routes")
+}

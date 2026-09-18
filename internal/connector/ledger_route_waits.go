@@ -9,7 +9,9 @@ import (
 )
 
 // Route waits in the ledger: a route whose last attempt at a worktree failed,
-// and when the next attempt is due.
+// and when the backoff that failure armed ends. Not when the next attempt is
+// due — nothing schedules one, as RouteWait.Until says below: the next record
+// on that route makes the attempt, whenever it arrives, and it may not.
 //
 // This table is the durable record; Worktrees holds a copy of it in memory
 // because the dispatcher asks which routes are waiting on every tick, once a

@@ -854,9 +854,11 @@ END;
 	migrationOperator,
 
 	// Migration 11. The routes whose last worktree attempt failed, and when
-	// the next one is due. See ledger_route_waits.go: the backoff is
-	// Worktrees', in memory; this is the copy `connect status` and `connect
-	// doctor` read from another process.
+	// the backoff that failure armed ends — not when the next attempt is due,
+	// which nothing schedules: the next record on the route makes it, and
+	// there may be no such record. See ledger_route_waits.go: the backoff is
+	// Worktrees', in memory; this is the durable record `connect status` and
+	// `connect doctor` read from another process.
 	migrationRouteWaits,
 }
 

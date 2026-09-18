@@ -379,8 +379,24 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 		if failure.first.IsZero() {
 			failure.first = now
 		}
+		// Recorded first, and armed only if it was recorded. A backoff the
+		// ledger does not hold is the invisible wait this table exists to
+		// end, and the case that writes it is the likely one: a worktree that
+		// failed because the disk is full is a row that will not insert for
+		// the same reason. The operator then frees the disk, the ledger
+		// works again, and a route no longer in any row goes on being held
+		// for half an hour with nothing to show for it.
+		//
+		// What that costs is the route being tried again on the next tick
+		// while the ledger will not take the row — loud, in the log, on every
+		// attempt, and over as soon as the ledger is writable. Loud and wrong
+		// is recoverable; quiet and wrong is what this whole change is about.
+		// A repeat failure keeps the backoff it already recorded, so only a
+		// first failure that cannot be written leaves the route unarmed.
+		if err := w.recordWait(ctx, route, failure, now, err); err != nil {
+			return "", err
+		}
 		w.failures[route] = failure
-		w.recordWait(ctx, route, failure, now, err)
 		return "", err
 	}
 	// The recorded wait went with the transition that made the worktree live,
@@ -414,14 +430,16 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 // crash-loops does not hammer a broken route on every start — and what a
 // person loses is an immediate retry after fixing the machine, which the
 // status line now gives them the deadline for.
-func (w *Worktrees) resumeWaits(ctx context.Context) {
+func (w *Worktrees) resumeWaits(ctx context.Context) error {
 	waits, err := w.ledger.RouteWaits(ctx)
 	if err != nil {
-		// The backoffs stay empty, which is what a restart did before: every
-		// route is tried once and fails again into a fresh wait. Nothing is
-		// lost, so this is said and not returned.
-		w.log.Warn("connector: could not read the recorded waits on routes", "error", err)
-		return
+		// Returned, not logged. Carrying on would start the connector with an
+		// empty map over a ledger that still advertises the backoffs, which
+		// is the split this method exists to close, at the one moment it is
+		// guaranteed to be wrong. Recovery already refuses to start on a
+		// ledger read it cannot make (UnfinishedWorktrees, below), so this is
+		// the same rule rather than a new one.
+		return fmt.Errorf("connector: read the recorded waits on routes: %w", err)
 	}
 	now := w.now()
 	w.mu.Lock()
@@ -448,6 +466,7 @@ func (w *Worktrees) resumeWaits(ctx context.Context) {
 	if resumed > 0 {
 		w.log.Info("connector: routes whose backoff a previous run armed are still waiting it out", "routes", resumed)
 	}
+	return nil
 }
 
 // ForgetWaitsExcept implements WaitingWorkspaces: the row and the backoff it
@@ -474,24 +493,43 @@ func (w *Worktrees) ForgetWaitsExcept(ctx context.Context, keep []string) (int, 
 }
 
 // clearWait forgets the recorded wait on a route, if there was one.
+//
+// This one is said and not returned, unlike every other ledger failure around
+// it, and the reason is what the caller would have to give up. It runs on the
+// path that proved the route unusable, where the error returned is
+// ErrRouteUnusable and the dispatcher keys on it to block the record with a
+// reason and answer the recording that asked. Returning the ledger's error
+// instead would take that away and leave the record to be retried, trading a
+// durable, correct refusal for a transient one.
+//
+// What is left is a stale row on a route the dispatcher is refusing: status
+// shows the block and a wait together, which is confusing and not harmful.
+// It is also retried — every later event on that route reaches this same
+// line — so it lasts until the next attempt rather than for the life of the
+// run.
 func (w *Worktrees) clearWait(ctx context.Context, route string) {
 	if err := w.ledger.ClearRouteWait(ctx, route); err != nil {
-		w.log.Warn("connector: could not clear the recorded wait on a route", "route", route, "error", err)
+		w.log.Warn("connector: could not clear the recorded wait on a route; status may show it until the next event on this route",
+			"route", route, "error", err)
 	}
 }
 
-// recordWait puts the wait where a person can read it. A ledger that will not
-// take it is said out loud and nothing more: the caller's error is the reason
-// the worktree failed, and losing it to a bookkeeping error would be worse
-// than an unrecorded wait.
-func (w *Worktrees) recordWait(ctx context.Context, route string, failure prepareFailure, now time.Time, cause error) {
+// recordWait puts the wait where a person can read it, and says whether it
+// got there. The caller arms nothing it could not record: half the state is
+// the failure mode this table was added to remove.
+//
+// The error names the failure that caused the wait as well as the one that
+// stopped it being written, so the log line the dispatcher already makes for
+// a failed Prepare still says why the worktree failed.
+func (w *Worktrees) recordWait(ctx context.Context, route string, failure prepareFailure, now time.Time, cause error) error {
 	wait := RouteWait{
 		Route: route, Failures: failure.count, Reason: w.red.Sanitize(cause.Error()),
 		FirstAt: failure.first, LastAt: now, Until: failure.until,
 	}
 	if err := w.ledger.RecordRouteWait(ctx, wait); err != nil {
-		w.log.Warn("connector: could not record the wait on a route", "route", route, "error", err)
+		return fmt.Errorf("connector: %w (recording the wait it left: %w)", cause, err)
 	}
+	return nil
 }
 
 // RoutesWaiting implements WaitingWorkspaces: the routes still in a Prepare
@@ -898,13 +936,21 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 		return ErrPlanOnly
 	}
 	if w.off {
-		if dropped, err := w.ForgetWaitsExcept(ctx, nil); err != nil {
-			w.log.Warn("connector: could not drop the recorded waits on routes", "error", err)
-		} else if dropped > 0 {
+		// Returned, not logged. Nothing else ever clears these rows with
+		// worktrees off — Prepare hands back the route without reaching the
+		// ledger — so a drop that failed and was carried past would leave
+		// status and doctor claiming routes wait for worktrees this run will
+		// never make, for as long as the run lasts. Refusing to start is the
+		// recoverable end of that.
+		dropped, err := w.ForgetWaitsExcept(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("connector: drop the recorded waits on routes: %w", err)
+		}
+		if dropped > 0 {
 			w.log.Info("connector: worktrees are off, so no route is waiting for one", "routes", dropped)
 		}
-	} else {
-		w.resumeWaits(ctx)
+	} else if err := w.resumeWaits(ctx); err != nil {
+		return err
 	}
 	unlock, err := w.lock(ctx)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
