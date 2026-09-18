@@ -262,6 +262,30 @@ func TestConnectDoctorRefusesOnlyWhatTheRunCommandRefuses(t *testing.T) {
 	assert.Equal(t, setup.StatusFail, checks[0].Status)
 }
 
+// Copilot, on #748: on macOS the Platform check said the connector cannot run
+// there and then named a capability macOS has, so the failure contradicted
+// itself and sent a Mac reader after the wrong thing. The constraint that
+// actually applies is #736's: the task token reaches a worker's MCP server
+// over an inherited descriptor, and Linux alone seals the descriptors a
+// process passes on. Reading a process's start time is the half macOS has.
+//
+// The check and the run command's refusal say the one reason, so a person
+// cannot be told two different things about the same platform.
+func TestConnectDoctorPlatformCheckNamesTheConstraintThatApplies(t *testing.T) {
+	c := connectUnsupportedOSCheck("darwin")
+	assert.Equal(t, "Platform", c.Name)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Contains(t, c.Message, "darwin", "it names the platform it refuses")
+	assert.Contains(t, c.Message, connectLinuxOnlyReason, "it gives the reason the run command gives")
+	assert.NotContains(t, c.Message, "macOS",
+		"a refusal must not name a capability the platform it refuses actually has")
+
+	err := connectUnsupportedOSError("darwin")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), connectLinuxOnlyReason, "doctor and the run command give the one reason")
+	assert.NotContains(t, err.Error(), "macOS")
+}
+
 // The acp driver runs a pinned adapter out of the connector's own npm
 // prefix, never one on PATH: doctor resolves it the way the driver does, so
 // a documented install passes and an unpinned build on PATH does not.

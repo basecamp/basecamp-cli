@@ -249,13 +249,25 @@ func acpAdapterCheck(worker string) setup.Check {
 	return c
 }
 
+// connectUnsupportedOSCheck is the Platform check on a GOOS the connector
+// does not run on. It gives the constraint that actually applies
+// (connectSupportedOS, and #736): the task token reaches a worker's MCP
+// server over an inherited descriptor, and Linux alone seals the descriptors
+// a process passes on. Reading a process's start time is the half macOS has,
+// so naming that here told a Mac reader the connector could run there and
+// then refused it anyway.
+func connectUnsupportedOSCheck(goos string) setup.Check {
+	return setup.Check{Name: "Platform", Status: setup.StatusFail,
+		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectLinuxOnlyReason),
+		Hint:    "Run the connector on Linux; the rest of the CLI runs here."}
+}
+
 // driverChecks refuses what the run command refuses: doctor never calls a
 // connector ready that would not start.
 func driverChecks(p connectProfile) []setup.Check {
 	var checks []setup.Check
 	if !connectSupportedOS(runtime.GOOS) {
-		checks = append(checks, setup.Check{Name: "Platform", Status: setup.StatusFail,
-			Message: fmt.Sprintf("The connector does not run on %s: it ends a worker by its process group and start time, which macOS and Linux alone can say", runtime.GOOS)})
+		checks = append(checks, connectUnsupportedOSCheck(runtime.GOOS))
 	}
 	if p.file.Driver != setup.DriverSpawn && p.file.Driver != setup.DriverACP {
 		checks = append(checks, setup.Check{Name: "Driver", Status: setup.StatusFail,

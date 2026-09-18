@@ -171,7 +171,7 @@ func connectDriver(name, worker, adaptersDir string) (driver.Driver, error) {
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
-		return output.ErrUsage("basecamp connect runs on Linux only: the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits")
+		return connectUnsupportedOSError(runtime.GOOS)
 	}
 	app := appctx.FromContext(cmd.Context())
 	ctx := cmd.Context()
@@ -539,6 +539,17 @@ func connectConsumerNamespace(agentID int64, shadow bool) string {
 // end of each task.
 func connectSupportedOS(goos string) bool {
 	return goos == "linux"
+}
+
+// connectLinuxOnlyReason is why, in one place: the run command's refusal and
+// doctor's Platform check say the same thing, so a person who meets one and
+// then the other is not told two different stories about their machine.
+const connectLinuxOnlyReason = "the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits"
+
+// connectUnsupportedOSError is the run command's refusal on a platform the
+// connector does not run on.
+func connectUnsupportedOSError(goos string) error {
+	return output.ErrUsage(fmt.Sprintf("basecamp connect runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
 }
 
 // connectRoutes is connect.json's routes as they are now, not as they were at
