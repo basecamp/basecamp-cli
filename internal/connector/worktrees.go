@@ -417,6 +417,9 @@ func (w *Worktrees) Plan(ctx context.Context, route, name string) (*PlannedWorkD
 	if err != nil {
 		return nil, unusable(w.hasNoCommit(ctx, repository), fmt.Errorf("connector: route %s has no commit to branch from: %w", route, err))
 	}
+	if err := w.inCheckout(ctx, repository, base, rel); err != nil {
+		return nil, fmt.Errorf("connector: route %s: %w", route, err)
+	}
 	path := w.path(w.root, repository, name)
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("connector: worktree path %q is not absolute", path)
@@ -455,6 +458,35 @@ func (e *UnmodeledPathError) Error() string {
 }
 
 func (e *UnmodeledPathError) Unwrap() error { return ErrNotModeled }
+
+// inCheckout refuses a route the checkout would not contain. A worktree is
+// the commit's tree written out, and git writes a directory only where the
+// tree has one: a route that is untracked or ignored — or that the commit
+// has as a file — is a working directory that would not be there, and
+// nothing can be started in it. The tree is asked, and only what it proves
+// is refused (ErrRouteUnusable, which arms no backoff and is the record's
+// reason): a submodule is a directory the checkout makes, empty, and a
+// symbolic link is followed at dispatch to wherever it points, which this
+// does not guess at either way.
+func (w *Worktrees) inCheckout(ctx context.Context, repository, commit, rel string) error {
+	if rel == "." {
+		return nil
+	}
+	mode, err := w.treeEntry(ctx, repository, commit, filepath.ToSlash(rel))
+	switch {
+	case err != nil:
+		// Not a proof of anything: the next attempt asks again.
+		return err
+	case mode == "":
+		return fmt.Errorf("%s is not a directory %s tracks at %s, so no worktree of it would hold the route: %w",
+			rel, repository, shortCommit(commit), ErrRouteUnusable)
+	case mode == modeTree, mode == modeGitlink, mode == modeSymlink:
+		return nil
+	default:
+		return fmt.Errorf("%s is a file in %s at %s, not a directory a session could run in: %w",
+			rel, repository, shortCommit(commit), ErrRouteUnusable)
+	}
+}
 
 // ReadFile reads a file as the planned session would read it, as far as it
 // can be said without a checkout to read.

@@ -2068,3 +2068,61 @@ func TestPlanWorktreesSaysWhatItActuallyNeeds(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ledger", "the one that records worktrees does need it")
 }
+
+// A worktree is the commit's tree written out, so a route the tree does not
+// have is a working directory that would not be there: git writes no
+// directory for one that is untracked or ignored, and nothing could be
+// started in it. It is refused as the route it is, not waited on.
+func TestPlanRefusesARouteTheCheckoutWouldNotHold(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+
+	// The tracked route, and the repository itself, are what a checkout has.
+	for _, route := range []string{filepath.Join(h.repo, "app"), h.repo} {
+		plan, err := planner.Plan(ctx, route, "doctor")
+		require.NoError(t, err, "a directory the repository tracks is in every worktree of it")
+		assert.NotEmpty(t, plan.Dir)
+	}
+
+	// A directory that is only on disk is in no worktree.
+	untracked := filepath.Join(h.repo, "scratch")
+	require.NoError(t, os.MkdirAll(untracked, 0o700))
+	_, err = planner.Plan(ctx, untracked, "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+	assert.Contains(t, err.Error(), "no worktree of it would hold the route")
+
+	// One that is ignored is untracked with a reason, and no different.
+	h.write(h.repo, ".gitignore", "ignored/\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "ignore something")
+	ignored := filepath.Join(h.repo, "ignored")
+	require.NoError(t, os.MkdirAll(ignored, 0o700))
+	_, err = planner.Plan(ctx, ignored, "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+
+	// And a route the commit has as a file — a directory made on disk over
+	// a file the repository tracks — is not a directory to run in.
+	h.write(h.repo, "conflict", "a file at HEAD\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "a file where a directory will be")
+	require.NoError(t, os.Remove(filepath.Join(h.repo, "conflict")))
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "conflict"), 0o700))
+	_, err = planner.Plan(ctx, filepath.Join(h.repo, "conflict"), "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+	assert.Contains(t, err.Error(), "not a directory a session could run in")
+
+	// A submodule's directory the checkout does make, empty; a symbolic
+	// link it follows at dispatch. Neither is proved unusable, so neither
+	// is refused here.
+	h.git(h.repo, "update-index", "--add", "--cacheinfo", "160000,"+h.git(h.repo, "rev-parse", "HEAD")+",vendor")
+	require.NoError(t, os.Symlink("app", filepath.Join(h.repo, "applink")))
+	h.git(h.repo, "add", "applink")
+	h.git(h.repo, "commit", "-q", "-m", "a submodule and a link")
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "vendor"), 0o700))
+	for _, route := range []string{filepath.Join(h.repo, "vendor"), filepath.Join(h.repo, "applink")} {
+		_, err = planner.Plan(ctx, route, "doctor")
+		assert.NotErrorIs(t, err, ErrRouteUnusable, "%s is not proved unusable", route)
+	}
+}

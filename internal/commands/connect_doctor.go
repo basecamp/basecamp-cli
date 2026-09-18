@@ -388,7 +388,7 @@ func preflightHint(err error) (string, int) {
 	var unmodeled *connector.UnmodeledPathError
 	switch {
 	case errors.Is(err, connector.ErrRouteUnusable):
-		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees.", 0
+		return "With worktrees on, a route has to be a directory a git repository tracks, in a repository with a commit — git tracks a directory through the files in it, so an untracked or ignored one is in no checkout. Commit it, route the project elsewhere, or run the profile without worktrees.", 0
 	case errors.Is(err, errNoWorkDir):
 		// Not proved to be the route itself (#753): git, or the directory,
 		// could not be read this once, and a dispatch would try again.

@@ -963,3 +963,29 @@ func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
 		"the declaration is certainly there, and is what to do about it first")
 	assert.NotContains(t, c.Hint, "readable by the user")
 }
+
+// A route the repository does not track is a directory no worktree would
+// hold, so a session there would have nowhere to start. Doctor says so
+// rather than passing over it — the route exists on disk, and every check
+// that only looks at the disk is satisfied by it.
+func TestConnectDoctorPreflightRefusesARouteNoWorktreeWouldHold(t *testing.T) {
+	file, route, repo, _ := codexWorktreeProfile(t)
+
+	// The tracked route the repository has is ready, and stays ready.
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	require.Equal(t, setup.StatusPass, c.Status, "a route the repository tracks is in every worktree of it")
+	assert.Contains(t, c.Message, "would start")
+
+	untracked := filepath.Join(repo, "scratch")
+	require.NoError(t, os.MkdirAll(untracked, 0o755))
+	file.Projects[2] = admission.Route{Path: untracked}
+
+	c, ok = preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status, "doctor never calls a connector ready that would not start")
+	assert.Contains(t, c.Message, untracked)
+	assert.Contains(t, c.Message, "no worktree of it would hold the route")
+	assert.Contains(t, c.Hint, "Commit it", "and what to do about it")
+	assert.NotContains(t, c.Message, "start in "+route, "the route that would run is not named")
+}
