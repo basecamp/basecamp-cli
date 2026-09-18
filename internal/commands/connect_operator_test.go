@@ -486,14 +486,22 @@ func TestImportRunsOnALedgerOlderThanTheBuild(t *testing.T) {
 
 	file := filepath.Join(t.TempDir(), "reconciliation.json")
 	require.NoError(t, os.WriteFile(file, []byte(`{"version":1,"entries":[{"event_id":2,"decision":"done"}]}`), 0o600))
-	// The fabricated ledger cannot actually migrate (its tables are already
-	// there), so the migration's own error is the end of this run. What
-	// matters is what it is not: import must never refuse itself over the
-	// lock it holds.
+	// What the fabricated ledger makes of the migration it is asked to apply
+	// again depends on which migration that is: one that creates what is
+	// already there fails, one that can be replayed does not. Either is the
+	// end of this run, and neither is what matters — import must never refuse
+	// itself over the lock it holds.
 	_, err = f.run(t, output.FormatJSON, "import", file)
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "already holds this account")
-	assert.NotContains(t, err.Error(), "Stop the connector")
+	if err != nil {
+		assert.NotContains(t, err.Error(), "already holds this account")
+		assert.NotContains(t, err.Error(), "Stop the connector")
+		return
+	}
+	// It got through, which it could only do holding its own lock: the ledger
+	// is at this build's schema now, and reads without ErrLedgerOutOfDate.
+	reader, err := connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err, "import migrated the ledger it locked")
+	require.NoError(t, reader.Close())
 }
 
 func TestConnectStatusOnAMissingShadowLedgerPointsAtTheShadowRun(t *testing.T) {

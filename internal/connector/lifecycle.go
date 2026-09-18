@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,12 +29,42 @@ const GuardAckBody = "👀 received"
 // a person can tell a notice from the agent's own words.
 const lifecycleSignature = "automatic notice from basecamp connect"
 
+// redispatchAsk is the only thing a lifecycle notice ever asks a person to do.
+// Every notice that carries it is retractable, because a person's decision on
+// the record answers it; every notice that does not — the guard
+// acknowledgement, the still-running notice, a completion notice reporting an
+// outcome nobody has to act on — is a record of a moment, and a record stands.
+func redispatchAsk(eventID int64) string {
+	return "basecamp connect redispatch " + strconv.FormatInt(eventID, 10)
+}
+
+// asksRedispatch reports whether a posted message asks a person to redispatch
+// eventID. It reads the body that went out, not the records: the records have
+// moved on — that is why the message is being retracted — and what a reader
+// is looking at is the words.
+func asksRedispatch(body string, eventID int64) bool {
+	text, ask := MessageText(body), redispatchAsk(eventID)
+	for from := 0; from+len(ask) <= len(text); {
+		i := strings.Index(text[from:], ask)
+		if i < 0 {
+			break
+		}
+		end := from + i + len(ask)
+		// "redispatch 12" is not an ask for event 123.
+		if end == len(text) || text[end] < '0' || text[end] > '9' {
+			return true
+		}
+		from = end
+	}
+	return false
+}
+
 // renderHoldingReply is the reply to a mention or assignment in a project that
 // has no route.
 func renderHoldingReply(kind MessageKind, eventID int64) string {
 	lines := []string{
 		"I can't start on this here yet: this project has no working directory set up for me on the connector's machine, so nothing was run.",
-		"Once the project is added to connect.json, a person can run it with: basecamp connect redispatch " + strconv.FormatInt(eventID, 10),
+		"Once the project is added to connect.json, a person can run it with: " + redispatchAsk(eventID),
 		"",
 		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
 	}
@@ -50,9 +81,30 @@ func renderHoldingReply(kind MessageKind, eventID int64) string {
 func renderRefusedStart(kind MessageKind, eventID int64) string {
 	lines := []string{
 		"I can't start on this: this project's working directory on the connector's machine is not a git repository with a commit, and the connector is set up to give each task a worktree of its own, so nothing was run.",
-		"Once the directory is a repository, or the connector runs without worktrees, a person can run it with: basecamp connect redispatch " + strconv.FormatInt(eventID, 10),
+		"Once the directory is a repository, or the connector runs without worktrees, a person can run it with: " + redispatchAsk(eventID),
 		"",
 		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
+	}
+	return renderLines(kind, lines)
+}
+
+// renderRetraction answers an ask an earlier notice made. It says what
+// happened and that nothing is being asked for now; it does not say the work
+// is done, which the connector does not know, and it does not touch the
+// notice it answers. Nobody is named: the connector knows who authorized the
+// decision only as the handle the command recorded, which is not a person on
+// this card.
+func renderRetraction(kind MessageKind, eventID int64, action DecisionAction, at time.Time) string {
+	answer := "It was run at " + clock(at) + "; "
+	if action == DecisionDiscard {
+		answer = "The record was closed instead, at " + clock(at) + "; "
+	}
+	id := strconv.FormatInt(eventID, 10)
+	lines := []string{
+		"Event " + id + ": an earlier notice here asked a person to run " + redispatchAsk(eventID) + ". " +
+			answer + "the notice stands as a record, and asks for nothing now.",
+		"",
+		"Event " + id + " · " + lifecycleSignature,
 	}
 	return renderLines(kind, lines)
 }
@@ -89,7 +141,7 @@ func CompletionNeeded(s Settlement) bool {
 // nothing.
 func completionLine(e SettledEvent) string {
 	id := strconv.FormatInt(e.EventID, 10)
-	redispatch := " Needs a person: basecamp connect redispatch " + id
+	redispatch := " Needs a person: " + redispatchAsk(e.EventID)
 	if e.Decided {
 		// A person already redispatched or discarded it: the notice says what
 		// happened, and asks for nothing.
@@ -218,6 +270,9 @@ func LifecycleHooks(l *Ledger, opts LifecycleOptions) Hooks {
 		StartRefused: func(ctx context.Context, tx Tx, r RefusedStart) error {
 			return refusedStartIntent(ctx, tx, l.now(), r)
 		},
+		RecordDecided: func(ctx context.Context, tx Tx, d RecordDecision) error {
+			return retractionIntents(ctx, tx, l.now(), d)
+		},
 	}
 }
 
@@ -257,6 +312,91 @@ SELECT bucket_id, reply_kind, reply_recording_id, acknowledge FROM events WHERE 
 		destination: Destination{BucketID: bucketID, Kind: kind, RecordingID: replyRecordingID},
 		body:        renderRefusedStart(kind, r.EventID),
 	})
+}
+
+// retractionIntents writes a retraction for every posted notice that asked for
+// the decision a person has just made.
+//
+// Only a message that went out, or is on its way out, is retracted: a pending
+// one stands down at its claim, which is the pre-send half of this and is
+// cheaper, and one canceled, indeterminate or abandoned may never have
+// reached the destination at all. A message still sending gets a retraction
+// written now and held at its claim until the message it answers is known to
+// exist.
+//
+// Asks for one event can stand at two destinations — a holding reply goes to
+// the record's own reply, an attempt's completion notice to the originating
+// record's — so the latest ask at each destination is retracted, and only the
+// latest: two retractions of the same ask on one card is the noise this is
+// supposed to remove.
+func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecision) error {
+	asked, err := postedAsks(ctx, tx, d.EventID)
+	if err != nil {
+		return err
+	}
+	for _, p := range asked {
+		if err := writeIntent(ctx, tx, now, newIntent{
+			key:         retractionKey(p.id, d.EventID),
+			kind:        IntentRetraction,
+			eventID:     d.EventID,
+			retracts:    p.id,
+			destination: p.dest,
+			body:        renderRetraction(p.dest.Kind, d.EventID, d.Action, d.At),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// postedAsk is one message the connector posted that asks for an event's
+// redispatch.
+type postedAsk struct {
+	id   int64
+	dest Destination
+}
+
+// postedAsks reads the latest ask for an event at each destination, and closes
+// the cursor before its caller writes: one statement at a time on a
+// transaction.
+func postedAsks(ctx context.Context, tx Tx, eventID int64) ([]postedAsk, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT o.id, o.bucket_id, o.message_kind, o.recording_id, o.body
+FROM outbox o
+WHERE o.state IN ('sent', 'sending') AND (
+     (o.kind = 'holding_reply' AND o.event_id = ?1)
+  OR (o.kind = 'completion' AND o.attempt_id IN (
+        SELECT a.id FROM attempts a JOIN task_events te ON te.task_id = a.task_id WHERE te.event_id = ?1)))
+ORDER BY o.id`, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	latest := map[Destination]postedAsk{}
+	for rows.Next() {
+		var (
+			p          postedAsk
+			kind, body string
+		)
+		if err := rows.Scan(&p.id, &p.dest.BucketID, &kind, &p.dest.RecordingID, &body); err != nil {
+			return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
+		}
+		p.dest.Kind = MessageKind(kind)
+		if asksRedispatch(body, eventID) {
+			latest[p.dest] = p
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
+	}
+	out := make([]postedAsk, 0, len(latest))
+	for _, p := range latest {
+		out = append(out, p)
+	}
+	// In id order, so two retractions written at once are written in the order
+	// the messages they answer went out.
+	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id })
+	return out, nil
 }
 
 // verdictIntents writes the guard for an admitted request and the holding

@@ -76,6 +76,10 @@ const (
 	// lists in one pass.
 	RunBatch          = 16
 	RunReconcileBatch = 1
+	// RetractionWait is how long a retraction waits when the message it
+	// answers is still on its way: the request in front of it is bounded by
+	// PostTimeout, so this only decides how often the wait is asked again.
+	RetractionWait = time.Second
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -279,7 +283,8 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 	claimed[intent.ID] = true
 	o.line(intent)
 	if intent.State != IntentSending {
-		// Claiming canceled it.
+		// Claiming canceled it, or left it pending for a later tick: either
+		// way no request is made for it, and the flush goes on to the next.
 		return intent.ID, false, nil
 	}
 
@@ -337,8 +342,9 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 }
 
 // claimIntent moves the oldest due pending intent to sending and commits, or,
-// for a guard that no longer applies, to canceled. It is the only way to
-// sending.
+// for one that no longer applies, to canceled; a retraction whose message is
+// still on its way is left pending and due again shortly. It is the only way
+// to sending.
 func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, error) {
 	var (
 		out Intent
@@ -439,6 +445,44 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 			if !live {
 				next, note = IntentCanceled, "the attempt ended before the notice went out"
+			}
+		}
+		if in.Kind == IntentRetraction {
+			// A retraction answers a message at the destination. It goes out
+			// once that message is known to be there, waits while it is on
+			// its way, and is never sent when it turned out not to exist: a
+			// refusal created nothing, and an indeterminate or abandoned
+			// intent is a person's to settle, not something to post a reply
+			// to on a guess. A person who then proves that notice sent, or
+			// sends it again, has it stand unretracted: they are the ones
+			// looking at the destination, and the connector does not post
+			// behind them.
+			var answered string
+			switch err := tx.QueryRowContext(ctx, `SELECT state FROM outbox WHERE id = ?`, in.Retracts).Scan(&answered); {
+			case errors.Is(err, sql.ErrNoRows):
+				answered = ""
+			case err != nil:
+				return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+			}
+			switch IntentState(answered) {
+			case IntentSent:
+				// The message is at the destination: answer it.
+			case IntentPending, IntentSending:
+				// Not yet. It stays pending, due again on the next tick,
+				// rather than being claimed and left with nothing to say.
+				due := l.now().Add(RetractionWait)
+				if _, err := tx.ExecContext(ctx, `UPDATE outbox SET not_before = ? WHERE id = ? AND state = 'pending'`,
+					stamp(due), in.ID); err != nil {
+					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+				}
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("connector: commit outbox claim %d: %w", in.ID, err)
+				}
+				in.NotBefore = due
+				out, ok = in, true
+				return nil
+			default:
+				next, note = IntentCanceled, "the notice it answers was not posted"
 			}
 		}
 		if in.Kind == IntentGuardAck {
