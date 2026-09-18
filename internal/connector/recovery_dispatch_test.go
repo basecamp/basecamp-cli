@@ -750,7 +750,7 @@ func attemptState(t *testing.T, l *Ledger, id string) string {
 // that process.
 func killRecorded(t *testing.T, p driver.Process) {
 	t.Helper()
-	if owns, err := driver.OwnsWorker(driver.Process{PID: p.PID, PGID: p.PID, StartedAt: p.StartedAt}); err == nil && owns {
+	if owns, err := driver.OwnsWorker(identityOf(p.PID, p.PID, p.StartedAt)); err == nil && owns {
 		require.NoError(t, syscall.Kill(p.PID, syscall.SIGKILL))
 	}
 }

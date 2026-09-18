@@ -472,6 +472,16 @@ func (b *lockedBuffer) String() string {
 	return string(b.buf)
 }
 
+// identityOf is a process the agent log recorded, as the one-owner rule
+// takes it. The stamp written there is the kernel's (kernelStart) or nothing
+// at all, exactly as the ledger writes a worker's, so the rule can tell the
+// process recorded from a later one the kernel gave the same pid — and
+// without that bit it would answer neither, and the harness would signal
+// nothing it started.
+func identityOf(pid, pgid int, started time.Time) driver.Process {
+	return driver.Process{PID: pid, PGID: pgid, StartedAt: started, StartedExact: !started.IsZero()}
+}
+
 // killAgents ends every fake agent a harness started that is still alive, so
 // a failed test leaves nothing behind. It signals by the identity the agent
 // recorded — pid, group and start time — through the same call the connector
@@ -481,12 +491,12 @@ func (h *harness) killAgents() {
 		if entry.Step != "start" || entry.PID <= 0 || entry.PGID <= 0 {
 			continue
 		}
-		_, _ = driver.TerminateRecorded(driver.Process{PID: entry.PID, PGID: entry.PGID, StartedAt: entry.StartedAt}, time.Second)
+		_, _ = driver.TerminateRecorded(identityOf(entry.PID, entry.PGID, entry.StartedAt), time.Second)
 	}
 	// A worker's own children, which a group signal cannot reach once the
 	// worker that led the group is gone.
 	for _, child := range h.children() {
-		if owns, err := driver.OwnsWorker(driver.Process{PID: child.PID, PGID: child.PID, StartedAt: child.StartedAt}); err == nil && owns {
+		if owns, err := driver.OwnsWorker(identityOf(child.PID, child.PID, child.StartedAt)); err == nil && owns {
 			_ = syscall.Kill(child.PID, syscall.SIGKILL)
 		}
 	}
@@ -802,7 +812,7 @@ func (h *harness) children() []driver.Process {
 	var out []driver.Process
 	for _, e := range h.agentLog() {
 		if e.Step == "grandchild" && e.Child > 0 {
-			out = append(out, driver.Process{PID: e.Child, PGID: e.PGID, StartedAt: e.StartedAt})
+			out = append(out, identityOf(e.Child, e.PGID, e.ChildStartedAt))
 		}
 	}
 	return out

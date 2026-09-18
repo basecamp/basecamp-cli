@@ -46,8 +46,10 @@ type agentLogEntry struct {
 	// Args and Env are the agent's own, on its "start" entry.
 	Args []string `json:"args,omitempty"`
 	Env  []string `json:"env,omitempty"`
-	// Child is the pid of the process a "grandchild" step started.
-	Child int `json:"child,omitempty"`
+	// Child is the pid of the process a "grandchild" step started, and
+	// ChildStartedAt the kernel's start time for it.
+	Child          int       `json:"child,omitempty"`
+	ChildStartedAt time.Time `json:"child_started_at,omitempty"`
 	// Prompt is the prompt as the agent received it, on a "prompt" step.
 	Prompt string `json:"prompt,omitempty"`
 }
@@ -79,7 +81,22 @@ func (w *fakeWorker) close() {
 func (w *fakeWorker) log(event int64, n int, step string) {
 	pgid, _ := syscall.Getpgid(0)
 	_ = appendJSONLine(filepath.Join(w.dir, agentLogFile),
-		agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Event: event, N: n, Step: step})
+		agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: kernelStart(os.Getpid()), Event: event, N: n, Step: step})
+}
+
+// kernelStart is the kernel's own start time for pid, which is what makes a
+// recorded pid an identity (driver.Process.StartedExact). Nothing else is
+// written down: a wall-clock stamp is not an identity, the one-owner rule
+// refuses to answer about one (driver.ErrIdentityUnknown), and a harness
+// that recorded one could not signal what it started. A pid the kernel
+// cannot be asked about is recorded with no start time, which reads back as
+// no identity rather than a false one.
+func kernelStart(pid int) time.Time {
+	p, err := driver.LookupProcess(pid)
+	if err != nil {
+		return time.Time{}
+	}
+	return p.StartedAt
 }
 
 func (h *harness) agentLog() []agentLogEntry {
@@ -377,7 +394,8 @@ func (w *fakeWorker) step(ctx context.Context, event int64, n int, step string) 
 		}
 		pgid, _ := syscall.Getpgid(0)
 		return appendJSONLine(filepath.Join(w.dir, agentLogFile),
-			agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Event: event, N: n, Step: "grandchild", Child: pid})
+			agentLogEntry{PID: os.Getpid(), PGID: pgid, StartedAt: kernelStart(os.Getpid()), Event: event, N: n,
+				Step: "grandchild", Child: pid, ChildStartedAt: kernelStart(pid)})
 	case "arrive":
 		// A further event on the conversation while this one is in hand.
 		id, err := strconv.ParseInt(arg, 10, 64)
