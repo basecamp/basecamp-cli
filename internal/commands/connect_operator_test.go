@@ -353,6 +353,36 @@ func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {
 	assert.Equal(t, setup.StatusWarn, byName["Hold"].Status)
 }
 
+// doctor is the other place a person looks. A waiting route warns: it is a
+// machine a person must fix, but the connector is still trying it, so calling
+// it a failure would exit non-zero on a connector that is running correctly.
+func TestConnectDoctorWarnsAboutRoutesWaitingForAWorktree(t *testing.T) {
+	ctx := context.Background()
+	f := newOperatorFixture(t)
+	l := f.ledger(t, false)
+	first := time.Date(2026, 9, 18, 6, 0, 0, 0, time.UTC)
+	require.NoError(t, l.RecordRouteWait(ctx, connector.RouteWait{
+		Route: "/work/app", Failures: 14, Reason: "git rev-parse: detected dubious ownership in repository",
+		FirstAt: first, LastAt: first.Add(6 * time.Hour), Until: first.Add(6*time.Hour + 30*time.Minute),
+	}))
+	require.NoError(t, l.RecordRouteWait(ctx, connector.RouteWait{
+		Route: "/work/other", Failures: 2, FirstAt: first.Add(time.Hour), LastAt: first.Add(2 * time.Hour), Until: first.Add(3 * time.Hour),
+	}))
+	require.NoError(t, l.Close())
+
+	byName := map[string]setup.Check{}
+	for _, c := range ledgerChecks(ctx, connectProfile{name: "agent", file: f.file}) {
+		byName[c.Name] = c
+	}
+	require.Contains(t, byName, "Waiting routes")
+	assert.Equal(t, setup.StatusWarn, byName["Waiting routes"].Status, "a route waiting is not a route broken")
+	assert.Contains(t, byName["Waiting routes"].Message, "/work/app: 14 failed attempts at a worktree since 2026-09-18T06:00:00Z")
+	assert.Contains(t, byName["Waiting routes"].Message, "dubious ownership")
+	assert.Contains(t, byName["Waiting routes"].Message, "and 1 other route(s)")
+	assert.Contains(t, byName["Waiting routes"].Message, "the connector keeps trying and refuses nothing")
+	assert.Contains(t, byName["Waiting routes"].Hint, "basecamp connect status -P agent")
+}
+
 // doctor reads card 19's worktree ledger too: worktrees the connector kept
 // are a person's to deal with, and doctor is where a person finds out.
 func TestConnectDoctorReportsTheWorktreesTheConnectorKept(t *testing.T) {
@@ -544,6 +574,44 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, `"still_held"`)
 	assert.NotContains(t, out, `"StillHeld"`)
+}
+
+// A route that could not take a worktree holds its records back, and until
+// now that was visible only in the connector's log. Status is one of the two
+// places a person looks.
+func TestStatusReportsTheRoutesWaitingForAWorktree(t *testing.T) {
+	ctx := context.Background()
+	f := newOperatorFixture(t)
+	l := f.ledger(t, false)
+	first := time.Date(2026, 9, 18, 6, 0, 0, 0, time.UTC)
+	require.NoError(t, l.RecordRouteWait(ctx, connector.RouteWait{
+		Route: "/work/app", Failures: 14, Reason: "connector: route /work/app is not in a git repository: git rev-parse: exit status 128",
+		FirstAt: first, LastAt: first.Add(6 * time.Hour), Until: time.Now().Add(20 * time.Minute),
+	}))
+	require.NoError(t, l.Close())
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err, styled)
+	assert.Contains(t, styled, "Waiting routes 1 (no worktree could be made; their records wait, and the connector keeps trying)")
+	assert.Contains(t, styled, "/work/app  14 failures since 2026-09-18 06:00:00Z, next try ")
+	assert.Contains(t, styled, "is not in a git repository")
+
+	out, err := f.run(t, output.FormatJSON, "status")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"waiting_routes"`)
+	assert.Contains(t, out, `"failures": 14`)
+	assert.Contains(t, out, "1 routes waiting for a worktree")
+}
+
+// A status with nothing waiting says so, rather than leaving a reader to
+// guess: a route waiting forever and a route with no work on it looked
+// identical, which is the whole complaint.
+func TestStatusSaysNoRouteIsWaiting(t *testing.T) {
+	var buf bytes.Buffer
+	renderConnectStatus(&buf, connectStatusReport{Profile: "agent", Status: connector.Status{
+		Queues: map[string]int{}, Blocked: map[string]int{},
+	}})
+	assert.Contains(t, buf.String(), "Waiting routes 0 ")
 }
 
 // Status reads card 19's worktree ledger: the worktrees the connector kept

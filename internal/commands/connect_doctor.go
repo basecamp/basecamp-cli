@@ -35,15 +35,15 @@ func newConnectDoctorCmd() *cobra.Command {
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
 identity, the stream ticket mint, the account feed, the ledger (its gaps, open
-losses, hold, the worktrees it kept and messages waiting for a person), the
-worker the driver runs — the worker's own CLI on PATH under the spawn driver,
-the pinned ACP adapter in the connector's adapters directory under the acp
-driver, and the adapter's own refusal of configuration on this machine that
-the connector cannot switch off, run in the directory every routed project
-would work in (its worktree, where a profile makes them) — and a
-handshake with the agent's Basecamp MCP server, started with a worker's
-environment (without the basecamp_connect domain, which only a dispatched
-task's token opens).
+losses, hold, the routes no worktree could be made on, the worktrees it kept
+and messages waiting for a person), the worker the driver runs — the worker's
+own CLI on PATH under the spawn driver, the pinned ACP adapter in the
+connector's adapters directory under the acp driver, and the adapter's own
+refusal of configuration on this machine that the connector cannot switch off,
+run in the directory every routed project would work in (its worktree, where a
+profile makes them) — and a handshake with the agent's Basecamp MCP server,
+started with a worker's environment (without the basecamp_connect domain,
+which only a dispatched task's token opens).
 
 It writes nothing to the connector's ledger and posts nothing to Basecamp.
 Renewing the profile's own credential, which every command does when its token
@@ -177,6 +177,16 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 		checks = append(checks, setup.Check{Name: "Lifecycle messages", Status: setup.StatusWarn,
 			Message: fmt.Sprintf("%d messages may or may not have been posted and wait for a person", len(s.Indeterminate))})
 	}
+	// Warn, not fail. A route in a Prepare backoff is a route the connector is
+	// still trying, and doctor's failures are the things that stop it starting
+	// at all; calling a wait a failure would both exit non-zero on a connector
+	// that is running correctly and quietly reclassify a retry as a refusal.
+	// What a person needs is to know it is happening, which is the warning.
+	if len(s.Waiting) > 0 {
+		checks = append(checks, setup.Check{Name: "Waiting routes", Status: setup.StatusWarn,
+			Message: waitingRoutesMessage(s.Waiting),
+			Hint:    "basecamp connect status -P " + shellQuote(p.name) + " gives each route's last failure. Fix the route; the next task on it clears this on its own."})
+	}
 	switch {
 	case !s.WorktreesKnown:
 		checks = append(checks, setup.Check{Name: "Worktrees", Status: setup.StatusWarn,
@@ -188,6 +198,21 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 			Hint:    "basecamp connect worktrees list -P " + shellQuote(p.name) + ", then prune"})
 	}
 	return checks
+}
+
+// waitingRoutesMessage names the route that has been failing longest and its
+// last failure, so the warning is actionable without a second command, and
+// says how long it has been going on: six hours of waiting reads differently
+// from one minute, and that difference is the whole point of showing it.
+func waitingRoutesMessage(waits []connector.RouteWait) string {
+	first := waits[0]
+	msg := fmt.Sprintf("%s: %d failed attempts at a worktree since %s (%s)",
+		richtext.SanitizeSingleLine(first.Route), first.Failures,
+		first.FirstAt.UTC().Format(time.RFC3339), richtext.SanitizeSingleLine(first.Reason))
+	if len(waits) > 1 {
+		msg += fmt.Sprintf("; and %d other route(s)", len(waits)-1)
+	}
+	return msg + ". Records on them wait; the connector keeps trying and refuses nothing"
 }
 
 // workerBinaries are the executables the spawn driver runs for the

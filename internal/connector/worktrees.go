@@ -147,6 +147,9 @@ var _ WaitingWorkspaces = (*Worktrees)(nil)
 // it again.
 type prepareFailure struct {
 	count int
+	// first is when this run of failures started: what tells a six-hour wait
+	// from one that began a minute ago.
+	first time.Time
 	until time.Time
 }
 
@@ -330,6 +333,14 @@ func (w *Worktrees) PerTaskDirs() bool { return !w.off }
 // passes only when a person changes the directory; the error is returned
 // with no backoff armed, and the dispatcher refuses the record rather than
 // leaving the route to back off in silence.
+//
+// The wait that remains is written to the ledger as well as held here,
+// because status and doctor run in another process and read the ledger: a
+// wait that lived only in this map was visible in the connector's log and
+// nowhere a person looks. It is never escalated. However many times a route
+// has failed for a reason nothing can prove permanent, it is tried again when
+// its wait is over: "it has failed a lot" is not proof, and this connector
+// refuses only what it can prove.
 func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
 	if w.planOnly {
 		return "", ErrPlanOnly
@@ -351,18 +362,53 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 		// out of the dispatcher's window and answer one of them every half
 		// hour at most; the route is not going to become a repository on its
 		// own, so each record is refused as it comes and told once.
+		//
+		// Any wait recorded for it goes too. The route is refused now, with a
+		// reason on the record and a reply on the recording; a row saying it
+		// is waiting and will be tried again would be a second answer to the
+		// same question, and the wrong one.
 		delete(w.failures, route)
+		w.clearWait(ctx, route)
 		return "", err
 	}
 	if err != nil {
+		now := w.now()
 		failure.count++
 		delay := PrepareBackoff << min(failure.count-1, 10)
-		failure.until = w.now().Add(min(delay, PrepareBackoffMax))
+		failure.until = now.Add(min(delay, PrepareBackoffMax))
+		if failure.first.IsZero() {
+			failure.first = now
+		}
 		w.failures[route] = failure
+		w.recordWait(ctx, route, failure, now, err)
 		return "", err
 	}
 	delete(w.failures, route)
+	// The worktree is the only proof this connector ever has that the route
+	// works, so it is what clears the record of the failures.
+	w.clearWait(ctx, route)
 	return workDir, nil
+}
+
+// clearWait forgets the recorded wait on a route, if there was one.
+func (w *Worktrees) clearWait(ctx context.Context, route string) {
+	if err := w.ledger.ClearRouteWait(ctx, route); err != nil {
+		w.log.Warn("connector: could not clear the recorded wait on a route", "route", route, "error", err)
+	}
+}
+
+// recordWait puts the wait where a person can read it. A ledger that will not
+// take it is said out loud and nothing more: the caller's error is the reason
+// the worktree failed, and losing it to a bookkeeping error would be worse
+// than an unrecorded wait.
+func (w *Worktrees) recordWait(ctx context.Context, route string, failure prepareFailure, now time.Time, cause error) {
+	wait := RouteWait{
+		Route: route, Failures: failure.count, Reason: w.red.Sanitize(cause.Error()),
+		FirstAt: failure.first, LastAt: now, Until: failure.until,
+	}
+	if err := w.ledger.RecordRouteWait(ctx, wait); err != nil {
+		w.log.Warn("connector: could not record the wait on a route", "route", route, "error", err)
+	}
 }
 
 // RoutesWaiting implements WaitingWorkspaces: the routes still in a Prepare

@@ -852,6 +852,12 @@ END;
 	// 9. The numbers move only because nothing has shipped them yet; once a
 	// ledger has applied one, its number is fixed.
 	migrationOperator,
+
+	// Migration 11. The routes whose last worktree attempt failed, and when
+	// the next one is due. See ledger_route_waits.go: the backoff is
+	// Worktrees', in memory; this is the copy `connect status` and `connect
+	// doctor` read from another process.
+	migrationRouteWaits,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

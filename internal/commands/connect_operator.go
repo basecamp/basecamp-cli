@@ -166,9 +166,9 @@ func newConnectStatusCmd() *cobra.Command {
 		Short: "Show what the connector heard, holds and ran",
 		Long: `Show the connector's ledger: what its instance lock file says, the hold, the
 feed position (whether one is held, never the position), the last poll-served id,
-gaps and losses, queue depths, live tasks, retained worktrees, lifecycle
-messages waiting for a person, held records, and the last 20 dispatches with
-their outcomes.
+gaps and losses, queue depths, the routes no worktree could be made on, live
+tasks, retained worktrees, lifecycle messages waiting for a person, held
+records, and the last 20 dispatches with their outcomes.
 
 It reads the ledger read-only and takes no lock, so it works while the
 connector runs. It shows no content, no feed position and no token; a held
@@ -258,6 +258,9 @@ func connectStatusSummary(r connectStatusReport) string {
 	if r.Status.Hold != nil {
 		parts = append(parts, "held")
 	}
+	if n := len(r.Status.Waiting); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d routes waiting for a worktree", n))
+	}
 	parts = append(parts,
 		fmt.Sprintf("%d live tasks", len(r.Status.Tasks)),
 		fmt.Sprintf("%d held records", len(r.Status.Held)),
@@ -332,6 +335,15 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	}
 	if s.Review > 0 || s.AuthorizedBlocked > 0 || s.RedispatchPending > 0 {
 		fmt.Fprintf(w, "  Review         %d tagged, %d authorized and blocked, %d redispatches waiting for their task\n", s.Review, s.AuthorizedBlocked, s.RedispatchPending)
+	}
+	fmt.Fprintf(w, "  Waiting routes %d (no worktree could be made; their records wait, and the connector keeps trying)\n", len(s.Waiting))
+	for _, wait := range s.Waiting {
+		next := "due now"
+		if wait.Waiting(time.Now()) {
+			next = "next try " + stamp(wait.Until)
+		}
+		fmt.Fprintf(w, "    %s  %d failures since %s, %s: %s\n",
+			clean(wait.Route), wait.Failures, stamp(wait.FirstAt), next, clean(wait.Reason))
 	}
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))

@@ -107,6 +107,11 @@ type Status struct {
 	AuthorizedBlocked int `json:"authorized_blocked"`
 	RedispatchPending int `json:"redispatch_pending"`
 
+	// Waiting is every route whose last worktree attempt failed. Its records
+	// are admitted and startable and are not starting, which no other field
+	// of this status would say.
+	Waiting []RouteWait `json:"waiting_routes"`
+
 	Tasks     []TaskStatus     `json:"live_tasks"`
 	Worktrees []WorktreeStatus `json:"retained_worktrees"`
 	// WorktreesKnown is false when the retained worktrees could not be
@@ -327,7 +332,7 @@ func (l *Ledger) status(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("connector: status generation: %w", err)
 	}
 	for _, step := range []func(context.Context, *sql.Tx, *Status) error{
-		statusPositions, statusGaps, statusQueues, statusTasks, statusIntents, statusHeld, statusDispatches,
+		statusPositions, statusGaps, statusQueues, statusWaiting, statusTasks, statusIntents, statusHeld, statusDispatches,
 	} {
 		if err := step(ctx, tx, &s); err != nil {
 			return Status{}, err
@@ -352,6 +357,15 @@ func statusConnection(ctx context.Context, tx *sql.Tx, s *Status) error {
 		return err
 	}
 	s.Connection = &c
+	return nil
+}
+
+func statusWaiting(ctx context.Context, tx *sql.Tx, s *Status) error {
+	waits, err := readRouteWaits(ctx, tx)
+	if err != nil {
+		return err
+	}
+	s.Waiting = waits
 	return nil
 }
 

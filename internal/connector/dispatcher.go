@@ -205,9 +205,11 @@ type Dispatcher struct {
 	afterTurn func()
 	// confirmGroupGone is the one-owner rule's step 3; a test seam.
 	confirmGroupGone func(driver.Process, time.Duration) error
-	// strandedAt is when the stranded count was last reported. Read and
-	// written only by the dispatch loop.
+	// strandedAt is when the stranded count was last reported, waitingAt when
+	// the routes waiting for a worktree were. Read and written only by the
+	// dispatch loop.
 	strandedAt time.Time
+	waitingAt  time.Time
 	// held is how many attempts recovery left live because their workers
 	// could not be identified or verified. Written by Recover, read under mu.
 	held int
@@ -476,6 +478,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		return err
 	}
 	d.reportStranded(ctx, approved)
+	d.reportWaitingRoutes(ctx)
 	for _, record := range records {
 		// Asked again on every record, not counted down: a start that failed
 		// can have held its attempt, and a held attempt takes a slot as a
@@ -526,6 +529,40 @@ func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]stri
 	if stranded > 0 {
 		d.log.Warn("connector: admitted work no route covers is waiting; route its project or discard it",
 			"records", stranded)
+	}
+}
+
+// reportWaitingRoutes says which routes could not take a worktree and are
+// therefore holding their records back, on the same schedule as the stranded
+// count: a condition that persists keeps saying so, rather than being
+// mentioned once at the failure and never again.
+//
+// Only routes still inside their wait are named. A route whose wait has
+// elapsed is one the dispatcher will try again on its next record, so saying
+// it is waiting would be wrong — and a route nothing is routed to any more
+// would otherwise be warned about for as long as the connector ran.
+//
+// Nothing here escalates. The count is reported, never acted on: a route that
+// has reached the cap fifty times is still a route that may work in a minute,
+// and the connector blocks only what it can prove.
+func (d *Dispatcher) reportWaitingRoutes(ctx context.Context) {
+	if time.Since(d.waitingAt) < StrandedInterval {
+		return
+	}
+	d.waitingAt = time.Now()
+	waits, err := d.ledger.RouteWaits(ctx)
+	if err != nil {
+		d.log.Warn("connector: reading the routes waiting for a worktree", "error", err)
+		return
+	}
+	now := time.Now()
+	for _, w := range waits {
+		if !w.Waiting(now) {
+			continue
+		}
+		d.log.Warn("connector: no worktree could be made on this route, so its records wait; this is a machine to fix, not something the connector recovers from",
+			"route", w.Route, "failures", w.Failures, "waiting_since", w.FirstAt.UTC().Format(time.RFC3339),
+			"next_attempt", w.Until.UTC().Format(time.RFC3339), "last_failure", w.Reason)
 	}
 }
 
