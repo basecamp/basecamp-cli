@@ -17,7 +17,8 @@ import (
 // The Claude Code spawn driver's row: `claude -p` speaking stream-json.
 func init() {
 	registerHarnessDriver(harnessDriver{
-		Name: claude.Name,
+		Name:      claude.Name,
+		FollowUps: true,
 		New: func(agent string) driver.Driver {
 			return claude.New(claude.Options{Binary: agent, CloseGrace: 5 * time.Second, Lookup: func(string) (string, bool) { return "", false }})
 		},

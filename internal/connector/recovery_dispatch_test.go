@@ -417,6 +417,7 @@ func assertSpawnBlocked(t *testing.T, h *harness, l *Ledger) {
 // task of its own, and an exposed one is never run again.
 func TestRecoveryFollowUpsSurviveTheirTasksEnd(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
+		requireFollowUps(t, d)
 		raceSubset(t, false)
 		t.Run("a follow-up arrives, the task ends", func(t *testing.T) {
 			h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
@@ -487,8 +488,17 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 	)
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
 		raceSubset(t, false)
+		// The follow-up prompt is a second prompt on a live session, so it is
+		// measured on the drivers that have one. On a one-shot driver the
+		// same event arrives as another task's dispatch prompt, which is the
+		// prompt already being measured here.
+		plan := []string{"get", "ack", "reply", "complete"}
+		if d.FollowUps {
+			plan = []string{"get", "arrive:" + strconv.FormatInt(followUp, 10),
+				"await:" + strconv.FormatInt(followUp, 10) + "=dispatched", "ack", "reply", "complete"}
+		}
 		h := newHarness(t, d, harnessScenario{Plans: map[string][]string{
-			strconv.FormatInt(event, 10) + "#1": {"get", "arrive:" + strconv.FormatInt(followUp, 10), "await:" + strconv.FormatInt(followUp, 10) + "=dispatched", "ack", "reply", "complete"},
+			strconv.FormatInt(event, 10) + "#1": plan,
 		}})
 		h.publish(feedEntry{Event: todoEvent(event, recording)})
 		h.run(harnessRun{})
@@ -500,7 +510,9 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 			}
 		}
 		require.Contains(t, prompts, event)
-		require.Contains(t, prompts, followUp)
+		if d.FollowUps {
+			require.Contains(t, prompts, followUp)
+		}
 		for id, prompt := range prompts {
 			tokens := estimateTokens(prompt)
 			t.Logf("%s: prompt for event %d: %d bytes, %d tokens by the bound, budget %d", d.Name, id, len(prompt), tokens, MaxPromptTokens)

@@ -20,10 +20,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/spawn"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
 // The integrated recovery harness (plan step 22).
@@ -55,13 +59,23 @@ import (
 //
 // Each driver the connector can start workers with registers a row
 // (registerHarnessDriver): how to build the driver with a fake agent as its
-// binary, and the fake agent's side of the driver's wire. The fake agent is
-// this test binary behind a small exec wrapper, so the dispatcher's
-// environment allowlist is never widened for the harness. Whatever the wire,
-// the fake agent's work is the same fakeWorker: it binds to its task through
-// the MCP server declaration the driver handed it (the state directory and the
-// task token) and calls the ledger exactly as `basecamp mcp --connect-state`
-// does. Every dispatch test runs once per registered driver.
+// binary, and the fake agent's side of the driver's wire. There are three —
+// the Claude Code spawn driver, the Codex spawn driver and the acp driver,
+// each in its own recovery_<driver>_test.go — and
+// TestEveryDriverTheConnectorStartsHasAHarnessRow holds that list to the
+// drivers the run command can actually start, so a fourth cannot be added
+// without a row. The fake agent is this test binary behind a small exec
+// wrapper, so the dispatcher's environment allowlist is never widened for
+// the harness. Whatever the wire, the fake agent's work is the same
+// fakeWorker: it binds to its task through the MCP server declaration the
+// driver handed it (the state directory and the task token) and calls the
+// ledger exactly as `basecamp mcp --connect-state` does. Every dispatch test
+// runs once per registered driver.
+//
+// Recovery is where the drivers differ most — each leaves a different
+// process tree behind, and each says the worker is gone in its own way — so
+// each kill point is worth its three runs. A row costs seconds, not minutes:
+// adding the Codex and acp rows took this package from 108 to 134 seconds.
 //
 // # What the harness does not cover
 //
@@ -69,6 +83,18 @@ import (
 // spawn.New(connect.json's worker): the registry that maps a worker name to a
 // driver is that package's own test's. The fake agent is the driver's binary,
 // which is what the registry would otherwise decide.
+//
+// A case about a second prompt on a live session runs only on the drivers
+// whose sessions take one (requireFollowUps): a Codex process is one turn,
+// and what the dispatcher does with a follow-up it cannot hand over is
+// TestAFollowUpForAOneShotDriverStartsATaskOfItsOwn, in dispatcher_test.go.
+//
+// TestRecoveryAgainstRealAgents runs the Claude Code spawn driver and no
+// other: its rows are registered in recovery_claude_test.go, and no real row
+// is registered for Codex or for an ACP adapter. So what is proven against
+// a real agent binary — a real `basecamp mcp` behind a real MCP client, a
+// real model's turn — is proven for Claude Code alone; for the other two,
+// what is proven is the connector's side of their wire.
 //
 // # Synchronization
 //
@@ -87,6 +113,12 @@ type harnessDriver struct {
 	// stdout, binds w to the MCP server declaration it was given, calls
 	// w.Turn for each prompt, and returns the process's exit code.
 	Agent func(w *fakeWorker) int
+	// FollowUps is the driver's driver.Capabilities.FollowUpPrompts: whether
+	// a session takes a second prompt, which is what decides whether an event
+	// arriving mid-turn is exposed to the worker in hand or waits for a task
+	// of its own. TestHarnessRowsSayWhatTheirDriversDo holds it to the
+	// driver's own answer.
+	FollowUps bool
 	// Real rows start the real agent binary with the real `basecamp mcp`:
 	// they run only in TestRecoveryAgainstRealAgents, opted into locally.
 	Real bool
@@ -103,6 +135,20 @@ func registerHarnessDriver(d harnessDriver) {
 		}
 	}
 	harnessDrivers = append(harnessDrivers, d)
+}
+
+// requireFollowUps skips a case that is about a second prompt on a live
+// session, for a driver whose sessions take one. The case is not a weaker
+// guarantee on such a driver, it is a different one: the event arriving
+// mid-turn waits for a task of its own, and which state it waits in, and for
+// how long, is the dispatcher's to decide, not something the worker can be
+// scripted around. That path is TestAFollowUpForAOneShotDriverStartsATaskOfItsOwn
+// in dispatcher_test.go, against a one-shot driver in this process.
+func requireFollowUps(t *testing.T, d harnessDriver) {
+	t.Helper()
+	if !d.FollowUps {
+		t.Skip("a session of this driver takes one prompt: no follow-up is ever handed to a live worker")
+	}
 }
 
 func harnessDriverNamed(name string) (harnessDriver, bool) {
@@ -127,6 +173,49 @@ func forEachDriver(t *testing.T, fn func(t *testing.T, d harnessDriver)) {
 				t.Skip("starts processes")
 			}
 			fn(t, d)
+		})
+	}
+}
+
+// The harness runs every driver the connector can start a worker with: each
+// spawn driver connect.json's workers resolve to, and the acp driver. A
+// driver with no row is a driver whose recovery — the process trees it
+// leaves, and what a restart can read back about them — nothing proves.
+func TestEveryDriverTheConnectorStartsHasAHarnessRow(t *testing.T) {
+	want := map[string]bool{acp.Name: false}
+	for _, worker := range setup.Workers {
+		d, err := spawn.New(worker, spawn.Options{})
+		require.NoError(t, err, worker)
+		want[d.Name()] = false
+	}
+	for _, d := range harnessDrivers {
+		if d.Real {
+			continue
+		}
+		if _, ok := want[d.Name]; ok {
+			want[d.Name] = true
+		}
+	}
+	for name, has := range want {
+		assert.True(t, has, "the recovery harness has no row for the %q driver", name)
+	}
+}
+
+// A row says what its driver does. FollowUps decides the shape the follow-up
+// cases expect, so a row that drifts from its driver would quietly stop
+// proving anything about either shape.
+func TestHarnessRowsSayWhatTheirDriversDo(t *testing.T) {
+	agent := filepath.Join(t.TempDir(), "agent")
+	require.NoError(t, os.WriteFile(agent, []byte("#!/bin/sh\nexit 0\n"), 0o700)) //nolint:gosec // an executable stub
+	for _, d := range harnessDrivers {
+		if d.Real {
+			continue
+		}
+		t.Run(d.Name, func(t *testing.T) {
+			built := d.New(agent)
+			require.NotNil(t, built, "the row builds its driver")
+			assert.Equal(t, d.Name, built.Name())
+			assert.Equal(t, d.FollowUps, built.Capabilities().FollowUpPrompts)
 		})
 	}
 }
