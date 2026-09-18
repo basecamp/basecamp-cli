@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -612,57 +611,6 @@ func TestAFollowUpForAOneShotDriverStartsATaskOfItsOwn(t *testing.T) {
 	assert.Zero(t, unknown, "never exposed on the first task, so not unknown there")
 }
 
-type fakeWorkspaces struct {
-	perTask   bool
-	mu        sync.Mutex
-	n         int
-	finished  int
-	recovered bool
-}
-
-func (w *fakeWorkspaces) Prepare(_ context.Context, route string, eventID int64) (string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.n++
-	return route + "-wt-" + string(rune('0'+w.n)), nil
-}
-func (w *fakeWorkspaces) Finish(context.Context, string, string) error {
-	w.mu.Lock()
-	w.finished++
-	w.mu.Unlock()
-	return nil
-}
-func (w *fakeWorkspaces) PerTaskDirs() bool { return w.perTask }
-func (w *fakeWorkspaces) Recover(context.Context) error {
-	w.mu.Lock()
-	w.recovered = true
-	w.mu.Unlock()
-	return nil
-}
-
-func TestPerTaskWorkspacesLetTwoTasksShareARoute(t *testing.T) {
-	fake := newFakeDriver()
-	hold := make(chan struct{})
-	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
-		select {
-		case <-hold:
-		case <-s.canceled:
-			return driver.PromptResult{Stop: driver.TurnCanceled}, nil
-		}
-		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
-	}
-	ws := &fakeWorkspaces{perTask: true}
-	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Workspaces = ws })
-	admitOn(t, h.ledger, 1, "recording:1")
-	admitOn(t, h.ledger, 2, "recording:2")
-	h.run(t)
-	a, b := nextSession(t, fake), nextSession(t, fake)
-	assert.NotEqual(t, a.cfg.Cwd, b.cfg.Cwd)
-	close(hold)
-	h.attemptsEnded(t, 2)
-	assert.True(t, ws.recovered, "Recover runs on start")
-}
-
 func nextSession(t *testing.T, fake *fakeDriver) *fakeSession {
 	t.Helper()
 	select {
@@ -945,9 +893,7 @@ func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
 	// The session reports the worker's group, which still has a member, and
 	// closing it kills nothing.
 	fake.process = worker.Process()
-	ws := &fakeWorkspaces{}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
-		o.Workspaces = ws
 		o.CancelGrace = 200 * time.Millisecond
 	})
 	// Confirmation without signaling, so the fixture's tree survives the
@@ -973,9 +919,6 @@ func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
 	attempt := liveAttemptID(t, h.ledger)
 	assert.Equal(t, "running", readAttempt(t, h.ledger, attempt).State, "the record is not terminal")
 	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
-	ws.mu.Lock()
-	defer ws.mu.Unlock()
-	assert.Zero(t, ws.finished, "the working directory is not released")
 }
 
 // liveAttemptID is the id of the one attempt that has not ended.
@@ -1014,10 +957,8 @@ func TestRecoveryReleasesNothingWhileTheRecordedGroupSurvives(t *testing.T) {
 	worker, grandchild := drivertest.SurvivingWorker(t, work)
 
 	fake := newFakeDriver()
-	ws := &fakeWorkspaces{}
 	lines := &safeBuffer{}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
-		o.Workspaces = ws
 		o.Lines = ndjson.NewWriter(lines)
 		o.CancelGrace = 100 * time.Millisecond
 	})
@@ -1042,19 +983,14 @@ func TestRecoveryReleasesNothingWhileTheRecordedGroupSurvives(t *testing.T) {
 	assert.Equal(t, "running", readAttempt(t, h.ledger, l.AttemptID).State, "the record is not terminal")
 	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
 	assert.True(t, drivertest.Alive(grandchild))
-	ws.mu.Lock()
-	assert.Zero(t, ws.finished, "the working directory is not released")
-	ws.mu.Unlock()
 	assert.NotContains(t, lines.String(), `"state":"ended"`, "and no end is reported")
 }
 
 // Copilot r4: a settlement that cannot be written releases nothing either.
 func TestASettlementThatCannotBeWrittenReleasesNothing(t *testing.T) {
 	fake := newFakeDriver()
-	ws := &fakeWorkspaces{}
 	lines := &safeBuffer{}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
-		o.Workspaces = ws
 		o.Lines = ndjson.NewWriter(lines)
 	})
 	h.ledger.SetHooks(Hooks{AttemptEnded: func(context.Context, Tx, Settlement) error {
@@ -1070,15 +1006,8 @@ func TestASettlementThatCannotBeWrittenReleasesNothing(t *testing.T) {
 	attempts, err := h.ledger.LiveAttempts(context.Background())
 	require.NoError(t, err)
 	require.Len(t, attempts, 1, "the attempt stays live")
-	assert.Zero(t, ws.finishedCount(), "its directory is not released")
 	assert.NotContains(t, lines.String(), `"state":"ended"`, "and no end is reported")
 	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State)
-}
-
-func (w *fakeWorkspaces) finishedCount() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.finished
 }
 
 func liveRuns(h *dispatchHarness) int {
@@ -1095,8 +1024,7 @@ func TestAStartThatFailedAfterLaunchingReleasesNothingWhileItsGroupLives(t *test
 
 	fake := newFakeDriver()
 	fake.startErr = []error{&driver.StartError{Process: worker, Err: errors.New("handshake timed out")}}
-	ws := &fakeWorkspaces{}
-	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Workspaces = ws; o.CancelGrace = 100 * time.Millisecond })
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.CancelGrace = 100 * time.Millisecond })
 	h.d.confirmGroupGone = func(p driver.Process, _ time.Duration) error {
 		if driver.GroupMembersRemain(p) {
 			return driver.ErrGroupOutlivedLeader
@@ -1112,7 +1040,6 @@ func TestAStartThatFailedAfterLaunchingReleasesNothingWhileItsGroupLives(t *test
 		return err == nil && len(attempts) == 1 && liveRuns(h) == 0 && h.d.heldCount() == 1
 	}, 5*time.Second, 20*time.Millisecond)
 	assert.True(t, drivertest.Alive(grandchild))
-	assert.Zero(t, ws.finishedCount(), "the directory is not released")
 	assert.Equal(t, StateDispatched, getRecord(t, h.ledger, 1).State, "the record is not terminal")
 }
 
@@ -1139,35 +1066,6 @@ func TestAWorkerThatExitsNonZeroMidTurnFailedAndOneThatVanishedIsLost(t *testing
 			assert.Equal(t, tc.want, h.attemptsEnded(t, 1)[0].StopReason)
 		})
 	}
-}
-
-type waitingWorkspaces struct {
-	fakeWorkspaces
-	waiting []string
-}
-
-func (w *waitingWorkspaces) Prepare(_ context.Context, route string, _ int64) (string, error) {
-	if slices.Contains(w.waiting, route) {
-		return "", errors.New("the repository cannot take a worktree")
-	}
-	return route, nil
-}
-
-func (w *waitingWorkspaces) RoutesWaiting() []string { return w.waiting }
-
-// Card 19: a route that cannot take a task must not starve the others.
-func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
-	fake := newFakeDriver()
-	ws := &waitingWorkspaces{waiting: []string{"/work/broken"}}
-	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Workspaces = ws })
-	h.routes[700] = admission.Route{Path: "/work/broken"}
-	for i := int64(1); i <= 12; i++ {
-		admitRouted(t, h.ledger, i, 700, "recording:broken"+strconv.FormatInt(i, 10), "/work/broken")
-	}
-	admitRouted(t, h.ledger, 50, adapterBucketID, "recording:ok", testRoute)
-	h.run(t)
-	s := nextSession(t, fake)
-	assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
 }
 
 // The redaction rule at the connector's end (driver's redact.go): the task's

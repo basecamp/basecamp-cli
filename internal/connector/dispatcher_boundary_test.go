@@ -11,31 +11,22 @@ import (
 )
 
 // The one release point, as a property of the source rather than of a
-// reviewer's attention: settling an attempt, releasing a working directory
-// and reporting an end happen in Dispatcher.release and nowhere else, so no
-// later card can add a path that releases a directory while a worker may
-// still be in it.
-func TestOnlyTheReleasePointSettlesAnAttemptOrReleasesItsDirectory(t *testing.T) {
+// reviewer's attention: settling an attempt and reporting an end happen in
+// Dispatcher.release and nowhere else, so no later card can add a path that
+// settles an attempt while a worker may still be running.
+func TestOnlyTheReleasePointSettlesAnAttempt(t *testing.T) {
 	source, err := os.ReadFile("dispatcher.go")
 	require.NoError(t, err)
 	functions := splitFunctions(string(source))
 	require.NotEmpty(t, functions)
 
-	for _, call := range []string{"EndAttempt(", "finishWorkspace(", "d.settle(", "d.adopt("} {
+	for _, call := range []string{"EndAttempt(", "d.settle(", "d.adopt("} {
 		for name, body := range functions {
 			if name == "release" || name == call[:len(call)-1] || (name == "settle" && call == "EndAttempt(") {
 				continue
 			}
 			assert.NotContains(t, body, call, "%s calls %s outside the release point", name, call)
 		}
-	}
-	// The only other way to release a directory is one no task ever owned.
-	for name, body := range functions {
-		switch name {
-		case "finishWorkspace", "discardPreparedWorkspace", "workspaceFinished":
-			continue
-		}
-		assert.NotContains(t, body, "Workspaces.Finish(", "%s releases a working directory of its own accord", name)
 	}
 	for name, body := range functions {
 		if name == "release" {

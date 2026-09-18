@@ -75,8 +75,7 @@ wait for review, until basecamp connect release. Linux only.
 	}
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd(), newConnectWorkerMCPCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
-		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
-		newConnectWorktreesCmd())
+		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
 	return cmd
 }
 
@@ -181,10 +180,6 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		}
 		trust += ": people " + strings.Join(ids, ", ")
 	}
-	worktrees := "off"
-	if f.Worktrees {
-		worktrees = "on"
-	}
 	d := map[string]any{
 		"file":     exact(path),
 		"account":  f.AccountID,
@@ -195,7 +190,7 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		// agent the driver runs, and a file written before that field
 		// existed still means the default, which is what a person reading
 		// show needs to see.
-		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline), worktrees),
+		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline)),
 		"projects": strconv.Itoa(len(f.Projects)) + " routed",
 	}
 	for id, r := range f.Projects {
@@ -265,16 +260,15 @@ type connectSetupFlags struct {
 	trust string
 	allow []string
 
-	routes    []string
-	classes   []string
-	watch     []string
-	unwatch   []string
-	unroute   []string
-	driver    string
-	worker    string
-	parallel  int
-	deadline  time.Duration
-	worktrees bool
+	routes   []string
+	classes  []string
+	watch    []string
+	unwatch  []string
+	unroute  []string
+	driver   string
+	worker   string
+	parallel int
+	deadline time.Duration
 }
 
 func newConnectSetupCmd() *cobra.Command {
@@ -331,7 +325,7 @@ Examples:
   basecamp connect setup -P agent --operator-profile me --route 12345=~/Work/app
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --route 12345=~/Work/app
-  basecamp connect setup -P agent --class 12345=internal --deadline 90m --worktrees`,
+  basecamp connect setup -P agent --class 12345=internal --deadline 90m`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -357,7 +351,6 @@ Examples:
 	fl.StringVar(&f.worker, "worker", "", fmt.Sprintf("The coding agent workers run: %s (default %s)", strings.Join(setup.Workers, ", "), setup.DefaultWorker))
 	fl.IntVar(&f.parallel, "concurrency", 0, fmt.Sprintf("Workers at once (default %d)", setup.DefaultConcurrency))
 	fl.DurationVar(&f.deadline, "deadline", 0, fmt.Sprintf("Deadline per task (default %s)", setup.DefaultDeadline))
-	fl.BoolVar(&f.worktrees, "worktrees", false, "Give each task its own git worktree")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 
 	return cmd
@@ -381,7 +374,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if err != nil {
 		return err
 	}
-	worktreesChanged(cmd, f, &changes)
 	expect, err := parseExpectIdentity(f.expectIdentity)
 	if err != nil {
 		return err
@@ -808,14 +800,6 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 		ch.Deadline = f.deadline
 	}
 	return ch, nil
-}
-
-// worktreesChanged wires --worktrees, which is only a change when typed.
-func worktreesChanged(cmd *cobra.Command, f *connectSetupFlags, ch *setup.Changes) {
-	if cmd.Flags().Changed("worktrees") {
-		v := f.worktrees
-		ch.Worktrees = &v
-	}
 }
 
 // parseProjectPairs parses repeatable <project-id>=<value> flags.

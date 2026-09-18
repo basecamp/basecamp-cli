@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -128,29 +129,6 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 			"<br>Event 1 · automatic notice from basecamp connect</div>", in.Body)
 		require.NoError(t, ob.Flush(ctx))
 		assert.Equal(t, IntentSent, obRetraction(t, ledger, holding, 1).State, "a closed record is waiting for nothing")
-	})
-
-	t.Run("a refused start, once the record is redispatched", func(t *testing.T) {
-		ctx := context.Background()
-		ledger, clock := obLedger(t)
-		obAdmit(t, ledger, 1, "recording:10304028989")
-		require.NoError(t, ledger.RefuseStart(ctx, 1, ReasonRouteUnusable))
-		basecamp := newFakeBasecamp(clock.Now)
-		ob := obOutbox(t, ledger, basecamp)
-		require.NoError(t, ob.Flush(ctx))
-		refusal := obIntent(t, ledger, refusedStartKey(1))
-		require.Equal(t, IntentSent, refusal.State)
-
-		clock.Advance(20 * time.Minute)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
-		require.NoError(t, err)
-		obRoutedNow(t, ledger, 1)
-
-		in := obRetraction(t, ledger, refusal, 1)
-		assert.Equal(t, refusal.Destination, in.Destination)
-		assert.Contains(t, in.Body, "A person ran it at 12:20 UTC")
-		require.NoError(t, ob.Flush(ctx))
-		assert.Equal(t, IntentSent, obRetraction(t, ledger, refusal, 1).State)
 	})
 
 	t.Run("a holding reply in a Campfire, as plain text", func(t *testing.T) {
@@ -281,7 +259,6 @@ func TestARetractionWaitsWhileTheAskIsStillOpen(t *testing.T) {
 // posts a wrong message on somebody's card, or leaves a right one unsaid.
 func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
 	holding := Intent{Kind: IntentHoldingReply, Key: holdingKey(1), EventID: 1}
-	refused := Intent{Kind: IntentHoldingReply, Key: refusedStartKey(1), EventID: 1}
 	completion := Intent{Kind: IntentCompletion, Key: completionKey("a1")}
 	open := func(t *testing.T, ctx context.Context, ledger *Ledger, source Intent, id int64) bool {
 		t.Helper()
@@ -298,7 +275,6 @@ func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
 		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
 		require.NoError(t, err)
 		assert.True(t, open(t, ctx, ledger, holding, 1))
-		assert.False(t, open(t, ctx, ledger, refused, 1), "the route-unusable reply asks about another block")
 	})
 
 	t.Run("a blocked reason that comes round on its own answers it", func(t *testing.T) {
@@ -841,13 +817,29 @@ func obUpgradedLedger(t *testing.T, clock *obClock, setup func(t *testing.T, old
 	return ledger
 }
 
+// refusedStartReplyAsItWentOut is the reply a connector with worktrees posted
+// for a record whose route was not a repository, in the words it used. The
+// renderer is gone with worktrees; the message is still in ledgers that ran
+// that build, so the fixture carries the text rather than a stand-in. What
+// matters to the retraction is the redispatch ask in it — a notice with no ask
+// is a notice with nothing to answer, and postedAsks passes over it.
+func refusedStartReplyAsItWentOut(eventID int64) string {
+	return renderLines(MessageComment, []string{
+		"I can't start on this: this project's working directory on the connector's machine is not a git repository with a commit, and the connector is set up to give each task a worktree of its own, so nothing was run.",
+		"Once the directory is a repository, or the connector runs without worktrees, a person can run it with: " + redispatchAsk(eventID),
+		"",
+		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
+	})
+}
+
 // Done when: an upgrade answers the asks it inherits. A build before the
-// retraction posted a holding reply and then, once the project had a
-// directory that was not a repository, a refused-start reply — two asks for
-// one event at one destination, neither of which anything could answer. The
-// first decision after the upgrade answers both: an ask left standing under an
-// answer to the notice that overtook it still tells a person to run something
-// nobody is going to run.
+// retraction posted a holding reply and then a second one — the refused-start
+// reply a connector with worktrees wrote when the route was not a repository,
+// a kind nothing writes any more but an upgraded ledger still carries. Two
+// asks for one event at one destination, neither of which anything could
+// answer. The first decision after the upgrade answers both: an ask left
+// standing under an answer to the notice that overtook it still tells a
+// person to run something nobody is going to run.
 func TestEveryUnansweredAskAtADestinationIsRetracted(t *testing.T) {
 	ctx := context.Background()
 	clock := &obClock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
@@ -865,13 +857,13 @@ VALUES (7, 'holding_reply:event:1',         'holding_reply', 'sent', 1, 48699913
         '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:01:00.000000000Z', '2026-09-17T11:02:00.000000000Z', 555),
        (8, 'holding_reply:refused:event:1', 'holding_reply', 'sent', 1, 48699913, 'comment', 10304028989, ?2,
         '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:31:00.000000000Z', '2026-09-17T11:32:00.000000000Z', 556)`,
-			renderHoldingReply(MessageComment, 1), renderRefusedStart(MessageComment, 1))
+			renderHoldingReply(MessageComment, 1), refusedStartReplyAsItWentOut(1))
 		require.NoError(t, err)
 	})
 	basecamp := newFakeBasecamp(clock.Now)
 	ob := obOutbox(t, ledger, basecamp)
 
-	// A person fixes the repository and redispatches. Deciding the record
+	// A person routes the project and redispatches. Deciding the record
 	// again while its prerequisite runs answers nothing twice.
 	_, err := ledger.Redispatch(ctx, 1, "jorge")
 	require.NoError(t, err)

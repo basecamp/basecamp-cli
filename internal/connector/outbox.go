@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // The outbox: every message the connector itself posts to Basecamp — the
@@ -291,11 +289,7 @@ const (
 	IntentGuardAck IntentKind = "guard_ack"
 	// IntentHoldingReply answers a request the connector is not going to
 	// start work on until a person changes something: a mention or
-	// assignment in a project with no route (holdingKey), and one whose
-	// route no task can be given a working directory in (refusedStartKey).
-	// One of each per event, because the second can follow the first — a
-	// route added, and the directory it names not one a worktree can be made
-	// in — and an event told the first thing is owed the second.
+	// assignment in a project with no route. One per event.
 	IntentHoldingReply IntentKind = "holding_reply"
 	// IntentStillRunning is one still-running notice. One per attempt and
 	// occurrence.
@@ -394,22 +388,6 @@ func guardKey(eventID int64) string {
 
 func holdingKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":event:" + strconv.FormatInt(eventID, 10)
-}
-
-// refusedStartKey is the holding reply for a record the dispatcher refused
-// to start. It is not holdingKey: an event can be told there is no route and
-// then, once there is one, that no worktree can be made in it.
-func refusedStartKey(eventID int64) string {
-	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
-}
-
-// holdingReplyReason is the one blocked reason a holding reply answers for:
-// its key says which of them it is.
-func holdingReplyReason(in Intent) string {
-	if in.Key == refusedStartKey(in.EventID) {
-		return ReasonRouteUnusable
-	}
-	return string(admission.ReasonNoRoute)
 }
 
 func completionKey(attemptID string) string {

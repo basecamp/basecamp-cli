@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // Lifecycle messages are fixed forms. Every word comes from this file; every
@@ -112,23 +114,6 @@ func renderHoldingReply(kind MessageKind, eventID int64) string {
 	return renderLines(kind, lines)
 }
 
-// renderRefusedStart is the reply to a request whose route no task could be
-// given a working directory in. It says the same three things every holding
-// reply says: nothing ran, what has to change, and how to run it once it
-// has. What has to change is on the connector's machine and not in the
-// reader's hands, so the reply names the condition and not the path: a route
-// is a directory on someone else's computer, and the card is not where it is
-// fixed.
-func renderRefusedStart(kind MessageKind, eventID int64) string {
-	lines := []string{
-		"I can't start on this: this project's working directory on the connector's machine is not a git repository with a commit, and the connector is set up to give each task a worktree of its own, so nothing was run.",
-		"Once the directory is a repository, or the connector runs without worktrees, a person can run it with: " + redispatchAsk(eventID),
-		"",
-		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
-	}
-	return renderLines(kind, lines)
-}
-
 // renderRetraction answers an ask an earlier notice made. Both of the things
 // it claims are checked before it is sent: that a person decided the record at
 // that time, which the decisions table holds, and that the record is not
@@ -187,7 +172,7 @@ func renderRetraction(kind MessageKind, eventID int64, others []int64, postedAt 
 //
 // The question is asked of the notice that made the ask, not of the record in
 // general, because "waiting" is not one state. A holding reply answers one
-// blocked reason, as its own claim does (holdingReplyReason): a record whose
+// blocked reason, as its own claim does: a record whose
 // rerun replaced no_route with read_failed or throttled is not waiting on a
 // person at all — those reasons come round again on their own — so that ask
 // is answered and the record moving between them is the answer. A completion
@@ -200,7 +185,7 @@ func askStillOpen(ctx context.Context, q Tx, source Intent, eventID int64) (open
 	switch source.Kind {
 	case IntentHoldingReply:
 		query = `SELECT state = 'blocked' AND reason = ?2 FROM events WHERE id = ?1`
-		args = append(args, holdingReplyReason(source))
+		args = append(args, string(admission.ReasonNoRoute))
 	case IntentCompletion:
 		query = `
 SELECT e.state = 'completed' AND e.redispatch_decision IS NULL
@@ -391,51 +376,10 @@ func LifecycleHooks(l *Ledger, opts LifecycleOptions) Hooks {
 		StillRunning: func(ctx context.Context, tx Tx, tick StillRunningTick) error {
 			return stillRunningIntent(ctx, tx, l.now(), tick)
 		},
-		StartRefused: func(ctx context.Context, tx Tx, r RefusedStart) error {
-			return refusedStartIntent(ctx, tx, l.now(), r)
-		},
 		RecordDecided: func(ctx context.Context, tx Tx, d RecordDecision) error {
 			return retractionIntents(ctx, tx, l.now(), d)
 		},
 	}
-}
-
-// refusedStartIntent is the holding reply for a record the dispatcher
-// refused to start. Nothing else would say anything: no attempt was made, so
-// no settlement renders a completion notice, and the guard's boost is the
-// last thing the recording heard.
-//
-// A record that asked for no acknowledgement — a subscription, a completion
-// — is not a request, and gets no reply, which is the rule the verdict hook
-// holds too.
-func refusedStartIntent(ctx context.Context, tx Tx, now time.Time, r RefusedStart) error {
-	var (
-		bucketID, replyRecordingID int64
-		replyKind                  string
-		acknowledge                bool
-	)
-	switch err := tx.QueryRowContext(ctx, `
-SELECT bucket_id, reply_kind, reply_recording_id, acknowledge FROM events WHERE id = ?`, r.EventID).
-		Scan(&bucketID, &replyKind, &replyRecordingID, &acknowledge); {
-	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("connector: lifecycle for event %d: %w", r.EventID, ErrNoSuchRecord)
-	case err != nil:
-		return fmt.Errorf("connector: lifecycle for event %d: %w", r.EventID, err)
-	}
-	if !acknowledge {
-		return nil
-	}
-	kind, ok := destinationKind(replyKind)
-	if !ok || replyRecordingID <= 0 {
-		return nil
-	}
-	return writeIntent(ctx, tx, now, newIntent{
-		key:         refusedStartKey(r.EventID),
-		kind:        IntentHoldingReply,
-		eventID:     r.EventID,
-		destination: Destination{BucketID: bucketID, Kind: kind, RecordingID: replyRecordingID},
-		body:        renderRefusedStart(kind, r.EventID),
-	})
 }
 
 // retractionIntents writes a retraction for every posted notice that asked for

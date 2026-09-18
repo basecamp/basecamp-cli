@@ -682,9 +682,6 @@ CMD basecamp connect shadow
 CMD basecamp connect shadow promote
 CMD basecamp connect show
 CMD basecamp connect status
-CMD basecamp connect worktrees
-CMD basecamp connect worktrees list
-CMD basecamp connect worktrees prune
 CMD basecamp docs
 CMD basecamp docs archive
 CMD basecamp docs doc
@@ -5524,7 +5521,6 @@ FLAG basecamp connect setup --trust type=string
 FLAG basecamp connect setup --verbose type=count
 FLAG basecamp connect setup --watch-completions type=stringArray
 FLAG basecamp connect setup --worker type=string
-FLAG basecamp connect setup --worktrees type=bool
 FLAG basecamp connect shadow --account type=string
 FLAG basecamp connect shadow --agent type=bool
 FLAG basecamp connect shadow --cache-dir type=string
@@ -5610,72 +5606,6 @@ FLAG basecamp connect status --stats type=bool
 FLAG basecamp connect status --styled type=bool
 FLAG basecamp connect status --todolist type=string
 FLAG basecamp connect status --verbose type=count
-FLAG basecamp connect worktrees --account type=string
-FLAG basecamp connect worktrees --agent type=bool
-FLAG basecamp connect worktrees --cache-dir type=string
-FLAG basecamp connect worktrees --count type=bool
-FLAG basecamp connect worktrees --help type=bool
-FLAG basecamp connect worktrees --hints type=bool
-FLAG basecamp connect worktrees --ids-only type=bool
-FLAG basecamp connect worktrees --in type=string
-FLAG basecamp connect worktrees --jq type=string
-FLAG basecamp connect worktrees --json type=bool
-FLAG basecamp connect worktrees --markdown type=bool
-FLAG basecamp connect worktrees --md type=bool
-FLAG basecamp connect worktrees --no-hints type=bool
-FLAG basecamp connect worktrees --no-stats type=bool
-FLAG basecamp connect worktrees --profile type=string
-FLAG basecamp connect worktrees --project type=string
-FLAG basecamp connect worktrees --quiet type=bool
-FLAG basecamp connect worktrees --stats type=bool
-FLAG basecamp connect worktrees --styled type=bool
-FLAG basecamp connect worktrees --todolist type=string
-FLAG basecamp connect worktrees --verbose type=count
-FLAG basecamp connect worktrees list --account type=string
-FLAG basecamp connect worktrees list --agent type=bool
-FLAG basecamp connect worktrees list --cache-dir type=string
-FLAG basecamp connect worktrees list --count type=bool
-FLAG basecamp connect worktrees list --help type=bool
-FLAG basecamp connect worktrees list --hints type=bool
-FLAG basecamp connect worktrees list --ids-only type=bool
-FLAG basecamp connect worktrees list --in type=string
-FLAG basecamp connect worktrees list --jq type=string
-FLAG basecamp connect worktrees list --json type=bool
-FLAG basecamp connect worktrees list --markdown type=bool
-FLAG basecamp connect worktrees list --md type=bool
-FLAG basecamp connect worktrees list --no-hints type=bool
-FLAG basecamp connect worktrees list --no-stats type=bool
-FLAG basecamp connect worktrees list --profile type=string
-FLAG basecamp connect worktrees list --project type=string
-FLAG basecamp connect worktrees list --quiet type=bool
-FLAG basecamp connect worktrees list --shadow type=bool
-FLAG basecamp connect worktrees list --stats type=bool
-FLAG basecamp connect worktrees list --styled type=bool
-FLAG basecamp connect worktrees list --todolist type=string
-FLAG basecamp connect worktrees list --verbose type=count
-FLAG basecamp connect worktrees prune --account type=string
-FLAG basecamp connect worktrees prune --agent type=bool
-FLAG basecamp connect worktrees prune --cache-dir type=string
-FLAG basecamp connect worktrees prune --count type=bool
-FLAG basecamp connect worktrees prune --force type=stringArray
-FLAG basecamp connect worktrees prune --help type=bool
-FLAG basecamp connect worktrees prune --hints type=bool
-FLAG basecamp connect worktrees prune --ids-only type=bool
-FLAG basecamp connect worktrees prune --in type=string
-FLAG basecamp connect worktrees prune --jq type=string
-FLAG basecamp connect worktrees prune --json type=bool
-FLAG basecamp connect worktrees prune --markdown type=bool
-FLAG basecamp connect worktrees prune --md type=bool
-FLAG basecamp connect worktrees prune --no-hints type=bool
-FLAG basecamp connect worktrees prune --no-stats type=bool
-FLAG basecamp connect worktrees prune --profile type=string
-FLAG basecamp connect worktrees prune --project type=string
-FLAG basecamp connect worktrees prune --quiet type=bool
-FLAG basecamp connect worktrees prune --shadow type=bool
-FLAG basecamp connect worktrees prune --stats type=bool
-FLAG basecamp connect worktrees prune --styled type=bool
-FLAG basecamp connect worktrees prune --todolist type=string
-FLAG basecamp connect worktrees prune --verbose type=count
 FLAG basecamp docs --account type=string
 FLAG basecamp docs --agent type=bool
 FLAG basecamp docs --cache-dir type=string
@@ -18865,9 +18795,6 @@ SUB basecamp connect shadow
 SUB basecamp connect shadow promote
 SUB basecamp connect show
 SUB basecamp connect status
-SUB basecamp connect worktrees
-SUB basecamp connect worktrees list
-SUB basecamp connect worktrees prune
 SUB basecamp docs
 SUB basecamp docs archive
 SUB basecamp docs doc

@@ -111,7 +111,16 @@ type File struct {
 	Worker      string   `json:"worker,omitempty"`
 	Concurrency int      `json:"concurrency"`
 	Deadline    Duration `json:"deadline"`
-	Worktrees   bool     `json:"worktrees"`
+
+	// LegacyWorktrees is the --worktrees setting of a connector that gave
+	// each task a git worktree of its own. Worktrees are gone: a task runs
+	// where its route says, and nothing here reads this. It is still a field
+	// because Parse refuses an unknown key, and a connect.json written
+	// before they went has "worktrees" in it — accepting it is what lets
+	// that file still open. Parse zeroes it, and omitempty keeps it out of
+	// everything written from here, so the next `connect setup` writes the
+	// key away for good.
+	LegacyWorktrees bool `json:"worktrees,omitempty"`
 }
 
 // Agent is the identity the agent profile authenticated as at setup.
@@ -283,6 +292,8 @@ func Parse(data []byte) (File, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return File{}, errors.New("parse connect.json: trailing data after the object")
 	}
+	// Read, and forgotten: see LegacyWorktrees.
+	f.LegacyWorktrees = false
 	if f.Projects == nil {
 		f.Projects = map[int64]admission.Route{}
 	}

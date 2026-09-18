@@ -48,7 +48,7 @@ type Route struct {
 // verified identity) and the --project scope.
 //
 // connect.json as a whole is written by `basecamp connect setup` (plan step
-// 16), which also carries the driver, concurrency, deadline and worktrees;
+// 16), which also carries the driver, concurrency and deadline;
 // this is only the part admission decides from.
 type Policy struct {
 	// AgentID is the agent's own Person id. Required.

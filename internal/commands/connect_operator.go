@@ -166,7 +166,7 @@ func newConnectStatusCmd() *cobra.Command {
 		Short: "Show what the connector heard, holds and ran",
 		Long: `Show the connector's ledger: what its instance lock file says, the hold, the
 feed position (whether one is held, never the position), the last poll-served id,
-gaps and losses, queue depths, live tasks, retained worktrees, lifecycle
+gaps and losses, queue depths, live tasks, lifecycle
 messages waiting for a person, held records, and the last 20 dispatches with
 their outcomes.
 
@@ -225,7 +225,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		return err
 	}
 	defer func() { _ = ledger.Close() }()
-	status, err := ledger.Status(cmd.Context(), ledger.RetainedWorktreeStatus)
+	status, err := ledger.Status(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -242,15 +242,6 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		return nil
 	}
 	return p.app.OK(report, output.WithSummary(connectStatusSummary(report)))
-}
-
-// worktreesUnavailable is why status cannot say whether any worktrees are
-// retained. It never reads as none.
-func worktreesUnavailable(s connector.Status) string {
-	if s.WorktreesUnavailable != "" {
-		return s.WorktreesUnavailable
-	}
-	return "nothing listed them for this status"
 }
 
 func connectStatusSummary(r connectStatusReport) string {
@@ -338,14 +329,6 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	for _, t := range s.Tasks {
 		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v  in %s\n",
 			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
-	}
-	if !s.WorktreesKnown {
-		fmt.Fprintf(w, "  Worktrees      unavailable: %s\n", clean(worktreesUnavailable(s)))
-	} else {
-		fmt.Fprintf(w, "  Worktrees      %d retained\n", len(s.Worktrees))
-		for _, wt := range s.Worktrees {
-			fmt.Fprintf(w, "    %s %s\n", clean(wt.Path), clean(wt.Reason))
-		}
 	}
 	fmt.Fprintf(w, "  Indeterminate  %d lifecycle messages wait for a person\n", len(s.Indeterminate))
 	for _, in := range s.Indeterminate {

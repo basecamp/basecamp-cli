@@ -54,9 +54,11 @@ import (
 //	dispatched  blocked     dispatcher (withdrawExposure)            exposed at launch, spawn failed again
 //	dispatched  completed   worker (complete_dispatch), dispatcher   the outcome, reported or settled
 //	admitted    queued      lifecycle bookkeeping                    —
-//	admitted    blocked     dispatcher (RefuseStart)                 no working directory on the route
+//	admitted    blocked     —                                        an edge the lifecycle map allows and no
+//	                                                                 caller takes today
 //	admitted    discarded   operator                                 discard
-//	queued      blocked     dispatcher (RefuseStart)                 no working directory on the route
+//	queued      blocked     —                                        an edge the lifecycle map allows and no
+//	                                                                 caller takes today
 //	queued      discarded   operator                                 discard
 //	completed   —           nobody                                   terminal
 //	discarded   —           nobody                                   terminal

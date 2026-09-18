@@ -87,7 +87,7 @@ func TestSaveWritesTheSpecDefaults(t *testing.T) {
 	assert.Equal(t, "spawn", raw["driver"])
 	assert.EqualValues(t, 2, raw["concurrency"])
 	assert.Equal(t, "45m0s", raw["deadline"])
-	assert.Equal(t, false, raw["worktrees"])
+	assert.NotContains(t, raw, "worktrees", "a setting the connector no longer has is not written")
 }
 
 func TestLoadReportsAMissingFileAsNotExist(t *testing.T) {
@@ -114,6 +114,33 @@ func TestParseRefusesUnknownKeys(t *testing.T) {
 	_, err = Parse(data)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "watch_completion")
+}
+
+// A connect.json written before worktrees went still opens. The parse is
+// strict — an unknown key is a refusal, which is what makes a misspelled
+// setting a refusal rather than a silent nothing — so the key every existing
+// file carries has to stay known. Deleting the field outright would have
+// stopped every connector that had ever been set up.
+func TestParseAcceptsAndForgetsTheWorktreesSettingOfAnOlderFile(t *testing.T) {
+	data, err := json.Marshal(validFile(t))
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	require.NotContains(t, raw, "worktrees", "nothing written now carries it")
+	raw["worktrees"] = true
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+
+	f, err := Parse(data)
+	require.NoError(t, err, "a file written by a connector that had worktrees still opens")
+	assert.False(t, f.LegacyWorktrees, "and the setting is read, then forgotten")
+
+	// And writing that file back takes the key out for good.
+	again, err := json.Marshal(f)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(again, &out))
+	assert.NotContains(t, out, "worktrees")
 }
 
 func TestValidateFailsClosed(t *testing.T) {
@@ -186,7 +213,7 @@ func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
 		"duplicate operator_id":  strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
 		"duplicate nested route": strings.Replace(string(data), `"48699913":{`, `"48699913":{"path":"/elsewhere",`, 1),
 		"case variant key":       strings.Replace(string(data), `"trust":`, `"Trust":`, 1),
-		"long s variant key":     strings.Replace(string(data), `"worktrees"`, `"worktreeſ"`, 1),
+		"long s variant key":     strings.Replace(string(data), `"concurrency"`, `"concurrencſ"`, 1),
 		"padded project id":      strings.Replace(string(data), `"48699913":{`, `"048699913":{`, 1),
 		"signed project id":      strings.Replace(string(data), `"48699913":{`, `"+48699913":{`, 1),
 	} {

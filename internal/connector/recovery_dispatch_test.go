@@ -300,7 +300,7 @@ func (h *harness) assertRecovered(row crashRow) {
 	}
 	assert.Len(t, h.notices(101), row.notices, "completion notices")
 
-	status, err := l.Status(context.Background(), nil)
+	status, err := l.Status(context.Background())
 	require.NoError(t, err)
 	assert.Len(t, status.Indeterminate, row.indeterminate, "indeterminate lifecycle messages in status")
 	for _, in := range status.Indeterminate {
@@ -595,7 +595,6 @@ func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 		require.Len(t, attempts, 3, "the held attempt, and one for each event in the other project")
 		assert.Equal(t, string(AttemptLaunching), attempts[0].State)
 		assert.Empty(t, attempts[0].StopReason)
-		assert.False(t, h.releasedDir(h.workDir()), "the held task's working directory is not released")
 		assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
 	})
 }
@@ -654,7 +653,7 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 					assert.Equal(t, GuardAckBody, boost.Content)
 					assert.Equal(t, int64(5001), boost.RecordingID)
 				}
-				status, err := h.ledger().Status(context.Background(), nil)
+				status, err := h.ledger().Status(context.Background())
 				require.NoError(t, err)
 				waiting := 0
 				for _, in := range status.Indeterminate {
@@ -707,14 +706,13 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 
 			assert.Equal(t, string(AttemptRunning), attemptState(t, l, attempts[0].id), "the attempt stays live while its tree runs")
 			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
-			assert.False(t, h.releasedDir(h.workDir()), "the working directory is not released")
 			assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
 			assert.False(t, processGone(context.Background(), grandchild.PID), "recovery does not signal a group whose leader it cannot verify")
 			_, err := driver.OwnsWorker(worker)
 			assert.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
 		}
 
-		// The tree ends; the next restart may settle and release.
+		// The tree ends; the next restart may settle.
 		killRecorded(t, grandchild)
 		// Reaped, not merely dead: a zombie is still a member of the group.
 		require.NoError(t, waitFor(ctx, func() (bool, error) { return syscall.Kill(grandchild.PID, 0) != nil, nil }))
@@ -722,10 +720,9 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		assert.Equal(t, string(AttemptEnded), attemptState(t, l, attempts[0].id))
 		assert.Equal(t, StateCompleted, stateOf(t, l, 101))
 		assert.Equal(t, string(OutcomeUnknown), outcomeOf(t, l, 101))
-		assert.True(t, h.releasedDir(h.workDir()), "released once the tree is gone")
 		assert.Len(t, h.notices(101), 1)
 		assert.Equal(t, 1, h.handed(101), "and never run again")
-		assert.Equal(t, 1, h.handed(104), "the directory released, the waiting event runs")
+		assert.Equal(t, 1, h.handed(104), "the task settled, the waiting event runs")
 		h.assertNoWorkerOutlivedItsRecord()
 	})
 }
