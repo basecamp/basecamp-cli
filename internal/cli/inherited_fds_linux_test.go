@@ -5,6 +5,8 @@ package cli
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,7 +33,7 @@ func TestSealedDescriptorsDoNotReachChildren(t *testing.T) {
 	}
 	inherit(t, inheritedFD)
 
-	sealInheritedDescriptors()
+	require.NoError(t, sealInheritedDescriptors())
 
 	out, err := exec.CommandContext(t.Context(), shell, "-c", "ls /proc/self/fd").Output() //nolint:gosec // G204: a listing of the child's own descriptors
 	require.NoError(t, err)
@@ -44,7 +46,7 @@ func TestSealedDescriptorsDoNotReachChildren(t *testing.T) {
 func TestSealingLeavesTheDescriptorReadable(t *testing.T) {
 	inherit(t, inheritedFD)
 
-	sealInheritedDescriptors()
+	require.NoError(t, sealInheritedDescriptors())
 
 	flags, err := unix.FcntlInt(uintptr(inheritedFD), unix.F_GETFD, 0)
 	require.NoError(t, err)
@@ -60,7 +62,7 @@ func TestSealingLeavesTheDescriptorReadable(t *testing.T) {
 func TestSealingWithoutCloseRange(t *testing.T) {
 	inherit(t, inheritedFD)
 
-	sealListedDescriptors()
+	require.NoError(t, sealListedDescriptors(procSelfFD))
 
 	flags, err := unix.FcntlInt(uintptr(inheritedFD), unix.F_GETFD, 0)
 	require.NoError(t, err)
@@ -72,7 +74,7 @@ func TestSealingLeavesTheStandardDescriptors(t *testing.T) {
 	shareStandardDescriptors(t)
 	before := standardFlags(t)
 
-	sealInheritedDescriptors()
+	require.NoError(t, sealInheritedDescriptors())
 
 	assert.Equal(t, before, standardFlags(t))
 }
@@ -123,4 +125,54 @@ func standardFlags(t *testing.T) []int {
 		flags = append(flags, got)
 	}
 	return flags
+}
+
+// The walk that stands in for CLOSE_RANGE_CLOEXEC says so when it cannot read
+// the listing it works from. Returning quietly would leave the caller
+// believing every inherited descriptor was sealed when none of them were.
+func TestSealingRefusesWhenItCannotListTheDescriptors(t *testing.T) {
+	err := sealListedDescriptors(filepath.Join(t.TempDir(), "no-such-listing"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "seal the descriptors this process inherited")
+}
+
+// A listing this process cannot make sense of is not a listing it may skip:
+// an entry that is not a descriptor number means the walk cannot say which
+// descriptors it covered.
+func TestSealingRefusesAListingItCannotRead(t *testing.T) {
+	listing := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(listing, "not-a-descriptor"), nil, 0o600))
+
+	err := sealListedDescriptors(listing)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"not-a-descriptor"`)
+}
+
+// A descriptor named by the listing but no longer open is the one failure
+// that is not one: it is already out of reach of every child. The listing is
+// a snapshot, so this happens whenever anything closes a descriptor while the
+// walk runs.
+func TestSealingAcceptsADescriptorThatHasSinceBeenClosed(t *testing.T) {
+	listing := t.TempDir()
+	closedFD := inheritedFD + 1
+	require.False(t, fdIsOpen(closedFD), "the test needs a descriptor number nothing holds")
+	require.NoError(t, os.WriteFile(filepath.Join(listing, strconv.Itoa(closedFD)), nil, 0o600))
+
+	assert.NoError(t, sealListedDescriptors(listing))
+}
+
+// The walk seals what the listing names, so a listing standing in for
+// /proc/self/fd reaches the same descriptor the real one would.
+func TestSealingSealsWhatTheListingNames(t *testing.T) {
+	inherit(t, inheritedFD)
+	listing := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(listing, strconv.Itoa(inheritedFD)), nil, 0o600))
+
+	require.NoError(t, sealListedDescriptors(listing))
+
+	flags, err := unix.FcntlInt(uintptr(inheritedFD), unix.F_GETFD, 0)
+	require.NoError(t, err)
+	assert.NotZero(t, flags&unix.FD_CLOEXEC)
 }

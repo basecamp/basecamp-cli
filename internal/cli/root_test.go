@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"runtime"
 	"testing"
@@ -407,6 +408,20 @@ func TestReportWireError(t *testing.T) {
 	buf.Reset()
 	reportWireError(&buf, output.ErrAPI(502, "bad\x1b[31mgateway\r\ninjected"))
 	assert.Equal(t, "Error: badgateway injected\n", buf.String())
+}
+
+// TestReportStartupFailure pins what a refused startup looks like: the
+// program has not parsed a command yet, so there is no output format to
+// honor and no envelope to fill — one sanitized line on stderr and a
+// non-zero exit. sealInheritedDescriptors is the only caller: a process that
+// cannot keep an inherited credential from its children does not run.
+func TestReportStartupFailure(t *testing.T) {
+	var buf bytes.Buffer
+
+	code := reportStartupFailure(&buf, errors.New("could not open /proc/self/fd to seal the descriptors this process inherited"))
+
+	assert.Equal(t, "Error: could not open /proc/self/fd to seal the descriptors this process inherited\n", buf.String())
+	assert.NotEqual(t, output.ExitOK, code)
 }
 
 // TestResolveProfileMayCreatePassesUnknownName: a command that registers the

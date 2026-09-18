@@ -3,6 +3,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"os"
 
@@ -26,42 +28,81 @@ import (
 // buffered in it, so nothing is consumed for an invocation that never serves.
 // Standard input, output and error are left alone: a child is meant to share
 // those.
-func sealInheritedDescriptors() {
+//
+// It fails closed. This is the credential handover boundary, and a process
+// that cannot say every inherited descriptor is sealed cannot say the token
+// descriptor is; the error it returns stops startup rather than letting the
+// program run on with a promise it did not keep.
+func sealInheritedDescriptors() error {
 	if err := unix.CloseRange(firstInheritedFD, math.MaxUint32, unix.CLOSE_RANGE_CLOEXEC); err == nil {
-		return
+		return nil
 	}
 	// Kernels before 5.11 do not know CLOSE_RANGE_CLOEXEC. Ask the process
 	// which descriptors it actually has and mark those.
-	sealListedDescriptors()
+	return sealListedDescriptors(procSelfFD)
 }
 
 // firstInheritedFD is the first descriptor that is not one of the standard
 // three.
 const firstInheritedFD = 3
 
-func sealListedDescriptors() {
-	dir, err := os.Open("/proc/self/fd")
+// procSelfFD is where Linux lists the descriptors a process holds. It is a
+// parameter of sealListedDescriptors only so a test can watch the walk refuse
+// a listing it cannot trust.
+const procSelfFD = "/proc/self/fd"
+
+func sealListedDescriptors(listingDir string) error {
+	dir, err := os.Open(listingDir)
 	if err != nil {
-		return
+		return fmt.Errorf("could not open %s to seal the descriptors this process inherited: %w", listingDir, err)
 	}
 	defer func() { _ = dir.Close() }()
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		return
+		return fmt.Errorf("could not read %s to seal the descriptors this process inherited: %w", listingDir, err)
 	}
 	listing, err := sysfd.Of(dir.Fd())
 	if err != nil {
-		return
+		return fmt.Errorf("could not seal the descriptors this process inherited: %w", err)
 	}
 	for _, name := range names {
 		fd, err := sysfd.Parse(name)
-		if err != nil || fd.Int() < firstInheritedFD || fd == listing {
-			continue
-		}
-		flags, err := unix.FcntlInt(fd.Uintptr(), unix.F_GETFD, 0)
 		if err != nil {
+			return fmt.Errorf("could not seal the descriptors this process inherited: %s holds %q, which is not a descriptor", listingDir, name)
+		}
+		if fd.Int() < firstInheritedFD || fd == listing {
 			continue
 		}
-		_, _ = unix.FcntlInt(fd.Uintptr(), unix.F_SETFD, flags|unix.FD_CLOEXEC)
+		if err := sealDescriptor(fd); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// sealDescriptor marks one descriptor close-on-exec.
+//
+// A descriptor that is no longer open is the one failure that is not a
+// failure: the listing is a snapshot, and a number that has been closed since
+// it was taken is already out of reach of every child. Anything else means
+// the descriptor is open and still inheritable, which is the thing this
+// refuses to let happen quietly.
+func sealDescriptor(fd sysfd.Descriptor) error {
+	flags, err := unix.FcntlInt(fd.Uintptr(), unix.F_GETFD, 0)
+	if err != nil {
+		if errors.Is(err, unix.EBADF) {
+			return nil
+		}
+		return fmt.Errorf("could not read the flags of inherited descriptor %s: %w", fd, err)
+	}
+	if flags&unix.FD_CLOEXEC != 0 {
+		return nil
+	}
+	if _, err := unix.FcntlInt(fd.Uintptr(), unix.F_SETFD, flags|unix.FD_CLOEXEC); err != nil {
+		if errors.Is(err, unix.EBADF) {
+			return nil
+		}
+		return fmt.Errorf("could not keep inherited descriptor %s from the processes this one starts: %w", fd, err)
+	}
+	return nil
 }
