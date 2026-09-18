@@ -22,16 +22,16 @@ const pipeWaitDelay = 2 * time.Second
 // # One owner, one release point
 //
 // This is the connector's rule for a task's process tree, its working
-// directory (or worktree), and its ledger record. All three belong to one
-// owner — the attempt — and are released at one point, in this order:
+// directory, and its ledger record. All three belong to one owner — the
+// attempt — and are released at one point, in this order:
 //
 //  1. Every worker starts as the leader of its own process group
 //     (StartWorker), so the tree it makes can be signaled as one.
 //  2. A cancel, a deadline or a shutdown ends that group: SIGTERM, a bounded
 //     wait, then SIGKILL, by process group id and never by name (Terminate).
 //  3. The group is then CONFIRMED gone (ConfirmGroupGone). Only after that
-//     may the attempt be settled, its directory or worktree released, and its
-//     record made terminal.
+//     may the attempt be settled, its directory released, and its record
+//     made terminal.
 //  4. A group that cannot be confirmed gone — members left, a pid whose
 //     identity cannot be established, a platform that cannot say — leaves the
 //     record HELD: live in the ledger, its conversation and directory still
@@ -53,8 +53,8 @@ const pipeWaitDelay = 2 * time.Second
 // only avoid waiting on it (WaitDelay, CloseStdout). Containment is the
 // sandbox launcher's job, not this rule's.
 //
-// Cards that start workers, remove worktrees or settle records use the
-// functions here rather than writing their own.
+// Cards that start workers or settle records use the functions here rather
+// than writing their own.
 //
 // # What a driver promises, and where each promise can still be broken
 //
@@ -609,7 +609,7 @@ func groupProbe(pgid int, err error) error {
 
 // ConfirmGroupGone is step 3 of the one-owner rule: it answers whether a
 // worker's process group is gone, and it is what every caller asks before
-// settling an attempt, releasing a working directory or removing a worktree.
+// settling an attempt or releasing a working directory.
 //
 // It signals the group once more — a worker that ignored SIGTERM gets SIGKILL
 // — then waits up to grace for the last member to go. A group with members

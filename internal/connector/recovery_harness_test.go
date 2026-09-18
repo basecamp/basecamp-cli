@@ -363,7 +363,7 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	wrapper := "#!/bin/sh\n" +
 		harnessAgentEnv + "=" + shellQuote(d.Name) + " " + harnessDirEnv + "=" + shellQuote(dir) + " exec " + shellQuote(exe) + ` "$@"` + "\n"
 	require.NoError(t, os.WriteFile(h.agent, []byte(wrapper), 0o700)) //nolint:gosec // the fake agent's wrapper must be executable
-	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile, workspaceFile} {
+	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
 	}
 	// Registered before killAgents so it runs after it: the watch for a token
@@ -399,14 +399,13 @@ func (h *harness) writeScenario() {
 
 // Files in a harness directory.
 const (
-	scenarioFile  = "scenario.json"
-	feedFile      = "feed.jsonl"
-	storeFile     = "basecamp.jsonl"
-	linesFile     = "lines.jsonl"
-	pollsFile     = "polls.jsonl"
-	agentLogFile  = "agent.jsonl"
-	liveFile      = "live.jsonl"
-	workspaceFile = "workspaces.jsonl"
+	scenarioFile = "scenario.json"
+	feedFile     = "feed.jsonl"
+	storeFile    = "basecamp.jsonl"
+	linesFile    = "lines.jsonl"
+	pollsFile    = "polls.jsonl"
+	agentLogFile = "agent.jsonl"
+	liveFile     = "live.jsonl"
 	// tokensDir holds the task tokens the fake workers were handed, so the
 	// parent can look for them everywhere a token must not be.
 	tokensDir = "tokens"
@@ -793,7 +792,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 		return
 	}
 	places.Texts = append(places.Texts, out.String())
-	for _, name := range []string{linesFile, storeFile, pollsFile, workspaceFile, agentLogFile} {
+	for _, name := range []string{linesFile, storeFile, pollsFile, agentLogFile} {
 		data, err := os.ReadFile(filepath.Join(h.dir, name))
 		require.NoError(t, err)
 		places.Texts = append(places.Texts, string(data))
@@ -1115,32 +1114,6 @@ func runSecretScan(dirs []string) int {
 	}
 	fmt.Println("read\t" + strconv.Itoa(read))
 	return 0
-}
-
-// workspaces is every preparation and release of a task's working directory.
-func (h *harness) workspaces() []workspaceEvent {
-	h.t.Helper()
-	var out []workspaceEvent
-	require.NoError(h.t, readJSONLines(filepath.Join(h.dir, workspaceFile), func(line []byte) error {
-		var e workspaceEvent
-		if err := json.Unmarshal(line, &e); err != nil {
-			return err
-		}
-		out = append(out, e)
-		return nil
-	}))
-	return out
-}
-
-// releasedDir says a task's working directory was handed back, which the
-// one-owner rule allows only once its worker's process group is gone.
-func (h *harness) releasedDir(dir string) bool {
-	for _, e := range h.workspaces() {
-		if e.Step == "finish" && e.WorkDir == dir {
-			return true
-		}
-	}
-	return false
 }
 
 // workDir is the first routed project's working directory.

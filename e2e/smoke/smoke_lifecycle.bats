@@ -52,14 +52,6 @@ load smoke_helper
   mark_out_of_scope "Applies a reconciliation file to a local connector ledger — covered by Go tests in internal/commands and internal/connector"
 }
 
-@test "connect worktrees list is out of scope" {
-  mark_out_of_scope "Reads a local connector's ledger — covered by Go tests in internal/commands and internal/connector"
-}
-
-@test "connect worktrees prune is out of scope" {
-  mark_out_of_scope "Removes local git worktrees a connector kept — covered by Go tests in internal/commands and internal/connector"
-}
-
 @test "auth refresh is out of scope" {
   mark_out_of_scope "Requires OAuth credentials"
 }

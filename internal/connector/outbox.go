@@ -291,11 +291,7 @@ const (
 	IntentGuardAck IntentKind = "guard_ack"
 	// IntentHoldingReply answers a request the connector is not going to
 	// start work on until a person changes something: a mention or
-	// assignment in a project with no route (holdingKey), and one whose
-	// route no task can be given a working directory in (refusedStartKey).
-	// One of each per event, because the second can follow the first — a
-	// route added, and the directory it names not one a worktree can be made
-	// in — and an event told the first thing is owed the second.
+	// assignment in a project with no route. One per event.
 	IntentHoldingReply IntentKind = "holding_reply"
 	// IntentStillRunning is one still-running notice. One per attempt and
 	// occurrence.
@@ -396,18 +392,32 @@ func holdingKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":event:" + strconv.FormatInt(eventID, 10)
 }
 
-// refusedStartKey is the holding reply for a record the dispatcher refused
-// to start. It is not holdingKey: an event can be told there is no route and
-// then, once there is one, that no worktree can be made in it.
-func refusedStartKey(eventID int64) string {
+// legacyRefusedStartKey is the key a connector that made worktrees gave the
+// holding reply for a record whose route could take no worktree. Nothing
+// writes one now — the refusal that called for it went with worktrees — but
+// an upgraded ledger still holds the ones that build wrote, pending or sent,
+// over records still blocked legacyReasonRouteUnusable. They are read as they
+// were written; only new rows are written the new way.
+func legacyRefusedStartKey(eventID int64) string {
 	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
 }
 
-// holdingReplyReason is the one blocked reason a holding reply answers for:
-// its key says which of them it is.
+// legacyReasonRouteUnusable is the blocked reason those records carry.
+// Nothing blocks a record with it any more, and nothing clears it on their
+// behalf: a record an upgraded ledger carries is still waiting for the person
+// its notice asked, and both the send and the retraction have to know that.
+const legacyReasonRouteUnusable = "route_unusable"
+
+// holdingReplyReason is the blocked reason a holding reply answers for. Its
+// key says which: the one an older build wrote answers route_unusable, and
+// everything written now answers no_route. Reading every holding reply as
+// no_route cancels a legacy reply that is still called for, and tells a
+// person an ask is answered while its record is still blocked on it — a
+// redispatch of a blocked record leaves it blocked, so the reason is the
+// whole of the question.
 func holdingReplyReason(in Intent) string {
-	if in.Key == refusedStartKey(in.EventID) {
-		return ReasonRouteUnusable
+	if in.Key == legacyRefusedStartKey(in.EventID) {
+		return legacyReasonRouteUnusable
 	}
 	return string(admission.ReasonNoRoute)
 }

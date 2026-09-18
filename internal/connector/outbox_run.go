@@ -415,10 +415,10 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 		if in.Kind == IntentHoldingReply {
 			// Each reply answers one reason a record waits on something only
 			// a person changes, and is sent only while the record is still
-			// blocked on that reason — not on the other one. Two of them can
-			// be pending at once (a project with no route, then a route no
-			// worktree can be made in), and each is wrong about the world the
-			// moment its own reason is not why the record is waiting.
+			// blocked on that reason. Which reason is the key's to say
+			// (holdingReplyReason): what is written now answers no_route, and
+			// an upgraded ledger can still hold one an older build wrote for
+			// a route no worktree could be made in.
 			var stillBlocked bool
 			switch err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = ? FROM events WHERE id = ?`,
 				holdingReplyReason(in), in.EventID).Scan(&stillBlocked); {

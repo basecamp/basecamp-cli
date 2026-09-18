@@ -17,7 +17,6 @@ import (
 func TestApplyKeepsWhatIsNotPassed(t *testing.T) {
 	f := validFile(t)
 	f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}
-	f.Worktrees = true
 
 	out, err := Apply(f, Changes{})
 	require.NoError(t, err)
@@ -133,13 +132,11 @@ func TestApplyRoutes(t *testing.T) {
 }
 
 func TestApplyDispatchSettings(t *testing.T) {
-	on := true
-	out, err := Apply(validFile(t), Changes{Driver: DriverACP, Concurrency: 4, Deadline: 90 * time.Minute, Worktrees: &on})
+	out, err := Apply(validFile(t), Changes{Driver: DriverACP, Concurrency: 4, Deadline: 90 * time.Minute})
 	require.NoError(t, err)
 	assert.Equal(t, DriverACP, out.Driver)
 	assert.Equal(t, 4, out.Concurrency)
 	assert.Equal(t, Duration(90*time.Minute), out.Deadline)
-	assert.True(t, out.Worktrees)
 }
 
 func TestResolveDirExpandsHome(t *testing.T) {

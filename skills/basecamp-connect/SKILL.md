@@ -148,8 +148,7 @@ widens trust.
   "driver": "spawn",
   "worker": "claude",
   "concurrency": 2,
-  "deadline": "45m0s",
-  "worktrees": false
+  "deadline": "45m0s"
 }
 ```
 
@@ -168,7 +167,6 @@ widens trust.
 | `worker` | Which coding agent a spawn worker is: `claude` (default) or `codex` | `--worker` |
 | `concurrency` | Workers at once, 1 to 32 (default 2) | `--concurrency` |
 | `deadline` | Time limit per task, 1m to 24h (default 45m) | `--deadline 90m` |
-| `worktrees` | Each task gets its own git worktree of the routed directory, kept when the task ends and removed only by `connect worktrees prune` | `--worktrees`, `--worktrees=false` |
 
 **Never edit connect.json by hand.** It is the trust anchor: setup verifies
 every person and route before writing it, writes it owner-only, and parses it
@@ -284,8 +282,7 @@ pass `--allow <id>` for each.
 - Show the names, let the person choose, and map each choice to its numeric
   `id` yourself. When a name matches more than one project, ask which.
 - For each project ask which local directory its work runs in. Check the
-  directory exists. If worktrees are wanted, check it is a git repository
-  (`git -C '<dir>' rev-parse --show-toplevel`).
+  directory exists.
 - Offer `--watch-completions` only when the person wants the agent to act on
   every completed to-do or card in a project without being assigned. Offer
   `--class` only when they want projects labelled (for example `internal`; see
@@ -302,7 +299,7 @@ basecamp connect setup -P '<profile>' --operator-profile '<operator-profile>' \
   --route '<project-id>=<dir>' --route '<project-id>=<dir>' --json
 ```
 
-adding `--trust`, `--allow`, `--watch-completions`, `--class` or `--worktrees`
+adding `--trust`, `--allow`, `--watch-completions` or `--class`
 as chosen, and on the bot-user path `--expect-identity <bot-identity-id>`.
 
 **6. Read the result** (next section) and tell the person what it means. When it
@@ -323,7 +320,7 @@ project names up the same way as on first setup, and quote values by the Shell q
 | Trust only the operator, or project members | `--trust operator` / `--trust project` (leaving allowlist mode drops the list) |
 | Trust specific people | `--allow <person-id>` for each; the list you pass **replaces** the old one, so pass everyone who stays |
 | Change the operator | `--operator-profile '<profile>'` |
-| Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline`, `--worktrees` / `--worktrees=false` |
+| Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline` |
 | Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
 
 A class or watch setting needs the project routed first, in the same run or an

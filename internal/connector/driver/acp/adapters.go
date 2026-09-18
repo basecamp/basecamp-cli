@@ -64,8 +64,9 @@ type Adapter struct {
 	// run with configuration the connector cannot switch off: nil when there is
 	// none to check. read is how it reads a configuration file, os.ReadFile
 	// when nil — the seam a caller stands in when the session's working
-	// directory does not exist yet (doctor, which reads a planned worktree's
-	// files out of the repository it would be made from).
+	// directory is not where the files to check are. Doctor stood in it to
+	// read a planned worktree's files out of the repository; with worktrees
+	// gone, every caller passes nil and reads the working directory itself.
 	Preflight func(cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error
 }
 

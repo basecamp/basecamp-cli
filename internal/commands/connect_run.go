@@ -87,7 +87,7 @@ func ensurePrivateChain(root string, parts ...string) (string, error) {
 // connectStateDir is the connector's state directory for a set-up profile,
 // created owner-only: $XDG_STATE_HOME/basecamp/connect/<account>-<agent>, or
 // connect-shadow for a shadow run. Everything that reads the connector's
-// state (worktrees prune, status) resolves it here.
+// state (status) resolves it here.
 func connectStateDir(file setup.File, shadow bool) (string, error) {
 	stateHome, err := connectStateHome()
 	if err != nil {
@@ -352,19 +352,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
-		// Built with worktrees off too, so the ones made while they were on
-		// are still settled and recovered.
-		worktreesRoot, err := ensurePrivateChain(stateDir, connectWorktreesDir)
-		if err != nil {
-			return err
-		}
-		workspaces, err := connector.NewWorktrees(connector.WorktreesOptions{
-			Ledger: ledger, Root: worktreesRoot, Logger: logger, Off: !file.Worktrees,
-			Redaction: driver.Redaction{Dirs: []string{stateDir}},
-		})
-		if err != nil {
-			return err
-		}
 		options := connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
@@ -376,7 +363,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			Replies: connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
 			Lines:   lines, Logger: logger,
 		})
-		options.Workspaces = workspaces
 		dispatcher, err = connector.NewDispatcher(options)
 		if err != nil {
 			return err

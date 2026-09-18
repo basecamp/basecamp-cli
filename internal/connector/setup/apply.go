@@ -37,8 +37,6 @@ type Changes struct {
 	Worker      string
 	Concurrency int
 	Deadline    time.Duration
-	// Worktrees is nil to keep the file's value.
-	Worktrees *bool
 }
 
 // Apply returns f with ch applied. f is not modified. Everything that can
@@ -109,9 +107,6 @@ func Apply(f File, ch Changes) (File, error) {
 	if ch.Deadline != 0 {
 		out.Deadline = Duration(ch.Deadline)
 	}
-	if ch.Worktrees != nil {
-		out.Worktrees = *ch.Worktrees
-	}
 	return out, nil
 }
 
@@ -181,46 +176,4 @@ func ResolveDir(raw string) (string, error) {
 		return "", fmt.Errorf("%s is not a directory", resolved)
 	}
 	return filepath.Clean(resolved), nil
-}
-
-// NoRepositoryAt proves there is no git repository at dir or above it: every
-// directory from dir to the filesystem root was read, and none of them holds
-// a .git. It is a proof of absence and nothing else — anything that cannot be
-// read, a permission error or a path that is not there, is reported as no
-// proof, so a directory that is momentarily unreadable is never mistaken for
-// one that is not a repository.
-//
-// It exists because git cannot be asked this question and answered without
-// reading its prose: `git rev-parse --show-toplevel` exits 128 both for a
-// directory outside a repository and for one it could not enter, and the
-// difference between them is the difference between a configuration a person
-// has to change and a failure worth retrying. The filesystem is asked
-// instead, and the answer is the same one whether it is asked before the
-// route is written (RouteChecks) or after a dispatch has failed on it
-// (connector's Prepare).
-//
-// It errs toward no proof in two places, both of which leave the caller
-// retrying rather than refusing: a repository git declines to use (dubious
-// ownership) has a .git and is not proved absent, and git stops discovery at
-// a filesystem boundary while this walk does not.
-func NoRepositoryAt(dir string) bool {
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	for dir = filepath.Clean(dir); ; {
-		switch _, err := os.Lstat(filepath.Join(dir, ".git")); {
-		case err == nil:
-			// Something is there. Whatever git makes of it, its refusal is
-			// not the absence of a repository.
-			return false
-		case !errors.Is(err, os.ErrNotExist):
-			return false
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return true
-		}
-		dir = parent
-	}
 }

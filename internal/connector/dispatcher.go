@@ -63,41 +63,6 @@ const (
 // tools are mcp__basecamp__*.
 const MCPServerName = "basecamp"
 
-// Workspaces decides the directory a task works in from its approved route.
-// The default works in the route itself.
-type Workspaces interface {
-	// Prepare returns the working directory for a task on route.
-	Prepare(ctx context.Context, route string, originatingEventID int64) (string, error)
-	// Finish is called once the task's worker is gone.
-	Finish(ctx context.Context, route, workDir string) error
-}
-
-// PerTaskWorkspaces is a Workspaces that gives every task a directory of its
-// own (a git worktree), so two tasks on one route do not share a working
-// directory and the route itself is not held busy. The ledger still holds one
-// live task per working directory.
-type PerTaskWorkspaces interface {
-	Workspaces
-	PerTaskDirs() bool
-}
-
-// WaitingWorkspaces is a Workspaces that knows some routes cannot take a
-// task now — a repository whose worktree could not be made, say. The
-// dispatcher leaves those routes out of the startable query, so records it
-// could not start on them never fill the window ahead of other routes.
-type WaitingWorkspaces interface {
-	Workspaces
-	RoutesWaiting() []string
-}
-
-// RecoveringWorkspaces is a Workspaces with state of its own to reconcile on
-// start. Recover runs after every attempt a previous process left live is
-// settled.
-type RecoveringWorkspaces interface {
-	Workspaces
-	Recover(ctx context.Context) error
-}
-
 // ReplyLister lists the agent's comments or chat lines at a reply destination,
 // for the adopted-reply rule.
 type ReplyLister interface {
@@ -124,7 +89,6 @@ type DispatcherOptions struct {
 	Launcher driver.Launcher
 	// NoAutomaticRetry: never retry a failed spawn (sandbox mode).
 	NoAutomaticRetry bool
-	Workspaces       Workspaces
 
 	// MCP names what the worker's Basecamp MCP server runs as.
 	MCP WorkerMCP
@@ -370,11 +334,6 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			worker, TokenHolder{Process: a.Taker.Identity(), Unaccounted: a.TakerUnaccounted},
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
-	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
-		if err := w.Recover(ctx); err != nil {
-			return fmt.Errorf("connector: recover working directories: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -458,19 +417,8 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	// Invariant 2, in the query: only records whose route connect.json
 	// approves now, in the projects this run hears, and on a directory no live
 	// task holds. A record the dispatcher cannot start never fills the window.
-	startable := approved
-	if w, ok := d.opts.Workspaces.(WaitingWorkspaces); ok {
-		if waiting := w.RoutesWaiting(); len(waiting) > 0 {
-			startable = make(map[int64]string, len(approved))
-			for bucket, route := range approved {
-				if !slices.Contains(waiting, route) {
-					startable[bucket] = route
-				}
-			}
-		}
-	}
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
-		Routes: startable, RouteHeld: !d.perTaskDirs(), Limit: d.opts.Concurrency * 4,
+		Routes: approved, RouteHeld: true, Limit: d.opts.Concurrency * 4,
 	})
 	if err != nil {
 		return err
@@ -541,17 +489,7 @@ func (d *Dispatcher) approvedRoutes() map[int64]string {
 	return approved
 }
 
-func (d *Dispatcher) perTaskDirs() bool {
-	w, ok := d.opts.Workspaces.(PerTaskWorkspaces)
-	return ok && w.PerTaskDirs()
-}
-
 func (d *Dispatcher) workDirBusy(route string) bool {
-	if d.perTaskDirs() {
-		// Each task gets its own directory; LaunchTask's unique working
-		// directory is what holds.
-		return false
-	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, r := range d.live {
@@ -567,36 +505,13 @@ func (d *Dispatcher) workDirBusy(route string) bool {
 // caller's question (free), not this one's.
 func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	route := record.Decision.Route
-	workDir := route
-	if d.opts.Workspaces != nil {
-		dir, err := d.opts.Workspaces.Prepare(ctx, route, record.ID)
-		switch {
-		case errors.Is(err, ErrRouteUnusable):
-			// The route is not a condition that passes: it is a directory a
-			// person has to change. Waiting for it is what made this
-			// invisible — the route backed off, the records stayed admitted,
-			// and nobody was told anything — so the record is blocked with
-			// the reason, which `connect status` counts and a redispatch
-			// clears, and the recording that asked is answered once.
-			d.log.Error("connector: no task can be given a working directory on this route", "event_id", record.ID, "error", err)
-			if err := d.ledger.RefuseStart(ctx, record.ID, ReasonRouteUnusable); err != nil {
-				return err
-			}
-			return nil
-		case err != nil:
-			d.log.Warn("connector: could not prepare a working directory", "event_id", record.ID, "error", err)
-			return nil
-		}
-		workDir = dir
-	}
+	// The working directory is the route, and nothing is prepared for it: the
+	// connector runs the worker where it was pointed, and a task that needs a
+	// directory of its own is the agent's business to make.
 	launch, err := d.ledger.LaunchTask(ctx, LaunchSpec{
-		EventID: record.ID, Route: route, WorkDir: workDir, Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
+		EventID: record.ID, Route: route, WorkDir: route, Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
 	})
 	if err != nil {
-		// No task was created, so there is no attempt to release and no
-		// worker to confirm: the directory prepared for it was never a
-		// task's.
-		d.discardPreparedWorkspace(ctx, route, workDir)
 		return err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs, State: string(AttemptLaunching)})
@@ -962,13 +877,12 @@ func (d *Dispatcher) confirmTakerGone(worker driver.Process, holder TokenHolder)
 // left for the next start.
 const settleAttempts = 5
 
-// release is the ONE place an attempt is settled, its working directory
-// released and its end reported: the single release point of the driver
-// package's one-owner rule. Nothing else in the connector calls EndAttempt,
-// Workspaces.Finish, or writes an ended dispatch line — a source test holds
-// that (dispatcher_boundary_test.go).
+// release is the ONE place an attempt is settled and its end reported: the
+// single release point of the driver package's one-owner rule. Nothing else
+// in the connector calls EndAttempt or writes an ended dispatch line — a
+// source test holds that (dispatcher_boundary_test.go).
 //
-// It releases nothing until the worker's process group is confirmed gone, and
+// It settles nothing until the worker's process group is confirmed gone, and
 // nothing if the ledger refuses the settlement. Either way the attempt stays
 // live: its token, its conversation and its directory are still its own, a
 // person settles it, and this process stops counting it among the workers it
@@ -1010,7 +924,6 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 	// out either — it cancels the reads (Run) and waits only for this to
 	// return.
 	d.wg.Go(func() { d.adopt(ctx, settlement) })
-	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
 	if run != nil {
 		d.forget(launch.AttemptID)
@@ -1037,28 +950,6 @@ func (d *Dispatcher) forget(attemptID string) {
 	d.mu.Lock()
 	delete(d.live, attemptID)
 	d.mu.Unlock()
-}
-
-// finishWorkspace releases a task's working directory. It is the release
-// point's alone: a directory is released only once the task that owned it is
-// settled and its worker's group is confirmed gone.
-func (d *Dispatcher) finishWorkspace(ctx context.Context, route, workDir string) {
-	d.workspaceFinished(ctx, route, workDir)
-}
-
-// discardPreparedWorkspace releases a directory prepared for a task that was
-// never created, so no worker ever ran in it.
-func (d *Dispatcher) discardPreparedWorkspace(ctx context.Context, route, workDir string) {
-	d.workspaceFinished(ctx, route, workDir)
-}
-
-func (d *Dispatcher) workspaceFinished(ctx context.Context, route, workDir string) {
-	if d.opts.Workspaces == nil || workDir == "" {
-		return
-	}
-	if err := d.opts.Workspaces.Finish(ctx, route, workDir); err != nil {
-		d.log.Warn("connector: finishing a working directory", "error", err)
-	}
 }
 
 // AdoptionBudget bounds the reads one settlement spends on the adopted-reply

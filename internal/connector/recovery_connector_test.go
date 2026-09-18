@@ -306,11 +306,7 @@ func runHarnessConnector(dir string) error {
 		PrivateDir:  filepath.Join(dir, "sessions"),
 		// As the run command wires it: the agent's replies, lifecycle
 		// messages filtered out by the ledger.
-		Replies: LifecycleFilteredReplies{Lister: storePoster{dir: dir, kill: &killSpec{}}, Ledger: ledger},
-		// Not in the run command, which passes none: a task works in its
-		// route either way. The harness's records when a directory is
-		// prepared and released, for the one-owner rule's assertions.
-		Workspaces:         &harnessWorkspaces{dir: dir},
+		Replies:            LifecycleFilteredReplies{Lister: storePoster{dir: dir, kill: &killSpec{}}, Ledger: ledger},
 		StillRunning:       DefaultStillRunning,
 		IsLifecycleMessage: IsLifecycleMessageIn(ledger),
 		Lines:              lines,
@@ -548,27 +544,6 @@ func recordTaskToken(dir, attemptID, token string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(tokens, attemptID+".token"), []byte(token), 0o600)
-}
-
-// harnessWorkspaces is the working directory a task gets: the route itself,
-// as the run command's default does. It records every preparation and every
-// release, so a test can say whether a directory was released — which the
-// one-owner rule allows only once a worker's process group is gone.
-type harnessWorkspaces struct{ dir string }
-
-type workspaceEvent struct {
-	Step    string `json:"step"`
-	Route   string `json:"route"`
-	WorkDir string `json:"work_dir"`
-	EventID int64  `json:"event_id,omitempty"`
-}
-
-func (w *harnessWorkspaces) Prepare(_ context.Context, route string, eventID int64) (string, error) {
-	return route, appendJSONLine(filepath.Join(w.dir, workspaceFile), workspaceEvent{Step: "prepare", Route: route, WorkDir: route, EventID: eventID})
-}
-
-func (w *harnessWorkspaces) Finish(_ context.Context, route, workDir string) error {
-	return appendJSONLine(filepath.Join(w.dir, workspaceFile), workspaceEvent{Step: "finish", Route: route, WorkDir: workDir})
 }
 
 // unsettled says what a run that never reached its predicate was still

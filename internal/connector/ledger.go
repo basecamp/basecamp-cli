@@ -831,9 +831,11 @@ END;
 	// outbox.go for the invariants it holds.
 	migrationOutbox,
 
-	// Migration 9. The git worktrees a task runs in: the row written before
-	// `git worktree add`, the states it moves through, and the ones kept when
-	// a task ends holding work. See ledger_worktrees.go.
+	// Migration 9. The git worktrees a task ran in. Worktrees are gone —
+	// migration 12 drops the table — but this one stays where it is, exactly
+	// as it shipped: a ledger already at 9 or later has applied it, and a
+	// fresh ledger has to walk the same numbers to reach 12. Deleting it
+	// would make every later migration mean something else.
 	//
 	// 8, 9 and 10 were each written as 8 on their own branch, against
 	// different predecessors. They ship together here, so the order is
@@ -857,7 +859,77 @@ END;
 	// already posted made. It rebuilds the outbox table, which migration 8
 	// shipped with a CHECK that knows four kinds. See outbox.go.
 	migrationRetraction,
+
+	// Migration 12. The worktrees table goes. Nothing makes a worktree any
+	// more: the connector runs a task where it was started, and a task that
+	// needs a directory of its own makes one. The rows it held were a record
+	// of directories on this machine, not of work anyone asked for, and no
+	// query reads them.
+	//
+	// The directories themselves are not touched. A worktree the connector
+	// kept is still on disk, still a git worktree of its repository, still
+	// holding whatever it held — dropping this table forgets the connector's
+	// account of it and nothing else. `git worktree list` in the repository
+	// still finds it, and `git worktree remove` still removes it.
+	migrationDropWorktrees,
 }
+
+// migrationWorktrees is migration 9 as it shipped: the worktrees a task ran
+// in. Nothing reads it — migration 12 drops the table — and it is kept here
+// only because a migration that has been applied is never taken out of the
+// list. Do not edit it.
+const migrationWorktrees = `
+CREATE TABLE worktrees (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  path                 TEXT    NOT NULL,
+  work_dir             TEXT    NOT NULL,
+  route                TEXT    NOT NULL,
+  repository           TEXT    NOT NULL,
+  branch               TEXT    NOT NULL,
+  base_commit          TEXT    NOT NULL,
+  originating_event_id INTEGER NOT NULL,
+  branch_created       INTEGER NOT NULL DEFAULT 0,
+  admin_dir            TEXT    NOT NULL DEFAULT '',
+  task_id              INTEGER REFERENCES tasks (id),
+  state                TEXT    NOT NULL
+                       CHECK (state IN ('creating', 'live', 'retained', 'removing', 'removed')),
+  retained_reason      TEXT    NOT NULL DEFAULT ''
+                       CHECK (retained_reason IN ('', 'dirty', 'unpushed', 'locked', 'moved', 'unverified', 'finished', 'orphaned')),
+  created_at           TEXT    NOT NULL,
+  finished_at          TEXT,
+  retained_at          TEXT,
+  removed_at           TEXT,
+  removed_by           TEXT    NOT NULL DEFAULT ''
+                       CHECK (removed_by IN ('', 'prune', 'prune_forced', 'missing', 'never_created')),
+  CHECK (state <> 'retained' OR retained_reason <> ''),
+  CHECK ((state = 'removed') = (removed_by <> ''))
+);
+CREATE UNIQUE INDEX worktrees_open_path ON worktrees (path) WHERE state <> 'removed';
+CREATE UNIQUE INDEX worktrees_open_work_dir ON worktrees (work_dir) WHERE state <> 'removed';
+CREATE INDEX worktrees_state ON worktrees (state);
+
+CREATE TRIGGER worktrees_state_edges
+BEFORE UPDATE OF state ON worktrees
+WHEN NEW.state <> OLD.state AND NOT (
+     (OLD.state = 'creating' AND NEW.state IN ('live', 'retained', 'removing', 'removed'))
+  OR (OLD.state = 'live'     AND NEW.state IN ('retained', 'removing', 'removed'))
+  OR (OLD.state = 'retained' AND NEW.state IN ('removing', 'removed'))
+  OR (OLD.state = 'removing' AND NEW.state IN ('retained', 'removed')))
+BEGIN
+  SELECT RAISE(ABORT, 'a worktree state moves along its edges only');
+END;
+`
+
+// migrationDropWorktrees drops what migration 9 made. Dropping the table
+// takes its indexes and its trigger with it; they are named here anyway so
+// this migration reads as the undoing of that one.
+const migrationDropWorktrees = `
+DROP TRIGGER IF EXISTS worktrees_state_edges;
+DROP INDEX IF EXISTS worktrees_open_path;
+DROP INDEX IF EXISTS worktrees_open_work_dir;
+DROP INDEX IF EXISTS worktrees_state;
+DROP TABLE IF EXISTS worktrees;
+`
 
 func (l *Ledger) migrate(ctx context.Context) error {
 	if _, err := l.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
