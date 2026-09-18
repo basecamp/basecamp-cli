@@ -55,9 +55,9 @@
 // approvals set to never, so whatever the sandbox would refuse is refused
 // without asking anyone. That is still policy, not containment: the sandbox
 // is Codex's, not the connector's. One consequence is worth knowing: a
-// worktree's git data lives outside the working directory, so a Codex worker
-// cannot commit, and a Codex task that edits anything ends with its worktree
-// kept. Codex's sandbox reads the whole filesystem, but runs the model's
+// worker cannot write a repository whose git data lives outside the working
+// directory, so it cannot commit there. Codex's sandbox reads the whole
+// filesystem, but runs the model's
 // shell in a PID namespace of its own, so the processes outside it — MCP
 // servers among them — are not visible to it.
 package codex
