@@ -42,10 +42,17 @@ func TestARouteNoWorkingDirectoryCanBeMadeInIsRefused(t *testing.T) {
 	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:10304028989", testRoute)
 	h.run(t)
 
-	require.Eventually(t, func() bool {
+	// The state the record is actually in is what a failure here has to say,
+	// so the wait collects it rather than reporting a bare timeout. The
+	// harness helper that would describe the whole ledger lives in a
+	// unix-tagged file and this one is not, which is the same reason the
+	// permission cases moved out (Copilot on #753).
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		r, ok, err := h.ledger.Get(ctx, 1)
-		return err == nil && ok && r.State == StateBlocked
-	}, 5*time.Second, 10*time.Millisecond, "the record was never refused: "+unsettled(ctx, h.ledger))
+		assert.NoError(c, err)
+		assert.True(c, ok, "the record is gone")
+		assert.Equal(c, StateBlocked, r.State, "the record was never refused")
+	}, 5*time.Second, 10*time.Millisecond)
 
 	r, _, err := h.ledger.Get(ctx, 1)
 	require.NoError(t, err)

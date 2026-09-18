@@ -1,3 +1,5 @@
+//go:build unix
+
 package setup
 
 import (
@@ -25,6 +27,11 @@ func TestNoRepositoryAtProvesOnlyWhatItCanRead(t *testing.T) {
 	assert.False(t, NoRepositoryAt(filepath.Join(dir, "not-there")), "a directory that is not there proves nothing")
 
 	if os.Geteuid() != 0 {
+		// The other half of the rule, and the reason this file is unix: a
+		// mode of 0o000 is what makes a directory unsearchable, and it is a
+		// Unix mode. NoRepositoryAt itself needs no tag — an error that is
+		// not "does not exist" is no proof whatever produced it — but the
+		// fixture that sets the state up does.
 		locked := filepath.Join(dir, "locked")
 		require.NoError(t, os.MkdirAll(filepath.Join(locked, "route"), 0o700))
 		require.NoError(t, os.Chmod(locked, 0o000))

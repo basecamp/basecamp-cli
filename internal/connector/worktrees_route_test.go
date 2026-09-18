@@ -62,22 +62,5 @@ func TestPrepareWaitsOnARouteThatIsNotThere(t *testing.T) {
 	assert.Equal(t, []string{gone}, h.wt.RoutesWaiting())
 }
 
-// Neither does a directory that could not be read. git says the same thing
-// it says outside a repository, and this is the case the proof exists to
-// keep out of the refusal.
-func TestPrepareWaitsOnARouteThatCannotBeRead(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads every directory")
-	}
-	h := newWorktreeHarness(t)
-	locked := filepath.Join(filepath.Dir(h.repo), "locked")
-	route := filepath.Join(locked, "route")
-	require.NoError(t, os.MkdirAll(route, 0o700))
-	require.NoError(t, os.Chmod(locked, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
-
-	_, err := h.wt.Prepare(context.Background(), route, 5)
-	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrRouteUnusable)
-	assert.Equal(t, []string{route}, h.wt.RoutesWaiting())
-}
+// The case a directory that cannot be read makes is in
+// worktrees_route_unix_test.go: only a Unix mode says it.
