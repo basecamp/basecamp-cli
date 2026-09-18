@@ -209,6 +209,10 @@ type Hooks struct {
 	// StartRefused runs in RefuseStart's transaction, after the record is
 	// blocked: where the reply saying nothing will be started is called for.
 	StartRefused func(ctx context.Context, tx Tx, r RefusedStart) error
+	// RecordDecided runs in the transaction of a person's decision on a
+	// record — a redispatch or a discard: where a notice already posted stops
+	// asking for anything, and is retracted.
+	RecordDecided func(ctx context.Context, tx Tx, d RecordDecision) error
 }
 
 // RefusedStart is what StartRefused is told. Everything else about the
@@ -218,6 +222,25 @@ type RefusedStart struct {
 	EventID int64
 	Reason  string
 }
+
+// RecordDecision is what RecordDecided is told: the record a person decided,
+// how, and when.
+type RecordDecision struct {
+	EventID int64
+	Action  DecisionAction
+	At      time.Time
+}
+
+// DecisionAction is a person's decision on a record, in the words the
+// decisions table records it with.
+type DecisionAction string
+
+const (
+	// DecisionRedispatch authorized the record to run.
+	DecisionRedispatch DecisionAction = "redispatch"
+	// DecisionDiscard closed it without running it.
+	DecisionDiscard DecisionAction = "discard"
+)
 
 // SetHooks installs hooks. Not safe concurrently with ledger use.
 func (l *Ledger) SetHooks(h Hooks) { l.hooks = h }

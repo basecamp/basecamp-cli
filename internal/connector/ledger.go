@@ -852,6 +852,11 @@ END;
 	// 9. The numbers move only because nothing has shipped them yet; once a
 	// ledger has applied one, its number is fixed.
 	migrationOperator,
+
+	// Migration 11. The retraction: the message that answers an ask a notice
+	// already posted made. It rebuilds the outbox table, which migration 8
+	// shipped with a CHECK that knows four kinds. See outbox.go.
+	migrationRetraction,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
