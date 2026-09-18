@@ -1464,3 +1464,58 @@ func TestConnectShowNamesTheWorkerTheDriverRuns(t *testing.T) {
 	assert.Contains(t, connectShowDisplay("/x/connect.json", f, false)["workers"].(string), setup.DefaultWorker,
 		"a legacy file with no worker shows the default it means")
 }
+
+// --worktrees reads as a git workflow and is not one: no worker commits in a
+// worktree, and the connector keeps every worktree it makes. Setup says so
+// where the choice is made instead of refusing the combination, and names
+// codex only where codex is what changes — it is the one worker that commits
+// in a plain route and gives that up in a worktree.
+func TestConnectSetupWarnsWhatWorktreesLeaveBehind(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+
+	checks := func(t *testing.T, args ...string) map[string]string {
+		t.Helper()
+		app := newConnectSetupApp(t, s, "agent")
+		var buf bytes.Buffer
+		app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+		out, err := runConnectSetupCmd(t, app, args...)
+		require.NoError(t, err, out)
+		var envelope struct {
+			Data struct {
+				Ready  bool `json:"ready"`
+				Checks []struct {
+					Name    string `json:"name"`
+					Status  string `json:"status"`
+					Message string `json:"message"`
+				} `json:"checks"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+		assert.True(t, envelope.Data.Ready, "a warning is not a refusal: %s", buf.String())
+		byName := map[string]string{}
+		for _, c := range envelope.Data.Checks {
+			byName[c.Name] = c.Status + ": " + c.Message
+		}
+		return byName
+	}
+
+	off := checks(t, "--worker", "codex")
+	assert.NotContains(t, off, "Worktrees", "nothing to warn about with worktrees off")
+	assert.NotContains(t, off, "Worktrees and codex")
+
+	on := checks(t, "--worktrees", "--worker", "codex")
+	require.Contains(t, on, "Worktrees")
+	assert.Contains(t, on["Worktrees"], setup.StatusWarn+":")
+	assert.Contains(t, on["Worktrees"], "no worker commits in a worktree")
+	assert.Contains(t, on["Worktrees"], "keeps every one")
+	require.Contains(t, on, "Worktrees and codex")
+	assert.Contains(t, on["Worktrees and codex"], setup.StatusWarn+":")
+	assert.Contains(t, on["Worktrees and codex"], "codex commits in a route that is a repository")
+
+	// The same warning for a worker that never commits anywhere, without the
+	// codex line, which would be untrue of it.
+	claude := checks(t, "--worker", "claude")
+	require.Contains(t, claude, "Worktrees", "the file kept --worktrees from the run before")
+	assert.NotContains(t, claude, "Worktrees and codex")
+}

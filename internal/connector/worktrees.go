@@ -29,6 +29,25 @@ import (
 // listed by `basecamp connect status` and `basecamp connect worktrees list`,
 // until an operator discards it with `basecamp connect worktrees prune`.
 //
+// # No worker commits in one
+//
+// A worktree is where a task's work is done, not where it is committed. The
+// v1 permission policy (policy.go) allows reads, searches and edits inside
+// the working directory and refuses everything else, so a commit put to it
+// as a tool call is refused; Codex is the one worker whose shell is not put
+// to the policy at all, and its own sandbox confines that shell's writes to
+// the working directory just the same. A worktree's git data is not in the
+// working directory — it is git's record of it, <repo>/.git/worktrees/<name>
+// — so the write a commit makes lands where no worker may write. Codex is
+// therefore the one worker the flag takes something from: it commits in a
+// route that is a repository and cannot in a worktree.
+//
+// What that means for every task here: a task that edits anything ends with
+// a worktree holding uncommitted work, which is work by the rule below, so a
+// prune keeps it until an operator forces the removal or deals with it
+// themselves. `basecamp connect setup --worktrees` warns about exactly this
+// before it writes connect.json.
+//
 // # One worktree, one removal
 //
 // WHEN. Only an operator's `worktrees prune` removes a worktree. The

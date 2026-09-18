@@ -311,6 +311,14 @@ work runs in: --route <project-id>=<dir>. A project with no route gets a
 holding reply and no work. --watch-completions <project-id> makes the agent
 hear every trusted completion in that project without being assigned.
 
+Worktrees. --worktrees gives each task a git worktree of its own, so tasks on
+one repository run side by side. The connector keeps every worktree it makes
+and removes none of its own accord: basecamp connect worktrees prune is what
+discards one, and it keeps a worktree with work in it unless it is forced.
+No worker commits in a worktree — a worktree's git data lives outside the
+working directory, which is the only place a worker may write — so the work a
+task does stays uncommitted there for you to read.
+
 connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
 (Windows), or where the filesystem holding the configuration directory
@@ -357,7 +365,7 @@ Examples:
 	fl.StringVar(&f.worker, "worker", "", fmt.Sprintf("The coding agent workers run: %s (default %s)", strings.Join(setup.Workers, ", "), setup.DefaultWorker))
 	fl.IntVar(&f.parallel, "concurrency", 0, fmt.Sprintf("Workers at once (default %d)", setup.DefaultConcurrency))
 	fl.DurationVar(&f.deadline, "deadline", 0, fmt.Sprintf("Deadline per task (default %s)", setup.DefaultDeadline))
-	fl.BoolVar(&f.worktrees, "worktrees", false, "Give each task its own git worktree")
+	fl.BoolVar(&f.worktrees, "worktrees", false, "Give each task its own git worktree, kept for you to prune; no worker commits in one")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 
 	return cmd
@@ -564,6 +572,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
 	report.Add(setup.RouteChecks(ctx, reader, next)...)
+	report.Add(setup.WorktreeChecks(next)...)
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {

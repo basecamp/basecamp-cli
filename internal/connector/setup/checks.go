@@ -383,3 +383,47 @@ func ErrorText(err error) string {
 	}
 	return richtext.SanitizeSingleLine(err.Error())
 }
+
+// WorktreeChecks says what --worktrees actually leaves behind, because the
+// flag's name promises a git workflow the connector does not have.
+//
+// No worker commits in a worktree. The v1 permission policy (connector's
+// policy.go) allows reads, searches and edits inside the working directory
+// and refuses everything else, so a `git commit` put to it as a tool call is
+// refused whatever the worker; Codex is the one worker whose shell is not put
+// to the policy at all, and its own sandbox confines that shell's writes to
+// the working directory. A worktree keeps its git data outside the working
+// directory, in <repo>/.git/worktrees/<name>, so the write a commit makes
+// lands where no worker may write. Every task that edits anything therefore
+// ends with a worktree holding uncommitted work, which the connector keeps
+// and `worktrees prune` will not remove unless it is forced.
+//
+// It warns and does not refuse. The combination is a real choice — running
+// tasks on one repository side by side is what worktrees are for, and
+// reading each worktree by hand is a way of working — and what it costs is a
+// directory to deal with, not lost work.
+//
+// The worker is named only where it changes the answer. Codex commits in a
+// route that is a repository, where the git data is inside the working
+// directory, and gives that up in a worktree; the other workers commit
+// nowhere, so a warning that named Codex alone would read as though they did.
+func WorktreeChecks(f File) []Check {
+	if !f.Worktrees {
+		return nil
+	}
+	checks := []Check{{
+		Name:    "Worktrees",
+		Status:  StatusWarn,
+		Message: "Each task works in a worktree of its own, and the connector keeps every one: no worker commits in a worktree, so a task that edits anything leaves its work uncommitted there",
+		Hint:    "basecamp connect worktrees list -P " + f.Profile + ", then prune; a worktree with work in it is kept unless the prune is forced.",
+	}}
+	if f.WorkerName() == WorkerCodex {
+		checks = append(checks, Check{
+			Name:    "Worktrees and codex",
+			Status:  StatusWarn,
+			Message: "codex commits in a route that is a repository, where the git data is inside the working directory; a worktree keeps its git data outside one, and codex's sandbox refuses that write",
+			Hint:    "Leave --worktrees off for a worker that commits its own work, or keep them and read each worktree yourself.",
+		})
+	}
+	return checks
+}
