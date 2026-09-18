@@ -325,11 +325,13 @@ type harnessScenario struct {
 type harness struct {
 	t   *testing.T
 	dir string
-	// watching is the parent's watch for each task token, for the run in
-	// flight; watchStop ends it.
+	// watching is the parent's watch for each task token, for the life of
+	// the harness; watchStop ends the loop that registers them, and
+	// watchDone is closed once that loop has returned.
 	watchMu   sync.Mutex
 	watching  map[string]func() []string
 	watchStop chan struct{}
+	watchDone chan struct{}
 	// state is the connector's state directory, under this harness's own
 	// XDG_STATE_HOME and named as the connector names it, so a worker's MCP
 	// server resolves it exactly as `basecamp mcp --connect-state` does.
@@ -603,9 +605,15 @@ func (h *harness) killAgents() {
 // For the harness, not for a run: a worker outlives the connector that
 // started it — one left lingering for a restart to end, a real agent, one
 // still binding when the connector died — and can write a file in the gap
-// between one run's exit and the next run's start, or after the last run.
-// The watch begins with the first run and ends at cleanup, once every worker
+// between one run's exit and the next run's start, or after the last. The
+// watch begins with the first run and ends at cleanup, once every worker
 // is ended (newHarness), and reports then.
+//
+// A watcher is started in one place only, registerTokenWatchers, from the
+// loop this starts; and the cleanup that reads the watchers joins that loop
+// before it reads them (stopWatchingForTokenFiles). So no watcher can be
+// registered after the reading, to be neither stopped nor read: not because
+// the loop checks, but because the loop is over.
 func (h *harness) watchForTokenFiles() {
 	h.t.Helper()
 	h.watchMu.Lock()
@@ -616,25 +624,33 @@ func (h *harness) watchForTokenFiles() {
 	if h.watching == nil {
 		h.watching = map[string]func() []string{}
 	}
-	stop := make(chan struct{})
-	h.watchStop = stop
+	stop, done := make(chan struct{}), make(chan struct{})
+	h.watchStop, h.watchDone = stop, done
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-stop:
 				return
 			case <-time.After(5 * time.Millisecond):
 			}
-			for _, token := range h.knownTokens() {
-				h.watchMu.Lock()
-				if _, ok := h.watching[token]; !ok {
-					h.watching[token] = drivertest.WatchForSecretFiles(token,
-						h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions"))
-				}
-				h.watchMu.Unlock()
-			}
+			h.registerTokenWatchers()
 		}
 	}()
+}
+
+// registerTokenWatchers starts a watcher for every token a worker has taken
+// that has none yet. It is the one place a watcher is started.
+func (h *harness) registerTokenWatchers() {
+	tokens := h.knownTokens()
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+	for _, token := range tokens {
+		if _, ok := h.watching[token]; !ok {
+			h.watching[token] = drivertest.WatchForSecretFiles(token,
+				h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions"))
+		}
+	}
 }
 
 // knownTokens reads the tokens the workers have taken so far, ignoring a
@@ -660,15 +676,28 @@ func (h *harness) watchedTokens() int {
 	return len(h.watching)
 }
 
-// stopWatchingForTokenFiles ends the watchers and reports what they saw. It
-// is the harness's cleanup: every worker has been ended by then.
+// stopWatchingForTokenFiles ends the watch and reports what it saw. It is
+// the harness's cleanup: every worker has been ended by then.
+//
+// The loop that registers watchers is joined first, so that once the
+// watchers are read nothing can add one; then one last registration pass
+// of this goroutine's own, so a token first seen in the loop's final
+// interval is watched too — a watcher scans once before it is stopped —
+// and only then is every watcher stopped and its finding read. Nothing
+// found is dropped: every watcher that was ever started is in the map, and
+// every one in the map is read here.
 func (h *harness) stopWatchingForTokenFiles() int {
 	h.watchMu.Lock()
-	defer h.watchMu.Unlock()
-	if h.watchStop != nil {
-		close(h.watchStop)
-		h.watchStop = nil
+	stop, done := h.watchStop, h.watchDone
+	h.watchStop, h.watchDone = nil, nil
+	h.watchMu.Unlock()
+	if stop != nil {
+		close(stop)
+		<-done
 	}
+	h.registerTokenWatchers()
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
 	watched := len(h.watching)
 	for token, stop := range h.watching {
 		for _, found := range stop() {
@@ -677,6 +706,29 @@ func (h *harness) stopWatchingForTokenFiles() int {
 		delete(h.watching, token)
 	}
 	return watched
+}
+
+// The watch's reading cannot miss a watcher: a token taken just before the
+// reading, in the interval the registering loop never got to, is watched
+// and counted by the reading itself; and once the reading has happened, no
+// watcher can be registered any more, however the loop's last interval and
+// the cleanup happened to interleave.
+func TestTheTokenWatchReadsEveryWatcherItCouldHaveStarted(t *testing.T) {
+	require.NotEmpty(t, harnessDrivers)
+	h := newHarness(t, harnessDrivers[0], harnessScenario{})
+	h.watchForTokenFiles()
+	tokens := filepath.Join(h.dir, tokensDir)
+	require.NoError(t, os.MkdirAll(tokens, 0o700))
+	// Taken now, and the watch read now: before the loop's next interval.
+	require.NoError(t, os.WriteFile(filepath.Join(tokens, "taken-1.token"), []byte("tok_one"), 0o600))
+	assert.Equal(t, 1, h.stopWatchingForTokenFiles(), "the token taken just before the reading is watched and counted by it")
+	// And once read, no loop registers any more: a token taken afterwards
+	// is not watched until something reads again — and a reading watches
+	// what it knows, once, and reads it, so nothing it could see is dropped.
+	require.NoError(t, os.WriteFile(filepath.Join(tokens, "taken-2.token"), []byte("tok_two"), 0o600))
+	time.Sleep(25 * time.Millisecond)
+	assert.Zero(t, h.watchedTokens(), "no watcher is registered after the reading")
+	assert.Equal(t, 2, h.stopWatchingForTokenFiles(), "a later reading watches every token it knows, once, and reads it")
 }
 
 // requireNoTaskTokenLeaked holds every run to the credential rule, for every
