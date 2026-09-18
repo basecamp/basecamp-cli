@@ -617,12 +617,28 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 			t.Run(row.name, func(t *testing.T) {
 				// A worker that never calls get_dispatch is what the guard is
 				// for: the acknowledgement falls to the connector.
+				//
+				// The guard is due a delay after admission, and the rows
+				// kill the connector as it posts. That kill must land on an
+				// attempt already running — a worker recorded, so a restart
+				// can end it and settle — and the delay is what buys the
+				// launch that time: a working directory, the ledger, the
+				// token socket, the agent's wrapper and, for the acp row,
+				// its whole handshake. At 50ms a loaded CI runner lost that
+				// race, the attempt was left launching with no worker to
+				// identify, and the restart held it rather than settle, as
+				// it must. A second is not a sleep for an outcome, it is the
+				// guard's own period, sized so the launch fits; the check
+				// after the kill says so when it does not, in a moment
+				// rather than at the surviving run's deadline.
 				h := newHarness(t, d, harnessScenario{
-					GuardDelay: 50 * time.Millisecond,
+					GuardDelay: time.Second,
 					Plans:      map[string][]string{"101#1": {"linger"}},
 				})
 				h.publish(feedEntry{Event: todoEvent(101, 5001)})
 				h.run(harnessRun{Kill: row.kill, Killed: true})
+				require.NotEmpty(t, recordedWorkers(t, h.ledger()),
+					"the guard outran the launch: the attempt was still launching when the guard was due, so no restart can identify its worker or settle it")
 				h.run(harnessRun{})
 				h.run(harnessRun{})
 
