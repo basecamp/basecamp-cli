@@ -34,17 +34,13 @@ import (
 // descriptor is; the error it returns stops startup rather than letting the
 // program run on with a promise it did not keep.
 func sealInheritedDescriptors() error {
-	if err := unix.CloseRange(firstInheritedFD, math.MaxUint32, unix.CLOSE_RANGE_CLOEXEC); err == nil {
+	if err := unix.CloseRange(uint(sysfd.FirstNonStandard), math.MaxUint32, unix.CLOSE_RANGE_CLOEXEC); err == nil {
 		return nil
 	}
 	// Kernels before 5.11 do not know CLOSE_RANGE_CLOEXEC. Ask the process
 	// which descriptors it actually has and mark those.
 	return sealListedDescriptors(procSelfFD)
 }
-
-// firstInheritedFD is the first descriptor that is not one of the standard
-// three.
-const firstInheritedFD = 3
 
 // procSelfFD is where Linux lists the descriptors a process holds. It is a
 // parameter of sealListedDescriptors only so a test can watch the walk refuse
@@ -70,7 +66,7 @@ func sealListedDescriptors(listingDir string) error {
 		if err != nil {
 			return fmt.Errorf("could not seal the descriptors this process inherited: %s holds %q, which is not a descriptor", listingDir, name)
 		}
-		if fd.Int() < firstInheritedFD || fd == listing {
+		if fd < sysfd.FirstNonStandard || fd == listing {
 			continue
 		}
 		if err := sealDescriptor(fd); err != nil {
