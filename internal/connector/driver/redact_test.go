@@ -125,8 +125,8 @@ func TestTheRuleTakesTerminalControlsOutOfEverythingItSanitizes(t *testing.T) {
 	assert.NotContains(t, out, "\a", "nor a bell")
 	assert.Contains(t, out, "danger", "and the text itself still reads")
 
-	assert.NotContains(t, r.Sanitize("a2Kb"), "", "the C1 block is an escape sequence of its own")
-	assert.NotContains(t, r.Sanitize("ab"), "", "DEL too")
+	assert.NotContains(t, r.Sanitize("a\u009b2Kb"), "\u009b", "the C1 block is an escape sequence of its own")
+	assert.NotContains(t, r.Sanitize("a\x7fb"), "\x7f", "DEL too")
 	assert.NotContains(t, r.Sanitize("keep\roverwrite"), "\r", "a carriage return rewrites the line it is on")
 	assert.Equal(t, "one\ttwo\nthree", r.Sanitize("one\ttwo\nthree"), "tab and newline are a log field's own")
 

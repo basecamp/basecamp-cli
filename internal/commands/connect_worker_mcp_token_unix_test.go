@@ -17,7 +17,8 @@ import (
 func serveOnce(t *testing.T, reply string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "t.sock")
-	l, err := net.Listen("unix", path)
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "unix", path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l.Close() })
 	go func() {
