@@ -340,14 +340,18 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	if s.Review > 0 || s.AuthorizedBlocked > 0 || s.RedispatchPending > 0 {
 		fmt.Fprintf(w, "  Review         %d tagged, %d authorized and blocked, %d redispatches waiting for their task\n", s.Review, s.AuthorizedBlocked, s.RedispatchPending)
 	}
-	fmt.Fprintf(w, "  Waiting routes %d (no worktree could be made; records on them wait, and each is tried again when its wait is over)\n", len(s.Waiting))
+	// Neutral about the state each row is in, because the rows are in two:
+	// a backoff still running holds that route's records out of the window,
+	// while one that has elapsed holds nothing and is simply a failure
+	// nothing has disproved. The per-route line says which.
+	fmt.Fprintf(w, "  Waiting routes %d (the last attempt at a worktree on each failed; none is refused, and none retries on its own)\n", len(s.Waiting))
 	for _, wait := range s.Waiting {
-		next := "its wait is over; the next record on it tries again"
+		state := "backoff elapsed; the next record on this route is what tries again"
 		if wait.Waiting(time.Now()) {
-			next = "next try " + stamp(wait.Until)
+			state = "in a backoff until " + stamp(wait.Until)
 		}
 		fmt.Fprintf(w, "    %s  %d failed attempts since %s, %s: %s\n",
-			clean(wait.Route), wait.Failures, stamp(wait.FirstAt), next, clean(wait.Reason))
+			clean(wait.Route), wait.Failures, stamp(wait.FirstAt), state, clean(wait.Reason))
 	}
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))

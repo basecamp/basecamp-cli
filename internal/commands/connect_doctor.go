@@ -184,7 +184,7 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 	// What a person needs is to know it is happening, which is the warning.
 	if len(s.Waiting) > 0 {
 		checks = append(checks, setup.Check{Name: "Waiting routes", Status: setup.StatusWarn,
-			Message: waitingRoutesMessage(s.Waiting),
+			Message: waitingRoutesMessage(s.Waiting, time.Now()),
 			Hint:    "basecamp connect status -P " + shellQuote(p.name) + " gives each route's last failure. Fix the route; the next task on it clears this on its own."})
 	}
 	switch {
@@ -202,17 +202,27 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 
 // waitingRoutesMessage names the route that has been failing longest and its
 // last failure, so the warning is actionable without a second command, and
-// says how long it has been going on: six hours of waiting reads differently
+// says how long it has been going on: six hours of failing reads differently
 // from one minute, and that difference is the whole point of showing it.
-func waitingRoutesMessage(waits []connector.RouteWait) string {
+//
+// It says which state that route is in rather than one thing about both. A
+// backoff still running holds that route's records; one that has elapsed
+// holds nothing, and the attempt comes with the next record on the route,
+// whenever that is. A message that told a person their records were waiting
+// when they are not would send them to look in the wrong place.
+func waitingRoutesMessage(waits []connector.RouteWait, now time.Time) string {
 	first := waits[0]
-	msg := fmt.Sprintf("%s: %d failed attempts at a worktree since %s (%s)",
+	state := "its backoff has elapsed, and the next record on it is what tries again"
+	if first.Waiting(now) {
+		state = "in a backoff until " + first.Until.UTC().Format(time.RFC3339) + ", which holds its records"
+	}
+	msg := fmt.Sprintf("%s: %d failed attempts at a worktree since %s, %s (last failure: %s)",
 		richtext.SanitizeSingleLine(first.Route), first.Failures,
-		first.FirstAt.UTC().Format(time.RFC3339), richtext.SanitizeSingleLine(first.Reason))
+		first.FirstAt.UTC().Format(time.RFC3339), state, richtext.SanitizeSingleLine(first.Reason))
 	if len(waits) > 1 {
 		msg += fmt.Sprintf("; and %d other route(s)", len(waits)-1)
 	}
-	return msg + ". Records on them wait; each route is tried again when its wait is over, and none is refused"
+	return msg + ". None is refused"
 }
 
 // workerBinaries are the executables the spawn driver runs for the

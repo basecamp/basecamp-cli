@@ -44,17 +44,25 @@ CREATE TABLE route_waits (
 // RouteWait is a route the connector could not make a worktree on, as status
 // and doctor show it. Reason is the failure as the connector logged it, with
 // the connector's own paths and environment already taken out of it.
+//
+// Until is the end of the backoff the last failure armed, and nothing more.
+// It is not a scheduled attempt: the next attempt happens when a record on
+// that route reaches the dispatcher, which may be a second after the backoff
+// ends or never. The field is named for what it is, because a consumer told
+// it was the next attempt would be told something the connector does not
+// promise.
 type RouteWait struct {
 	Route    string    `json:"route"`
 	Failures int       `json:"failures"`
 	Reason   string    `json:"reason,omitempty"`
 	FirstAt  time.Time `json:"first_failed_at"`
 	LastAt   time.Time `json:"last_failed_at"`
-	Until    time.Time `json:"next_attempt_at"`
+	Until    time.Time `json:"backoff_until"`
 }
 
 // Waiting is whether the route is still inside its backoff at now: the
-// dispatcher leaves its records out while it is.
+// dispatcher leaves its records out while it is. False is a route that is
+// startable again, not a route that has been tried again.
 func (w RouteWait) Waiting(now time.Time) bool { return now.Before(w.Until) }
 
 // RecordRouteWait writes the wait a failed Prepare left. FirstAt is kept from

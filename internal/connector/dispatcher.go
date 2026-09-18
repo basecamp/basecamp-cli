@@ -557,9 +557,18 @@ func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]stri
 // a person looking, a confident line about a route that is not there any more
 // sends them nowhere.
 //
-// Only routes still inside their wait are named in the log. A route whose
-// wait has elapsed is one the next record on it will try, so calling it
-// waiting would be wrong.
+// A route set that is not this connector's is not pruned against and is not
+// reported either. Declining to delete on it is the rule above; declining to
+// speak is the same rule applied to the claim. Naming a route as waiting says
+// it is one of this connector's routes, and a connect.json that could not be
+// read, or that now names another agent, is not evidence of that. The rows
+// stay in the ledger, where status and doctor still show them — those run
+// against the state directory the profile names, so they and the file agree
+// about whose they are; this loop is the one place the two can disagree.
+//
+// Only routes still inside their backoff are named. A route whose backoff has
+// elapsed is startable again and waits for nothing but a record, so calling
+// it waiting would be wrong.
 //
 // Nothing here escalates. The count is reported, never acted on: a route that
 // has reached the cap fifty times is still a route that may work in a minute,
@@ -581,16 +590,17 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 	// whole table exists to keep. A row left standing a few minutes too long
 	// is the cheaper mistake by a wide margin.
 	routes, known := d.opts.Routes()
-	if known {
-		keep := make([]string, 0, len(routes))
-		for _, route := range routes {
-			keep = append(keep, route.Path)
-		}
-		if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
-			d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
-		} else if dropped > 0 {
-			d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
-		}
+	if !known {
+		return
+	}
+	keep := make([]string, 0, len(routes))
+	for _, route := range routes {
+		keep = append(keep, route.Path)
+	}
+	if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
+		d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
+	} else if dropped > 0 {
+		d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
 	}
 	waits, err := d.ledger.RouteWaits(ctx)
 	if err != nil {
@@ -602,9 +612,9 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 		if !w.Waiting(now) {
 			continue
 		}
-		d.log.Warn("connector: no worktree could be made on this route, so its records wait; this is a machine to fix, not something the connector recovers from",
-			"route", w.Route, "failures", w.Failures, "waiting_since", w.FirstAt.UTC().Format(time.RFC3339),
-			"next_attempt", w.Until.UTC().Format(time.RFC3339), "last_failure", w.Reason)
+		d.log.Warn("connector: no worktree could be made on this route, so its records are held out of the window until its backoff ends; this is a machine to fix, not something the connector recovers from",
+			"route", w.Route, "failures", w.Failures, "failing_since", w.FirstAt.UTC().Format(time.RFC3339),
+			"backoff_until", w.Until.UTC().Format(time.RFC3339), "last_failure", w.Reason)
 	}
 }
 

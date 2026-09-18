@@ -379,7 +379,7 @@ func TestConnectDoctorWarnsAboutRoutesWaitingForAWorktree(t *testing.T) {
 	assert.Contains(t, byName["Waiting routes"].Message, "/work/app: 14 failed attempts at a worktree since 2026-09-18T06:00:00Z")
 	assert.Contains(t, byName["Waiting routes"].Message, "dubious ownership")
 	assert.Contains(t, byName["Waiting routes"].Message, "and 1 other route(s)")
-	assert.Contains(t, byName["Waiting routes"].Message, "each route is tried again when its wait is over, and none is refused")
+	assert.Contains(t, byName["Waiting routes"].Message, "None is refused")
 	assert.Contains(t, byName["Waiting routes"].Hint, "basecamp connect status -P agent")
 }
 
@@ -592,14 +592,18 @@ func TestStatusReportsTheRoutesWaitingForAWorktree(t *testing.T) {
 
 	styled, err := f.run(t, output.FormatStyled, "status")
 	require.NoError(t, err, styled)
-	assert.Contains(t, styled, "Waiting routes 1 (no worktree could be made; records on them wait, and each is tried again when its wait is over)")
-	assert.Contains(t, styled, "/work/app  14 failed attempts since 2026-09-18 06:00:00Z, next try ")
+	assert.Contains(t, styled, "Waiting routes 1 (the last attempt at a worktree on each failed; none is refused, and none retries on its own)")
+	assert.Contains(t, styled, "/work/app  14 failed attempts since 2026-09-18 06:00:00Z, in a backoff until ")
 	assert.Contains(t, styled, "is not in a git repository")
 
 	out, err := f.run(t, output.FormatJSON, "status")
 	require.NoError(t, err, out)
 	assert.Contains(t, out, `"waiting_routes"`)
 	assert.Contains(t, out, `"failures": 14`)
+	// Until is the end of the recorded backoff, not a scheduled attempt: the
+	// attempt comes with the next record on the route, whenever that is.
+	assert.Contains(t, out, `"backoff_until"`)
+	assert.NotContains(t, out, `"next_attempt_at"`)
 	assert.Contains(t, out, "1 route waiting for a worktree")
 	assert.NotContains(t, out, "1 routes waiting")
 }
@@ -615,9 +619,30 @@ func TestStatusSaysNoRouteIsWaiting(t *testing.T) {
 	assert.Contains(t, buf.String(), "Waiting routes 0 ")
 }
 
-// A wait that has elapsed is not a retry in flight. Saying "due now" read as
-// the connector being about to act; what is true is that the next record on
-// the route is what tries again.
+// doctor says which state the route it names is in. A backoff still running
+// holds that route's records; one that has elapsed holds nothing, and the
+// attempt comes with the next record on the route. Telling a person their
+// records were waiting when they are not sends them to look in the wrong
+// place.
+func TestConnectDoctorTellsAnElapsedBackoffFromARunningOne(t *testing.T) {
+	first := time.Date(2026, 9, 18, 6, 0, 0, 0, time.UTC)
+	now := first.Add(7 * time.Hour)
+	running := connector.RouteWait{Route: "/work/app", Failures: 4, Reason: "fatal: cannot chdir",
+		FirstAt: first, LastAt: now, Until: now.Add(30 * time.Minute)}
+	elapsed := running
+	elapsed.Until = now.Add(-time.Minute)
+
+	msg := waitingRoutesMessage([]connector.RouteWait{running}, now)
+	assert.Contains(t, msg, "in a backoff until 2026-09-18T13:30:00Z, which holds its records")
+
+	msg = waitingRoutesMessage([]connector.RouteWait{elapsed}, now)
+	assert.Contains(t, msg, "its backoff has elapsed, and the next record on it is what tries again")
+	assert.NotContains(t, msg, "holds its records")
+}
+
+// A backoff that has elapsed is not a retry in flight. The status line says
+// what actually happens: the next record on the route is what tries again,
+// and there may be no such record.
 func TestStatusSaysWhatAnElapsedWaitMeans(t *testing.T) {
 	var buf bytes.Buffer
 	elapsed := time.Now().Add(-time.Hour)
@@ -628,8 +653,8 @@ func TestStatusSaysWhatAnElapsedWaitMeans(t *testing.T) {
 			FirstAt: elapsed.Add(-time.Hour), LastAt: elapsed.Add(-time.Hour), Until: elapsed,
 		}},
 	}})
-	assert.Contains(t, buf.String(), "its wait is over; the next record on it tries again")
-	assert.NotContains(t, buf.String(), "next try ")
+	assert.Contains(t, buf.String(), "backoff elapsed; the next record on this route is what tries again")
+	assert.NotContains(t, buf.String(), "in a backoff until")
 }
 
 // Status reads card 19's worktree ledger: the worktrees the connector kept

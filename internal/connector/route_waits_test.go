@@ -234,7 +234,10 @@ func TestAWaitOnARouteNoLongerRoutedIsDropped(t *testing.T) {
 // route that has been failing all morning, which is the thing this table
 // exists to keep.
 func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
-	h := newDispatchHarness(t, newFakeDriver(), nil)
+	var logs bytes.Buffer
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	})
 	ctx := context.Background()
 	now := time.Now()
 	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
@@ -244,7 +247,7 @@ func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
 
 	h.mu.Lock()
 	h.routes = map[int64]admission.Route{}
-	h.routesUnreadable = true
+	h.routesUnknown = true
 	h.mu.Unlock()
 
 	h.d.reviewWaitingRoutes(ctx)
@@ -252,17 +255,50 @@ func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, waits, 1, "a file that could not be read says nothing about which routes exist")
 	assert.Equal(t, 14, waits[0].Failures)
+	assert.NotContains(t, logs.String(), "/work/failing-all-morning",
+		"and naming a route as waiting claims it is this connector's, which an unread file does not establish")
 
 	// A file that reads and routes nothing is a different fact, and does
 	// prune: the emptiness was observed.
 	h.mu.Lock()
-	h.routesUnreadable = false
+	h.routesUnknown = false
 	h.mu.Unlock()
 	h.d.waitingAt = time.Time{}
 	h.d.reviewWaitingRoutes(ctx)
 	waits, err = h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, waits, "an empty set that was read is an empty set")
+}
+
+// A connect.json that reads but names another agent or account is the same
+// case: it is not this connector's route set, so it neither deletes a wait
+// nor makes one safe to call this connector's in the log. Re-setting the
+// profile for another identity under a running connector stops the old one
+// reporting routes that are no longer its own.
+func TestAConfigNamingAnotherIdentityNeitherPrunesNorReports(t *testing.T) {
+	var logs bytes.Buffer
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	})
+	ctx := context.Background()
+	now := time.Now()
+	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+		Route: "/work/was-ours", Failures: 5, Reason: "fatal: cannot chdir",
+		FirstAt: now.Add(-time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
+	}))
+
+	// What connectRoutes does for a file naming another agent: read, empty,
+	// and not this connector's.
+	h.mu.Lock()
+	h.routes = map[int64]admission.Route{}
+	h.routesUnknown = true
+	h.mu.Unlock()
+
+	h.d.reviewWaitingRoutes(ctx)
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	require.Len(t, waits, 1, "another identity's file does not delete this ledger's record")
+	assert.NotContains(t, logs.String(), "/work/was-ours", "nor does it let the route be called this connector's")
 }
 
 // Worktrees turned off: no route is waiting for a worktree that is never
