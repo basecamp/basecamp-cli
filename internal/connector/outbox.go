@@ -75,10 +75,15 @@ import (
 //     sending at the first send that may not have landed.
 //  11. A notice is retracted by another message, never by editing or deleting
 //     the one that went out. Only an ask is retracted — a line telling a
-//     person to run something — and only once the message carrying it is
-//     known to exist: a retraction whose notice was refused, or left
-//     indeterminate for a person, is canceled rather than posted at a
-//     destination where there may be nothing to answer.
+//     person to run something — and both halves of what the retraction claims
+//     are asked again at its claim, because a retraction that is wrong is
+//     worse than none: a reader trusts the later message, so a line saying an
+//     ask is answered under an ask that is still live means nobody acts on
+//     it. The message it answers must be known to exist — one whose notice
+//     was refused, or left indeterminate for a person, is canceled rather
+//     than posted where there may be nothing to answer — and the record must
+//     not be waiting for that ask any more, which is a person's decision
+//     having actually settled it and not merely having been made.
 const migrationOutbox = `
 CREATE TABLE outbox (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -448,14 +448,19 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 		}
 		if in.Kind == IntentRetraction {
-			// A retraction answers a message at the destination. It goes out
-			// once that message is known to be there, waits while it is on
-			// its way, and is never sent when it turned out not to exist: a
-			// refusal created nothing, and an indeterminate or abandoned
-			// intent is a person's to settle, not something to post a reply
-			// to on a guess. A person who then proves that notice sent, or
-			// sends it again, has it stand unretracted: they are the ones
-			// looking at the destination, and the connector does not post
+			// A retraction says two things, and both are asked again here,
+			// because a retraction that is wrong is worse than none: a reader
+			// trusts the later message, and a line saying an ask is answered
+			// under an ask that is still live means nobody acts on it.
+			//
+			// First, that there is a message at the destination to answer. It
+			// goes out once that message is known to be there, waits while it
+			// is on its way, and is never sent when it turned out not to
+			// exist: a refusal created nothing, and an indeterminate or
+			// abandoned intent is a person's to settle, not something to post
+			// a reply to on a guess. A person who then proves that notice
+			// sent, or sends it again, has it stand unretracted: they are the
+			// ones looking at the destination, and the connector does not post
 			// behind them.
 			var answered string
 			switch err := tx.QueryRowContext(ctx, `SELECT state FROM outbox WHERE id = ?`, in.Retracts).Scan(&answered); {
@@ -464,10 +469,33 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			case err != nil:
 				return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
 			}
+			waiting := false
 			switch IntentState(answered) {
 			case IntentSent:
 				// The message is at the destination: answer it.
 			case IntentPending, IntentSending:
+				waiting = true
+			default:
+				next, note = IntentCanceled, "the notice it answers was not posted"
+			}
+			// Second, that the ask is answered — now, not when the decision
+			// was made. A redispatch of a blocked record authorizes it and
+			// leaves its prerequisite to run again; until that settles the
+			// block the operator is still being told to redispatch, and the
+			// retraction waits. A record that is gone answers nothing, and
+			// says nothing.
+			if next == IntentSending && !waiting {
+				open, found, err := askStillOpen(ctx, tx, in.EventID)
+				switch {
+				case err != nil:
+					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
+				case !found:
+					next, note = IntentCanceled, "the record it answers for is gone"
+				case open:
+					waiting = true
+				}
+			}
+			if waiting {
 				// Not yet. It stays pending, due again on the next tick,
 				// rather than being claimed and left with nothing to say.
 				due := l.now().Add(RetractionWait)
@@ -481,8 +509,6 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 				in.NotBefore = due
 				out, ok = in, true
 				return nil
-			default:
-				next, note = IntentCanceled, "the notice it answers was not posted"
 			}
 		}
 		if in.Kind == IntentGuardAck {

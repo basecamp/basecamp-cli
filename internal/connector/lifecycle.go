@@ -88,25 +88,53 @@ func renderRefusedStart(kind MessageKind, eventID int64) string {
 	return renderLines(kind, lines)
 }
 
-// renderRetraction answers an ask an earlier notice made. It says what
-// happened and that nothing is being asked for now; it does not say the work
-// is done, which the connector does not know, and it does not touch the
-// notice it answers. Nobody is named: the connector knows who authorized the
-// decision only as the handle the command recorded, which is not a person on
-// this card.
+// renderRetraction answers an ask an earlier notice made. Both of the things
+// it claims are checked before it is sent: that a person decided the record at
+// that time, which the decisions table holds, and that the record is not
+// waiting for the ask any more, which its state says at the moment the message
+// goes out (askStillOpen). It does not say the work is done, which the
+// connector does not know, and it does not touch the notice it answers. Nobody
+// is named: the connector knows who decided only as the handle the command
+// recorded, which is not a person on this card.
 func renderRetraction(kind MessageKind, eventID int64, action DecisionAction, at time.Time) string {
-	answer := "It was run at " + clock(at) + "; "
-	if action == DecisionDiscard {
-		answer = "The record was closed instead, at " + clock(at) + "; "
-	}
 	id := strconv.FormatInt(eventID, 10)
+	answer := "A person ran it at " + clock(at) + ", and event " + id + " is not waiting for it now."
+	if action == DecisionDiscard {
+		answer = "A person closed event " + id + " instead, at " + clock(at) + ", and it is not waiting for anything now."
+	}
 	lines := []string{
-		"Event " + id + ": an earlier notice here asked a person to run " + redispatchAsk(eventID) + ". " +
-			answer + "the notice stands as a record, and asks for nothing now.",
+		"Event " + id + ": an earlier notice here asked a person to run " + redispatchAsk(eventID) + ". " + answer,
+		"The earlier notice stands as a record of when it was written; nothing in it needs doing.",
 		"",
 		"Event " + id + " · " + lifecycleSignature,
 	}
 	return renderLines(kind, lines)
+}
+
+// askStillOpen reports whether a record is waiting for a person to run its
+// redispatch — the one thing a lifecycle notice ever asks for — and whether
+// the record is there to ask about at all.
+//
+// It is the difference between a decision and an answer. A person's redispatch
+// of a blocked record authorizes it and hands its prerequisite back to the
+// caller to run again; if that run does not settle the blocking condition the
+// record is still blocked, the operator is still being told to redispatch, and
+// a message saying the ask is answered would stop the next reader acting on a
+// notice that is still live. Silence is better than that, so the retraction
+// waits for the record to move.
+func askStillOpen(ctx context.Context, q Tx, eventID int64) (open, found bool, err error) {
+	switch err := q.QueryRowContext(ctx, `
+SELECT e.state IN ('blocked', 'held')
+    OR (e.state = 'completed' AND e.redispatch_decision IS NULL
+        AND EXISTS (SELECT 1 FROM task_events te
+                    WHERE te.event_id = e.id AND te.withdrawn_at IS NULL AND te.outcome IN ('unknown', 'failed')))
+FROM events e WHERE e.id = ?`, eventID).Scan(&open); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, false, nil
+	case err != nil:
+		return false, false, fmt.Errorf("connector: read what event %d is waiting for: %w", eventID, err)
+	}
+	return open, true, nil
 }
 
 // renderStillRunning is one still-running notice.
