@@ -460,22 +460,43 @@ func TestARestartTakesTheArmedBackoffsBack(t *testing.T) {
 	assert.Equal(t, PrepareBackoff*2, waits[0].Until.Sub(waits[0].LastAt), "doubled from the first, not restarted at it")
 }
 
-// A backoff that has run out is not resumed: it is a failure nothing has
-// disproved, which is what the row already says, and the route is startable.
-func TestARestartDoesNotResumeAnExpiredBackoff(t *testing.T) {
+// An expired row carries two facts and only one of them expires. The deadline
+// is not resumed — that route is startable, which is what the row already
+// says — but the history is, because a route that has failed nine times is
+// still that route: coming back without the count would start the doubling at
+// a minute again, so a connector restarting in a loop would hammer a broken
+// route exactly as hard as on the first failure.
+func TestARestartKeepsAnExpiredWaitsHistoryButNotItsDeadline(t *testing.T) {
 	h := newWorktreeHarness(t)
 	ctx := context.Background()
 	route := filepath.Join(h.repo, "app")
-	now := time.Now()
+	first := time.Date(2026, 9, 18, 6, 0, 0, 0, time.UTC)
+	clock := first.Add(6 * time.Hour)
 	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
-		Route: route, Failures: 9, FirstAt: now.Add(-6 * time.Hour), LastAt: now.Add(-time.Hour), Until: now.Add(-time.Minute),
+		Route: route, Failures: 9, FirstAt: first, LastAt: clock.Add(-time.Hour), Until: clock.Add(-time.Minute),
 	}))
 
-	restarted := h.worktrees("")
+	restarted := h.worktrees(fakeGit(t, `case "$*" in *"worktree add"*) exit 128;; esac`))
+	restarted.now = func() time.Time { return clock }
 	require.NoError(t, restarted.Recover(ctx))
 	assert.Empty(t, restarted.RoutesWaiting(), "an elapsed backoff holds nothing")
 
 	waits, err := h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
-	assert.Len(t, waits, 1, "and the record of the failures stands until a worktree disproves it")
+	require.Len(t, waits, 1, "and the record of the failures stands until a worktree disproves it")
+
+	// The route is startable, so it is tried at once — and the failure that
+	// follows doubles from ten, not from one.
+	_, err = restarted.Prepare(ctx, route, 140)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrPrepareBackoff)
+
+	waits, err = h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	require.Len(t, waits, 1)
+	assert.Equal(t, 10, waits[0].Failures)
+	assert.Equal(t, first, waits[0].FirstAt.UTC(), "and it is still counted from when the route started failing")
+	assert.Equal(t, PrepareBackoffMax, waits[0].Until.Sub(waits[0].LastAt),
+		"the tenth failure waits the capped wait, not the first failure's minute")
+	assert.Equal(t, []string{route}, restarted.RoutesWaiting())
 }

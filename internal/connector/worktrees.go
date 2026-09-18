@@ -402,10 +402,12 @@ func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventI
 // it runs before anything is dispatched, so reconciling here closes the gap
 // rather than narrowing it.
 //
-// Only a backoff that has not run out is resumed: a past deadline is a
-// failure nothing has disproved, not a wait, and it is what the row already
-// says. The count comes back with it, so the connector goes on doubling from
-// where it was instead of starting at a minute again on every restart.
+// The deadline and the history are taken back separately, because only one
+// of them expires. A backoff that has not run out is resumed as a backoff. A
+// past one is not — that route is startable, which is what the row already
+// says — but its count and the hour it started failing come back either way,
+// so the connector goes on doubling from where it was instead of starting at
+// a minute again on every restart.
 //
 // A restart therefore keeps the remaining wait rather than trying the route
 // at once. That is the conservative half of the trade — a connector that
@@ -426,11 +428,22 @@ func (w *Worktrees) resumeWaits(ctx context.Context) {
 	defer w.mu.Unlock()
 	resumed := 0
 	for _, wait := range waits {
-		if !wait.Waiting(now) {
-			continue
+		// The history always; the deadline only while it is still running.
+		// They are two facts and only one of them expires. A row whose
+		// backoff has run out is a route that may be tried at once — that is
+		// what makes it startable — but it is still a route that has failed
+		// fourteen times, and coming back without the count would start the
+		// doubling at a minute again, so a connector restarting in a loop
+		// would hammer a broken route exactly as hard as on the first
+		// failure. It would also leave the row saying fifteen failures while
+		// the connector behaved as though it were the first, which is the
+		// ledger and the backoff disagreeing about the same route.
+		failure := prepareFailure{count: wait.Failures, first: wait.FirstAt}
+		if wait.Waiting(now) {
+			failure.until = wait.Until
+			resumed++
 		}
-		w.failures[wait.Route] = prepareFailure{count: wait.Failures, first: wait.FirstAt, until: wait.Until}
-		resumed++
+		w.failures[wait.Route] = failure
 	}
 	if resumed > 0 {
 		w.log.Info("connector: routes whose backoff a previous run armed are still waiting it out", "routes", resumed)
