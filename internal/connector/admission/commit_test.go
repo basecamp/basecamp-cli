@@ -170,7 +170,7 @@ func TestCommitsAreSerialisedPerConversation(t *testing.T) {
 			admitted++
 		case StateQueued:
 			queued++
-		case StateBlocked, StateDiscarded:
+		case StateBlocked, StateDiscarded, StateHeld:
 			t.Errorf("unexpected %s commit", v.State)
 		}
 	}

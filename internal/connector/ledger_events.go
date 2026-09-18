@@ -291,6 +291,11 @@ type transition struct {
 	retryAt time.Time
 	// set is further columns written in the same statement.
 	set []assignment
+	// byOperator adds the edges only a person's decision has (operatorEdges):
+	// out of held, and out of completed by a redispatch or a discard. The
+	// database refuses them to anything that does not also write the
+	// decision (ledger_hold.go).
+	byOperator bool
 }
 
 // assignment is one further column a transition writes. column is this
@@ -314,6 +319,8 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 		if t.reason == "" {
 			return false, fmt.Errorf("connector: set state of %d: a %s record needs a reason", t.id, t.state)
 		}
+	case StateHeld:
+		// A held record may keep the reason it was blocked on, or none.
 	case StateSeen, StateAdmitted, StateQueued, StateDispatched, StateCompleted:
 		if t.reason != "" {
 			return false, fmt.Errorf("connector: set state of %d: a %s record takes no reason", t.id, t.state)
@@ -326,6 +333,9 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 		return false, fmt.Errorf("connector: set state of %d: only a blocked record has a retry deadline", t.id)
 	}
 	froms := enterableFrom(t.state)
+	if t.byOperator {
+		froms = append(froms, operatorEdgesInto(t.state)...)
+	}
 	if len(t.from) > 0 {
 		froms = slices.DeleteFunc(froms, func(from string) bool {
 			return !slices.Contains(t.from, RecordState(from))
@@ -467,6 +477,8 @@ var ErrNoSuchRecord = errors.New("no such event record")
 // The tombstone is what makes an explicit replay safe forever, so it is never
 // deleted — only the payload goes. Non-terminal records are never touched:
 // their payload is the only copy of what intake was told.
+// Nor is a completed record a person redispatched while its task was live:
+// that task's end admits it, and admitted needs its snapshot.
 func (l *Ledger) DropContent(ctx context.Context, discardedBefore, completedBefore time.Time) (int, error) {
 	res, err := l.db.ExecContext(ctx, `
 UPDATE events
@@ -476,7 +488,7 @@ SET details = NULL, event_type = '', kind = '', action = '', bucket_id = 0,
     snapshot = NULL, trigger_name = '', acknowledge = 0, conversation_key = '',
     reply_kind = '', reply_recording_id = 0, routed = 0, route = '', class = '',
     recording_url = '', requester_id = 0
-WHERE content_dropped = 0
+WHERE content_dropped = 0 AND redispatch_decision IS NULL
   AND ((state = ? AND updated_at < ?) OR (state = ? AND updated_at < ?))`,
 		string(StateDiscarded), stamp(discardedBefore),
 		string(StateCompleted), stamp(completedBefore))

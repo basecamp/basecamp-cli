@@ -429,7 +429,10 @@ func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64,
 
 // JoinConversation puts the records on a live task's conversation that wait
 // for a worker onto the task, at delivery admitted, and returns their ids. A
-// task that has ended takes none: they start a task of their own.
+// task that has ended takes none: they start a task of their own. Nor does a
+// task a redispatch superseded while it runs: its worker's token is refused,
+// so what joined it could only end unknown. Nor does any task while the hold
+// marker stands: joining is a hand-off to a worker (ledger_hold.go).
 func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, error) {
 	var out []int64
 	err := retryBusy(func() error {
@@ -439,7 +442,8 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 		}
 		defer func() { _ = tx.Rollback() }()
 		var key, route string
-		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key, route FROM tasks WHERE id = ? AND ended_at IS NULL`, taskID).Scan(&key, &route); {
+		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key, route FROM tasks WHERE id = ? AND ended_at IS NULL AND superseded_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM hold_marker)`, taskID).Scan(&key, &route); {
 		case errors.Is(err, sql.ErrNoRows):
 			out = nil
 			return nil
@@ -656,6 +660,9 @@ type SettledEvent struct {
 	Withdrawn bool
 	// Blocked is a withdrawal refused a second automatic retry.
 	Blocked bool
+	// Decided is a record a person has already redispatched or discarded, so
+	// the completion notice asks nothing of them.
+	Decided bool
 }
 
 // EndAttempt ends a live attempt with its stop reason, supersedes the task's
@@ -890,7 +897,9 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 }
 
 // StartableRecords returns up to limit records waiting for a worker, the
-// oldest per conversation, oldest first, whatever their route.
+// oldest per conversation, oldest first, whatever their route. While the hold
+// marker stands there are none: the database would refuse their launch
+// (ledger_hold.go).
 func (l *Ledger) StartableRecords(ctx context.Context, limit int) ([]Record, error) {
 	return l.startable(ctx, "", nil, limit)
 }
@@ -945,6 +954,7 @@ func (l *Ledger) startable(ctx context.Context, extra string, args []any, limit 
 SELECT MIN(e.id) FROM events e
 WHERE ` + startableCondition + extra + `
   AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.ended_at IS NULL AND t.conversation_key = e.conversation_key)
+  AND NOT EXISTS (SELECT 1 FROM hold_marker)
 GROUP BY e.conversation_key ORDER BY MIN(e.id) LIMIT ?`
 	rows, err := l.db.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {

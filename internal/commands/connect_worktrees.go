@@ -304,7 +304,7 @@ func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, f
 	}
 	// Named, not created: reading what a connector left must not make a
 	// state directory for a connector that never ran.
-	stateDir, err := connectStateDirPath(file, shadow)
+	stateDir, err := connectStatePath(file, shadow)
 	if err != nil {
 		return nil, nil, output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}

@@ -40,6 +40,7 @@ type connectRunFlags struct {
 	since    int64
 	driver   string
 	adapters string
+	hold     bool
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -51,6 +52,8 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
 	fl.StringVar(&f.adapters, "acp-adapters", "", "Where the pinned ACP adapters are installed, for --driver acp (default $XDG_DATA_HOME/basecamp/acp-adapters)")
+	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
+	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
 }
 
 // connectStateHome is the directory holding the connector's state root, from
@@ -91,29 +94,28 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	group, dir := connectStateParts(file, shadow)
-	return ensurePrivateChain(stateHome, "basecamp", group, dir)
+	return ensurePrivateChain(stateHome, connectStateParts(file, shadow)...)
 }
 
-// connectStateDirPath is the same directory, named and not created: what
-// reads a connector's state resolves.
-func connectStateDirPath(file setup.File, shadow bool) (string, error) {
+// connectStatePath is connectStateDir's path, created nothing: for commands
+// that only read the connector's state, and must not make a directory to do
+// it.
+func connectStatePath(file setup.File, shadow bool) (string, error) {
 	stateHome, err := connectStateHome()
 	if err != nil {
 		return "", err
 	}
-	group, dir := connectStateParts(file, shadow)
-	return filepath.Join(stateHome, "basecamp", group, dir), nil
+	return filepath.Join(append([]string{stateHome}, connectStateParts(file, shadow)...)...), nil
 }
 
-func connectStateParts(file setup.File, shadow bool) (group, dir string) {
-	group = "connect"
+func connectStateParts(file setup.File, shadow bool) []string {
+	group := "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return group, connector.StateDirName(file.AccountID, file.Agent.PersonID)
+	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID)}
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
@@ -268,6 +270,21 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	defer func() { _ = ledger.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	if f.hold {
+		// Before intake starts: nothing this run admits may dispatch ahead of
+		// the marker.
+		held, err := ledger.SetHold(ctx, operatorName(), connector.HoldByOperator)
+		if err != nil {
+			return err
+		}
+		logger.Info("connector: held", "generation", held.Hold.Generation, "tagged_for_review", held.Tagged, "held", held.Held)
+	}
+	if hold, ok, err := ledger.HoldMarker(ctx); err != nil {
+		return err
+	} else if ok {
+		logger.Warn("connector: the hold stands; nothing is dispatched or posted until `basecamp connect release`",
+			"since", hold.HeldAt, "by", richtext.SanitizeSingleLine(hold.HeldBy))
+	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
 
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
@@ -313,7 +330,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Lines: lines, Logger: logger})
+		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Paused: ledger.Held, Lines: lines, Logger: logger})
 		if err != nil {
 			return err
 		}
@@ -389,6 +406,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
+	defer func() {
+		// Whatever ended the run, status says it is not running any more.
+		_ = ledger.NoteConnection(context.WithoutCancel(ctx), connector.ConnectionStopped, "")
+	}()
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
 		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
 
@@ -430,6 +451,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil && runCtx.Err() == nil {
 			return err
 		}
+	}
+	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
+		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {

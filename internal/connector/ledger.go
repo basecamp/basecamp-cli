@@ -49,6 +49,10 @@ const (
 	StateCompleted RecordState = "completed"
 	// StateDiscarded is terminal with a verified verdict.
 	StateDiscarded RecordState = "discarded"
+	// StateHeld waits for a person. A record tagged for review by a hold
+	// becomes held where it would have waited for a worker, and only a
+	// person's redispatch or discard moves it on. It keeps its snapshot.
+	StateHeld RecordState = "held"
 )
 
 // Lane names which lane first served an event. It is diagnostic: dedupe is by
@@ -831,12 +835,17 @@ END;
 	// `git worktree add`, the states it moves through, and the ones kept when
 	// a task ends holding work. See ledger_worktrees.go.
 	//
-	// 8 and 9 were each written as 8 on their own branch, against different
-	// predecessors. They ship together here, so the order is settled: 7 the
-	// dispatcher's tasks and attempts, 8 the outbox, 9 the worktrees. These
-	// numbers do not move again — a ledger that has applied one never sees it
-	// renumbered.
+	// 8, 9 and 10 were each written as 8 on their own branch, against
+	// different predecessors. They ship together here, so the order is
+	// settled: 7 the dispatcher's tasks and attempts, 8 the outbox, 9 the
+	// worktrees, 10 the operator's tables. These numbers do not move again —
+	// a ledger that has applied one never sees it renumbered.
 	migrationWorktrees,
+
+	// Migration 10. The hold marker, intake generations, the review tag and
+	// people's decisions on records. See ledger_hold.go for the invariants
+	// they hold.
+	migrationOperator,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {
@@ -845,6 +854,17 @@ func (l *Ledger) migrate(ctx context.Context) error {
   applied_at TEXT NOT NULL
 )`); err != nil {
 		return fmt.Errorf("connector: create migration table: %w", err)
+	}
+	// A ledger a newer basecamp wrote is refused, not opened as if it were
+	// current: its triggers and states (a held record, say) are rules this
+	// binary does not know, and running over them could break them — the
+	// rollback case.
+	var newest int
+	if err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&newest); err != nil {
+		return fmt.Errorf("connector: read schema version: %w", err)
+	}
+	if newest > len(migrations) {
+		return fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", newest, len(migrations), ErrLedgerSchema)
 	}
 
 	for i := range migrations {

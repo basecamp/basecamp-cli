@@ -116,3 +116,20 @@ func TestThePolicyRefusesFilesystemCallsWithNoPath(t *testing.T) {
 	assert.False(t, allow(driver.ToolEdit))
 	assert.True(t, allow(driver.ToolThink), "the one allowed kind that touches no file")
 }
+
+// A location that names nothing is not a location inside the working
+// directory: it would otherwise resolve to the directory itself and pass.
+func TestPolicyRefusesAnEditThatNamesNoPath(t *testing.T) {
+	dir := t.TempDir()
+	p := DefaultPolicy(dir)
+	for _, loc := range []string{"", "   "} {
+		decision := p.Decide(context.Background(), driver.PermissionRequest{
+			Tool: "Edit", Kind: driver.ToolEdit, Locations: []string{loc},
+		})
+		assert.False(t, decision.Allow, "an edit whose location is %q", loc)
+	}
+	allowed := p.Decide(context.Background(), driver.PermissionRequest{
+		Tool: "Edit", Kind: driver.ToolEdit, Locations: []string{filepath.Join(dir, "file.go")},
+	})
+	assert.True(t, allowed.Allow)
+}

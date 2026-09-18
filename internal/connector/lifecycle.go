@@ -73,6 +73,11 @@ func CompletionNeeded(s Settlement) bool {
 func completionLine(e SettledEvent) string {
 	id := strconv.FormatInt(e.EventID, 10)
 	redispatch := " Needs a person: basecamp connect redispatch " + id
+	if e.Decided {
+		// A person already redispatched or discarded it: the notice says what
+		// happened, and asks for nothing.
+		redispatch = ""
+	}
 	switch {
 	case e.Blocked:
 		return "Event " + id + ": the worker could not be started." + redispatch
@@ -307,10 +312,17 @@ FROM attempts a JOIN tasks t ON t.id = a.task_id WHERE a.id = ? AND a.state = 'e
 	}
 	s.Stop, s.SpawnFailed, s.OriginatingEventID = StopReason(stop), spawnFailed, originating.Int64
 
+	// Decided is a person's decision this settlement's notice would otherwise
+	// ask for: the record left the state the notice describes, a redispatch
+	// waits on it, or an authorization was made after this attempt ended. An
+	// authorization from before — a redispatch that led to this attempt —
+	// answered for an earlier outcome, not this one.
 	rows, err := q.QueryContext(ctx, `
-SELECT te.event_id, te.delivery, te.outcome, te.reply_id, te.withdrawn_at IS NOT NULL, e.state, e.reason
+SELECT te.event_id, te.delivery, te.outcome, te.reply_id, te.withdrawn_at IS NOT NULL, e.state, e.reason,
+       e.state NOT IN ('completed', 'blocked') OR e.redispatch_decision IS NOT NULL
+       OR COALESCE(e.authorized_at >= (SELECT ended_at FROM attempts WHERE id = ?2), 0)
 FROM task_events te JOIN events e ON e.id = te.event_id
-WHERE te.task_id = ? AND (te.withdrawn_at IS NULL OR te.exposed_attempt_id = ?)
+WHERE te.task_id = ?1 AND (te.withdrawn_at IS NULL OR te.exposed_attempt_id = ?2)
 ORDER BY te.event_id`, s.TaskID, attemptID)
 	if err != nil {
 		return Settlement{}, fmt.Errorf("connector: settlement of %s: %w", attemptID, err)
@@ -323,7 +335,7 @@ ORDER BY te.event_id`, s.TaskID, attemptID)
 			reason                   string
 			reply                    sql.NullInt64
 		)
-		if err := rows.Scan(&e.EventID, &delivery, &outcome, &reply, &e.Withdrawn, &state, &reason); err != nil {
+		if err := rows.Scan(&e.EventID, &delivery, &outcome, &reply, &e.Withdrawn, &state, &reason, &e.Decided); err != nil {
 			return Settlement{}, fmt.Errorf("connector: settlement of %s: %w", attemptID, err)
 		}
 		switch {

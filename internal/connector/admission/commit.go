@@ -68,7 +68,7 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 	}
 	switch {
 	case written == v.State:
-	case v.State == StateAdmitted && written == StateQueued:
+	case v.State == StateAdmitted && (written == StateQueued || written == StateHeld):
 		v.State = written
 	default:
 		return v, fmt.Errorf("admission: ledger wrote %s for a %s verdict on event %d", written, v.State, v.EventID)
