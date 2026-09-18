@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -326,4 +327,29 @@ func TestUsableTicketBoundsTheLifetimeWithoutOverflow(t *testing.T) {
 	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second))), "MaxInt64/1e9: the last value a Duration holds")
 	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second)+1)), "just past it, where the conversion overflows")
 	assert.False(t, UsableTicket(ticket(math.MaxInt64)), "wraps to -1s when converted first")
+}
+
+// The hint is a line we tell an operator to paste into a shell, and it
+// carries a profile name read from a configuration file — which is not held
+// to the check that applied when the profile was created. An embedded single
+// quote is the case that tells quoting apart from wrapping.
+func TestProjectChecksQuoteTheProfileInTheHint(t *testing.T) {
+	f := validFile(t)
+	f.Projects = map[int64]admission.Project{}
+	f.Profile = `it's; echo pwned`
+	quoted := `'it'\''s; echo pwned'`
+
+	for _, firstSetup := range []bool{true, false} {
+		checks := ProjectChecks(context.Background(), &fakeReader{}, f, firstSetup)
+		require.Len(t, checks, 1)
+		hint := checks[0].Hint
+		assert.NotContains(t, hint, "-P it's", "first setup %v: the name is not interpolated raw", firstSetup)
+		assert.Contains(t, hint, "-P "+quoted, "first setup %v", firstSetup)
+
+		// And a real shell reads that word back as the name that went in,
+		// rather than running what follows the quote.
+		out, err := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf %s "+quoted).Output()
+		require.NoError(t, err)
+		assert.Equal(t, f.Profile, string(out), "first setup %v", firstSetup)
+	}
 }

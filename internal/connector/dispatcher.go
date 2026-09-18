@@ -427,7 +427,11 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	// task's own project and to the set as it is now — not to the served bit
 	// admission wrote on each record when it decided it.
 	for _, r := range runs {
-		if !r.authorized() {
+		// The same snapshot decides and is handed to the join. Reading it
+		// again inside authorized would let the cache turn over between the
+		// two, so a task could be authorized against one set and joined
+		// against another (Copilot on #765).
+		if servedErr != nil || !r.authorizedIn(served) {
 			continue
 		}
 		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
@@ -1178,12 +1182,23 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 // worker, and returns it. Nothing joins or is exposed once connect.json has
 // stopped serving the task's project.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
-	if !r.authorized() {
+	// Once, and the same set all the way down: the check, and the join it
+	// authorizes. Read twice, the cache could turn over in between and the
+	// two could disagree.
+	served, err := r.d.servedBuckets()
+	switch {
+	case err != nil:
+		// Not "no longer served": nothing read which projects are, so
+		// nothing here can say this one is not. Same false claim the holding
+		// reply and the stranded report used to make (Copilot on #765).
+		r.log.Warn("connector: which projects are served could not be read; no more instructions are handed to this worker until it can be",
+			"task_id", r.launch.TaskID, "error", err)
+		return 0, false, nil
+	case !r.authorizedIn(served):
 		r.log.Warn("connector: the task's project is no longer served; no more instructions are handed to its worker",
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
 	}
-	served, _ := r.d.servedBuckets()
 	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 		return 0, false, err
 	}
@@ -1309,13 +1324,11 @@ func (r *taskRun) goneStop() StopReason {
 	return StopLost
 }
 
-// authorized reports whether connect.json still serves this task's project,
-// among the projects this run hears.
-func (r *taskRun) authorized() bool {
-	served, err := r.d.servedBuckets()
-	if err != nil {
-		return false
-	}
+// authorizedIn reports whether served — one reading of connect.json, taken
+// by the caller — covers this task's project. It takes the set rather than
+// fetching it so that whatever else the caller does with that reading is
+// done against the same one.
+func (r *taskRun) authorizedIn(served []int64) bool {
 	return slices.Contains(served, r.record.BucketID)
 }
 

@@ -38,6 +38,22 @@ accept:
   - 'connect setup .*--operator-profile[ =]''?jorge\b'
   - 'connect setup .*--serve[ =](''222''|222)(\s|$)'
 reject:
+  # What these evals guarantee about setup commands: every one in the trace
+  # is a command the CLI would accept. The accepts above prove a correct one
+  # was issued; these prove no incorrect one was, which is the half a model
+  # can otherwise satisfy by issuing a command the CLI refuses and then
+  # retrying — the broad setup mock answers success either way.
+  #
+  # --serve takes a project id and nothing else: bare or single-quoted
+  # digits, ending the shell word. Anything else is what parsePositiveID
+  # refuses. Written as the shape of a wrong value rather than as a list of
+  # wrong values, because four rounds of review found four more spellings —
+  # and without lookahead, so Go's RE2 can read it too: the guard in
+  # internal/commands/connect_skilleval_test.go holds this property against
+  # parsePositiveID itself.
+  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|''[0-9]*[^0-9''])'
+  # And the flag that no longer exists, in any spelling.
+  - 'connect setup .*--(route|remove-route)\b'
   - '--with-token'
   - '--with-client-credentials'
   # Every machine-output mode the interactive connection refuses.

@@ -315,7 +315,13 @@ func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Che
 			Status: StatusWarn,
 			Message: "No project is served: this agent is handed no work at all, and every mention gets a holding reply. " +
 				"The connector will start and do nothing.",
-			Hint: "Serve one: basecamp connect setup -P " + f.Profile + " --serve <project-id>",
+			// Quoted, not interpolated: this is a line we tell an operator
+			// to paste into a shell, and a profile name comes from a
+			// configuration file, which is not held to the check that
+			// applied when the profile was created. Validate happens to
+			// refuse an unsafe name before this runs today; that is a guard
+			// in another package's call order, not one at the point of use.
+			Hint: "Serve one: basecamp connect setup -P " + richtext.ShellQuote(f.Profile) + " --serve <project-id>",
 		}
 		if firstSetup {
 			c.Status = StatusFail
