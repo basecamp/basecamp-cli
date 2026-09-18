@@ -137,11 +137,23 @@ func renderRefusedStart(kind MessageKind, eventID int64) string {
 // connector does not know, and it does not touch the notice it answers. Nobody
 // is named: the connector knows who decided only as the handle the command
 // recorded, which is not a person on this card.
-func renderRetraction(kind MessageKind, eventID int64, others []int64, action DecisionAction, at time.Time) string {
+//
+// One ask, one answer. Where two unanswered asks for the same event stand at
+// one destination — a ledger upgraded from a schema that had no retractions
+// carries them — each gets its own, and each names when the notice it answers
+// went out (posted): two lines saying the same words under two different
+// notices tell a reader nothing about which is answered, and are the same
+// message to reconciliation, which would rather leave both for a person than
+// guess which is which.
+func renderRetraction(kind MessageKind, eventID int64, others []int64, postedAt time.Time, action DecisionAction, at time.Time) string {
 	id := strconv.FormatInt(eventID, 10)
 	answer := "A person ran it at " + clock(at) + ", and event " + id + " is not waiting for it now."
 	if action == DecisionDiscard {
 		answer = "A person closed event " + id + " instead, at " + clock(at) + ", and it is not waiting for anything now."
+	}
+	notice := "an earlier notice here"
+	if !postedAt.IsZero() {
+		notice = "an earlier notice here, posted at " + clock(postedAt) + ","
 	}
 	// A completion notice speaks for a whole attempt and can ask about several
 	// events. This answers one of them, and says so: a closing line that spoke
@@ -153,7 +165,7 @@ func renderRetraction(kind MessageKind, eventID int64, others []int64, action De
 			eventList(others) + "; this answers only event " + id + "."
 	}
 	lines := []string{
-		"Event " + id + ": an earlier notice here asked a person to run " + redispatchAsk(eventID) + ". " + answer,
+		"Event " + id + ": " + notice + " asked a person to run " + redispatchAsk(eventID) + ". " + answer,
 		stands,
 		"",
 		"Event " + id + " · " + lifecycleSignature,
@@ -428,9 +440,12 @@ SELECT bucket_id, reply_kind, reply_recording_id, acknowledge FROM events WHERE 
 //
 // Asks for one event can stand at two destinations — a holding reply goes to
 // the record's own reply, an attempt's completion notice to the originating
-// record's — so the latest ask at each destination is retracted, and only the
-// latest: two retractions of the same ask on one card is the noise this is
-// supposed to remove.
+// record's — and, on a ledger upgraded from a schema that had no retractions,
+// several can stand at one: nothing answered the older ones as they were
+// overtaken. Every ask nothing has answered yet is retracted, which is what
+// the key says (invariant 2: one retraction per posted message and the event
+// whose ask it answers), and an ask that already has its answer is left alone,
+// so deciding an event again writes nothing new.
 func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecision) error {
 	asked, err := postedAsks(ctx, tx, d.EventID)
 	if err != nil {
@@ -443,7 +458,7 @@ func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecisi
 			eventID:     d.EventID,
 			retracts:    p.id,
 			destination: p.dest,
-			body:        renderRetraction(p.dest.Kind, d.EventID, p.others, d.Action, d.At),
+			body:        renderRetraction(p.dest.Kind, d.EventID, p.others, p.postedAt, d.Action, d.At),
 		}); err != nil {
 			return err
 		}
@@ -454,20 +469,28 @@ func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecisi
 // postedAsk is one message the connector posted that asks for an event's
 // redispatch, with the other events it asks about — none, for a holding
 // reply; the rest of the attempt, for a completion notice.
+//
+// postedAt is when that message went out, and is set only when another
+// unanswered ask for the same event stands at the same destination: the
+// retraction names it then, so each of the two answers one notice and says
+// which.
 type postedAsk struct {
-	id     int64
-	dest   Destination
-	others []int64
+	id       int64
+	dest     Destination
+	others   []int64
+	postedAt time.Time
 }
 
-// postedAsks reads the latest ask for an event at each destination, and closes
-// the cursor before its caller writes: one statement at a time on a
+// postedAsks reads every ask for an event that nothing has answered yet, and
+// closes the cursor before its caller writes: one statement at a time on a
 // transaction.
 func postedAsks(ctx context.Context, tx Tx, eventID int64) ([]postedAsk, error) {
 	rows, err := tx.QueryContext(ctx, `
-SELECT o.id, o.bucket_id, o.message_kind, o.recording_id, o.body
+SELECT o.id, o.bucket_id, o.message_kind, o.recording_id, o.body, COALESCE(o.sending_at, o.created_at)
 FROM outbox o
-WHERE o.state IN ('sent', 'sending') AND (
+WHERE o.state IN ('sent', 'sending')
+  AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.retracts = o.id AND r.event_id = ?1)
+  AND (
      (o.kind = 'holding_reply' AND o.event_id = ?1)
   OR (o.kind = 'completion' AND o.attempt_id IN (
         SELECT a.id FROM attempts a JOIN task_events te ON te.task_id = a.task_id WHERE te.event_id = ?1)))
@@ -476,13 +499,13 @@ ORDER BY o.id`, eventID)
 		return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
 	}
 	defer func() { _ = rows.Close() }()
-	latest := map[Destination]postedAsk{}
+	standing := map[Destination][]postedAsk{}
 	for rows.Next() {
 		var (
-			p          postedAsk
-			kind, body string
+			p                  postedAsk
+			kind, body, posted string
 		)
-		if err := rows.Scan(&p.id, &p.dest.BucketID, &kind, &p.dest.RecordingID, &body); err != nil {
+		if err := rows.Scan(&p.id, &p.dest.BucketID, &kind, &p.dest.RecordingID, &body, &posted); err != nil {
 			return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
 		}
 		p.dest.Kind = MessageKind(kind)
@@ -495,14 +518,24 @@ ORDER BY o.id`, eventID)
 				p.others = append(p.others, id)
 			}
 		}
-		latest[p.dest] = p
+		// An unreadable stamp is no reason not to answer the ask: the
+		// retraction goes out without naming the hour.
+		if at, err := parseStamp(posted); err == nil {
+			p.postedAt = at
+		}
+		standing[p.dest] = append(standing[p.dest], p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
 	}
-	out := make([]postedAsk, 0, len(latest))
-	for _, p := range latest {
-		out = append(out, p)
+	out := make([]postedAsk, 0, len(standing))
+	for _, at := range standing {
+		for _, p := range at {
+			if len(at) == 1 {
+				p.postedAt = time.Time{}
+			}
+			out = append(out, p)
+		}
 	}
 	// In id order, so two retractions written at once are written in the order
 	// the messages they answer went out.

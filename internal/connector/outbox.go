@@ -80,9 +80,10 @@ import (
 //     worse than none: a reader trusts the later message, so a line saying an
 //     ask is answered under an ask that is still live means nobody acts on
 //     it. The message it answers must be known to exist — one whose notice
-//     was refused, or left indeterminate for a person, is canceled rather
-//     than posted where there may be nothing to answer — and the record must
-//     not be waiting for that ask any more, which is a person's decision
+//     was refused, or left indeterminate for a person, waits for that person
+//     rather than being posted where there may be nothing to answer, and is
+//     canceled once they say there is nothing (abandoned) — and the record
+//     must not be waiting for that ask any more, which is a person's decision
 //     having actually settled it and not merely having been made.
 const migrationOutbox = `
 CREATE TABLE outbox (

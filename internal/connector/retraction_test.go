@@ -527,7 +527,11 @@ func TestRetractionWaitsForTheNoticeItAnswers(t *testing.T) {
 		assert.Equal(t, IntentSent, obRetraction(t, ledger, holding, 1).State)
 	})
 
-	t.Run("left indeterminate after the decision", func(t *testing.T) {
+	// A notice left indeterminate is a person's to settle, and until they do
+	// the retraction says nothing and stays where it is. Canceling it on the
+	// tick after reconciliation gave up would decide the ask by whichever got
+	// there first, the tick or the person — and the person is always slower.
+	t.Run("left indeterminate after the decision: it waits for the person", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
 		_, err := ledger.Redispatch(ctx, 1, "jorge")
@@ -535,12 +539,13 @@ func TestRetractionWaitsForTheNoticeItAnswers(t *testing.T) {
 
 		_, err = ledger.settleReconciled(ctx, holding.ID, 0, obUnreachableNote)
 		require.NoError(t, err)
-		clock.Advance(RetractionWait)
-		require.NoError(t, ob.Flush(ctx))
+		for range 3 {
+			clock.Advance(RetractionHeld)
+			require.NoError(t, ob.Flush(ctx))
+		}
 
 		in := obRetraction(t, ledger, holding, 1)
-		assert.Equal(t, IntentCanceled, in.State, "nothing at the destination to answer")
-		assert.Equal(t, "the notice it answers was not posted", in.Note)
+		assert.Equal(t, IntentPending, in.State, "nobody has said whether there is anything at the destination")
 		assert.Empty(t, basecamp.at(holding.Destination), "a person settles the notice; nothing is posted on a guess")
 	})
 }
@@ -569,6 +574,34 @@ func TestAPersonsResolutionOfTheNoticeDecidesItsRetraction(t *testing.T) {
 		require.NoError(t, ob.Flush(ctx))
 		assert.Equal(t, IntentSent, obRetraction(t, ledger, holding, 1).State,
 			"an ask a person has just confirmed is on the card is the last one to leave standing")
+	})
+
+	// The same resolution, after the outbox has ticked over the indeterminate
+	// notice — which is the ordinary case, since a person settling one takes
+	// longer than a second. The answer does not depend on who got there first.
+	t.Run("resolved sent after the outbox ticked: still answered", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
+		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		require.NoError(t, err)
+		obRoutedNow(t, ledger, 1)
+
+		_, err = ledger.settleReconciled(ctx, holding.ID, 0, obUnreachableNote)
+		require.NoError(t, err)
+		// Ticks while the notice sits indeterminate, waiting for a person.
+		for range 3 {
+			clock.Advance(RetractionHeld)
+			require.NoError(t, ob.Flush(ctx))
+		}
+		require.Equal(t, IntentPending, obRetraction(t, ledger, holding, 1).State)
+
+		receipt := basecamp.add(holding.Destination, adapterAgentID, holding.Body)
+		require.NoError(t, ledger.ResolveIntent(ctx, holding.ID, IntentResolution{Resolution: ResolveSent, ReceiptID: receipt, By: "jorge"}))
+		clock.Advance(RetractionHeld)
+		require.NoError(t, ob.Flush(ctx))
+		assert.Equal(t, IntentSent, obRetraction(t, ledger, holding, 1).State,
+			"an ask a person has just confirmed is on the card is the last one to leave standing")
+		assert.Len(t, basecamp.at(holding.Destination), 2, "the reply the person named, and the answer to it")
 	})
 
 	t.Run("abandoned: nothing was said, so nothing is answered", func(t *testing.T) {
@@ -703,48 +736,23 @@ WHERE sql LIKE '%outbox%' AND type IN ('index', 'trigger') ORDER BY name`)
 // real.
 func TestTheOutboxRebuildCarriesTheRowsOver(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "state", "connector.db")
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-
-	old, err := sql.Open("sqlite", ledgerDSN(path, true))
-	require.NoError(t, err)
-	_, err = old.ExecContext(ctx, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
-	require.NoError(t, err)
-	for i := range len(migrations) - 1 {
-		_, err = old.ExecContext(ctx, migrations[i])
-		require.NoError(t, err, "migration %d", i+1)
-		_, err = old.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, 'then')`, i+1)
-		require.NoError(t, err)
-	}
-	_, err = old.ExecContext(ctx, `
+	ledger := obUpgradedLedger(t, nil, func(t *testing.T, old *sql.DB) {
+		t.Helper()
+		_, err := old.ExecContext(ctx, `
 INSERT INTO events (id, state, reason, lane, event_type, kind, action, bucket_id, creator_id, recording_id,
                     created_at, seen_at, updated_at)
 VALUES (1, 'blocked', 'no_route', 'import', '', '', '', 48699913, 26909558, 10304028972, '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z')`)
-	require.NoError(t, err)
-	// A sent one with its receipt, a pending one, and one a person abandoned:
-	// a receipt, a note and a resolver between them.
-	_, err = old.ExecContext(ctx, `
+		require.NoError(t, err)
+		// A sent one with its receipt, a pending one, and one a person
+		// abandoned: a receipt, a note and a resolver between them.
+		_, err = old.ExecContext(ctx, `
 INSERT INTO outbox (id, intent_key, kind, state, event_id, bucket_id, message_kind, recording_id, body,
                     created_at, not_before, sending_at, finished_at, receipt_id, note, resolved_by, reconcile_failures)
 VALUES (7,  'holding_reply:event:1', 'holding_reply', 'sent',      1, 48699913, 'comment', 10304028989, 'first',  '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:01:00.000000000Z', '2026-09-17T11:02:00.000000000Z', 555, '', '', 0),
        (8,  'guard_ack:event:1',     'guard_ack',     'pending',   1, 48699913, 'boost',   10304028972, 'second', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', NULL, NULL, NULL, '', '', 0),
        (9,  'completion:attempt:a1', 'completion',    'abandoned', 1, 48699913, 'comment', 10304028989, 'third',  '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:01:00.000000000Z', '2026-09-17T11:02:00.000000000Z', NULL, 'unlistable', 'jorge', 3)`)
-	require.NoError(t, err)
-	require.NoError(t, old.Close())
-	// The connector's own open makes the file private; a raw sql.Open does
-	// not, and the privacy check refuses what it finds.
-	for _, name := range []string{path, path + "-wal", path + "-shm"} {
-		if _, err := os.Stat(name); err == nil {
-			require.NoError(t, os.Chmod(name, 0o600))
-		}
-	}
-
-	ledger, err := OpenLedger(path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = ledger.Close() })
-	version, err := ledger.SchemaVersion(ctx)
-	require.NoError(t, err)
-	require.Equal(t, len(migrations), version, "the rebuild ran")
+		require.NoError(t, err)
+	})
 
 	carried, err := ledger.Intents(ctx, IntentFilter{})
 	require.NoError(t, err)
@@ -788,6 +796,106 @@ VALUES ('holding_reply:refused:event:1', 'holding_reply', 1, 48699913, 'comment'
 	next, err := res.LastInsertId()
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), next, "the autoincrement sequence followed the highest copied id")
+}
+
+// obUpgradedLedger is a ledger whose rows a build with no retractions wrote:
+// every migration but the last is applied by hand, setup fills the tables, and
+// opening it runs the rebuild for real. The clock, when one is given, is the
+// ledger's afterwards.
+func obUpgradedLedger(t *testing.T, clock *obClock, setup func(t *testing.T, old *sql.DB)) *Ledger {
+	t.Helper()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+
+	old, err := sql.Open("sqlite", ledgerDSN(path, true))
+	require.NoError(t, err)
+	_, err = old.ExecContext(ctx, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
+	require.NoError(t, err)
+	for i := range len(migrations) - 1 {
+		_, err = old.ExecContext(ctx, migrations[i])
+		require.NoError(t, err, "migration %d", i+1)
+		_, err = old.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, 'then')`, i+1)
+		require.NoError(t, err)
+	}
+	setup(t, old)
+	require.NoError(t, old.Close())
+	// The connector's own open makes the file private; a raw sql.Open does
+	// not, and the privacy check refuses what it finds.
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(name); err == nil {
+			require.NoError(t, os.Chmod(name, 0o600))
+		}
+	}
+
+	ledger, err := OpenLedger(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
+	version, err := ledger.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, len(migrations), version, "the rebuild ran")
+	if clock != nil {
+		ledger.now = clock.Now
+	}
+	ledger.SetHooks(LifecycleHooks(ledger, LifecycleOptions{}))
+	return ledger
+}
+
+// Done when: an upgrade answers the asks it inherits. A build before the
+// retraction posted a holding reply and then, once the project had a
+// directory that was not a repository, a refused-start reply — two asks for
+// one event at one destination, neither of which anything could answer. The
+// first decision after the upgrade answers both: an ask left standing under an
+// answer to the notice that overtook it still tells a person to run something
+// nobody is going to run.
+func TestEveryUnansweredAskAtADestinationIsRetracted(t *testing.T) {
+	ctx := context.Background()
+	clock := &obClock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
+	ledger := obUpgradedLedger(t, clock, func(t *testing.T, old *sql.DB) {
+		t.Helper()
+		_, err := old.ExecContext(ctx, `
+INSERT INTO events (id, state, reason, lane, event_type, kind, action, bucket_id, creator_id, recording_id,
+                    created_at, seen_at, updated_at)
+VALUES (1, 'blocked', 'no_route', 'import', '', '', '', 48699913, 26909558, 10304028972, '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z')`)
+		require.NoError(t, err)
+		_, err = old.ExecContext(ctx, `
+INSERT INTO outbox (id, intent_key, kind, state, event_id, bucket_id, message_kind, recording_id, body,
+                    created_at, not_before, sending_at, finished_at, receipt_id)
+VALUES (7, 'holding_reply:event:1',         'holding_reply', 'sent', 1, 48699913, 'comment', 10304028989, ?1,
+        '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:01:00.000000000Z', '2026-09-17T11:02:00.000000000Z', 555),
+       (8, 'holding_reply:refused:event:1', 'holding_reply', 'sent', 1, 48699913, 'comment', 10304028989, ?2,
+        '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:31:00.000000000Z', '2026-09-17T11:32:00.000000000Z', 556)`,
+			renderHoldingReply(MessageComment, 1), renderRefusedStart(MessageComment, 1))
+		require.NoError(t, err)
+	})
+	basecamp := newFakeBasecamp(clock.Now)
+	ob := obOutbox(t, ledger, basecamp)
+
+	// A person fixes the repository and redispatches. Deciding the record
+	// again while its prerequisite runs answers nothing twice.
+	_, err := ledger.Redispatch(ctx, 1, "jorge")
+	require.NoError(t, err)
+	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	require.NoError(t, err)
+
+	answered := map[int64]Intent{}
+	for _, in := range obRetractions(t, ledger) {
+		answered[in.Retracts] = in
+	}
+	require.Len(t, answered, 2, "the older ask is answered too, not dropped for the later one")
+	assert.Contains(t, answered[7].Body, "posted at 11:01 UTC")
+	assert.Contains(t, answered[8].Body, "posted at 11:31 UTC")
+	assert.NotEqual(t, answered[7].Body, answered[8].Body,
+		"two answers in the same words say nothing about which notice is answered, and are one message to reconciliation")
+
+	// Admission runs again and the record is admitted, so neither ask is open
+	// any more and both answers go out.
+	obRoutedNow(t, ledger, 1)
+	require.NoError(t, ob.Flush(ctx))
+	dest := Destination{BucketID: adapterBucketID, Kind: MessageComment, RecordingID: obReplyRecording}
+	assert.Len(t, basecamp.at(dest), 2, "one answer for each notice")
+	assert.Equal(t, IntentSent, obIntent(t, ledger, retractionKey(7, 1)).State)
+	assert.Equal(t, IntentSent, obIntent(t, ledger, retractionKey(8, 1)).State)
 }
 
 // The ask is read off the words that went out, and read exactly: a notice

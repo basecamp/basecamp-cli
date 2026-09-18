@@ -80,6 +80,11 @@ const (
 	// answers is still on its way: the request in front of it is bounded by
 	// PostTimeout, so this only decides how often the wait is asked again.
 	RetractionWait = time.Second
+	// RetractionHeld is how long it waits when the message it answers is a
+	// person's to settle — left indeterminate, or refused and resendable.
+	// Nothing but a person changes that, and a person takes minutes at best,
+	// so the question is asked far less often than of one still in flight.
+	RetractionHeld = time.Minute
 )
 
 // OutboxOptions configures the outbox's sender.
@@ -467,22 +472,42 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			// just confirmed is on the card is the last one to leave standing.
 			// One who abandons it instead has said it is not to be sent, and
 			// the retraction goes with it.
+			//
+			// So a notice a person has yet to settle leaves the retraction
+			// pending, not canceled: an indeterminate one may still be
+			// resolved sent, a refused one resent, and either puts the ask on
+			// the card. Canceling on the first tick after reconciliation gave
+			// up would make the answer depend on whether a tick or the person
+			// got there first, and a person is always slower. It is asked
+			// again at RetractionHeld rather than RetractionWait, since only a
+			// person changes it. The settlement decides it either way: sent
+			// answers the ask, abandoned ends it.
 			source := Intent{}
-			var answered, sourceKind string
-			switch err := tx.QueryRowContext(ctx, `SELECT state, kind, intent_key, COALESCE(event_id, 0) FROM outbox WHERE id = ?`,
-				in.Retracts).Scan(&answered, &sourceKind, &source.Key, &source.EventID); {
+			var answered, sourceKind, sourceNote string
+			switch err := tx.QueryRowContext(ctx, `SELECT state, kind, intent_key, COALESCE(event_id, 0), note FROM outbox WHERE id = ?`,
+				in.Retracts).Scan(&answered, &sourceKind, &source.Key, &source.EventID, &sourceNote); {
 			case errors.Is(err, sql.ErrNoRows):
 				answered = ""
 			case err != nil:
 				return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
 			}
 			source.Kind = IntentKind(sourceKind)
-			waiting := false
+			waiting, held := false, false
 			switch IntentState(answered) {
 			case IntentSent:
 				// The message is at the destination: answer it.
 			case IntentPending, IntentSending:
 				waiting = true
+			case IntentIndeterminate:
+				waiting, held = true, true
+			case IntentCanceled:
+				// A refused request created nothing and a person may send it
+				// again; any other cancellation is final.
+				if sourceNote == RefusedNote {
+					waiting, held = true, true
+				} else {
+					next, note = IntentCanceled, "the notice it answers was not posted"
+				}
 			default:
 				next, note = IntentCanceled, "the notice it answers was not posted"
 			}
@@ -504,9 +529,13 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 				}
 			}
 			if waiting {
-				// Not yet. It stays pending, due again on the next tick,
-				// rather than being claimed and left with nothing to say.
-				due := l.now().Add(RetractionWait)
+				// Not yet. It stays pending, due again shortly, rather than
+				// being claimed and left with nothing to say.
+				wait := RetractionWait
+				if held {
+					wait = RetractionHeld
+				}
+				due := l.now().Add(wait)
 				if _, err := tx.ExecContext(ctx, `UPDATE outbox SET not_before = ? WHERE id = ? AND state = 'pending'`,
 					stamp(due), in.ID); err != nil {
 					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
