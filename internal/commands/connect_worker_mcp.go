@@ -79,6 +79,14 @@ func newConnectWorkerMCPCmd() *cobra.Command {
 // receiveTaskToken takes the token from the connector's socket. A socket that
 // hands over nothing — this process is not the worker's, or the socket was
 // already used — is a refusal, not an empty token.
+//
+// Only a whole line is a token. A handoff the connector completed is one
+// newline-terminated line, so ReadString finds its delimiter and reports no
+// error; every error it can report — a deadline, a reset, an EOF part way
+// through — comes with the bytes that did arrive, and those bytes are a
+// prefix of the token, not the token. Accepting them would start
+// `basecamp mcp` with a credential that cannot authenticate and no way to
+// say why, so the error is the answer (Copilot on #738).
 func receiveTaskToken(path string, timeout time.Duration) (string, error) {
 	dialer := net.Dialer{Timeout: timeout}
 	conn, err := dialer.DialContext(context.Background(), "unix", path)
@@ -88,14 +96,13 @@ func receiveTaskToken(path string, timeout time.Duration) (string, error) {
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	line, err := bufio.NewReaderSize(conn, 256).ReadString('\n')
-	token := strings.TrimSpace(line)
-	if token == "" {
-		if err == nil {
-			err = errors.New("empty")
-		}
+	if err == nil && strings.TrimSpace(line) == "" {
+		err = errors.New("empty")
+	}
+	if err != nil {
 		return "", fmt.Errorf("worker-mcp: the connector handed over no token: %w", err)
 	}
-	return token, nil
+	return strings.TrimSpace(line), nil
 }
 
 // workerMCPArgs is what the bridge becomes. The token is on descriptor fd,
