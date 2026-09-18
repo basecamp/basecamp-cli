@@ -722,10 +722,15 @@ BEGIN
 END;
 
 -- The acknowledgement settles with the delivery: the id a worker points at is
--- written when it acknowledges, or never.
+-- written by the statement that acknowledges, or never. Three things have to
+-- hold together — nothing was recorded before, the row was still waiting to be
+-- acknowledged, and this same statement acknowledges it. Writing the id while
+-- leaving the row exposed would put an id in the receipt that no worker ever
+-- reported.
 CREATE TRIGGER task_events_acknowledgement_settles_once
 BEFORE UPDATE OF ack_id ON task_events
-WHEN NEW.ack_id IS NOT OLD.ack_id AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed')
+WHEN NEW.ack_id IS NOT OLD.ack_id
+ AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed' OR NEW.delivery <> 'delivered')
 BEGIN
   SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
 END;
