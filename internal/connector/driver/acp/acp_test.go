@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -1039,6 +1040,18 @@ func TestPreflightReadsTheEnvironmentTheAdapterWouldBeGiven(t *testing.T) {
 	require.ErrorIs(t, Preflight(CodexACP, cwd, lookup, nil), ErrForeignMCPConfig)
 }
 
+// refuseToRead reads every file but one, which no one may read: the read
+// seam stands in for a permission a test cannot count on having, or not
+// having.
+func refuseToRead(denied string) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) {
+		if name == denied {
+			return nil, fmt.Errorf("open %s: %w", name, fs.ErrPermission)
+		}
+		return os.ReadFile(name)
+	}
+}
+
 // A refusal names every layer that refuses, not the first: the layers are
 // read in a fixed order — the user's, the system's, then the project's — so
 // naming the first would have a person fix the user's config, run this
@@ -1070,9 +1083,7 @@ func TestTheCodexPreflightNamesEveryLayerThatRefusesTheSession(t *testing.T) {
 
 	// One that cannot be read and one that declares them are both said, and
 	// both are what they are to errors.Is.
-	require.NoError(t, os.Chmod(userConfig, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(userConfig, 0o600) })
-	err = codexPreflight(cwd, lookup, nil)
+	err = codexPreflight(cwd, lookup, refuseToRead(userConfig))
 	require.ErrorIs(t, err, ErrConfigUnreadable)
 	require.ErrorIs(t, err, ErrForeignMCPConfig)
 	assert.Contains(t, err.Error(), "cannot be read")
@@ -1111,11 +1122,12 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "an inline table declares them on one line, at any depth")
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
 	require.NoError(t, codexPreflight(cwd, lookup, nil), "an escape in a value is not a key")
-	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o000))
-	unreadable := codexPreflight(cwd, lookup, nil)
+	// Through the read seam, not a file mode: what a mode means depends on
+	// who runs the test, and root reads a 0o000 file like any other.
+	denied := refuseToRead(filepath.Join(home, ".codex", "config.toml"))
+	unreadable := codexPreflight(cwd, lookup, denied)
 	require.ErrorIs(t, unreadable, ErrConfigUnreadable, "a config this cannot read is refused, not assumed empty")
 	require.NotErrorIs(t, unreadable, ErrForeignMCPConfig, "but it is not a declaration, and a caller must be able to tell")
-	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o600))
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))
 	withCodexHome := func(name string) (string, bool) {

@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -428,42 +427,66 @@ func (w *Worktrees) Plan(ctx context.Context, route, name string) (*PlannedWorkD
 	}, nil
 }
 
-// SymlinkHops bounds how many symbolic links one planned read follows,
-// as a kernel bounds a path resolution: a link that goes round in a circle
-// ends the read rather than the process.
-const SymlinkHops = 32
-
 // git's mode for a tree entry, as ls-tree prints it.
 const (
 	modeTree    = "040000"
 	modeSymlink = "120000"
+	modeGitlink = "160000"
 )
 
-// ReadFile reads a file as the planned session would read it.
+// ErrNotModeled is a path a planned read does not model: the commit has
+// something there, but not a regular file whose content this can read.
+var ErrNotModeled = errors.New("connector: a planned read models a regular file and nothing else")
+
+// UnmodeledPathError is one such path, so a caller can say which layer it
+// could not check and what is in the way.
+type UnmodeledPathError struct {
+	// Path is the path in the worktree, as it was asked for.
+	Path string
+	// Kind is what the repository has there: a symbolic link, a submodule.
+	Kind string
+	// Repository and Commit are where it was looked for.
+	Repository string
+	Commit     string
+}
+
+func (e *UnmodeledPathError) Error() string {
+	return fmt.Sprintf("%s is %s in %s at %s, which a planned read does not model", e.Path, e.Kind, e.Repository, shortCommit(e.Commit))
+}
+
+func (e *UnmodeledPathError) Unwrap() error { return ErrNotModeled }
+
+// ReadFile reads a file as the planned session would read it, as far as it
+// can be said without a checkout to read.
 //
-// What the promise is: a path inside the worktree is resolved against the
-// repository at BaseCommit — that is what git would write into the checkout,
-// and there is no checkout to read — component by component, the way a path
-// is resolved in a directory: a tracked file is every worktree's, a file
-// only the route has (untracked, ignored, or edited since the commit) is no
-// worktree's, and a symbolic link is followed to wherever it points, into
-// the tree again or out onto the filesystem the session would land on.
+// The promise, exactly: a path inside the worktree is what the repository
+// tracks at BaseCommit as a regular file, which is what git would write
+// into the checkout. A file only the route has — untracked, ignored, or
+// edited since the commit — is in no worktree and reads as absent.
 // Everything outside the worktree is read from disk, where the session
 // reads it.
 //
-// What it will not do is guess. A link that goes round in a circle, a
-// component that is a file where a directory has to be, or a path this
-// cannot resolve is an error rather than an absence, and the preflight
-// refuses what it cannot read: a session this cannot model is not a session
-// anything should call ready.
+// What it does not promise: anything the repository has there that is not a
+// regular file. A symbolic link is followed by the kernel at dispatch to
+// wherever it points, inside the tree or out of it, and git hands back its
+// target rather than that file; a submodule's directory is left empty by
+// the checkout, and whether the session then reads something there depends
+// on what a person did to it. Modeling those means modeling git, one
+// object kind at a time, and this does not: it returns ErrNotModeled —
+// an UnmodeledPathError naming the path and what is in the way — so the
+// caller can say it did not check that layer. What must never happen is a
+// profile called ready on the strength of a layer nothing read, which is
+// the bug this whole check exists for.
 //
 // A path the commit does not have is os.ErrNotExist, as an absent file is.
+// A directory where a file has to be, or a file where a directory has to
+// be, is an error, as it is on a filesystem.
 func (p *PlannedWorkDir) ReadFile(ctx context.Context, name string) ([]byte, error) {
 	rel, inside := p.inWorktree(name)
 	if !inside {
 		return os.ReadFile(name) //nolint:gosec // G304: the caller's own configuration paths
 	}
-	return p.readInWorktree(ctx, rel, 0)
+	return p.readInWorktree(ctx, name, rel)
 }
 
 // inWorktree is name's place inside the planned worktree, slash-separated,
@@ -479,17 +502,15 @@ func (p *PlannedWorkDir) inWorktree(name string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-// readInWorktree resolves rel inside the worktree the way a path is resolved
-// in a directory, and reads what it lands on.
-func (p *PlannedWorkDir) readInWorktree(ctx context.Context, rel string, hops int) ([]byte, error) {
+// readInWorktree walks rel one component at a time, so a link or a
+// submodule on the way is named rather than walked through.
+func (p *PlannedWorkDir) readInWorktree(ctx context.Context, name, rel string) ([]byte, error) {
 	if rel == "" {
 		return nil, fmt.Errorf("connector: %s is the worktree itself, not a file in it", p.Worktree)
 	}
 	parts := strings.Split(rel, "/")
 	for i, part := range parts {
 		if part == "" || part == "." || part == ".." {
-			// path.Join cleans these out of everything this builds; a caller
-			// that asks for one anyway is not asking about a file.
 			return nil, fmt.Errorf("connector: %q is not a path in a worktree", rel)
 		}
 		here := strings.Join(parts[:i+1], "/")
@@ -500,51 +521,28 @@ func (p *PlannedWorkDir) readInWorktree(ctx context.Context, rel string, hops in
 			return nil, err
 		case mode == "":
 			return nil, fmt.Errorf("%s at %s: %w", here, shortCommit(p.BaseCommit), os.ErrNotExist)
-		case mode == modeSymlink:
-			if hops >= SymlinkHops {
-				return nil, fmt.Errorf("connector: %s in a worktree of %s goes through more than %d symbolic links", rel, p.Repository, SymlinkHops)
+		case mode == modeSymlink, mode == modeGitlink:
+			kind := "a symbolic link"
+			if mode == modeGitlink {
+				kind = "a submodule"
 			}
-			target, err := p.w.blobAtCommit(ctx, p.Repository, p.BaseCommit, here)
-			if err != nil {
-				return nil, err
+			return nil, &UnmodeledPathError{
+				Path: filepath.Join(p.Worktree, filepath.FromSlash(here)), Kind: kind,
+				Repository: p.Repository, Commit: p.BaseCommit,
 			}
-			return p.followLink(ctx, here, string(target), strings.Join(parts[i+1:], "/"), hops+1)
 		case mode == modeTree:
 			if last {
-				return nil, fmt.Errorf("connector: %s in a worktree of %s is a directory", rel, p.Repository)
+				return nil, fmt.Errorf("connector: %s in a worktree of %s is a directory", name, p.Repository)
 			}
 		case !last:
-			return nil, fmt.Errorf("connector: %s in a worktree of %s is a file, not a directory", here, p.Repository)
+			return nil, fmt.Errorf("connector: %s in a worktree of %s is a file, not a directory",
+				filepath.Join(p.Worktree, filepath.FromSlash(here)), p.Repository)
 		default:
 			return p.w.blobAtCommit(ctx, p.Repository, p.BaseCommit, here)
 		}
 	}
 	// Every component but the last is a tree, and the last returned above.
 	return nil, fmt.Errorf("connector: %q could not be resolved in a worktree of %s", rel, p.Repository)
-}
-
-// followLink continues a resolution through the link at link, whose target
-// is target, with rest still to resolve.
-func (p *PlannedWorkDir) followLink(ctx context.Context, link, target, rest string, hops int) ([]byte, error) {
-	if target == "" {
-		return nil, fmt.Errorf("connector: the symbolic link %s in a worktree of %s points nowhere", link, p.Repository)
-	}
-	if path.IsAbs(target) {
-		// Out of the worktree and onto the machine the session runs on,
-		// where the rest of the path is resolved as any path is.
-		return os.ReadFile(filepath.Join(filepath.FromSlash(target), filepath.FromSlash(rest))) //nolint:gosec // G304: where a link in the checkout points
-	}
-	next := path.Join(path.Dir(link), target)
-	if rest != "" {
-		next = path.Join(next, rest)
-	}
-	if next == ".." || strings.HasPrefix(next, "../") {
-		// The link leaves the worktree: where it lands is a place on this
-		// machine, under a directory that exists only once the worktree is
-		// made, and is read as the session would read it.
-		return os.ReadFile(filepath.Join(p.Worktree, filepath.FromSlash(next))) //nolint:gosec // G304: where a link in the checkout points
-	}
-	return p.readInWorktree(ctx, next, hops)
 }
 
 // treeEntry is the mode of one path in a commit's tree, and "" when the
@@ -567,8 +565,7 @@ func (w *Worktrees) treeEntry(ctx context.Context, repository, commit, rel strin
 	return mode, nil
 }
 
-// blobAtCommit is the content of one path in a commit's tree, whatever the
-// tree says that path is.
+// blobAtCommit is the content of one regular file in a commit's tree.
 func (w *Worktrees) blobAtCommit(ctx context.Context, repository, commit, rel string) ([]byte, error) {
 	return w.gitRaw(ctx, repository, "show", "--end-of-options", commit+":"+rel)
 }

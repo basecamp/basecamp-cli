@@ -1976,62 +1976,57 @@ func TestPlannedWorkDirReadsTheCommitTheWorktreeWouldBeMadeFrom(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
-// A planned read resolves a path as the session would, symbolic links and
-// all: git hands back a link's target text where the checkout would hand
-// back the file it points at, and a doctor that read the text would say a
-// config declares nothing when the file it points at declares MCP servers.
-func TestPlannedWorkDirFollowsSymlinksAsTheCheckoutWould(t *testing.T) {
+// A planned read models a regular file the repository tracks, and says so
+// about everything else. A symbolic link is followed by the kernel at
+// dispatch to wherever it points, and git hands back its target instead of
+// that file; a submodule's directory the checkout leaves empty. Reading the
+// link's text as configuration is how doctor would call a profile ready
+// over a layer nothing read, so a layer like that is named, not guessed.
+func TestPlannedWorkDirSaysWhichLayersItDoesNotModel(t *testing.T) {
 	h := newWorktreeHarness(t)
 	ctx := context.Background()
 	route := filepath.Join(h.repo, "app")
-	outside := filepath.Join(h.home, "outside.toml")
-	require.NoError(t, os.WriteFile(outside, []byte("on the machine\n"), 0o600))
 
 	h.write(h.repo, "shared.toml", "shared content\n")
 	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "app", ".codex"), 0o700))
-	for name, target := range map[string]string{
-		"app/.codex/config.toml": "../../shared.toml", // into the tree again
-		"app/absolute.toml":      outside,             // out onto the machine
-		"app/escaping.toml":      "../../../away.toml",
-		"app/loop.toml":          "loop.toml",
-		"app/linkdir":            ".codex", // a directory that is a link
-	} {
-		require.NoError(t, os.Symlink(target, filepath.Join(h.repo, filepath.FromSlash(name))))
-	}
+	require.NoError(t, os.Symlink("../../shared.toml", filepath.Join(h.repo, "app", ".codex", "config.toml")))
+	require.NoError(t, os.Symlink(".codex", filepath.Join(h.repo, "app", "linkdir")))
 	h.git(h.repo, "add", ".")
 	h.git(h.repo, "commit", "-q", "-m", "links")
+	// A submodule, without fetching anything: a gitlink in the tree is what
+	// a submodule is to the checkout.
+	h.git(h.repo, "update-index", "--add", "--cacheinfo", "160000,"+h.git(h.repo, "rev-parse", "HEAD")+",app/vendor")
+	h.git(h.repo, "commit", "-q", "-m", "a submodule")
 
 	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
 	require.NoError(t, err)
 	plan, err := planner.Plan(ctx, route, "doctor")
 	require.NoError(t, err)
 
-	got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex", "config.toml"))
-	require.NoError(t, err)
-	assert.Equal(t, "shared content\n", string(got), "the file the link points at, not the link's text")
+	for _, tc := range []struct{ name, path, kind string }{
+		{"a link where the file is", filepath.Join(plan.Dir, ".codex", "config.toml"), "a symbolic link"},
+		{"a link on the way to it", filepath.Join(plan.Dir, "linkdir", "config.toml"), "a symbolic link"},
+		{"a submodule on the way to it", filepath.Join(plan.Dir, "vendor", ".codex", "config.toml"), "a submodule"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := plan.ReadFile(ctx, tc.path)
+			require.ErrorIs(t, err, ErrNotModeled)
+			assert.NotErrorIs(t, err, os.ErrNotExist, "what was not read is not an absence")
+			var unmodeled *UnmodeledPathError
+			require.ErrorAs(t, err, &unmodeled)
+			assert.Equal(t, tc.kind, unmodeled.Kind)
+			assert.Contains(t, err.Error(), unmodeled.Path, "the layer that was not read is named")
+			assert.Contains(t, unmodeled.Path, plan.Worktree)
+		})
+	}
 
-	got, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "absolute.toml"))
-	require.NoError(t, err)
-	assert.Equal(t, "on the machine\n", string(got), "a link out of the worktree lands on the machine")
-
-	// A link that climbs out of the worktree lands under a directory that
-	// exists only once the worktree is made; nothing is there.
-	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "escaping.toml"))
-	assert.ErrorIs(t, err, os.ErrNotExist)
-
-	// A link to itself is not a file, and not an absence either: what this
-	// cannot resolve it refuses rather than calls empty.
-	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "loop.toml"))
-	require.Error(t, err)
-	assert.NotErrorIs(t, err, os.ErrNotExist)
-	assert.Contains(t, err.Error(), "symbolic links")
-
-	// A directory on the way that is a link is followed too.
-	got, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "linkdir", "config.toml"))
+	// A regular file the repository tracks is still read as the checkout
+	// would have it, which is the whole promise it does make.
+	got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, "..", "shared.toml"))
 	require.NoError(t, err)
 	assert.Equal(t, "shared content\n", string(got))
 
-	// A directory is not a file, and neither is a file used as one.
+	// And a directory is a directory, a file used as one is not.
 	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is a directory")

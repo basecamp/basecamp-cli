@@ -878,11 +878,12 @@ func TestConnectDoctorPreflightNamesEveryLayerInOneRun(t *testing.T) {
 	assert.Contains(t, c.Message, project, "the route's own layer is named in the same run as the shared one")
 }
 
-// A Codex config that is a symbolic link is read as the session reads it:
-// the file it points at. Reading the link's own text instead would find no
-// mcp_servers in it and call a profile ready that blocks every dispatch —
-// this card's bug in another costume.
-func TestConnectDoctorPreflightFollowsASymlinkedConfigAsTheSessionWould(t *testing.T) {
+// A Codex config that is a symbolic link is a layer doctor does not model:
+// git hands back the link's target text where the session would read the
+// file it points at. What it must not do is read that text, find no
+// mcp_servers in it, and call the profile ready — a layer nothing read is
+// said as one, and the profile is not ready on the strength of it.
+func TestConnectDoctorPreflightSaysWhenALayerCouldNotBeChecked(t *testing.T) {
 	file, route, repo, _ := codexWorktreeProfile(t)
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "codex.toml"), []byte("[mcp_servers.linear]\ncommand = \"linear-mcp\"\n"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(route, ".codex"), 0o755))
@@ -892,9 +893,12 @@ func TestConnectDoctorPreflightFollowsASymlinkedConfigAsTheSessionWould(t *testi
 
 	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
 	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status,
-		"the link's target declares MCP servers, and the session reads the target")
-	assert.Contains(t, c.Message, filepath.Join(route, ".codex", "config.toml"))
+	assert.Equal(t, setup.StatusFail, c.Status, "a layer nothing read is not a layer that passed")
+	assert.Contains(t, c.Message, "could not check")
+	assert.Contains(t, c.Message, filepath.Join(route, ".codex", "config.toml"), "the layer is named where a person can look at it")
+	assert.Contains(t, c.Message, "a symbolic link", "and what is in the way is said")
+	assert.Contains(t, c.Hint, "yourself")
+	assert.Contains(t, c.Hint, "without worktrees")
 }
 
 // A route git could read as an option or a pattern is a route like any
@@ -929,4 +933,31 @@ func TestConnectDoctorPreflightGroupsEachRefusalOnItsOwn(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(c.Message, project), "the second route's own layer is named too, once")
 	assert.Contains(t, c.Message, "start in "+paths[1]+":", "and named as that route's alone")
 	assert.NotContains(t, c.Message, "start in "+paths[0], "the route with only the shared reason is not named on its own")
+}
+
+// The hint is for the reason that most needs acting on. The layers are read
+// in a fixed order, so a file in /etc that cannot be read comes before a
+// user config that certainly declares MCP servers; the person still has to
+// be told about the declaration.
+func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file whatever its mode says")
+	}
+	file, home, _ := codexProfile(t, 1)
+	// config.toml is read before managed_config.toml, so the layer that
+	// cannot be read is the one this would hint about by order alone.
+	unreadable := writeCodexConfig(t, home, "model = \"gpt-5\"\n")
+	declared := filepath.Join(home, ".codex", "managed_config.toml")
+	require.NoError(t, os.WriteFile(declared, []byte("[mcp_servers.linear]\ncommand = \"linear-mcp\"\n"), 0o600))
+	require.NoError(t, os.Chmod(unreadable, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Contains(t, c.Message, declared, "both layers are reported")
+	assert.Contains(t, c.Message, unreadable)
+	assert.Contains(t, c.Hint, "Take the MCP servers out",
+		"the declaration is certainly there, and is what to do about it first")
+	assert.NotContains(t, c.Hint, "readable by the user")
 }

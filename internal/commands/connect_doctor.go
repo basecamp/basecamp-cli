@@ -276,6 +276,12 @@ func acpAdapterCheck(worker string) setup.Check {
 // user's and the system's — fail identically, so an identical reason is
 // reported once, for all of them.
 //
+// A layer inside a planned worktree that is not a regular file the
+// repository tracks — a symbolic link, a submodule — is not modeled and is
+// reported as a layer that could not be checked. Doctor never calls a
+// profile ready on the strength of a layer nothing read, which is the bug
+// this check exists for; what it does not do is model git.
+//
 // What it runs against is the directory a dispatch would give the session,
 // which is the route only while worktrees are off. With them on the session
 // works in a worktree under the connector's state directory, and the layers
@@ -314,6 +320,7 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 		reason string
 		routes []string
 		hint   string
+		rank   int
 	}
 	var failures []*failure
 	seen := map[string]*failure{}
@@ -334,7 +341,8 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 			reason := preflightReason(err)
 			f, ok := seen[reason]
 			if !ok {
-				f = &failure{reason: reason, hint: preflightHint(err)}
+				hint, rank := preflightHint(err)
+				f = &failure{reason: reason, hint: hint, rank: rank}
 				seen[reason] = f
 				failures = append(failures, f)
 			}
@@ -361,27 +369,34 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 			lead = "No session would start in"
 		}
 		parts = append(parts, fmt.Sprintf("%s %s: %s", lead, where, f.reason))
-		if c.Hint == "" {
-			c.Hint = f.hint
-		}
 	}
 	c.Message = strings.Join(parts, "; ")
+	// The hint is the one for the reason that most needs acting on, not the
+	// one the walk happened to reach first: the layers are read in a fixed
+	// order, so a file that could not be read in /etc would otherwise hide
+	// the remedy for a declaration that is certainly there.
+	best := slices.MinFunc(failures, func(a, b *failure) int { return a.rank - b.rank })
+	c.Hint = best.hint
 	return c, true
 }
 
-// preflightHint is what to do about one refusal.
-func preflightHint(err error) string {
+// preflightHint is what to do about one refusal, and where it stands among
+// the others: the lower the rank, the more it is the thing to do first. A
+// refusal that is certainly a blocked session outranks one that only says
+// nothing could be checked.
+func preflightHint(err error) (string, int) {
+	var unmodeled *connector.UnmodeledPathError
 	switch {
 	case errors.Is(err, errNoWorkDir):
-		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees."
+		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees.", 0
 	case errors.Is(err, acp.ErrForeignMCPConfig):
-		// A declaration first: where a session is refused for both, the
-		// declaration is the one that is certainly there.
-		return "Take the MCP servers out of that file (a key an escape hides counts), or start the connector with CODEX_HOME set to a Codex home that declares none."
+		return "Take the MCP servers out of that file (a key an escape hides counts), or start the connector with CODEX_HOME set to a Codex home that declares none.", 1
+	case errors.As(err, &unmodeled):
+		return "Read that file yourself before you trust the profile — doctor models a planned worktree's regular files and nothing else — or run without worktrees, where the check reads what is there.", 2
 	case errors.Is(err, acp.ErrConfigUnreadable):
-		return "Make that file readable by the user the connector runs as, or remove it: while it cannot be read, nothing can tell whether it declares MCP servers."
+		return "Make that file readable by the user the connector runs as, or remove it: while it cannot be read, nothing can tell whether it declares MCP servers.", 3
 	default:
-		return "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again."
+		return "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again.", 4
 	}
 }
 
@@ -432,6 +447,18 @@ func preflightRoute(ctx context.Context, a acp.Adapter, planner *connector.Workt
 	read := func(name string) ([]byte, error) { return plan.ReadFile(ctx, name) }
 	refusals := acp.Refusals(acp.Preflight(a, plan.Dir, nil, read))
 	for i, refusal := range refusals {
+		// A layer nothing read is said as that, not as a refusal over what
+		// is in it: doctor does not model a link or a submodule in a
+		// planned worktree, and must not let one pass as checked either.
+		var unmodeled *connector.UnmodeledPathError
+		if errors.As(refusal, &unmodeled) {
+			refusals[i] = unmodeledLayerError{
+				err: refusal,
+				msg: "a configuration layer this could not check: " +
+					strings.ReplaceAll(unmodeled.Error(), plan.Worktree, plan.Repository),
+			}
+			continue
+		}
 		// A file inside the planned worktree is the repository's, at the
 		// commit the worktree would be made from: say where a person can go
 		// and change it, not where a directory nobody has made yet would
@@ -456,6 +483,17 @@ type inRepositoryError struct {
 
 func (e inRepositoryError) Error() string { return e.msg }
 func (e inRepositoryError) Unwrap() error { return e.err }
+
+// unmodeledLayerError is a configuration layer doctor did not read,
+// because a planned worktree's links and submodules are not modeled. It is
+// the same error: only its words move.
+type unmodeledLayerError struct {
+	err error
+	msg string
+}
+
+func (e unmodeledLayerError) Error() string { return e.msg }
+func (e unmodeledLayerError) Unwrap() error { return e.err }
 
 // preflightReason is a preflight's refusal as a person reads it: the driver
 // package's own prefix off the front, because the check already names the
