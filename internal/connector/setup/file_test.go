@@ -306,10 +306,12 @@ func TestAWorktreeWorkerThatCannotCommitIsRefused(t *testing.T) {
 		f.Worker = WorkerCodex
 		require.NoError(t, f.Validate(), "codex without worktrees is fine")
 
-		next, err := Apply(f, Changes{Worktrees: ptr(true)})
-		require.NoError(t, err)
+		// Apply is setup's pre-network gate, so the refusal has to land
+		// here: rejecting it only at Save would spend token, identity and
+		// trust checks on flags already known to be impossible.
+		_, err := Apply(f, Changes{Worktrees: ptr(true)})
 
-		require.Error(t, next.Validate())
+		require.ErrorIs(t, err, ErrCannotCommitInAWorktree)
 	})
 
 	t.Run("codex named for a profile already using worktrees", func(t *testing.T) {
@@ -317,10 +319,9 @@ func TestAWorktreeWorkerThatCannotCommitIsRefused(t *testing.T) {
 		f.Worktrees = true
 		require.NoError(t, f.Validate(), "worktrees without codex is fine")
 
-		next, err := Apply(f, Changes{Worker: WorkerCodex})
-		require.NoError(t, err)
+		_, err := Apply(f, Changes{Worker: WorkerCodex})
 
-		require.Error(t, next.Validate())
+		require.ErrorIs(t, err, ErrCannotCommitInAWorktree)
 	})
 
 	// Load runs Validate, so a hand-edited file is refused where it is
@@ -370,3 +371,83 @@ func TestAWorktreeWorkerThatCannotCommitIsRefused(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// TestAProfileThatCannotCommitCanBeRepaired is the other half of the refusal,
+// and the half that makes it usable. `connect setup` reads connect.json
+// before it applies a change, so refusing the file at Load would leave an
+// operator already in this state unable to leave it: the command that is
+// supposed to fix the file would not read it. The refusal has to be one
+// setup can pick up and put down.
+func TestAProfileThatCannotCommitCanBeRepaired(t *testing.T) {
+	// A file written before the refusal existed, or edited by hand.
+	stuck := func(t *testing.T) string {
+		t.Helper()
+		path := filepath.Join(configDir(t), "connect.json")
+		f := validFile(t)
+		f.Worktrees = true
+		require.NoError(t, save(path, f))
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		edited := strings.Replace(string(raw), `"worker": "claude"`, `"worker": "codex"`, 1)
+		require.NotEqual(t, string(raw), edited)
+		require.NoError(t, os.WriteFile(path, []byte(edited), 0o600))
+		return path
+	}
+
+	t.Run("running it is refused", func(t *testing.T) {
+		_, err := Load(stuck(t))
+
+		require.ErrorIs(t, err, ErrCannotCommitInAWorktree)
+	})
+
+	t.Run("turning worktrees off repairs it", func(t *testing.T) {
+		f, err := LoadToRepair(stuck(t))
+		require.NoError(t, err, "setup must be able to read the file it is fixing")
+		require.True(t, f.Worktrees, "the file it read is the one on disk, not a blank one")
+
+		next, err := Apply(f, Changes{Worktrees: ptr(false)})
+
+		require.NoError(t, err)
+		require.NoError(t, next.Validate())
+	})
+
+	t.Run("naming a worker that commits repairs it", func(t *testing.T) {
+		f, err := LoadToRepair(stuck(t))
+		require.NoError(t, err)
+
+		next, err := Apply(f, Changes{Worker: WorkerClaude})
+
+		require.NoError(t, err)
+		require.NoError(t, next.Validate())
+	})
+
+	// Repairable is not the same as permitted: a run that changes something
+	// else leaves the file as broken as it found it, and says so.
+	t.Run("a run that repairs nothing is still refused", func(t *testing.T) {
+		f, err := LoadToRepair(stuck(t))
+		require.NoError(t, err)
+
+		_, err = Apply(f, Changes{Concurrency: 4})
+
+		require.ErrorIs(t, err, ErrCannotCommitInAWorktree)
+	})
+
+	// Only this one state is tolerated. Everything else Load refuses, it
+	// still refuses, or the repair path becomes a way to load a file nothing
+	// has checked.
+	t.Run("no other invalid file is tolerated", func(t *testing.T) {
+		path := filepath.Join(configDir(t), "connect.json")
+		f := validFile(t)
+		require.NoError(t, save(path, f))
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		edited := strings.Replace(string(raw), `"driver": "spawn"`, `"driver": "nonsense"`, 1)
+		require.NotEqual(t, string(raw), edited)
+		require.NoError(t, os.WriteFile(path, []byte(edited), 0o600))
+
+		_, err = LoadToRepair(path)
+
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrCannotCommitInAWorktree)
+	})
+}

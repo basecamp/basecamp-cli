@@ -405,7 +405,11 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	defer unlock()
 
-	existing, err := setup.Load(path)
+	// Setup is where a file the connector refuses to run gets fixed, so it
+	// reads one state Load alone would reject. Apply still has to produce a
+	// file that validates, so this widens what can be repaired, not what can
+	// be written.
+	existing, err := setup.LoadToRepair(path)
 	exists := err == nil
 	switch {
 	case errors.Is(err, os.ErrNotExist):

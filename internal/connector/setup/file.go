@@ -248,15 +248,8 @@ func (f File) Validate() error {
 	if f.Worker != "" && !slices.Contains(Workers, f.Worker) {
 		return fmt.Errorf("connect.json worker %q is not one of %s", f.Worker, strings.Join(Workers, ", "))
 	}
-	// Codex's sandbox is workspace-write: it writes inside the working
-	// directory and nowhere else. A worktree's git data lives outside that
-	// directory, so a Codex worker in a worktree cannot commit, and a task
-	// that edits anything ends with its worktree kept. The combination is
-	// refused here rather than at setup because the two settings can be
-	// reached one run at a time, and a file that arrives any other way is
-	// no less broken.
-	if f.Worktrees && f.WorkerName() == WorkerCodex {
-		return fmt.Errorf("connect.json pairs worktrees with worker %q, which cannot commit in one: %s's sandbox writes only inside the working directory, and a worktree's git data is outside it. Turn worktrees off, or run a worker that can commit in one", WorkerCodex, WorkerCodex)
+	if err := f.workerCanCommit(); err != nil {
+		return err
 	}
 	if f.Concurrency < 1 || f.Concurrency > MaxConcurrency {
 		return fmt.Errorf("connect.json concurrency %d is outside 1..%d", f.Concurrency, MaxConcurrency)
@@ -265,6 +258,46 @@ func (f File) Validate() error {
 		return fmt.Errorf("connect.json deadline %s is outside %s..%s", d, MinDeadline, MaxDeadline)
 	}
 	return nil
+}
+
+// ErrCannotCommitInAWorktree is worktrees paired with a worker whose sandbox
+// cannot reach a worktree's git data. It is a named error because the two
+// readers of connect.json want opposite things from it: the connector must
+// refuse to run such a file, and setup must be able to load one in order to
+// repair it. Without the distinction the refusal is a trap — the operator is
+// told to turn worktrees off by a command that will not read the file long
+// enough to do it.
+var ErrCannotCommitInAWorktree = errors.New("worktrees are on for a worker that cannot commit in one")
+
+// workerCanCommit refuses worktrees paired with Codex. Codex's sandbox is
+// workspace-write: it writes inside the working directory and nowhere else.
+// A worktree's git data lives outside that directory, so a Codex worker in a
+// worktree cannot commit, and a task that edits anything ends with its
+// worktree kept.
+//
+// The check reads the resulting file rather than the flags typed, because the
+// two settings are separate flags on separate runs: turn worktrees on today,
+// name the worker tomorrow, and a refusal that reads one invocation refuses
+// nothing.
+func (f File) workerCanCommit() error {
+	if f.Worktrees && f.WorkerName() == WorkerCodex {
+		return fmt.Errorf("%w: %s's sandbox writes only inside the working directory, and a worktree's git data is outside it. Turn worktrees off (--worktrees=false), or name a worker that can commit in one (--worker %s)",
+			ErrCannotCommitInAWorktree, WorkerCodex, WorkerClaude)
+	}
+	return nil
+}
+
+// LoadToRepair is Load for `connect setup`, which must read a file it would
+// refuse to run in order to change it. It tolerates exactly one otherwise
+// fatal state — ErrCannotCommitInAWorktree — and nothing else. The caller
+// still has to Validate what it applies, so the only file this lets through
+// is one on its way to being fixed.
+func LoadToRepair(path string) (File, error) {
+	f, err := Load(path)
+	if errors.Is(err, ErrCannotCommitInAWorktree) {
+		return f, nil
+	}
+	return f, err
 }
 
 // WorkerName is the worker the file names, the default when it names none.
@@ -297,6 +330,11 @@ func Parse(data []byte) (File, error) {
 		f.Projects = map[int64]admission.Route{}
 	}
 	if err := f.Validate(); err != nil {
+		// The file is returned alongside a repairable refusal, so setup can
+		// change what makes it invalid; every other refusal yields nothing.
+		if errors.Is(err, ErrCannotCommitInAWorktree) {
+			return f, err
+		}
 		return File{}, err
 	}
 	return f, nil

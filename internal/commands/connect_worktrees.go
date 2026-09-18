@@ -36,8 +36,9 @@ commit it reaches held elsewhere — and keeps what could.
 
 They add up: every task leaves one, so prune is part of running a connector
 with worktrees on. A Codex worker cannot commit — a worktree's git data is
-outside the directory its sandbox may write — so with Codex every task that
-edits anything leaves a worktree with work in it.`,
+outside the directory its sandbox may write — so worktrees and Codex are
+refused together: connect setup --worktrees=false, or --worker claude,
+repairs a profile already set up that way.`,
 	}
 	cmd.AddCommand(newConnectWorktreesListCmd(), newConnectWorktreesPruneCmd())
 	return cmd

@@ -1456,7 +1456,7 @@ basecamp auth agent connect -P agent               # Connect this computer to a 
 basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<dir>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
 basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
 basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
-basecamp connect setup -P agent --worker codex --worktrees  # Run workers with Codex instead of Claude Code, and give each task its own git worktree
+basecamp connect setup -P agent --worker codex             # Run workers with Codex instead of Claude Code (not with --worktrees: a Codex worker cannot commit in one)
 basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk, git's record of it, and why it is kept (finished, dirty, unpushed, locked, moved, unverified, orphaned)
 basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (on disk: every commit it reaches is kept under refs/basecamp-connect/retained/; orphaned: the task branch goes and the commit it stood at is reported)
 ```
@@ -1477,9 +1477,11 @@ size. Removing them is the operator's call: `connect worktrees prune` removes
 those that hold no work, and never pass `--force` for a path the operator did not
 name. A worktree whose directory something else removed is reported as
 `orphaned`: the connector leaves git's record of it and the task branch exactly
-as they are, and only a force on its path deletes the branch. A Codex worker cannot commit (its sandbox cannot write the
-worktree's git data), so with Codex every task that edits files leaves a kept
-worktree.
+as they are, and only a force on its path deletes the branch. Worktrees are refused with a Codex worker: its sandbox
+writes only inside the working directory, and a worktree's git data is outside
+it, so the worker could never commit. Setup rejects the pairing however it is
+reached, and `--worktrees=false` or `--worker claude` repairs a profile already
+in that state.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

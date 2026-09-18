@@ -112,6 +112,14 @@ func Apply(f File, ch Changes) (File, error) {
 	if ch.Worktrees != nil {
 		out.Worktrees = *ch.Worktrees
 	}
+	// Worktrees and the worker are separate flags, so this is the first point
+	// at which either can be judged: the pairing is a property of the result,
+	// not of what was typed. Refusing it here rather than leaving it to Save
+	// keeps setup's promise that nothing reaches the network before what can
+	// be refused locally has been.
+	if err := out.workerCanCommit(); err != nil {
+		return File{}, err
+	}
 	return out, nil
 }
 
