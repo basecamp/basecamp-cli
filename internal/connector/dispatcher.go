@@ -457,17 +457,22 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	d.mu.Unlock()
 
-	// One read of connect.json for the whole tick. Asked twice, the two
-	// answers can straddle the two-second cache: this tick would then start
-	// records against the routes it saw first while pruning the waits of the
-	// routes it saw second, so a route removed in between is both dispatched
-	// to and forgotten. What the tick does is decided by one snapshot.
+	// One read of connect.json for the whole tick, and every part of the tick
+	// decides from it: the follow-ups below, the prune, and the startable
+	// query. Asked more than once, the answers can straddle the two-second
+	// cache — this tick would then start records against the routes it saw
+	// first while pruning the waits of the routes it saw second, so a route
+	// removed in between is both dispatched to and forgotten.
 	routes, known := d.opts.Routes()
 	approved := d.scopeRoutes(routes)
 	// Follow-ups first: an event on a live conversation joins its task, while
 	// connect.json still approves that task's directory for its project.
+	// Against this tick's snapshot, not a read of its own: a follow-up
+	// authorized by a newer connect.json than the one the same tick prunes
+	// and dispatches against is the window above, in the one loop that used
+	// to open it again.
 	for _, r := range runs {
-		if !r.authorized() {
+		if !r.authorizedIn(approved) {
 			continue
 		}
 		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
@@ -1501,8 +1506,17 @@ func (r *taskRun) goneStop() StopReason {
 
 // authorized reports whether connect.json still approves this task's
 // directory for its project, in the projects this run hears.
+// authorized reads connect.json for itself. It is for callers outside the
+// dispatch tick — nextFollowUp, on the worker's own goroutine, which wants
+// the file as it is now rather than as some tick saw it.
 func (r *taskRun) authorized() bool {
-	return r.d.approvedRoutes()[r.record.BucketID] == r.launch.Route
+	return r.authorizedIn(r.d.approvedRoutes())
+}
+
+// authorizedIn is the same question against a snapshot the caller already
+// holds, so a tick decides every part of itself from one read.
+func (r *taskRun) authorizedIn(approved map[int64]string) bool {
+	return approved[r.record.BucketID] == r.launch.Route
 }
 
 // refusalRecorder is the dispatcher's driver.RefusalRecorder for one attempt:

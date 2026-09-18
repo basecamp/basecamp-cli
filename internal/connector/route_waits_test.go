@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -616,6 +617,25 @@ func TestADispatchTickDecidesOnOneRouteSnapshot(t *testing.T) {
 		o.Workspaces = waitingWorktrees(t, o.Ledger)
 	})
 	ctx := context.Background()
+
+	// Live runs, because the follow-up loop is the part that read the file
+	// again and an empty d.live walks past it: this test asserted one read
+	// and passed over a loop that never ran. One run on an approved route and
+	// one on a route connect.json does not name, so both sides of the
+	// authorization check are walked.
+	for i, route := range []string{testRoute, "/work/never-routed"} {
+		id := int64(500 + i)
+		admitRouted(t, h.ledger, id, adapterBucketID, "recording:snapshot"+strconv.FormatInt(id, 10), route)
+		launch, err := h.ledger.LaunchTask(ctx, LaunchSpec{EventID: id, Route: route, Driver: "fake", Deadline: time.Hour})
+		require.NoError(t, err)
+		record, _, err := h.ledger.Get(ctx, id)
+		require.NoError(t, err)
+		h.d.mu.Lock()
+		h.d.live[launch.AttemptID] = &taskRun{d: h.d, launch: launch, record: record, log: slog.New(slog.DiscardHandler)}
+		h.d.mu.Unlock()
+	}
+	require.Equal(t, 2, liveRuns(h), "the follow-up loop has something to walk")
+
 	h.mu.Lock()
 	h.routeReads = 0
 	h.mu.Unlock()
@@ -625,7 +645,8 @@ func TestADispatchTickDecidesOnOneRouteSnapshot(t *testing.T) {
 	h.mu.Lock()
 	reads := h.routeReads
 	h.mu.Unlock()
-	assert.Equal(t, 1, reads, "the approval map and the prune come from the same read")
+	assert.Equal(t, 1, reads,
+		"the follow-up authorizations, the prune and the startable query all come from one read")
 }
 
 // A prune that the ledger refused leaves rows for routes this tick has just
