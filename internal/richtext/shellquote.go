@@ -4,7 +4,9 @@ import "strings"
 
 // ShellQuote renders s so a POSIX shell reads it as one literal word:
 // unchanged when nothing in it can mean anything to a shell, and otherwise
-// wrapped in single quotes with embedded single quotes spelled '\”.
+// wrapped in single quotes with each embedded single quote spliced out
+// and back in as '\” — the exact four characters, quote backslash quote
+// quote, which is what a caller copying this line needs.
 //
 // It is an encoding applied to the whole value, not a metacharacter list.
 // Hints and breadcrumbs are text a person pastes into a shell, and they

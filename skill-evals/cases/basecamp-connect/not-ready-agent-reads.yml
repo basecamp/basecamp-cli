@@ -30,14 +30,21 @@ reject:
   # can otherwise satisfy by issuing a command the CLI refuses and then
   # retrying — the broad setup mock answers success either way.
   #
-  # --serve takes a project id and nothing else: bare or single-quoted
-  # digits, ending the shell word. Anything else is what parsePositiveID
-  # refuses. Written as the shape of a wrong value rather than as a list of
-  # wrong values, because four rounds of review found four more spellings —
-  # and without lookahead, so Go's RE2 can read it too: the guard in
-  # internal/commands/connect_skilleval_test.go holds this property against
-  # parsePositiveID itself.
-  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|''[0-9]*[^0-9''])'
+  # --serve carries a project id and nothing else: digits ending the shell
+  # word, bare or single-quoted, naming something above zero. Written as the
+  # shape of a wrong value rather than as a list of wrong values, because
+  # four rounds of review found four more spellings — and without lookahead,
+  # so Go's RE2 reads the same pattern the Ruby runner does.
+  #
+  # This is deliberately narrower than parsePositiveID at one point: the CLI
+  # takes a leading plus (+222 parses to 222) and a trace here may not. The
+  # guard in internal/commands/connect_skilleval_test.go holds both halves —
+  # that everything these patterns allow is something the CLI accepts, and
+  # that everything the CLI refuses is something they reject — with +222, 0,
+  # 000, 007 and the empty value in its corpus, so neither the narrowing nor
+  # a disagreement can be accidental.
+  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|0+(\s|$)|''[0-9]*[^0-9'']|''0*'')'
+  - 'connect setup .*--serve=(\s|$)'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
   - 'auth agent connect'
