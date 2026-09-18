@@ -88,13 +88,29 @@ func connectStateDir(file setup.File, shadow bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	group := "connect"
+	group, dir := connectStateParts(file, shadow)
+	return ensurePrivateChain(stateHome, "basecamp", group, dir)
+}
+
+// connectStateDirPath is the same directory, named and not created: what
+// reads a connector's state resolves.
+func connectStateDirPath(file setup.File, shadow bool) (string, error) {
+	stateHome, err := connectStateHome()
+	if err != nil {
+		return "", err
+	}
+	group, dir := connectStateParts(file, shadow)
+	return filepath.Join(stateHome, "basecamp", group, dir), nil
+}
+
+func connectStateParts(file setup.File, shadow bool) (group, dir string) {
+	group = "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return ensurePrivateChain(stateHome, "basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID))
+	return group, connector.StateDirName(file.AccountID, file.Agent.PersonID)
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
@@ -164,11 +180,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
 		return output.ErrUsage("connect.json cannot be used: " + err.Error())
-	}
-	if file.Worktrees && !f.shadow {
-		// Refused rather than ignored: workers would share the route's
-		// checkout while connect.json says each task gets its own.
-		return output.ErrUsage("connect.json asks for worktrees, which this basecamp does not support yet; run setup with --worktrees=false")
 	}
 	driverName := file.Driver
 	if f.driver != "" {
@@ -299,7 +310,20 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
-		dispatcher, err = connector.NewDispatcher(connectDispatcherOptions(connectDispatch{
+		// Built with worktrees off too, so the ones made while they were on
+		// are still settled and recovered.
+		worktreesRoot, err := ensurePrivateChain(stateDir, connectWorktreesDir)
+		if err != nil {
+			return err
+		}
+		workspaces, err := connector.NewWorktrees(connector.WorktreesOptions{
+			Ledger: ledger, Root: worktreesRoot, Logger: logger, Off: !file.Worktrees,
+			Redaction: driver.Redaction{Dirs: []string{stateDir}},
+		})
+		if err != nil {
+			return err
+		}
+		options := connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
@@ -309,7 +333,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			// every reply, outside the adoption budget, for nothing.
 			Replies: connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
 			Lines:   lines, Logger: logger,
-		}))
+		})
+		options.Workspaces = workspaces
+		dispatcher, err = connector.NewDispatcher(options)
 		if err != nil {
 			return err
 		}

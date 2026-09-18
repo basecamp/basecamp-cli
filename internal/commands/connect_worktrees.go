@@ -1,0 +1,332 @@
+package commands
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/output"
+)
+
+// connectWorktreesDir is where a connector's task worktrees live, under its
+// state directory.
+const connectWorktreesDir = "worktrees"
+
+func newConnectWorktreesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "worktrees",
+		Short: "List and prune the git worktrees the connector kept",
+		Long: `With worktrees on (connect setup --worktrees), each task works in a git
+worktree of its own, on a basecamp-connect/ branch. The connector never
+removes one: when the task ends its worktree is kept and listed here, with
+the task it was for and what it takes up on disk. You remove them with prune,
+which goes by what could be lost — nothing on the disk but the files git
+tracks, unchanged, no merge or rebase in progress, not locked, and every
+commit it reaches held elsewhere — and keeps what could.
+
+They add up: every task leaves one, so prune is part of running a connector
+with worktrees on. A Codex worker cannot commit — a worktree's git data is
+outside the directory its sandbox may write — so with Codex every task that
+edits anything leaves a worktree with work in it.`,
+	}
+	cmd.AddCommand(newConnectWorktreesListCmd(), newConnectWorktreesPruneCmd())
+	return cmd
+}
+
+func newConnectWorktreesListCmd() *cobra.Command {
+	var shadow bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List the worktrees kept for you to deal with",
+		Long: `List the worktrees the connector kept, with the task each was for, its size
+on disk, git's record of it, and why it is kept: finished (its task ended —
+the connector removes no worktree of its own accord), dirty (uncommitted
+work), unpushed (commits nothing else holds), locked, moved (no longer where
+the connector left it), orphaned (its directory is gone, while git's record
+of it and the task branch are still there), or unverified (their state could
+not be read). A prune says which of these a worktree turns out to be.`,
+		Example: `  basecamp connect worktrees list -P agent`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app := appctx.FromContext(cmd.Context())
+			wt, closeLedger, err := openConnectWorktrees(app, shadow)
+			if err != nil {
+				return err
+			}
+			defer closeLedger()
+			retained, err := wt.Retained(cmd.Context())
+			if err != nil {
+				return err
+			}
+			out := make([]worktreeView, 0, len(retained))
+			for _, r := range retained {
+				out = append(out, viewWorktree(r))
+			}
+			return app.OK(out, output.WithSummary(fmt.Sprintf("%d worktree(s) kept", len(out))))
+		},
+	}
+	cmd.Flags().BoolVar(&shadow, "shadow", false, "Read the shadow connector's state instead")
+	return cmd
+}
+
+func newConnectWorktreesPruneCmd() *cobra.Command {
+	var (
+		force  []string
+		shadow bool
+	)
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove the kept worktrees you have dealt with",
+		Long: `Remove every kept worktree that holds no work: clean, with every commit it
+reaches held elsewhere. This is the only thing that removes a worktree. One
+that still holds work is kept and listed with why.
+
+--force <path> removes that worktree even with work in it; name each one, and
+it tells you what goes.
+Every commit it reaches that nothing else holds is first kept under
+refs/basecamp-connect/retained/ (retained_refs), so a force on a worktree that
+is still on disk discards files, never commits. A worktree holding a submodule's own git data, or a lock, is
+never forced; neither is one that is no longer where it was (reason "moved"):
+move it back, or remove it yourself and prune again. A force that could not go
+through is reported as kept with force_refused. Worktrees of tasks still
+running are never touched.
+
+A worktree whose directory something else removed (reason "orphaned") is left
+exactly as it is — git's record of it and the task branch, whatever they reach
+— and a plain prune leaves it alone. A force on its path deletes the task
+branch and nothing else, leaving git's record for ` + "`git worktree prune`" + `:
+commits only that branch or that record reached go when you do that, and
+nothing here works out which those are. Move the directory back, or keep the
+branch, if you want them. A worktree whose state could not be read
+(reason "unverified") is kept; forcing it keeps every commit that could be
+found, which in a repository that keeps no reflogs may not be all of them.`,
+		Example: `  basecamp connect worktrees prune -P agent
+  basecamp connect worktrees prune -P agent --force ~/.local/state/basecamp/connect/2914079-52007412/worktrees/app-1a2b3c4d/17-a1b2c3`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app := appctx.FromContext(cmd.Context())
+			for i, p := range force {
+				if !filepath.IsAbs(p) {
+					return output.ErrUsage(fmt.Sprintf("--force %q: name the worktree by its absolute path, as worktrees list shows it", p))
+				}
+				force[i] = filepath.Clean(p)
+			}
+			wt, closeLedger, err := openConnectWorktrees(app, shadow)
+			if err != nil {
+				return err
+			}
+			defer closeLedger()
+			results, err := wt.Prune(cmd.Context(), force)
+			if errors.Is(err, connector.ErrNotRetained) {
+				return output.ErrUsageHint("Nothing was pruned: "+err.Error(), "--force takes a path from `basecamp connect worktrees list`.")
+			}
+			if err != nil {
+				return err
+			}
+			out := make([]pruneView, 0, len(results))
+			removed, kept := 0, 0
+			for _, r := range results {
+				out = append(out, pruneView{
+					worktreeView: viewWorktree(r.Worktree), Action: string(r.Action), ForceRefused: r.ForceRefused,
+					RetainedRefs: r.RetainedRefs, BranchDeletedAt: r.BranchDeletedAt,
+				})
+				if r.Action == connector.PruneKept {
+					kept++
+				} else {
+					removed++
+				}
+			}
+			return app.OK(out, output.WithSummary(fmt.Sprintf("%d removed, %d kept", removed, kept)))
+		},
+	}
+	cmd.Flags().StringArrayVar(&force, "force", nil, "Remove this kept worktree even with work in it (repeatable; an absolute path from worktrees list)")
+	cmd.Flags().BoolVar(&shadow, "shadow", false, "Read the shadow connector's state instead")
+	return cmd
+}
+
+// worktreeView is a kept worktree as the commands show it.
+type worktreeView struct {
+	Path  string `json:"path"`
+	State string `json:"state"`
+	// SizeBytes is what the worktree takes up on disk, so an operator can
+	// see what reclaiming it is worth; -1 when it is there and could not be
+	// read, and nothing at all for one that is gone.
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	WorkDir   string `json:"work_dir"`
+	Branch    string `json:"branch"`
+	Route     string `json:"route"`
+	Reason    string `json:"reason,omitempty"`
+	// Record is git's record of the worktree (<repo>/.git/worktrees/<name>),
+	// which outlives a directory something else removed: what an operator
+	// needs to find what is left, and what `git worktree prune` clears.
+	Record     string `json:"record,omitempty"`
+	EventID    int64  `json:"event_id"`
+	TaskID     int64  `json:"task_id,omitempty"`
+	RetainedAt string `json:"retained_at,omitempty"`
+}
+
+type pruneView struct {
+	worktreeView
+	Action       string   `json:"action"`
+	ForceRefused bool     `json:"force_refused,omitempty"`
+	RetainedRefs []string `json:"retained_refs,omitempty"`
+	// BranchDeletedAt is where the task branch stood when a force on an
+	// orphaned worktree deleted it: nothing worked out what it reached, so
+	// this is what puts it back (git branch <name> <commit>).
+	BranchDeletedAt string `json:"branch_deleted_at,omitempty"`
+}
+
+// sizeLimit bounds how long reading a worktree's size may take: a listing is
+// not worth holding for a tree that cannot be walked.
+const sizeLimit = 5 * time.Second
+
+// reasonOf is why a worktree is kept: nothing, for one that is not.
+func reasonOf(w connector.Worktree) string {
+	if w.State == connector.WorktreeRemoved {
+		return ""
+	}
+	return string(w.RetainedReason)
+}
+
+// recordOf is git's record of the worktree, when it is still there: the
+// directory an orphaned worktree leaves behind.
+func recordOf(w connector.Worktree) string {
+	if w.AdminDir == "" || w.State == connector.WorktreeRemoved {
+		return ""
+	}
+	if _, err := os.Lstat(w.AdminDir); err != nil {
+		return ""
+	}
+	return w.AdminDir
+}
+
+// sizeOf is what a worktree takes up on disk. A worktree that is not there
+// takes up nothing, and is not walked for an answer; one a removal has
+// frozen is under its removing name.
+func sizeOf(w connector.Worktree) int64 {
+	for _, path := range []string{w.Path, w.Path + connector.RemovingSuffix} {
+		switch _, err := os.Lstat(path); {
+		case err == nil:
+			return dirSize(path)
+		case !errors.Is(err, os.ErrNotExist):
+			return -1
+		}
+	}
+	return 0
+}
+
+// dirSize is what a directory takes up, in bytes, following no symlink; -1
+// when it cannot be read in time or at all. The walk runs apart from the
+// answer: a filesystem call that never returns — a mount a worker left —
+// keeps only its own goroutine, and never the listing.
+func dirSize(path string) int64 {
+	deadline := time.Now().Add(sizeLimit)
+	walked := make(chan int64, 1)
+	go func() {
+		var total int64
+		err := filepath.WalkDir(path, func(_ string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if time.Now().After(deadline) {
+				return errors.New("the worktree could not be read in time")
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().IsRegular() {
+				total += info.Size()
+			}
+			return nil
+		})
+		if err != nil {
+			total = -1
+		}
+		walked <- total
+	}()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case total := <-walked:
+		return total
+	case <-timer.C:
+		return -1
+	}
+}
+
+func viewWorktree(w connector.Worktree) worktreeView {
+	v := worktreeView{
+		Path: w.Path, State: string(w.State), SizeBytes: sizeOf(w), WorkDir: w.WorkDir,
+		Branch: w.Branch, Route: w.Route, Reason: reasonOf(w), Record: recordOf(w),
+		EventID: w.OriginatingEventID, TaskID: w.TaskID,
+	}
+	if !w.RetainedAt.IsZero() {
+		v.RetainedAt = w.RetainedAt.UTC().Format(time.RFC3339)
+	}
+	return v
+}
+
+// openConnectWorktrees opens the ledger of the connector the active profile
+// is set up as: the one it has, never a new one, and never a schema this
+// binary would migrate under a connector that is running.
+func openConnectWorktrees(app *appctx.App, shadow bool) (*connector.Worktrees, func(), error) {
+	if app == nil {
+		return nil, nil, errors.New("app not initialized")
+	}
+	name := app.Config.ActiveProfile
+	if name == "" {
+		return nil, nil, output.ErrUsageHint("Worktrees belong to a connector's profile", "Pass -P/--profile <name>, a profile set up with `basecamp connect setup`.")
+	}
+	path, err := setup.Path(config.GlobalConfigDir(), name)
+	if err != nil {
+		return nil, nil, output.ErrUsage(err.Error())
+	}
+	file, err := setup.Load(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil, nil, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
+	case err != nil:
+		return nil, nil, output.ErrUsage("connect.json cannot be used: " + err.Error())
+	}
+	// Named, not created: reading what a connector left must not make a
+	// state directory for a connector that never ran.
+	stateDir, err := connectStateDirPath(file, shadow)
+	if err != nil {
+		return nil, nil, output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+	}
+	ledgerPath := filepath.Join(stateDir, connector.LedgerFile)
+	if _, err := os.Lstat(ledgerPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, output.ErrUsageHint("This connector has not run yet: there is no ledger in "+stateDir, "Run: basecamp connect -P "+shellQuote(name))
+		}
+		return nil, nil, err
+	}
+	ledger, err := connector.OpenExistingLedger(context.Background(), ledgerPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	wt, err := connector.NewWorktrees(connector.WorktreesOptions{
+		Ledger: ledger, Root: filepath.Join(stateDir, connectWorktreesDir),
+		// What a removal refuses is said, not swallowed.
+		Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	})
+	if err != nil {
+		_ = ledger.Close()
+		return nil, nil, err
+	}
+	return wt, func() { _ = ledger.Close() }, nil
+}

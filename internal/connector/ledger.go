@@ -825,13 +825,18 @@ END;
 	migrationTasksAndAttempts,
 	// Migration 8. The outbox every lifecycle message goes through. See
 	// outbox.go for the invariants it holds.
-	//
-	// This was migration 7 while it sat on #736's head: 6 for the tasks and
-	// attempts it builds on, 7 for the outbox. Main took 6 for the
-	// acknowledgement trigger, which pushed the dispatcher's tables to 7 and
-	// this to 8. The numbers move only because nothing has shipped them yet;
-	// once a ledger has applied one, its number is fixed.
 	migrationOutbox,
+
+	// Migration 9. The git worktrees a task runs in: the row written before
+	// `git worktree add`, the states it moves through, and the ones kept when
+	// a task ends holding work. See ledger_worktrees.go.
+	//
+	// 8 and 9 were each written as 8 on their own branch, against different
+	// predecessors. They ship together here, so the order is settled: 7 the
+	// dispatcher's tasks and attempts, 8 the outbox, 9 the worktrees. These
+	// numbers do not move again — a ledger that has applied one never sees it
+	// renumbered.
+	migrationWorktrees,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

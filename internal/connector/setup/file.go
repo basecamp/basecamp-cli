@@ -59,11 +59,12 @@ const (
 // Workers: the coding agent a driver runs.
 const (
 	WorkerClaude = "claude"
+	WorkerCodex  = "codex"
 )
 
 // Workers is every worker connect.json may name. A worker is a row here plus
 // its spawn constructor (internal/connector/driver/spawn).
-var Workers = []string{WorkerClaude}
+var Workers = []string{WorkerClaude, WorkerCodex}
 
 // Defaults, from the connector spec.
 const (

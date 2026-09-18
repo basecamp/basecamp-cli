@@ -67,6 +67,7 @@ isolated state directory and dispatches nothing. macOS and Linux only.`,
 	cmd.AddCommand(newConnectSetupCmd())
 	cmd.AddCommand(newConnectWorkerMCPCmd())
 	cmd.AddCommand(newConnectShowCmd())
+	cmd.AddCommand(newConnectWorktreesCmd())
 	return cmd
 }
 
@@ -181,7 +182,7 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"agent":    agent,
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
-		"workers":  fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees),
+		"workers":  fmt.Sprintf("%s %s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline), worktrees),
 		"projects": strconv.Itoa(len(f.Projects)) + " routed",
 	}
 	for id, r := range f.Projects {
