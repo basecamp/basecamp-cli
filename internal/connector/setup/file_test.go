@@ -280,3 +280,93 @@ func TestWorkerIsOneSetupKnowsAndDefaultsToClaude(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, WorkerClaude, next.Worker)
 }
+
+// TestAWorktreeWorkerThatCannotCommitIsRefused covers the pairing of
+// worktrees with Codex. Codex's sandbox writes only inside the working
+// directory and a worktree's git data is outside it, so the worker can
+// never commit. The combination is reachable four ways and refused in all
+// of them: the check is on the resulting file, not on the flags typed.
+func TestAWorktreeWorkerThatCannotCommitIsRefused(t *testing.T) {
+	t.Run("both settings arriving together", func(t *testing.T) {
+		f := validFile(t)
+		f.Worktrees = true
+		f.Worker = WorkerCodex
+
+		err := f.Validate()
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot commit in one")
+	})
+
+	// The two settings are separate flags on separate runs, so a refusal
+	// that only reads one invocation refuses nothing: turn worktrees on
+	// today, name the worker tomorrow, and the file is the same file.
+	t.Run("worktrees turned on for a profile already running codex", func(t *testing.T) {
+		f := validFile(t)
+		f.Worker = WorkerCodex
+		require.NoError(t, f.Validate(), "codex without worktrees is fine")
+
+		next, err := Apply(f, Changes{Worktrees: ptr(true)})
+		require.NoError(t, err)
+
+		require.Error(t, next.Validate())
+	})
+
+	t.Run("codex named for a profile already using worktrees", func(t *testing.T) {
+		f := validFile(t)
+		f.Worktrees = true
+		require.NoError(t, f.Validate(), "worktrees without codex is fine")
+
+		next, err := Apply(f, Changes{Worker: WorkerCodex})
+		require.NoError(t, err)
+
+		require.Error(t, next.Validate())
+	})
+
+	// Load runs Validate, so a hand-edited file is refused where it is
+	// read rather than producing workers that silently cannot commit.
+	t.Run("a file edited by hand", func(t *testing.T) {
+		dir := configDir(t)
+		path := filepath.Join(dir, "connect.json")
+		f := validFile(t)
+		f.Worktrees = true
+		require.NoError(t, save(path, f), "the file is saveable before codex is named")
+
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		edited := strings.Replace(string(raw), `"worker": "claude"`, `"worker": "codex"`, 1)
+		if edited == string(raw) {
+			edited = strings.Replace(string(raw), `"worktrees": true`, `"worker": "codex",
+  "worktrees": true`, 1)
+		}
+		require.NotEqual(t, string(raw), edited, "the fixture must actually gain the worker")
+		require.NoError(t, os.WriteFile(path, []byte(edited), 0o600))
+
+		_, err = Load(path)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot commit in one")
+	})
+
+	// The default worker commits in a worktree, so worktrees alone are not
+	// the problem and must stay accepted — including when the file names
+	// no worker at all and WorkerName falls back to the default.
+	t.Run("worktrees with a worker that can commit", func(t *testing.T) {
+		for _, worker := range []string{"", WorkerClaude} {
+			f := validFile(t)
+			f.Worktrees = true
+			f.Worker = worker
+
+			require.NoError(t, f.Validate(), "worker %q", worker)
+		}
+	})
+
+	t.Run("codex without worktrees", func(t *testing.T) {
+		f := validFile(t)
+		f.Worker = WorkerCodex
+
+		require.NoError(t, f.Validate())
+	})
+}
+
+func ptr[T any](v T) *T { return &v }

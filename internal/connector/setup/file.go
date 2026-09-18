@@ -248,6 +248,16 @@ func (f File) Validate() error {
 	if f.Worker != "" && !slices.Contains(Workers, f.Worker) {
 		return fmt.Errorf("connect.json worker %q is not one of %s", f.Worker, strings.Join(Workers, ", "))
 	}
+	// Codex's sandbox is workspace-write: it writes inside the working
+	// directory and nowhere else. A worktree's git data lives outside that
+	// directory, so a Codex worker in a worktree cannot commit, and a task
+	// that edits anything ends with its worktree kept. The combination is
+	// refused here rather than at setup because the two settings can be
+	// reached one run at a time, and a file that arrives any other way is
+	// no less broken.
+	if f.Worktrees && f.WorkerName() == WorkerCodex {
+		return fmt.Errorf("connect.json pairs worktrees with worker %q, which cannot commit in one: %s's sandbox writes only inside the working directory, and a worktree's git data is outside it. Turn worktrees off, or run a worker that can commit in one", WorkerCodex, WorkerCodex)
+	}
 	if f.Concurrency < 1 || f.Concurrency > MaxConcurrency {
 		return fmt.Errorf("connect.json concurrency %d is outside 1..%d", f.Concurrency, MaxConcurrency)
 	}
