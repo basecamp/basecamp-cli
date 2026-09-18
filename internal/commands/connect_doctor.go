@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -36,9 +38,11 @@ identity, the stream ticket mint, the account feed, the ledger (its gaps, open
 losses, hold, the worktrees it kept and messages waiting for a person), the
 worker the driver runs — the worker's own CLI on PATH under the spawn driver,
 the pinned ACP adapter in the connector's adapters directory under the acp
-driver — and a handshake with the agent's Basecamp MCP server, started with a
-worker's environment (without the basecamp_connect domain, which only a
-dispatched task's token opens).
+driver, and the adapter's own refusal of configuration on this machine that the
+connector cannot switch off, run against every routed directory — and a
+handshake with the agent's Basecamp MCP server, started with a worker's
+environment (without the basecamp_connect domain, which only a dispatched
+task's token opens).
 
 It writes nothing to the connector's ledger and posts nothing to Basecamp.
 Renewing the profile's own credential, which every command does when its token
@@ -202,7 +206,11 @@ func workerBinaries(file setup.File) []string {
 // to be on it.
 func workerBinaryChecks(file setup.File) []setup.Check {
 	if file.Driver == setup.DriverACP {
-		return []setup.Check{acpAdapterCheck(file.WorkerName())}
+		checks := []setup.Check{acpAdapterCheck(file.WorkerName())}
+		if c, ok := acpPreflightCheck(file); ok {
+			checks = append(checks, c)
+		}
+		return checks
 	}
 	bins := workerBinaries(file)
 	checks := make([]setup.Check, 0, len(bins))
@@ -247,6 +255,111 @@ func acpAdapterCheck(worker string) setup.Check {
 	c.Status = setup.StatusPass
 	c.Message = fmt.Sprintf("%s@%s at %s", a.Package, a.Version, richtext.SanitizeSingleLine(bin))
 	return c
+}
+
+// acpPreflightCheck runs the adapter's own preflight — the refusal the acp
+// driver makes before it starts anything — for the directories a dispatch
+// would run in. It is the check a resolved adapter does not make: the
+// preflight reads configuration on this machine the connector cannot switch
+// off (a Codex config layer that declares MCP servers, which codex-acp would
+// load into the session beside the connector's), so a profile whose adapter
+// is installed and on the pin can still have every record refused with
+// ErrUnusable the moment it is dispatched. There is no second check: doctor
+// refuses what the run command refuses.
+//
+// Every routed directory, not the first, and every distinct reason rather
+// than the first: the preflight walks per-directory layers as well as the
+// machine's, so one route can carry a .codex/config.toml another has not,
+// and a person fixing this wants the whole list out of one run. It costs a
+// handful of file reads per route. The layers every route shares — the
+// user's and the system's — fail identically, so an identical reason is
+// reported once, for all of them.
+//
+// It runs against the routed directory rather than the worktree a task may
+// be given under the connector's state directory. The repository's own
+// .codex/config.toml is in a worktree exactly as it is in the route; what
+// differs is the ancestors of a directory nobody configures, above the
+// user's own layer, which is checked whatever the working directory is.
+//
+// The second return is false when there is nothing to run: an adapter with
+// no preflight (claude-agent-acp) gets no row, rather than a row saying a
+// check that does not exist passed.
+func acpPreflightCheck(file setup.File) (setup.Check, bool) {
+	a, ok := acp.AdapterForWorker(file.WorkerName())
+	if !ok || a.Preflight == nil {
+		return setup.Check{}, false
+	}
+	c := setup.Check{Name: "Adapter " + a.Name + " preflight"}
+	ids := make([]int64, 0, len(file.Projects))
+	for id := range file.Projects {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	if len(ids) == 0 {
+		c.Status = setup.StatusSkip
+		c.Message = "No project is routed, so there is no directory a session would run in"
+		return c, true
+	}
+
+	type failure struct {
+		reason  string
+		routes  []string
+		foreign bool
+	}
+	var failures []*failure
+	seen := map[string]*failure{}
+	for _, id := range ids {
+		path := file.Projects[id].Path
+		err := acp.Preflight(a, path, nil)
+		if err == nil {
+			continue
+		}
+		reason := preflightReason(err)
+		f, ok := seen[reason]
+		if !ok {
+			f = &failure{reason: reason, foreign: errors.Is(err, acp.ErrForeignMCPConfig)}
+			seen[reason] = f
+			failures = append(failures, f)
+		}
+		f.routes = append(f.routes, richtext.SanitizeSingleLine(path))
+	}
+	if len(failures) == 0 {
+		c.Status = setup.StatusPass
+		c.Message = fmt.Sprintf("%s would start in every routed directory (%d checked)", a.Name, len(ids))
+		return c, true
+	}
+
+	c.Status = setup.StatusFail
+	parts := make([]string, 0, len(failures))
+	for i, f := range failures {
+		where := strings.Join(f.routes, ", ")
+		if len(ids) > 1 && len(f.routes) == len(ids) {
+			// Every route, one reason: the user's or the system's layer,
+			// which no route escapes by being somewhere else.
+			where = "any routed directory"
+		}
+		lead := "no session would start in"
+		if i == 0 {
+			lead = "No session would start in"
+		}
+		parts = append(parts, fmt.Sprintf("%s %s: %s", lead, where, f.reason))
+		if c.Hint == "" && f.foreign {
+			c.Hint = "Take mcp_servers out of that file, or start the connector with CODEX_HOME set to a Codex home that declares none."
+		}
+	}
+	c.Message = strings.Join(parts, "; ")
+	if c.Hint == "" {
+		c.Hint = "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again."
+	}
+	return c, true
+}
+
+// preflightReason is a preflight's refusal as a person reads it: the driver
+// package's own prefix off the front, because the check already names the
+// adapter, and the rest as it is — it names the file, which is the whole
+// answer to what to change.
+func preflightReason(err error) string {
+	return strings.TrimPrefix(errorMessage(err), "acp: ")
 }
 
 // connectUnsupportedOSCheck is the Platform check on a GOOS the connector

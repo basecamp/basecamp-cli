@@ -1004,6 +1004,41 @@ func TestAModeChangeFailsTheTurnBeforeTheWorkerIsGone(t *testing.T) {
 
 // ---------------------------------------------------------------- foreign MCP configuration
 
+// Preflight is how anything outside a dispatch — doctor — asks the question
+// a dispatch asks. It has to resolve the adapter's configuration the way the
+// adapter will, so it reads the environment the adapter would be given: the
+// base allowlist (HOME) and the adapter's own names (CODEX_HOME), and not
+// whatever this process happens to hold.
+func TestPreflightReadsTheEnvironmentTheAdapterWouldBeGiven(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	codexHome := filepath.Join(root, "codex-home")
+	cwd := filepath.Join(root, "repo")
+	for _, dir := range []string{filepath.Join(home, ".codex"), codexHome, cwd} {
+		require.NoError(t, os.MkdirAll(dir, 0o700))
+	}
+	declares := []byte("[mcp_servers.linear]\ncommand = \"/bin/linear-mcp\"\n")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), declares, 0o600))
+
+	env := map[string]string{"HOME": home}
+	lookup := func(name string) (string, bool) {
+		v, ok := env[name]
+		return v, ok
+	}
+	require.NoError(t, Preflight(ClaudeAgentACP, cwd, lookup), "an adapter with no preflight refuses nothing")
+
+	err := Preflight(CodexACP, cwd, lookup)
+	require.ErrorIs(t, err, ErrForeignMCPConfig, "HOME reaches the preflight, so the user's own layer is read")
+	assert.Contains(t, err.Error(), filepath.Join(home, ".codex", "config.toml"), "and the refusal names the file")
+
+	env["CODEX_HOME"] = codexHome
+	require.NoError(t, Preflight(CodexACP, cwd, lookup),
+		"CODEX_HOME is one of the adapter's own names, so it reaches the preflight and replaces ~/.codex")
+
+	require.NoError(t, os.WriteFile(filepath.Join(codexHome, "config.toml"), declares, 0o600))
+	require.ErrorIs(t, Preflight(CodexACP, cwd, lookup), ErrForeignMCPConfig)
+}
+
 func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

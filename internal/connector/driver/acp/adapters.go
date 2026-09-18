@@ -338,6 +338,31 @@ const codexConfig = `{"features":{"apps":false,"plugins":false,"remote_plugin":f
 	`"skills":{"bundled":{"enabled":false},"include_instructions":false},` +
 	`"shell_environment_policy":{"inherit":"core"},"web_search":"disabled"}`
 
+// Preflight is adapter a's own refusal of a session it would not start,
+// made before anything starts and run here for a session that would work in
+// cwd: nil for an adapter that has nothing on this machine to check, and
+// nil when the adapter would start there.
+//
+// The environment it reads is the one the adapter would run in —
+// driver.BaseEnv and the adapter's own names, read with lookup (os.LookupEnv
+// when nil), under the driver's own switches — so what the preflight
+// resolves its configuration against (a CODEX_HOME, a HOME) is what the
+// adapter will. A dispatch runs the same preflight against the session's
+// environment, which is this one plus what the dispatcher gives a session
+// (see Driver.open); anything outside a dispatch — doctor — asks here, and
+// gets the answer a dispatch would rather than one read from its own
+// environment.
+func Preflight(a Adapter, cwd string, lookup func(string) (string, bool)) error {
+	if a.Preflight == nil {
+		return nil
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	env := mergeEnv(driver.BuildEnv(driver.BaseEnv, lookup, nil), driver.BuildEnv(a.Env, lookup, nil))
+	return a.Preflight(cwd, lookupIn(setEnv(env, a.SetEnv)))
+}
+
 // Adapters are the pinned adapters the driver runs.
 func Adapters() []Adapter { return []Adapter{ClaudeAgentACP, CodexACP} }
 
