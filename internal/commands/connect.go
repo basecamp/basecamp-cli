@@ -180,7 +180,11 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"agent":    agent,
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
-		"workers":  fmt.Sprintf("%s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.Concurrency, time.Duration(f.Deadline), worktrees),
+		// The worker as well as the driver: the file records which coding
+		// agent the driver runs, and a file written before that field
+		// existed still means the default, which is what a person reading
+		// show needs to see.
+		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline), worktrees),
 		"projects": strconv.Itoa(len(f.Projects)) + " routed",
 	}
 	for id, r := range f.Projects {

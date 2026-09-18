@@ -1450,3 +1450,17 @@ func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
 	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
 	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
 }
+
+// Copilot on #738: show formatted the workers line from the driver alone, so
+// the worker connect.json records was invisible — including the default a
+// file written before the field existed still means.
+func TestConnectShowNamesTheWorkerTheDriverRuns(t *testing.T) {
+	f := setup.New("agent")
+	f.AccountID = "999"
+	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
+	assert.Contains(t, connectShowDisplay("/x/connect.json", f, false)["workers"].(string), setup.DefaultWorker)
+
+	f.Worker = ""
+	assert.Contains(t, connectShowDisplay("/x/connect.json", f, false)["workers"].(string), setup.DefaultWorker,
+		"a legacy file with no worker shows the default it means")
+}
