@@ -157,7 +157,7 @@ func (w *fakeWorker) bind(ctx context.Context, server driver.MCPServer) error {
 	if err := os.Setenv("XDG_STATE_HOME", home); err != nil {
 		return err
 	}
-	agentID, err := ResolveStateDir(stateDir, harnessAccount)
+	_, agentID, err := ResolveStateDir(stateDir, harnessAccount)
 	if err != nil {
 		return err
 	}
