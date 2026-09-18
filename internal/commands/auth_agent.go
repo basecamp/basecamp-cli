@@ -225,22 +225,16 @@ func resolveAgentConnectProfile(app *appctx.App) (*agentConnectTarget, error) {
 
 	// Registering or binding rewrites the global config file. Prove it can
 	// be before an operator approves anything — and, when the entry exists
-	// without an account, that the global file is the layer that defines
-	// it, since a system, repo or local config's accountless entry would
-	// keep shadowing whatever is written.
+	// without an account, that the account written there takes effect.
 	if target.existing == nil || target.existing.AccountID == "" {
 		if err := globalConfigTakesProfiles(); err != nil {
 			return nil, err
 		}
 	}
 	if target.existing != nil && target.existing.AccountID == "" {
-		unbound, err := globalProfileIsUnbound(name)
-		if err != nil {
-			return nil, err
-		}
-		if !unbound {
-			return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account and is not the global config's entry", name),
-				"Add account_id to the config file that defines it, then rerun the connection.")
+		if blocker := globalBindingBlocker(app.Config, name); blocker != "" {
+			return nil, output.ErrUsageHint(fmt.Sprintf("Profile %q has no account, and connecting cannot bind one", name),
+				blocker+", then rerun the connection.")
 		}
 	}
 	return target, nil
@@ -281,7 +275,7 @@ func (t *agentConnectTarget) commit(app *appctx.App, conn *auth.AgentConnection)
 		t.existing.AccountID = conn.AccountID
 	case !accountIDsEqual(t.existing.AccountID, conn.AccountID):
 		return false, output.ErrUsageHint(
-			fmt.Sprintf("Profile %q is bound to account %s, and the approved agent belongs to account %s", t.name, t.existing.AccountID, conn.AccountID),
+			fmt.Sprintf("Profile %q is bound to account %s%s, and the approved agent belongs to account %s", t.name, t.existing.AccountID, boundIn(app.Config, t.name), conn.AccountID),
 			"Nothing was stored. Connect the agent under a profile of its own: -P <name>.")
 	}
 	return isDefault, nil

@@ -344,8 +344,8 @@ func (l *Ledger) MarkUnrecoveredThrough(ctx context.Context, lossID, id int64) (
 }
 
 // UnrecoveredIDs returns every id the connector has given up on, across all
-// losses. `basecamp connect status` and `doctor` show these: an unrecovered id
-// is documented, not hidden, and the poll lane may still serve it later.
+// losses. Nothing here discards them: an unrecovered id stays on the record,
+// and the poll lane may still serve it later.
 func (l *Ledger) UnrecoveredIDs(ctx context.Context) ([]int64, error) {
 	rows, err := l.db.QueryContext(ctx,
 		`SELECT DISTINCT event_id FROM loss_ids WHERE state = ? ORDER BY event_id`,
