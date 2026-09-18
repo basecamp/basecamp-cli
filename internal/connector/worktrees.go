@@ -240,6 +240,13 @@ var ErrNoRoot = errors.New("connector: worktrees need an absolute root")
 // that does the work on purpose: doctor asks where a dispatch would run by
 // running the code that decides it, not a second copy of the rule.
 func PlanWorktrees(opts WorktreesOptions) (*Worktrees, error) {
+	if opts.Off {
+		// With worktrees off a task works in its route, which is not a
+		// decision to plan: a planner that answered anyway would answer
+		// something Prepare would not do, which is the one thing planning
+		// exists to rule out.
+		return nil, ErrPlanNothing
+	}
 	w, err := newWorktrees(opts)
 	if err != nil {
 		return nil, err
@@ -247,6 +254,10 @@ func PlanWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 	w.planOnly = true
 	return w, nil
 }
+
+// ErrPlanNothing is a planner asked for with worktrees off: a task's working
+// directory is then its route, and nothing about it is planned.
+var ErrPlanNothing = errors.New("connector: with worktrees off a task works in its route; there is nothing to plan")
 
 func newWorktrees(opts WorktreesOptions) (*Worktrees, error) {
 	if opts.Root == "" || !filepath.IsAbs(opts.Root) {
@@ -784,6 +795,9 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 // those a removal left mid-flight, which hold work until a start or a prune
 // judges them again.
 func (w *Worktrees) Retained(ctx context.Context) ([]Worktree, error) {
+	if w.planOnly {
+		return nil, ErrPlanOnly
+	}
 	return w.ledger.Worktrees(ctx, WorktreeRetained, WorktreeRemoving)
 }
 

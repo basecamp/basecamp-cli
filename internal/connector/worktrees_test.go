@@ -2126,3 +2126,28 @@ func TestPlanRefusesARouteTheCheckoutWouldNotHold(t *testing.T) {
 		assert.NotErrorIs(t, err, ErrRouteUnusable, "%s is not proved unusable", route)
 	}
 }
+
+// A planner is only a planner: it has no ledger, so everything the ledger
+// answers refuses rather than reaching for one, and it is not asked for at
+// all where there are no worktrees to plan.
+func TestAPlannerRefusesEverythingItCannotAnswer(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+
+	_, err = planner.Retained(ctx)
+	assert.ErrorIs(t, err, ErrPlanOnly, "a planner has no ledger to list worktrees from")
+	_, err = planner.Prepare(ctx, filepath.Join(h.repo, "app"), 1)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+	assert.ErrorIs(t, planner.Finish(ctx, "", ""), ErrPlanOnly)
+	assert.ErrorIs(t, planner.Recover(ctx), ErrPlanOnly)
+	_, err = planner.Prune(ctx, nil)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+
+	// With worktrees off, a task works in its route and there is nothing to
+	// plan: a planner that answered anyway would answer for a dispatch that
+	// would not happen.
+	_, err = PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup, Off: true})
+	assert.ErrorIs(t, err, ErrPlanNothing)
+}

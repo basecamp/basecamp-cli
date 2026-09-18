@@ -371,12 +371,20 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 		parts = append(parts, fmt.Sprintf("%s %s: %s", lead, where, f.reason))
 	}
 	c.Message = strings.Join(parts, "; ")
-	// The hint is the one for the reason that most needs acting on, not the
-	// one the walk happened to reach first: the layers are read in a fixed
-	// order, so a file that could not be read in /etc would otherwise hide
-	// the remedy for a declaration that is certainly there.
-	best := slices.MinFunc(failures, func(a, b *failure) int { return a.rank - b.rank })
-	c.Hint = best.hint
+	// Every distinct remedy, most pressing first: the message names more
+	// than one reason, and a person fixing them needs what to do about each.
+	// Order by rank rather than by the order the layers happen to be read
+	// in, so a file that could not be read in /etc does not come before a
+	// declaration that is certainly there.
+	ranked := slices.Clone(failures)
+	slices.SortStableFunc(ranked, func(a, b *failure) int { return a.rank - b.rank })
+	hints := make([]string, 0, len(ranked))
+	for _, f := range ranked {
+		if !slices.Contains(hints, f.hint) {
+			hints = append(hints, f.hint)
+		}
+	}
+	c.Hint = strings.Join(hints, " ")
 	return c, true
 }
 

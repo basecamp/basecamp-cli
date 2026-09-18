@@ -937,10 +937,10 @@ func TestConnectDoctorPreflightGroupsEachRefusalOnItsOwn(t *testing.T) {
 	assert.NotContains(t, c.Message, "start in "+paths[0], "the route with only the shared reason is not named on its own")
 }
 
-// The hint is for the reason that most needs acting on. The layers are read
-// in a fixed order, so a file in /etc that cannot be read comes before a
-// user config that certainly declares MCP servers; the person still has to
-// be told about the declaration.
+// The hint carries what to do about every reason reported, most pressing
+// first. The layers are read in a fixed order, so a file that cannot be read
+// comes before a config that certainly declares MCP servers; the person has
+// to be told about the declaration, and about both.
 func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a file whatever its mode says")
@@ -961,7 +961,9 @@ func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
 	assert.Contains(t, c.Message, unreadable)
 	assert.Contains(t, c.Hint, "Take the MCP servers out",
 		"the declaration is certainly there, and is what to do about it first")
-	assert.NotContains(t, c.Hint, "readable by the user")
+	assert.Contains(t, c.Hint, "readable by the user", "and the other layer still has its own remedy")
+	assert.Less(t, strings.Index(c.Hint, "Take the MCP servers out"), strings.Index(c.Hint, "readable by the user"),
+		"most pressing first, not first in the order the layers are read")
 }
 
 // A route the repository does not track is a directory no worktree would
