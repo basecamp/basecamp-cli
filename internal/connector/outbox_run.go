@@ -458,17 +458,25 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			// is on its way, and is never sent when it turned out not to
 			// exist: a refusal created nothing, and an indeterminate or
 			// abandoned intent is a person's to settle, not something to post
-			// a reply to on a guess. A person who then proves that notice
-			// sent, or sends it again, has it stand unretracted: they are the
-			// ones looking at the destination, and the connector does not post
-			// behind them.
-			var answered string
-			switch err := tx.QueryRowContext(ctx, `SELECT state FROM outbox WHERE id = ?`, in.Retracts).Scan(&answered); {
+			// a reply to on a guess.
+			//
+			// Sent is sent however it got there. A person resolving an
+			// indeterminate notice as sent has looked at the destination and
+			// named the message; that is the strongest form of the evidence
+			// this needs, not a reason to stay quiet, and an ask a person has
+			// just confirmed is on the card is the last one to leave standing.
+			// One who abandons it instead has said it is not to be sent, and
+			// the retraction goes with it.
+			source := Intent{}
+			var answered, sourceKind string
+			switch err := tx.QueryRowContext(ctx, `SELECT state, kind, intent_key, COALESCE(event_id, 0) FROM outbox WHERE id = ?`,
+				in.Retracts).Scan(&answered, &sourceKind, &source.Key, &source.EventID); {
 			case errors.Is(err, sql.ErrNoRows):
 				answered = ""
 			case err != nil:
 				return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)
 			}
+			source.Kind = IntentKind(sourceKind)
 			waiting := false
 			switch IntentState(answered) {
 			case IntentSent:
@@ -479,13 +487,13 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 				next, note = IntentCanceled, "the notice it answers was not posted"
 			}
 			// Second, that the ask is answered — now, not when the decision
-			// was made. A redispatch of a blocked record authorizes it and
-			// leaves its prerequisite to run again; until that settles the
-			// block the operator is still being told to redispatch, and the
-			// retraction waits. A record that is gone answers nothing, and
-			// says nothing.
+			// was made, and answered as the notice that made it asked. A
+			// redispatch of a blocked record authorizes it and leaves its
+			// prerequisite to run again; until that settles the block the
+			// operator is still being told to redispatch, and the retraction
+			// waits. A record that is gone answers nothing, and says nothing.
 			if next == IntentSending && !waiting {
-				open, found, err := askStillOpen(ctx, tx, in.EventID)
+				open, found, err := askStillOpen(ctx, tx, source, in.EventID)
 				switch {
 				case err != nil:
 					return fmt.Errorf("connector: outbox claim retraction %d: %w", in.ID, err)

@@ -161,9 +161,9 @@ func renderRetraction(kind MessageKind, eventID int64, others []int64, action De
 	return renderLines(kind, lines)
 }
 
-// askStillOpen reports whether a record is waiting for a person to run its
-// redispatch — the one thing a lifecycle notice ever asks for — and whether
-// the record is there to ask about at all.
+// askStillOpen reports whether a record is still in the state the notice
+// described — still waiting for the very thing that notice asked a person to
+// do — and whether the record is there to ask about at all.
 //
 // It is the difference between a decision and an answer. A person's redispatch
 // of a blocked record authorizes it and hands its prerequisite back to the
@@ -172,13 +172,37 @@ func renderRetraction(kind MessageKind, eventID int64, others []int64, action De
 // a message saying the ask is answered would stop the next reader acting on a
 // notice that is still live. Silence is better than that, so the retraction
 // waits for the record to move.
-func askStillOpen(ctx context.Context, q Tx, eventID int64) (open, found bool, err error) {
-	switch err := q.QueryRowContext(ctx, `
-SELECT e.state IN ('blocked', 'held')
-    OR (e.state = 'completed' AND e.redispatch_decision IS NULL
-        AND EXISTS (SELECT 1 FROM task_events te
-                    WHERE te.event_id = e.id AND te.withdrawn_at IS NULL AND te.outcome IN ('unknown', 'failed')))
-FROM events e WHERE e.id = ?`, eventID).Scan(&open); {
+//
+// The question is asked of the notice that made the ask, not of the record in
+// general, because "waiting" is not one state. A holding reply answers one
+// blocked reason, as its own claim does (holdingReplyReason): a record whose
+// rerun replaced no_route with read_failed or throttled is not waiting on a
+// person at all — those reasons come round again on their own — so that ask
+// is answered and the record moving between them is the answer. A completion
+// notice asks about an outcome nobody has decided, and only the latest live
+// outcome is that record's, as loadEventTask reads it: a retired row from a
+// task that has since been superseded and rerun says nothing about now.
+func askStillOpen(ctx context.Context, q Tx, source Intent, eventID int64) (open, found bool, err error) {
+	var query string
+	args := []any{eventID}
+	switch source.Kind {
+	case IntentHoldingReply:
+		query = `SELECT state = 'blocked' AND reason = ?2 FROM events WHERE id = ?1`
+		args = append(args, holdingReplyReason(source))
+	case IntentCompletion:
+		query = `
+SELECT e.state = 'completed' AND e.redispatch_decision IS NULL
+   AND (SELECT te.outcome FROM task_events te
+        WHERE te.event_id = e.id AND te.withdrawn_at IS NULL
+        ORDER BY te.task_id DESC LIMIT 1) IN ('unknown', 'failed')
+FROM events e WHERE e.id = ?1`
+	default:
+		// No other kind carries an ask, so no retraction is written against
+		// one. Left waiting rather than sent, which is the direction that
+		// cannot put a wrong answer on a card.
+		return true, true, nil
+	}
+	switch err := q.QueryRowContext(ctx, query, args...).Scan(&open); {
 	case errors.Is(err, sql.ErrNoRows):
 		return false, false, nil
 	case err != nil:

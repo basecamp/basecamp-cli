@@ -276,47 +276,85 @@ func TestARetractionWaitsWhileTheAskIsStillOpen(t *testing.T) {
 	assert.Len(t, basecamp.at(holding.Destination), 2)
 }
 
-// What "the ask is answered" means, state by state. It is the question the
-// retraction asks again at its claim, so a wrong answer here posts a wrong
-// message on somebody's card.
+// What "the ask is answered" means, per notice and state by state. It is the
+// question the retraction asks again at its claim, so a wrong answer here
+// posts a wrong message on somebody's card, or leaves a right one unsaid.
 func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
-	open := func(t *testing.T, ctx context.Context, ledger *Ledger, id int64) bool {
+	holding := Intent{Kind: IntentHoldingReply, Key: holdingKey(1), EventID: 1}
+	refused := Intent{Kind: IntentHoldingReply, Key: refusedStartKey(1), EventID: 1}
+	completion := Intent{Kind: IntentCompletion, Key: completionKey("a1")}
+	open := func(t *testing.T, ctx context.Context, ledger *Ledger, source Intent, id int64) bool {
 		t.Helper()
-		open, found, err := askStillOpen(ctx, ledger.db, id)
+		open, found, err := askStillOpen(ctx, ledger.db, source, id)
 		require.NoError(t, err)
 		require.True(t, found)
 		return open
 	}
 
-	t.Run("blocked waits for a person", func(t *testing.T) {
+	t.Run("a holding reply waits while its own reason stands", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, _ := obLedger(t)
 		seenRecord(t, ledger, 1)
 		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
 		require.NoError(t, err)
-		assert.True(t, open(t, ctx, ledger, 1))
+		assert.True(t, open(t, ctx, ledger, holding, 1))
+		assert.False(t, open(t, ctx, ledger, refused, 1), "the route-unusable reply asks about another block")
+	})
+
+	t.Run("a blocked reason that comes round on its own answers it", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, _ := obLedger(t)
+		seenRecord(t, ledger, 1)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+		require.NoError(t, err)
+		require.True(t, open(t, ctx, ledger, holding, 1))
+
+		// The person ran the redispatch and the rerun blocked on something
+		// that retries by itself (admission.NextBlockedRetry): nobody is
+		// being asked for a redispatch any more.
+		v := obNoRouteVerdict(1, getRecord(t, ledger, 1).Revision, obCommentReply)
+		v.Reason = admission.ReasonReadFailed
+		_, err = ledger.Admission().Commit(ctx, v)
+		require.NoError(t, err)
+		assert.Equal(t, StateBlocked, getRecord(t, ledger, 1).State)
+		assert.False(t, open(t, ctx, ledger, holding, 1), "read_failed is not the block that reply answered")
 	})
 
 	t.Run("admitted is running, and waits for nobody", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, _ := obLedger(t)
 		obAdmit(t, ledger, 1, "recording:10304028989")
-		assert.False(t, open(t, ctx, ledger, 1))
+		assert.False(t, open(t, ctx, ledger, holding, 1))
+		assert.False(t, open(t, ctx, ledger, completion, 1))
 	})
 
-	t.Run("completed with an unreported outcome waits", func(t *testing.T) {
+	t.Run("a completion notice waits on the latest outcome, not a retired one", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock := obLedger(t)
 		obAdmit(t, ledger, 1, "recording:10304028989")
-		l := obLaunch(t, ledger, 1)
+		first := obLaunch(t, ledger, 1)
 		clock.Advance(time.Minute)
-		_, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopDeadline})
+		_, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: first.AttemptID, Stop: StopDeadline})
 		require.NoError(t, err)
-		assert.True(t, open(t, ctx, ledger, 1))
+		assert.True(t, open(t, ctx, ledger, completion, 1), "unknown, and nobody has decided it")
 
 		_, err = ledger.Redispatch(ctx, 1, "jorge")
 		require.NoError(t, err)
-		assert.False(t, open(t, ctx, ledger, 1), "redispatched: it is going to run")
+		assert.False(t, open(t, ctx, ledger, completion, 1), "redispatched: it is going to run")
+
+		// It runs again and succeeds. The first task's unknown row is retired,
+		// not withdrawn, so a predicate reading every row would call this open
+		// forever.
+		second := obLaunch(t, ledger, 1)
+		d, err := ledger.Dispatch(ctx, second.Token, adapterAgentID)
+		require.NoError(t, err)
+		obPull(t, d, 1)
+		_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: id64(4242)})
+		require.NoError(t, err)
+		_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: second.AttemptID, Stop: StopFinished})
+		require.NoError(t, err)
+		assert.Equal(t, StateCompleted, getRecord(t, ledger, 1).State)
+		assert.False(t, open(t, ctx, ledger, completion, 1), "the latest outcome succeeded")
 	})
 
 	t.Run("discarded waits for nothing", func(t *testing.T) {
@@ -327,13 +365,13 @@ func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
 		require.NoError(t, err)
 		_, err = ledger.Discard(ctx, 1, "jorge")
 		require.NoError(t, err)
-		assert.False(t, open(t, ctx, ledger, 1))
+		assert.False(t, open(t, ctx, ledger, holding, 1))
 	})
 
 	t.Run("a record the ledger does not hold answers nothing", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, _ := obLedger(t)
-		stillOpen, found, err := askStillOpen(ctx, ledger.db, 404)
+		stillOpen, found, err := askStillOpen(ctx, ledger.db, holding, 404)
 		require.NoError(t, err)
 		assert.False(t, found)
 		assert.False(t, stillOpen)
@@ -504,6 +542,52 @@ func TestRetractionWaitsForTheNoticeItAnswers(t *testing.T) {
 		assert.Equal(t, IntentCanceled, in.State, "nothing at the destination to answer")
 		assert.Equal(t, "the notice it answers was not posted", in.Note)
 		assert.Empty(t, basecamp.at(holding.Destination), "a person settles the notice; nothing is posted on a guess")
+	})
+}
+
+// A person's resolution of an indeterminate notice decides the retraction with
+// it, and each of the three says something different. Sent is sent however the
+// receipt got there: a person who names the message has looked at the
+// destination, which is the strongest form of the evidence a retraction needs.
+// Abandoned says the notice is not to be sent, so there is nothing to answer.
+func TestAPersonsResolutionOfTheNoticeDecidesItsRetraction(t *testing.T) {
+	t.Run("resolved sent: the ask is on the card, so it is answered", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
+		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		require.NoError(t, err)
+		obRoutedNow(t, ledger, 1)
+
+		// Reconciliation could not settle it, and a person looked at the
+		// destination and named the message.
+		_, err = ledger.settleReconciled(ctx, holding.ID, 0, obUnreachableNote)
+		require.NoError(t, err)
+		receipt := basecamp.add(holding.Destination, adapterAgentID, holding.Body)
+		require.NoError(t, ledger.ResolveIntent(ctx, holding.ID, IntentResolution{Resolution: ResolveSent, ReceiptID: receipt, By: "jorge"}))
+
+		clock.Advance(RetractionWait)
+		require.NoError(t, ob.Flush(ctx))
+		assert.Equal(t, IntentSent, obRetraction(t, ledger, holding, 1).State,
+			"an ask a person has just confirmed is on the card is the last one to leave standing")
+	})
+
+	t.Run("abandoned: nothing was said, so nothing is answered", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
+		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		require.NoError(t, err)
+		obRoutedNow(t, ledger, 1)
+
+		_, err = ledger.settleReconciled(ctx, holding.ID, 0, obUnreachableNote)
+		require.NoError(t, err)
+		require.NoError(t, ledger.ResolveIntent(ctx, holding.ID, IntentResolution{Resolution: ResolveAbandon, By: "jorge"}))
+
+		clock.Advance(RetractionWait)
+		require.NoError(t, ob.Flush(ctx))
+		in := obRetraction(t, ledger, holding, 1)
+		assert.Equal(t, IntentCanceled, in.State)
+		assert.Equal(t, "the notice it answers was not posted", in.Note)
+		assert.Empty(t, basecamp.at(holding.Destination))
 	})
 }
 
