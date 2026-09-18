@@ -110,3 +110,31 @@ func TestStderrLinesKeepARefusalTheDiagnosticsBury(t *testing.T) {
 	assert.Equal(t, "line 69", bounded[len(bounded)-1], "keeping the newest")
 	assert.LessOrEqual(t, len(r.Lines(strings.Repeat("z", 4000))[0]), maxStderr)
 }
+
+// Copilot on #738: Sanitize is the last thing every driver error and log
+// field passes through, and the connector's stderr is a terminal. A field a
+// worker chose — Claude's reported permission mode, a tool name — must not be
+// able to move the cursor, repaint the screen or start an escape sequence
+// there. Tab and newline stay: they are what a legitimate multi-line log
+// field is made of, and neither drives a terminal.
+func TestTheRuleTakesTerminalControlsOutOfEverythingItSanitizes(t *testing.T) {
+	r := NewRedactor(Redaction{Secrets: []string{"test-token-not-real"}})
+
+	out := r.Sanitize("mode \x1b[31;1mdanger\x1b[0m\a set")
+	assert.NotContains(t, out, "\x1b", "an escape character never reaches a terminal")
+	assert.NotContains(t, out, "\a", "nor a bell")
+	assert.Contains(t, out, "danger", "and the text itself still reads")
+
+	assert.NotContains(t, r.Sanitize("a2Kb"), "", "the C1 block is an escape sequence of its own")
+	assert.NotContains(t, r.Sanitize("ab"), "", "DEL too")
+	assert.NotContains(t, r.Sanitize("keep\roverwrite"), "\r", "a carriage return rewrites the line it is on")
+	assert.Equal(t, "one\ttwo\nthree", r.Sanitize("one\ttwo\nthree"), "tab and newline are a log field's own")
+
+	// A control character in the middle of a secret must not hide it from
+	// the replacer, so the controls come out first.
+	assert.NotContains(t, r.Sanitize("test-token\x1b-not-real"), "not-real")
+
+	// The pattern rules hold for a caller with no redaction of its own, and
+	// so does this one.
+	assert.NotContains(t, (*Redactor)(nil).Sanitize("\x1b]0;title\a"), "\x1b")
+}

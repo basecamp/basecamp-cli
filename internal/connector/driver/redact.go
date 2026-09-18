@@ -23,29 +23,33 @@ import (
 //
 // Sanitize removes, in this order:
 //
-//  1. Every value in Redaction.Secrets, wherever it appears: the task token
+//  1. Every character that drives a terminal rather than printing on one:
+//     C0 but for tab and newline, DEL, and the C1 block. It goes first so
+//     that an escape character inside a secret cannot carry it past the
+//     rules below.
+//  2. Every value in Redaction.Secrets, wherever it appears: the task token
 //     and the agent's credentials, named by whoever holds them.
-//  2. Every value of the worker's environment and of its MCP servers'
+//  3. Every value of the worker's environment and of its MCP servers'
 //     environments (Redaction.Env) that BaseEnv does not name. BaseEnv is
 //     the operator's home, path, locale and terminal, chosen because none of
 //     it authenticates anyone; everything a driver or the dispatcher adds by
 //     name (an API key, a config directory) is a value the agent was given,
 //     and is taken out. Values shorter than minEnvValue are left, since a
 //     one-character value would take out every letter it matches.
-//  3. Every path under Redaction.Dirs — the connector's state directory,
+//  4. Every path under Redaction.Dirs — the connector's state directory,
 //     which holds the ledger, and its runtime directory, which holds session
 //     files and token sockets — to the end of the path, whether it is written
 //     as given or with its symlinks resolved.
-//  4. Email addresses: agents volunteer the signed-in account's address
+//  5. Email addresses: agents volunteer the signed-in account's address
 //     unprompted.
-//  5. Credential-shaped runs: a bearer header's value, and any unbroken run
+//  6. Credential-shaped runs: a bearer header's value, and any unbroken run
 //     of 40 or more token characters.
 //
 // Stderr is further never passed on verbatim: only its last line is kept,
 // sanitized, stripped of control characters and cut to maxStderr bytes.
 //
-// A nil *Redactor still applies rules 4 and 5, so no caller is ever without
-// the pattern rules.
+// A nil *Redactor still applies rules 1, 5 and 6, so no caller is ever
+// without the control and pattern rules.
 //
 // Where this can still be broken: a secret the Redactor was not told about
 // and that has no credential shape (a short password, say) passes; a secret
@@ -176,6 +180,10 @@ func NewRedactor(r Redaction) *Redactor {
 // Sanitize is the one function every text crossing out of a worker passes
 // through. See the rule above.
 func (r *Redactor) Sanitize(s string) string {
+	// Controls first: a terminal is the connector's stderr, and stripping
+	// them afterwards would let an escape character sitting inside a secret
+	// carry that secret past the replacer.
+	s = stripControls(s)
 	if r != nil {
 		s = r.values.Replace(s)
 		if r.paths != nil {
@@ -184,6 +192,30 @@ func (r *Redactor) Sanitize(s string) string {
 	}
 	s = emailPattern.ReplaceAllString(s, redactedEmail)
 	return bearerPattern.ReplaceAllString(s, redactedCred)
+}
+
+// stripControls removes every character that drives a terminal rather than
+// printing on one: C0, DEL and the C1 block. What is sanitized ends up on
+// the connector's stderr and in its log, and the fields interpolated into it
+// are a worker's own — the permission mode Claude reports, a tool name — so
+// a malformed or hostile value must not be able to move the cursor, repaint
+// the screen or start an escape sequence there.
+//
+// Tab and newline stay. Neither drives a terminal, and both are what a
+// legitimate multi-line log field is made of; a message that must be one
+// line says so itself (Redactor.line, which maps every remaining control to
+// a space). Carriage return does not stay: it rewrites the line it is on,
+// which is how output is made to lie about what it said.
+func stripControls(s string) string {
+	return strings.Map(func(c rune) rune {
+		switch {
+		case c == '\t' || c == '\n':
+			return c
+		case c < 0x20, c == 0x7f, c >= 0x80 && c <= 0x9f:
+			return -1
+		}
+		return c
+	}, s)
 }
 
 // Stderr is what may be passed on of a worker's stderr: its last non-empty
