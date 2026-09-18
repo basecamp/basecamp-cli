@@ -1,0 +1,2547 @@
+//go:build unix
+
+package acp
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
+)
+
+func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == fakeAgentArg {
+		runFakeAgent(os.Args[2])
+		os.Exit(0)
+	}
+	if len(os.Args) > 1 && os.Args[1] == fakeChildArg {
+		runFakeChild()
+		os.Exit(0)
+	}
+	modeConfirmWait = 500 * time.Millisecond
+	os.Exit(m.Run())
+}
+
+const (
+	testPackage = "@example/fake-acp"
+	testVersion = "9.9.9"
+)
+
+var testAdapter = Adapter{
+	Name:    "fake-acp",
+	Package: testPackage,
+	Version: testVersion,
+	Env:     []string{"FAKE_AGENT_KEY"},
+	SetEnv:  map[string]string{"FAKE_AGENT_SWITCH": "on"},
+	Modes:   map[driver.PermissionMode]string{driver.ModeEditsInWorkDir: "ask"},
+	SessionMeta: map[string]any{
+		"vendor": map[string]any{"settingSources": []string{}},
+	},
+	LoadSession: true,
+}
+
+// recordingPolicy allows by a function and remembers what it was asked.
+type recordingPolicy struct {
+	workDir string
+	allow   func(driver.PermissionRequest) bool
+
+	mu    sync.Mutex
+	asked []driver.PermissionRequest
+}
+
+func (p *recordingPolicy) Rules() driver.PermissionRules {
+	return driver.PermissionRules{Mode: driver.ModeEditsInWorkDir, WorkDir: p.workDir}
+}
+
+func (p *recordingPolicy) Decide(_ context.Context, req driver.PermissionRequest) driver.PermissionDecision {
+	p.mu.Lock()
+	p.asked = append(p.asked, req)
+	p.mu.Unlock()
+	return driver.PermissionDecision{Allow: p.allow != nil && p.allow(req)}
+}
+
+func (p *recordingPolicy) requests() []driver.PermissionRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.asked)
+}
+
+type harness struct {
+	// withConfig is a test's last word on the session config.
+	withConfig func(driver.SessionConfig) driver.SessionConfig
+	fakeDir    string
+	t          *testing.T
+	sc         scenario
+	dir        string
+	policy     *recordingPolicy
+	lookup     map[string]string
+	grace      time.Duration
+}
+
+// newHarness is a fake agent that answers initialize as the pinned adapter,
+// offers the asking mode, and confirms it by read-back, unless the test says
+// otherwise.
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	// The fake agent's own files live apart from the session's working
+	// directory: its record holds what it was sent, the task token included,
+	// and the working directory is where no token may be.
+	fakeDir := t.TempDir()
+	return &harness{
+		fakeDir: fakeDir,
+		t:       t,
+		dir:     dir,
+		sc: scenario{
+			Record: filepath.Join(fakeDir, "record.json"), AgentName: testPackage, AgentVersion: testVersion,
+			Modes: []string{"auto", "ask", "bypassPermissions"}, CurrentMode: "bypassPermissions", ModeConfig: true, Confirm: "readback",
+			LoadSession: true,
+		},
+		policy: &recordingPolicy{workDir: dir},
+		lookup: map[string]string{},
+		grace:  2 * time.Second,
+	}
+}
+
+func (h *harness) driver() *Driver {
+	h.t.Helper()
+	raw, err := json.Marshal(h.sc)
+	require.NoError(h.t, err)
+	path := filepath.Join(h.fakeDir, "scenario.json")
+	require.NoError(h.t, os.WriteFile(path, raw, 0o600))
+	exe, err := os.Executable()
+	require.NoError(h.t, err)
+	d, err := New(Options{
+		Adapter: testAdapter, Binary: exe, Args: []string{fakeAgentArg, path},
+		Lookup:           func(name string) (string, bool) { v, ok := h.lookup[name]; return v, ok },
+		HandshakeTimeout: 10 * time.Second, CloseGrace: h.grace,
+	})
+	require.NoError(h.t, err)
+	return d
+}
+
+func (h *harness) config() driver.SessionConfig {
+	cfg := driver.SessionConfig{
+		Cwd: h.dir,
+		Env: []string{"HOME=" + h.dir, "PATH=/usr/bin:/bin"},
+		MCPServers: []driver.MCPServer{{
+			Name: "basecamp", Command: "/usr/local/bin/basecamp", Args: []string{"mcp", "--profile", "agent"},
+			Env: map[string]string{"BASECAMP_CONNECT_TASK_TOKEN": "test-token-not-real", "HOME": h.dir},
+		}},
+		Policy:     h.policy,
+		Scope:      driver.Scope{WorkDir: h.dir},
+		PrivateDir: h.t.TempDir(),
+	}
+	if h.withConfig != nil {
+		cfg = h.withConfig(cfg)
+	}
+	return cfg
+}
+
+func (h *harness) open() driver.Session {
+	h.t.Helper()
+	s, err := h.driver().NewSession(context.Background(), h.config())
+	require.NoError(h.t, err)
+	h.t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// record is what the fake agent has written about its run so far. It waits
+// for the file: a process that has just been started may not have written it
+// yet on a loaded machine.
+func (h *harness) record() agentRecord {
+	h.t.Helper()
+	var rec agentRecord
+	var raw []byte
+	require.Eventually(h.t, func() bool {
+		var err error
+		raw, err = os.ReadFile(h.sc.Record)
+		return err == nil
+	}, 30*time.Second, 10*time.Millisecond, "the agent wrote no record")
+	require.NoError(h.t, json.Unmarshal(raw, &rec))
+	return rec
+}
+
+func (h *harness) turns(turns ...turnScript) { h.sc.Turns = turns }
+
+func raw(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
+}
+
+func permission(t *testing.T, call map[string]any, options ...[2]string) json.RawMessage {
+	t.Helper()
+	opts := make([]any, 0, len(options))
+	for _, o := range options {
+		opts = append(opts, map[string]any{"optionId": o[0], "name": "label " + o[0], "kind": o[1]})
+	}
+	return raw(t, map[string]any{"toolCall": call, "options": opts})
+}
+
+func standardOptions() [][2]string {
+	return [][2]string{{"allow-once", "allow_once"}, {"allow-always", "allow_always"}, {"reject", "reject_once"}}
+}
+
+func gone(pid int) bool {
+	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+}
+
+func waitGone(t *testing.T, pid int) {
+	t.Helper()
+	require.Eventually(t, func() bool { return gone(pid) }, 10*time.Second, 20*time.Millisecond, "pid %d still exists", pid)
+}
+
+// ---------------------------------------------------------------- invariant 1
+
+func TestTheAdapterEnvironmentIsAnAllowlist(t *testing.T) {
+	h := newHarness(t)
+	h.lookup = map[string]string{
+		"FAKE_AGENT_KEY":              "test-key-not-real",
+		"CLAUDE_CODE_MESSAGING_TOKEN": "test-host-token-not-real",
+		"BASECAMP_TOKEN":              "test-basecamp-token-not-real",
+	}
+	h.sc.Probe = []string{"FAKE_AGENT_KEY", "FAKE_AGENT_SWITCH"}
+	cfg := h.config()
+	drivertest.RequireNoSecretFilesDuring(t, "test-token-not-real", []string{cfg.Cwd, cfg.PrivateDir}, func() {
+		s, err := h.driver().NewSession(context.Background(), cfg)
+		require.NoError(t, err)
+		_ = s.Close()
+	})
+
+	rec := h.record()
+	// The task token reaches the MCP server's declared environment, over the
+	// wire, and nowhere the adapter process itself keeps.
+	drivertest.RequireNoSecret(t, "test-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args, Dirs: []string{cfg.Cwd, cfg.PrivateDir}})
+	drivertest.RequireNoSecret(t, "test-host-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args})
+	drivertest.RequireNoSecret(t, "test-basecamp-token-not-real", drivertest.Places{Env: rec.EnvKV, Args: rec.Args})
+	assert.Equal(t, []string{"FAKE_AGENT_KEY", "FAKE_AGENT_SWITCH", "HOME", "PATH"}, rec.Env,
+		"the adapter gets the session's environment, its named variables and its own switches, and nothing else")
+	assert.Equal(t, "test-key-not-real", rec.Probe["FAKE_AGENT_KEY"])
+	assert.Equal(t, "on", rec.Probe["FAKE_AGENT_SWITCH"])
+
+	var params struct {
+		Cwd        string          `json:"cwd"`
+		MCPServers []wireServer    `json:"mcpServers"`
+		Meta       json.RawMessage `json:"_meta"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Params["session/new"], &params))
+	assert.Equal(t, h.dir, params.Cwd)
+	require.Len(t, params.MCPServers, 1)
+	srv := params.MCPServers[0]
+	assert.Equal(t, []wireEnv{{Name: "BASECAMP_CONNECT_TASK_TOKEN", Value: "test-token-not-real"}, {Name: "HOME", Value: h.dir}}, srv.Env,
+		"every variable the MCP server needs is declared in mcpServers[].env, and nothing else")
+	assert.Equal(t, []string{"mcp", "--profile", "agent"}, srv.Args)
+	assert.NotContains(t, strings.Join(srv.Args, " "), "test-token-not-real", "no token in argv")
+	assert.JSONEq(t, `{"vendor":{"settingSources":[]}}`, string(params.Meta))
+}
+
+// ---------------------------------------------------------------- invariant 2
+
+func TestTheAskingModeIsSetAndReadBack(t *testing.T) {
+	h := newHarness(t)
+	s := h.open()
+	rec := h.record()
+	assert.Equal(t, []string{"initialize", "session/new", "session/set_mode", "session/set_config_option"}, rec.Methods)
+	var set struct {
+		ModeID string `json:"modeId"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Params["session/set_mode"], &set))
+	assert.Equal(t, "ask", set.ModeID)
+	assert.Equal(t, "sess-1", s.ID())
+}
+
+func TestTheAskingModeIsConfirmedByAModeUpdate(t *testing.T) {
+	h := newHarness(t)
+	h.sc.ModeConfig = false
+	h.sc.Confirm = "notify"
+	h.open()
+	assert.Equal(t, []string{"initialize", "session/new", "session/set_mode"}, h.record().Methods)
+}
+
+func TestASessionThatCannotBePutInItsAskingModeIsNotRun(t *testing.T) {
+	cases := map[string]func(*scenario){
+		"the mode is not offered":            func(sc *scenario) { sc.Modes = []string{"auto", "bypassPermissions"} },
+		"the read-back reports the old mode": func(sc *scenario) { sc.Confirm = "stale" },
+		"no mode update follows":             func(sc *scenario) { sc.ModeConfig = false; sc.Confirm = "none" },
+		"set_mode fails":                     func(sc *scenario) { sc.Confirm = "error" },
+		"the agent has no modes at all":      func(sc *scenario) { sc.Modes = nil; sc.ModeConfig = false },
+		"a mode update overtakes the answer that confirms it": func(sc *scenario) {
+			sc.ModeBeforeSetAnswer = "bypassPermissions"
+		},
+		"only a stale mode update, no option": func(sc *scenario) { sc.ModeConfig = false; sc.Confirm = "stale" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			mutate(&h.sc)
+			s, err := h.driver().NewSession(context.Background(), h.config())
+			require.Error(t, err)
+			assert.Nil(t, s)
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+			assert.NotErrorIs(t, err, driver.ErrNotStarted, "a process existed")
+			assert.NotContains(t, h.record().Methods, "session/prompt")
+			waitGone(t, h.record().PID)
+		})
+	}
+}
+
+func TestLeavingTheAskingModeMidTurnEndsTheSession(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{ModeChange: "bypassPermissions"}, {SleepMS: 5000}}, Stop: "end_turn"})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker was not ended")
+	}
+	_, err = s.Prompt(context.Background(), "again")
+	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+}
+
+func TestAPolicyModeTheAdapterHasNoAskingModeForStartsNothing(t *testing.T) {
+	h := newHarness(t)
+	d := h.driver()
+	d.opts.Adapter.Modes = map[driver.PermissionMode]string{}
+	_, err := d.NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, driver.ErrNotStarted)
+	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+	require.ErrorIs(t, err, driver.ErrUnusable, "a configuration no retry can fix")
+	_, statErr := os.Stat(h.sc.Record)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "no process was started")
+}
+
+// ---------------------------------------------------------------- invariant 3
+
+func outcomeOf(t *testing.T, raw json.RawMessage) (string, string) {
+	t.Helper()
+	var o struct {
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &o))
+	return o.Outcome.Outcome, o.Outcome.OptionID
+}
+
+func TestPermissionOptionsAreChosenByKindNeverByIdOrLabel(t *testing.T) {
+	// Ids that lie about their kinds.
+	lying := [][2]string{{"reject", "allow_once"}, {"allow-once", "reject_once"}, {"yes", "allow_always"}}
+	call := map[string]any{"toolCallId": "call-1", "kind": "edit", "locations": []any{map[string]any{"path": "x"}}}
+
+	for _, tc := range []struct {
+		name    string
+		allow   bool
+		options [][2]string
+		want    [2]string
+	}{
+		{"allowed picks allow_once", true, lying, [2]string{"selected", "reject"}},
+		{"refused picks reject_once", false, lying, [2]string{"selected", "allow-once"}},
+		{"allowed never picks allow_always", true, [][2]string{{"always", "allow_always"}, {"no", "reject_once"}}, [2]string{"selected", "no"}},
+		{"refused falls back to reject_always", false, [][2]string{{"once", "allow_once"}, {"never", "reject_always"}}, [2]string{"selected", "never"}},
+		{"nothing to refuse with is canceled", false, [][2]string{{"once", "allow_once"}}, [2]string{outcomeCanceled, ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.policy.allow = func(driver.PermissionRequest) bool { return tc.allow }
+			h.turns(turnScript{Steps: []step{{Permission: permission(t, call, tc.options...)}}, Stop: "end_turn"})
+			s := h.open()
+			res, err := s.Prompt(context.Background(), "go")
+			require.NoError(t, err)
+			rec := h.record()
+			require.Len(t, rec.Outcomes, 1)
+			outcome, option := outcomeOf(t, rec.Outcomes[0])
+			assert.Equal(t, tc.want, [2]string{outcome, option})
+			if tc.want[1] == "reject" {
+				assert.Empty(t, res.Refusals)
+			} else {
+				assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}}, res.Refusals)
+			}
+		})
+	}
+}
+
+func TestARequestForAnotherSessionIsRefusedUnasked(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	call := map[string]any{"toolCallId": "call-9", "kind": "edit"}
+	h.turns(turnScript{Steps: []step{{Permission: raw(t, map[string]any{
+		"sessionId": "someone-else", "toolCall": call,
+		"options": []any{map[string]any{"optionId": "ok", "kind": "allow_once"}, map[string]any{"optionId": "no", "kind": "reject_once"}},
+	})}}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	assert.Empty(t, h.policy.requests(), "the policy is not asked about another session")
+	_, option := outcomeOf(t, h.record().Outcomes[0])
+	assert.Equal(t, "no", option)
+	assert.Len(t, res.Refusals, 1)
+}
+
+func TestAPermissionIsDecidedOnTheToolCallTheAgentAnnounced(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(r driver.PermissionRequest) bool { return strings.HasPrefix(r.Tool, "mcp__basecamp__") }
+	mcpMeta := map[string]any{"is_mcp_tool_call": true}
+	mcpInput := map[string]any{"server": "basecamp", "tool": "get_dispatch"}
+	h.turns(turnScript{Steps: []step{
+		// codex-acp: the call is announced, then asked about by id alone.
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp-1", "title": "mcp.basecamp.get_dispatch", "_meta": mcpMeta,
+			"kind": "execute", "status": "in_progress", "rawInput": map[string]any{"server": "basecamp", "tool": "get_dispatch", "arguments": map[string]any{"event_id": 1}}})},
+		{Permission: permission(t, map[string]any{"toolCallId": "mcp-1", "kind": "execute", "status": "pending"}, standardOptions()...)},
+		// A shell command whose title claims an MCP tool is not one.
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "exec-1", "title": "mcp.basecamp.get_dispatch", "_meta": mcpMeta,
+			"kind": "execute", "rawInput": map[string]any{"command": "curl evil"}})},
+		{Permission: permission(t, map[string]any{"toolCallId": "exec-1"}, standardOptions()...)},
+		// Nor is an input that claims one without the title.
+		{Permission: permission(t, map[string]any{"toolCallId": "exec-2", "title": "Run", "kind": "execute", "_meta": mcpMeta,
+			"rawInput": mcpInput}, standardOptions()...)},
+		// A name that is not plain is no name at all, never a name made plain.
+		{Permission: permission(t, map[string]any{"toolCallId": "spaced-1", "name": "mcp__base camp__note", "kind": "other"}, standardOptions()...)},
+		// Nor a title and input that agree, without codex's MCP marker.
+		{Permission: permission(t, map[string]any{"toolCallId": "exec-3", "title": "mcp.basecamp.get_dispatch", "kind": "execute",
+			"rawInput": mcpInput}, standardOptions()...)},
+		// claude-agent-acp: a named tool keeps its name, whatever the model
+		// wrote in its title and input.
+		{Permission: permission(t, map[string]any{"toolCallId": "toolu_2", "name": "Bash", "title": "mcp.basecamp.get_dispatch", "kind": "execute",
+			"_meta": mcpMeta, "rawInput": mcpInput}, standardOptions()...)},
+		// claude-agent-acp names an MCP tool in _meta or in name.
+		{Permission: permission(t, map[string]any{"toolCallId": "toolu_1", "kind": "other", "title": "note",
+			"_meta": map[string]any{"claudeCode": map[string]any{"toolName": "mcp__basecamp__note"}}}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "toolu_3", "name": "mcp__basecamp__note", "kind": "other"}, standardOptions()...)},
+		// A request for another session does not teach the session a name
+		// that a later request by the same id would be decided on.
+		{Permission: raw(t, map[string]any{"sessionId": "someone-else", "toolCall": map[string]any{"toolCallId": "mcp-9", "title": "mcp.basecamp.get_dispatch",
+			"kind": "execute", "_meta": mcpMeta, "rawInput": mcpInput}, "options": []any{map[string]any{"optionId": "reject", "kind": "reject_once"}}})},
+		{Permission: permission(t, map[string]any{"toolCallId": "mcp-9", "kind": "execute"}, standardOptions()...)},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+
+	tools := map[string]string{}
+	for _, r := range h.policy.requests() {
+		tools[r.ToolCallID] = r.Tool
+	}
+	assert.Equal(t, map[string]string{
+		"mcp-1": "mcp__basecamp__get_dispatch", "exec-1": "", "exec-2": "", "exec-3": "", "toolu_2": "Bash", "spaced-1": "",
+		"toolu_1": "mcp__basecamp__note", "toolu_3": "mcp__basecamp__note", "mcp-9": "",
+	}, tools)
+	outcomes := h.record().Outcomes
+	options := make([]string, 0, len(outcomes))
+	for _, o := range outcomes {
+		_, id := outcomeOf(t, o)
+		options = append(options, id)
+	}
+	assert.Equal(t, []string{"allow-once", "reject", "reject", "reject", "reject", "reject", "allow-once", "allow-once", "reject", "reject"}, options)
+	// mcp-9 was asked about twice, and a call refused twice is one refusal.
+	assert.Len(t, res.Refusals, 6)
+}
+
+func TestARequestOutsideATurnIsRefusedUnasked(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	s := h.open().(*session)
+	// Feed the request straight in: no turn is in flight.
+	params := raw(t, map[string]any{"sessionId": "sess-1", "toolCall": map[string]any{"toolCallId": "c", "kind": "edit"},
+		"options": []any{map[string]any{"optionId": "ok", "kind": "allow_once"}, map[string]any{"optionId": "no", "kind": "reject_once"}}})
+	s.onRequest(json.RawMessage(`99`), "session/request_permission", params, s.claim("session/request_permission"))
+	assert.Empty(t, h.policy.requests())
+}
+
+// ---------------------------------------------------------------- invariant 4
+
+func TestARefusalIsNeverReportedAsACancel(t *testing.T) {
+	call := map[string]any{"toolCallId": "exec-1", "kind": "execute"}
+	t.Run("codex ends a refused turn as canceled", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{Permission: permission(t, call, standardOptions()...)}}, Stop: string(driver.TurnCanceled)})
+		res, err := h.open().Prompt(context.Background(), "go")
+		require.NoError(t, err)
+		assert.Equal(t, driver.TurnRefusal, res.Stop)
+		assert.Equal(t, []driver.Refusal{{ToolCallID: "exec-1", Tool: "execute"}}, res.Refusals)
+	})
+	t.Run("claude ends it as end_turn, with the refusal on record", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{Permission: permission(t, call, standardOptions()...)}}, Stop: "end_turn"})
+		res, err := h.open().Prompt(context.Background(), "go")
+		require.NoError(t, err)
+		assert.Equal(t, driver.TurnEndTurn, res.Stop)
+		assert.Len(t, res.Refusals, 1)
+	})
+	t.Run("a canceled stop nobody asked for is an error", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: string(driver.TurnCanceled)})
+		res, err := h.open().Prompt(context.Background(), "go")
+		require.Error(t, err)
+		assert.NotEqual(t, driver.TurnCanceled, res.Stop)
+	})
+	t.Run("a cancel the connector asked for is canceled", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "hi"}})}},
+			WaitForCancel: true, Stop: string(driver.TurnCanceled)})
+		s := h.open()
+		answers := make(chan driver.PromptResult, 1)
+		go func() {
+			res, err := s.Prompt(context.Background(), "go")
+			assert.NoError(t, err)
+			answers <- res
+		}()
+		<-s.Updates()
+		require.NoError(t, s.Cancel(context.Background()))
+		select {
+		case res := <-answers:
+			assert.Equal(t, driver.TurnCanceled, res.Stop)
+		case <-time.After(5 * time.Second):
+			t.Fatal("no answer after cancel")
+		}
+	})
+	t.Run("an unknown stop reason is an error", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: "gave_up"})
+		_, err := h.open().Prompt(context.Background(), "go")
+		require.Error(t, err)
+	})
+}
+
+func TestACancelWithNoTurnEndsTheNextOneAndOnlyIt(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{WaitForCancel: true, Stop: string(driver.TurnCanceled)}, turnScript{Stop: "end_turn"})
+	s := h.open()
+	require.NoError(t, s.Cancel(context.Background()))
+	assert.NotContains(t, h.record().Methods, "session/cancel", "nothing is sent for a turn that is not there")
+
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnCanceled, res.Stop, "the turn the cancel raced starts canceled")
+	assert.Contains(t, h.record().Methods, "session/cancel")
+
+	res, err = s.Prompt(context.Background(), "follow-up")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnEndTurn, res.Stop, "a cancel ends one turn, not the session's every turn after it")
+	n := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n, "one cancel, for one turn")
+}
+
+func TestAPermissionIsNotAllowedOnceTheTurnIsCanceled(t *testing.T) {
+	h := newHarness(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		once.Do(func() { close(started) })
+		<-release
+		return true
+	}
+	h.turns(turnScript{Steps: []step{{Permission: permission(t, map[string]any{"toolCallId": "c1", "kind": "edit"}, standardOptions()...)}},
+		WaitForCancel: true, Stop: string(driver.TurnCanceled)}, turnScript{Stop: "end_turn"})
+	s := h.open()
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		assert.NoError(t, err)
+		answers <- res
+	}()
+	<-started
+	require.NoError(t, s.Cancel(context.Background()))
+	close(release)
+	select {
+	case res := <-answers:
+		assert.Equal(t, driver.TurnCanceled, res.Stop)
+		assert.Len(t, res.Refusals, 1, "a permission the policy allowed while the turn was canceled is refused")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the canceled turn never ended")
+	}
+	_, option := outcomeOf(t, h.record().Outcomes[0])
+	assert.Equal(t, "reject", option)
+
+	// The cancel ended the turn it found; the next one is not born canceled.
+	res, err := s.Prompt(context.Background(), "follow-up")
+	require.NoError(t, err)
+	assert.Equal(t, driver.TurnEndTurn, res.Stop)
+	n := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			n++
+		}
+	}
+	assert.Equal(t, 1, n)
+}
+
+// ---------------------------------------------------------------- invariant 5
+
+func TestLoadIsGatedByWhatTheAgentAdvertises(t *testing.T) {
+	replay := []json.RawMessage{
+		raw(t, map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "old"}}),
+		raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "old answer"}}),
+		raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t0", "kind": "read"}),
+	}
+	for _, tc := range []struct {
+		name         string
+		load, resume bool
+		method       string
+	}{
+		{"loadSession", true, false, "session/load"},
+		{"resume only", false, true, "session/resume"},
+		{"both prefers load", true, true, "session/load"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.sc.LoadSession, h.sc.Resume, h.sc.Replay = tc.load, tc.resume, replay
+			h.sc.SessionID = "sess-earlier"
+			d := h.driver()
+			s, err := d.LoadSession(context.Background(), h.config(), "sess-earlier")
+			require.NoError(t, err)
+			defer s.Close()
+			assert.Equal(t, "sess-earlier", s.ID())
+			rec := h.record()
+			assert.Contains(t, rec.Methods, tc.method)
+			assert.NotContains(t, rec.Methods, "session/new")
+			assert.True(t, d.Capabilities().LoadSession, "a session this driver can reload, by load or resume")
+			select {
+			case u := <-s.Updates():
+				t.Fatalf("a load's replay was reported as progress: %+v", u)
+			default:
+			}
+			assert.Contains(t, rec.Methods, "session/set_config_option", "a loaded session is put in its asking mode too")
+		})
+	}
+	t.Run("neither", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.LoadSession, h.sc.Resume = false, false
+		d := h.driver()
+		_, err := d.LoadSession(context.Background(), h.config(), "sess-earlier")
+		require.ErrorIs(t, err, ErrLoadUnsupported)
+		assert.False(t, d.Capabilities().LoadSession)
+		assert.NotErrorIs(t, err, driver.ErrNotStarted)
+		waitGone(t, h.record().PID)
+	})
+	t.Run("a session id the ledger could not have written starts nothing", func(t *testing.T) {
+		h := newHarness(t)
+		_, err := h.driver().LoadSession(context.Background(), h.config(), "../../etc; rm")
+		require.ErrorIs(t, err, driver.ErrNotStarted)
+	})
+}
+
+// ---------------------------------------------------------------- invariants 6 and 7, and driver invariant 4
+
+func TestOnlyAStartThatRanNothingIsErrNotStarted(t *testing.T) {
+	t.Run("missing binary", func(t *testing.T) {
+		h := newHarness(t)
+		d := h.driver()
+		d.opts.Binary = filepath.Join(h.dir, "no-such-adapter")
+		_, err := d.NewSession(context.Background(), h.config())
+		require.ErrorIs(t, err, driver.ErrNotStarted)
+	})
+	for name, mutate := range map[string]func(*scenario){
+		"initialize fails":        func(sc *scenario) { sc.FailInitialize = true },
+		"another adapter":         func(sc *scenario) { sc.AgentName = "@someone/else" },
+		"another adapter version": func(sc *scenario) { sc.AgentVersion = "9.9.10" },
+		"another protocol":        func(sc *scenario) { sc.ProtocolVersion = 2 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			mutate(&h.sc)
+			_, err := h.driver().NewSession(context.Background(), h.config())
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, driver.ErrNotStarted)
+			assert.Equal(t, h.record().PID, driver.StartedProcess(err).PID, "a start that launched a process says which")
+			assert.NotContains(t, h.record().Methods, "session/new")
+			waitGone(t, h.record().PID)
+		})
+	}
+	t.Run("a handshake that never answers", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.Hang = "session/new"
+		d := h.driver()
+		d.opts.HandshakeTimeout = 3 * time.Second
+		_, err := d.NewSession(context.Background(), h.config())
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NotErrorIs(t, err, driver.ErrNotStarted)
+		waitGone(t, h.record().PID)
+	})
+}
+
+// ---------------------------------------------------------------- driver invariant 5
+
+func TestCloseEndsTheWholeProcessGroup(t *testing.T) {
+	h := newHarness(t)
+	h.sc.SpawnChild, h.sc.IgnoreStdinEOF, h.sc.IgnoreTerminate = true, true, true
+	h.grace = 200 * time.Millisecond
+	s := h.open()
+	rec := h.record()
+	require.NotZero(t, rec.ChildPID)
+	assert.Equal(t, rec.PID, s.Process().PGID)
+
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		_ = syscall.Kill(-rec.PID, syscall.SIGKILL)
+		t.Fatal("Close did not end an adapter that ignores EOF and SIGTERM")
+	}
+	require.NoError(t, s.Close(), "Close is idempotent")
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the adapter outlived Close")
+	}
+	waitGone(t, rec.PID)
+	waitGone(t, rec.ChildPID)
+	_, err := s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrSessionEnded)
+}
+
+func TestAWorkerThatDiesMidTurnEndsThePrompt(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{Hang: true})
+	s := h.open()
+	answers := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "go")
+		answers <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, syscall.Kill(s.Process().PID, syscall.SIGKILL))
+	select {
+	case err := <-answers:
+		require.ErrorIs(t, err, driver.ErrSessionEnded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt did not return when the worker died")
+	}
+}
+
+// ---------------------------------------------------------------- invariant 8
+
+func TestNothingTheAgentVolunteersIsKept(t *testing.T) {
+	h := newHarness(t)
+	h.sc.AuthEmail = "person@example.com"
+	h.turns(
+		turnScript{Steps: []step{
+			{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "secret words the connector never keeps"}})},
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "cat /home/person/.ssh/id_rsa", "kind": "read",
+				"status": "pending", "rawInput": map[string]any{"path": "/home/person/.ssh/id_rsa"}, "name": "Read person@example.com"})},
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t2", "title": "cat /home/person/.ssh/id_rsa", "kind": "read"})},
+			{Update: raw(t, map[string]any{"sessionUpdate": "usage_update", "used": 1200, "size": 200000})},
+			{Update: raw(t, map[string]any{"sessionUpdate": "plan", "entries": []any{map[string]any{"content": "step one"}}})},
+		}, Stop: "end_turn", Usage: raw(t, map[string]any{"inputTokens": 12, "outputTokens": 34})},
+		turnScript{ErrorMessage: "quota exhausted for person@example.com"},
+	)
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	assert.Equal(t, driver.Usage{InputTokens: 12, OutputTokens: 34, ContextUsed: 1200, ContextSize: 200000}, res.Usage)
+
+	var updates []driver.Update
+	for len(updates) < 6 {
+		select {
+		case u := <-s.Updates():
+			updates = append(updates, u)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d updates", len(updates))
+		}
+	}
+	kinds := make([]driver.UpdateKind, 0, len(updates))
+	for _, u := range updates {
+		kinds = append(kinds, u.Kind)
+		assert.NotContains(t, u.Tool, "@")
+		assert.NotContains(t, u.Tool, "ssh")
+	}
+	assert.Equal(t, []driver.UpdateKind{driver.UpdateAgentMessageChunk, driver.UpdateToolCall, driver.UpdateToolCallUpdate, driver.UpdateUsage, driver.UpdatePlan, driver.UpdateUsage}, kinds)
+	assert.Empty(t, updates[2].Tool, "a title is never a tool's name")
+	assert.Equal(t, len("secret words the connector never keeps"), updates[0].Chars)
+	assert.Equal(t, driver.ToolRead, updates[1].ToolKind)
+	assert.Equal(t, driver.ToolPending, updates[1].Status)
+
+	_, err = s.Prompt(context.Background(), "again")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "person@example.com")
+	assert.Contains(t, err.Error(), "quota exhausted")
+
+	h2 := newHarness(t)
+	h2.sc.AuthEmail, h2.sc.FailInitialize = "person@example.com", true
+	_, err = h2.driver().NewSession(context.Background(), h2.config())
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "person@example.com")
+}
+
+// ---------------------------------------------------------------- turns
+
+func TestAPromptWhoseContextEndsLeavesTheTurnToFinish(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{SleepMS: 400}}, Stop: "end_turn"}, turnScript{Stop: "end_turn"})
+	s := h.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := s.Prompt(ctx, "slow")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	_, err = s.Prompt(context.Background(), "overlapping")
+	require.Error(t, err, "the first turn is still in flight")
+	require.Eventually(t, func() bool {
+		_, err := s.Prompt(context.Background(), "next")
+		return err == nil
+	}, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestFollowUpsArePromptsInTheSameSession(t *testing.T) {
+	h := newHarness(t)
+	d := h.driver()
+	caps := d.Capabilities()
+	assert.True(t, caps.FollowUpPrompts)
+	assert.True(t, caps.PermissionCallback)
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+	for range 3 {
+		res, err := s.Prompt(context.Background(), "next")
+		require.NoError(t, err)
+		assert.Equal(t, driver.TurnEndTurn, res.Stop)
+	}
+	methods := h.record().Methods
+	n := 0
+	for _, m := range methods {
+		if m == "session/prompt" {
+			n++
+		}
+	}
+	assert.Equal(t, 3, n)
+	assert.Equal(t, Name, d.Name())
+}
+
+// ---------------------------------------------------------------- adapters
+
+func TestLocateFindsOnlyThePinnedVersion(t *testing.T) {
+	dir := t.TempDir()
+	a := Adapter{Name: "fake-acp", Package: "@example/fake-acp", Version: "1.2.3"}
+	_, err := Locate(dir, a)
+	require.ErrorIs(t, err, ErrAdapterMissing)
+	_, err = Locate("relative/dir", a)
+	require.Error(t, err)
+
+	pkg := filepath.Join(dir, "node_modules", "@example", "fake-acp")
+	require.NoError(t, os.MkdirAll(pkg, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name":"@example/fake-acp","version":"1.2.4"}`), 0o600))
+	_, err = Locate(dir, a)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pinned")
+
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name":"@example/fake-acp","version":"1.2.3"}`), 0o600))
+	_, err = Locate(dir, a)
+	require.ErrorIs(t, err, ErrAdapterMissing, "no executable yet")
+	bin := filepath.Join(dir, "node_modules", ".bin")
+	require.NoError(t, os.MkdirAll(bin, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "fake-acp"), []byte("#!/bin/sh\n"), 0o700))
+	got, err := Locate(dir, a)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(bin, "fake-acp"), got)
+}
+
+func TestThePinnedAdapters(t *testing.T) {
+	for _, a := range Adapters() {
+		got, ok := AdapterNamed(a.Name)
+		require.True(t, ok)
+		assert.Equal(t, a.Package, got.Package)
+		assert.NotEmpty(t, a.Modes[driver.ModeEditsInWorkDir], a.Name)
+		for _, name := range a.Env {
+			assert.NotContains(t, []string{"CLAUDE_CODE_EXECUTABLE", "CODEX_PATH", "CLAUDE_CODE_MESSAGING_TOKEN", "BASECAMP_TOKEN"}, name,
+				"%s may not take a variable that swaps its pinned agent or carries the host's token", a.Name)
+		}
+	}
+	options := ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["options"].(map[string]any)
+	assert.Equal(t, true, options["strictMcpConfig"], "only the session's MCP servers")
+	assert.Equal(t, MCPStatusInit, ClaudeAgentACP.MCPStatus)
+	assert.Equal(t, []map[string]string{{"type": "system", "subtype": "init"}}, ClaudeAgentACP.SessionMeta["claudeCode"].(map[string]any)["emitRawSDKMessages"],
+		"the init, and only the init, is forwarded")
+	assert.Equal(t, MCPStatusStartupFailures, CodexACP.MCPStatus)
+	assert.Equal(t, []string{"EnterPlanMode", "ExitPlanMode"}, options["disallowedTools"], "a plan-mode switch would leave the verified mode")
+	assert.Equal(t, []string{}, options["settingSources"], "none of the host's settings")
+	assert.Equal(t, false, options["allowDangerouslySkipPermissions"])
+	assert.Equal(t, "true", CodexACP.SetEnv["DISABLE_MCP_CONFIG_FILTERING"], "the requested server is never dropped for a configured one")
+	assert.NotNil(t, CodexACP.Preflight)
+	assert.Equal(t, "0.78.0", ClaudeAgentACP.Version)
+	assert.Equal(t, "1.12.0", CodexACP.Version)
+
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	data, err := os.ReadFile(filepath.Join("adapters", "package.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &manifest))
+	for _, a := range Adapters() {
+		assert.Equal(t, a.Version, manifest.Dependencies[a.Package], "adapters/package.json pins what the driver checks")
+	}
+	var codexCfg map[string]any
+	require.NoError(t, json.Unmarshal([]byte(CodexACP.SetEnv["CODEX_CONFIG"]), &codexCfg), "CODEX_CONFIG is JSON")
+
+	_, ok := AdapterNamed("nobody")
+	assert.False(t, ok)
+	dir, err := DefaultAdaptersDir(func(name string) (string, bool) {
+		return map[string]string{"HOME": "/home/agent"}[name], name == "HOME"
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/home/agent/.local/share/basecamp/acp-adapters", dir)
+}
+
+// ---------------------------------------------------------------- hangs
+
+func TestAnAgentThatStopsReadingCannotHoldCancelOrClose(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	h.grace = 300 * time.Millisecond
+	s := h.open()
+
+	prompted := make(chan error, 1)
+	go func() {
+		// Larger than the pipe and the agent's read buffer: the write sticks.
+		_, err := s.Prompt(context.Background(), strings.Repeat("x", 8<<20))
+		prompted <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+
+	canceled := make(chan error, 1)
+	go func() { canceled <- s.Cancel(context.Background()) }()
+	select {
+	case err := <-canceled:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Cancel waited on a stuck write")
+	}
+	closed := make(chan struct{})
+	go func() { _ = s.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		_ = syscall.Kill(-s.Process().PGID, syscall.SIGKILL)
+		t.Fatal("Close waited on a stuck write")
+	}
+	select {
+	case err := <-prompted:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stuck prompt never returned")
+	}
+}
+
+func TestALineTooLongEndsTheWorker(t *testing.T) {
+	old := maxLine
+	maxLine = 1 << 20
+	t.Cleanup(func() { maxLine = old })
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk",
+		"content": map[string]any{"type": "text", "text": strings.Repeat("y", 2<<20)}})}}, Hang: true})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrSessionEnded)
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker outlived its unreadable stream")
+	}
+}
+
+func TestAModeChangeFailsTheTurnBeforeTheWorkerIsGone(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{ModeChange: "bypassPermissions"}}, Hang: true})
+	s := h.open().(*session)
+	release := make(chan struct{})
+	ended := make(chan struct{})
+	s.mu.Lock()
+	s.endUnsafe = func() {
+		<-release
+		s.worker.Terminate(0)
+		close(ended)
+	}
+	s.mu.Unlock()
+	answers := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "go")
+		answers <- err
+	}()
+	select {
+	case err := <-answers:
+		require.ErrorIs(t, err, driver.ErrUnsafeMode, "the turn fails on the mode report, not on the worker's end")
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the turn waited for the worker to be ended")
+	}
+	close(release)
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker was not ended")
+	}
+	<-s.Done()
+}
+
+// ---------------------------------------------------------------- foreign MCP configuration
+
+func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cwd := filepath.Join(root, "repo", "sub")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o700))
+	require.NoError(t, os.MkdirAll(cwd, 0o700))
+	lookup := func(name string) (string, bool) {
+		if name == "HOME" {
+			return home, true
+		}
+		return "", false
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\n[projects.\"/tmp\"]\ntrust_level = \"trusted\"\n"), 0o600))
+	require.NoError(t, codexPreflight(cwd, lookup))
+
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("['mcp_servers'.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted key declares them too")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[\"mcp\\u005fservers\".basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a key with an escape is refused rather than read")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles.\"my profile\".mcp_servers.x]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a quoted table path declares them too")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[profiles . demo . mcp_servers . basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "TOML allows space around the dots")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("\ufeff[mcp_servers.basecamp]\ncommand = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a byte order mark does not hide the first line")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"),
+		[]byte("profile = \"demo\"\nprofiles = { demo = { mcp_servers = { basecamp = { command = \"/bin/evil\" } } } }\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "an inline table declares them on one line, at any depth")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
+	require.NoError(t, codexPreflight(cwd, lookup), "an escape in a value is not a key")
+	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o000))
+	require.ErrorIs(t, codexPreflight(cwd, lookup), ErrForeignMCPConfig, "a config this cannot read is refused, not assumed empty")
+	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o600))
+	codexHome := filepath.Join(root, "codex-home")
+	require.NoError(t, os.MkdirAll(codexHome, 0o700))
+	withCodexHome := func(name string) (string, bool) {
+		if name == "CODEX_HOME" {
+			return codexHome, true
+		}
+		return lookup(name)
+	}
+	require.NoError(t, codexPreflight(cwd, withCodexHome), "CODEX_HOME replaces ~/.codex")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "repo", ".codex"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "repo", ".codex", "config.toml"), []byte("mcp_servers.basecamp.command = \"/bin/evil\"\n"), 0o600))
+	require.ErrorIs(t, codexPreflight(cwd, withCodexHome), ErrForeignMCPConfig, "a project layer above the working directory counts")
+
+	h := newHarness(t)
+	d := h.driver()
+	d.opts.Adapter.Preflight = func(string, func(string) (string, bool)) error { return ErrForeignMCPConfig }
+	_, err := d.NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	require.ErrorIs(t, err, driver.ErrNotStarted)
+	require.ErrorIs(t, err, driver.ErrUnusable)
+	_, statErr := os.Stat(h.sc.Record)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
+}
+
+func TestCloseGivesUpOnOutputAnEscapedDescendantHolds(t *testing.T) {
+	h := newHarness(t)
+	h.sc.EscapingChild, h.sc.IgnoreStdinEOF, h.sc.IgnoreTerminate = true, true, true
+	h.grace = 300 * time.Millisecond
+	s := h.open()
+	rec := h.record()
+	require.NotZero(t, rec.ChildPID)
+	t.Cleanup(func() { _ = syscall.Kill(rec.ChildPID, syscall.SIGKILL) })
+
+	closed := make(chan struct{})
+	go func() { _ = s.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close waited on output a process outside the worker's group holds")
+	}
+	waitGone(t, rec.PID)
+	assert.False(t, gone(rec.ChildPID), "the escaped descendant is not this driver's to kill by name")
+}
+
+func TestAgentTextIsFitForALog(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{ErrorMessage: "quota for person@example.com\u001b[31mred\u009b31mred\nsecond line\ttab"})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.Error(t, err)
+	for _, bad := range []string{"person@example.com", "\u001b", "\u009b", "\n", "\t"} {
+		assert.NotContains(t, err.Error(), bad)
+	}
+	assert.Contains(t, err.Error(), "quota for")
+}
+
+func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	var deciding atomic.Int32
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		deciding.Add(1)
+		defer deciding.Add(-1)
+		<-release
+		return true
+	}
+	const flood = 60
+	h.turns(turnScript{
+		FloodPermissions: flood,
+		FloodCall:        permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		Stop:             "end_turn",
+	})
+	s := h.open()
+	type answer struct {
+		res driver.PromptResult
+		err error
+	}
+	// The result comes back on a channel rather than being asserted where it
+	// arrives: a goroutine that outlives the test must not be the one to fail
+	// it.
+	answers := make(chan answer, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		answers <- answer{res, err}
+	}()
+	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 60*time.Second, 10*time.Millisecond,
+		"the session decides at most %d at once", maxDecisions)
+	// Every request but the ones stuck in a decision has been answered.
+	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 60*time.Second, 20*time.Millisecond,
+		"a flood is answered as it arrives")
+	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
+	answered := h.record().Outcomes
+	close(release)
+	var got answer
+	select {
+	case got = <-answers:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the flooded turn never ended")
+	}
+	require.NoError(t, got.err)
+	res := got.res
+	assert.NotEmpty(t, res.Refusals, "a request refused for want of room is still a refusal on the turn")
+	canceled := 0
+	for _, o := range answered {
+		if len(o) == 0 || string(o) == "null" {
+			continue
+		}
+		if outcome, _ := outcomeOf(t, o); outcome == outcomeCanceled {
+			canceled++
+		}
+	}
+	assert.Positive(t, canceled, "what reaches the policy past its bound is refused undecided")
+	allowed := 0
+	for _, o := range h.record().Outcomes {
+		if len(o) == 0 || string(o) == "null" {
+			continue
+		}
+		if _, option := outcomeOf(t, o); option == "allow-once" {
+			allowed++
+		}
+	}
+	assert.Positive(t, allowed, "while what fits is still decided")
+}
+
+// The connection answers at most maxHandlers requests at once, whatever the
+// agent sends: the rest are refused as they are read, so no flood of requests
+// becomes a flood of goroutines.
+func TestTheConnectionBoundsRequestsInFlight(t *testing.T) {
+	// What the client writes, the test reads; what the test writes, the
+	// client reads.
+	fromClient, toAgent := io.Pipe()
+	toClient, fromAgent := io.Pipe()
+	t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+
+	c := newConn(toAgent)
+	var busy atomic.Int32
+	c.onBusy = func(string, json.RawMessage, any) { busy.Add(1) }
+	release := make(chan struct{})
+	var inFlight, peak atomic.Int32
+	c.onRequest = func(id json.RawMessage, _ string, _ json.RawMessage, _ any) {
+		n := inFlight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		inFlight.Add(-1)
+		c.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
+	}
+	go func() { _ = c.read(toClient) }()
+
+	answers := make(chan int, 1)
+	go func() {
+		// Read what the client writes, so no reply of its own can block it.
+		refused := 0
+		scanner := bufio.NewScanner(fromClient)
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), "too many requests") {
+				refused++
+			}
+			if strings.Contains(scanner.Text(), "outcome") {
+				break
+			}
+		}
+		answers <- refused
+	}()
+	for i := range 64 {
+		_, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i)
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return int(inFlight.Load()) == maxHandlers }, 10*time.Second, 5*time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, int32(maxHandlers), peak.Load(), "no more goroutines than the bound, whatever arrives")
+	close(release)
+	select {
+	case refused := <-answers:
+		assert.Positive(t, refused, "what does not fit is refused as it is read")
+		assert.GreaterOrEqual(t, int(busy.Load()), refused, "and every one of those refusals is heard by the session")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no answer reached the agent")
+	}
+}
+
+func TestWhatOneToolCallMayCostTheSession(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	// What a tool call costs is what it costs inside a turn: outside one,
+	// nothing of it is kept at all.
+	s.mu.Lock()
+	s.turn = &turn{done: make(chan struct{})}
+	s.mu.Unlock()
+	long := strings.Repeat("c", maxToolCallID+1)
+	locations := make([]any, 0, maxLocations*4)
+	for i := range maxLocations * 4 {
+		locations = append(locations, map[string]any{"path": fmt.Sprintf("/work/%d", i)})
+	}
+	u, ok := decodeUpdate(raw(t, map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": long, "kind": "edit", "status": "pending", "locations": locations,
+	}))
+	require.True(t, ok)
+	assert.Len(t, u.Locations, maxLocations, "a call carries as many paths as this driver carries, no more")
+	assert.True(t, u.Unplaceable, "and a call whose paths did not all fit is one the policy cannot place")
+	info := s.noteTool(u)
+	assert.Len(t, info.locations, maxLocations)
+	assert.True(t, info.unplaceable)
+	s.mu.Lock()
+	remembered := len(s.tools)
+	s.mu.Unlock()
+	assert.Zero(t, remembered, "an id past what an id can be is not a key to keep")
+
+	for i := range maxTools + 10 {
+		s.noteTool(sessionUpdate{ToolCallID: fmt.Sprintf("call-%d", i), Kind: "edit", Status: "pending"})
+	}
+	s.mu.Lock()
+	remembered = len(s.tools)
+	s.mu.Unlock()
+	assert.Equal(t, maxTools, remembered)
+}
+
+// A permission being decided as the turn ends is still on the turn's result:
+// the agent can answer the prompt before it hears the answer to its request.
+func TestARefusalDecidedAsTheTurnEndsIsOnItsResult(t *testing.T) {
+	h := newHarness(t)
+	deciding := make(chan struct{})
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		close(deciding)
+		time.Sleep(300 * time.Millisecond)
+		return false
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+	})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	select {
+	case <-deciding:
+	default:
+		t.Fatal("the policy was never asked")
+	}
+	assert.Len(t, res.Refusals, 1)
+}
+
+// A handshake that fails after the adapter started leaves nothing of its
+// process group behind by the time NewSession returns: the caller settles the
+// attempt on that error.
+func TestAFailedHandshakeLeavesNoGroupBehind(t *testing.T) {
+	// Several runs: the window this closes is a matter of milliseconds.
+	for run := range 4 {
+		h := newHarness(t)
+		h.sc.SpawnChild, h.sc.IgnoreTerminate = true, true
+		// Past initialize, so the agent has surely started and said so.
+		h.sc.Hang = "session/new"
+		d := h.driver()
+		d.opts.HandshakeTimeout = 3 * time.Second
+		d.opts.CloseGrace = 2 * time.Second
+		_, err := d.NewSession(context.Background(), h.config())
+		require.Error(t, err)
+		rec := h.record()
+		require.NotZero(t, rec.ChildPID)
+		assert.True(t, gone(rec.ChildPID) && gone(rec.PID),
+			"run %d: the adapter's group is gone when NewSession returns, not a moment later", run)
+	}
+}
+
+func TestARefusalRecordIsBounded(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	tr := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = tr
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.mu.Lock()
+		s.turn = nil
+		s.mu.Unlock()
+	})
+	long := strings.Repeat("x", 4*maxToolCallID)
+	for i := range maxRecorded + maxRefusals + 100 {
+		s.record(driver.PermissionRequest{ToolCallID: fmt.Sprintf("%s-%d", long, i), Kind: driver.ToolEdit}, tr)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Len(t, tr.refusals, maxRefusals, "a turn holds so many refusals and no more")
+	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID, "a recorded id is cut, and then redacted")
+	assert.LessOrEqual(t, len(s.recorded), maxRecorded, "and a session remembers so many and no more")
+	assert.ErrorIs(t, s.unsafe, ErrRefusalMemoryFull, "and a session that reaches that bound ends")
+}
+
+// A session remembers so many refused tool call ids and no more, and the one
+// that fills that memory is the last refusal it records: past the bound a
+// repeat cannot be told from a first, so the session ends rather than write
+// the same tool call to the ledger twice.
+func TestARefusalPastWhatASessionCanRememberEndsIt(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t)
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	s := h.open().(*session)
+	for i := range maxRecorded {
+		s.record(driver.PermissionRequest{ToolCallID: fmt.Sprintf("call-%d", i), Kind: driver.ToolEdit}, nil)
+	}
+	require.Equal(t, maxRecorded, len(recorder.Recorded()), "each of them recorded once")
+	assert.ErrorIs(t, s.failure(), ErrRefusalMemoryFull, "and the session that can remember no more ends")
+
+	// One more tool call, asked about twice. The session cannot say whether
+	// it has refused this one before.
+	s.record(driver.PermissionRequest{ToolCallID: "over", Kind: driver.ToolEdit}, nil)
+	s.record(driver.PermissionRequest{ToolCallID: "over", Kind: driver.ToolEdit}, nil)
+
+	over := 0
+	for _, r := range recorder.Recorded() {
+		if r.ToolCallID == "over" {
+			over++
+		}
+	}
+	assert.Equal(t, 0, over, "a refusal the session cannot promise is the only one is not written, let alone written twice")
+	assert.Equal(t, maxRecorded, len(recorder.Recorded()), "the ledger holds one record per tool call and no more")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Len(t, s.recorded, maxRecorded, "and the memory itself never grows past its bound")
+}
+
+// A cancel that arrives once the agent has answered the prompt, while the
+// session still waits on a decision, is not sent: that turn is over.
+func TestACancelAfterTheAgentAnsweredIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	deciding := make(chan struct{})
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		close(deciding)
+		time.Sleep(600 * time.Millisecond)
+		return false
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit"}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+	})
+	s := h.open()
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		assert.NoError(t, err)
+		answers <- res
+	}()
+	<-deciding
+	// The agent answers the prompt 150ms after asking; the decision takes 600.
+	time.Sleep(350 * time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	res := <-answers
+	assert.Equal(t, driver.TurnEndTurn, res.Stop)
+	assert.NotContains(t, h.record().Methods, "session/cancel")
+}
+
+// A turn the agent has answered asks nothing more: a request that arrives
+// while the session waits on a decision still in flight is refused, not put
+// to the policy.
+func TestARequestAfterTheAgentAnsweredIsNotAllowed(t *testing.T) {
+	h := newHarness(t)
+	var calls atomic.Int32
+	h.policy.allow = func(req driver.PermissionRequest) bool {
+		if calls.Add(1) == 1 {
+			time.Sleep(800 * time.Millisecond)
+		}
+		return true
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit", "locations": []any{map[string]any{"path": "x"}}}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               "end_turn",
+		LateRequest:        permission(t, map[string]any{"toolCallId": "late", "kind": "edit"}, standardOptions()...),
+	})
+	s := h.open()
+	_, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return len(h.record().Outcomes) == 2 }, 10*time.Second, 20*time.Millisecond)
+	for _, r := range h.policy.requests() {
+		assert.NotEqual(t, "late", r.ToolCallID, "a request after the answer is not put to the policy")
+	}
+	late := h.record().Outcomes
+	_, lastOption := outcomeOf(t, late[len(late)-1])
+	assert.NotEqual(t, "allow-once", lastOption)
+}
+
+// A cancel that arrives after the agent has answered does not turn the
+// agent's own stop into one the connector asked for.
+func TestACancelAfterTheAnswerDoesNotClaimTheStop(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool {
+		time.Sleep(700 * time.Millisecond)
+		return true
+	}
+	h.turns(turnScript{
+		FloodPermissions:   1,
+		FloodCall:          permission(t, map[string]any{"kind": "edit", "locations": []any{map[string]any{"path": "x"}}}, standardOptions()...),
+		StopWithoutWaiting: true,
+		Stop:               string(driver.TurnCanceled),
+	})
+	s := h.open()
+	type answer struct {
+		res driver.PromptResult
+		err error
+	}
+	answers := make(chan answer, 1)
+	go func() {
+		res, err := s.Prompt(context.Background(), "go")
+		answers <- answer{res, err}
+	}()
+	// The agent answers 150ms in; the decision runs to 700ms.
+	time.Sleep(400 * time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	a := <-answers
+	assert.NotEqual(t, driver.TurnCanceled, a.res.Stop, "the connector's cancel came after the agent had stopped")
+	// The decision still in flight came back allowed after the agent had
+	// answered, so it was refused; the agent's own canceled stop is that refusal.
+	require.NoError(t, a.err)
+	assert.Equal(t, driver.TurnRefusal, a.res.Stop)
+	assert.NotContains(t, h.record().Methods, "session/cancel")
+}
+
+func TestTheTurnEndWaitsForRequestsAlreadyRead(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	claimed := s.claim("session/request_permission")
+	assert.Nil(t, turnOf(claimed), "no turn in flight")
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		s.mu.Lock()
+		s.deciding--
+		s.mu.Unlock()
+	}()
+	start := time.Now()
+	s.drainDecisions()
+	assert.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond, "a request read but not yet decided holds the turn's end")
+}
+
+func TestUpdatesCarryBoundedIDs(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.emit(driver.Update{Kind: driver.UpdateToolCall, ToolCallID: strings.Repeat("i", 10*maxToolCallID)})
+	select {
+	case u := <-s.Updates():
+		assert.LessOrEqual(t, len(u.ToolCallID), maxToolCallID, "an id is cut, and then redacted")
+	case <-time.After(2 * time.Second):
+		t.Fatal("no update")
+	}
+}
+
+// The driver asks for the group's confirmation with the worker it started,
+// and an answer that the group outlived its leader is in the error the caller
+// settles on.
+func TestAFailedHandshakeAsksForTheGroupsConfirmation(t *testing.T) {
+	h := newHarness(t)
+	h.sc.FailInitialize = true
+	var asked []driver.Process
+	old := confirmGroupGone
+	confirmGroupGone = func(p driver.Process, grace time.Duration) error {
+		asked = append(asked, p)
+		return driver.ErrGroupOutlivedLeader
+	}
+	t.Cleanup(func() { confirmGroupGone = old })
+	_, err := h.driver().NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
+	require.Len(t, asked, 1)
+	assert.Equal(t, h.record().PID, asked[0].PGID, "the group of the adapter this session started")
+}
+
+// The prompt's answer settles its turn as it is read, on the reading
+// goroutine, so a request read right after it is outside the turn whatever
+// the turn's own goroutine has done yet.
+func TestAnAnswerSettlesItsTurnAsItIsRead(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	s := h.open().(*session)
+	tr := &turn{done: make(chan struct{}), call: s.conn.register("session/prompt")}
+	s.mu.Lock()
+	s.turn = tr
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.mu.Lock()
+		s.turn = nil
+		s.mu.Unlock()
+	})
+
+	s.onResponse(tr.call.id)
+	params := raw(t, map[string]any{"sessionId": "sess-1", "toolCall": map[string]any{"toolCallId": "after", "kind": "edit"},
+		"options": []any{map[string]any{"optionId": "ok", "kind": "allow_once"}, map[string]any{"optionId": "no", "kind": "reject_once"}}})
+	s.onRequest(json.RawMessage(`98`), "session/request_permission", params, s.claim("session/request_permission"))
+	assert.Empty(t, h.policy.requests(), "a request read after the answer is not put to the policy")
+}
+
+// The install fails on a Node version an adapter does not support, rather
+// than leaving an installation Locate accepts and the first dispatch cannot
+// run: npm only warns about engines without --engine-strict.
+func TestTheAdapterInstallRefusesAnUnsupportedNode(t *testing.T) {
+	makefile, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "Makefile"))
+	require.NoError(t, err)
+	var install string
+	for _, line := range strings.Split(string(makefile), "\n") {
+		if strings.Contains(line, "npm ci") && strings.Contains(line, "ACP_ADAPTERS_DIR") {
+			install = line
+		}
+	}
+	require.NotEmpty(t, install, "make acp-adapters installs with npm ci")
+	assert.Contains(t, install, "--engine-strict")
+	assert.Contains(t, install, "--ignore-scripts")
+
+	var lock struct {
+		Packages map[string]struct {
+			Engines map[string]string `json:"engines"`
+		} `json:"packages"`
+	}
+	raw, err := os.ReadFile(filepath.Join("adapters", "package-lock.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &lock))
+	assert.NotEmpty(t, lock.Packages["node_modules/"+ClaudeAgentACP.Package].Engines["node"],
+		"the pinned adapter states the Node it needs, which --engine-strict enforces")
+}
+
+// A session whose MCP server did not connect does not go on: the worker
+// would run without the Basecamp tools and its task token, and a turn that
+// ends without them would be settled as finished.
+func TestASessionWhoseMCPServerDidNotConnectDoesNotGoOn(t *testing.T) {
+	withStatus := func(h *harness, status MCPStatus) *Driver {
+		d := h.driver()
+		d.opts.Adapter.MCPStatus = status
+		return d
+	}
+	t.Run("claude: the init reports every server connected", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "connected"}}}, Stop: "end_turn"}, turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		for range 2 {
+			res, err := s.Prompt(context.Background(), "go")
+			require.NoError(t, err)
+			assert.Equal(t, driver.TurnEndTurn, res.Stop)
+		}
+	})
+	for name, init := range map[string]map[string]string{
+		"claude: the server failed":     {"basecamp": "failed"},
+		"claude: the server is pending": {"basecamp": "pending"},
+		"claude: the server is missing": {"other": "connected"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.turns(turnScript{Steps: []step{{MCPInit: init}, {SleepMS: 3000}}, Stop: "end_turn"})
+			s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+			require.NoError(t, err)
+			defer s.Close()
+			_, err = s.Prompt(context.Background(), "go")
+			require.ErrorIs(t, err, ErrMCPServerNotConnected)
+			select {
+			case <-s.Done():
+			case <-time.After(10 * time.Second):
+				t.Fatal("the worker was not ended")
+			}
+		})
+	}
+	t.Run("claude: a turn that ends with no init at all", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "never told is not connected")
+	})
+	t.Run("codex: a startup failure", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp_startup.basecamp", "kind": "other",
+				"title": "mcp__basecamp__startup", "status": "failed"})},
+			{SleepMS: 3000},
+		}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+	})
+	t.Run("claude: a server the session never gave it", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "connected", "elsewhere": "connected"}}, {SleepMS: 3000}}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+		assert.Contains(t, err.Error(), "never gave it")
+	})
+	t.Run("a failure while the session is opening is what the start reports", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "failed"}
+		_, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "not the closed stream that failure caused")
+	})
+	t.Run("an init naming another session vouches for nothing", func(t *testing.T) {
+		h := newHarness(t)
+		h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "connected"}
+		h.sc.MCPInitSessionID = "someone-elses-session"
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusInit).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected, "this session was never told about its own servers")
+	})
+	t.Run("codex: a startup failure for a server nobody gave it", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Steps: []step{
+			{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "mcp_startup.elsewhere", "kind": "other",
+				"title": "mcp__elsewhere__startup", "status": "failed"})},
+			{SleepMS: 3000},
+		}, Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.ErrorIs(t, err, ErrMCPServerNotConnected)
+		assert.Contains(t, err.Error(), "never gave it")
+	})
+	t.Run("codex: no failure reported is no failure", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Stop: "end_turn"})
+		s, err := withStatus(h, MCPStatusStartupFailures).NewSession(context.Background(), h.config())
+		require.NoError(t, err)
+		defer s.Close()
+		_, err = s.Prompt(context.Background(), "go")
+		require.NoError(t, err)
+	})
+}
+
+// An agent that asks faster than its refusals can be written has stopped
+// working with this client: the connection says so, and the session ends
+// rather than leaving requests unanswered for ever.
+func TestAnAgentThatOutrunsEvenItsRefusalsEndsTheSession(t *testing.T) {
+	t.Run("the connection reports the overflow", func(t *testing.T) {
+		oldBusy, oldHandlers := maxBusy, maxHandlers
+		maxBusy, maxHandlers = 2, 2
+		t.Cleanup(func() { maxBusy, maxHandlers = oldBusy, oldHandlers })
+
+		// A writer nobody reads: refusals queue up rather than going out.
+		_, toAgent := io.Pipe()
+		toClient, fromAgent := io.Pipe()
+		t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+		c := newConn(toAgent)
+		release := make(chan struct{})
+		defer close(release)
+		c.onRequest = func(json.RawMessage, string, json.RawMessage, any) { <-release }
+		overflowed := make(chan struct{})
+		var once sync.Once
+		c.onOverflow = func() { once.Do(func() { close(overflowed) }) }
+		go func() { _ = c.read(toClient) }()
+
+		go func() {
+			for i := range 64 {
+				if _, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i); err != nil {
+					return
+				}
+			}
+		}()
+		select {
+		case <-overflowed:
+		case <-time.After(20 * time.Second):
+			t.Fatal("an agent outrunning every bound was never reported")
+		}
+	})
+
+	t.Run("the session ends", func(t *testing.T) {
+		h := newHarness(t)
+		h.turns(turnScript{Hang: true})
+		s := h.open()
+		answers := make(chan error, 1)
+		go func() {
+			_, err := s.Prompt(context.Background(), "go")
+			answers <- err
+		}()
+		require.Eventually(t, func() bool { return slices.Contains(h.record().Methods, "session/prompt") },
+			10*time.Second, 50*time.Millisecond)
+		s.(*session).conn.onOverflow()
+		select {
+		case err := <-answers:
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unanswered")
+		case <-time.After(10 * time.Second):
+			t.Fatal("the turn did not end")
+		}
+		select {
+		case <-s.Done():
+		case <-time.After(10 * time.Second):
+			t.Fatal("the worker was not ended")
+		}
+	})
+}
+
+// A session that is not the one the connector asked for is the driver
+// package's own sentinel, so every driver settles it the same way.
+func TestAnUnverifiedSessionIsTheSharedSentinel(t *testing.T) {
+	require.ErrorIs(t, ErrMCPServerNotConnected, driver.ErrSessionUnverified)
+	h := newHarness(t)
+	h.turns(turnScript{Steps: []step{{MCPInit: map[string]string{"basecamp": "failed"}}, {SleepMS: 3000}}, Stop: "end_turn"})
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+	_, err = s.Prompt(context.Background(), "go")
+	require.ErrorIs(t, err, driver.ErrSessionUnverified)
+}
+
+// redactionSecret is the value fed through every error path. It is obviously
+// fake, and is planted where a real secret would be: in the session's
+// environment, in its MCP server's environment, in the name of its private
+// directory, and in what the agent writes back.
+const redactionSecret = "test-token-not-real-a71c3e"
+
+func redactionHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.sc.Secret = redactionSecret
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		private := filepath.Join(cfg.PrivateDir, redactionSecret)
+		require.NoError(t, os.Mkdir(private, 0o700))
+		cfg.PrivateDir = private
+		cfg.Env = append(slices.Clone(cfg.Env), "FAKE_AGENT_SECRET="+redactionSecret)
+		cfg.MCPServers[0].Env["BASECAMP_CONNECT_TASK_TOKEN"] = redactionSecret
+		cfg.Redaction = driver.Redaction{Secrets: []string{redactionSecret}}
+		return cfg
+	}
+	return h
+}
+
+// The redaction rule (driver's redact.go): nothing this driver hands back
+// carries the secret, whichever way the session fails.
+func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
+	drivertest.RequireRedacted(t, redactionSecret, []drivertest.RedactionPath{
+		{Name: "start", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			// The adapter is not the pinned one, and its stderr, which
+			// carries the secret, is in the failure.
+			h.sc.AgentVersion = "0.0.0"
+			_, err := h.driver().NewSession(context.Background(), h.config())
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "handshake", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.sc.Confirm = "stale"
+			h.sc.CurrentMode = redactionSecret
+			h.sc.Modes = []string{"ask", redactionSecret}
+			_, err := h.driver().NewSession(context.Background(), h.config())
+			require.ErrorIs(t, err, driver.ErrUnsafeMode)
+			return drivertest.Crossing{Errors: []error{err}}
+		}},
+		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.turns(turnScript{Steps: []step{
+				{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": redactionSecret, "name": redactionSecret, "kind": "edit"})},
+				{Permission: permission(t, map[string]any{"toolCallId": redactionSecret, "name": redactionSecret, "kind": "edit"}, standardOptions()...)},
+			}, ErrorMessage: "the agent failed with " + redactionSecret})
+			s := h.open()
+			result, err := s.Prompt(context.Background(), "go")
+			require.Error(t, err)
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			h.turns(turnScript{Steps: []step{{Update: raw(t, map[string]any{"sessionUpdate": "agent_message_chunk",
+				"content": map[string]any{"type": "text", "text": redactionSecret}})}}, WaitForCancel: true, Stop: string(driver.TurnCanceled)})
+			s := h.open()
+			results := make(chan driver.PromptResult, 1)
+			go func() {
+				res, err := s.Prompt(context.Background(), "go")
+				assert.NoError(t, err)
+				results <- res
+			}()
+			<-s.Updates()
+			err := s.Cancel(context.Background())
+			res := <-results
+			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{res},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
+			h := redactionHarness(t)
+			s := h.open()
+			err := s.Close()
+			_, promptErr := s.Prompt(context.Background(), "go")
+			return drivertest.Crossing{Errors: []error{err, promptErr},
+				Updates: drainUpdates(s), Texts: []string{s.(*session).stderrNote()}}
+		}},
+	})
+}
+
+// drainUpdates is every update the session has emitted so far.
+func drainUpdates(s driver.Session) []driver.Update {
+	var out []driver.Update
+	for {
+		select {
+		case u, ok := <-s.Updates():
+			if !ok {
+				return out
+			}
+			out = append(out, u)
+		case <-time.After(200 * time.Millisecond):
+			return out
+		}
+	}
+}
+
+// A refusal is recorded as it is made, once per tool call id, so a worker
+// that dies before its result has already reported it (driver's "Refusals").
+func TestEveryRefusalIsRecordedOnceAsItIsMade(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	call := map[string]any{"toolCallId": "call-1", "kind": "edit"}
+	// Two ids that are cut to the same first bytes are still two calls.
+	long := strings.Repeat("d", maxToolCallID)
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, call, standardOptions()...)},
+		// The same call asked about twice is one refusal.
+		{Permission: permission(t, call, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "call-2", "kind": "execute"}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": long + "-one", "kind": "edit"}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": long + "-two", "kind": "edit"}, standardOptions()...)},
+	}, Hang: true})
+	s := h.open()
+	go func() { _, _ = s.Prompt(context.Background(), "go") }()
+	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 4 }, 10*time.Second, 20*time.Millisecond,
+		"each refusal is recorded as it is made, before the turn ends")
+	recorded := recorder.Recorded()
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "call-1", Tool: "edit"}, {ToolCallID: "call-2", Tool: "execute"}}, recorded[:2])
+}
+
+// The dispatcher logs a worker's last output when it stops badly; it reads
+// it off the session, so the session must offer it.
+func TestTheDispatcherCanReadTheAdaptersLastWords(t *testing.T) {
+	h := newHarness(t)
+	h.sc.Secret = "the adapter's last words"
+	s := h.open()
+	tail, ok := s.(interface{ StderrTail() string })
+	require.True(t, ok, "the dispatcher probes for this method")
+	require.Eventually(t, func() bool { return strings.Contains(tail.StderrTail(), "last words") },
+		10*time.Second, 50*time.Millisecond)
+}
+
+// A session that failed while its handshake was returning is ended, not
+// handed out: nothing prompts a worker the driver has already killed.
+func TestASessionAlreadyFailedIsNeverHandedOut(t *testing.T) {
+	h := newHarness(t)
+	// The failure lands while session/new is being answered; the handshake
+	// itself succeeds.
+	h.sc.MCPInitAtSessionStart = map[string]string{"basecamp": "failed"}
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s, err := d.NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, ErrMCPServerNotConnected)
+	assert.Nil(t, s)
+	waitGone(t, h.record().PID)
+}
+
+// And a failure claimed in the window between the handshake returning and the
+// session being handed out: the seam stands where only a race could.
+func TestASessionThatFailsAsItIsHandedOutIsNotHandedOut(t *testing.T) {
+	h := newHarness(t)
+	failure := errors.New("acp: claimed as the handshake returned")
+	old := afterHandshake
+	afterHandshake = func(s *session) { s.fail(failure) }
+	t.Cleanup(func() { afterHandshake = old })
+
+	s, err := h.driver().NewSession(context.Background(), h.config())
+	assert.Nil(t, s)
+	require.ErrorIs(t, err, failure)
+	var start *driver.StartError
+	require.ErrorAs(t, err, &start, "a start that ran a process says which")
+	assert.NotZero(t, start.Process.PID)
+	waitGone(t, h.record().PID)
+}
+
+// A permission request this client cannot read is a refusal it made, and is
+// recorded like any other.
+func TestAnUnreadableRequestIsARefusalToo(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	h.turns(turnScript{Steps: []step{{Permission: raw(t, []any{"not", "an", "object"})}}, Hang: true})
+	s := h.open()
+	go func() { _, _ = s.Prompt(context.Background(), "go") }()
+	require.Eventually(t, func() bool { return len(recorder.Recorded()) == 1 }, 10*time.Second, 20*time.Millisecond)
+	select {
+	case u := <-s.Updates():
+		assert.Equal(t, driver.UpdatePermission, u.Kind)
+		assert.False(t, u.Allowed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no update for a refusal")
+	}
+}
+
+// ---------------------------------------------------------------- what the agent writes is bounded
+
+// An adapter can send an account of its MCP servers for any session it likes,
+// as often as it likes, before the session's own id is known. What is held is
+// bounded in every direction: how many accounts, which ids may have one, and
+// how much of one is kept.
+func TestTheAccountsHeldBeforeASessionIsNamedAreBounded(t *testing.T) {
+	h := newHarness(t)
+	d := h.driver()
+	d.opts.Adapter.MCPStatus = MCPStatusInit
+	s := h.open().(*session)
+	s.mu.Lock()
+	s.id = ""
+	s.mcpStatus = MCPStatusInit
+	s.mu.Unlock()
+
+	init := func(id string, servers ...map[string]any) {
+		list := make([]any, 0, len(servers))
+		for _, srv := range servers {
+			list = append(list, srv)
+		}
+		s.onSDKMessage(raw(t, map[string]any{
+			"sessionId": id,
+			"message":   map[string]any{"type": "system", "subtype": "init", "mcp_servers": list},
+		}))
+	}
+	// An id this session could never have been given is not held at all, so
+	// it does not even take a place among the few that are.
+	init(strings.Repeat("x", 4096), map[string]any{"name": "basecamp", "status": "connected"})
+	init("../../etc/passwd", map[string]any{"name": "basecamp", "status": "connected"})
+	s.mu.Lock()
+	assert.Empty(t, s.earlyInit, "no account is held for an id this session could not have")
+	s.mu.Unlock()
+
+	// Then a flood of accounts, each naming far more servers than the
+	// session was given, and each name far longer than a name.
+	long := strings.Repeat("l", 8192)
+	for i := range maxEarlyInit * 20 {
+		servers := make([]map[string]any, 0, 200)
+		for j := range 200 {
+			servers = append(servers, map[string]any{"name": fmt.Sprintf("%s-%d-%d", long, i, j), "status": long})
+		}
+		init(fmt.Sprintf("sess-%d", i), servers...)
+	}
+
+	s.mu.Lock()
+	held := len(s.earlyInit)
+	ids := slices.Collect(maps.Keys(s.earlyInit))
+	widest, longest := 0, 0
+	for _, a := range s.earlyInit {
+		width := len(a.statuses)
+		if a.foreign {
+			width++
+		}
+		widest = max(widest, width)
+		longest = max(longest, len(a.reason))
+		for name, status := range a.statuses {
+			longest = max(longest, len(name), len(status))
+		}
+	}
+	names := len(s.mcpNames)
+	s.mu.Unlock()
+	assert.LessOrEqual(t, held, maxEarlyInit, "no more accounts held than could ever be used")
+	for _, id := range ids {
+		assert.True(t, validSessionID(id), "an id this session could never be given is not held: %q", id)
+	}
+	assert.LessOrEqual(t, widest, names+1, "an account holds the session's own servers and the one name it did not give")
+	assert.LessOrEqual(t, longest, 512, "and none of it is the agent's to size")
+
+	// And what is held is still an account: the one that turns out to name
+	// this session vouches for its servers when the id arrives.
+	s.mu.Lock()
+	s.earlyInit = nil
+	s.mcpConfirmed = false
+	s.mu.Unlock()
+	init("sess-good", map[string]any{"name": "basecamp", "status": "connected"})
+	s.nameSession("sess-good")
+	s.mu.Lock()
+	confirmed, unsafe := s.mcpConfirmed, s.unsafe
+	s.mu.Unlock()
+	assert.NoError(t, unsafe, "an account of the servers the session gave is no reason to end it")
+	assert.True(t, confirmed, "and it is the account that vouches for them")
+}
+
+// A path no filesystem takes, and a mode no adapter has, are cut to what they
+// can be rather than kept whole.
+func TestALongPathAndALongModeAreCutToWhatTheyCanBe(t *testing.T) {
+	long := strings.Repeat("p", maxLocationPath*4)
+	u, ok := decodeUpdate(raw(t, map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "edit",
+		"locations": []any{map[string]any{"path": "/work/" + long}},
+	}))
+	require.True(t, ok)
+	require.Len(t, u.Locations, 1)
+	assert.Len(t, u.Locations[0], maxLocationPath)
+	assert.True(t, strings.HasPrefix(u.Locations[0], "/work/"), "what is kept is the leading part, which is what the policy judges")
+
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.reportMode(strings.Repeat("m", maxMode*4))
+	s.mu.Lock()
+	mode := s.mode
+	s.mu.Unlock()
+	assert.Len(t, mode, maxMode)
+}
+
+// ---------------------------------------------------------------- what a decision may rest on
+
+// A tool call announced where the session could not be asked about it — a
+// load's replayed history — tells the session nothing: a later request that
+// names only that call's id is decided without the name the replay carried.
+func TestAReplayedToolCallCannotNameALaterRequest(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(r driver.PermissionRequest) bool { return strings.HasPrefix(r.Tool, "mcp__basecamp__") }
+	h.sc.SessionID = "sess-earlier"
+	h.sc.Replay = []json.RawMessage{
+		raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "replayed-1", "kind": "other",
+			"name": "mcp__basecamp__note", "status": "in_progress"}),
+	}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "replayed-1", "kind": "other"}, standardOptions()...)},
+	}, Stop: "end_turn"})
+
+	s, err := h.driver().LoadSession(context.Background(), h.config(), "sess-earlier")
+	require.NoError(t, err)
+	defer s.Close()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+
+	requests := h.policy.requests()
+	require.Len(t, requests, 1)
+	assert.Empty(t, requests[0].Tool, "a call the replay named is not a call this session announced")
+	assert.NotEmpty(t, res.Refusals, "so it is decided on its kind, and refused")
+	outcomes := h.record().Outcomes
+	require.Len(t, outcomes, 1)
+	_, option := outcomeOf(t, outcomes[0])
+	assert.Equal(t, "reject", option)
+}
+
+// Two options of one id say nothing about which the agent would act on, so
+// none is selected and the request is answered as canceled.
+func TestOptionsSharingAnIDSelectNothing(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "dup-1", "kind": "read"},
+			[2]string{"x", "allow_once"}, [2]string{"x", "reject_once"})},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	outcomes := h.record().Outcomes
+	require.Len(t, outcomes, 1)
+	kind, option := outcomeOf(t, outcomes[0])
+	assert.Equal(t, outcomeCanceled, kind, "nothing of that list is selected")
+	assert.Empty(t, option)
+	assert.NotEmpty(t, res.Refusals, "and it is a call this session did not allow")
+}
+
+// A request turned away at the connection's own bound is answered later, off
+// the reading goroutine; the turn it belongs to is the one it was read in.
+func TestARequestRefusedAtTheBoundCarriesTheTurnItWasReadIn(t *testing.T) {
+	fromClient, toAgent := io.Pipe()
+	toClient, fromAgent := io.Pipe()
+	t.Cleanup(func() { _ = toAgent.Close(); _ = fromAgent.Close() })
+	go func() { _, _ = io.Copy(io.Discard, fromClient) }()
+
+	c := newConn(toAgent)
+	mine := &claimed{turn: &turn{}}
+	c.claim = func(string) any { return mine }
+	heard := make(chan any, 1)
+	c.onBusy = func(_ string, _ json.RawMessage, got any) { heard <- got }
+	released := make(chan any, 1)
+	c.release = func(got any) { released <- got }
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	c.onRequest = func(json.RawMessage, string, json.RawMessage, any) { <-hold }
+	go func() { _ = c.read(toClient) }()
+
+	for i := range maxHandlers + 1 {
+		_, err := fmt.Fprintf(fromAgent, `{"jsonrpc":"2.0","id":%d,"method":"session/request_permission","params":{}}`+"\n", i)
+		require.NoError(t, err)
+	}
+	select {
+	case got := <-heard:
+		assert.Same(t, mine, got, "the refusal is recorded against what the request was read in")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the refusal was never heard")
+	}
+	select {
+	case got := <-released:
+		assert.Same(t, mine, got, "and the turn's end stops waiting for it once it is answered")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the claim was never given up")
+	}
+}
+
+// ---------------------------------------------------------------- nothing hangs
+
+// An agent that has stopped reading its input cannot hold a prompt past its
+// context, however much of the prompt is still in the pipe.
+func TestAPromptWhoseWriteIsStuckReturnsWithItsContext(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	s := h.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := s.Prompt(ctx, strings.Repeat("prompt ", 1<<20))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 10*time.Second)
+}
+
+// A cancel is one per turn: a second call ends nothing more and sends
+// nothing more.
+func TestASecondCancelIsNotASecondCancel(t *testing.T) {
+	h := newHarness(t)
+	h.turns(turnScript{WaitForCancel: true, Stop: "cancelled"}) //nolint:misspell // ACP's wire value
+	s := h.open()
+	answers := make(chan error, 1)
+	go func() {
+		_, err := s.Prompt(context.Background(), "go")
+		answers <- err
+	}()
+	require.Eventually(t, func() bool { return slices.Contains(h.record().Methods, "session/prompt") },
+		10*time.Second, 10*time.Millisecond)
+	require.NoError(t, s.Cancel(context.Background()))
+	require.NoError(t, s.Cancel(context.Background()), "a second cancel is not an error")
+	<-answers
+	cancels := 0
+	for _, m := range h.record().Methods {
+		if m == "session/cancel" {
+			cancels++
+		}
+	}
+	assert.Equal(t, 1, cancels, "one cancel per turn, whoever asks twice")
+}
+
+// ---------------------------------------------------------------- configuration
+
+// Two MCP servers of one name are one name in the agent's account of them, so
+// there is no session this driver can judge.
+func TestTwoMCPServersOfOneNameAreUnusable(t *testing.T) {
+	h := newHarness(t)
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.MCPServers = append(cfg.MCPServers, cfg.MCPServers[0])
+		return cfg
+	}
+	_, err := h.driver().NewSession(context.Background(), h.config())
+	require.ErrorIs(t, err, driver.ErrUnusable)
+	require.ErrorIs(t, err, driver.ErrNotStarted)
+	_, statErr := os.Stat(h.sc.Record)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was started")
+}
+
+// What the preflight reads is the environment the adapter will run in, not
+// the connector's: a session's own environment is what the adapter resolves
+// its configuration against.
+func TestThePreflightReadsTheEnvironmentTheAdapterWillHave(t *testing.T) {
+	h := newHarness(t)
+	h.lookup["CODEX_HOME"] = "/connector/home"
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Env = append(cfg.Env, "CODEX_HOME=/session/home")
+		return cfg
+	}
+	seen := make(chan string, 1)
+	d := h.driver()
+	d.opts.Adapter.Preflight = func(_ string, lookup func(string) (string, bool)) error {
+		v, _ := lookup("CODEX_HOME")
+		seen <- v
+		return nil
+	}
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+	assert.Equal(t, "/session/home", <-seen)
+}
+
+// A name the session never gave is not kept as a name, because a name put
+// through a sanitizer can come out as one the session did give: an account
+// naming "base\acamp" as connected vouches for nothing.
+func TestAForeignNameThatReadsAsAGivenOneVouchesForNothing(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	s.mu.Lock()
+	s.id = ""
+	s.mcpStatus = MCPStatusInit
+	s.mcpConfirmed = false
+	s.earlyInit = nil
+	s.mu.Unlock()
+
+	s.onSDKMessage(raw(t, map[string]any{
+		"sessionId": "sess-good",
+		"message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": []any{
+			map[string]any{"name": "base\acamp", "status": "connected"},
+		}},
+	}))
+	s.nameSession("sess-good")
+
+	s.mu.Lock()
+	confirmed, unsafe := s.mcpConfirmed, s.unsafe
+	s.mu.Unlock()
+	assert.False(t, confirmed, "a server the session never gave vouches for no server it did")
+	require.ErrorIs(t, unsafe, ErrMCPServerNotConnected)
+}
+
+// A permission request read in no turn belongs to no turn: a prompt that
+// started after it was read did not ask for it, and its refusal is not on
+// that prompt's result. The ledger still has it.
+func TestARefusalReadInNoTurnIsOnNoTurnsResult(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	s := h.open().(*session)
+	outside := s.claim("session/request_permission")
+	require.Nil(t, turnOf(outside), "no turn was in flight when it was read")
+	t.Cleanup(func() { s.release(outside) })
+
+	later := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = later
+	s.mu.Unlock()
+	s.record(driver.PermissionRequest{ToolCallID: "outside-1", Tool: "Bash", Kind: driver.ToolExecute}, turnOf(outside))
+
+	s.mu.Lock()
+	refusals := len(later.refusals)
+	s.mu.Unlock()
+	assert.Zero(t, refusals, "a turn that began after the request was read did not ask for it")
+	assert.Equal(t, []driver.Refusal{{ToolCallID: "outside-1", Tool: "Bash"}}, recorder.Recorded(),
+		"and it is still the driver's own record")
+}
+
+// A refusal with no tool call id is counted every time it happens: only an id
+// can say that two refusals are one call.
+func TestRefusalsWithNoToolCallIDAreCountedEveryTime(t *testing.T) {
+	h := newHarness(t)
+	recorder := &drivertest.Refusals{}
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	// Three requests naming no call at all, identical in every field.
+	nameless := map[string]any{"kind": "execute"}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, nameless, standardOptions()...)},
+		{Permission: permission(t, nameless, standardOptions()...)},
+		{Permission: permission(t, nameless, standardOptions()...)},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	assert.Len(t, res.Refusals, 3, "three nameless denials are three refusals")
+	assert.Len(t, recorder.Recorded(), 3, "and three records")
+}
+
+// A call whose paths this driver could not carry whole is a call the policy
+// cannot place: it is refused without being asked, rather than judged on the
+// paths that fit. The policy allows an edit only when every path it names is
+// inside the working directory, so judging a subset is how a refusal becomes
+// an allow.
+func TestACallWhosePathsDoNotFitIsRefusedUnasked(t *testing.T) {
+	h := newHarness(t)
+	h.policy.allow = func(driver.PermissionRequest) bool { return true }
+	inside := make([]any, 0, maxLocations+1)
+	for i := range maxLocations {
+		inside = append(inside, map[string]any{"path": filepath.Join(h.dir, fmt.Sprintf("f%d", i))})
+	}
+	// The path that would have refused the call is the one past the cap.
+	tooMany := append(slices.Clone(inside), map[string]any{"path": "/etc/shadow"})
+	tooLong := []any{map[string]any{"path": filepath.Join(h.dir, strings.Repeat("s/", 3000)+"x")}}
+	h.turns(turnScript{Steps: []step{
+		{Permission: permission(t, map[string]any{"toolCallId": "many-1", "kind": "edit", "locations": tooMany}, standardOptions()...)},
+		{Permission: permission(t, map[string]any{"toolCallId": "long-1", "kind": "edit", "locations": tooLong}, standardOptions()...)},
+		// And a call announced with paths that did not fit is still
+		// unplaceable when the agent asks about it by id alone.
+		{Update: raw(t, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "many-2", "kind": "edit",
+			"status": "in_progress", "locations": tooMany})},
+		{Permission: permission(t, map[string]any{"toolCallId": "many-2", "kind": "edit"}, standardOptions()...)},
+	}, Stop: "end_turn"})
+	s := h.open()
+	res, err := s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+
+	assert.Empty(t, h.policy.requests(), "a call the policy cannot place is not put to it")
+	outcomes := make([]string, 0, 3)
+	for _, o := range h.record().Outcomes {
+		kind, option := outcomeOf(t, o)
+		outcomes = append(outcomes, kind)
+		assert.Empty(t, option, "refused with no option of the agent's")
+	}
+	assert.Equal(t, []string{outcomeCanceled, outcomeCanceled, outcomeCanceled}, outcomes)
+	assert.Len(t, res.Refusals, 3, "and each is a refusal of this driver's")
+}
+
+// A tool call that has finished is forgotten whatever the session could be
+// asked at that moment: what it said of itself must not outlive it and
+// describe a call a later turn is asked about.
+func TestAFinishedToolCallIsForgottenEvenOutsideATurn(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	first := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = first
+	s.mu.Unlock()
+	s.noteTool(sessionUpdate{ToolCallID: "X", Name: "mcp__basecamp__note", Kind: "read", Status: "in_progress"})
+	s.mu.Lock()
+	_, known := s.tools["X"]
+	s.mu.Unlock()
+	require.True(t, known, "a call announced in a turn is what the session knows of it")
+
+	// The turn is answered, and the call completes after it: outside any turn.
+	s.mu.Lock()
+	s.turn = nil
+	s.mu.Unlock()
+	s.noteTool(sessionUpdate{ToolCallID: "X", Status: "completed"})
+	s.mu.Lock()
+	_, stillKnown := s.tools["X"]
+	s.mu.Unlock()
+	assert.False(t, stillKnown, "a finished call is forgotten")
+
+	second := &turn{done: make(chan struct{})}
+	s.mu.Lock()
+	s.turn = second
+	s.mu.Unlock()
+	info := s.noteTool(sessionUpdate{ToolCallID: "X", Kind: "execute"})
+	assert.Empty(t, info.name, "so the next turn's request by that id inherits no name")
+	assert.Equal(t, driver.ToolExecute, info.kind)
+}
+
+// Whose account of the MCP servers this is, is decided under one lock: the
+// session's id can arrive while an account is being read, and an account read
+// as nobody's must not then be applied as this session's.
+func TestAnAccountIsNeverAppliedToTheSessionItDoesNotName(t *testing.T) {
+	h := newHarness(t)
+	s := h.open().(*session)
+	foreign := raw(t, map[string]any{
+		"sessionId": "sess-other",
+		"message": map[string]any{"type": "system", "subtype": "init", "mcp_servers": []any{
+			map[string]any{"name": "basecamp", "status": "connected"},
+		}},
+	})
+	// The two meet on a barrier: the account is read as nobody's just as the
+	// session's own id arrives.
+	for range 50000 {
+		s.mu.Lock()
+		s.id = ""
+		s.mcpStatus = MCPStatusInit
+		s.mcpConfirmed = false
+		s.earlyInit = nil
+		s.mu.Unlock()
+		ready, done := make(chan struct{}), make(chan struct{})
+		go func() {
+			close(ready)
+			s.onSDKMessage(foreign)
+			close(done)
+		}()
+		<-ready
+		s.nameSession("sess-real")
+		<-done
+		s.mu.Lock()
+		confirmed := s.mcpConfirmed
+		s.mu.Unlock()
+		if confirmed {
+			t.Fatal("another session's account vouched for this session's MCP servers")
+		}
+	}
+}
+
+// A cancel never reaches a turn whose prompt is still on its way: the turn
+// holds its place in the queue until its write is done, so no session/cancel
+// can be written for a prompt the agent has not been sent.
+func TestACancelDoesNotTouchATurnWhosePromptIsStillBeingWritten(t *testing.T) {
+	h := newHarness(t)
+	h.sc.StopReadingAfter = "session/set_config_option"
+	h.grace = 500 * time.Millisecond
+	s := h.open().(*session)
+	go func() { _, _ = s.Prompt(context.Background(), strings.Repeat("prompt ", 1<<20)) }()
+	require.Eventually(t, func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.turn != nil
+	}, 10*time.Second, 5*time.Millisecond, "the turn is in flight")
+
+	err := s.Cancel(context.Background())
+	require.Error(t, err, "the agent is not reading, so the cancel could not be sent")
+	s.mu.Lock()
+	canceled := s.turn != nil && s.turn.canceled
+	s.mu.Unlock()
+	assert.False(t, canceled, "and it did not mark a turn whose prompt is still being written")
+}
+
+// ---------------------------------------------------------------- what the adapter says it got
+
+// chunk is one agent_message_chunk of text, as an adapter answers its own
+// read-back command.
+func chunk(t *testing.T, text string) json.RawMessage {
+	t.Helper()
+	return raw(t, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}})
+}
+
+// The boundary's one guarantee: what the adapter says it is running is
+// compared with what the session declared, after it is running, and a
+// difference ends the session before anyone is handed it.
+func TestASessionRunsOnlyTheMCPServersTheAdapterSaysItGot(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		readback Readback
+		answer   string
+		wantErr  bool
+	}{
+		{"claude counts them and agrees", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"1 MCP server(s): 1 connected, 0 not connected, 0 disabled. Use `/mcp` in the terminal for details.", false},
+		{"claude counts one too many", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"2 MCP server(s): 2 connected, 0 not connected, 0 disabled.", true},
+		{"claude counts one unusable", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"1 MCP server(s): 0 connected, 1 not connected, 0 disabled.", true},
+		{"claude says nothing this can read", Readback{Command: "/mcp", Parse: claudeMCPReport},
+			"MCP is fine, trust me.", true},
+		{"codex names what the session gave", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- basecamp", false},
+		{"codex names its own built-in too", Readback{Command: "/mcp", Parse: codexMCPReport, BuiltIn: []string{"codex_apps"}},
+			"Configured MCP servers:\n- codex_apps: 49 tools, 27 resources, auth=bearerToken\n- basecamp", false},
+		{"codex names a built-in nobody allowed", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- codex_apps: 49 tools, 27 resources, auth=bearerToken\n- basecamp", true},
+		{"codex names a server of the host's", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- basecamp\n- host-secrets: 3 tools", true},
+		{"codex does not have the session's own", Readback{Command: "/mcp", Parse: codexMCPReport},
+			"Configured MCP servers:\n- something-else", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.turns(turnScript{Steps: []step{{Update: chunk(t, tc.answer)}}, Stop: "end_turn"})
+			d := h.driver()
+			d.opts.Adapter.Readback = tc.readback
+			s, err := d.NewSession(context.Background(), h.config())
+			if tc.wantErr {
+				require.ErrorIs(t, err, ErrMCPReadback)
+				require.ErrorIs(t, err, driver.ErrSessionUnverified, "a session that is not the one asked for")
+				assert.Nil(t, s)
+				waitGone(t, h.record().PID)
+				return
+			}
+			require.NoError(t, err)
+			defer s.Close()
+			assert.Contains(t, string(h.record().Params["session/prompt"]), "/mcp", "the adapter was asked")
+			select {
+			case u := <-s.Updates():
+				t.Fatalf("the read-back was reported as progress: %+v", u)
+			default:
+			}
+		})
+	}
+}
+
+// The adapter's own answer is read once and kept nowhere: the read-back's own
+// text is not in an update, and a chunk longer than the answer can be is cut.
+func TestTheReadbackTextIsReadOnceAndKeptNowhere(t *testing.T) {
+	h := newHarness(t)
+	long := strings.Repeat("x", maxReadback*4)
+	h.turns(turnScript{Steps: []step{
+		{Update: chunk(t, "Configured MCP servers:\n- basecamp\n"+long)},
+	}, Stop: "end_turn"}, turnScript{Steps: []step{{Update: chunk(t, "secret words")}}, Stop: "end_turn"})
+	d := h.driver()
+	d.opts.Adapter.Readback = Readback{Command: "/mcp", Parse: codexMCPReport}
+	s, err := d.NewSession(context.Background(), h.config())
+	require.NoError(t, err)
+	defer s.Close()
+
+	sess := s.(*session)
+	sess.mu.Lock()
+	collecting := sess.readback
+	sess.mu.Unlock()
+	assert.Nil(t, collecting, "nothing is collected once the answer has been read")
+
+	_, err = s.Prompt(context.Background(), "go")
+	require.NoError(t, err)
+	for {
+		select {
+		case u := <-s.Updates():
+			assert.NotContains(t, fmt.Sprintf("%+v", u), "secret words", "an update carries no text of the agent's")
+			continue
+		default:
+		}
+		break
+	}
+}

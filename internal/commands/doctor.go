@@ -23,6 +23,8 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -148,6 +150,11 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 
 	// 5. Config files check
 	checks = append(checks, checkConfigFiles(app, verbose)...)
+
+	// 5b. The connector's session paths, for a profile set up as one.
+	if check := checkConnectorSessionPaths(app); check != nil {
+		checks = append(checks, *check)
+	}
 
 	// 6. Credentials check
 	credCheck := checkCredentials(app, verbose)
@@ -1359,4 +1366,54 @@ func checkLegacyInstall() *Check {
 		Message: fmt.Sprintf("Found legacy bcq data: %s", strings.Join(found, ", ")),
 		Hint:    "Run: basecamp migrate",
 	}
+}
+
+// checkConnectorSessionPaths reports whether a task token's unix socket fits
+// under the session directory this profile's connector would use. A unix
+// socket path is 103 bytes at most, and a long home, a deep XDG_RUNTIME_DIR
+// or large account and person ids can pass it. The connector moves the socket
+// to a short directory of its own rather than fail a dispatch, so this is a
+// warning about the layout, not a failure — but a person should hear it here
+// rather than discover it in a log.
+//
+// It answers for THIS process's environment: a connector started from a
+// systemd user unit, launchd or cron may have a different XDG_RUNTIME_DIR,
+// and the check says so in its message rather than pretending otherwise.
+//
+// It says nothing at all for a profile that is not set up as a connector.
+func checkConnectorSessionPaths(app *appctx.App) *Check {
+	name := app.Config.ActiveProfile
+	if name == "" || !isValidProfileName(name) {
+		return nil
+	}
+	path, err := setup.Path(config.GlobalConfigDir(), name)
+	if err != nil {
+		return nil
+	}
+	file, err := setup.Load(path)
+	if err != nil {
+		return nil
+	}
+	sessions := connectSessionsPath(file)
+	attempt := filepath.Join(sessions, strings.Repeat("a", connector.AttemptIDLength))
+	check := &Check{Name: "Connector Session Paths"}
+	if connector.TokenSocketFits(attempt) {
+		check.Status = "pass"
+		check.Message = sessions
+		return check
+	}
+	check.Status = "warn"
+	check.Message = fmt.Sprintf("%s is too deep for a task token's socket (a unix socket path is %d bytes at most, and this is what XDG_RUNTIME_DIR gives this shell)", sessions, connector.MaxSocketPath)
+	check.Hint = shortRuntimeDirHint()
+	return check
+}
+
+// shortRuntimeDirHint names a short place for the runtime directory on this
+// platform: macOS has no /run/user.
+func shortRuntimeDirHint() string {
+	where := "/run/user/$UID"
+	if runtime.GOOS == "darwin" {
+		where = "/tmp"
+	}
+	return "The connector will put each token socket in a short directory of its own instead. Set XDG_RUNTIME_DIR to a short path (" + where + ", say) to keep it beside the session's own files."
 }

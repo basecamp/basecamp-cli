@@ -1,0 +1,91 @@
+package connector
+
+import (
+	"os"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// The one release point, as a property of the source rather than of a
+// reviewer's attention: settling an attempt, releasing a working directory
+// and reporting an end happen in Dispatcher.release and nowhere else, so no
+// later card can add a path that releases a directory while a worker may
+// still be in it.
+func TestOnlyTheReleasePointSettlesAnAttemptOrReleasesItsDirectory(t *testing.T) {
+	source, err := os.ReadFile("dispatcher.go")
+	require.NoError(t, err)
+	functions := splitFunctions(string(source))
+	require.NotEmpty(t, functions)
+
+	for _, call := range []string{"EndAttempt(", "finishWorkspace(", "d.settle(", "d.adopt("} {
+		for name, body := range functions {
+			if name == "release" || name == call[:len(call)-1] || (name == "settle" && call == "EndAttempt(") {
+				continue
+			}
+			assert.NotContains(t, body, call, "%s calls %s outside the release point", name, call)
+		}
+	}
+	// The only other way to release a directory is one no task ever owned.
+	for name, body := range functions {
+		switch name {
+		case "finishWorkspace", "discardPreparedWorkspace", "workspaceFinished":
+			continue
+		}
+		assert.NotContains(t, body, "Workspaces.Finish(", "%s releases a working directory of its own accord", name)
+	}
+	for name, body := range functions {
+		if name == "release" {
+			continue
+		}
+		assert.NotContains(t, body, "State: string(AttemptEnded)", "%s reports an attempt ended outside the release point", name)
+	}
+	// Both confirmations are the release point's: the worker's own group, and
+	// the process the task token went to, which an agent may have started in
+	// a group of its own.
+	for _, call := range []string{"confirmGroupGone(", "confirmTakerGone("} {
+		assert.Contains(t, functions["release"], call, "the release point does not confirm with %s", call)
+	}
+}
+
+// The one rule for reading who holds a task token, as a property of the
+// source: a holder is read through settledTaker, which closes the socket and
+// waits for a handoff in flight to finish first, and nowhere else. Reading
+// holderOf directly is how the NewSession failure path came to settle an
+// attempt around a holder the socket had not finished deciding (Copilot on
+// #738), and it is the shape a later card would repeat.
+func TestAHolderIsOnlyEverReadThroughTheSettledSocket(t *testing.T) {
+	source, err := os.ReadFile("dispatcher.go")
+	require.NoError(t, err)
+	functions := splitFunctions(string(source))
+	require.NotEmpty(t, functions)
+
+	require.Contains(t, functions["settledTaker"], "holderOf(", "settledTaker is where a holder is read")
+	for name, body := range functions {
+		if name == "settledTaker" || name == "holderOf" {
+			continue
+		}
+		assert.NotContains(t, body, "holderOf(", "%s reads a token holder without settling the socket first", name)
+		assert.NotContains(t, body, ".Holder()", "%s reads a token holder without settling the socket first", name)
+	}
+}
+
+// splitFunctions maps each top-level function or method name in a Go file to
+// its body text.
+func splitFunctions(source string) map[string]string {
+	header := regexp.MustCompile(`(?m)^func (?:\([^)]*\) )?(\w+)\(`)
+	matches := header.FindAllStringSubmatchIndex(source, -1)
+	out := make(map[string]string, len(matches))
+	for i, m := range matches {
+		end := len(source)
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		name := source[m[2]:m[3]]
+		out[name] = strings.TrimSpace(source[m[0]:end])
+	}
+	return out
+}

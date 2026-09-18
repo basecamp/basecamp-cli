@@ -1,0 +1,9 @@
+{
+  "name": "basecamp-connect-acp-adapters",
+  "private": true,
+  "description": "The ACP adapters the connector's acp driver is pinned to. Installed with make acp-adapters; never downloaded at dispatch time.",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.78.0",
+    "@agentclientprotocol/codex-acp": "1.12.0"
+  }
+}

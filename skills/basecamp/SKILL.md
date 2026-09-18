@@ -1454,7 +1454,32 @@ basecamp auth login --with-token -P bot --account <id>  # Import a personal acce
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
 basecamp connect setup -P agent --operator-profile <me> --route <project-id>=<dir>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
+basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
+basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
+basecamp connect setup -P agent --worker codex --worktrees  # Run workers with Codex instead of Claude Code, and give each task its own git worktree
+basecamp connect worktrees list -P agent --json    # The worktrees the connector kept: every task's, with its size on disk, git's record of it, and why it is kept (finished, dirty, unpushed, locked, moved, unverified, orphaned)
+basecamp connect worktrees prune -P agent          # The only thing that removes a worktree: removes the kept ones that hold no work; --force <path> removes one that does (on disk: every commit it reaches is kept under refs/basecamp-connect/retained/; orphaned: the task branch goes and the commit it stood at is reported)
 ```
+
+`basecamp connect` runs until it is stopped: it is not a command to call for an
+answer. Stdout is a wire of one JSON object per line (events seen, verdicts,
+dispatches — ids and states, never content) and the logs are on stderr, so read
+the lines rather than the log. SIGINT and SIGTERM cancel whatever workers are
+running, settle them, and exit 130 and 143. It runs on Linux only: the task
+token's hand-over onto a descriptor the next program inherits is sealed only
+there. It refuses a second connector for the same agent, and takes `--project`
+(repeatable) to hear and dispatch only those projects. Run it under a
+supervisor rather than from a session you will close.
+
+With worktrees on, a task's worktree is kept when the task ends — the connector
+removes none of its own accord — and listed by `connect worktrees list` with its
+size. Removing them is the operator's call: `connect worktrees prune` removes
+those that hold no work, and never pass `--force` for a path the operator did not
+name. A worktree whose directory something else removed is reported as
+`orphaned`: the connector leaves git's record of it and the task branch exactly
+as they are, and only a force on its path deletes the branch. A Codex worker cannot commit (its sandbox cannot write the
+worktree's git data), so with Codex every task that edits files leaves a kept
+worktree.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

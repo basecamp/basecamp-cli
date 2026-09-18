@@ -5,11 +5,14 @@ description: |
   connector's setup: the agent's credential (basecamp auth agent connect),
   connect.json (who may drive the agent, which project routes to which
   directory), and readiness (basecamp connect setup). Explains every setup
-  result and failure. Starting and supervising the connector is not in this
-  skill yet.
+  result and failure. Also reads what the connector ran (status, doctor) and
+  carries out a person's decisions on its records (redispatch, discard,
+  release, the cutover's shadow promote and import). Starting and supervising
+  the connector is not in this skill yet.
   Use when asked to connect an agent, set up or change the connector, add or
-  remove a project, change who can drive the agent, or find out why setup
-  says the connector is not ready.
+  remove a project, change who can drive the agent, find out why setup says
+  the connector is not ready, or see, retry, close or release what the
+  connector holds.
 triggers:
   - /basecamp-connect
   - connect an agent
@@ -20,6 +23,11 @@ triggers:
   - route a project to a directory
   - who can drive the agent
   - connector not ready
+  - basecamp connect status
+  - basecamp connect doctor
+  - redispatch an event
+  - held records
+  - release the hold
 ---
 
 # Basecamp connector: connect an agent and manage its setup
@@ -70,7 +78,8 @@ explain the result. This skill is the reference you do that from.
   computer. Show them in this conversation only; never post them to Basecamp,
   chat, a file or anywhere else. Whoever approves that code chooses which agent
   this computer acts as.
-- Setup and the connection refuse to run while `BASECAMP_TOKEN` is set. Tell the
+- Setup, the connection, doctor and redispatch refuse to run while
+  `BASECAMP_TOKEN` is set. Tell the
   person to unset it in their shell; do not set, print or work around it.
 
 **Identity.** Never set up a profile whose identity you have not confirmed with
@@ -111,7 +120,7 @@ the link and code while it waits; then wait for it to finish.
 | Credential | The CLI's credential store, under the profile. `basecamp auth status -P '<profile>' --json` describes it (see Inspecting). Never open it. |
 | connect.json | `$XDG_CONFIG_HOME/basecamp/connect/<profile>/connect.json`, default `~/.config/basecamp/connect/<profile>/connect.json`. Setup's JSON result gives the exact `path`. |
 | Setup lock | `.connect.lock` beside connect.json. One setup per profile at a time. |
-| Connector runtime state (ledger, checkpoint, lock) | Does not exist yet: it comes with the connector run (card 24, behind step 21). Do not look for it. |
+| Connector runtime state (ledger, checkpoint, lock) | `$XDG_STATE_HOME/basecamp/connect/<account>-<agent person id>/`, default under `~/.local/state`; a shadow run's is under `connect-shadow/` instead. Read it only through `basecamp connect status` and `basecamp connect doctor`; never open or copy the files. |
 
 The CLI's configuration, its profiles and (when it uses files) its credential
 store also live under `$XDG_CONFIG_HOME/basecamp`, so pointing
@@ -137,6 +146,7 @@ widens trust.
     "222": { "path": "/home/me/Work/app", "class": "internal", "watch_completions": true }
   },
   "driver": "spawn",
+  "worker": "claude",
   "concurrency": 2,
   "deadline": "45m0s",
   "worktrees": false
@@ -155,9 +165,10 @@ widens trust.
 | `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
 | `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
 | `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
+| `worker` | Which coding agent a spawn worker is: `claude` (default) or `codex` | `--worker` |
 | `concurrency` | Workers at once, 1 to 32 (default 2) | `--concurrency` |
 | `deadline` | Time limit per task, 1m to 24h (default 45m) | `--deadline 90m` |
-| `worktrees` | Each task gets its own git worktree of the routed directory | `--worktrees`, `--worktrees=false` |
+| `worktrees` | Each task gets its own git worktree of the routed directory, kept when the task ends and removed only by `connect worktrees prune` | `--worktrees`, `--worktrees=false` |
 
 **Never edit connect.json by hand.** It is the trust anchor: setup verifies
 every person and route before writing it, writes it owner-only, and parses it
@@ -312,7 +323,7 @@ project names up the same way as on first setup, and quote values by the Shell q
 | Trust only the operator, or project members | `--trust operator` / `--trust project` (leaving allowlist mode drops the list) |
 | Trust specific people | `--allow <person-id>` for each; the list you pass **replaces** the old one, so pass everyone who stays |
 | Change the operator | `--operator-profile '<profile>'` |
-| Change workers | `--driver`, `--concurrency`, `--deadline`, `--worktrees` / `--worktrees=false` |
+| Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline`, `--worktrees` / `--worktrees=false` |
 | Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
 
 A class or watch setting needs the project routed first, in the same run or an
@@ -393,14 +404,55 @@ is bound to account X, and this command named account Y* (drop `--account`), and
 *Profile holds a person's login, not an Agent's credential* (either it is a bot
 user and needs `--expect-identity`, or the wrong login is stored: ask).
 
-## Not built yet
+## Seeing and deciding what the connector ran
 
-Setup is all there is today. These come with card 24, behind step 21, and do not
-exist in the CLI yet, so do not try them or look for flags for them:
+These read or change the connector's own ledger for a set-up profile. They are
+the person's decisions, so run the deciding ones only when the person asks for
+that record or that step.
 
-- starting and supervising the connector, and reading its pointer lines;
-- a `service install` subcommand that keeps it running under systemd or launchd;
-- status, doctor and redispatch commands for the connector;
+- `basecamp connect status -P '<profile>'` (`--shadow` for a shadow run's
+  ledger; `--json` for fields): what its lock file says (diagnostic, never
+  proof that it runs), the hold, the feed position
+  (held or not, never the position), gaps, queues, live tasks and their workers,
+  lifecycle messages waiting for a person, held records, the last dispatches.
+  Read-only and safe while the connector runs. It shows no content.
+- `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
+  poll, the ledger, the worker binary, and a handshake with the agent's MCP
+  server. It writes nothing to the ledger and posts nothing to Basecamp,
+  though it may renew the profile's credential as any command does.
+- `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
+  run again or for the first time. Accepted for an unknown or failed outcome
+  (one whose task is still running waits for that task to end), a blocked
+  record and a held one; refused for a success, a discarded record and a record
+  that is itself still on its way to a worker. It stops the replaced worker
+  only when that process is provably still it, and says what became of it.
+- `basecamp connect discard -P '<profile>' <event_id>`: close a held, blocked
+  or unknown record without running it.
+- `basecamp connect release -P '<profile>'`: clear the hold that a start with
+  `--hold` or a shadow promote set. Held records stay held until each is
+  redispatched or discarded.
+- Cutover only: `basecamp connect shadow promote -P '<profile>'` makes the
+  shadow ledger the connector's, held, and needs both the shadow run and the
+  connector stopped; `basecamp connect import -P '<profile>' <file>` applies a
+  reconciliation file and needs the connector stopped. Run these only when the
+  person is doing a cutover and asks for them.
+
+Doctor exits `not_ready` (exit 7) when a check fails; explain each failed check.
+Follow a hint from these commands only as the rules above allow: one that says
+to reconnect the agent's profile rotates its secret and needs the person's
+consent, and one that says to run or stop the connector is the person's to do,
+since starting it is not part of this skill.
+
+## Not this skill's to do yet
+
+These come with card 24. Do not start, supervise or watch the connector from
+here, and do not look for flags for it:
+
+- starting and supervising the connector, and reading the NDJSON pointer lines
+  it writes while it runs (the command writes them today; using them is not
+  this skill's yet);
+- a `service install` subcommand that keeps it running under systemd or
+  launchd, which does not exist in the CLI;
 - the Claude Code and Codex plugins that start it.
 
 When the person asks to start the connector, say plainly that setup is done (or

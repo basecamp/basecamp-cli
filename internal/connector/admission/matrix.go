@@ -72,6 +72,10 @@ const (
 	StateQueued    State = "queued"
 	StateBlocked   State = "blocked"
 	StateDiscarded State = "discarded"
+	// StateHeld is never a verdict. It is what the ledger writes instead of
+	// admitted or queued for a record a hold tagged for review, which waits
+	// for a person.
+	StateHeld State = "held"
 )
 
 // Reason explains a blocked or discarded verdict.
