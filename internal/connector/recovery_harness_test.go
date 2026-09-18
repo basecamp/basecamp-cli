@@ -364,6 +364,10 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile, workspaceFile} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
 	}
+	// Registered before killAgents so it runs after it: the watch for a token
+	// in a file ends, and reports, once every worker this harness started has
+	// been ended.
+	t.Cleanup(func() { h.stopWatchingForTokenFiles() })
 	t.Cleanup(h.killAgents)
 	return h
 }
@@ -591,14 +595,24 @@ func (h *harness) killAgents() {
 	}
 }
 
-// watchForTokenFiles watches, for the rest of this run, every place a task
-// token must never be written, for every token a worker takes while it runs.
-// The workers watch too, but a worker the connector ends never reports; this
-// watcher is the parent's, and always does.
+// watchForTokenFiles watches, for the rest of this harness, every place a
+// task token must never be written, for every token a worker takes while it
+// runs. The workers watch too, but a worker the connector ends never reports;
+// this watcher is the parent's, and always does.
+//
+// For the harness, not for a run: a worker outlives the connector that
+// started it — one left lingering for a restart to end, a real agent, one
+// still binding when the connector died — and can write a file in the gap
+// between one run's exit and the next run's start, or after the last run.
+// The watch begins with the first run and ends at cleanup, once every worker
+// is ended (newHarness), and reports then.
 func (h *harness) watchForTokenFiles() {
 	h.t.Helper()
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
+	if h.watchStop != nil {
+		return
+	}
 	if h.watching == nil {
 		h.watching = map[string]func() []string{}
 	}
@@ -639,7 +653,15 @@ func (h *harness) knownTokens() []string {
 	return out
 }
 
-// stopWatchingForTokenFiles ends the watchers and reports what they saw.
+// watchedTokens is how many tokens the watch has found to watch so far.
+func (h *harness) watchedTokens() int {
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+	return len(h.watching)
+}
+
+// stopWatchingForTokenFiles ends the watchers and reports what they saw. It
+// is the harness's cleanup: every worker has been ended by then.
 func (h *harness) stopWatchingForTokenFiles() int {
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
@@ -667,13 +689,15 @@ func (h *harness) stopWatchingForTokenFiles() int {
 // It runs when the connector has exited, and the workers' side of it is read
 // once the workers have said their word (awaitWorkersWord): a worker's word
 // is due by its own exit, not by the connector's. The watch for a token in a
-// file runs until then too, since a worker still running is a worker that
-// can still write one.
+// file is not stopped here at all: a worker that has spoken may still be
+// running — lingering for a restart to end it — and can still write one, so
+// the watch runs for the harness and reports at its cleanup
+// (watchForTokenFiles).
 func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	t := h.t
 	t.Helper()
 	log := h.awaitWorkersWord(stateDir)
-	watched := h.stopWatchingForTokenFiles()
+	watched := h.watchedTokens()
 	tokens := h.taskTokens()
 	// A worker that bound to its task took a token, and the harness kept it.
 	// If it did not, this check has nothing to look for, and says so rather
@@ -868,9 +892,17 @@ func identityKey(p driver.Process) workerIdentity {
 func workersOwingAWord(log []agentLogEntry, recorded []driver.Process) []driver.Process {
 	said := map[workerIdentity]bool{}
 	for _, e := range log {
-		if e.Step == "bound" || strings.HasPrefix(e.Step, "bind-failed:") {
-			said[identityKey(identityOf(e.PID, e.PGID, e.StartedAt))] = true
+		if e.Step != "bound" && !strings.HasPrefix(e.Step, "bind-failed:") {
+			continue
 		}
+		if e.StartedAt.IsZero() {
+			// A word with no identity discharges nobody: it could be an
+			// earlier process's, under a pid the kernel gave again. The
+			// worker it was meant for reaches ProcessGone, or the silent
+			// check, and is answered for there.
+			continue
+		}
+		said[identityKey(identityOf(e.PID, e.PGID, e.StartedAt))] = true
 	}
 	var owing []driver.Process
 	seen := map[workerIdentity]bool{}
@@ -890,6 +922,44 @@ func workersOwingAWord(log []agentLogEntry, recorded []driver.Process) []driver.
 		}
 	}
 	return owing
+}
+
+// A worker's word is its own: it is matched by pid and kernel start time,
+// so a word an earlier process said under a pid the kernel gave again does
+// not discharge the later worker, and a word with no identity discharges no
+// one. The log and the ledger both accumulate across a harness's runs, which
+// is what makes the pid alone a stranger's key.
+func TestAWorkersWordIsMatchedByItsIdentity(t *testing.T) {
+	earlier := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	later := earlier.Add(time.Second)
+	recorded := []driver.Process{{PID: 4242, PGID: 4242, StartedAt: later, StartedExact: true}}
+	pids := func(ps []driver.Process) []int {
+		out := make([]int, 0, len(ps))
+		for _, p := range ps {
+			out = append(out, p.PID)
+		}
+		return out
+	}
+
+	t.Run("its own word discharges it", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, StartedAt: later, Step: "bound"}}
+		assert.Empty(t, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("an earlier process's word, under the same pid, does not", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, StartedAt: earlier, Step: "bind-failed: the earlier one"}}
+		assert.Equal(t, []int{4242}, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("a word with no identity discharges nobody", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, Step: "bound"}}
+		assert.Equal(t, []int{4242}, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("a start entry is owed by its own identity too", func(t *testing.T) {
+		log := []agentLogEntry{
+			{PID: 4343, PGID: 4343, StartedAt: later, Step: "start"},
+			{PID: 4343, PGID: 4343, StartedAt: earlier, Step: "bound"},
+		}
+		assert.Equal(t, []int{4343}, pids(workersOwingAWord(log, nil)))
+	})
 }
 
 // recordedWorkerProcesses is every worker process the ledger in dir recorded
