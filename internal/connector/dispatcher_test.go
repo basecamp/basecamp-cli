@@ -1279,14 +1279,14 @@ func TestTheProcessThatTookTheTokenIsEndedWithTheWorker(t *testing.T) {
 	socket.mu.Unlock()
 	// A worker in another group entirely, already confirmed gone.
 	worker := driver.Process{PID: 1 << 30, PGID: 1 << 30}
-	require.NoError(t, h.d.confirmTakerGone(worker, takerOf(socket)))
+	require.NoError(t, h.d.confirmTakerGone(worker, holderOf(socket)))
 	// Alive() counts a zombie, and this test is the process that has not
 	// reaped it; the rule's own question is whether anything of the group
 	// still runs.
 	assert.False(t, driver.GroupMembersRemain(taker), "the process holding the task token is ended with its worker")
 
 	// Asked again, with nothing of it left, it is still gone.
-	assert.NoError(t, h.d.confirmTakerGone(worker, takerOf(socket)))
+	assert.NoError(t, h.d.confirmTakerGone(worker, holderOf(socket)))
 }
 
 // A token taken inside the worker's own group is already covered by the
@@ -1299,8 +1299,8 @@ func TestATakerInTheWorkersGroupIsNotEndedTwice(t *testing.T) {
 	socket.mu.Lock()
 	socket.taker = driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now()}
 	socket.mu.Unlock()
-	require.NoError(t, h.d.confirmTakerGone(driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp()}, takerOf(socket)))
-	assert.NoError(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, takerOf(socket)),
+	require.NoError(t, h.d.confirmTakerGone(driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp()}, holderOf(socket)))
+	assert.NoError(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, holderOf(socket)),
 		"this process's own group is never signaled, whatever a record says")
 }
 
@@ -1570,4 +1570,34 @@ func TestARefusedHandoffIsAlwaysSaidOutLoud(t *testing.T) {
 	logs.Reset()
 	h.d.reportHandoff(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})), "att_x", HandoffClosed, driver.Process{}, true)
 	assert.NotContains(t, logs.String(), `"level":"WARN"`)
+}
+
+// Copilot on #738: a delivered token whose holder could not be identified
+// used to be the same zero taker as no delivery at all, so the release point
+// settled the attempt and released its directory around a process that may
+// still have held the task's credential. It is held instead — here, and
+// after a restart, because the ledger carries the state too.
+func TestAnAttemptWhoseTokenHolderIsUnaccountedForIsHeld(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+	ctx := context.Background()
+	// A worker whose pid is above the kernel's maximum: gone, nothing to
+	// signal, so only the token's holder is in question.
+	require.NoError(t, h.ledger.MarkRunning(ctx, l.AttemptID, AttemptProcess{PID: 1 << 30, PGID: 1 << 30, SessionID: "s"}))
+	require.NoError(t, h.ledger.MarkTakerUnaccounted(ctx, l.AttemptID))
+
+	require.Error(t, h.d.confirmTakerGone(driver.Process{PID: 1 << 30, PGID: 1 << 30}, TokenHolder{Unaccounted: true}),
+		"a token that is out and unaccounted for is never confirmed gone")
+
+	live, err := h.ledger.LiveAttempts(ctx)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+	require.True(t, live[0].TakerUnaccounted, "and the ledger carries that across a restart")
+	require.Zero(t, live[0].Taker.PID, "with no process recorded, which is why the flag is needed")
+
+	require.NoError(t, h.d.Recover(ctx))
+	assert.Empty(t, readAttempt(t, h.ledger, l.AttemptID).StopReason,
+		"the attempt stays live rather than being settled around the token's holder")
+	assert.Equal(t, 1, h.d.heldCount(), "and it holds one of the connector's worker slots until a person settles it")
 }

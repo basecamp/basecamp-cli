@@ -436,3 +436,61 @@ func TestADeliveryWithNoIdentityClearsTheTaker(t *testing.T) {
 	_, ok = s.Taker()
 	assert.False(t, ok, "and no stale taker is left standing for the release point to end")
 }
+
+// Copilot on #738: running out of tries to see whether the process holding
+// the token has exited is not the same as watching it exit. The socket used
+// to arm again after ten unreadable answers, which puts the same task token
+// in a second process while the first may still be running.
+func TestAKernelThatStopsAnsweringNeverArmsTheSocketAgain(t *testing.T) {
+	asked := 0
+	s := &TokenSocket{
+		stop: make(chan struct{}),
+		// A taker of this process's own, so the wait has something real to
+		// watch, and a kernel that will not say whether it is gone.
+		taker:   driver.Process{PID: os.Getpid(), PGID: syscall.Getpgrp(), StartedAt: time.Now(), StartedExact: true},
+		poll:    time.Millisecond,
+		pollMax: time.Millisecond,
+		gone: func(driver.Process) (bool, error) {
+			asked++
+			return false, errors.New("the process table cannot be read")
+		},
+	}
+
+	assert.Equal(t, takerUnaccounted, s.waitForTakerGone(), "an unanswerable question is not an answer")
+	assert.Equal(t, takerErrorLimit, asked, "and it is asked the whole budget first")
+	assert.True(t, s.Holder().Unaccounted, "the attempt is held: its token is out and nobody can say where")
+	assert.True(t, s.Holder().Held())
+}
+
+// A delivery the connector could not attribute is not the same as no
+// delivery, and used to be recorded as one: the zero taker armed the socket
+// for another handoff and told the release point nothing was out.
+func TestADeliveryToAnUnidentifiedProcessIsNotHandedAgain(t *testing.T) {
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 2*time.Second, peerCredentials,
+		processGroupOf, parentProcessOf, func(int) (driver.Process, error) {
+			// The peer passed the trust rule, and then the kernel would not
+			// say who it was.
+			return driver.Process{}, errors.New("the process table cannot be read")
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got), "the worker's own server is served")
+	assert.Equal(t, HandoffDelivered, <-handoffs)
+
+	// Armed again, the socket would hand the same token to whatever asked
+	// next while the first holder may still be running.
+	second, _ := fetch(t, s.Path())
+	assert.Empty(t, strings.TrimSpace(second), "nothing else is given this task's token")
+	assert.Equal(t, HandoffUnaccounted, <-handoffs, "and the socket ends there, loudly")
+	require.True(t, s.Settled(5*time.Second))
+
+	holder := s.Holder()
+	assert.True(t, holder.Held(), "the release point is told the token is out and unaccounted for")
+	assert.Zero(t, holder.Process.PID, "with no process to end, since none could be named")
+}

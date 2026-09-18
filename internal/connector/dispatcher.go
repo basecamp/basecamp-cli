@@ -342,7 +342,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
 		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
-			worker, a.Taker.Identity(),
+			worker, TokenHolder{Process: a.Taker.Identity(), Unaccounted: a.TakerUnaccounted},
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
 	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
@@ -565,7 +565,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
-		d.release(settleCtx, launch, driver.Process{}, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		d.release(settleCtx, launch, driver.Process{}, TokenHolder{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
 		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
@@ -579,7 +579,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 			"no_process", spawnFailed, "unusable", unusable, "error", err)
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
-		d.release(settleCtx, launch, driver.StartedProcess(err), takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		d.release(settleCtx, launch, driver.StartedProcess(err), holderOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return nil
 	}
@@ -649,9 +649,18 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// server is the process the release point must end.
 	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
 		d.reportHandoff(log, attemptID, handoff, taker, afterADelivery)
-		if handoff == HandoffDelivered && taker.PID > 0 {
+		switch {
+		case handoff == HandoffDelivered && taker.PID > 0:
 			if err := d.ledger.RecordTaker(recordCtx, attemptID, recordedProcess(taker, "")); err != nil {
 				log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
+			}
+		case handoff == HandoffDelivered, handoff == HandoffUnaccounted:
+			// A delivery whose recipient could not be identified, or a
+			// holder the kernel stopped answering about: the attempt carries
+			// that across a restart too, so the next process holds it rather
+			// than read a missing taker as nobody having the token.
+			if err := d.ledger.MarkTakerUnaccounted(recordCtx, attemptID); err != nil {
+				log.Warn("connector: could not record that this task's token holder is unaccounted for", "attempt_id", attemptID, "error", err)
 			}
 		}
 	})
@@ -768,16 +777,16 @@ func (d *Dispatcher) shortSocketBase(preferred string) string {
 // settledTaker stops the attempt's token socket and waits for it to finish
 // with whatever it was doing, so a handoff in flight is not still deciding
 // while the attempt is released. It is what the release point acts on.
-func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace time.Duration) driver.Process {
+func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace time.Duration) TokenHolder {
 	if tokens == nil {
-		return driver.Process{}
+		return TokenHolder{}
 	}
 	// Nothing more is handed over; a delivery already under way finishes.
 	tokens.Close()
 	if !tokens.Settled(grace) {
 		log.Warn("connector: the task token's socket was still busy when its attempt ended", "attempt_id", attemptID)
 	}
-	return takerOf(tokens)
+	return holderOf(tokens)
 }
 
 // reportHandoff says what became of one handoff of the task token. Only a
@@ -796,6 +805,12 @@ func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff H
 	case HandoffUndelivered:
 		log.Warn("connector: the worker's MCP server asked for its task token and could not be given it; the next start of it will be",
 			"attempt_id", attemptID)
+	case HandoffUnaccounted:
+		// The one thing worse than a worker without tools: a token out in a
+		// process the connector cannot see. Nothing else is served it, and
+		// the attempt will be held.
+		log.Error("connector: this task's token was delivered and the process holding it cannot be accounted for; no further handoff will be made and the attempt is held",
+			"attempt_id", attemptID)
 	case HandoffSpent:
 		log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
 			"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
@@ -812,13 +827,12 @@ func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff H
 	}
 }
 
-// takerOf is the process a socket's token went to, or none.
-func takerOf(tokens *TokenSocket) driver.Process {
+// holderOf is what a socket knows about the process holding its token.
+func holderOf(tokens *TokenSocket) TokenHolder {
 	if tokens == nil {
-		return driver.Process{}
+		return TokenHolder{}
 	}
-	taker, _ := tokens.Taker()
-	return taker
+	return tokens.Holder()
 }
 
 // confirmTakerGone is the release point's second confirmation: the process
@@ -832,7 +846,16 @@ func takerOf(tokens *TokenSocket) driver.Process {
 // too (Recover passes it to this same point). A taker the connector never
 // managed to identify is the one case left to the agent's own exit: such a
 // bridge ends when its agent's output closes.
-func (d *Dispatcher) confirmTakerGone(worker, taker driver.Process) error {
+func (d *Dispatcher) confirmTakerGone(worker driver.Process, holder TokenHolder) error {
+	if holder.Held() {
+		// The one rule for a holder the connector cannot account for: the
+		// token is out, nothing here can name the process that has it or
+		// prove it has gone, and an attempt is never released around that.
+		// It stays live — its directory, its conversation and one worker
+		// slot with it — for a person to settle (Copilot on #738).
+		return errors.New("connector: this task's token was delivered and the process holding it cannot be accounted for")
+	}
+	taker := holder.Process
 	ok := taker.PID > 0 && taker.PGID > 0
 	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
 		// A record that names the connector's own group is a mistake, not a
@@ -874,14 +897,14 @@ const settleAttempts = 5
 // live: its token, its conversation and its directory are still its own, a
 // person settles it, and this process stops counting it among the workers it
 // may start.
-func (d *Dispatcher) release(ctx context.Context, launch Launch, worker, taker driver.Process, end AttemptEnd, run *taskRun) {
+func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
 	if err == nil {
 		// An agent may start the connector's own MCP server in a process
 		// group of its own (Codex does), and that process holds the task's
 		// token: it is confirmed gone here too, by the same rule.
-		err = d.confirmTakerGone(worker, taker)
+		err = d.confirmTakerGone(worker, holder)
 	}
 	if err != nil {
 		d.hold()

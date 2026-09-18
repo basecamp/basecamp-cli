@@ -101,6 +101,11 @@ CREATE TABLE attempts (
   taker_pid        INTEGER,
   taker_pgid       INTEGER,
   taker_started    TEXT,
+  -- The token went out and the process holding it could not be accounted
+  -- for: its identity could not be read, or the kernel stopped answering
+  -- whether it is gone. Nothing is released around such an attempt, here or
+  -- after a restart.
+  taker_unaccounted INTEGER NOT NULL DEFAULT 0,
   UNIQUE (task_id, seq),
   CHECK ((state = 'ended') = (stop_reason <> ''))
 );
@@ -607,6 +612,29 @@ UPDATE attempts SET taker_pid = ?, taker_pgid = ?, taker_started = ? WHERE id = 
 	})
 }
 
+// MarkTakerUnaccounted records that the attempt's task token was delivered
+// and the process holding it cannot be accounted for. It is the ledger's
+// half of the same rule the socket holds in memory: a restart must not read
+// an attempt with no taker recorded as an attempt whose token nobody took,
+// and settle around a process that may still have it.
+func (l *Ledger) MarkTakerUnaccounted(ctx context.Context, attemptID string) error {
+	return retryBusy(func() error {
+		res, err := l.db.ExecContext(ctx,
+			`UPDATE attempts SET taker_unaccounted = 1 WHERE id = ? AND state <> 'ended'`, attemptID)
+		if err != nil {
+			return fmt.Errorf("connector: record the unaccounted token holder of %s: %w", attemptID, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return nil //nolint:nilerr // the write is committed
+		}
+		if n == 0 {
+			return fmt.Errorf("connector: record the unaccounted token holder of %s: %w", attemptID, ErrNoLiveAttempt)
+		}
+		return nil
+	})
+}
+
 // MarkRunning moves a launching attempt to running with its process and
 // session.
 func (l *Ledger) MarkRunning(ctx context.Context, attemptID string, p AttemptProcess) error {
@@ -859,8 +887,12 @@ type LiveAttempt struct {
 	Process         AttemptProcess
 	// Taker is the process the task token went to, where one took it. Its
 	// PID is zero when none did.
-	Taker      AttemptProcess
-	LaunchedAt time.Time
+	Taker AttemptProcess
+	// TakerUnaccounted is a token that went out to a process this attempt
+	// could not account for. Its PID is zero too, and the difference
+	// matters: nothing of such an attempt is released.
+	TakerUnaccounted bool
+	LaunchedAt       time.Time
 	// DeadlineAt is zero when the task has none.
 	DeadlineAt time.Time
 }
@@ -872,7 +904,7 @@ func (l *Ledger) LiveAttempts(ctx context.Context) ([]LiveAttempt, error) {
 	rows, err := l.db.QueryContext(ctx, `
 SELECT a.id, a.task_id, a.state, a.driver, t.route, t.work_dir, t.conversation_key,
        COALESCE(a.pid, 0), COALESCE(a.pgid, 0), a.process_started, a.session_id, a.launched_at, t.deadline_at,
-       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started
+       COALESCE(a.taker_pid, 0), COALESCE(a.taker_pgid, 0), a.taker_started, a.taker_unaccounted
 FROM attempts a JOIN tasks t ON t.id = a.task_id
 WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 	if err != nil {
@@ -888,7 +920,7 @@ WHERE a.state <> 'ended' ORDER BY a.launched_at, a.id`)
 		)
 		if err := rows.Scan(&a.AttemptID, &a.TaskID, &state, &a.Driver, &a.Route, &a.WorkDir, &a.ConversationKey,
 			&a.Process.PID, &a.Process.PGID, &started, &a.Process.SessionID, &launched, &deadline,
-			&a.Taker.PID, &a.Taker.PGID, &took); err != nil {
+			&a.Taker.PID, &a.Taker.PGID, &took, &a.TakerUnaccounted); err != nil {
 			return nil, fmt.Errorf("connector: live attempts: %w", err)
 		}
 		if took.Valid {
