@@ -77,6 +77,16 @@ func obLaunch(t *testing.T, ledger *Ledger, id int64) Launch {
 	return l
 }
 
+// obPull is get_dispatch. A worker reports only what it pulled — exposure at
+// launch is not the pull — so a test that acknowledges or completes an event
+// pulls it first, as a worker does.
+func obPull(t *testing.T, d *TaskDispatch, id int64) {
+	t.Helper()
+	_, ok, err := d.Get(context.Background(), id)
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
 func obIntent(t *testing.T, ledger *Ledger, key string) Intent {
 	t.Helper()
 	intents, err := ledger.Intents(context.Background(), IntentFilter{})

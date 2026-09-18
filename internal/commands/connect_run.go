@@ -115,7 +115,7 @@ func connectStateParts(file setup.File, shadow bool) []string {
 }
 
 // connectSessionsDir is where a session's short-lived files go — the MCP
-// configuration, and the one-use socket that hands over a task token. Never
+// configuration, and the socket that hands over a task token. Never
 // under the state directory or a working directory, which outlive the session
 // and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
 // memory-backed directory made for exactly this, or /tmp where there is none.
@@ -336,10 +336,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
-			// no reply is ever adopted from one.
-			Replies:            connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
-			IsLifecycleMessage: outbox.IsLifecycleMessage,
-			Lines:              lines, Logger: logger,
+			// no reply is ever adopted from one. That is the whole filter:
+			// an id-only predicate beside it would ask the ledger again for
+			// every reply, outside the adoption budget, for nothing.
+			Replies: connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
+			Lines:   lines, Logger: logger,
 		}))
 		if err != nil {
 			return err

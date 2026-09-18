@@ -311,7 +311,7 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	t.Logf("production-sized prompt: %d tokens by the upper bound", estimateTokens(prompt))
 	assert.Less(t, estimateTokens(prompt), MaxPromptTokens)
 
-	// The token reaches the worker's MCP server only over its one-use socket.
+	// The token reaches the worker's MCP server only over the socket.
 	secret := <-token
 	require.NotEmpty(t, secret, "the worker's own group was handed the token")
 	require.Len(t, cfg.MCPServers, 1)
@@ -1415,4 +1415,159 @@ func TestADeepSessionDirectoryStillGetsItsTokenAcross(t *testing.T) {
 	assert.LessOrEqual(t, len(socket), 103)
 	_, err = os.Stat(filepath.Dir(socket))
 	assert.True(t, os.IsNotExist(err), "and the directory it was moved to is removed with the attempt")
+}
+
+// Opus r6: a socket directory the connector had to make elsewhere is its own
+// to sweep, or a crash leaves one behind on every dispatch.
+func TestAShortSocketDirectoryIsSweptOnStart(t *testing.T) {
+	runtimeDir, err := os.MkdirTemp("/tmp", "bcrt-")
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(runtimeDir, 0o700))
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeDir) })
+
+	deep, err := os.MkdirTemp("/tmp", "bcc-deep-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.PrivateDir = deep
+		o.Lookup = func(k string) (string, bool) {
+			if k == "XDG_RUNTIME_DIR" {
+				return runtimeDir, true
+			}
+			return "", false
+		}
+	})
+	base := h.d.shortSocketBase(filepath.Join(deep, strings.Repeat("a", AttemptIDLength)))
+	require.NotEmpty(t, base)
+	assert.True(t, strings.HasPrefix(base, runtimeDir), "under the runtime directory this connector was given: %s vs %s", base, runtimeDir)
+
+	// What a crashed run left behind.
+	leftover := filepath.Join(base, "s-from-a-crash")
+	require.NoError(t, os.Mkdir(leftover, 0o700))
+	require.NoError(t, h.d.Recover(context.Background()))
+	_, err = os.Stat(leftover)
+	assert.True(t, os.IsNotExist(err), "a start sweeps what a crash left in it")
+}
+
+// Copilot: a start that failed can leave its attempt held, and a held
+// attempt takes a worker slot. Capacity is asked again for every record in
+// the pass, not counted down from what it was at the top.
+func TestAHeldAttemptTakesASlotWithinTheSamePass(t *testing.T) {
+	fake := newFakeDriver()
+	// Every start fails after a process existed, and no group can be
+	// confirmed gone: each attempt is held.
+	for range 3 {
+		fake.startErr = append(fake.startErr,
+			&driver.StartError{Process: driver.Process{PID: 1 << 30, PGID: 1 << 30}, Err: errors.New("handshake failed")})
+	}
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
+	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return driver.ErrGroupOutlivedLeader }
+	// Three records on three directories, so nothing but the bound stops them.
+	for i, id := range []int64{1, 2, 3} {
+		route := "/work/held" + string(rune('a'+i))
+		h.routes[adapterBucketID+int64(i)] = admission.Route{Path: route}
+		seenRecord(t, h.ledger, id)
+		v := admittedVerdict(id, 0, "recording:held"+string(rune('a'+i)))
+		v.Route = route
+		_, err := h.ledger.ledgerCommitWithBucket(v, adapterBucketID+int64(i))
+		require.NoError(t, err)
+	}
+	h.run(t)
+
+	require.Eventually(t, func() bool { return h.d.heldCount() >= 2 }, 5*time.Second, 10*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, 2, h.d.heldCount(), "two held attempts fill the window, and the third record waits")
+	var attempts int
+	require.NoError(t, h.ledger.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM attempts`).Scan(&attempts))
+	assert.Equal(t, 2, attempts, "no third worker while two are unaccounted for")
+	assert.LessOrEqual(t, h.d.free(), 0)
+}
+
+// An agent hands its MCP servers its own whole environment, so a name the
+// connector leaves unset arrives carrying the agent's value — and
+// BASECAMP_BASE_URL is where the agent's Basecamp credential would be sent.
+// Every name the server may have is pinned to this connector's value or to
+// nothing.
+func TestTheWorkersServerEnvironmentPinsEveryNameItMayHave(t *testing.T) {
+	fake := newFakeDriver()
+	var cfg driver.SessionConfig
+	fake.onStart = func(c driver.SessionConfig) { cfg = c }
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.MCP.Env = []string{"BASECAMP_EXTRA_NOT_REAL"}
+		o.Lookup = func(k string) (string, bool) {
+			if k == "BASECAMP_CACHE_DIR" {
+				return "/var/cache/connector", true
+			}
+			return "", false
+		}
+	})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+	h.attemptsEnded(t, 1)
+
+	env := cfg.MCPServers[0].Env
+	require.NotEmpty(t, env)
+	for _, name := range append(append([]string{}, MCPServerEnv...), "BASECAMP_EXTRA_NOT_REAL") {
+		value, ok := env[name]
+		assert.Truef(t, ok, "%s is not pinned, so the agent's own value would reach the server", name)
+		if name == "BASECAMP_CACHE_DIR" {
+			assert.Equal(t, "/var/cache/connector", value)
+		} else {
+			assert.Empty(t, value, "%s", name)
+		}
+	}
+}
+
+// Card 19, through the coordinator: the shared recorder deduplicates
+// nothing. Two identical refusals are two refusals, and what counts as one is
+// the driver's question, not the ledger's.
+func TestTheRecorderCountsWhatItIsToldTwiceIfItIsToldTwice(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	r := &refusalRecorder{ledger: ledger, attemptID: l.AttemptID, log: slog.New(slog.DiscardHandler)}
+
+	same := driver.Refusal{Tool: "Bash"}
+	require.NoError(t, r.RecordRefusal(context.Background(), same))
+	require.NoError(t, r.RecordRefusal(context.Background(), same))
+	assert.Equal(t, 0, r.unrecorded())
+
+	var refusals int
+	require.NoError(t, ledger.db.QueryRowContext(context.Background(),
+		`SELECT refusals FROM attempts WHERE id = ?`, l.AttemptID).Scan(&refusals))
+	assert.Equal(t, 2, refusals, "identical refusals with no call id are distinct")
+}
+
+// Opus r9: a peer that is not the worker's ends the socket for good, so it is
+// said out loud whether or not a delivery came first — it is the one event
+// the peer check exists to catch.
+func TestARefusedHandoffIsAlwaysSaidOutLoud(t *testing.T) {
+	var logs safeBuffer
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	})
+	for _, tc := range []struct {
+		handoff Handoff
+		after   bool
+		want    string
+	}{
+		{HandoffRefused, true, "is not the worker asked for its task token"},
+		{HandoffRefused, false, "is not the worker asked for its task token"},
+		{HandoffUndelivered, true, "could not be given it"},
+		{HandoffExpired, true, "within the window"},
+		{HandoffSpent, true, "restarted more often"},
+	} {
+		logs.Reset()
+		h.d.reportHandoff(slog.New(slog.NewJSONHandler(&logs, nil)), "att_x", tc.handoff, driver.Process{}, tc.after)
+		assert.Contains(t, logs.String(), tc.want, "%s after=%v", tc.handoff, tc.after)
+		assert.Contains(t, logs.String(), `"level":"WARN"`, "%s after=%v is worth a warning", tc.handoff, tc.after)
+	}
+
+	// Closed after a delivery is how every healthy attempt ends.
+	logs.Reset()
+	h.d.reportHandoff(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})), "att_x", HandoffClosed, driver.Process{}, true)
+	assert.NotContains(t, logs.String(), `"level":"WARN"`)
 }

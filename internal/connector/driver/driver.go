@@ -63,7 +63,17 @@
 //  1. The driver calls SessionConfig.Refusals.RecordRefusal before it sends
 //     its answer to the agent, or before it emits the update for a refusal
 //     it observed. It calls it once per tool call id: a refusal the stream
-//     announced and the result repeats is one refusal.
+//     announced and the result repeats is one refusal. A refusal with NO
+//     tool call id — one read from a line of the agent's output rather than
+//     from a call — counts every time it happens, identical text included:
+//     two refusals of the same tool are two refusals, and nothing but an id
+//     can say they are one.
+//     The recorder itself deduplicates NOTHING: it records what it is told,
+//     once per call. Deciding what is one refusal is the driver's, which
+//     knows what it read — a tool call id where the agent gives one, and
+//     where a driver reads refusals from lines of output, the line AND its
+//     occurrence in that output, so two identical lines are two refusals and
+//     reading the same output twice records neither again (card 19).
 //  2. The dispatcher's recorder writes it to the attempt's row at once
 //     (connector.Ledger.RecordRefusal: attempts.refusals, incremented while
 //     the attempt is live). A write the ledger refuses is carried by the
@@ -80,6 +90,12 @@
 // session — its attempt is settled as lost and its task superseded — so a
 // ledger key on (attempt, tool call) would buy nothing, and this is settled,
 // not open.
+//
+// Where a refusal can be seen differs by agent: Claude Code announces it in
+// its stream and repeats it in the turn's result, and an agent that writes
+// refusals only to stderr is read through Worker.StderrLines, not
+// StderrTail — the tail is the last line, and whatever the agent prints next
+// would bury the refusal.
 //
 // Where this can still be broken: a refusal the agent never reports — a tool
 // it declined to ask for, or a denial its stream does not carry — is not a
@@ -178,6 +194,12 @@ type SessionConfig struct {
 	Launcher Launcher
 	// Scope is what the launcher is told the worker is for.
 	Scope Scope
+	// SocketDir is the directory holding the task token's unix socket, which
+	// the worker's MCP server dials. It is PrivateDir in the ordinary case
+	// and a short directory of the connector's own where a socket path under
+	// PrivateDir would be longer than a unix socket takes. It is in Scope
+	// too, which is what a launcher is given.
+	SocketDir string
 	// PrivateDir is an owner-only directory the driver may write session
 	// files into (an MCP config, say). The driver removes what it wrote when
 	// the session is closed; the dispatcher sweeps the directory on start.
@@ -437,7 +459,14 @@ type Scope struct {
 	EventIDs []int64
 	// WorkDir is the approved working directory the record carries.
 	WorkDir string
-	Class   string
+	// SocketDir holds the task token's unix socket, which the worker's MCP
+	// server dials. A launcher that confines a worker must let it reach this
+	// directory, or the worker's MCP server cannot be handed its token. It is
+	// SessionConfig.PrivateDir in the ordinary case, and a short directory of
+	// the connector's own where a socket path under PrivateDir would be
+	// longer than a unix socket takes.
+	SocketDir string
+	Class     string
 }
 
 // Command is a process to run: path, argv (without the path) and the whole

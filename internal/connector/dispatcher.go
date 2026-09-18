@@ -38,8 +38,9 @@ import (
 //  3. Nothing crosses to a worker that it does not need. The prompt names
 //     events and a recording URL, never content, and is under
 //     MaxPromptTokens at its worst case; the task token reaches only the
-//     worker's MCP server, over a one-use socket, never an argv or an
-//     environment; both environments are allowlists.
+//     worker's MCP server, over a socket that serves one handoff per start of
+//     that server, never an argv or an environment; both environments are
+//     allowlists.
 //  4. Stop reasons are the dispatcher's own record: deadline and shutdown
 //     are stops it asked for; a canceled turn it did not ask for is failed;
 //     a worker gone with a turn in flight is lost.
@@ -204,6 +205,10 @@ type Dispatcher struct {
 	// red is the dispatcher's redaction rule; a task's lines use its own
 	// (taskRedaction), which adds the task's token and environments.
 	red *driver.Redactor
+	// socketBase is where a token socket goes when its session directory's
+	// path is too long for one; empty until the first attempt needs it.
+	socketBase   string
+	socketBaseMu sync.Mutex
 }
 
 // NewDispatcher builds a dispatcher.
@@ -363,15 +368,30 @@ func (d *Dispatcher) hold() {
 	d.mu.Unlock()
 }
 
-// sweepPrivateDir removes session files a crashed process left: they can hold
-// a task token.
+// sweepPrivateDir removes what a crashed process left in the session and
+// socket directories. Nothing there carries the task token — it crosses over
+// the socket, never in a file — but a stale MCP configuration, an empty
+// session directory and a dead socket are litter with an attempt's name on
+// them, and a start is when they are cleared.
 func (d *Dispatcher) sweepPrivateDir() {
-	entries, err := os.ReadDir(d.opts.PrivateDir)
+	d.sweep(d.opts.PrivateDir)
+	// And the short socket base, where this connector needs one: a crash
+	// leaves a directory there that nothing else would remove. Asking with an
+	// attempt-sized path is how the dispatcher decides whether it needs one
+	// at all.
+	if base := d.shortSocketBase(filepath.Join(d.opts.PrivateDir, strings.Repeat("a", AttemptIDLength))); base != "" {
+		d.sweep(base)
+	}
+}
+
+// sweep removes everything in dir.
+func (d *Dispatcher) sweep(dir string) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		_ = os.RemoveAll(filepath.Join(d.opts.PrivateDir, e.Name()))
+		_ = os.RemoveAll(filepath.Join(dir, e.Name()))
 	}
 }
 
@@ -381,10 +401,6 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	for _, r := range d.live {
 		runs = append(runs, r)
 	}
-	// An attempt recovery left live may still have a worker; it holds a slot
-	// as a running one does, so the bound is on workers, not on this
-	// process's own.
-	free := d.opts.Concurrency - len(d.live) - d.held
 	d.mu.Unlock()
 
 	approved := d.approvedRoutes()
@@ -403,7 +419,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		return nil
 	default:
 	}
-	if free <= 0 {
+	if d.free() <= 0 {
 		return nil
 	}
 	// Invariant 2, in the query: only records whose route connect.json
@@ -428,24 +444,33 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	d.reportStranded(ctx, approved)
 	for _, record := range records {
-		if free <= 0 {
+		// Asked again on every record, not counted down: a start that failed
+		// can have held its attempt, and a held attempt takes a slot as a
+		// running one does (Copilot).
+		if d.free() <= 0 {
 			break
 		}
 		if d.workDirBusy(record.Decision.Route) {
 			continue
 		}
-		started, err := d.start(ctx, record)
-		if err != nil {
+		if err := d.start(ctx, record); err != nil {
 			if errors.Is(err, ErrNotStartable) {
 				continue
 			}
 			return err
 		}
-		if started {
-			free--
-		}
 	}
 	return nil
+}
+
+// free is how many more workers this connector may have: the concurrency it
+// was given, less the attempts it is running and the attempts it is holding.
+// An attempt recovery left live may still have a worker, and one whose worker
+// could not be confirmed gone certainly may, so both take a slot.
+func (d *Dispatcher) free() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.opts.Concurrency - len(d.live) - d.held
 }
 
 // StrandedInterval is how often the dispatcher says how much admitted work
@@ -504,15 +529,17 @@ func (d *Dispatcher) workDirBusy(route string) bool {
 	return false
 }
 
-// start launches a task for record. It reports whether a worker is running.
-func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
+// start launches a task for record: the ledger first, then the driver, and
+// the release point on every path that fails after it. Capacity is the
+// caller's question (free), not this one's.
+func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	route := record.Decision.Route
 	workDir := route
 	if d.opts.Workspaces != nil {
 		dir, err := d.opts.Workspaces.Prepare(ctx, route, record.ID)
 		if err != nil {
 			d.log.Warn("connector: could not prepare a working directory", "event_id", record.ID, "error", err)
-			return false, nil
+			return nil
 		}
 		workDir = dir
 	}
@@ -524,7 +551,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// worker to confirm: the directory prepared for it was never a
 		// task's.
 		d.discardPreparedWorkspace(ctx, route, workDir)
-		return false, err
+		return err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs, State: string(AttemptLaunching)})
 
@@ -539,7 +566,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
 		d.release(settleCtx, launch, driver.Process{}, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
-		return false, nil //nolint:nilerr // settled as a start that ran nothing
+		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
 	if err != nil {
@@ -554,16 +581,20 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		// release point confirms that group gone before anything is settled.
 		d.release(settleCtx, launch, driver.StartedProcess(err), takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
-		return false, nil
+		return nil
 	}
 	p := session.Process()
 	// The token goes only to this worker's own process group.
 	tokens.AllowGroup(p.PGID)
 	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
 		_ = session.Close()
+		// The socket was open to the worker's group, so a handoff may be in
+		// flight: it is finished with before the taker is read, as at every
+		// other release.
+		taker := settledTaker(tokens, log, launch.AttemptID, d.opts.CancelGrace)
 		cleanup()
-		d.release(settleCtx, launch, p, takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
-		return false, err
+		d.release(settleCtx, launch, p, taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed}, nil)
+		return err
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
@@ -576,7 +607,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) (bool, error) {
 		defer d.wg.Done()
 		run.supervise(ctx)
 	}()
-	return true, nil
+	return nil
 }
 
 // sessionConfig builds what the driver is given (invariant 3).
@@ -585,10 +616,10 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		return driver.SessionConfig{}, nil, func() {}, fmt.Errorf("connector: session directory: %w", err)
 	}
-	// The token's one carriage: a one-use socket, served only to the worker's
+	// The token's one carriage: a socket served only to the worker's
 	// process group (tokensocket.go). It goes in the attempt's own directory
 	// unless a socket path there would be longer than a unix socket takes.
-	socketDir, temporary, err := TokenSocketDir(dir, d.opts.Lookup)
+	socketDir, temporary, err := TokenSocketDir(dir, d.shortSocketBase(dir))
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return driver.SessionConfig{}, nil, func() {}, err
@@ -604,33 +635,44 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 		_ = os.RemoveAll(dir)
 		return driver.SessionConfig{}, nil, func() {}, err
 	}
-	attemptID, log := launch.AttemptID, d.log
+	// This attempt's own logger, so a handoff line goes through the task's
+	// redaction (its token, its socket directory) and not only the
+	// dispatcher's. The session's environment is not known yet; what these
+	// lines carry is ids and enums.
+	attemptID := launch.AttemptID
+	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{SocketDir: socketDir}))
 	// The handoff outlives the start, and a shutdown must not stop the
 	// connector from recording who holds the token.
 	recordCtx := context.WithoutCancel(ctx)
-	go func() {
-		if handoff := tokens.Result(); handoff != HandoffDelivered {
-			log.Warn("connector: the worker's MCP server did not take its task token", "attempt_id", attemptID, "handoff", string(handoff))
-			return
+	// Every handoff, not only the first: an MCP host that restarts its stdio
+	// server re-runs the bridge, which takes the token again, and the newest
+	// server is the process the release point must end.
+	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
+		d.reportHandoff(log, attemptID, handoff, taker, afterADelivery)
+		if handoff == HandoffDelivered && taker.PID > 0 {
+			if err := d.ledger.RecordTaker(recordCtx, attemptID,
+				AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
+				log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
+			}
 		}
-		// Which process took it, so a restart can end it as it ends the
-		// worker: an agent may have started it in a group of its own.
-		taker, ok := tokens.Taker()
-		if !ok {
-			return
-		}
-		if err := d.ledger.RecordTaker(recordCtx, attemptID,
-			AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
-			log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
-		}
-	}()
+	})
 	cleanup := func() {
 		tokens.Close()
 		removeSocketDir()
 		_ = os.RemoveAll(dir)
 	}
 
+	// Every name the server may have is set here, to this connector's value
+	// or to nothing: the agent hands its MCP servers its own whole
+	// environment, so a name the connector left unset would arrive carrying
+	// the agent's value, and BASECAMP_BASE_URL decides where the agent's
+	// Basecamp credential is sent.
 	serverEnv := driver.EnvMap(driver.BuildEnv(append(append([]string{}, driver.BaseEnv...), append(MCPServerEnv, d.opts.MCP.Env...)...), d.opts.Lookup, nil))
+	for _, name := range append(append([]string{}, MCPServerEnv...), d.opts.MCP.Env...) {
+		if _, ok := serverEnv[name]; !ok {
+			serverEnv[name] = ""
+		}
+	}
 	return driver.SessionConfig{
 		Cwd: launch.WorkDir,
 		Env: driver.BuildEnv(driver.BaseEnv, d.opts.Lookup, nil),
@@ -647,9 +689,10 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 		// handed out at launch; the rest are exposed as they are prompted, so
 		// a launcher reading this list is told what the task may cover, not
 		// what the worker has seen.
+		SocketDir: socketDir,
 		Scope: driver.Scope{
 			TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs,
-			WorkDir: launch.WorkDir, Class: record.Decision.Class,
+			WorkDir: launch.WorkDir, SocketDir: socketDir, Class: record.Decision.Class,
 		},
 		PrivateDir: dir,
 	}, tokens, cleanup, nil
@@ -658,7 +701,10 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 // taskRedaction is the dispatcher's redaction plus what only this task has:
 // its token and the environments its worker and MCP server were given.
 func (d *Dispatcher) taskRedaction(launch Launch, cfg driver.SessionConfig) driver.Redaction {
-	more := driver.Redaction{Secrets: []string{launch.Token}, Env: slices.Clone(cfg.Env)}
+	more := driver.Redaction{Secrets: []string{launch.Token}, Env: slices.Clone(cfg.Env),
+		// Where the socket lives is the task's too: it is not always under
+		// the private directory the dispatcher's own redaction names.
+		Dirs: []string{cfg.SocketDir}}
 	for _, server := range cfg.MCPServers {
 		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
 	}
@@ -695,6 +741,78 @@ func reportUnreported(log *slog.Logger, stop StopReason, settlement Settlement) 
 	}
 }
 
+// shortSocketBase is the connector's own directory for token sockets that
+// cannot live beside their session's files, made once and swept on start. A
+// base that cannot be made is empty, and TokenSocketDir says so rather than
+// putting a socket somewhere unchecked.
+func (d *Dispatcher) shortSocketBase(preferred string) string {
+	if TokenSocketFits(preferred) {
+		return ""
+	}
+	d.socketBaseMu.Lock()
+	defer d.socketBaseMu.Unlock()
+	if d.socketBase != "" {
+		return d.socketBase
+	}
+	// The sessions directory's own name, which carries the account and the
+	// agent: two connectors of the same agent share a base, and no two
+	// others do.
+	base, err := ShortSocketBase(filepath.Base(d.opts.PrivateDir), d.opts.Lookup)
+	if err != nil {
+		d.log.Error("connector: no directory for a task token's socket", "error", err)
+		return ""
+	}
+	d.socketBase = base
+	return base
+}
+
+// settledTaker stops the attempt's token socket and waits for it to finish
+// with whatever it was doing, so a handoff in flight is not still deciding
+// while the attempt is released. It is what the release point acts on.
+func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace time.Duration) driver.Process {
+	if tokens == nil {
+		return driver.Process{}
+	}
+	// Nothing more is handed over; a delivery already under way finishes.
+	tokens.Close()
+	if !tokens.Settled(grace) {
+		log.Warn("connector: the task token's socket was still busy when its attempt ended", "attempt_id", attemptID)
+	}
+	return takerOf(tokens)
+}
+
+// reportHandoff says what became of one handoff of the task token. Only a
+// socket the release point closed after it had served this worker is quiet:
+// everything else leaves a worker whose Basecamp tools will not work, and no
+// agent reports that on its own (card 23 measured both adapters).
+func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff Handoff, _ driver.Process, afterADelivery bool) {
+	switch handoff {
+	case HandoffDelivered:
+	case HandoffRefused:
+		// Whatever asked was not this worker's. It is the one event the peer
+		// check exists to catch, and it ends the socket, so it is said out
+		// loud whether or not a delivery came first.
+		log.Warn("connector: something that is not the worker asked for its task token; the socket is closed and this task's token will not be served again",
+			"attempt_id", attemptID)
+	case HandoffUndelivered:
+		log.Warn("connector: the worker's MCP server asked for its task token and could not be given it; the next start of it will be",
+			"attempt_id", attemptID)
+	case HandoffSpent:
+		log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
+			"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
+	case HandoffExpired:
+		// Before any delivery this is a worker that never took its token;
+		// after one it is a restart the socket waited for and did not see.
+		// Either way a server that starts now has no Basecamp tools.
+		log.Warn("connector: nothing took the worker's task token within the window; a server that starts now will have no Basecamp tools",
+			"attempt_id", attemptID, "after_a_delivery", afterADelivery)
+	default:
+		// Closed: the release point is done with this attempt, which is how
+		// every healthy one ends.
+		log.Debug("connector: the task token's socket is finished with", "attempt_id", attemptID, "handoff", string(handoff))
+	}
+}
+
 // takerOf is the process a socket's token went to, or none.
 func takerOf(tokens *TokenSocket) driver.Process {
 	if tokens == nil {
@@ -710,10 +828,11 @@ func takerOf(tokens *TokenSocket) driver.Process {
 // gone like the worker; a process that cannot be confirmed holds the attempt,
 // as any other unconfirmed group does.
 //
-// Its identity lives in this process only: a connector that restarts knows
-// the worker it recorded, not the MCP servers an agent started beside it.
-// Such a bridge exits when its agent's stdout closes, which is what ends it
-// after a crash.
+// Its identity is recorded on the attempt as it is handed the token
+// (Ledger.RecordTaker), so a connector that restarts ends it by that record
+// too (Recover passes it to this same point). A taker the connector never
+// managed to identify is the one case left to the agent's own exit: such a
+// bridge ends when its agent's output closes.
 func (d *Dispatcher) confirmTakerGone(worker, taker driver.Process) error {
 	ok := taker.PID > 0 && taker.PGID > 0
 	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
@@ -942,6 +1061,10 @@ func (r *taskRun) supervise(ctx context.Context) {
 		stop = StopFailed
 	}
 	<-updatesDone
+	// The socket is finished with before the attempt is released, so the
+	// process that took the token is known to the release point rather than
+	// recorded a moment too late.
+	taker := settledTaker(r.tokens, r.log, r.launch.AttemptID, d.opts.CancelGrace)
 	r.cleanup()
 	// Every update is drained, so every refusal the driver read has been
 	// through the recorder; what the ledger would not take is settled now.
@@ -960,7 +1083,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 
 	// Through the one release point: it confirms the worker's group is gone
 	// before the attempt is settled or its directory released.
-	d.release(settleCtx, r.launch, r.session.Process(), takerOf(r.tokens), AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
+	d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt
@@ -1104,7 +1227,13 @@ func (r *taskRun) answered(result driver.PromptResult, err error) (driver.Prompt
 	switch {
 	case err == nil:
 		return result, "", false
-	case errors.Is(err, driver.ErrUnsafeMode), errors.Is(err, driver.ErrSessionUnverified):
+	case errors.Is(err, driver.ErrUnsafeMode):
+		// The permission mode is the security-relevant one, and keeps a line
+		// of its own.
+		r.log.Error("connector: the worker did not confirm its permission mode; stopped",
+			"task_id", r.launch.TaskID, "error", err)
+		return result, StopFailed, true
+	case errors.Is(err, driver.ErrSessionUnverified):
 		// A session the driver itself ended because it was not the one asked
 		// for is a failure, not a worker that went away: the connector caused
 		// this end and knows why.

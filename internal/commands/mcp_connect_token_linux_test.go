@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package commands
 
@@ -32,6 +32,9 @@ func tokenPipe(t *testing.T, token string) int {
 	fd, err := syscall.Dup(int(r.Fd()))
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
+	// The command closes it once it reads the token; a case that never gets
+	// that far leaves it to this.
+	t.Cleanup(func() { _ = syscall.Close(fd) })
 	return fd
 }
 
@@ -97,6 +100,7 @@ func TestMCPCommandRefusesATokenInTheEnvironment(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--connect-token-fd")
 	assert.Empty(t, os.Getenv("BASECAMP_CONNECT_TASK_TOKEN"))
+	assert.True(t, fdOpen(fd), "and the descriptor it never got to was left alone")
 }
 
 // A descriptor that is not a pipe or a socket is refused and left alone: a
@@ -135,6 +139,9 @@ func TestMCPCommandRefusesABadTokenDescriptor(t *testing.T) {
 		want string
 	}{
 		"no descriptor":               {[]string{"--connect-state", dir}, "--connect-token-fd"},
+		"a blank descriptor":          {[]string{"--connect-state", dir, "--connect-token-fd", "   "}, "--connect-token-fd"},
+		"not a number":                {[]string{"--connect-state", dir, "--connect-token-fd", "three"}, "not a file descriptor"},
+		"past what int can hold":      {[]string{"--connect-state", dir, "--connect-token-fd", "2147483648"}, "out of range"},
 		"stdin is the MCP wire":       {[]string{"--connect-state", dir, "--connect-token-fd", "0"}, "3 or above"},
 		"stdout":                      {[]string{"--connect-state", dir, "--connect-token-fd", "1"}, "3 or above"},
 		"not open":                    {[]string{"--connect-state", dir, "--connect-token-fd", "987"}, "it is not open"},
@@ -163,6 +170,7 @@ func heldPipe(t *testing.T, written string) int {
 	fd, err := syscall.Dup(int(r.Fd()))
 	require.NoError(t, err)
 	require.NoError(t, r.Close())
+	t.Cleanup(func() { _ = syscall.Close(fd) })
 	return fd
 }
 
@@ -182,4 +190,27 @@ func TestMCPCommandDoesNotWaitOnAWriteEndLeftOpen(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no task token arrived")
 	assert.Less(t, time.Since(started), 5*time.Second)
+}
+
+// A descriptor number no descriptor could have is refused where every other
+// bad one is: at the read, by asking the operating system about it.
+func TestABadDescriptorNumberIsRefusedAtTheRead(t *testing.T) {
+	_, err := readTaskToken(99999999)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not open")
+}
+
+// And the command reads a whitespace state directory as absent as well, so it
+// refuses the descriptor rather than reporting a token that was never read.
+func TestABlankStateDirectoryIsNoStateDirectory(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "test-token")
+	app := setupMCPTestApp(t, "999", "https://3.basecampapi.com")
+	fd := tokenPipe(t, "token\n")
+	dev, ino, _ := fdIdentity(t, fd)
+
+	err := executeMCPCommand(t, app, "--connect-state", "   ", "--connect-token-fd", strconv.Itoa(fd))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--connect-token-fd is only for a server started with --connect-state")
+	nowDev, nowIno, open := fdIdentity(t, fd)
+	assert.True(t, open && nowDev == dev && nowIno == ino, "and the descriptor was not touched")
 }

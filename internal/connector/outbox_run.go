@@ -200,7 +200,9 @@ func (o *Outbox) Start(ctx context.Context) error {
 		}
 		o.log.Warn("connector: a lifecycle message's listing failed on start; it is tried again", "error", err)
 	}
-	if err := o.flushSome(ctx, 0, true); err != nil && ctx.Err() == nil {
+	if err := o.flushSome(ctx, 0, true); err != nil && (errors.Is(err, errLedger) || ctx.Err() == nil) {
+		// A ledger failure stops the start whenever it happened, even if the
+		// bound ran out in the same breath.
 		return fmt.Errorf("connector: send lifecycle messages on start: %w", err)
 	}
 	return nil
@@ -302,7 +304,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 			// settle, finding nothing; or it was written and could not be read
 			// back. Either way it is an error wherever it happens, so a start
 			// stops on it.
-			return intent.ID, false, fmt.Errorf("connector: record or read back the refusal of lifecycle message %d: %w", intent.ID, err)
+			return intent.ID, false, fmt.Errorf("%w: record or read back the refusal of lifecycle message %d: %w", errLedger, intent.ID, err)
 		}
 		o.log.Warn("connector: a lifecycle message was refused", "intent_id", intent.ID, "kind", string(intent.Kind), "error", postErr)
 		o.line(settled)
@@ -328,7 +330,7 @@ func (o *Outbox) sendNext(ctx context.Context, claimed map[int64]bool) (int64, b
 		// reconciliation will find the message by its body, or it was written
 		// and could not be read back. The ledger failed either way: that is an
 		// error wherever it happens, so a start stops on it.
-		return intent.ID, false, fmt.Errorf("connector: record or read back the receipt of lifecycle message %d: %w", intent.ID, err)
+		return intent.ID, false, fmt.Errorf("%w: record or read back the receipt of lifecycle message %d: %w", errLedger, intent.ID, err)
 	}
 	o.line(recorded)
 	return intent.ID, false, nil
@@ -414,6 +416,25 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			}
 			if !stillBlocked {
 				next, note = IntentCanceled, "no longer called for"
+			}
+		}
+		if in.Kind == IntentStillRunning {
+			// The notice says the worker is still working. If its attempt has
+			// ended in the meantime — behind a slow send, or a listing in
+			// front of it — that is no longer true, and the completion notice,
+			// if the settlement called for one, is the connector's last word.
+			// A crashed process's attempt is not ended yet when a start
+			// flushes: the dispatcher's recovery settles it just after, and
+			// that settlement's notice follows this one.
+			var live bool
+			switch err := tx.QueryRowContext(ctx, `SELECT state <> 'ended' FROM attempts WHERE id = ?`, in.AttemptID).Scan(&live); {
+			case errors.Is(err, sql.ErrNoRows):
+				live = false
+			case err != nil:
+				return fmt.Errorf("connector: outbox claim still-running %d: %w", in.ID, err)
+			}
+			if !live {
+				next, note = IntentCanceled, "the attempt ended before the notice went out"
 			}
 		}
 		if in.Kind == IntentGuardAck {
@@ -851,23 +872,30 @@ func (r LifecycleFilteredReplies) AgentReplies(ctx context.Context, bucketID int
 	if err := retryBusy(func() error {
 		clear(receipts)
 		clear(unreceipted)
+		// A receipt names the connector's message whatever state its intent
+		// is in. A body stands in for a message only while one may exist
+		// unreceipted: a canceled intent posted nothing, so its words are the
+		// worker's if they appear.
 		rows, err := r.Ledger.db.QueryContext(ctx, `
-SELECT receipt_id, body FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
+SELECT receipt_id, body, state IN ('pending', 'sending', 'indeterminate', 'abandoned')
+FROM outbox WHERE message_kind = ? AND recording_id = ?`, string(messageKind), recordingID)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var (
-				receipt sql.NullInt64
-				body    string
+				receipt   sql.NullInt64
+				body      string
+				unsettled bool
 			)
-			if err := rows.Scan(&receipt, &body); err != nil {
+			if err := rows.Scan(&receipt, &body, &unsettled); err != nil {
 				return err
 			}
-			if receipt.Valid {
+			switch {
+			case receipt.Valid:
 				receipts[receipt.Int64] = true
-			} else {
+			case unsettled:
 				unreceipted[MessageText(body)] = true
 			}
 		}

@@ -32,6 +32,12 @@ func (b *safeBuffer) Write(p []byte) (int, error) {
 	return b.buf.Write(p)
 }
 
+func (b *safeBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
 func (b *safeBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()

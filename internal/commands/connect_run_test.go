@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
@@ -150,4 +152,44 @@ func TestDoctorWarnsWhenSessionPathsCannotTakeASocket(t *testing.T) {
 	sessions = connectSessionsPath(file)
 	assert.False(t, connector.TokenSocketFits(filepath.Join(sessions, strings.Repeat("a", connector.AttemptIDLength))),
 		"and a deep one does not, which is what doctor warns about")
+}
+
+// The check doctor actually runs, not only the paths behind it.
+func TestTheDoctorCheckReadsTheProfilesConnectorLayout(t *testing.T) {
+	app := &appctx.App{Config: &config.Config{}}
+	assert.Nil(t, checkConnectorSessionPaths(app), "no profile, nothing to say")
+
+	// A config home of this test's own: the check must never read the
+	// person's real one.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	app.Config.ActiveProfile = "agent"
+	assert.Nil(t, checkConnectorSessionPaths(app), "a profile with no connect.json is not a connector")
+
+	file := setup.New("agent")
+	file.AccountID = "2914079"
+	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
+	file.Trust.OperatorID = 26909558
+	file.Projects = map[int64]admission.Route{48929974: {Path: "/work/repo"}}
+	path, err := setup.Path(config.GlobalConfigDir(), "agent")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	data, err := json.Marshal(file)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	check := checkConnectorSessionPaths(app)
+	require.NotNil(t, check)
+	assert.Equal(t, "pass", check.Status, check.Message)
+
+	deep, err := os.MkdirTemp("/tmp", "bcc-doctor-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+	t.Setenv("XDG_RUNTIME_DIR", deep)
+	check = checkConnectorSessionPaths(app)
+	require.NotNil(t, check)
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Hint, "XDG_RUNTIME_DIR", "and says what to do about it")
 }

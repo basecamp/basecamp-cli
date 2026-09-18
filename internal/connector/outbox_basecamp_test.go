@@ -35,6 +35,7 @@ type obServer struct {
 	beforeStore func(r *http.Request) int
 	pageSize    int
 	pageHook    func(page int)
+	truncated   bool
 }
 
 type obServerMessage struct {
@@ -125,6 +126,13 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 		for _, msg := range all {
 			out = append(out, s.render(kind, msg))
 		}
+		s.mu.Lock()
+		truncated := s.truncated
+		s.mu.Unlock()
+		if truncated {
+			// More pages than the SDK will follow: it answers Truncated.
+			w.Header().Set("Link", `<`+s.URL+r.URL.Path+`?page=2>; rel="next"`)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	default:
@@ -135,6 +143,12 @@ func (s *obServer) serve(w http.ResponseWriter, r *http.Request) {
 func (s *obServer) setOnPost(fn func(r *http.Request, id int64) int) {
 	s.mu.Lock()
 	s.onPost = fn
+	s.mu.Unlock()
+}
+
+func (s *obServer) setTruncated(v bool) {
+	s.mu.Lock()
+	s.truncated = v
 	s.mu.Unlock()
 }
 
@@ -325,4 +339,27 @@ func TestBasecampPosterRefusalIsNotPosted(t *testing.T) {
 	_, err = server.poster(t).Post(context.Background(), Destination{Kind: MessageComment, RecordingID: 5}, "x")
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNotPosted, "a 503 may or may not have created it")
+}
+
+// A listing the SDK truncated at its page cap will not grow shorter by
+// waiting: it is unlistable, not a failure to retry for hours.
+func TestBasecampPosterTreatsATruncatedListingAsUnlistable(t *testing.T) {
+	server := newOBServer(t)
+	poster := server.poster(t)
+	since := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	for _, kind := range []MessageKind{MessageBoost, MessageComment} {
+		dest := Destination{Kind: kind, RecordingID: 77}
+		server.setTruncated(true)
+		_, err := poster.List(context.Background(), dest, since)
+		require.ErrorIs(t, err, ErrUnlistable, kind)
+		assert.Contains(t, err.Error(), "truncated", kind)
+	}
+}
+
+// Basecamp rejecting a create as invalid created nothing, like a 403.
+func TestBasecampPosterTreatsAValidationRefusalAsNotPosted(t *testing.T) {
+	server := newOBServer(t)
+	server.beforeStore = func(*http.Request) int { return http.StatusUnprocessableEntity }
+	_, err := server.poster(t).Post(context.Background(), Destination{Kind: MessageComment, RecordingID: 5}, "x")
+	require.ErrorIs(t, err, ErrNotPosted)
 }

@@ -44,8 +44,10 @@ const pipeWaitDelay = 2 * time.Second
 //  5. A restart reaps by the same rule (TerminateRecorded, then the same
 //     confirmation), and asks OwnsWorker first: a pid is not an identity, so
 //     ownership is the pid AND the start time recorded with it. Everything
-//     that acts on a recorded worker — recovery, status, redispatch, discard,
-//     hold — asks OwnsWorker rather than testing a pid of its own.
+//     that acts on a recorded worker asks OwnsWorker rather than testing a
+//     pid of its own: in this card, recovery (through TerminateRecorded) and
+//     the release point's second confirmation; any later one — status,
+//     redispatch, discard, hold — the same way.
 //
 // The one thing this cannot cover is a descendant that leaves the group by
 // calling setsid: it is outside every group signal, and the connector can
@@ -104,9 +106,11 @@ const pipeWaitDelay = 2 * time.Second
 //     the worker's MCP server, running as the agent's profile, reads it from
 //     that store itself.
 //   - A task token lives from LaunchTask to the end of its task. The ledger
-//     keeps only its hash. It crosses to exactly one process, the worker's
-//     MCP server, and never to the agent process: the dispatcher serves it
-//     once over a unix socket in the attempt's owner-only runtime directory,
+//     keeps only its hash. It crosses only to the worker's MCP server, and
+//     never to the agent process: the dispatcher serves it over a unix socket
+//     in the attempt's owner-only runtime directory, once per start of that
+//     server (an MCP host that restarts a stdio server re-runs it, so the
+//     bridge asks again) and at most connector.MaxTokenHandoffs times,
 //     only to a peer of this user in the worker's process group or descended
 //     from its leader (connector.ServeTaskToken), and `basecamp connect
 //     worker-mcp` passes it on to `basecamp mcp` over an inherited
@@ -244,7 +248,17 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 	// The child has its copy; this process keeps none, so the reader sees
 	// end of file once the worker and everything it started have closed it.
 	_ = writeEnd.Close()
-	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: time.Now()}
+	// The kernel's own start time for this pid, not the clock: it is what
+	// tells this worker from a later process the kernel gives the same pid,
+	// and OwnsWorker compares against it. A wall-clock stamp is only as
+	// precise as startTolerance, which under fast pid reuse is wide enough to
+	// accept a stranger (Copilot). Where the kernel cannot be asked, the
+	// stamp stands and the tolerance is what is left.
+	started := time.Now()
+	if exact, err := processStartTime(ec.Process.Pid); err == nil {
+		started = exact
+	}
+	w.process = Process{PID: ec.Process.Pid, PGID: ec.Process.Pid, StartedAt: started}
 	go func() {
 		err := ec.Wait()
 		w.exit = exitOf(ec, err)
@@ -295,6 +309,12 @@ func (w *Worker) Exit() Exit {
 // StderrTail is what may be passed on of the worker's stderr, through r
 // (Redactor.Stderr): never the text verbatim.
 func (w *Worker) StderrTail(r *Redactor) string { return r.Stderr(w.stderr.String()) }
+
+// StderrLines is what may be passed on of the worker's stderr when its last
+// line is not enough — a refusal the agent wrote before it wrote anything
+// else — through r (Redactor.Lines): bounded in lines and in bytes, each
+// sanitized, never the text verbatim.
+func (w *Worker) StderrLines(r *Redactor) []string { return r.Lines(w.stderr.String()) }
 
 // Terminate ends the process group: SIGTERM, grace, SIGKILL. It returns once
 // the leader is reaped. Idempotent.
@@ -355,17 +375,45 @@ func OwnsWorker(p Process) (bool, error) {
 	if p.PID <= 0 || p.PGID <= 0 || p.StartedAt.IsZero() {
 		return false, nil
 	}
-	started, err := processStartTime(p.PID)
+	gone, err := ProcessGone(p)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, groupGone(p.PGID)
-		}
 		return false, err
 	}
-	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
+	if gone {
+		// The leader is gone, or its pid is somebody else's now: what is left
+		// of the group decides whether anything of this worker remains.
 		return false, groupGone(p.PGID)
 	}
 	return true, nil
+}
+
+// ProcessGone reports whether the process a record names is gone: no process
+// by that pid, a zombie, or a later process the kernel gave the same pid. It
+// asks only about that process and says nothing about its group, which is
+// what a caller wants to know about a worker's MCP server — the group is the
+// agent's and outlives its servers.
+//
+// It is the one place the question "is this still that process?" is answered;
+// OwnsWorker asks it too, and adds the group.
+func ProcessGone(p Process) (bool, error) {
+	if p.PID <= 0 {
+		return true, nil
+	}
+	started, err := processStartTime(p.PID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+		return false, err
+	}
+	if p.StartedAt.IsZero() {
+		// Nothing to compare: a pid that exists is taken to be it.
+		return false, nil
+	}
+	if d := started.Sub(p.StartedAt); d > startTolerance || d < -startTolerance {
+		return true, nil
+	}
+	return false, nil
 }
 
 // LookupProcess is a live process's identity: its pid, the process group it

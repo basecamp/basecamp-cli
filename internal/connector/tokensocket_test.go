@@ -4,18 +4,22 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 const socketTestToken = "test-token-not-real"
@@ -44,7 +48,7 @@ func fetch(t *testing.T, path string) (string, error) {
 	return string(data), err
 }
 
-func TestTheTokenGoesOnceToTheWorkersOwnGroup(t *testing.T) {
+func TestTheTokenGoesToTheWorkersOwnGroupOnly(t *testing.T) {
 	s, err := ServeTaskToken(tokenDir(t), socketTestToken, 5*time.Second)
 	require.NoError(t, err)
 	// This test process connects, so the worker's group here is its own.
@@ -55,10 +59,85 @@ func TestTheTokenGoesOnceToTheWorkersOwnGroup(t *testing.T) {
 	assert.Equal(t, socketTestToken+"\n", got)
 	assert.Equal(t, HandoffDelivered, s.Result())
 
+	s.Close()
+	require.True(t, s.Settled(5*time.Second))
 	_, err = os.Lstat(s.Path())
-	assert.True(t, os.IsNotExist(err), "the socket is unlinked once it has been used")
+	assert.True(t, os.IsNotExist(err), "the socket is unlinked when the connector is done with it")
 	_, err = fetch(t, s.Path())
-	assert.Error(t, err, "a second connection is refused")
+	assert.Error(t, err, "and nothing else is served")
+}
+
+// An MCP host that restarts a stdio server re-runs its command, and the
+// bridge takes the token again on every start: a socket that served once and
+// closed would leave the restarted server with no Basecamp tools. Each start
+// is a handoff of its own, with the same peer checks, up to a bound.
+func TestARestartedMCPServerTakesTheTokenAgain(t *testing.T) {
+	// The taker this test reports is a pid that no longer exists, which is
+	// what the socket waits for between handoffs: a server that has gone.
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
+		processGroupOf, parentProcessOf, func(int) (driver.Process, error) {
+			// A pid above the kernel's maximum, in the worker's own group: it
+			// passes the trust rule and is gone the moment it is asked about.
+			return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, MaxTokenHandoffs+2)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	for i := range MaxTokenHandoffs {
+		got, fetchErr := fetch(t, s.Path())
+		require.NoErrorf(t, fetchErr, "handoff %d", i+1)
+		require.Equal(t, socketTestToken, strings.TrimSpace(got), "handoff %d", i+1)
+		assert.Equal(t, HandoffDelivered, <-handoffs)
+		taker, ok := s.Taker()
+		require.True(t, ok)
+		assert.Positive(t, taker.PID, "the newest server is the one holding the token")
+	}
+
+	// The budget is spent, and that is said out loud: no adapter reports a
+	// server that came up without its token (card 23 measured both).
+	assert.Equal(t, HandoffSpent, <-handoffs)
+	require.True(t, s.Settled(5*time.Second), "the budget is spent and the socket is finished with")
+	_, err = fetch(t, s.Path())
+	assert.Error(t, err, "a host that restarts its server more often than that is not served forever")
+	assert.Equal(t, HandoffDelivered, s.Result(), "the first handoff is still what Result says")
+}
+
+// The peer check is per handoff, not only on the first: a stranger that
+// connects after a legitimate restart gets nothing, and ends the socket.
+func TestThePeerCheckAppliesToEveryHandoff(t *testing.T) {
+	// The first connection is the worker's; the second is a process of some
+	// other group, as the kernel reports it. The taker reported for the first
+	// is a pid that is gone, so the socket arms again at once.
+	var handoffCount atomic.Int64
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
+		func(pid int) (int, error) {
+			if handoffCount.Add(1) > 1 {
+				return syscall.Getpgrp() + 100000, nil
+			}
+			return processGroupOf(pid)
+		},
+		func(int) (int, error) { return 1, nil },
+		func(int) (driver.Process, error) {
+			return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got))
+	assert.Equal(t, HandoffDelivered, <-handoffs)
+
+	second, _ := fetch(t, s.Path())
+	assert.Empty(t, strings.TrimSpace(second), "the second handoff is checked like the first")
+	assert.Equal(t, HandoffRefused, <-handoffs)
+	assert.True(t, s.Settled(5*time.Second), "and a refusal ends the socket")
 }
 
 func TestAPeerOutsideTheWorkersGroupGetsNothing(t *testing.T) {
@@ -182,4 +261,178 @@ func TestTheSocketRemembersWhoTookTheToken(t *testing.T) {
 	assert.Equal(t, os.Getpid(), taker.PID, "this test took it")
 	assert.Equal(t, syscall.Getpgrp(), taker.PGID)
 	assert.False(t, taker.StartedAt.IsZero(), "with the start time that tells it from a later pid")
+}
+
+// Opus r7: the short base is chosen so that what MkdirTemp makes under it
+// still fits, and a runtime directory too deep for one falls through to /tmp
+// rather than leaving the connector with nowhere to put a socket.
+func TestTheShortSocketBaseIsChosenSoTheSocketFits(t *testing.T) {
+	deep, err := os.MkdirTemp("/tmp", "bcrt-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(deep) })
+	deep = filepath.Join(deep, strings.Repeat("d", 40), strings.Repeat("e", 40))
+	require.NoError(t, os.MkdirAll(deep, 0o700))
+
+	base, err := ShortSocketBase("2914079-52007412", func(k string) (string, bool) {
+		if k == "XDG_RUNTIME_DIR" {
+			return deep, true
+		}
+		return "", false
+	})
+	require.NoError(t, err, "a runtime directory too deep is not the end of it")
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	assert.False(t, strings.HasPrefix(base, deep), "the deep one is skipped")
+
+	// Whatever MkdirTemp makes under it fits, with its longest possible name.
+	dir, temporary, err := TokenSocketDir(filepath.Join(deep, strings.Repeat("a", AttemptIDLength)), base)
+	require.NoError(t, err)
+	require.True(t, temporary)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	assert.True(t, TokenSocketFits(filepath.Join(base, "s0123456789")), "the longest name MkdirTemp can make")
+	assert.True(t, TokenSocketFits(dir))
+
+	socket, err := ServeTaskToken(dir, socketTestToken, time.Second)
+	require.NoError(t, err, "and a socket actually binds there")
+	socket.Close()
+}
+
+// Opus r6/r7: a handoff in flight when an attempt ends is finished with
+// before anything reads who took the token, so the release point never sees
+// an empty taker for a token that was in fact handed over.
+func TestAHandoffInFlightIsFinishedBeforeTheTakerIsRead(t *testing.T) {
+	// The identity lookup is where the handoff is slowest; hold it there.
+	slow := make(chan struct{})
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 2*time.Second,
+		peerCredentials, processGroupOf, parentProcessOf,
+		func(pid int) (driver.Process, error) {
+			<-slow
+			return driver.LookupProcess(pid)
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	s.AllowGroup(syscall.Getpgrp())
+
+	got := make(chan string, 1)
+	go func() {
+		token, _ := fetch(t, s.Path())
+		got <- token
+	}()
+	require.Equal(t, socketTestToken, strings.TrimSpace(<-got), "the token is out before the taker is known")
+	_, ok := s.Taker()
+	require.False(t, ok, "the fixture must have the handoff still deciding")
+
+	// The release point's move: stop the socket, wait for it, then read.
+	s.Close()
+	close(slow)
+	assert.True(t, s.Settled(5*time.Second), "the socket finishes what it was doing")
+	taker, ok := s.Taker()
+	require.True(t, ok, "and the process that took the token is known by then")
+	assert.Equal(t, os.Getpid(), taker.PID)
+	assert.Equal(t, HandoffDelivered, s.Result())
+}
+
+// Opus r8: after a delivery the socket does not arm again while the process
+// that took the token is still running — a restart is that process ending —
+// so the token is not there for the asking for the rest of the window.
+func TestTheSocketDoesNotArmAgainWhileTheServerHoldingTheTokenLives(t *testing.T) {
+	// The taker reported is this test process, which is very much alive.
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 300*time.Millisecond, peerCredentials,
+		processGroupOf, parentProcessOf, driver.LookupProcess)
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got))
+	require.Equal(t, HandoffDelivered, <-handoffs)
+	taker, ok := s.Taker()
+	require.True(t, ok)
+	require.Equal(t, os.Getpid(), taker.PID)
+
+	// Two windows' worth of asking, while the server that has the token runs.
+	for range 3 {
+		second, _ := fetch(t, s.Path())
+		assert.Empty(t, strings.TrimSpace(second), "nothing is handed out while that server lives")
+	}
+	select {
+	case h := <-handoffs:
+		t.Fatalf("a second handoff was made while the first server was still running: %s", h)
+	default:
+	}
+	assert.False(t, s.Settled(100*time.Millisecond), "and the socket is still this attempt's, waiting")
+}
+
+// Opus r9: a write that fails after the peer passed the checks is not a
+// refusal and does not end the socket — the worker's next start is still owed
+// its token.
+func TestAWriteThatFailsIsNotARefusal(t *testing.T) {
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
+		processGroupOf, parentProcessOf, func(int) (driver.Process, error) {
+			return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	// Connect and go, the way a host that kills its server between the
+	// connect and the read does.
+	dialer := net.Dialer{Timeout: 2 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "unix", s.Path())
+	require.NoError(t, err)
+	require.NoError(t, conn.(*net.UnixConn).CloseRead())
+	require.NoError(t, conn.Close())
+
+	first := <-handoffs
+	if first == HandoffDelivered {
+		t.Skip("the kernel took the write before the peer's close landed; the race is the fixture's, not the rule's")
+	}
+	assert.Equal(t, HandoffUndelivered, first, "not a refusal: nothing untrusted asked")
+
+	// And the socket is still this attempt's: the next start gets its token.
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	assert.Equal(t, socketTestToken, strings.TrimSpace(got))
+	assert.Equal(t, HandoffDelivered, <-handoffs)
+}
+
+// A delivery the connector cannot attribute leaves no taker behind: waiting
+// on the wrong process, or ending it, is worse than not knowing.
+func TestADeliveryWithNoIdentityClearsTheTaker(t *testing.T) {
+	identify := make(chan struct{})
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, peerCredentials,
+		processGroupOf, parentProcessOf, func(pid int) (driver.Process, error) {
+			select {
+			case <-identify:
+				return driver.Process{}, errors.New("the kernel would not say")
+			default:
+				return driver.Process{PID: 1 << 30, PGID: syscall.Getpgrp(), StartedAt: time.Now()}, nil
+			}
+		})
+	require.NoError(t, err)
+	defer s.Close()
+	handoffs := make(chan Handoff, 4)
+	s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got))
+	require.Equal(t, HandoffDelivered, <-handoffs)
+	taker, ok := s.Taker()
+	require.True(t, ok)
+	require.Equal(t, 1<<30, taker.PID)
+
+	// The next handoff's identity cannot be read.
+	close(identify)
+	got, err = fetch(t, s.Path())
+	require.NoError(t, err)
+	require.Equal(t, socketTestToken, strings.TrimSpace(got), "the token still goes to a peer that passed")
+	require.Equal(t, HandoffDelivered, <-handoffs)
+	_, ok = s.Taker()
+	assert.False(t, ok, "and no stale taker is left standing for the release point to end")
 }

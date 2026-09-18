@@ -43,14 +43,15 @@ import (
 //	blocked     queued      admission                                re-decided, conversation live
 //	blocked     blocked     admission                                re-decided, still blocked
 //	blocked     discarded   admission, operator                      verdict, or discard
-//	blocked     dispatched  lifecycle bookkeeping                    —
+//	blocked     dispatched  —                                        an edge the lifecycle map has and no
+//	                                                                 caller can take: a task needs an
+//	                                                                 instruction, and blocked has none
 //	admitted    dispatched  dispatcher (CreateTask)                  joins a task
 //	queued      dispatched  dispatcher (CreateTask)                  joins a task
 //	dispatched  dispatched  dispatcher (CreateTask)                  redispatch onto a new task
-//	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker
+//	dispatched  admitted    dispatcher (SupersedeTask)               never handed to a worker, task retired
 //	dispatched  admitted    dispatcher (withdrawExposure)            exposed at launch, spawn proven failed: retry
 //	dispatched  blocked     dispatcher (withdrawExposure)            exposed at launch, spawn failed again
-//	dispatched  blocked     dispatcher                               never handed to a worker
 //	dispatched  completed   worker (complete_dispatch), dispatcher   the outcome, reported or settled
 //	admitted    queued      lifecycle bookkeeping                    —
 //	admitted    blocked     lifecycle bookkeeping                    —
@@ -61,18 +62,37 @@ import (
 //	discarded   —           nobody                                   terminal
 //
 // Writing the state a record already has is a repeat and always allowed. Any
-// pair not in the table is refused.
+// pair not in the table is refused. Into dispatched and out of it, the task
+// decides, as a rule about the moves rather than about the state: a record
+// enters dispatched only when a live task already carries it, and leaves it —
+// other than to completed — only when none does
+// (events_dispatched_while_on_a_live_task, and move). A record can therefore
+// be dispatched with no live task, and one case is expected: work a worker was
+// handed, whose task was superseded, waiting for its outcome (invariant 7).
 //
 // # Task (tasks)
 //
 //	live        created by the dispatcher (CreateTask); its token is valid
 //	superseded  by the dispatcher or an operator's redispatch (SupersedeTask);
-//	            its token is refused; terminal
+//	            its token is refused; terminal, and the row is never deleted
+//
+// An operator's redispatch is the dispatcher's own two writes in one
+// transaction: supersedeTask on the live task — which refuses its token from
+// then on, retires its rows, and returns what no worker was handed to
+// admitted — and createTask for the events being run again. It can therefore
+// redispatch an admitted, queued or dispatched record, which covers held work
+// waiting for its outcome and the spawn-failure retry. A completed or
+// discarded record it cannot: those are terminal here, so redispatching one
+// is a decision this ledger does not carry (plan step 21 owns it).
 //
 // # Delivery (task_events.delivery), per event on a task
 //
 //	admitted → exposed    worker (get_dispatch), dispatcher at launch
-//	exposed  → delivered  worker (ack_dispatch)
+//	exposed  → delivered  worker (ack_dispatch); the id the worker points at,
+//	                      when it has one, is written with this move or never
+//	                      (task_events_acknowledgement_settles_once), so an id
+//	                      arriving after the acknowledgement is a second
+//	                      report and refused
 //	exposed  → completed  worker (complete_dispatch)
 //	exposed  → completed  dispatcher settlement (worker gone before ack)
 //	delivered → completed worker (complete_dispatch), dispatcher settlement
@@ -99,8 +119,15 @@ import (
 // # Invariants
 //
 //  1. One live task per event: task_events_one_live_task.
-//  2. One task per conversation: an event joins a task only if every
-//     dispatched record on its conversation joins the same task (createTask).
+//  2. One task per conversation, and in the conversation's order: an event
+//     joins a task only if no live task holds its conversation, no record on
+//     that conversation is dispatched outside this task, and no admitted
+//     record older than it is waiting there — admission queues a record
+//     precisely because an earlier one is next, and a queued record does not
+//     go around it (conversationsAreFree, and
+//     task_events_one_live_task_per_conversation). The conversation a task
+//     holds is written on the task's own rows, because retention clears a
+//     terminal record's conversation_key while its task is still live.
 //  3. The token is valid only while its task is live, checked inside every
 //     worker call's own transaction.
 //  4. Nothing leaves dispatched while a worker may still act: a record with a
@@ -110,11 +137,17 @@ import (
 //     spec's automatic retry: an exposure written at launch whose spawn
 //     failed before any worker process existed is withdrawn, and the record
 //     returns to admitted for its one retry, or goes to blocked after a
-//     second failure (withdrawExposure).
-//  5. A worker acts only on its own task's rows, reports only what it was
-//     handed, and a reported outcome stands.
+//     second failure (withdrawExposure) — the only way from dispatched to
+//     blocked.
+//  5. A worker acts only on its own task's rows, reports only what it
+//     pulled, and a reported outcome stands — the report path enforces that,
+//     and the delivery triggers hold the same shape for anything else writing
+//     to the file: forward only, never past a missing pull, with the
+//     dispatcher settling a completed record as the one exception.
 //  6. A task is made only of instructions a worker can pull, and finished
-//     work is never handed out for the first time.
+//     work is never handed out for the first time: a completed record is
+//     served, acknowledged and completed only by the worker that pulled it
+//     (pulled_at), never on the strength of an exposure written at launch.
 //  7. Superseding retires the task's rows and returns only what it never
 //     exposed to admitted; what a worker was handed stays dispatched (4) and
 //     waits for its outcome or a redispatch, which supersedes and creates in
@@ -172,6 +205,8 @@ var (
 	// work a worker was handed that is not settled yet. A conversation has
 	// one task at a time.
 	ErrConversationBusy = errors.New("the event's conversation already has a task")
+	// ErrNoSuchTask is a task id the ledger does not hold.
+	ErrNoSuchTask = errors.New("no such task")
 	// ErrEventOnLiveTask is an event a live task already carries. Handing it
 	// to a second task would give two workers one instruction.
 	ErrEventOnLiveTask = errors.New("the event is already on a live task")
@@ -234,21 +269,32 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
 
-	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
-	if err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
-	}
-	taskID, err := res.LastInsertId()
-	if err != nil {
-		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
-	}
+	// Read first, write after: a refusal leaves the caller's transaction as
+	// it found it, whatever the caller then does with it.
+	guards := make([]string, 0, len(eventIDs))
+	conversations := make([]string, 0, len(eventIDs))
 	for _, id := range eventIDs {
-		var acknowledge, hasInstruction int
-		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction); {
+		var (
+			acknowledge, hasInstruction int
+			state, conversation         string
+		)
+		switch err := tx.QueryRowContext(ctx, `SELECT acknowledge, content_dropped = 0 AND snapshot IS NOT NULL AND length(snapshot) > 0, state, conversation_key FROM events WHERE id = ?`, id).Scan(&acknowledge, &hasInstruction, &state, &conversation); {
 		case errors.Is(err, sql.ErrNoRows):
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrNoSuchRecord)
 		case err != nil:
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		if s := RecordState(state); s != StateAdmitted && s != StateQueued && s != StateDispatched {
+			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only admitted, queued or redispatched work joins a task", id, state)
+		}
+		var onLive bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM task_events WHERE event_id = ? AND retired_at IS NULL)`, id).Scan(&onLive); err != nil {
+			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
+		}
+		if onLive {
+			// The unique index refuses it too, whoever writes; this is the
+			// same refusal with the event named.
+			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
 		}
 		if hasInstruction == 0 {
 			// A task a worker could pull nothing from would read as a task
@@ -260,62 +306,120 @@ func (l *Ledger) createTask(ctx context.Context, tx *sql.Tx, eventIDs []int64) (
 		if acknowledge != 0 {
 			guard = "armed"
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard) VALUES (?, ?, ?)`, taskID, id, guard); err != nil {
+		guards = append(guards, guard)
+		conversations = append(conversations, conversation)
+	}
+
+	// One task per conversation (invariant 2), asked as two questions, both
+	// before anything is written: a refusal leaves the caller's transaction
+	// untouched, and the records this call dispatches never count themselves.
+	if err := l.conversationsAreFree(ctx, tx, eventIDs, conversations); err != nil {
+		return TaskGrant{}, err
+	}
+
+	res, err := tx.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at) VALUES (?, ?)`, tokenHash(token), l.timestamp())
+	if err != nil {
+		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
+	}
+	taskID, err := res.LastInsertId()
+	if err != nil {
+		return TaskGrant{}, fmt.Errorf("connector: create task: %w", err)
+	}
+	for i, id := range eventIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id, guard, conversation_key) VALUES (?, ?, ?, ?)`, taskID, id, guards[i], conversations[i]); err != nil {
 			if isConstraint(err) {
 				return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, ErrEventOnLiveTask)
 			}
 			return TaskGrant{}, fmt.Errorf("connector: task event %d: %w", id, err)
 		}
 	}
-
-	// One task per conversation: every dispatched record on the events'
-	// conversations must be among the events this task takes. Checked after
-	// every event is on the task — so an event already on a live task is told
-	// as that — and before any of them moves, so the records this call
-	// dispatches never count.
-	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
-	args := make([]any, 0, len(eventIDs)*2)
-	for _, id := range eventIDs {
-		args = append(args, id)
-	}
-	for _, id := range eventIDs {
-		args = append(args, id)
-	}
-	var busy int64
-	//nolint:gosec // G202: placeholders, not values
-	switch err := tx.QueryRowContext(ctx, `
-SELECT other.id FROM events other
-JOIN events mine ON mine.conversation_key = other.conversation_key
-WHERE mine.id IN (`+placeholders+`) AND mine.conversation_key <> ''
-  AND other.state = 'dispatched' AND other.id NOT IN (`+placeholders+`)
-LIMIT 1`, args...).Scan(&busy); {
-	case err == nil:
-		return TaskGrant{}, fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", busy, ErrConversationBusy)
-	case !errors.Is(err, sql.ErrNoRows):
-		return TaskGrant{}, fmt.Errorf("connector: read conversations: %w", err)
-	}
-
 	for _, id := range eventIDs {
 		// Admitted or queued work joins a task; a dispatched record whose
 		// task was superseded joins its replacement.
+		// The pre-pass read this state; the move is what makes it so under a
+		// concurrent writer, and refuses if it changed underneath.
 		moved, err := l.move(ctx, tx, transition{id: id, state: StateDispatched, from: []RecordState{StateAdmitted, StateQueued, StateDispatched}})
 		if err != nil {
 			return TaskGrant{}, err
 		}
 		if !moved {
-			var state string
-			_ = tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, id).Scan(&state)
-			return TaskGrant{}, fmt.Errorf("connector: task event %d is %s; only admitted, queued or redispatched work joins a task", id, state)
+			return TaskGrant{}, fmt.Errorf("connector: task event %d changed state while its task was being written", id)
 		}
 	}
 	return TaskGrant{ID: taskID, Token: token}, nil
 }
 
+// conversationsAreFree asks whether the conversations these events are on are
+// free for a task of their own.
+//
+// Two questions, because the answer lives in two places. A record waiting for
+// a worker or still dispatched is in events: admitted means admission decided
+// it goes next and a queued sibling may not jump ahead of it, and dispatched
+// means work a worker may still be holding, whether or not a live task
+// carries it (invariant 7). A conversation a live task already holds is in
+// task_events, which keeps the conversation of every row it was written for —
+// the record's own conversation_key is cleared once retention reaches it, and
+// a task whose records are all terminal is still a worker's task until it is
+// superseded.
+func (l *Ledger) conversationsAreFree(ctx context.Context, tx *sql.Tx, eventIDs []int64, conversations []string) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(eventIDs)), ", ")
+	for i, conversation := range conversations {
+		if conversation == "" {
+			continue
+		}
+		args := make([]any, 0, len(eventIDs)+1)
+		args = append(args, conversation)
+		for _, id := range eventIDs {
+			args = append(args, id)
+		}
+
+		var (
+			other      int64
+			otherState string
+		)
+		//nolint:gosec // G202: placeholders, not values
+		//
+		// An older admitted sibling is next on its conversation, and a queued
+		// one does not go around it: admission queues a record precisely
+		// because an earlier one holds the conversation. A dispatched sibling
+		// counts whatever its id, because a worker may still be holding it.
+		switch err := tx.QueryRowContext(ctx, `
+SELECT id, state FROM events
+WHERE conversation_key = ? AND id NOT IN (`+placeholders+`)
+  AND (state = 'dispatched' OR (state = 'admitted' AND id < ?))
+ORDER BY id LIMIT 1`, append(args, eventIDs[i])...).Scan(&other, &otherState); {
+		case err == nil && RecordState(otherState) == StateDispatched:
+			return fmt.Errorf("connector: event %d is dispatched on the same conversation: %w", other, ErrConversationBusy)
+		case err == nil:
+			return fmt.Errorf("connector: event %d is admitted ahead of event %d on the same conversation: %w", other, eventIDs[i], ErrConversationBusy)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("connector: read conversations: %w", err)
+		}
+
+		var task int64
+		//nolint:gosec // G202: placeholders, not values
+		switch err := tx.QueryRowContext(ctx, `
+SELECT task_id FROM task_events
+WHERE conversation_key = ? AND retired_at IS NULL AND event_id NOT IN (`+placeholders+`)
+ORDER BY task_id LIMIT 1`, args...).Scan(&task); {
+		case err == nil:
+			return fmt.Errorf("connector: task %d is live on the conversation of event %d: %w", task, eventIDs[i], ErrConversationBusy)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("connector: read live tasks: %w", err)
+		}
+	}
+	return nil
+}
+
 // SupersedeTask retires a task: its token is refused from then on, and its
-// events are free to join a new task. An event the task never exposed returns
-// to admitted, to be dispatched again once its conversation is free; an event
-// a worker was handed stays dispatched, because that worker may have acted on
-// it, and waits for its settlement or a person's redispatch.
+// events are free to join a new task. An event this task never exposed
+// returns to admitted, to be dispatched again once its conversation is free —
+// unless something else still holds it dispatched, which invariant 4 decides
+// and this call does not override: an earlier task's exposure that was never
+// withdrawn keeps the record dispatched, waiting for its outcome, and a
+// record a person or a later verdict has moved stays where it was put. An
+// event a worker was handed stays dispatched for the same reason: that worker
+// may have acted on it, and it waits for its settlement or a redispatch.
 func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 	return retryBusy(func() error {
 		tx, err := l.db.BeginTx(ctx, nil)
@@ -333,6 +437,13 @@ func (l *Ledger) SupersedeTask(ctx context.Context, taskID int64) error {
 // supersedeTask is SupersedeTask inside the caller's transaction, so a
 // redispatch can retire the old task and create the new one in one commit.
 func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ?)`, taskID).Scan(&exists); err != nil {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
+	}
+	if !exists {
+		return fmt.Errorf("connector: supersede task %d: %w", taskID, ErrNoSuchTask)
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT event_id FROM task_events WHERE task_id = ? AND retired_at IS NULL AND delivery = 'admitted'`, taskID)
 	if err != nil {
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
@@ -360,12 +471,12 @@ func (l *Ledger) supersedeTask(ctx context.Context, tx *sql.Tx, taskID int64) er
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET superseded_at = COALESCE(superseded_at, ?) WHERE id = ?`, now, taskID); err != nil {
 		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE task_events SET retired_at = COALESCE(retired_at, ?) WHERE task_id = ?`, now, taskID); err != nil {
-		return fmt.Errorf("connector: supersede task %d: %w", taskID, err)
-	}
 	for _, id := range unexposed {
-		// Only a record still dispatched moves: one a person or a later
-		// verdict already moved stays where it was put.
+		// Only a record still dispatched moves, and only if nothing else
+		// holds it: move's own refusals — a worker holding it on another
+		// task, a record a person or a later verdict moved — are the answer,
+		// not an error, so the result is read for what it is and not acted
+		// on.
 		if _, err := l.move(ctx, tx, transition{id: id, state: StateAdmitted, from: []RecordState{StateDispatched}}); err != nil {
 			return err
 		}
@@ -564,7 +675,7 @@ func (d *TaskDispatch) get(ctx context.Context, eventID int64) (Instruction, boo
 	if eventID == 0 {
 		err := tx.QueryRowContext(ctx, `
 SELECT te.event_id FROM task_events te JOIN events e ON e.id = te.event_id
-WHERE te.task_id = ? AND te.delivery IN ('admitted', 'exposed') AND `+servableSQL+`
+WHERE te.task_id = ? AND te.retired_at IS NULL AND te.delivery IN ('admitted', 'exposed') AND `+servableSQL+`
 ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Instruction{}, false, nil
@@ -581,7 +692,7 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 	if err != nil {
 		return Instruction{}, false, err
 	}
-	if !servable(record, te.delivery) {
+	if !servable(record, te.pulled) {
 		return Instruction{}, false, fmt.Errorf("connector: event %d: %w", eventID, ErrNotDispatchable)
 	}
 
@@ -670,17 +781,18 @@ ORDER BY te.event_id LIMIT 1`, taskID).Scan(&eventID)
 }
 
 // servable is whether an event on a task is handed to its worker: its record
-// is dispatched, or completed after this worker was exposed to it — finished
-// work is never handed out for the first time — and it still has its
-// instruction. servableSQL is the same rule over task_events te and events e,
+// is dispatched, or completed after this worker pulled it — finished work is
+// never handed out for the first time — and it still has its instruction. servableSQL is the same rule over task_events te and events e,
 // for the earliest-event query; the two are kept side by side so they cannot
 // drift.
-func servable(record Record, delivery Delivery) bool {
-	state := record.State == StateDispatched || (record.State == StateCompleted && delivery != DeliveryAdmitted)
+func servable(record Record, pulled bool) bool {
+	// Exposure at launch is the dispatcher's write, not a worker's pull, so
+	// finished work is served again only to a worker that already had it.
+	state := record.State == StateDispatched || (record.State == StateCompleted && pulled)
 	return state && !record.ContentDropped && len(record.Decision.Snapshot) > 0
 }
 
-const servableSQL = `(e.state = 'dispatched' OR (e.state = 'completed' AND te.delivery <> 'admitted'))
+const servableSQL = `(e.state = 'dispatched' OR (e.state = 'completed' AND te.pulled_at IS NOT NULL))
   AND e.content_dropped = 0 AND e.snapshot IS NOT NULL AND length(e.snapshot) > 0`
 
 // Ack records the worker's acknowledgement: delivery moves to delivered, and
@@ -694,7 +806,17 @@ func (d *TaskDispatch) Ack(ctx context.Context, eventID int64, ackID *int64) (Re
 			if ackID != nil && te.ackID.Valid && te.ackID.Int64 != *ackID {
 				return false, fmt.Errorf("connector: event %d acknowledged as %d: %w", eventID, te.ackID.Int64, ErrReportConflict)
 			}
-			if te.delivery != DeliveryExposed && (ackID == nil || te.ackID.Valid) {
+			if ackID != nil && !te.ackID.Valid && te.delivery != DeliveryExposed {
+				// The acknowledgement settles with the delivery, id and all:
+				// this event was acknowledged with nothing to point at, and
+				// an id arriving afterwards is a second, different report,
+				// not the same call retried.
+				return false, fmt.Errorf("connector: event %d was acknowledged without an acknowledgement id: %w", eventID, ErrReportConflict)
+			}
+			if te.delivery != DeliveryExposed {
+				// Acknowledged already, and by whatever this call says: an
+				// id equal to the one recorded, or none to record. The
+				// receipt is the answer.
 				return false, nil
 			}
 			_, err := tx.ExecContext(ctx, `
@@ -717,37 +839,47 @@ WHERE task_id = ? AND event_id = ?`, d.ledger.timestamp(), nullableID(ackID), ta
 // answers the same receipt; a different one is refused, because a reported
 // outcome stands.
 func (d *TaskDispatch) Complete(ctx context.Context, eventID int64, c Completion) (Receipt, error) {
-	if c.Outcome != OutcomeSucceeded && c.Outcome != OutcomeFailed {
-		return Receipt{}, fmt.Errorf("connector: outcome must be %q or %q: %w", OutcomeSucceeded, OutcomeFailed, ErrInvalidReport)
-	}
-	links, err := normalizeLinks(c.Links)
-	if err != nil {
-		return Receipt{}, err
-	}
-	encoded, err := json.Marshal(links)
-	if err != nil {
-		return Receipt{}, err
-	}
 	var out Receipt
-	err = retryBusy(func() error {
+	err := retryBusy(func() error {
 		var err error
 		out, err = d.report(ctx, eventID, func(ctx context.Context, tx *sql.Tx, taskID int64, te taskEvent) (bool, error) {
+			// Validated inside the call's transaction, after the token and
+			// the exposure are: a worker whose task was superseded is told
+			// that, whatever it sent.
+			if c.Outcome != OutcomeSucceeded && c.Outcome != OutcomeFailed {
+				return false, fmt.Errorf("connector: outcome must be %q or %q: %w", OutcomeSucceeded, OutcomeFailed, ErrInvalidReport)
+			}
+			links, err := normalizeLinks(c.Links)
+			if err != nil {
+				return false, err
+			}
+			encoded, err := json.Marshal(links)
+			if err != nil {
+				return false, err
+			}
 			if te.delivery == DeliveryCompleted {
 				if te.outcome == string(c.Outcome) && te.links == string(encoded) && sameID(te.replyID, c.ReplyID) {
 					return false, nil
 				}
 				return false, fmt.Errorf("connector: event %d completed as %s: %w", eventID, te.outcome, ErrReportConflict)
 			}
-			if _, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}}); err != nil {
-				return false, err
-			}
+			// The delivery first, the record after: while the record is still
+			// dispatched, task_events_exposure_comes_first reads this as a
+			// worker's completion and holds it to the pull. Completing the
+			// record first would make every completion look like the
+			// dispatcher settling one.
 			now := d.ledger.timestamp()
-			_, err = tx.ExecContext(ctx, `
+			if _, err = tx.ExecContext(ctx, `
 UPDATE task_events
 SET delivery = 'completed', delivered_at = COALESCE(delivered_at, ?), completed_at = ?,
     outcome = ?, links = ?, reply_id = ?
-WHERE task_id = ? AND event_id = ?`, now, now, string(c.Outcome), string(encoded), nullableID(c.ReplyID), taskID, eventID)
-			return true, err
+WHERE task_id = ? AND event_id = ?`, now, now, string(c.Outcome), string(encoded), nullableID(c.ReplyID), taskID, eventID); err != nil {
+				return false, err
+			}
+			if _, err := d.ledger.move(ctx, tx, transition{id: eventID, state: StateCompleted, from: []RecordState{StateDispatched}}); err != nil {
+				return false, err
+			}
+			return true, nil
 		})
 		return err
 	})
@@ -774,11 +906,21 @@ func (d *TaskDispatch) report(ctx context.Context, eventID int64, apply func(con
 	if err != nil {
 		return Receipt{}, err
 	}
-	if te.delivery == DeliveryAdmitted {
+	if !te.pulled {
+		// Exposure at launch is not a worker having the instruction: the
+		// pull is. A worker reports only what it pulled.
 		return Receipt{}, fmt.Errorf("connector: event %d: %w", eventID, ErrNotExposed)
 	}
 	wrote, err := apply(ctx, tx, taskID, te)
 	if err != nil {
+		// A refusal the worker can read is passed on as it is: wrapping it
+		// would put this package's name in the middle of the message the
+		// worker is shown.
+		for _, refusal := range []error{ErrInvalidReport, ErrReportConflict, ErrNotDispatchable, ErrHeldByWorker} {
+			if errors.Is(err, refusal) {
+				return Receipt{}, err
+			}
+		}
 		return Receipt{}, fmt.Errorf("connector: report on event %d: %w", eventID, err)
 	}
 	if wrote {
@@ -828,7 +970,7 @@ func loadTaskEvent(ctx context.Context, tx *sql.Tx, taskID, eventID int64) (task
 	)
 	err := tx.QueryRowContext(ctx, `
 SELECT delivery, guard, ack_id, outcome, links, reply_id, pulled_at IS NOT NULL
-FROM task_events WHERE task_id = ? AND event_id = ?`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID, &te.pulled)
+FROM task_events WHERE task_id = ? AND event_id = ? AND retired_at IS NULL`, taskID, eventID).Scan(&delivery, &te.guard, &te.ackID, &te.outcome, &te.links, &te.replyID, &te.pulled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return te, fmt.Errorf("connector: event %d: %w", eventID, ErrNotOnTask)
 	}
@@ -900,8 +1042,10 @@ func sameID(stored sql.NullInt64, given *int64) bool {
 // markup, not by review.
 //
 // A mention element runs from its start tag to the first end tag of the same
-// name, unless another attachment starts first or none closes, in which case
-// the start tag stands alone. What it leaves behind is a space, not nothing:
+// name, unless it closes itself, another attachment starts first, or none
+// closes, in which case the start tag stands alone. So no removal can swallow
+// the instruction between a self-closing mention and some later stray closing
+// tag. What it leaves behind is a space, not nothing:
 // closing the gap could join a "<" before the element to the text after it
 // into a tag that swallows what follows — someone else's mention included —
 // and a space can never begin one.
@@ -942,7 +1086,14 @@ func stripOnce(text string, personID int64) (string, [][2]int) {
 			if id, isPerson := basecamp.PersonIDFromSGID(t.sgid); isPerson && id == personID {
 				out.WriteString(text[pos:t.start])
 				out.WriteString(strippedMention)
-				pos = mentionEnd(text, t.end)
+				if strings.HasSuffix(text[t.start:t.end], "/>") {
+					// A self-closing tag is the whole element: what follows
+					// is not its content, and a later stray closing tag is
+					// not its end.
+					pos = t.end
+				} else {
+					pos = mentionEnd(text, t.end)
+				}
 				removed = append(removed, [2]int{t.start, pos})
 				continue
 			}
@@ -955,22 +1106,51 @@ func stripOnce(text string, personID int64) (string, [][2]int) {
 }
 
 // mentionEnd is where the mention whose start tag ends at from ends: after the
-// first </bc-attachment>, or at from when another attachment starts first or
-// none closes.
+// first </bc-attachment>, or at from when another attachment starts first,
+// some other element closes first, or none closes.
 func mentionEnd(text string, from int) int {
+	var open []string
 	for at := from; ; {
 		t, ok := nextMarkup(text, at)
 		if !ok {
 			return from
 		}
-		if strings.EqualFold(t.name, "bc-attachment") {
+		switch {
+		case strings.EqualFold(t.name, "bc-attachment"):
 			if t.isEnd {
 				return t.end
 			}
+			// Another attachment starts: this one was never closed.
 			return from
+		case t.isEnd:
+			// An end tag for something opened inside the mention — a
+			// mention's own figure closes its parts — is part of it. One that
+			// closes nothing opened here belongs to an element around the
+			// mention, so the closing tag further on is not this mention's:
+			// the start tag stands alone rather than swallowing what follows.
+			depth := len(open) - 1
+			for depth >= 0 && !strings.EqualFold(open[depth], t.name) {
+				depth--
+			}
+			if depth < 0 {
+				return from
+			}
+			open = open[:depth]
+		case !isVoidElement(t.name):
+			open = append(open, t.name)
 		}
 		at = t.end
 	}
+}
+
+// isVoidElement reports the elements of Basecamp's rich text that have no end
+// tag, so an unclosed one of them does not look like something still open.
+func isVoidElement(name string) bool {
+	switch strings.ToLower(name) {
+	case "br", "hr", "img", "source", "input", "meta", "link":
+		return true
+	}
+	return false
 }
 
 // markup is one start or end tag the walk found: where it starts and ends,
@@ -1172,38 +1352,46 @@ func StateRoot() (string, error) {
 
 // ResolveStateDir is the one place a state directory is accepted: dir must
 // be exactly StateRoot/<account>-<agent person id>, and its account must be
-// accountID, compared as numbers. It returns the agent's Person id.
+// accountID, compared as numbers. It returns the directory made absolute —
+// which is the one every caller should go on to use — and the agent's Person
+// id.
 //
 // The location is part of the check, not only the name. A directory named
 // for this account anywhere else — a copy of another account's ledger renamed
 // to match — is refused, because the name is what binds a ledger to an
 // account and anyone can choose a name.
-func ResolveStateDir(dir, accountID string) (int64, error) {
+func ResolveStateDir(dir, accountID string) (string, int64, error) {
 	root, err := StateRoot()
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
+		return "", 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
 	}
-	refuse := func(why StateDirProblem, account string) (int64, error) {
-		return 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
+	refuse := func(why StateDirProblem, account string) (string, int64, error) {
+		return "", 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
 	}
 	if filepath.Dir(abs) != root {
 		return refuse(StateDirElsewhere, "")
 	}
 	account, agent, ok := strings.Cut(filepath.Base(abs), "-")
 	agentID, err := strconv.ParseInt(agent, 10, 64)
-	if !ok || err != nil || agentID <= 0 {
+	if !ok || err != nil || agentID <= 0 || agent != strconv.FormatInt(agentID, 10) {
+		// The agent is spelled one way, so one directory answers to one name:
+		// "+52007412" and "052007412" are other directories, not this one.
 		return refuse(StateDirMisnamed, account)
 	}
 	given, errGiven := strconv.ParseUint(account, 10, 64)
+	if errGiven != nil || given == 0 {
+		// Not an account at all: the name is wrong, not another account's.
+		return refuse(StateDirMisnamed, account)
+	}
 	want, errWant := strconv.ParseUint(accountID, 10, 64)
-	if errGiven != nil || errWant != nil || given == 0 || given != want {
+	if errWant != nil || given != want {
 		return refuse(StateDirOtherAccount, account)
 	}
-	return agentID, nil
+	return abs, agentID, nil
 }
 
 // LedgerFile is the ledger's file name inside the state directory.

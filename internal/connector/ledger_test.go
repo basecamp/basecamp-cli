@@ -238,3 +238,114 @@ func TestLedgerRefusesALooseAncestor(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, setup.ErrNotPrivate)
 }
+
+// A second Ledger on a file this process already has open — a status read
+// beside a running connector, a promote — must not run the check that opens
+// the file: POSIX drops every lock this process holds on a file when any
+// descriptor for it is closed, SQLite's included, and the first handle would
+// go on believing it still held them.
+func TestASecondLedgerOnALiveFileNeitherOpensNorDisturbsIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	ctx := context.Background()
+	_, err = first.RecordSeen(ctx, testEvent(1), LanePoll)
+	require.NoError(t, err)
+	checksBefore := securePathRuns.Load()
+
+	second, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer second.Close()
+
+	assert.Equal(t, checksBefore, securePathRuns.Load(), "the check that opens the file did not run again")
+
+	// Both handles read and write, in both orders, with the other's locks
+	// still in place.
+	_, err = second.RecordSeen(ctx, testEvent(2), LanePoll)
+	require.NoError(t, err)
+	record, ok, err := first.Get(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, ok, "the first handle reads what the second wrote")
+	assert.Equal(t, StateSeen, record.State)
+	require.NoError(t, first.SetState(ctx, 1, StateDiscarded, "untrusted_author"))
+	record, ok, err = second.Get(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, StateDiscarded, record.State)
+
+	// The file has to be the one that was checked.
+	require.NoError(t, second.Close())
+	require.NoError(t, os.Rename(path, path+".moved"))
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	_, err = OpenLedger(path)
+	assert.ErrorIs(t, err, ErrLedgerNotTheSameFile)
+}
+
+// The one-check-per-file rule is about the file, not the name: a hardlink or
+// another route to a file this process has open is recognized as that file,
+// before the check that would open it.
+func TestASecondNameForALiveLedgerIsRefusedWithoutOpeningIt(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	checks := securePathRuns.Load()
+
+	link := filepath.Join(dir, "hard.db")
+	require.NoError(t, os.Link(path, link))
+	_, err = OpenExistingLedger(context.Background(), link)
+
+	// Refused, because SQLite names its write-ahead log after the path and
+	// one file under two names is two logs — and refused before the check
+	// that opens the file, which would have dropped the live handle's locks.
+	require.ErrorIs(t, err, ErrLedgerUnderAnotherName)
+	assert.Equal(t, checks, securePathRuns.Load())
+	_, err = first.RecordSeen(context.Background(), testEvent(1), LanePoll)
+	require.NoError(t, err, "the live handle is untouched")
+	_, ok, err := first.Get(context.Background(), 1)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// Close releases the file once: a defensive second Close must not take the
+// entry away from another Ledger still holding it.
+func TestClosingALedgerTwiceReleasesItOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	first, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer first.Close()
+	second, err := OpenLedger(path)
+	require.NoError(t, err)
+	require.NoError(t, second.Close())
+	require.NoError(t, second.Close())
+	checks := securePathRuns.Load()
+
+	third, err := OpenLedger(path)
+	require.NoError(t, err)
+	defer third.Close()
+
+	assert.Equal(t, checks, securePathRuns.Load(), "the first handle still holds the file")
+}
+
+// An aliased open that arrives while the first opener's check is still
+// running must find that file's entry: that check is the one that opens the
+// file, and it is what the whole mechanism exists to hold off.
+func TestAnAliasClaimedDuringTheFirstCheckFindsTheSameFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "connector.db")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	link := filepath.Join(dir, "hard.db")
+	require.NoError(t, os.Link(path, link))
+
+	// The first opener has claimed the file; its check has not run yet.
+	first := claimLedger(path)
+	defer releaseLedger(first)
+	second := claimLedger(link)
+	defer releaseLedger(second)
+
+	assert.Same(t, first, second, "one file, one entry, whatever it is called")
+}

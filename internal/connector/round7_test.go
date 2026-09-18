@@ -40,8 +40,7 @@ func TestDropContentKeepsARecordUpdatedJustAfterAWholeSecondCutoff(t *testing.T)
 	_, err := ledger.RecordSeen(ctx, testEvent(43), LanePoll)
 	require.NoError(t, err)
 	// The lifecycle has no shortcut to completed, so the record walks there.
-	require.NoError(t, ledger.SetState(ctx, 43, StateAdmitted, ""))
-	require.NoError(t, ledger.SetState(ctx, 43, StateDispatched, ""))
+	dispatchForTest(t, ledger, 43)
 	require.NoError(t, ledger.SetState(ctx, 43, StateCompleted, ""))
 
 	dropped, err := ledger.DropContent(ctx, cutoff, cutoff)

@@ -112,7 +112,9 @@ func (p *BasecampPoster) list(ctx context.Context, dest Destination, since time.
 			return nil, err
 		}
 		if result.Meta.Truncated {
-			return nil, errors.New("connector: the boost listing was truncated")
+			// A truncated listing is the SDK's page cap, which waiting does not
+			// raise: the same class as a Campfire too deep to page.
+			return nil, fmt.Errorf("connector: the boost listing was truncated: %w", ErrUnlistable)
 		}
 		for _, b := range result.Boosts {
 			keep(b.Booster, b.ID, b.CreatedAt, b.Content)
@@ -124,7 +126,7 @@ func (p *BasecampPoster) list(ctx context.Context, dest Destination, since time.
 			return nil, err
 		}
 		if result.Meta.Truncated {
-			return nil, errors.New("connector: the comment listing was truncated")
+			return nil, fmt.Errorf("connector: the comment listing was truncated: %w", ErrUnlistable)
 		}
 		for _, c := range result.Comments {
 			keep(c.Creator, c.ID, c.CreatedAt, c.Content)

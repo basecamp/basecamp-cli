@@ -852,6 +852,7 @@ func TestOutboxNeverAdoptsAWorkersOwnMessage(t *testing.T) {
 	workersOwn := basecamp.add(claimed.Destination, adapterAgentID, GuardAckBody)
 	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
+	obPull(t, d, 1)
 	_, err = d.Ack(ctx, 1, &workersOwn)
 	require.NoError(t, err)
 
@@ -1368,6 +1369,7 @@ func TestOutboxAWorkersMessageIsMatchedByKindToo(t *testing.T) {
 	// guard's boost.
 	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
+	obPull(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: &boost})
 	require.NoError(t, err)
 
@@ -1376,4 +1378,123 @@ func TestOutboxAWorkersMessageIsMatchedByKindToo(t *testing.T) {
 	got := obIntent(t, ledger, claimed.Key)
 	require.Equal(t, IntentSent, got.State, "a comment id is not a boost id")
 	assert.Equal(t, boost, *got.ReceiptID)
+}
+
+// A still-running notice says the worker is still working. If its attempt has
+// ended before the notice goes out, it is not sent: the connector's last word
+// on finished work is never "still working on this".
+func TestOutboxAStillRunningNoticeIsNotPostedAfterTheAttemptEnded(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	_, err := ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+
+	// The worker finishes and reports before the notice is sent, so the
+	// settlement calls for no completion notice either.
+	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	obPull(t, d, 1)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: id64(4242)})
+	require.NoError(t, err)
+	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopFinished})
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Zero(t, basecamp.postCount(), "nothing says the worker is still working")
+	got := obIntent(t, ledger, stillRunningKey(l.AttemptID, 1))
+	assert.Equal(t, IntentCanceled, got.State)
+	assert.Equal(t, "the attempt ended before the notice went out", got.Note)
+}
+
+// A still-running notice whose attempt is not in the ledger at all is
+// canceled too, as a holding reply is when its record is gone.
+func TestOutboxAStillRunningNoticeWithNoAttemptIsCanceled(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	_, err := ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `PRAGMA foreign_keys = off`)
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `DELETE FROM attempts WHERE id = ?`, l.AttemptID)
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	assert.Zero(t, basecamp.postCount())
+	assert.Equal(t, IntentCanceled, obIntent(t, ledger, stillRunningKey(l.AttemptID, 1)).State)
+}
+
+// A ledger failure while sending stops the start even when the start's bound
+// runs out in the same breath.
+func TestOutboxALedgerFailureWhileSendingIsNotHiddenByAnEndingBound(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(id, 0, obCommentReply))
+		require.NoError(t, err)
+	}
+	_, err := ledger.db.ExecContext(ctx, `CREATE TRIGGER refuse_receipt BEFORE UPDATE OF receipt_id ON outbox WHEN NEW.receipt_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.afterPost = func(Destination, int64) error {
+		cancel() // the start's bound runs out as the request is answered
+		return nil
+	}
+	require.Error(t, obOutbox(t, ledger, basecamp).Start(startCtx))
+}
+
+// A canceled intent posted nothing, so its words do not hide a worker's reply
+// that happens to read the same.
+func TestOutboxACanceledNoticeDoesNotHideAReply(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	seenRecord(t, ledger, 1)
+	_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+	require.NoError(t, err)
+	in := obIntent(t, ledger, holdingKey(1))
+	basecamp := newFakeBasecamp(clock.Now)
+	basecamp.beforePost = func(Destination, string) error { return fmt.Errorf("403: %w", ErrNotPosted) }
+	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
+	require.Equal(t, IntentCanceled, obIntent(t, ledger, in.Key).State)
+
+	// A worker's reply that reads exactly like the notice nobody posted.
+	since := clock.Now().Add(-time.Minute)
+	reply := basecamp.add(in.Destination, adapterAgentID, in.Body)
+	listed, err := LifecycleFilteredReplies{Lister: basecamp, Ledger: ledger}.
+		AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "nothing of ours is there to hide it")
+	assert.Equal(t, reply, listed[0].ID)
+}
+
+// A receipt identifies the connector's message whatever its intent's state,
+// and since the dispatcher is given no id-only predicate beside this filter,
+// that is the whole of the spec's "not one of the connector's own lifecycle
+// messages" for a notice the ledger has a receipt for.
+func TestOutboxASentNoticeIsLeftOutByItsReceipt(t *testing.T) {
+	ledger, clock := obLedger(t)
+	ctx := context.Background()
+	in := sendingHolding(t, ledger, 1, obCommentReply)
+	basecamp := newFakeBasecamp(clock.Now)
+	since := clock.Now().Add(-time.Minute)
+	landed := basecamp.add(in.Destination, adapterAgentID, `<div dir="auto">`+in.Body+`</div>`)
+	reply := basecamp.add(in.Destination, adapterAgentID, "<div>Done: the fix is on the branch.</div>")
+	_, err := ledger.recordReceipt(ctx, in.ID, landed)
+	require.NoError(t, err)
+	require.Equal(t, IntentSent, obIntent(t, ledger, in.Key).State)
+
+	listed, err := LifecycleFilteredReplies{Lister: basecamp, Ledger: ledger}.
+		AgentReplies(ctx, adapterBucketID, "comment", obReplyRecording, since)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "the sent notice is left out by its receipt")
+	assert.Equal(t, reply, listed[0].ID)
 }
