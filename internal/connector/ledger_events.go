@@ -217,8 +217,10 @@ var lifecycle = map[RecordState][]RecordState{
 	StateAdmitted: {StateQueued, StateDispatched, StateBlocked, StateDiscarded},
 	StateQueued:   {StateDispatched, StateBlocked, StateDiscarded},
 	StateBlocked:  {StateAdmitted, StateQueued, StateDispatched, StateDiscarded},
-	// A dispatched record whose worker never started has its exposure
-	// withdrawn and returns to admitted. It is never discarded: a dispatched
+	// A dispatched record whose spawn failed before any worker process
+	// existed has its exposure withdrawn (task_events.withdrawn_at) and
+	// returns to admitted; one a worker was handed otherwise leaves only to
+	// completed (the dispatch lifecycle, ledger_dispatch.go). It is never discarded: a dispatched
 	// event ends completed, with an outcome, even when the outcome is
 	// unknown.
 	StateDispatched: {StateCompleted, StateBlocked, StateAdmitted},
@@ -367,6 +369,21 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 		args = append(args, *t.revision)
 	}
 	query.WriteString(" AND state IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(froms)), ", ") + ")")
+	switch t.state {
+	case StateDispatched:
+		// A record is dispatched exactly while a live task carries it: it
+		// enters dispatched only with its task row already written
+		// (createTask), and a repeat is a repeat.
+		query.WriteString(" AND (state = 'dispatched' OR " + onLiveTask + ")")
+	case StateCompleted:
+	default:
+		// Invariant 4 of the dispatch lifecycle (ledger_dispatch.go): a
+		// record a worker was handed leaves dispatched only to completed —
+		// and any other record leaves it only once no live task carries it
+		// (supersedeTask retires the row first).
+		query.WriteString(" AND NOT (" + heldByWorker + ")")
+		query.WriteString(" AND NOT (state = 'dispatched' AND " + onLiveTask + ")")
+	}
 	for _, from := range froms {
 		args = append(args, from)
 	}
@@ -385,6 +402,29 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 	return affected > 0, nil
 }
 
+// heldByWorker is true of a dispatched events row a worker was handed and
+// has not reported on: a delivery exposed or delivered, on any task, and not
+// withdrawn because the spawn failed before any worker existed.
+const heldByWorker = `state = 'dispatched' AND EXISTS (
+  SELECT 1 FROM task_events WHERE task_events.event_id = events.id
+    AND delivery IN ('exposed', 'delivered') AND withdrawn_at IS NULL)`
+
+// onLiveTask is true of an events row a live task carries.
+const onLiveTask = `EXISTS (
+  SELECT 1 FROM task_events WHERE task_events.event_id = events.id AND retired_at IS NULL)`
+
+// ErrNotOnALiveTask is a move into dispatched for a record no live task
+// carries. Records are dispatched by creating a task for them.
+var ErrNotOnALiveTask = errors.New("no live task carries this event; a record is dispatched by creating a task for it")
+
+// ErrOnALiveTask is a move out of dispatched, other than to completed, for a
+// record a live task still carries. Its task is superseded first.
+var ErrOnALiveTask = errors.New("a live task still carries this event; supersede the task first")
+
+// ErrHeldByWorker is a move out of dispatched for an event a worker was
+// handed and has not reported on. Only its outcome moves it.
+var ErrHeldByWorker = errors.New("a worker was handed this event; it leaves dispatched only when completed")
+
 // explainRefusal says why an update changed nothing: there is no such record,
 // or the record is somewhere the lifecycle cannot leave for state.
 //
@@ -398,6 +438,21 @@ func (l *Ledger) explainRefusal(ctx context.Context, id int64, state RecordState
 		return fmt.Errorf("connector: set state of %d: %w", id, ErrNoSuchRecord)
 	case err != nil:
 		return fmt.Errorf("connector: set state of %d: %w", id, err)
+	}
+	if slices.Contains(enterableFrom(state), current) {
+		// The edge exists; a dispatch rule refused it.
+		var held, live bool
+		if err := l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE id = ? AND `+heldByWorker+`), EXISTS (SELECT 1 FROM events WHERE id = ? AND `+onLiveTask+`)`, id, id).Scan(&held, &live); err != nil {
+			return fmt.Errorf("connector: set state of %d: %w", id, err)
+		}
+		switch {
+		case held:
+			return fmt.Errorf("connector: set state of %d: %w", id, ErrHeldByWorker)
+		case state == StateDispatched && !live:
+			return fmt.Errorf("connector: set state of %d: %w", id, ErrNotOnALiveTask)
+		case live:
+			return fmt.Errorf("connector: set state of %d: %w", id, ErrOnALiveTask)
+		}
 	}
 	return fmt.Errorf("connector: set state of %d: %s to %s is %w", id, current, state, ErrNotATransition)
 }

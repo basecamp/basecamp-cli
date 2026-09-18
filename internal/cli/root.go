@@ -303,6 +303,19 @@ func postRunNoticesEnabled(app *appctx.App) bool {
 
 // Execute runs the root command.
 func Execute() {
+	// Before anything else: a descriptor this process inherited belongs to
+	// this process, not to the children it starts. The root command's
+	// persistent hooks load configuration, tighten directories and may check
+	// for an update before any command's own RunE runs, and a connector-
+	// started worker arrives holding its task token on an inherited pipe.
+	//
+	// A process that cannot seal them cannot make that promise, so it does
+	// not start: continuing would run every hook with the token descriptor
+	// still there for a child to inherit, and say nothing about it.
+	if err := sealInheritedDescriptors(); err != nil {
+		os.Exit(reportStartupFailure(os.Stderr, err))
+	}
+
 	cmd := NewRootCmd()
 
 	// Add subcommands
@@ -538,6 +551,16 @@ func reportWireError(w io.Writer, err error) int {
 	if hint != "" && !strings.Contains(message, hint) {
 		fmt.Fprintln(w, hint)
 	}
+	return output.ExitCodeFor(apiErr.Code)
+}
+
+// reportStartupFailure says on stderr why the program will not run at all.
+// It comes before cobra has parsed anything, so there is no command to ask
+// for an output format and no envelope to fill; stderr also keeps it clear of
+// a command whose stdout speaks a wire protocol.
+func reportStartupFailure(w io.Writer, err error) int {
+	apiErr := output.AsError(err)
+	fmt.Fprintln(w, "Error: "+richtext.SanitizeSingleLine(apiErr.Message))
 	return output.ExitCodeFor(apiErr.Code)
 }
 

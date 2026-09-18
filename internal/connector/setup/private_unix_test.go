@@ -187,3 +187,28 @@ func TestLockRefusesASecondSetup(t *testing.T) {
 	require.NoError(t, err)
 	unlockAgain()
 }
+
+func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	path := filepath.Join(dir, "ledger.db")
+
+	err := CheckPrivateFile(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, statErr := os.Lstat(path)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "nothing was created")
+
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	require.NoError(t, CheckPrivateFile(path))
+
+	require.NoError(t, os.Chmod(path, 0o644))
+	require.ErrorIs(t, CheckPrivateFile(path), ErrNotPrivate)
+	require.NoError(t, os.Chmod(path, 0o600))
+
+	link := filepath.Join(dir, "link.db")
+	require.NoError(t, os.Symlink(path, link))
+	require.Error(t, CheckPrivateFile(link))
+
+	require.NoError(t, os.Chmod(dir, 0o775))
+	require.ErrorIs(t, CheckPrivateFile(path), ErrNotPrivate, "a directory others can write")
+}
