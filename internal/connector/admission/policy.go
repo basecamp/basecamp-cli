@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"path"
 	"slices"
 )
 
@@ -126,8 +126,19 @@ func checkLegacyPath(data []byte) error {
 	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return fmt.Errorf(`the "path" of a connector that routed projects is not a string: %w`, err)
 	}
-	if legacy == "" || !filepath.IsAbs(legacy) || filepath.Clean(legacy) != legacy {
-		return fmt.Errorf(`the "path" of a connector that routed projects is %q, which is not the clean absolute path such a connector wrote`, legacy)
+	// POSIX, not this host's rules. The connector runs on Linux only, so the
+	// writer of this key wrote a POSIX path — and path.IsAbs answers for
+	// that format on every platform, where filepath.IsAbs answers for
+	// whatever the reader happens to be compiled for. This package builds
+	// everywhere, so with filepath a legitimate Linux-written connect.json
+	// would be refused on Windows: the check would reject exactly the files
+	// it exists to accept (Copilot on #765).
+	//
+	// A compatibility check validates what the old writer could produce, not
+	// what this reader would accept. Those are the same thing only when the
+	// format and the host agree, and a path is where they do not.
+	if legacy == "" || !path.IsAbs(legacy) || path.Clean(legacy) != legacy {
+		return fmt.Errorf(`the "path" of a connector that routed projects is %q, which is not the clean absolute POSIX path such a connector wrote`, legacy)
 	}
 	return nil
 }

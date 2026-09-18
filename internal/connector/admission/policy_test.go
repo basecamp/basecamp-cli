@@ -103,6 +103,18 @@ func TestAMalformedLegacyPathIsRefusedBeforeItIsDiscarded(t *testing.T) {
 		})
 	}
 
+	// The shape is the writer's, not this host's. A connector runs on Linux
+	// only, so this key is a POSIX path — and this package builds
+	// everywhere, so a check written against the reader's platform would
+	// refuse a legitimate Linux-written file on Windows, rejecting exactly
+	// what it exists to accept. This test file carries no build tag on
+	// purpose: it is the one that would catch that, and it catches it only
+	// where it runs.
+	require.NoError(t, policy(`{"path":"/work/app"}`),
+		"a POSIX absolute path is the shape the writer wrote, on every platform this parser is built for")
+	assert.Error(t, policy(`{"path":"C:\\work\\app"}`),
+		"and a path in the reader's dialect is not something that writer could have produced")
+
 	// What the old writer really wrote still opens, and the key is still
 	// discarded rather than kept.
 	p, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":{"path":"/work/app","class":"internal"}}}`))
