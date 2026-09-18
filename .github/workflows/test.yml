@@ -142,7 +142,11 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Run tests with race detector
-        run: go test -tags dev -race -v ./...
+        # 20 minutes, not Go's default 10 per package. internal/connector runs
+        # real sockets, real processes and the recovery harness; under -race it
+        # takes about five minutes on a fast box and roughly twice that on a
+        # runner. The default was not a hung test, it was the budget.
+        run: go test -tags dev -race -v -timeout 20m ./...
 
   integration:
     name: Integration Tests
