@@ -31,7 +31,7 @@ reject:
   # retrying — the broad setup mock answers success either way.
   #
   # --serve carries a project id and nothing else: digits ending the shell
-  # word, bare or single-quoted, naming something above zero. Written as the
+  # word, bare or quoted either way, naming something above zero. Written as the
   # shape of a wrong value rather than as a list of wrong values, because
   # four rounds of review found four more spellings — and without lookahead,
   # so Go's RE2 reads the same pattern the Ruby runner does.
@@ -44,7 +44,7 @@ reject:
   # allow, the CLI must accept; everything the CLI refuses, they must reject
   # — and its doc comment names what it cannot model, which is the shell
   # itself.
-  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|[0-9]+'')'
+  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s''"]|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|"[0-9]*[^0-9"]|"0*"|"[0-9]*"[^\s]|[0-9]+[''"])'
   - 'connect setup .*--serve=(\s|$)'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'

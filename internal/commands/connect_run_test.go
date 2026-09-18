@@ -91,19 +91,47 @@ func TestServedProjectsFollowConnectJSON(t *testing.T) {
 	require.NoError(t, err, "serving nothing is an answer, not a failure")
 	assert.Empty(t, current, "a project no longer served stops authorizing dispatch without a restart")
 
-	other := file
-	other.Agent.PersonID = 1
-	write(other)
-	clock = clock.Add(connectServedTTL)
-	_, err = served.Current()
-	assert.Error(t, err, "a file naming another agent is a failure to read the answer, not the answer")
-	assert.Empty(t, current, "and it authorizes no dispatch")
+	// Each failure is checked from a *non-empty* last-good state, and on the
+	// map that failing call returned — not on one a previous call left in
+	// the variable. Asserting the stale one passes however much
+	// authorization a broken read hands back, which is the one place in this
+	// change where that would cost the most (Copilot on #765).
+	for _, tc := range []struct {
+		name   string
+		break_ func()
+		why    string
+	}{
+		{
+			name: "a file naming another agent",
+			break_: func() {
+				other := file
+				other.Agent.PersonID = 1
+				write(other)
+			},
+			why: "a file naming another agent is a failure to read the answer, not the answer",
+		},
+		{
+			name:   "a file that no longer parses",
+			break_: func() { require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600)) },
+			why:    "a file that no longer loads is reported as unreadable, never as an empty served set",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Back to serving something, so a leak of stale authorization
+			// has something to leak.
+			write(file)
+			clock = clock.Add(connectServedTTL)
+			good, err := served.Current()
+			require.NoError(t, err)
+			require.NotEmpty(t, good, "the last good read served a project")
 
-	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
-	clock = clock.Add(connectServedTTL)
-	_, err = served.Current()
-	assert.Error(t, err, "a file that no longer loads is reported as unreadable, never as an empty served set")
-	assert.Empty(t, current, "and it authorizes no dispatch")
+			tc.break_()
+			clock = clock.Add(connectServedTTL)
+			broken, err := served.Current()
+			assert.Error(t, err, tc.why)
+			assert.Empty(t, broken, "and it hands back no authorization at all, stale or otherwise")
+		})
+	}
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.

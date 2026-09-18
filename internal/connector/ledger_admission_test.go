@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -737,4 +738,94 @@ func mentionMarkup(id int64) string {
 	payload := `{"_rails":{"data":"gid://bc3/Person/` + strconv.FormatInt(id, 10) + `","pur":"attachable"}}`
 	sgid := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	return `<bc-attachment sgid="` + sgid + `" content-type="application/vnd.basecamp.mention"></bc-attachment>`
+}
+
+// Repair, end to end: a connect.json that cannot be read holds its records,
+// and repairing the file decides them again with nobody redispatching.
+//
+// This is the promise the hold was chosen over a discard for, and until
+// Copilot pointed at it on #765 nothing kept it: NextBlockedRetry said which
+// reasons come round on a timer, and no production code called it, so a
+// held record waited for a person exactly like no_route did. The sweep in
+// intake is what closes that, and this asserts the whole path rather than
+// the pieces — broken, held, repaired, run.
+func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
+	ledger := newTestLedger(t)
+	queue, err := NewQueue(10, 100)
+	require.NoError(t, err)
+
+	reads := &adapterReads{summaries: map[int64]*basecamp.RecordingSummary{}}
+	reads.summaries[501] = &basecamp.RecordingSummary{
+		ID: 501, Status: "active", Type: "Todo", Title: "A to-do",
+		AppURL:             "https://app.basecamp.com/2914079/buckets/48699913/todos/501",
+		Bucket:             &basecamp.Bucket{ID: adapterBucketID},
+		Creator:            &basecamp.Person{ID: adapterOperatorID},
+		Content:            mentionMarkup(adapterAgentID) + "please look",
+		MentionedPersonIDs: []int64{adapterAgentID},
+		UpdatedAt:          time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC),
+	}
+
+	// The file is broken to start with.
+	broken := true
+	admitter, err := admission.NewAdmitter(admission.Policy{
+		AgentID: adapterAgentID,
+		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads},
+		admission.WithServed(func() (map[int64]admission.Project, error) {
+			if broken {
+				return nil, errors.New("connect.json cannot be read")
+			}
+			return map[int64]admission.Project{adapterBucketID: {Class: "internal"}}, nil
+		}))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Workers: 1})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+
+	ev := testEvent(1)
+	ev.EventType, ev.Kind, ev.RecordingID = "todo.created", "todo_created", 501
+	_, err = ledger.RecordSeen(ctx, ev, LanePoll)
+	require.NoError(t, err)
+	require.NoError(t, queue.Offer(ctx, ev.ID))
+
+	require.Eventually(t, func() bool {
+		return getRecord(t, ledger, ev.ID).State == StateBlocked
+	}, 5*time.Second, 10*time.Millisecond, "held while the file cannot be read")
+	require.Equal(t, string(admission.ReasonConfigUnreadable), getRecord(t, ledger, ev.ID).Reason)
+
+	// Nothing is due yet: the interval has not passed, so a sweep now would
+	// offer nothing and the record would sit exactly as a no_route one does.
+	dueNow, err := ledger.DueBlockedRetries(ctx, time.Now(), 10)
+	require.NoError(t, err)
+	assert.Empty(t, dueNow, "not due until the interval has passed")
+
+	// The operator repairs the file. The record is due once the interval is
+	// up, and the sweep offers it — no redispatch anywhere in this test.
+	broken = false
+	later := time.Now().Add(admission.BlockedRetryInterval + time.Minute)
+	due, err := ledger.DueBlockedRetries(ctx, later, 10)
+	require.NoError(t, err)
+	require.Equal(t, []int64{ev.ID}, due, "the repair is decided by the timer, not by a person")
+
+	for _, id := range due {
+		require.NoError(t, queue.Offer(ctx, id))
+	}
+	require.Eventually(t, func() bool {
+		return getRecord(t, ledger, ev.ID).State == StateAdmitted
+	}, 5*time.Second, 10*time.Millisecond, "and it runs once the file is back")
+
+	// Two days blocked, attempted a moment ago: a transient read failure is
+	// given up on and handed to a person at that point, and a configuration
+	// failure is not. An operator away for a week is ordinary, and giving up
+	// would strand the work silently — the outcome the hold exists to avoid.
+	blockedTwoDaysAgo, attemptedJustNow := time.Now().Add(-48*time.Hour), time.Now().Add(-time.Minute)
+	_, ok := admission.NextBlockedRetry(admission.ReasonConfigUnreadable, blockedTwoDaysAgo, attemptedJustNow, time.Time{})
+	assert.True(t, ok, "a configuration failure is not given up on after the transient window")
+	_, ok = admission.NextBlockedRetry(admission.ReasonReadFailed, blockedTwoDaysAgo, attemptedJustNow, time.Time{})
+	assert.False(t, ok, "where a transient read failure is handed to a person")
 }

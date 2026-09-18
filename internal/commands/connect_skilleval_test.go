@@ -93,10 +93,21 @@ var serveValues = []struct {
 	{arg: "'222'x", value: "222x"}, // the shell joins the fragments
 	{arg: "x'222'", value: "x222"},
 
+	// Double quotes are the other ordinary spelling, and the shell hands the
+	// CLI the same value. Omitting them is how the previous corpus let an
+	// undeclared narrowing through: "222" is not exotic (Copilot on #765).
+	{arg: `"222"`, value: "222", traceOK: true},
+	{arg: `"007"`, value: "007", traceOK: true},
+	{arg: `"0"`, value: "0"},
+	{arg: `""`, value: ""},
+	{arg: `"222=work"`, value: "222=work"},
+	{arg: `"222"x`, value: "222x"},
+
 	// The narrowings. The CLI takes all three; a trace may not.
 	{arg: "+222", value: "+222", why: "a leading plus is not how an id is written"},
 	{arg: "'22''2'", value: "222", why: "fragments the shell joins are not a spelling to teach"},
 	{arg: "222'333'", value: "222333", why: "same, the other way round"},
+	{arg: `'222'"333"`, value: "222333", why: "same, across both quote styles"},
 }
 
 func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {

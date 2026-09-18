@@ -152,9 +152,18 @@ const (
 // before it, and a deadline past the window hands the record to redispatch
 // rather than asking early.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
+	var unbounded bool
 	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled,
-		ReasonConfigUnreadable:
+	case ReasonConfigUnreadable:
+		// Outside the window, and deliberately. The others are transient
+		// server conditions: a day of them is a server that is not coming
+		// back on its own, so the record goes to a person. An unreadable
+		// connect.json is a local condition someone will fix, and there is
+		// no telling when — an operator away for a week is ordinary. Giving
+		// up after a day would strand the work silently, which is the one
+		// outcome the hold exists to avoid.
+		unbounded = true
+	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:
 	default:
 		return time.Time{}, false
 	}
@@ -162,7 +171,7 @@ func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time
 	if notBefore.After(next) {
 		next = notBefore
 	}
-	if next.After(blockedAt.Add(BlockedRetryWindow)) {
+	if !unbounded && next.After(blockedAt.Add(BlockedRetryWindow)) {
 		return time.Time{}, false
 	}
 	return next, true
