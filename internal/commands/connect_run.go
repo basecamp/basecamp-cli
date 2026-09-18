@@ -52,7 +52,6 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
 	fl.StringVar(&f.adapters, "acp-adapters", "", "Where the pinned ACP adapters are installed, for --driver acp (default $XDG_DATA_HOME/basecamp/acp-adapters)")
-	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
 	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
 }
 
