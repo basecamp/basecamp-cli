@@ -265,7 +265,27 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			// file, and the timer decides it again once the file is back.
 			return v.end(StateBlocked, ReasonConfigUnreadable), nil
 		}
+		// Every other gate discard turns on the trust set, the matrix or the
+		// --project scope, none of which the unreadable file touches.
 		return v.end(StateDiscarded, gate.Reason), nil
+	}
+	if policy.ProjectsUnknown {
+		// Before any read, and before anything below can end the verdict:
+		// nothing here can decide an event whose answer turns on a list that
+		// could not be read, and a discard is the one outcome repairing the
+		// file cannot reverse.
+		//
+		// It has to be here rather than after the trigger rules. A
+		// comment.created admits under mentioned, which needs no served
+		// project, or subscribed, which does — so with the list unknown the
+		// gate keeps the first and drops the second, does not discard, and
+		// match then returns not_addressed for a comment the agent is
+		// subscribed to. Terminally, over a broken file (Copilot on #765).
+		//
+		// Costing no reads is the other half: an unreadable file stops the
+		// connector spending the account's API budget on events it cannot
+		// decide.
+		return v.end(StateBlocked, ReasonConfigUnreadable), nil
 	}
 
 	if gate.ConfirmMembership {
@@ -328,13 +348,6 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
 	v.address(summary)
 
-	if policy.ProjectsUnknown {
-		// Nothing could read which projects are served, so nothing here can
-		// say this one is not. Blocked as a configuration error, which posts
-		// no holding reply and comes round again on the timer, instead of
-		// telling the person on the card that their project is not served.
-		return v.end(StateBlocked, ReasonConfigUnreadable), nil
-	}
 	if !v.Served {
 		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination

@@ -1614,6 +1614,26 @@ func TestAnUnreadableConfigStrandsNothingAndSaysWhy(t *testing.T) {
 
 	out := logged.String()
 	assert.Contains(t, out, "could not be read", "the operator is told what actually happened")
+	assert.Contains(t, out, "dispatch is paused", "and what it means for them")
 	assert.NotContains(t, out, "no longer serves",
 		"and not told their project was unserved, which nothing established")
+	assert.NotContains(t, out, "work is waiting",
+		"nor told work is waiting, which the skipped count is the only thing that could have established")
+}
+
+// And it says nothing about waiting work on an empty ledger either: the
+// count that would establish it is the one being skipped.
+func TestAnUnreadableConfigClaimsNoWaitingWorkOnAnEmptyLedger(t *testing.T) {
+	var logged safeBuffer
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	h.mu.Lock()
+	h.servedErr = errors.New("connect.json cannot be read")
+	h.mu.Unlock()
+
+	h.run(t)
+	time.Sleep(200 * time.Millisecond)
+	assert.NotContains(t, logged.String(), "work is waiting", "there is none, and nothing counted")
 }

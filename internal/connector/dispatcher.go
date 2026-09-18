@@ -501,8 +501,12 @@ func (d *Dispatcher) reportStranded(ctx context.Context, served []int64, servedE
 		// record's project is not among them. Counting against an empty set
 		// would call every startable record stranded and tell the operator
 		// to serve or discard projects that may be served already.
-		d.log.Warn("connector: admitted work is waiting, and which projects are served could not be read; nothing is stranded until it can be",
-			"error", servedErr)
+		//
+		// And it says only what is known. Whether any record is waiting is
+		// the question this cannot answer either — the count that would
+		// answer it is the one being skipped, and the ledger may be empty
+		// (Copilot on #765). What is certain is that nothing will start.
+		d.log.Warn("connector: dispatch is paused: which projects are served could not be read", "error", servedErr)
 		return
 	}
 	stranded, err := d.ledger.StrandedRecords(ctx, served, d.opts.Buckets)

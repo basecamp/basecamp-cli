@@ -330,9 +330,17 @@ project names up the same way as on first setup, and quote values by the Shell q
 | Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
 
 A class or watch setting needs the project served first, in the same run or an
-earlier one. A project cannot be served and removed in one run. The last served
-project cannot be removed on its own: serving none, the connector is not ready,
-so setup writes nothing. Say so, and ask what the person wants instead.
+earlier one. A project cannot be served and removed in one run.
+
+**Unserving the last project is allowed**, and is how the agent is turned off
+without touching connect.json by hand: `--unserve <id>` on the only served
+project writes an empty list, and setup reports a warning rather than an
+error — the connector will start and do nothing, and every mention gets a
+holding reply. Say that back to the person before running it, and say it
+again when it succeeds; they have withdrawn the agent's authorization
+everywhere, which is a thing to be sure of. Serving one again is
+`--serve <id>`. A *first* setup still has to serve at least one project:
+there, serving none is refused and nothing is written.
 
 Some changes setup refuses on purpose, because connect.json's trust was recorded
 for one agent in one account: another account, another agent person, a switch
@@ -372,8 +380,11 @@ Every run checks every served project, including the ones it keeps. A kept
 project that fails blocks the whole write, so fix it or stop serving it before
 other changes can land.
 
-- **Projects: No project is served.** Every mention would get a holding reply
-  and no work. Serve a project (step 4).
+- **Projects: No project is served.** A *failure* only on a first setup, where
+  it means the profile has not been set up: serve a project (step 4). On a
+  profile already set up it is a *warning*, not a failure — connect.json is
+  written, and the agent is left doing nothing until a project is served
+  again.
 - **Project `<id>`: reading the project was refused, and the message says
   Basecamp refuses this read to an Agent identity today.** This is Basecamp,
   not the setup: an Agent identity is refused the project and people reads

@@ -1211,3 +1211,43 @@ func TestAVerdictIsBuiltFromOneSnapshotOfTheServedProjects(t *testing.T) {
 	assert.Equal(t, 1, reads, "the served projects are read once per decision, then passed down")
 	assert.Equal(t, "first", v.Class, "and the class is the snapshot the rest of the verdict was decided from")
 }
+
+// Copilot on #765: an unreadable connect.json must not permanently discard a
+// subscribed comment, which is the one outcome repairing the file cannot
+// reverse.
+//
+// comment.created admits under two rules: mentioned, which needs no served
+// project, and subscribed, which does. With the list unreadable the gate
+// keeps mentioned and drops subscribed, so the gate does not discard — and
+// match then finds no mention and returns not_addressed, terminally, before
+// anything notices the configuration could not be read. The hold has to come
+// before that return, not after it.
+func TestAnUnreadableConfigDoesNotDiscardASubscribedComment(t *testing.T) {
+	f := newFakeReads()
+	// A comment on a recording the agent is subscribed to, mentioning nobody.
+	summary := summaryWith(recordingID, servedProj, "Comment", operatorID, "<div>a thought</div>")
+	summary.Parent = &basecamp.Parent{ID: recordingID + 1}
+	f.summaries[recordingID] = summary
+	f.subscriptions[recordingID+1] = true
+
+	ev := Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+
+	// Readable and served, the same event is admitted as subscribed: this is
+	// work that would have run.
+	served := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return map[int64]Project{servedProj: {}}, nil
+	}))
+	v := decide(t, served, ev)
+	require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+	assert.Equal(t, TriggerSubscribed, v.Trigger)
+
+	// Unreadable, it is held — not discarded not_addressed, which no repair
+	// of the file could undo.
+	unknown := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return nil, errors.New("connect.json cannot be read")
+	}))
+	v = decide(t, unknown, ev)
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason)
+	assert.NotEqual(t, ReasonNotAddressed, v.Reason, "a discard here is unrecoverable")
+}
