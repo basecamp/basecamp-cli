@@ -823,6 +823,15 @@ END;
 	// acknowledgement trigger before this branch landed, and a shipped
 	// migration is never renumbered under a ledger that has applied it.
 	migrationTasksAndAttempts,
+	// Migration 8. The outbox every lifecycle message goes through. See
+	// outbox.go for the invariants it holds.
+	//
+	// This was migration 7 while it sat on #736's head: 6 for the tasks and
+	// attempts it builds on, 7 for the outbox. Main took 6 for the
+	// acknowledgement trigger, which pushed the dispatcher's tables to 7 and
+	// this to 8. The numbers move only because nothing has shipped them yet;
+	// once a ledger has applied one, its number is fixed.
+	migrationOutbox,
 }
 
 func (l *Ledger) migrate(ctx context.Context) error {

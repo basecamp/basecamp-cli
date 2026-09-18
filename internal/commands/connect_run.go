@@ -123,6 +123,15 @@ func connectSessionsPath(file setup.File) string {
 	return filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
 }
 
+// connectShutdownFlush bounds how long a stopping connector spends posting
+// the completion notices of the attempts it stopped. What it cannot post in
+// time stays pending in the outbox and goes out on the next start.
+const connectShutdownFlush = 15 * time.Second
+
+// connectStartBound bounds how long a starting connector spends settling the
+// lifecycle messages a previous process left, before intake and dispatch run.
+const connectStartBound = 2 * time.Minute
+
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
 		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
@@ -259,8 +268,24 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsage(err.Error())
 	}
 
-	var dispatcher *connector.Dispatcher
+	var (
+		dispatcher *connector.Dispatcher
+		outbox     *connector.Outbox
+	)
 	if !f.shadow {
+		// Lifecycle messages: the hooks write each intent in its transition's
+		// transaction, so they are installed before anything transitions. A
+		// shadow run installs none: it posts nothing, and a shadow ledger
+		// promoted later must carry nothing to send.
+		ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
+		poster, err := connector.NewBasecampPoster(accountClient, agentID)
+		if err != nil {
+			return err
+		}
+		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Lines: lines, Logger: logger})
+		if err != nil {
+			return err
+		}
 		exe, err := os.Executable()
 		if err != nil {
 			return fmt.Errorf("locate this binary for the worker's MCP server: %w", err)
@@ -277,7 +302,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		dispatcher, err = connector.NewDispatcher(connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
-			Replies: connector.SDKReplies{Client: accountClient, AgentID: agentID},
+			// Replies are listed with their words, so the connector's own
+			// notices are left out even before their receipts are known, and
+			// no reply is ever adopted from one. That is the whole filter:
+			// an id-only predicate beside it would ask the ledger again for
+			// every reply, outside the adoption budget, for nothing.
+			Replies: connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
 			Lines:   lines, Logger: logger,
 		}))
 		if err != nil {
@@ -341,6 +371,20 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			cancel()
 		})
 	}
+	if outbox != nil {
+		// On start, before anything transitions: settle what a previous
+		// process left sending and send what is due, so no stale notice
+		// waits behind new work. Bounded, so a slow Basecamp delays the
+		// connector's start rather than stopping it; what is left, Run
+		// carries on with. A ledger that cannot settle an intent stops the
+		// start.
+		startCtx, stopStart := context.WithTimeout(runCtx, connectStartBound)
+		err := outbox.Start(startCtx)
+		stopStart()
+		if err != nil && runCtx.Err() == nil {
+			return err
+		}
+	}
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
@@ -348,7 +392,19 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if dispatcher != nil {
 		runPart("dispatch", dispatcher.Run)
 	}
+	if outbox != nil {
+		runPart("outbox", outbox.Run)
+	}
 	wg.Wait()
+	if outbox != nil {
+		// The dispatcher has settled every attempt it stopped; their
+		// completion notices go out now, within a bound.
+		flushCtx, stopFlush := context.WithTimeout(context.WithoutCancel(ctx), connectShutdownFlush)
+		if err := outbox.Flush(flushCtx); err != nil {
+			logger.Warn("connector: posting lifecycle messages on the way out", "error", err)
+		}
+		stopFlush()
+	}
 
 	mu.Lock()
 	sig := received
@@ -450,9 +506,10 @@ type connectDispatch struct {
 	StateDir    string
 	SessionsDir string
 
-	Replies connector.ReplyLister
-	Lines   *ndjson.Writer
-	Logger  *slog.Logger
+	Replies            connector.ReplyLister
+	IsLifecycleMessage func(id int64) bool
+	Lines              *ndjson.Writer
+	Logger             *slog.Logger
 }
 
 // connectDispatcherOptions is the dispatcher the run starts: connect.json's
@@ -460,18 +517,19 @@ type connectDispatch struct {
 // MCP server. Built here so what the command wires is what a test can read.
 func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 	return connector.DispatcherOptions{
-		Ledger:       d.Ledger,
-		Driver:       d.Driver,
-		Routes:       d.Routes,
-		Concurrency:  d.File.Concurrency,
-		Deadline:     time.Duration(d.File.Deadline),
-		Buckets:      d.Buckets,
-		MCP:          connector.WorkerMCP{Command: d.Executable, Profile: d.Profile, StateDir: d.StateDir},
-		PrivateDir:   d.SessionsDir,
-		Replies:      d.Replies,
-		Lines:        d.Lines,
-		Logger:       d.Logger,
-		StillRunning: connector.DefaultStillRunning,
+		Ledger:             d.Ledger,
+		Driver:             d.Driver,
+		Routes:             d.Routes,
+		Concurrency:        d.File.Concurrency,
+		Deadline:           time.Duration(d.File.Deadline),
+		Buckets:            d.Buckets,
+		MCP:                connector.WorkerMCP{Command: d.Executable, Profile: d.Profile, StateDir: d.StateDir},
+		PrivateDir:         d.SessionsDir,
+		Replies:            d.Replies,
+		IsLifecycleMessage: d.IsLifecycleMessage,
+		Lines:              d.Lines,
+		Logger:             d.Logger,
+		StillRunning:       connector.DefaultStillRunning,
 	}
 }
 
