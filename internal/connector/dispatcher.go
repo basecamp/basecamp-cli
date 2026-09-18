@@ -415,12 +415,15 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 
 	served := d.servedBuckets()
 	// Follow-ups first: an event on a live conversation joins its task, while
-	// connect.json still serves that task's project.
+	// connect.json still serves that task's project. The served set goes to
+	// the ledger as well as being checked here, so what joins is held to the
+	// task's own project and to the set as it is now — not to the served bit
+	// admission wrote on each record when it decided it.
 	for _, r := range runs {
 		if !r.authorized() {
 			continue
 		}
-		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
+		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 			return err
 		}
 	}
@@ -514,7 +517,8 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	// connector was started, and a task that needs a clone or a directory of
 	// its own is the agent's business to make.
 	launch, err := d.ledger.LaunchTask(ctx, LaunchSpec{
-		EventID: record.ID, Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
+		EventID: record.ID, Served: d.servedBuckets(),
+		Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
 	})
 	if err != nil {
 		return err
@@ -1152,7 +1156,7 @@ func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
 	}
-	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
+	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID, r.d.servedBuckets()); err != nil {
 		return 0, false, err
 	}
 	for {

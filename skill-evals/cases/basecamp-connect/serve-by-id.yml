@@ -20,7 +20,7 @@ mocks:
     output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","profile":"helper","account_id":"999","agent_person_id":4001,"agent_kind":"agent","operator_id":1001,"trust_mode":"operator","projects":2,"written":true,"ready":true,"checks":[{"name":"Project 222","status":"pass","message":"Readable by the agent"}]},"summary":"connect.json written; all passed"}'
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
-  - 'connect setup .*--serve[ =]''?222\b'
+  - 'connect setup .*--serve[ =]''?222(''|\s|$)'
 reject:
   # The name never reaches a command; only its id does. A project name is the
   # one value here nobody controls, and it can hold anything a shell would act

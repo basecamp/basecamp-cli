@@ -71,7 +71,7 @@ func obNoRouteVerdict(id, revision int64, reply admission.ReplyDestination) admi
 
 func obLaunch(t *testing.T, ledger *Ledger, id int64) Launch {
 	t.Helper()
-	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Driver: "fake", Deadline: time.Hour})
+	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Served: []int64{adapterBucketID}, Driver: "fake", Deadline: time.Hour})
 	require.NoError(t, err)
 	return l
 }

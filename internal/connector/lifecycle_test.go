@@ -24,7 +24,7 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 		obAdmit(t, ledger, 1, "recording:10304028989")
 		l := obLaunch(t, ledger, 1)
 		obAdmit(t, ledger, 2, "recording:10304028989")
-		_, err := ledger.JoinConversation(ctx, l.TaskID)
+		_, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 		require.NoError(t, err)
 		clock.Advance(5 * time.Minute)
 		settlement, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopDeadline})

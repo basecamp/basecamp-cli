@@ -161,7 +161,7 @@ func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
 	obAdmit(t, ledger, 1, "recording:10304028989")
 	l := obLaunch(t, ledger, 1)
 	obAdmit(t, ledger, 2, "recording:10304028989")
-	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.Equal(t, []int64{2}, joined)
 	exposed, err := ledger.ExposeEvent(ctx, l.AttemptID, 2)

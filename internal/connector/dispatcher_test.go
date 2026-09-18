@@ -845,7 +845,7 @@ func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
 	// One attempt whose worker cannot be identified.
 	h.served[900] = admission.Project{}
 	admitIn(t, h.ledger, 1, 900, "recording:held")
-	_, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Driver: "fake"})
+	_, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Served: []int64{900, adapterBucketID}, Driver: "fake"})
 	require.NoError(t, err)
 	// Two more conversations.
 	h.served[901] = admission.Project{}
@@ -944,7 +944,7 @@ func TestRecoveryReleasesNothingWhileTheRecordedGroupSurvives(t *testing.T) {
 		o.CancelGrace = 100 * time.Millisecond
 	})
 	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
-	l, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Driver: "fake"})
+	l, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Served: []int64{900, adapterBucketID}, Driver: "fake"})
 	require.NoError(t, err)
 	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{
 		PID: worker.PID, PGID: worker.PGID, StartedAt: worker.StartedAt, SessionID: "s",

@@ -33,7 +33,7 @@ func opAdmit(t *testing.T, l *Ledger, id int64, key string) RecordState {
 
 func launchOf(t *testing.T, l *Ledger, id int64) Launch {
 	t.Helper()
-	launch, err := l.LaunchTask(context.Background(), LaunchSpec{EventID: id, Driver: "claude"})
+	launch, err := l.LaunchTask(context.Background(), LaunchSpec{EventID: id, Served: []int64{adapterBucketID}, Driver: "claude"})
 	require.NoError(t, err)
 	return launch
 }
@@ -139,7 +139,7 @@ func TestRedispatchOnALiveTaskWaitsForItsEnd(t *testing.T) {
 
 	_, _, err = d.Get(ctx, 2)
 	assert.ErrorIs(t, err, ErrTaskTokenRefused, "the old worker is refused at once")
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "claude"})
 	assert.ErrorIs(t, err, ErrNotStartable, "no second task while the first is live")
 	startable, err := l.StartableRecords(ctx, 10)
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestRedispatchOfABlockedRecordRerunsItsPrerequisite(t *testing.T) {
 	assert.Equal(t, admission.StateAdmitted, written, "authorized, so admitted though tagged for review")
 
 	// Under the hold it is authorized and not launched.
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "claude"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "held")
 	_, err = l.Release(ctx, opBy)
@@ -378,7 +378,7 @@ func TestInvariant2AHeldLedgerSurvivesRestartUntilRelease(t *testing.T) {
 	startable, err := l.StartableRecords(ctx, 10)
 	require.NoError(t, err)
 	assert.Empty(t, startable, "the dispatcher is offered nothing while the hold stands")
-	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "claude"})
+	_, err = l.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "claude"})
 	require.Error(t, err)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1), "the refused launch rolled back")
 
@@ -724,7 +724,7 @@ func TestASupersededTaskTakesNoFollowUp(t *testing.T) {
 	launch := pendingRedispatch(t, l)
 	require.Equal(t, StateAdmitted, opAdmit(t, l, 2, "recording:9"), "the conversation's task is superseded, so a new event is admitted")
 
-	joined, err := l.JoinConversation(ctx, launch.TaskID)
+	joined, err := l.JoinConversation(ctx, launch.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Empty(t, joined)
 	_, err = l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
@@ -825,7 +825,7 @@ func TestInvariant2ATaskTakesNoFollowUpUnderTheHold(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StateQueued, opAdmit(t, l, 2, "recording:9"), "a new generation's record on the live conversation")
 
-	joined, err := l.JoinConversation(ctx, launch.TaskID)
+	joined, err := l.JoinConversation(ctx, launch.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Empty(t, joined)
 	assert.Equal(t, StateQueued, stateOf(t, l, 2))

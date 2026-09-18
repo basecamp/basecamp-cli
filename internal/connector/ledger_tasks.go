@@ -249,6 +249,11 @@ type CommittedVerdict struct {
 type LaunchSpec struct {
 	// EventID is the originating event: an admitted or queued record.
 	EventID int64
+	// Served is the projects connect.json serves now, already cut to the
+	// run's --project scope. Records on the originating record's
+	// conversation join its task only from its own project, and only while
+	// that project is among these.
+	Served []int64
 	// Driver is the driver's name.
 	Driver string
 	// Deadline is how long the task may run; zero for none.
@@ -332,7 +337,10 @@ SELECT EXISTS (SELECT 1 FROM tasks WHERE ended_at IS NULL AND conversation_key =
 	// The originating event first, then every other record on the
 	// conversation that waits for a worker. createTask dispatches them all
 	// and refuses an event a live task already carries.
-	joinable, err := joinableOn(ctx, tx, record.Decision.ConversationKey, spec.EventID)
+	// In the originating record's own project, and in one this run serves
+	// now: the record was chosen from the served set, and what joins it is
+	// held to the same set rather than to what admission wrote on each row.
+	joinable, err := joinableOn(ctx, tx, record.Decision.ConversationKey, record.BucketID, spec.Served, spec.EventID)
 	if err != nil {
 		return Launch{}, err
 	}
@@ -396,12 +404,30 @@ e.state IN ('admitted', 'queued') AND e.content_dropped = 0 AND e.snapshot IS NO
 AND e.served = 1 AND e.conversation_key <> ''
 AND NOT EXISTS (SELECT 1 FROM task_events te WHERE te.event_id = e.id AND te.retired_at IS NULL)`
 
-// joinableOn lists the records on key, other than except, that wait for a
-// worker, oldest first. The conversation is the whole of it: every task runs
-// in the connector's own directory, so there is no second thing for a
-// follow-up to match.
-func joinableOn(ctx context.Context, tx *sql.Tx, key string, except int64) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.conversation_key = ? AND e.id <> ? AND `+startableCondition+` ORDER BY e.id`, key, except)
+// joinableOn lists the records on key, in bucket, other than except, that
+// wait for a worker, oldest first. served narrows it further to the projects
+// connect.json serves right now, already cut to the run's --project scope;
+// empty serves nothing.
+//
+// The conversation is not the whole of it, and this is the reason (Copilot on
+// #765). A conversation key is the recording's or the Campfire's, never the
+// bucket's, so two records on one conversation can sit in two projects — a
+// recording moved between them is the ordinary way, and connect.json serving
+// only one of them is the ordinary case. A task is authorized against the
+// project its originating record was in; handing its worker an event from
+// another project would make the served list, which is the whole local answer
+// to which projects may drive this agent, leak at the one seam it exists to
+// hold.
+//
+// The record's own served bit is not that authorization either: admission
+// wrote it when the record was decided, so it says the project was served
+// then. served here is read at join time, so a project the operator has
+// stopped serving stops feeding a task that is already running.
+func joinableOn(ctx context.Context, tx *sql.Tx, key string, bucket int64, served []int64, except int64) ([]int64, error) {
+	if !slices.Contains(served, bucket) {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.conversation_key = ? AND e.bucket_id = ? AND e.id <> ? AND `+startableCondition+` ORDER BY e.id`, key, bucket, except)
 	if err != nil {
 		return nil, fmt.Errorf("connector: find follow-ups on %s: %w", key, err)
 	}
@@ -417,11 +443,12 @@ func joinableOn(ctx context.Context, tx *sql.Tx, key string, except int64) ([]in
 	return ids, rows.Err()
 }
 
-// joinConversation puts every record on key that waits for a worker onto the
-// live task taskID at delivery admitted, dispatched, as createTask would have,
-// and returns their ids, oldest first.
-func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key string) ([]int64, error) {
-	ids, err := joinableOn(ctx, tx, key, 0)
+// joinConversation puts every record on key, in bucket and in a project
+// served now, that waits for a worker onto the live task taskID at delivery
+// admitted, dispatched, as createTask would have, and returns their ids,
+// oldest first.
+func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64, key string, bucket int64, served []int64) ([]int64, error) {
+	ids, err := joinableOn(ctx, tx, key, bucket, served, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -447,13 +474,17 @@ func (l *Ledger) joinConversation(ctx context.Context, tx *sql.Tx, taskID int64,
 	return ids, nil
 }
 
-// JoinConversation puts the records on a live task's conversation that wait
-// for a worker onto the task, at delivery admitted, and returns their ids. A
-// task that has ended takes none: they start a task of their own. Nor does a
+// JoinConversation puts the records on a live task's conversation, in the
+// task's own project, that wait for a worker onto the task, at delivery
+// admitted, and returns their ids. served is the projects connect.json serves
+// now, already cut to the run's --project scope; a task whose project is not
+// among them takes nothing.
+//
+// A task that has ended takes none: they start a task of their own. Nor does a
 // task a redispatch superseded while it runs: its worker's token is refused,
 // so what joined it could only end unknown. Nor does any task while the hold
 // marker stands: joining is a hand-off to a worker (ledger_hold.go).
-func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, error) {
+func (l *Ledger) JoinConversation(ctx context.Context, taskID int64, served []int64) ([]int64, error) {
 	var out []int64
 	err := retryBusy(func() error {
 		tx, err := l.db.BeginTx(ctx, nil)
@@ -461,20 +492,28 @@ func (l *Ledger) JoinConversation(ctx context.Context, taskID int64) ([]int64, e
 			return fmt.Errorf("connector: begin join: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		var key string
-		switch err := tx.QueryRowContext(ctx, `SELECT conversation_key FROM tasks WHERE id = ? AND ended_at IS NULL AND superseded_at IS NULL
-  AND NOT EXISTS (SELECT 1 FROM hold_marker)`, taskID).Scan(&key); {
+		var (
+			key    string
+			bucket int64
+		)
+		// The task's project is its originating record's, read here rather
+		// than trusted from the caller. That record is dispatched while the
+		// task is live, so retention has not cleared its bucket.
+		switch err := tx.QueryRowContext(ctx, `SELECT t.conversation_key, e.bucket_id
+FROM tasks t JOIN events e ON e.id = t.originating_event_id
+WHERE t.id = ? AND t.ended_at IS NULL AND t.superseded_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM hold_marker)`, taskID).Scan(&key, &bucket); {
 		case errors.Is(err, sql.ErrNoRows):
 			out = nil
 			return nil
 		case err != nil:
 			return fmt.Errorf("connector: join task %d: %w", taskID, err)
 		}
-		if key == "" {
+		if key == "" || bucket == 0 {
 			out = nil
 			return nil
 		}
-		ids, err := l.joinConversation(ctx, tx, taskID, key)
+		ids, err := l.joinConversation(ctx, tx, taskID, key, bucket, served)
 		if err != nil {
 			return err
 		}
