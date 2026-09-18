@@ -275,8 +275,11 @@ func recordedAttempts(t *testing.T, l *Ledger) []recordedAttempt {
 		)
 		require.NoError(t, rows.Scan(&a.id, &a.state, &a.process.PID, &a.process.PGID, &started))
 		if started.Valid {
+			// The ledger writes the stamp only when it is the kernel's
+			// (AttemptProcess.startedStamp), so one read back is exact.
 			a.process.StartedAt, err = parseStamp(started.String)
 			require.NoError(t, err)
+			a.process.StartedExact = true
 		}
 		out = append(out, a)
 	}
@@ -614,12 +617,29 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 			t.Run(row.name, func(t *testing.T) {
 				// A worker that never calls get_dispatch is what the guard is
 				// for: the acknowledgement falls to the connector.
+				//
+				// The guard is due a delay after admission, and the rows
+				// kill the connector as it posts. That kill must land on an
+				// attempt already running — a worker recorded, so a restart
+				// can end it and settle — and the launch it races (a working
+				// directory, the ledger, the token socket, the agent's
+				// wrapper and, for the acp row, its whole handshake) takes
+				// what the machine gives it: on a loaded CI runner, more than
+				// the guard's 50ms, and the attempt was left launching with
+				// no worker to identify, held by the restart rather than
+				// settled, as it must be. So the fake Basecamp holds the
+				// acknowledgement until the connector has written its running
+				// line ("guard-after-running"): the ordering is made, not
+				// waited for, and the guard's period can stay short. The
+				// check after the kill is what that ordering promises.
 				h := newHarness(t, d, harnessScenario{
 					GuardDelay: 50 * time.Millisecond,
 					Plans:      map[string][]string{"101#1": {"linger"}},
 				})
 				h.publish(feedEntry{Event: todoEvent(101, 5001)})
-				h.run(harnessRun{Kill: row.kill, Killed: true})
+				h.run(harnessRun{Kill: row.kill, Killed: true, Fault: "guard-after-running"})
+				require.NotEmpty(t, recordedWorkers(t, h.ledger()),
+					"the kill landed on an attempt still launching: the acknowledgement was posted before the running line")
 				h.run(harnessRun{})
 				h.run(harnessRun{})
 

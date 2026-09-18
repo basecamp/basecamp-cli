@@ -325,11 +325,13 @@ type harnessScenario struct {
 type harness struct {
 	t   *testing.T
 	dir string
-	// watching is the parent's watch for each task token, for the run in
-	// flight; watchStop ends it.
+	// watching is the parent's watch for each task token, for the life of
+	// the harness; watchStop ends the loop that registers them, and
+	// watchDone is closed once that loop has returned.
 	watchMu   sync.Mutex
 	watching  map[string]func() []string
 	watchStop chan struct{}
+	watchDone chan struct{}
 	// state is the connector's state directory, under this harness's own
 	// XDG_STATE_HOME and named as the connector names it, so a worker's MCP
 	// server resolves it exactly as `basecamp mcp --connect-state` does.
@@ -364,6 +366,10 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile, workspaceFile} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
 	}
+	// Registered before killAgents so it runs after it: the watch for a token
+	// in a file ends, and reports, once every worker this harness started has
+	// been ended.
+	t.Cleanup(func() { h.stopWatchingForTokenFiles() })
 	t.Cleanup(h.killAgents)
 	return h
 }
@@ -438,7 +444,9 @@ type harnessRun struct {
 	StateDir string
 	// Fault is a standing misbehavior of the fake Basecamp for the run:
 	// "stall-catch-up" holds the feed's first poll until the socket has
-	// served every live event; "repair-stall" never answers a repair poll.
+	// served every live event; "repair-stall" never answers a repair poll;
+	// "guard-after-running" holds a guard acknowledgement until the
+	// connector has written its running line for an attempt.
 	Fault string
 	// Env is added to the connector's environment.
 	Env []string
@@ -591,36 +599,60 @@ func (h *harness) killAgents() {
 	}
 }
 
-// watchForTokenFiles watches, for the rest of this run, every place a task
-// token must never be written, for every token a worker takes while it runs.
-// The workers watch too, but a worker the connector ends never reports; this
-// watcher is the parent's, and always does.
+// watchForTokenFiles watches, for the rest of this harness, every place a
+// task token must never be written, for every token a worker takes while it
+// runs. The workers watch too, but a worker the connector ends never reports;
+// this watcher is the parent's, and always does.
+//
+// For the harness, not for a run: a worker outlives the connector that
+// started it — one left lingering for a restart to end, a real agent, one
+// still binding when the connector died — and can write a file in the gap
+// between one run's exit and the next run's start, or after the last. The
+// watch begins with the first run and ends at cleanup, once every worker
+// is ended (newHarness), and reports then.
+//
+// A watcher is started in one place only, registerTokenWatchers, from the
+// loop this starts; and the cleanup that reads the watchers joins that loop
+// before it reads them (stopWatchingForTokenFiles). So no watcher can be
+// registered after the reading, to be neither stopped nor read: not because
+// the loop checks, but because the loop is over.
 func (h *harness) watchForTokenFiles() {
 	h.t.Helper()
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
+	if h.watchStop != nil {
+		return
+	}
 	if h.watching == nil {
 		h.watching = map[string]func() []string{}
 	}
-	stop := make(chan struct{})
-	h.watchStop = stop
+	stop, done := make(chan struct{}), make(chan struct{})
+	h.watchStop, h.watchDone = stop, done
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-stop:
 				return
 			case <-time.After(5 * time.Millisecond):
 			}
-			for _, token := range h.knownTokens() {
-				h.watchMu.Lock()
-				if _, ok := h.watching[token]; !ok {
-					h.watching[token] = drivertest.WatchForSecretFiles(token,
-						h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions"))
-				}
-				h.watchMu.Unlock()
-			}
+			h.registerTokenWatchers()
 		}
 	}()
+}
+
+// registerTokenWatchers starts a watcher for every token a worker has taken
+// that has none yet. It is the one place a watcher is started.
+func (h *harness) registerTokenWatchers() {
+	tokens := h.knownTokens()
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+	for _, token := range tokens {
+		if _, ok := h.watching[token]; !ok {
+			h.watching[token] = drivertest.WatchForSecretFiles(token,
+				h.workDir(), filepath.Join(h.dir, "work-other"), filepath.Join(h.dir, "sessions"))
+		}
+	}
 }
 
 // knownTokens reads the tokens the workers have taken so far, ignoring a
@@ -639,14 +671,35 @@ func (h *harness) knownTokens() []string {
 	return out
 }
 
-// stopWatchingForTokenFiles ends the watchers and reports what they saw.
-func (h *harness) stopWatchingForTokenFiles() int {
+// watchedTokens is how many tokens the watch has found to watch so far.
+func (h *harness) watchedTokens() int {
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
-	if h.watchStop != nil {
-		close(h.watchStop)
-		h.watchStop = nil
+	return len(h.watching)
+}
+
+// stopWatchingForTokenFiles ends the watch and reports what it saw. It is
+// the harness's cleanup: every worker has been ended by then.
+//
+// The loop that registers watchers is joined first, so that once the
+// watchers are read nothing can add one; then one last registration pass
+// of this goroutine's own, so a token first seen in the loop's final
+// interval is watched too — a watcher scans once before it is stopped —
+// and only then is every watcher stopped and its finding read. Nothing
+// found is dropped: every watcher that was ever started is in the map, and
+// every one in the map is read here.
+func (h *harness) stopWatchingForTokenFiles() int {
+	h.watchMu.Lock()
+	stop, done := h.watchStop, h.watchDone
+	h.watchStop, h.watchDone = nil, nil
+	h.watchMu.Unlock()
+	if stop != nil {
+		close(stop)
+		<-done
 	}
+	h.registerTokenWatchers()
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
 	watched := len(h.watching)
 	for token, stop := range h.watching {
 		for _, found := range stop() {
@@ -657,27 +710,60 @@ func (h *harness) stopWatchingForTokenFiles() int {
 	return watched
 }
 
+// The watch's reading cannot miss a watcher: a token taken just before the
+// reading, in the interval the registering loop never got to, is watched
+// and counted by the reading itself; and once the reading has happened, no
+// watcher can be registered any more, however the loop's last interval and
+// the cleanup happened to interleave.
+func TestTheTokenWatchReadsEveryWatcherItCouldHaveStarted(t *testing.T) {
+	require.NotEmpty(t, harnessDrivers)
+	h := newHarness(t, harnessDrivers[0], harnessScenario{})
+	h.watchForTokenFiles()
+	tokens := filepath.Join(h.dir, tokensDir)
+	require.NoError(t, os.MkdirAll(tokens, 0o700))
+	// Taken now, and the watch read now: before the loop's next interval.
+	require.NoError(t, os.WriteFile(filepath.Join(tokens, "taken-1.token"), []byte("tok_one"), 0o600))
+	assert.Equal(t, 1, h.stopWatchingForTokenFiles(), "the token taken just before the reading is watched and counted by it")
+	// And once read, no loop registers any more: a token taken afterwards
+	// is not watched until something reads again — and a reading watches
+	// what it knows, once, and reads it, so nothing it could see is dropped.
+	require.NoError(t, os.WriteFile(filepath.Join(tokens, "taken-2.token"), []byte("tok_two"), 0o600))
+	time.Sleep(25 * time.Millisecond)
+	assert.Zero(t, h.watchedTokens(), "no watcher is registered after the reading")
+	assert.Equal(t, 2, h.stopWatchingForTokenFiles(), "a later reading watches every token it knows, once, and reads it")
+}
+
 // requireNoTaskTokenLeaked holds every run to the credential rule, for every
 // task token any worker was handed so far: not in an agent's argv or
 // environment, not in anything the connector wrote (its stdout lines, its
 // log, the lifecycle messages it posted, the polls it made, the workspace
 // records), not in any file under a working directory or the state directory
 // — and no worker saw one appear in those files while it ran.
+//
+// It runs when the connector has exited, and the workers' side of it is read
+// once the workers have said their word (awaitWorkersWord): a worker's word
+// is due by its own exit, not by the connector's. The watch for a token in a
+// file is not stopped here at all: a worker that has spoken may still be
+// running — lingering for a restart to end it — and can still write one, so
+// the watch runs for the harness and reports at its cleanup
+// (watchForTokenFiles).
 func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	t := h.t
 	t.Helper()
-	watched := h.stopWatchingForTokenFiles()
+	log := h.awaitWorkersWord(stateDir)
+	watched := h.watchedTokens()
 	tokens := h.taskTokens()
-	log := h.agentLog()
 	// A worker that bound to its task took a token, and the harness kept it.
 	// If it did not, this check has nothing to look for, and says so rather
 	// than passing.
-	bound, unbound := 0, 0
+	started, bound, unbound := 0, 0, 0
 	var places drivertest.Places
 	for _, e := range log {
 		places.Env = append(places.Env, e.Env...)
 		places.Args = append(places.Args, e.Args...)
 		switch {
+		case e.Step == "start":
+			started++
 		case e.Step == "bound":
 			bound++
 		case strings.HasPrefix(e.Step, "bind-failed:"):
@@ -692,7 +778,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 	// whoever its worker was — a fake one, or a real agent through the
 	// bridge, which leaves no agent log at all.
 	require.Len(t, tokens, h.tasksLaunched(stateDir), "every task the connector launched left its token for this check")
-	require.Equal(t, h.workersStarted(), bound+unbound,
+	require.Equal(t, started, bound+unbound,
 		"every worker that started either took its task's token or said why it could not")
 	for _, token := range h.takenTokens() {
 		require.Contains(t, tokens, token, "a worker took a token the connector did not mint for its task")
@@ -702,7 +788,7 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 		// Nothing to check is a fact about the run, not a pass: a run with
 		// no worker (a kill before the spawn, a start that ran nothing) is
 		// the only way here.
-		require.Equal(t, h.workersStarted(), unbound,
+		require.Equal(t, started, unbound,
 			"a worker that started either took a token or said why it could not")
 		return
 	}
@@ -727,7 +813,8 @@ func (h *harness) requireNoTaskTokenLeaked(out *lockedBuffer, stateDir string) {
 		require.Positive(t, read, "the scan read files; a scan that read nothing has cleared nothing")
 		files += read
 	}
-	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on", len(tokens), files, watched)
+	t.Logf("credential check: %d task tokens, %d files read, %d watched while the run went on; %d workers started, %d bound, %d said why not",
+		len(tokens), files, watched, started, bound, unbound)
 }
 
 // taskTokens is every token the connector minted for a task, as its launch
@@ -772,16 +859,180 @@ func (h *harness) tasksLaunched(dir string) int {
 	return n
 }
 
-// workersStarted counts the worker processes that reached their agent, which
-// is every worker that could have been handed a token.
-func (h *harness) workersStarted() int {
-	n := 0
-	for _, e := range h.agentLog() {
-		if e.Step == "start" {
-			n++
+// awaitWorkersWord waits for every worker of the run to have said what became
+// of its token — "bound", or "bind-failed:" and why — and returns the agent
+// log once it has. The word is the worker's, written from its own process at
+// its own pace, and it is owed by the time the worker exits: not by the time
+// the connector does, which is when the credential check runs.
+//
+// The two are not one moment. A crash row kills the connector at its
+// "running" line, written once the socket is armed and the attempt recorded,
+// while the handoff itself is still in flight on the socket's own goroutine.
+// The acp row's worker began the bind that dials it as the last act of its
+// handshake, since the socket cannot be armed before NewSession returns; it
+// learns of the death as a reset on the socket and says so a fraction of a
+// millisecond after the parent has seen the connector exit. Read at the exit,
+// the log counted that worker as one that said nothing (card 10317728733).
+// The spawn rows' workers have not even reached their agent by then — the
+// connector dies a millisecond after starting them — so read at the exit, the
+// check there ran over nobody.
+//
+// The workers owed a word are the processes the ledger recorded for the run's
+// attempts and the ones that reached their agent, each by its identity — pid
+// and kernel start time — so a pid the kernel has since given to a stranger
+// is not waited on as if it were the worker. A real agent row leaves no
+// agent log and is owed none. Both halves are held: a worker still alive
+// without a word when the wait runs out fails, and so does one that is gone
+// without ever saying it — a process that could have been handed a token
+// and left no account of it is not a pass.
+func (h *harness) awaitWorkersWord(stateDir string) []agentLogEntry {
+	t := h.t
+	t.Helper()
+	var recorded []driver.Process
+	if !h.driver.Real {
+		recorded = h.recordedWorkerProcesses(stateDir)
+	}
+	var log []agentLogEntry
+	var alive []int
+	err := waitFor(context.Background(), func() (bool, error) {
+		log = h.agentLog()
+		alive = alive[:0]
+		for _, p := range workersOwingAWord(log, recorded) {
+			gone, err := driver.ProcessGone(p)
+			if err != nil {
+				return false, fmt.Errorf("worker pid %d: %w", p.PID, err)
+			}
+			if !gone {
+				alive = append(alive, p.PID)
+			}
+		}
+		if len(alive) > 0 {
+			return false, nil
+		}
+		// Whoever still owes a word is gone, and a process that is gone has
+		// written all it ever will: this reading is the one to count.
+		log = h.agentLog()
+		return true, nil
+	})
+	require.NoError(t, err, "a worker still owes its word after the connector exited: pids %v", alive)
+	owing := workersOwingAWord(log, recorded)
+	silent := make([]int, 0, len(owing))
+	for _, p := range owing {
+		silent = append(silent, p.PID)
+	}
+	require.Empty(t, silent, "a worker is gone without saying whether it took its task's token: pids %v", silent)
+	return log
+}
+
+// workerIdentity is a worker as the log and the ledger both name it: its pid
+// and the kernel's start time for it, which is what tells it from a later
+// process the kernel gave the same pid. Both write the same instant — the
+// ledger from the process the driver started, the fake from its own — so
+// one worker's entries match each other and nobody else's.
+type workerIdentity struct {
+	pid     int
+	started int64
+}
+
+func identityKey(p driver.Process) workerIdentity {
+	return workerIdentity{pid: p.PID, started: p.StartedAt.UnixNano()}
+}
+
+// workersOwingAWord is every worker, recorded by the ledger or started as far
+// as its agent, whose word is not in log — by its identity, so it can be
+// waited on and told from a later process with its pid, and so a word an
+// earlier worker said cannot discharge a later one the kernel named alike:
+// the log and the ledger both accumulate across a harness's connector runs.
+func workersOwingAWord(log []agentLogEntry, recorded []driver.Process) []driver.Process {
+	said := map[workerIdentity]bool{}
+	for _, e := range log {
+		if e.Step != "bound" && !strings.HasPrefix(e.Step, "bind-failed:") {
+			continue
+		}
+		if e.StartedAt.IsZero() {
+			// A word with no identity discharges nobody: it could be an
+			// earlier process's, under a pid the kernel gave again. The
+			// worker it was meant for reaches ProcessGone, or the silent
+			// check, and is answered for there.
+			continue
+		}
+		said[identityKey(identityOf(e.PID, e.PGID, e.StartedAt))] = true
+	}
+	var owing []driver.Process
+	seen := map[workerIdentity]bool{}
+	owe := func(p driver.Process) {
+		key := identityKey(p)
+		if p.PID > 0 && !said[key] && !seen[key] {
+			seen[key] = true
+			owing = append(owing, p)
 		}
 	}
-	return n
+	for _, p := range recorded {
+		owe(p)
+	}
+	for _, e := range log {
+		if e.Step == "start" {
+			owe(identityOf(e.PID, e.PGID, e.StartedAt))
+		}
+	}
+	return owing
+}
+
+// A worker's word is its own: it is matched by pid and kernel start time,
+// so a word an earlier process said under a pid the kernel gave again does
+// not discharge the later worker, and a word with no identity discharges no
+// one. The log and the ledger both accumulate across a harness's runs, which
+// is what makes the pid alone a stranger's key.
+func TestAWorkersWordIsMatchedByItsIdentity(t *testing.T) {
+	earlier := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	later := earlier.Add(time.Second)
+	recorded := []driver.Process{{PID: 4242, PGID: 4242, StartedAt: later, StartedExact: true}}
+	pids := func(ps []driver.Process) []int {
+		out := make([]int, 0, len(ps))
+		for _, p := range ps {
+			out = append(out, p.PID)
+		}
+		return out
+	}
+
+	t.Run("its own word discharges it", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, StartedAt: later, Step: "bound"}}
+		assert.Empty(t, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("an earlier process's word, under the same pid, does not", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, StartedAt: earlier, Step: "bind-failed: the earlier one"}}
+		assert.Equal(t, []int{4242}, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("a word with no identity discharges nobody", func(t *testing.T) {
+		log := []agentLogEntry{{PID: 4242, PGID: 4242, Step: "bound"}}
+		assert.Equal(t, []int{4242}, pids(workersOwingAWord(log, recorded)))
+	})
+	t.Run("a start entry is owed by its own identity too", func(t *testing.T) {
+		log := []agentLogEntry{
+			{PID: 4343, PGID: 4343, StartedAt: later, Step: "start"},
+			{PID: 4343, PGID: 4343, StartedAt: earlier, Step: "bound"},
+		}
+		assert.Equal(t, []int{4343}, pids(workersOwingAWord(log, nil)))
+	})
+}
+
+// recordedWorkerProcesses is every worker process the ledger in dir recorded
+// for an attempt, with the identity it recorded, read as tasksLaunched reads
+// the ledger: as it is, or not at all.
+func (h *harness) recordedWorkerProcesses(dir string) []driver.Process {
+	h.t.Helper()
+	ctx := context.Background()
+	l, err := OpenLedgerReadOnly(ctx, filepath.Join(dir, LedgerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	require.NoError(h.t, err)
+	defer func() { _ = l.Close() }()
+	var out []driver.Process
+	for _, a := range recordedAttempts(h.t, l) {
+		out = append(out, a.process)
+	}
+	return out
 }
 
 // scanForSecret reads every file under dirs, in a process of its own, and

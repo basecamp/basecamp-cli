@@ -508,9 +508,28 @@ func (h *harness) connectorPosts() []storedMessage {
 type storePoster struct {
 	dir  string
 	kill *killSpec
+	// fault is the run's standing misbehavior (harnessRun.Fault):
+	// "guard-after-running" holds a guard acknowledgement until the
+	// connector has written its running line for an attempt.
+	fault string
 }
 
 func (p storePoster) Post(ctx context.Context, dest Destination, body string) (int64, error) {
+	if p.fault == "guard-after-running" && body == GuardAckBody {
+		// The guard is due a delay after admission, whether or not the
+		// launch it races has finished; a row that kills the connector as
+		// the acknowledgement is posted needs the kill to land on an
+		// attempt already running, with a worker recorded, or the restart
+		// holds an attempt it cannot identify. Basecamp is the one party
+		// that can wait for that without a seam in the connector: the
+		// running line is this process's own, written to the harness's
+		// file once MarkRunning has committed, and the post is made
+		// outside any transaction of the ledger's, so nothing the launch
+		// needs is held while it waits.
+		if err := waitFor(ctx, func() (bool, error) { return runningLineWritten(p.dir) }); err != nil {
+			return 0, fmt.Errorf("guard-after-running: no attempt was recorded running: %w", err)
+		}
+	}
 	if p.kill.at("post-before") {
 		die()
 	}
@@ -522,6 +541,21 @@ func (p storePoster) Post(ctx context.Context, dest Destination, body string) (i
 		die()
 	}
 	return id, nil
+}
+
+// runningLineWritten reports whether the connector in dir has written a
+// running line for any attempt: the line follows MarkRunning's commit, so a
+// worker is recorded for it by then.
+func runningLineWritten(dir string) (bool, error) {
+	running := false
+	err := readJSONLines(filepath.Join(dir, linesFile), func(line []byte) error {
+		var l DispatchLine
+		if json.Unmarshal(line, &l) == nil && l.Type == "dispatch" && l.State == string(AttemptRunning) {
+			running = true
+		}
+		return nil
+	})
+	return running, err
 }
 
 func (p storePoster) List(_ context.Context, dest Destination, since time.Time) ([]PostedMessage, error) {

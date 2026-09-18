@@ -322,7 +322,7 @@ func runHarnessConnector(dir string) error {
 		return err
 	}
 	outbox, err := NewOutbox(OutboxOptions{
-		Ledger: ledger, Poster: storePoster{dir: dir, kill: kill},
+		Ledger: ledger, Poster: storePoster{dir: dir, kill: kill, fault: os.Getenv(harnessFaultEnv)},
 		Paused: ledger.Held, Lines: lines, Logger: logger,
 		// A sending intent a previous process left is reconciled once it is
 		// this old, so a restart settles it rather than waiting out the
