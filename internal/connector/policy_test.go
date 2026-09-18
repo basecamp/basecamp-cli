@@ -133,3 +133,25 @@ func TestPolicyRefusesAnEditThatNamesNoPath(t *testing.T) {
 	})
 	assert.True(t, allowed.Allow)
 }
+
+// Copilot on #738: a symlink that exists and points at something that does
+// not is not a name yet to be created. Opening it creates the file it points
+// at, which is wherever the link says — so the policy resolves the link
+// rather than reading the kernel's ENOENT as "nothing here yet".
+func TestADanglingLinkIsResolvedToWhereItPoints(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "missing")
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "dangling")))
+	require.NoError(t, os.Symlink(filepath.Join(root, "inside-missing"), filepath.Join(root, "inward")))
+	require.NoError(t, os.Symlink(filepath.Join(root, "loop"), filepath.Join(root, "loop")))
+	p := DefaultPolicy(root)
+	edit := func(loc string) bool {
+		return p.Decide(context.Background(), driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{loc}}).Allow
+	}
+
+	assert.False(t, edit(filepath.Join(root, "dangling")), "writing it creates a file outside the working directory")
+	assert.False(t, edit(filepath.Join(root, "dangling", "under.txt")), "and so does writing under it")
+	assert.False(t, edit(filepath.Join(root, "loop")), "a path that resolves to nothing is refused, not guessed at")
+	assert.True(t, edit(filepath.Join(root, "inward")), "a link to a name inside the directory is still inside")
+	assert.True(t, edit(filepath.Join(root, "new", "file.txt")), "and a file not created yet, inside, is unaffected")
+}

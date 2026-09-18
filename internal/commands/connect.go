@@ -52,7 +52,7 @@ go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
 shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
 isolated state directory and dispatches nothing. --hold sets a durable hold:
 intake and admission run, nothing dispatches or posts, and earlier records
-wait for review, until basecamp connect release. macOS and Linux only.
+wait for review, until basecamp connect release. Linux only.
 
   basecamp connect status             what it heard, holds and ran
   basecamp connect doctor             what it needs to run
@@ -191,7 +191,11 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"agent":    agent,
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
-		"workers":  fmt.Sprintf("%s %s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline), worktrees),
+		// The worker as well as the driver: the file records which coding
+		// agent the driver runs, and a file written before that field
+		// existed still means the default, which is what a person reading
+		// show needs to see.
+		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s, worktrees %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline), worktrees),
 		"projects": strconv.Itoa(len(f.Projects)) + " routed",
 	}
 	for id, r := range f.Projects {

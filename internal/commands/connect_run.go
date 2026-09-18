@@ -171,7 +171,7 @@ func connectDriver(name, worker, adaptersDir string) (driver.Driver, error) {
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
-		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
+		return output.ErrUsage("basecamp connect runs on Linux only: the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits")
 	}
 	app := appctx.FromContext(cmd.Context())
 	ctx := cmd.Context()
@@ -187,6 +187,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return errEnvTokenShadows("the connector acts only as the agent its profile holds, and BASECAMP_TOKEN would override it")
 	}
 	buckets, err := parseProjectIDs(f.projects)
+	if err != nil {
+		return err
+	}
+	// Before the account is read or the feed is touched: a flag that cannot
+	// mean anything is a mistake to say so about, not one to act around.
+	since, err := connectSinceOverride(f.since)
 	if err != nil {
 		return err
 	}
@@ -296,9 +302,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	intakeOpts := connector.LiveOptions(live)
 	intakeOpts.AccountID = account
-	intakeOpts.ConsumerNamespace = "basecamp-connect-" + strconv.FormatInt(agentID, 10)
+	intakeOpts.ConsumerNamespace = connectConsumerNamespace(agentID, f.shadow)
 	intakeOpts.Filters = eventfeed.Filters{Buckets: buckets, ExcludePerformers: []int64{agentID}, ActorTypes: []string{"person"}}
-	intakeOpts.SinceEventID = f.since
+	intakeOpts.SinceEventID = since
 	intakeOpts.Ledger = ledger
 	intakeOpts.Queue = queue
 	intakeOpts.Lines = lines
@@ -491,11 +497,48 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	return nil
 }
 
-// connectSupportedOS is where the connector runs: the platforms whose
-// process start times the driver can read, so a recorded worker group is
-// never signaled after its pid was reused.
+// connectSinceOverride is the feed position --since asks for. Zero is the
+// default and means "resume from the ledger"; intake takes only a positive
+// value as an override (connector.Options.SinceEventID), so a negative one
+// would be accepted here and then quietly ignored there — the run would
+// resume from the ledger while the person who typed it believes they moved
+// the position.
+func connectSinceOverride(since int64) (int64, error) {
+	if since < 0 {
+		return 0, output.ErrUsage("--since takes the event id to enter the feed just after; the default, 0, resumes from the ledger")
+	}
+	return since, nil
+}
+
+// connectConsumerNamespace names a run's checkpoint lineage. A shadow run
+// gets its own: it has its own state directory, ledger, lock and checkpoint
+// already (connectStateDir), and intake's contract is that two connectors in
+// one account never share a lineage (connector.Options.ConsumerNamespace) —
+// a shadow running beside the connector it watches is two.
+func connectConsumerNamespace(agentID int64, shadow bool) string {
+	name := "basecamp-connect-" + strconv.FormatInt(agentID, 10)
+	if shadow {
+		return name + "-shadow"
+	}
+	return name
+}
+
+// connectSupportedOS is where the connector runs: Linux, and for now only
+// Linux.
+//
+// Two things have to hold, and macOS has only one of them. The driver must
+// be able to read process start times, so a recorded worker group is never
+// signaled after its pid was reused — macOS can. And the task token has to
+// reach the worker's MCP server, which it does on an inherited descriptor:
+// `connect worker-mcp` execs `basecamp mcp --connect-token-fd`, and that
+// hand-over is accepted only where the descriptors this process inherited
+// are sealed against everything it starts, which is Linux alone
+// (mcp_token_linux.go, and #736, which gated it deliberately). On macOS
+// every non-shadow dispatch would start a worker whose Basecamp tools fail
+// at the handshake, so the connector says so here rather than at the far
+// end of each task.
 func connectSupportedOS(goos string) bool {
-	return goos == "linux" || goos == "darwin"
+	return goos == "linux"
 }
 
 // connectRoutes is connect.json's routes as they are now, not as they were at

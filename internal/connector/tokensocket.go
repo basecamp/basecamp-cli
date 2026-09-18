@@ -40,9 +40,12 @@ import (
 //     for the process that took the token to be gone before it will hand the
 //     token to anything again (ProcessGone on the recorded taker), because
 //     that is exactly what a restart is: while the server that holds the
-//     token lives, nothing else may ask for it. Only where the taker's
-//     identity could not be read does it fall back to arming for one more
-//     window.
+//     token lives, nothing else may ask for it. Seeing that process exit is
+//     the ONLY thing that arms the socket again. A holder whose identity
+//     could not be read, and a kernel that stops answering whether the
+//     holder is gone, both end the socket instead (HandoffUnaccounted) and
+//     hold the attempt: neither is evidence that the first holder let go,
+//     and arming on either is how two processes end up with one task token.
 //  4. Before it writes anything it checks the peer's credentials with the
 //     kernel (SO_PEERCRED on Linux, LOCAL_PEERCRED and LOCAL_PEERPID on
 //     macOS), on every handoff and not only the first: the peer must be this
@@ -217,7 +220,30 @@ const (
 	// reports that on the wire (card 23 measured both), so this is the only
 	// place it can be seen.
 	HandoffSpent Handoff = "spent"
+	// HandoffUnaccounted: the token was delivered and the connector cannot
+	// account for the process holding it — its identity could not be read,
+	// or the kernel stopped answering whether it is gone. Nothing else is
+	// ever handed this token, and the attempt is held rather than released
+	// around a process that may still have it.
+	HandoffUnaccounted Handoff = "unaccounted"
 )
+
+// TokenHolder is what the connector knows about the process holding an
+// attempt's task token, and it is the whole of what the release point acts
+// on. Unaccounted is the case the zero Process cannot express: a delivery
+// was made and the connector cannot say who took it or whether they have
+// gone, which is not the same as no delivery at all.
+type TokenHolder struct {
+	// Process is the process that took the token, where it was identified.
+	Process driver.Process
+	// Unaccounted says the token is out and its holder cannot be accounted
+	// for. Nothing more is handed over, and nothing is released around it.
+	Unaccounted bool
+}
+
+// Held reports whether an attempt must be held rather than released: its
+// token is out and nothing here can prove who has it.
+func (h TokenHolder) Held() bool { return h.Unaccounted }
 
 // PeerCredentials are what the kernel says about the other end of a unix
 // socket connection.
@@ -250,10 +276,20 @@ type TokenSocket struct {
 	groupOf  func(pid int) (int, error)
 	parentOf func(pid int) (int, error)
 	lookup   func(pid int) (driver.Process, error)
+	// gone answers whether the process that took the token has exited, and
+	// poll and pollMax are how often it is asked; test seams.
+	gone    func(driver.Process) (bool, error)
+	poll    time.Duration
+	pollMax time.Duration
 
-	mu        sync.Mutex
-	taker     driver.Process
-	onHandoff func(Handoff, driver.Process, bool)
+	mu    sync.Mutex
+	taker driver.Process
+	// unaccounted is the one rule's state: the token was delivered and the
+	// connector cannot account for the process holding it. Once true it
+	// stays true — a token that is out and unaccounted for is not made safe
+	// by anything that happens later.
+	unaccounted bool
+	onHandoff   func(Handoff, driver.Process, bool)
 }
 
 // ServeTaskToken binds the socket for token in dir, which must be the
@@ -294,6 +330,7 @@ func serveTaskTokenWith(dir, token string, window time.Duration, peer func(*net.
 		path: path, token: token, listener: listener,
 		group: make(chan int, 1), done: make(chan struct{}), ended: make(chan struct{}), stop: make(chan struct{}),
 		peer: peer, groupOf: groupOf, parentOf: parentOf, lookup: lookup,
+		gone: driver.ProcessGone, poll: takerPoll, pollMax: takerPollMax,
 	}
 	go s.serve(window)
 	return s, nil
@@ -308,6 +345,15 @@ func (s *TokenSocket) Path() string { return s.path }
 // within the window; a group of 1 or less is never allowed.
 func (s *TokenSocket) AllowGroup(pgid int) {
 	s.setOnce.Do(func() { s.group <- pgid })
+}
+
+// Holder is what is known about the process holding this attempt's token: it
+// is what the release point asks, because the zero Process alone cannot tell
+// "nobody took it" from "somebody did and the connector cannot say who".
+func (s *TokenSocket) Holder() TokenHolder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return TokenHolder{Process: s.taker, Unaccounted: s.unaccounted}
 }
 
 // Taker is the process that took the token, once one has. It is the worker's
@@ -383,58 +429,88 @@ func (s *TokenSocket) Settled(wait time.Duration) bool {
 	}
 }
 
+// takerState is what the socket learned about the process it handed the
+// token to.
+type takerState int
+
+const (
+	// takerIsGone: that process is gone, and the next start of the worker's
+	// MCP server is what the socket arms for.
+	takerIsGone takerState = iota
+	// takerSocketStopped: the socket was closed while waiting.
+	takerSocketStopped
+	// takerUnaccounted: the token is out and the connector can neither say
+	// who holds it nor prove that they have gone.
+	takerUnaccounted
+)
+
 // waitForTakerGone waits for the process that took the token to be gone,
-// which is what a restart of the worker's MCP server looks like from here. It
-// reports whether the socket should arm again. The wait itself has no
-// deadline — MaxTokenHandoffs is what bounds the socket, not a clock — so the
-// only false is a socket that was closed.
+// which is what a restart of the worker's MCP server looks like from here.
+// The wait itself has no deadline — MaxTokenHandoffs is what bounds the
+// socket, not a clock.
 //
-// A taker whose identity could not be read cannot be waited for, so the
-// socket arms for one more window instead — the same bound as the first
-// handoff.
-func (s *TokenSocket) waitForTakerGone() bool {
+// It is one half of the rule for a holder the connector cannot account for
+// (the other is handed): no proof that the process holding this token has
+// exited, no further handoff. A taker whose identity was never read cannot
+// be waited for at all, and a kernel that stops answering leaves the
+// question open however long it is asked — both end the socket rather than
+// arm it, because arming it is what puts the same task token in a second
+// process while the first may still be running.
+func (s *TokenSocket) waitForTakerGone() takerState {
 	s.mu.Lock()
 	taker := s.taker
 	s.mu.Unlock()
 	if taker.PID <= 0 {
-		return true
+		// A delivery was made to a process this connector could not name
+		// (handed). There is nothing to watch for, so nothing may be handed
+		// the token again.
+		s.markUnaccounted()
+		return takerUnaccounted
 	}
-	wait := takerPoll
+	wait := s.poll
 	errors := 0
 	for {
 		timer := time.NewTimer(wait)
 		select {
 		case <-s.stop:
 			timer.Stop()
-			return false
+			return takerSocketStopped
 		case <-timer.C:
 		}
 		// The poll backs off: a task runs for hours, and asking the kernel
 		// about one process every second for all of it is a cost with no
 		// reader.
-		if wait < takerPollMax {
+		if wait < s.pollMax {
 			wait *= 2
 		}
-		gone, err := driver.ProcessGone(taker)
+		gone, err := s.gone(taker)
 		switch {
 		case err == nil && gone:
 			// The server that held the token is gone; the next start of it is
 			// what the socket arms for.
-			return true
+			return takerIsGone
 		case err == nil:
 			errors = 0
 		default:
 			// A kernel this process cannot read cannot answer whether that
-			// server is gone. Waiting forever on an unanswerable question
-			// would leave a restarted server with no token and say nothing,
-			// so after a while the socket arms as it does for a taker whose
-			// identity it never had.
+			// server is gone. Asking is bounded, and running out of tries is
+			// not an answer: the socket stops here, loudly, rather than arm
+			// on the assumption that a process it cannot see has exited.
 			errors++
 			if errors >= takerErrorLimit {
-				return true
+				s.markUnaccounted()
+				return takerUnaccounted
 			}
 		}
 	}
+}
+
+// markUnaccounted records that this attempt's token is out and the process
+// holding it cannot be accounted for.
+func (s *TokenSocket) markUnaccounted() {
+	s.mu.Lock()
+	s.unaccounted = true
+	s.mu.Unlock()
 }
 
 const (
@@ -460,8 +536,12 @@ func (s *TokenSocket) handed(h Handoff, taker driver.Process, after bool) {
 		// The token is out and the connector could not say to whom: keeping
 		// the last taker would have the socket waiting on a process that is
 		// not the one holding the token, and the release point ending the
-		// wrong thing (Opus r9). Nothing is better than something wrong.
+		// wrong thing (Opus r9). Nothing is better than something wrong —
+		// but nothing is not the same as no delivery, which is what the zero
+		// taker used to read as here (Copilot on #738), so the socket
+		// remembers that its token is out and unaccounted for.
 		s.taker = driver.Process{}
+		s.unaccounted = true
 	}
 	f := s.onHandoff
 	s.mu.Unlock()
@@ -497,10 +577,24 @@ func (s *TokenSocket) serve(window time.Duration) {
 	// worker's is not something to wait past.
 	delivered := false
 	for range MaxTokenHandoffs {
-		if delivered && !s.waitForTakerGone() {
-			// Closed, or the process that took the token is still running:
-			// nothing else may have it while that server lives.
-			return
+		if delivered {
+			switch s.waitForTakerGone() {
+			case takerIsGone:
+				// The server that held it has exited; the next start of it
+				// is what this window is for.
+			case takerSocketStopped:
+				// Closed, or the process that took the token is still
+				// running: nothing else may have it while that server lives.
+				return
+			case takerUnaccounted:
+				// The token is out and nothing here can prove who has it.
+				// The socket ends closed rather than armed, and says so: the
+				// attempt is held, not released around a process that may
+				// still hold its credential.
+				s.Close()
+				s.handed(HandoffUnaccounted, driver.Process{}, true)
+				return
+			}
 		}
 		h, taker := s.handOne(window)
 		s.handed(h, taker, delivered)

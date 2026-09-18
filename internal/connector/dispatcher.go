@@ -188,6 +188,11 @@ type Dispatcher struct {
 	mu   sync.Mutex
 	live map[string]*taskRun
 	wg   sync.WaitGroup
+	// stopping is closed when Run is shutting down, which is what bounds the
+	// adopted-reply rule's reads: their own context is the settlement's,
+	// which a shutdown deliberately does not cancel.
+	stopping     chan struct{}
+	stoppingOnce sync.Once
 
 	// terminateRecorded ends a previous process's worker; a test seam.
 	terminateRecorded func(driver.Process, time.Duration) (bool, error)
@@ -263,6 +268,8 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		lines:  opts.Lines,
 		live:   map[string]*taskRun{},
 
+		stopping: make(chan struct{}),
+
 		terminateRecorded: driver.TerminateRecorded,
 		confirmGroupGone:  driver.ConfirmGroupGone,
 	}, nil
@@ -294,6 +301,11 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
+			// Adoption is a read of Basecamp with a budget of its own, and
+			// a shutdown must not wait that budget out for every task that
+			// has just settled: it is stopped here, and the wait that
+			// follows is only for it to notice.
+			d.stopAdopting()
 			d.wg.Wait()
 			return nil
 		case <-ticker.C:
@@ -302,14 +314,23 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 // Recover ends every attempt a previous process left live (invariant 5).
+//
+// It is cleanup, not dispatch. A shutdown while it runs must stop this
+// process from starting anything new; it must not leave a previous
+// process's attempt half-settled, with a worker ended and its record still
+// live (Copilot on #738). So what recovery reads and what it settles go on a
+// context cancellation does not reach, as every other settlement does
+// (settleCtx). Only the working directories' own reconciliation, which
+// settles nothing, is left on the caller's context.
 func (d *Dispatcher) Recover(ctx context.Context) error {
+	cleanupCtx := context.WithoutCancel(ctx)
 	d.sweepPrivateDir()
 	// Recovery counts the attempts it leaves live afresh, so running it
 	// twice does not count them twice.
 	d.mu.Lock()
 	d.held = 0
 	d.mu.Unlock()
-	attempts, err := d.ledger.LiveAttempts(ctx)
+	attempts, err := d.ledger.LiveAttempts(cleanupCtx)
 	if err != nil {
 		return err
 	}
@@ -325,7 +346,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			d.hold()
 			continue
 		}
-		worker := driver.Process{PID: a.Process.PID, PGID: a.Process.PGID, StartedAt: a.Process.StartedAt}
+		worker := a.Process.Identity()
 		signaled, err := d.terminateRecorded(worker, driver.DefaultGrace)
 		if err != nil {
 			// A worker that may still be running with the operator's
@@ -341,8 +362,8 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			"task_id", a.TaskID, "was", string(a.State), "worker_signaled", signaled)
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
-		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
-			worker, driver.Process{PID: a.Taker.PID, PGID: a.Taker.PGID, StartedAt: a.Taker.StartedAt},
+		d.release(cleanupCtx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
+			worker, TokenHolder{Process: a.Taker.Identity(), Unaccounted: a.TakerUnaccounted},
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
 	if w, ok := d.opts.Workspaces.(RecoveringWorkspaces); ok {
@@ -351,6 +372,14 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// stopAdopting ends the adopted-reply rule's reads. Run calls it on its way
+// out: a settlement is written before adoption starts, so a shutdown drops
+// the link it might have added rather than holding the exit for the
+// adoption budget. Idempotent.
+func (d *Dispatcher) stopAdopting() {
+	d.stoppingOnce.Do(func() { close(d.stopping) })
 }
 
 // heldCount is how many attempts are held; for tests and status.
@@ -565,7 +594,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
-		d.release(settleCtx, launch, driver.Process{}, driver.Process{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		d.release(settleCtx, launch, driver.Process{}, TokenHolder{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
 		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
@@ -579,14 +608,14 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 			"no_process", spawnFailed, "unusable", unusable, "error", err)
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
-		d.release(settleCtx, launch, driver.StartedProcess(err), takerOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		d.release(settleCtx, launch, driver.StartedProcess(err), holderOf(tokens), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		return nil
 	}
 	p := session.Process()
 	// The token goes only to this worker's own process group.
 	tokens.AllowGroup(p.PGID)
-	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, SessionID: session.ID()}); err != nil {
+	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, recordedProcess(p, session.ID())); err != nil {
 		_ = session.Close()
 		// The socket was open to the worker's group, so a handoff may be in
 		// flight: it is finished with before the taker is read, as at every
@@ -649,10 +678,18 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	// server is the process the release point must end.
 	tokens.OnHandoff(func(handoff Handoff, taker driver.Process, afterADelivery bool) {
 		d.reportHandoff(log, attemptID, handoff, taker, afterADelivery)
-		if handoff == HandoffDelivered && taker.PID > 0 {
-			if err := d.ledger.RecordTaker(recordCtx, attemptID,
-				AttemptProcess{PID: taker.PID, PGID: taker.PGID, StartedAt: taker.StartedAt}); err != nil {
+		switch {
+		case handoff == HandoffDelivered && taker.PID > 0:
+			if err := d.ledger.RecordTaker(recordCtx, attemptID, recordedProcess(taker, "")); err != nil {
 				log.Warn("connector: could not record the process that took the task token", "attempt_id", attemptID, "error", err)
+			}
+		case handoff == HandoffDelivered, handoff == HandoffUnaccounted:
+			// A delivery whose recipient could not be identified, or a
+			// holder the kernel stopped answering about: the attempt carries
+			// that across a restart too, so the next process holds it rather
+			// than read a missing taker as nobody having the token.
+			if err := d.ledger.MarkTakerUnaccounted(recordCtx, attemptID); err != nil {
+				log.Warn("connector: could not record that this task's token holder is unaccounted for", "attempt_id", attemptID, "error", err)
 			}
 		}
 	})
@@ -769,16 +806,24 @@ func (d *Dispatcher) shortSocketBase(preferred string) string {
 // settledTaker stops the attempt's token socket and waits for it to finish
 // with whatever it was doing, so a handoff in flight is not still deciding
 // while the attempt is released. It is what the release point acts on.
-func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace time.Duration) driver.Process {
+func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace time.Duration) TokenHolder {
 	if tokens == nil {
-		return driver.Process{}
+		return TokenHolder{}
 	}
 	// Nothing more is handed over; a delivery already under way finishes.
 	tokens.Close()
 	if !tokens.Settled(grace) {
-		log.Warn("connector: the task token's socket was still busy when its attempt ended", "attempt_id", attemptID)
+		// A handoff still deciding after the socket was closed and waited
+		// out is a token that may be crossing to a process this attempt
+		// will never see recorded. That is the same thing as a holder that
+		// cannot be accounted for, and it is held for the same reason.
+		log.Error("connector: the task token's socket was still busy when its attempt ended; the attempt is held rather than settled around a handoff that may still be in flight",
+			"attempt_id", attemptID)
+		holder := holderOf(tokens)
+		holder.Unaccounted = true
+		return holder
 	}
-	return takerOf(tokens)
+	return holderOf(tokens)
 }
 
 // reportHandoff says what became of one handoff of the task token. Only a
@@ -797,6 +842,12 @@ func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff H
 	case HandoffUndelivered:
 		log.Warn("connector: the worker's MCP server asked for its task token and could not be given it; the next start of it will be",
 			"attempt_id", attemptID)
+	case HandoffUnaccounted:
+		// The one thing worse than a worker without tools: a token out in a
+		// process the connector cannot see. Nothing else is served it, and
+		// the attempt will be held.
+		log.Error("connector: this task's token was delivered and the process holding it cannot be accounted for; no further handoff will be made and the attempt is held",
+			"attempt_id", attemptID)
 	case HandoffSpent:
 		log.Warn("connector: the worker's MCP server has restarted more often than the connector serves its token; a further start will have no Basecamp tools",
 			"attempt_id", attemptID, "handoffs", MaxTokenHandoffs)
@@ -813,13 +864,12 @@ func (d *Dispatcher) reportHandoff(log *slog.Logger, attemptID string, handoff H
 	}
 }
 
-// takerOf is the process a socket's token went to, or none.
-func takerOf(tokens *TokenSocket) driver.Process {
+// holderOf is what a socket knows about the process holding its token.
+func holderOf(tokens *TokenSocket) TokenHolder {
 	if tokens == nil {
-		return driver.Process{}
+		return TokenHolder{}
 	}
-	taker, _ := tokens.Taker()
-	return taker
+	return tokens.Holder()
 }
 
 // confirmTakerGone is the release point's second confirmation: the process
@@ -833,7 +883,16 @@ func takerOf(tokens *TokenSocket) driver.Process {
 // too (Recover passes it to this same point). A taker the connector never
 // managed to identify is the one case left to the agent's own exit: such a
 // bridge ends when its agent's output closes.
-func (d *Dispatcher) confirmTakerGone(worker, taker driver.Process) error {
+func (d *Dispatcher) confirmTakerGone(worker driver.Process, holder TokenHolder) error {
+	if holder.Held() {
+		// The one rule for a holder the connector cannot account for: the
+		// token is out, nothing here can name the process that has it or
+		// prove it has gone, and an attempt is never released around that.
+		// It stays live — its directory, its conversation and one worker
+		// slot with it — for a person to settle (Copilot on #738).
+		return errors.New("connector: this task's token was delivered and the process holding it cannot be accounted for")
+	}
+	taker := holder.Process
 	ok := taker.PID > 0 && taker.PGID > 0
 	if own, known := driver.OwnProcessGroup(); ok && known && taker.PGID == own {
 		// A record that names the connector's own group is a mistake, not a
@@ -875,14 +934,14 @@ const settleAttempts = 5
 // live: its token, its conversation and its directory are still its own, a
 // person settles it, and this process stops counting it among the workers it
 // may start.
-func (d *Dispatcher) release(ctx context.Context, launch Launch, worker, taker driver.Process, end AttemptEnd, run *taskRun) {
+func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
 	if err == nil {
 		// An agent may start the connector's own MCP server in a process
 		// group of its own (Codex does), and that process holds the task's
 		// token: it is confirmed gone here too, by the same rule.
-		err = d.confirmTakerGone(worker, taker)
+		err = d.confirmTakerGone(worker, holder)
 	}
 	if err != nil {
 		d.hold()
@@ -906,9 +965,11 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker, taker d
 		return
 	}
 	reportUnreported(log, end.Stop, settlement)
-	// Adoption is a read of Basecamp, bounded but slow, and nothing waits on
-	// it: the settlement is already written, and the link it may add is not
-	// what the next dispatch depends on.
+	// Adoption is a read of Basecamp, bounded but slow, and no dispatch
+	// waits on it: the settlement is already written, and the link it may
+	// add is not what the next start depends on. A shutdown does not wait it
+	// out either — it cancels the reads (Run) and waits only for this to
+	// return.
 	d.wg.Go(func() { d.adopt(ctx, settlement) })
 	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
@@ -962,8 +1023,10 @@ func (d *Dispatcher) workspaceFinished(ctx context.Context, route, workDir strin
 }
 
 // AdoptionBudget bounds the reads one settlement spends on the adopted-reply
-// rule: settlement runs on a context a shutdown does not cancel, and a
-// shutdown must not wait on Basecamp for every live task.
+// rule. Settlement runs on a context a shutdown does not cancel — an attempt
+// half-settled is worse than a shutdown that takes a moment — but adoption
+// only adds a link to a record already written, so a shutdown ends it rather
+// than spending this budget on every task that has just settled.
 const AdoptionBudget = 2 * time.Minute
 
 // adopt applies the adopted-reply rule to a settled task.
@@ -971,8 +1034,20 @@ func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 	if d.opts.Replies == nil {
 		return
 	}
+	// The settlement's context outlives a shutdown on purpose; these reads
+	// do not (Copilot on #738).
+	written := ctx
 	ctx, cancel := context.WithTimeout(ctx, AdoptionBudget)
 	defer cancel()
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-d.stopping:
+			cancel()
+		case <-finished:
+		}
+	}()
 	candidates, err := d.ledger.AdoptionCandidates(ctx, s.TaskID)
 	if err != nil {
 		d.log.Warn("connector: adoption candidates", "task_id", s.TaskID, "error", err)
@@ -992,7 +1067,9 @@ func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 		if !ok {
 			continue
 		}
-		if err := d.ledger.AdoptReply(ctx, s.TaskID, c.EventID, id); err != nil {
+		// The listing is what a shutdown cancels; a link it already found is
+		// written whatever happens next.
+		if err := d.ledger.AdoptReply(written, s.TaskID, c.EventID, id); err != nil {
 			d.log.Warn("connector: adopting a reply", "event_id", c.EventID, "error", err)
 		}
 	}

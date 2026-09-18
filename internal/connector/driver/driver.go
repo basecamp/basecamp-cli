@@ -237,9 +237,15 @@ type Process struct {
 	// PGID is its process group, which Close signals. A driver starts every
 	// worker as the leader of a new group, so PGID == PID.
 	PGID int
-	// StartedAt is when the driver started it, to tell the process from a
-	// later one that reused its id.
+	// StartedAt is when the process started, to tell it from a later one
+	// that reused its id.
 	StartedAt time.Time
+	// StartedExact is true when StartedAt is the kernel's own start time for
+	// the pid, which is what an identity is compared by. False is a
+	// wall-clock stamp the driver took around the fork because the kernel
+	// could not be asked: readable, but not an identity, and the one-owner
+	// rule signals nothing and releases nothing on one (ErrIdentityUnknown).
+	StartedExact bool
 }
 
 // Exit is how a worker ended.
