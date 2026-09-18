@@ -549,3 +549,46 @@ func TestOneWriteCannotWithdrawAndComplete(t *testing.T) {
 	assert.Nil(t, withdrawn)
 	assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 }
+
+// An acknowledgement id belongs to the statement that acknowledges. Writing it
+// onto a row that stays exposed would leave an id in the receipt that no worker
+// ever reported, which is the half of "with the acknowledgement or never" that
+// checking only the old row cannot see.
+func TestAnAcknowledgementIDIsNotWrittenWithoutTheAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	f := newDispatchFixture(t)
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET ack_id = 99 WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "an acknowledgement id is written with the acknowledgement, once")
+	var ackID *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&ackID))
+	assert.Nil(t, ackID)
+	assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
+}
+
+// And the acknowledgement itself still writes one: the rule narrows what may
+// write an id, not whether Ack can.
+func TestAcknowledgingWritesTheIDItWasGiven(t *testing.T) {
+	ctx := context.Background()
+	f := newDispatchFixture(t)
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	d, err := f.ledger.Dispatch(ctx, f.grant.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = d.Get(ctx, 1)
+	require.NoError(t, err)
+	ackID := int64(99)
+	_, err = d.Ack(ctx, 1, &ackID)
+	require.NoError(t, err)
+
+	var got *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&got))
+	require.NotNil(t, got)
+	assert.Equal(t, int64(99), *got)
+	assert.Equal(t, "delivered", f.rowContext(ctx, t, 1).Delivery)
+}
