@@ -56,9 +56,9 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 
 		in := obIntent(t, ledger, stillRunningKey(l.AttemptID, 1))
 		assert.Equal(t, IntentStillRunning, in.Kind)
-		assert.Equal(t, renderStillRunning(MessageComment, l.TaskID, l.AttemptID, 1, l.LaunchedAt, tick.ProgressAt), in.Body)
+		assert.Equal(t, renderStillRunning(MessageComment, l.TaskID, l.AttemptID, 1, in.CreatedAt, l.LaunchedAt, tick.ProgressAt), in.Body)
 		assert.Equal(t,
-			"<div>Still working on this: task "+itoa(l.TaskID)+" started at 12:00 UTC. Last progress at 12:03 UTC.<br><br>"+
+			"<div>Working on this as of 12:10 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. Last progress at 12:03 UTC.<br><br>"+
 				"Attempt "+l.AttemptID+", update 1 · automatic notice from basecamp connect</div>", in.Body)
 	})
 
@@ -85,6 +85,41 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
+
+// A still-running notice can be the connector's last word on a task — an
+// attempt whose events all succeeded with a reply calls for no completion
+// notice — so it says when it was true and claims nothing about now. The
+// stamp is the connector's own sighting of a live attempt, not the worker's
+// last progress: a task can be alive and quiet for an hour, and both notices
+// carry the sighting.
+func TestStillRunningNoticeIsDatedAndNotPresentTense(t *testing.T) {
+	ctx := context.Background()
+	ledger, clock := obLedger(t)
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+
+	clock.Advance(40 * time.Minute)
+	_, err := ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+	quiet := obIntent(t, ledger, stillRunningKey(l.AttemptID, 1))
+	assert.Contains(t, MessageText(quiet.Body),
+		"Working on this as of 12:40 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. No progress has been reported yet.",
+		"an attempt with nothing to report is still dated by the sighting")
+
+	require.NoError(t, ledger.RecordProgress(ctx, l.AttemptID))
+	clock.Advance(20 * time.Minute)
+	_, err = ledger.StillRunning(ctx, l.AttemptID)
+	require.NoError(t, err)
+	reported := obIntent(t, ledger, stillRunningKey(l.AttemptID, 2))
+	assert.Contains(t, MessageText(reported.Body),
+		"Working on this as of 13:00 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. Last progress at 12:40 UTC.",
+		"the sighting and the worker's last progress are different facts, both said")
+
+	for _, in := range []Intent{quiet, reported} {
+		assert.NotContains(t, in.Body, "Still working", in.Key,
+			"no lifecycle message claims the present")
+	}
+}
 
 // No template carries anything a person or worker wrote: the snapshot's
 // content never reaches a lifecycle message.

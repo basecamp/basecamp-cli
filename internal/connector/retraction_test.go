@@ -235,7 +235,7 @@ func TestRedispatchAsksInReadsEveryAsk(t *testing.T) {
 	assert.Equal(t, []int64{41, 43}, redispatchAsksIn(two), "the succeeded event is reported, not asked about")
 	assert.Equal(t, []int64{7}, redispatchAsksIn(renderHoldingReply(MessageComment, 7)))
 	assert.Empty(t, redispatchAsksIn(GuardAckBody))
-	assert.Empty(t, redispatchAsksIn(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Time{})))
+	assert.Empty(t, redispatchAsksIn(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Now(), time.Time{})))
 	assert.Equal(t, "event 42", eventList([]int64{42}))
 	assert.Equal(t, "events 42 and 43", eventList([]int64{42, 43}))
 	assert.Equal(t, "events 42, 43 and 44", eventList([]int64{42, 43, 44}))
@@ -906,7 +906,7 @@ func TestAsksRedispatchReadsTheAskExactly(t *testing.T) {
 	assert.False(t, asksRedispatch(renderHoldingReply(MessageComment, 12), 1))
 	assert.False(t, asksRedispatch(renderHoldingReply(MessageComment, 1), 12))
 	assert.False(t, asksRedispatch(GuardAckBody, 1))
-	assert.False(t, asksRedispatch(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Time{}), 1))
+	assert.False(t, asksRedispatch(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Now(), time.Time{}), 1))
 
 	asking := renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed,
 		Events: []SettledEvent{{EventID: 1, Outcome: OutcomeFailed}}})
