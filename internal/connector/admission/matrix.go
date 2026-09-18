@@ -150,8 +150,12 @@ const (
 	// connect.json serves, and connect.json could not be read. Not
 	// no_route: that says the operator has not served this project, which
 	// would be a false thing to say — and to post a holding reply about —
-	// when the truth is that nothing could read the file. Retried on a
-	// timer (NextBlockedRetry), so repairing the file decides these records
-	// without anyone redispatching them.
+	// when the truth is that nothing could read the file.
+	//
+	// Like every other blocked reason, it waits for a person: repairing the
+	// file does not by itself decide these records, and `basecamp connect
+	// redispatch <id>` is what runs them. Nothing in the connector re-offers
+	// a blocked record on a timer — NextBlockedRetry describes a schedule
+	// no production code asks for — so this comment does not promise one.
 	ReasonConfigUnreadable Reason = "config_unreadable"
 )

@@ -15,7 +15,6 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 )
 
@@ -50,10 +49,6 @@ func (s *scriptedPolls) Poll(_ context.Context, cursor eventfeed.Cursor, filters
 type fixedClock struct{ at time.Time }
 
 func (c *fixedClock) now() time.Time { return c.at }
-
-// advance moves the clock on, for a test that has to wait out an interval
-// without waiting out an interval.
-func (c *fixedClock) advance(d time.Duration) { c.at = c.at.Add(d) }
 
 func newTestIntake(t *testing.T, polls eventfeed.PollSource, pointers io.Writer) (*Intake, *Ledger, *Queue) {
 	t.Helper()
@@ -389,79 +384,4 @@ func TestABurstOfAThousandEventsIsAbsorbedQuickly(t *testing.T) {
 	assert.Equal(t, 1000, seen)
 	assert.Less(t, elapsed, 30*time.Second, "intake is the only work on the feed's delivery path")
 	t.Logf("1,000 events through intake in %s", elapsed)
-}
-
-// The periodic hook itself, because the end-to-end test calls
-// sweepBlockedRetries directly and would stay green if nothing ever called it
-// on a tick (Copilot on #765). This drives the real ticker.
-func TestTheSweepTickOffersBlockedRecordsThatAreDue(t *testing.T) {
-	ledger := newTestLedger(t)
-	intake, _, queue := newTestIntakeOn(t, ledger, nil)
-	clock := &fixedClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	intake.now = clock.now
-	intake.repairSweep = 10 * time.Millisecond
-
-	// A record blocked for a reason that comes round on a timer, long
-	// enough ago to be due.
-	ctx := context.Background()
-	ev := testEvent(1)
-	_, err := ledger.RecordSeen(ctx, ev, LanePoll)
-	require.NoError(t, err)
-	require.NoError(t, ledger.SetState(ctx, ev.ID, StateBlocked, string(admission.ReasonConfigUnreadable)))
-	clock.advance(admission.BlockedRetryInterval + time.Minute)
-
-	// Drain whatever the queue already holds, so what arrives next is the
-	// sweep's doing.
-	for queue.Depth() > 0 {
-		_, err := queue.Take(ctx)
-		require.NoError(t, err)
-	}
-
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	intake.repairs.Add(1)
-	go intake.sweepLosses(runCtx)
-
-	got := make(chan int64, 1)
-	go func() {
-		id, err := queue.Take(runCtx)
-		if err == nil {
-			got <- id
-		}
-	}()
-	select {
-	case id := <-got:
-		assert.Equal(t, ev.ID, id, "the tick offered the due record")
-	case <-time.After(5 * time.Second):
-		t.Fatal("the sweep tick never offered the due blocked record")
-	}
-}
-
-// And the tick leaves alone a record outside the run's --project scope:
-// admission would discard it out_of_scope, which is terminal, so the retry
-// would cause the permanent loss it exists to prevent.
-func TestTheSweepLeavesBlockedRecordsOutsideTheRunsScope(t *testing.T) {
-	ledger := newTestLedger(t)
-	intake, _, _ := newTestIntakeOn(t, ledger, nil)
-	clock := &fixedClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	intake.now = clock.now
-
-	ctx := context.Background()
-	ev := testEvent(1)
-	_, err := ledger.RecordSeen(ctx, ev, LanePoll)
-	require.NoError(t, err)
-	require.NoError(t, ledger.SetState(ctx, ev.ID, StateBlocked, string(admission.ReasonConfigUnreadable)))
-	clock.advance(admission.BlockedRetryInterval + time.Minute)
-
-	inScope, err := ledger.DueBlockedRetries(ctx, clock.now(), []int64{ev.BucketID}, 10)
-	require.NoError(t, err)
-	require.Equal(t, []int64{ev.ID}, inScope, "due when the run hears its project")
-
-	outOfScope, err := ledger.DueBlockedRetries(ctx, clock.now(), []int64{ev.BucketID + 1}, 10)
-	require.NoError(t, err)
-	assert.Empty(t, outOfScope, "and never offered when it does not: a discard there is terminal")
-
-	everything, err := ledger.DueBlockedRetries(ctx, clock.now(), nil, 10)
-	require.NoError(t, err)
-	assert.Equal(t, []int64{ev.ID}, everything, "an unscoped run hears every project")
 }

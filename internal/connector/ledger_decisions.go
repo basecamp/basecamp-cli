@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
@@ -512,83 +511,4 @@ WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
 		return fmt.Errorf("connector: authorize event %d: %w", eventID, err)
 	}
 	return nil
-}
-
-// DueBlockedRetries are the blocked records whose own reason says they come
-// round again on a timer, and whose next attempt is due at now. Oldest
-// first, at most limit.
-//
-// This is what makes admission.NextBlockedRetry more than a description.
-// Nothing called it outside tests: a blocked record was re-decided only when
-// a person redispatched it, so every "retried on a timer" in the code and on
-// the cards was a promise the connector did not keep (Copilot on #765). The
-// intake sweep offers what this returns.
-//
-// A record a person has already authorized is left out: that is the
-// redispatch path's, and both offering it would decide it twice.
-//
-// buckets is the run's --project scope; empty means every project. It is not
-// a narrowing for tidiness: re-offering a record outside this run's scope
-// would have admission discard it out_of_scope, which is terminal, so the
-// retry built to avoid a permanent discard would cause one — for a record
-// that was only ever waiting, and that a differently scoped run is supposed
-// to pick up (Copilot on #765).
-func (l *Ledger) DueBlockedRetries(ctx context.Context, now time.Time, buckets []int64, limit int) ([]int64, error) {
-	where := ""
-	args := make([]any, 0, len(buckets))
-	if len(buckets) > 0 {
-		where = " AND bucket_id IN (" + placeholders(len(buckets)) + ")"
-		for _, b := range buckets {
-			args = append(args, b)
-		}
-	}
-	//nolint:gosec // G202: the condition is this package's constants and placeholders, never a value
-	rows, err := l.db.QueryContext(ctx, `
-SELECT id, reason, blocked_at, decided_at, retry_at FROM events
-WHERE state = 'blocked' AND content_dropped = 0 AND blocked_at IS NOT NULL
-  AND (authorized_at IS NULL OR authorized_at < blocked_at)`+where+`
-ORDER BY id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("connector: due blocked retries: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var due []int64
-	for rows.Next() {
-		var (
-			id                          int64
-			reason                      string
-			blockedAt, decidedAt, retry sql.NullString
-		)
-		if err := rows.Scan(&id, &reason, &blockedAt, &decidedAt, &retry); err != nil {
-			return nil, fmt.Errorf("connector: due blocked retries: %w", err)
-		}
-		blocked, err := parseStamp(blockedAt.String)
-		if err != nil {
-			return nil, err
-		}
-		// The last attempt is when the verdict was written; a record that
-		// somehow has none is treated as attempted when it blocked.
-		last := blocked
-		if decidedAt.Valid {
-			if last, err = parseStamp(decidedAt.String); err != nil {
-				return nil, err
-			}
-		}
-		var notBefore time.Time
-		if retry.Valid {
-			if notBefore, err = parseStamp(retry.String); err != nil {
-				return nil, err
-			}
-		}
-		next, ok := admission.NextBlockedRetry(admission.Reason(reason), blocked, last, notBefore)
-		if !ok || next.After(now) {
-			continue
-		}
-		due = append(due, id)
-		if limit > 0 && len(due) == limit {
-			break
-		}
-	}
-	return due, rows.Err()
 }

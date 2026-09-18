@@ -1156,12 +1156,14 @@ func TestAnUnreadableConfigIsHeldAsOneRatherThanAnsweredAsUnserved(t *testing.T)
 	assert.Equal(t, ReasonConfigUnreadable, v.Reason, "not no_route: nothing read the file, so nothing can say the project is unserved")
 	assert.False(t, v.Served)
 
-	// It comes round again on its own, which no_route would not.
+	// It waits for a person, as every blocked record does. An automatic
+	// sweep was built for this and taken back out: offering due blocked
+	// rows is a scheduler with its own claiming, and it re-decided five
+	// other blocked reasons besides this one. Carded, so that nothing here
+	// promises a timer that does not run.
 	blockedAt := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	_, retried := NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
-	assert.True(t, retried, "repairing the file decides these records without anyone redispatching them")
-	_, retried = NextBlockedRetry(ReasonNoRoute, blockedAt, blockedAt, time.Time{})
-	assert.False(t, retried, "which is exactly what no_route does not do")
+	assert.False(t, retried, "no schedule claims this record, and nothing would act on one if it did")
 
 	// And once the file is readable the record decides normally.
 	fail = false

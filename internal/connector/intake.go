@@ -849,55 +849,6 @@ func (in *Intake) sweepStranded(ctx context.Context) {
 	}
 }
 
-// sweepBlockedRetries offers the blocked records whose own reason says they
-// come round again on a timer and whose next attempt is due.
-//
-// Without this, "retried on a timer" was a description of a function nothing
-// called: a blocked record was re-decided only when a person redispatched it
-// (Copilot on #765). A read that failed, a throttle, and — the one this
-// change added — a connect.json that could not be read all waited for
-// somebody to notice. Repairing the file now decides its records by itself,
-// which is what the hold was chosen over a discard for.
-//
-// Offering one costs at most a second decision, never a second verdict: the
-// queue carries ids, and a commit applies only at the revision its decision
-// loaded. A queue that will not take one leaves it for the next sweep.
-//
-// # What a re-decision may do to a record, and why only one of them is a bug
-//
-// Re-deciding runs the whole of admission again, against the world as it is
-// now, so a re-offered record can end terminally. Most of those are the point
-// rather than a hazard — a recording trashed since is stale, a comment that
-// turns out not to address the agent is not_addressed, a performer the
-// operator has stopped trusting is untrusted_performer, a project they have
-// stopped serving loses its subscription rule. Each is the verdict a fresh
-// event would get, and each reflects a decision somebody made.
-//
-// out_of_scope is the exception, and it is why this passes the run's buckets
-// down. --project is one run's narrowing, not a policy: the projects it
-// leaves out are another run's to dispatch, and discarding their records here
-// would destroy work nothing else will do again. That would make the retry
-// built to avoid a permanent discard the cause of one (Copilot on #765).
-func (in *Intake) sweepBlockedRetries(ctx context.Context) {
-	due, err := in.ledger.DueBlockedRetries(ctx, in.now(), in.opts.Filters.Buckets, blockedRetryBatch)
-	if err != nil {
-		in.log.Warn("could not read the blocked records due to be decided again", "error", err)
-		return
-	}
-	for _, id := range due {
-		if err := in.queue.Offer(ctx, id); err != nil {
-			in.log.Warn("a blocked record due to be decided again could not be handed over; it stays for the next sweep",
-				"event_id", id, "error", err)
-			return
-		}
-	}
-}
-
-// blockedRetryBatch bounds one sweep, so a ledger holding thousands of
-// blocked records does not fill the queue with them in one tick at the
-// expense of new work.
-const blockedRetryBatch = 64
-
 // requeueSeen hands every record still in seen to the queue.
 //
 // The ledger row is written before the pointer line and before the hand-off,
@@ -1061,7 +1012,6 @@ func (in *Intake) sweepLosses(ctx context.Context) {
 			return
 		case <-ticker.C:
 			in.sweepStranded(ctx)
-			in.sweepBlockedRetries(ctx)
 			losses, err := in.ledger.OpenLosses(ctx)
 			if err != nil {
 				in.log.Warn("could not read the open losses", "error", err)

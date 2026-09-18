@@ -740,16 +740,18 @@ func mentionMarkup(id int64) string {
 	return `<bc-attachment sgid="` + sgid + `" content-type="application/vnd.basecamp.mention"></bc-attachment>`
 }
 
-// Repair, end to end: a connect.json that cannot be read holds its records,
-// and repairing the file decides them again with nobody redispatching.
+// A connect.json that cannot be read holds its records rather than discarding
+// them or answering that the project is not served, and a person's
+// redispatch runs them once the file is back.
 //
-// This is the promise the hold was chosen over a discard for, and until
-// Copilot pointed at it on #765 nothing kept it: NextBlockedRetry said which
-// reasons come round on a timer, and no production code called it, so a
-// held record waited for a person exactly like no_route did. The sweep in
-// intake is what closes that, and this asserts the whole path rather than
-// the pieces — broken, held, repaired, run.
-func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
+// Waiting for a person is what every other blocked record does, and it is
+// what this asserts — deliberately, and after taking an automatic sweep back
+// out. A retry that offers due blocked records is a scheduler of its own,
+// with its own claiming, and it turned out to re-decide five other blocked
+// reasons that have nothing to do with this change. It is carded rather than
+// carried here, so nothing in the code or the comments promises a timer that
+// does not run.
+func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testing.T) {
 	ledger := newTestLedger(t)
 	queue, err := NewQueue(10, 100)
 	require.NoError(t, err)
@@ -765,7 +767,6 @@ func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
 		UpdatedAt:          time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC),
 	}
 
-	// The file is broken to start with.
 	broken := true
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
@@ -777,17 +778,6 @@ func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
 			}
 			return map[int64]admission.Project{adapterBucketID: {Class: "internal"}}, nil
 		}))
-	require.NoError(t, err)
-
-	// The intake is the thing under test as much as the ledger is: its sweep
-	// is what offers a due record, and a test that offered by hand would
-	// stay green with the sweep deleted (Copilot on #765).
-	clock := &fixedClock{at: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}
-	intake, err := New(Options{
-		Origin: "https://3.basecampapi.com", AccountID: "2914079",
-		ConsumerNamespace: "connector-test", Ledger: ledger, Queue: queue,
-		Minter: stubMinter{}, Polls: &scriptedPolls{}, Clock: clock.now,
-	})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -807,32 +797,19 @@ func TestRepairingAnUnreadableConfigDecidesItsHeldRecords(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return getRecord(t, ledger, ev.ID).State == StateBlocked
 	}, 5*time.Second, 10*time.Millisecond, "held while the file cannot be read")
-	require.Equal(t, string(admission.ReasonConfigUnreadable), getRecord(t, ledger, ev.ID).Reason)
+	held := getRecord(t, ledger, ev.ID)
+	require.Equal(t, string(admission.ReasonConfigUnreadable), held.Reason)
+	assert.NotEqual(t, StateDiscarded, held.State, "a discard is the one outcome repairing the file could not undo")
 
-	// A sweep before the interval offers nothing: the record sits exactly as
-	// a no_route one does until it is due.
-	intake.sweepBlockedRetries(ctx)
-	time.Sleep(100 * time.Millisecond)
-	require.Equal(t, StateBlocked, getRecord(t, ledger, ev.ID).State, "not due until the interval has passed")
-
-	// The operator repairs the file, and the interval passes. Nothing here
-	// offers the record: the sweep does, which is the join this test exists
-	// to cover.
+	// The operator repairs the file and redispatches, which is the remedy
+	// for a blocked record and the one the holding reply names.
 	broken = false
-	clock.advance(admission.BlockedRetryInterval + time.Minute)
-	intake.sweepBlockedRetries(ctx)
+	res, err := ledger.Redispatch(ctx, ev.ID, "local:tester", []int64{adapterBucketID})
+	require.NoError(t, err)
+	require.True(t, res.Rerun, "a blocked record's prerequisite is run again")
+	require.NoError(t, queue.Offer(ctx, ev.ID))
 
 	require.Eventually(t, func() bool {
 		return getRecord(t, ledger, ev.ID).State == StateAdmitted
-	}, 5*time.Second, 10*time.Millisecond, "the repair is decided by the sweep, not by a person and not by this test")
-
-	// Two days blocked, attempted a moment ago: a transient read failure is
-	// given up on and handed to a person at that point, and a configuration
-	// failure is not. An operator away for a week is ordinary, and giving up
-	// would strand the work silently — the outcome the hold exists to avoid.
-	blockedTwoDaysAgo, attemptedJustNow := time.Now().Add(-48*time.Hour), time.Now().Add(-time.Minute)
-	_, ok := admission.NextBlockedRetry(admission.ReasonConfigUnreadable, blockedTwoDaysAgo, attemptedJustNow, time.Time{})
-	assert.True(t, ok, "a configuration failure is not given up on after the transient window")
-	_, ok = admission.NextBlockedRetry(admission.ReasonReadFailed, blockedTwoDaysAgo, attemptedJustNow, time.Time{})
-	assert.False(t, ok, "where a transient read failure is handed to a person")
+	}, 5*time.Second, 10*time.Millisecond, "and the work that was held runs")
 }
