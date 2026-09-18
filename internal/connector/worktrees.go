@@ -133,6 +133,9 @@ type Worktrees struct {
 
 	// Off leaves new tasks in their route; see WorktreesOptions.Off.
 	off bool
+	// planOnly is a Worktrees from PlanWorktrees: it has no ledger, and
+	// everything that would write refuses (ErrPlanOnly).
+	planOnly bool
 
 	mu       sync.Mutex
 	failures map[string]prepareFailure
@@ -215,10 +218,50 @@ var (
 // that another task's commits are safe.
 const BranchPrefix = "basecamp-connect/"
 
+// ErrPlanOnly is anything that would make, record or remove a worktree
+// asked of a Worktrees built by PlanWorktrees.
+var ErrPlanOnly = errors.New("connector: these worktrees can only be planned, not made")
+
 // NewWorktrees builds Worktrees.
 func NewWorktrees(opts WorktreesOptions) (*Worktrees, error) {
-	if opts.Ledger == nil || opts.Root == "" || !filepath.IsAbs(opts.Root) {
+	if opts.Ledger == nil {
 		return nil, errors.New("connector: worktrees need the ledger and an absolute root")
+	}
+	return newWorktrees(opts)
+}
+
+// ErrNoRoot is worktrees asked for without a directory to put them under.
+var ErrNoRoot = errors.New("connector: worktrees need an absolute root")
+
+// PlanWorktrees builds a Worktrees that only answers Plan: where a task on a
+// route would work, and what its checkout would hold. It takes no ledger
+// because it records nothing and makes nothing — Prepare, Finish, Recover
+// and Prune on it return ErrPlanOnly — and it is the same type as the one
+// that does the work on purpose: doctor asks where a dispatch would run by
+// running the code that decides it, not a second copy of the rule.
+func PlanWorktrees(opts WorktreesOptions) (*Worktrees, error) {
+	if opts.Off {
+		// With worktrees off a task works in its route, which is not a
+		// decision to plan: a planner that answered anyway would answer
+		// something Prepare would not do, which is the one thing planning
+		// exists to rule out.
+		return nil, ErrPlanNothing
+	}
+	w, err := newWorktrees(opts)
+	if err != nil {
+		return nil, err
+	}
+	w.planOnly = true
+	return w, nil
+}
+
+// ErrPlanNothing is a planner asked for with worktrees off: a task's working
+// directory is then its route, and nothing about it is planned.
+var ErrPlanNothing = errors.New("connector: with worktrees off a task works in its route; there is nothing to plan")
+
+func newWorktrees(opts WorktreesOptions) (*Worktrees, error) {
+	if opts.Root == "" || !filepath.IsAbs(opts.Root) {
+		return nil, ErrNoRoot
 	}
 	if opts.Git == "" {
 		opts.Git = "git"
@@ -288,6 +331,9 @@ func (w *Worktrees) PerTaskDirs() bool { return !w.off }
 // with no backoff armed, and the dispatcher refuses the record rather than
 // leaving the route to back off in silence.
 func (w *Worktrees) Prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
+	if w.planOnly {
+		return "", ErrPlanOnly
+	}
 	if w.off {
 		return route, nil
 	}
@@ -334,36 +380,260 @@ func (w *Worktrees) RoutesWaiting() []string {
 	return out
 }
 
-func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
+// PlannedWorkDir is where one task on a route would work, decided without
+// anything being made: the answer Prepare acts on, and the answer anything
+// that has to agree with a dispatch — doctor — asks for instead of guessing.
+type PlannedWorkDir struct {
+	// Route is the approved directory the project maps to.
+	Route string
+	// Repository is the repository the route is in.
+	Repository string
+	// Rel is the route's own place inside it, and so inside the worktree.
+	Rel string
+	// Worktree is where the checkout would be added.
+	Worktree string
+	// Dir is the session's working directory: the route's place in the
+	// worktree, which is what the driver is given as its cwd.
+	Dir string
+	// BaseCommit is the commit the worktree would be made at, and so the
+	// content its checkout would hold.
+	BaseCommit string
+
+	w *Worktrees
+}
+
+// Plan is where a task named name on route would work: the same decision
+// Prepare makes, with none of its effects. It runs the three reads Prepare
+// runs — the repository the route is in, the route's place inside it, and
+// the commit a worktree would be made at — and fails where Prepare fails,
+// with the same words, so a caller that plans learns now what a dispatch
+// would learn later.
+func (w *Worktrees) Plan(ctx context.Context, route, name string) (*PlannedWorkDir, error) {
 	if !filepath.IsAbs(route) {
-		return "", fmt.Errorf("connector: route %q is not absolute", route)
+		return nil, fmt.Errorf("connector: route %q is not absolute", route)
 	}
 	top, err := w.gitOut(ctx, route, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", unusable(setup.NoRepositoryAt(route), fmt.Errorf("connector: route %s is not in a git repository: %w", route, err))
+		// Proved, never read out of git's words (#753): the route itself
+		// being unusable is not a condition that passes, and a caller that
+		// plans — doctor — says so rather than waiting for it.
+		return nil, unusable(setup.NoRepositoryAt(route), fmt.Errorf("connector: route %s is not in a git repository: %w", route, err))
 	}
 	repository := filepath.Clean(top)
 	rel, err := filepath.Rel(realPath(repository), realPath(route))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("connector: route %s is not inside its repository: %w", route, ErrRouteUnusable)
+		return nil, fmt.Errorf("connector: route %s is not inside its repository: %w", route, ErrRouteUnusable)
 	}
 	base, err := w.gitOut(ctx, repository, "rev-parse", "--verify", "--end-of-options", "HEAD^{commit}")
 	if err != nil {
-		return "", unusable(w.hasNoCommit(ctx, repository), fmt.Errorf("connector: route %s has no commit to branch from: %w", route, err))
+		return nil, unusable(w.hasNoCommit(ctx, repository), fmt.Errorf("connector: route %s has no commit to branch from: %w", route, err))
+	}
+	if err := w.inCheckout(ctx, repository, base, rel); err != nil {
+		return nil, fmt.Errorf("connector: route %s: %w", route, err)
+	}
+	path := w.path(w.root, repository, name)
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("connector: worktree path %q is not absolute", path)
+	}
+	return &PlannedWorkDir{
+		Route: route, Repository: repository, Rel: rel,
+		Worktree: path, Dir: filepath.Join(path, rel), BaseCommit: base, w: w,
+	}, nil
+}
+
+// git's mode for a tree entry, as ls-tree prints it.
+const (
+	modeTree    = "040000"
+	modeSymlink = "120000"
+	modeGitlink = "160000"
+)
+
+// ErrNotModeled is a path a planned read does not model: the commit has
+// something there, but not a regular file whose content this can read.
+var ErrNotModeled = errors.New("connector: a planned read models a regular file and nothing else")
+
+// UnmodeledPathError is one such path, so a caller can say which layer it
+// could not check and what is in the way.
+type UnmodeledPathError struct {
+	// Path is the path in the worktree, as it was asked for.
+	Path string
+	// Kind is what the repository has there: a symbolic link, a submodule.
+	Kind string
+	// Repository and Commit are where it was looked for.
+	Repository string
+	Commit     string
+}
+
+func (e *UnmodeledPathError) Error() string {
+	return fmt.Sprintf("%s is %s in %s at %s, which a planned read does not model", e.Path, e.Kind, e.Repository, shortCommit(e.Commit))
+}
+
+func (e *UnmodeledPathError) Unwrap() error { return ErrNotModeled }
+
+// inCheckout refuses a route the checkout would not contain. A worktree is
+// the commit's tree written out, and git writes a directory only where the
+// tree has one: a route that is untracked or ignored — or that the commit
+// has as a file — is a working directory that would not be there, and
+// nothing can be started in it. The tree is asked, and only what it proves
+// is refused (ErrRouteUnusable, which arms no backoff and is the record's
+// reason): a submodule is a directory the checkout makes, empty, and a
+// symbolic link is followed at dispatch to wherever it points, which this
+// does not guess at either way.
+func (w *Worktrees) inCheckout(ctx context.Context, repository, commit, rel string) error {
+	if rel == "." {
+		return nil
+	}
+	mode, err := w.treeEntry(ctx, repository, commit, filepath.ToSlash(rel))
+	switch {
+	case err != nil:
+		// Not a proof of anything: the next attempt asks again.
+		return err
+	case mode == "":
+		return fmt.Errorf("%s is not a directory %s tracks at %s, so no worktree of it would hold the route: %w",
+			rel, repository, shortCommit(commit), ErrRouteUnusable)
+	case mode == modeTree, mode == modeGitlink, mode == modeSymlink:
+		return nil
+	default:
+		return fmt.Errorf("%s is a file in %s at %s, not a directory a session could run in: %w",
+			rel, repository, shortCommit(commit), ErrRouteUnusable)
+	}
+}
+
+// ReadFile reads a file as the planned session would read it, as far as it
+// can be said without a checkout to read.
+//
+// The promise, exactly: a path inside the worktree is what the repository
+// tracks at BaseCommit as a regular file, which is what git would write
+// into the checkout. A file only the route has — untracked, ignored, or
+// edited since the commit — is in no worktree and reads as absent.
+// Everything outside the worktree is read from disk, where the session
+// reads it.
+//
+// What it does not promise: anything the repository has there that is not a
+// regular file. A symbolic link is followed by the kernel at dispatch to
+// wherever it points, inside the tree or out of it, and git hands back its
+// target rather than that file; a submodule's directory is left empty by
+// the checkout, and whether the session then reads something there depends
+// on what a person did to it. Modeling those means modeling git, one
+// object kind at a time, and this does not: it returns ErrNotModeled —
+// an UnmodeledPathError naming the path and what is in the way — so the
+// caller can say it did not check that layer. What must never happen is a
+// profile called ready on the strength of a layer nothing read, which is
+// the bug this whole check exists for.
+//
+// A path the commit does not have is os.ErrNotExist, as an absent file is.
+// A directory where a file has to be, or a file where a directory has to
+// be, is an error, as it is on a filesystem.
+func (p *PlannedWorkDir) ReadFile(ctx context.Context, name string) ([]byte, error) {
+	rel, inside := p.inWorktree(name)
+	if !inside {
+		return os.ReadFile(name) //nolint:gosec // G304: the caller's own configuration paths
+	}
+	return p.readInWorktree(ctx, name, rel)
+}
+
+// inWorktree is name's place inside the planned worktree, slash-separated,
+// and whether it is inside it at all. The worktree itself is "".
+func (p *PlannedWorkDir) inWorktree(name string) (string, bool) {
+	rel, err := filepath.Rel(p.Worktree, name)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	if rel == "." {
+		return "", true
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// readInWorktree walks rel one component at a time, so a link or a
+// submodule on the way is named rather than walked through.
+func (p *PlannedWorkDir) readInWorktree(ctx context.Context, name, rel string) ([]byte, error) {
+	if rel == "" {
+		return nil, fmt.Errorf("connector: %s is the worktree itself, not a file in it", p.Worktree)
+	}
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return nil, fmt.Errorf("connector: %q is not a path in a worktree", rel)
+		}
+		here := strings.Join(parts[:i+1], "/")
+		last := i == len(parts)-1
+		mode, err := p.w.treeEntry(ctx, p.Repository, p.BaseCommit, here)
+		switch {
+		case err != nil:
+			return nil, err
+		case mode == "":
+			return nil, fmt.Errorf("%s at %s: %w", here, shortCommit(p.BaseCommit), os.ErrNotExist)
+		case mode == modeSymlink, mode == modeGitlink:
+			kind := "a symbolic link"
+			if mode == modeGitlink {
+				kind = "a submodule"
+			}
+			return nil, &UnmodeledPathError{
+				Path: filepath.Join(p.Worktree, filepath.FromSlash(here)), Kind: kind,
+				Repository: p.Repository, Commit: p.BaseCommit,
+			}
+		case mode == modeTree:
+			if last {
+				return nil, fmt.Errorf("connector: %s in a worktree of %s is a directory", name, p.Repository)
+			}
+		case !last:
+			return nil, fmt.Errorf("connector: %s in a worktree of %s is a file, not a directory",
+				filepath.Join(p.Worktree, filepath.FromSlash(here)), p.Repository)
+		default:
+			return p.w.blobAtCommit(ctx, p.Repository, p.BaseCommit, here)
+		}
+	}
+	// Every component but the last is a tree, and the last returned above.
+	return nil, fmt.Errorf("connector: %q could not be resolved in a worktree of %s", rel, p.Repository)
+}
+
+// treeEntry is the mode of one path in a commit's tree, and "" when the
+// commit has no such path. Existence is asked of the tree rather than read
+// from an error's words, and the path is given as a literal pathspec, so a
+// directory named for a glob is the directory it is named for.
+func (w *Worktrees) treeEntry(ctx context.Context, repository, commit, rel string) (string, error) {
+	if rel == "" || strings.ContainsRune(rel, 0) {
+		return "", fmt.Errorf("connector: %q is not a path in a repository", rel)
+	}
+	listed, err := w.gitOut(ctx, repository, "ls-tree", "--full-tree", "-z", "--end-of-options", commit, "--", ":(literal)"+rel)
+	if err != nil {
+		return "", err
+	}
+	entry, _, _ := strings.Cut(strings.Trim(listed, "\x00"), "\t")
+	if entry == "" {
+		return "", nil
+	}
+	mode, _, _ := strings.Cut(entry, " ")
+	return mode, nil
+}
+
+// blobAtCommit is the content of one regular file in a commit's tree.
+func (w *Worktrees) blobAtCommit(ctx context.Context, repository, commit, rel string) ([]byte, error) {
+	return w.gitRaw(ctx, repository, "show", "--end-of-options", commit+":"+rel)
+}
+
+// shortCommit is a commit id as a person reads one.
+func shortCommit(commit string) string {
+	return commit[:min(len(commit), 12)]
+}
+
+func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventID int64) (string, error) {
+	if !filepath.IsAbs(route) {
+		return "", fmt.Errorf("connector: route %q is not absolute", route)
 	}
 	suffix := make([]byte, 3)
 	if _, err := rand.Read(suffix); err != nil {
 		return "", err
 	}
 	name := strconv.FormatInt(originatingEventID, 10) + "-" + hex.EncodeToString(suffix)
-	path := w.path(w.root, repository, name)
-	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("connector: worktree path %q is not absolute", path)
+	plan, err := w.Plan(ctx, route, name)
+	if err != nil {
+		return "", err
 	}
-	workDir := filepath.Join(path, rel)
 	record := Worktree{
-		Path: path, WorkDir: workDir, Route: route, Repository: repository,
-		Branch: BranchPrefix + name, BaseCommit: base, OriginatingEventID: originatingEventID,
+		Path: plan.Worktree, WorkDir: plan.Dir, Route: route, Repository: plan.Repository,
+		Branch: BranchPrefix + name, BaseCommit: plan.BaseCommit, OriginatingEventID: originatingEventID,
 		State: WorktreeCreating,
 	}
 	id, err := w.ledger.BeginWorktree(ctx, record)
@@ -392,7 +662,7 @@ func (w *Worktrees) prepare(ctx context.Context, route string, originatingEventI
 		}
 		return "", fmt.Errorf("connector: create a worktree for event %d: %w", originatingEventID, err)
 	}
-	return workDir, nil
+	return plan.Dir, nil
 }
 
 // hasNoCommit proves a repository has no commit HEAD reaches. rev-parse
@@ -440,6 +710,9 @@ func (w *Worktrees) add(ctx context.Context, r *Worktree) error {
 // prune can judge it. Nothing here removes anything. A directory that is not
 // one of this connector's worktrees is left alone.
 func (w *Worktrees) Finish(ctx context.Context, _ string, workDir string) error {
+	if w.planOnly {
+		return ErrPlanOnly
+	}
 	record, ok, err := w.ledger.WorktreeByWorkDir(ctx, workDir)
 	if err != nil || !ok {
 		return err
@@ -484,6 +757,9 @@ func (w *Worktrees) keepUnjudged(ctx context.Context, r Worktree) error {
 // its names restored. It removes nothing. It runs in the connector that holds
 // the instance lock, before anything is dispatched.
 func (w *Worktrees) Recover(ctx context.Context) error {
+	if w.planOnly {
+		return ErrPlanOnly
+	}
 	unlock, err := w.lock(ctx)
 	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		// A prune holding the lock does not keep the connector from starting:
@@ -519,6 +795,9 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 // those a removal left mid-flight, which hold work until a start or a prune
 // judges them again.
 func (w *Worktrees) Retained(ctx context.Context) ([]Worktree, error) {
+	if w.planOnly {
+		return nil, ErrPlanOnly
+	}
 	return w.ledger.Worktrees(ctx, WorktreeRetained, WorktreeRemoving)
 }
 
@@ -573,6 +852,9 @@ var ErrNotRetained = errors.New("not a retained worktree")
 // are, until its path is in force. A path in force that is no retained
 // worktree refuses the whole prune before anything is removed.
 func (w *Worktrees) Prune(ctx context.Context, force []string) ([]PruneResult, error) {
+	if w.planOnly {
+		return nil, ErrPlanOnly
+	}
 	unlock, err := w.lock(ctx)
 	if err != nil {
 		return nil, err

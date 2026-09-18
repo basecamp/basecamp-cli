@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -61,8 +62,11 @@ type Adapter struct {
 	Readback Readback
 	// Preflight refuses, before anything starts, a session the adapter would
 	// run with configuration the connector cannot switch off: nil when there is
-	// none to check.
-	Preflight func(cwd string, lookup func(string) (string, bool)) error
+	// none to check. read is how it reads a configuration file, os.ReadFile
+	// when nil — the seam a caller stands in when the session's working
+	// directory does not exist yet (doctor, which reads a planned worktree's
+	// files out of the repository it would be made from).
+	Preflight func(cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error
 }
 
 // ClaudeAgentACP is Claude Code over ACP.
@@ -258,6 +262,72 @@ var ErrMCPServerNotConnected = fmt.Errorf("%w: an MCP server of the session did 
 // own, which the connector cannot keep out of a session.
 var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MCP servers of its own")
 
+// ErrConfigUnreadable is an agent configuration file that is there and
+// cannot be read. It refuses a session as a declaration does — the agent
+// may read what this cannot, and a file nobody can read is not a file that
+// declares nothing — but it is not a declaration, and what a person does
+// about it is not what they do about one, so it is its own error and not
+// ErrForeignMCPConfig.
+var ErrConfigUnreadable = errors.New("acp: an agent configuration file cannot be read")
+
+// unreadableConfigError is one such file.
+type unreadableConfigError struct {
+	file string
+	err  error
+}
+
+func (e *unreadableConfigError) Error() string {
+	return fmt.Sprintf("acp: %s cannot be read, so it cannot be said to declare no MCP server of its own: %v", e.file, e.err)
+}
+
+func (e *unreadableConfigError) Unwrap() []error { return []error{ErrConfigUnreadable, e.err} }
+
+// refusalsError is every reason one session was refused: one line to read,
+// and every one of them still to errors.Is.
+type refusalsError struct{ errs []error }
+
+func (e *refusalsError) Error() string {
+	parts := make([]string, 0, len(e.errs))
+	for i, err := range e.errs {
+		msg := err.Error()
+		if i > 0 {
+			// The package's prefix is on each of them; once is enough to read.
+			msg = strings.TrimPrefix(msg, "acp: ")
+		}
+		parts = append(parts, msg)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (e *refusalsError) Unwrap() []error { return e.errs }
+
+// Refusals is every reason a preflight refused a session, one error each:
+// the refusals of a joined refusal, and err itself when it is one refusal or
+// something else entirely. A caller that reports a session's refusals — a
+// doctor that groups them by the routes they affect — needs them apart, and
+// reading them out of a joined message would be reading a message.
+func Refusals(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(*refusalsError); ok { //nolint:errorlint // this is the join itself, not something wrapping one
+		return joined.errs
+	}
+	return []error{err}
+}
+
+// refused is every refusal as one error, and nil when there is none.
+func refused(errs []error) error {
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	default:
+		return &refusalsError{errs: errs}
+	}
+}
+
 // escapedTOMLKey is a table header or a key whose name carries a backslash
 // escape.
 var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
@@ -270,6 +340,9 @@ var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 // allowed; in the asking mode its tool calls need not be put to the policy at
 // all.
 //
+// It reads every layer rather than stopping at the first that refuses: a
+// person fixing this gets every file to change out of one run.
+//
 // It reads for the name, not the TOML: the name anywhere in the file — a
 // table header, a dotted key, an inline table, a profile, a comment — refuses
 // the session. Parsing it would mean matching Codex's own merge of profiles,
@@ -281,7 +354,10 @@ var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 // configuration from layers this cannot read — an MDM profile, a cloud-managed
 // config, a plugin — so it is a guard, not a proof. What would be a proof is
 // the effective configuration the app server reports, which ACP does not carry.
-func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
+func codexPreflight(cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error {
+	if read == nil {
+		read = os.ReadFile
+	}
 	var files []string
 	home := ""
 	if v, ok := lookup("CODEX_HOME"); ok && v != "" {
@@ -303,30 +379,41 @@ func codexPreflight(cwd string, lookup func(string) (string, bool)) error {
 			break
 		}
 	}
+	// A working directory under the home directory names the user's layer
+	// twice; a layer is read, and refused, once.
+	files = slices.Compact(slices.Sorted(slices.Values(files)))
+
+	// Every layer is read, and every one that refuses the session is
+	// reported: what a person has to change is all of it, and naming the
+	// first would have them run this again for the next.
+	var refusals []error
 	for _, file := range files {
-		raw, err := os.ReadFile(file) //nolint:gosec // G304: codex's own config locations
+		raw, err := read(file)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			// A file that is there and cannot be read is not a file this can
 			// say anything about, and Codex may read it where this cannot.
-			return fmt.Errorf("%w: %s cannot be read: %w", ErrForeignMCPConfig, file, err)
+			refusals = append(refusals, &unreadableConfigError{file: file, err: err})
+			continue
 		}
 		text := strings.TrimPrefix(string(raw), "\ufeff")
 		if strings.Contains(text, "mcp_servers") {
-			return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
+			refusals = append(refusals, fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file))
+			continue
 		}
 		for _, line := range strings.Split(text, "\n") {
 			if escapedTOMLKey.MatchString(line) {
 				// TOML decodes escapes in a quoted key, so "mcp\u005fservers"
 				// is mcp_servers to Codex and something else to a reader. A
 				// key this cannot read plainly is refused rather than guessed.
-				return fmt.Errorf("%w: %s has a key this cannot read (an escape in a quoted key)", ErrForeignMCPConfig, file)
+				refusals = append(refusals, fmt.Errorf("%w: %s has a key this cannot read (an escape in a quoted key)", ErrForeignMCPConfig, file))
+				break
 			}
 		}
 	}
-	return nil
+	return refused(refusals)
 }
 
 // codexConfig is the thread config codex-acp layers onto every session. The
@@ -337,6 +424,33 @@ const codexConfig = `{"features":{"apps":false,"plugins":false,"remote_plugin":f
 	`"image_generation":false,"memories":false,"skill_mcp_dependency_install":false,"tool_suggest":false},` +
 	`"skills":{"bundled":{"enabled":false},"include_instructions":false},` +
 	`"shell_environment_policy":{"inherit":"core"},"web_search":"disabled"}`
+
+// Preflight is adapter a's own refusal of a session it would not start,
+// made before anything starts and run here for a session that would work in
+// cwd: nil for an adapter that has nothing on this machine to check, and
+// nil when the adapter would start there.
+//
+// The environment it reads is the one the adapter would run in —
+// driver.BaseEnv and the adapter's own names, read with lookup (os.LookupEnv
+// when nil), under the driver's own switches — so what the preflight
+// resolves its configuration against (a CODEX_HOME, a HOME) is what the
+// adapter will. A dispatch runs the same preflight against the session's
+// environment, which is this one plus what the dispatcher gives a session
+// (see Driver.open); anything outside a dispatch — doctor — asks here, and
+// gets the answer a dispatch would rather than one read from its own
+// environment. read is how a configuration file is read, os.ReadFile when
+// nil: a caller checking a directory that does not exist yet reads its
+// files from wherever they will come from.
+func Preflight(a Adapter, cwd string, lookup func(string) (string, bool), read func(string) ([]byte, error)) error {
+	if a.Preflight == nil {
+		return nil
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	env := mergeEnv(driver.BuildEnv(driver.BaseEnv, lookup, nil), driver.BuildEnv(a.Env, lookup, nil))
+	return a.Preflight(cwd, lookupIn(setEnv(env, a.SetEnv)), read)
+}
 
 // Adapters are the pinned adapters the driver runs.
 func Adapters() []Adapter { return []Adapter{ClaudeAgentACP, CodexACP} }

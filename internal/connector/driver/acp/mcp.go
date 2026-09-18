@@ -31,8 +31,9 @@ import (
 //  2. What the adapter must not add. The adapter is configured so it can
 //     load no MCP server of the host's: claude-agent-acp is given
 //     settingSources: [] and strictMcpConfig, and codex-acp is refused
-//     before it starts when its config declares mcp_servers
-//     (ErrForeignMCPConfig, from codexPreflight) and is run with
+//     before it starts when a config layer of its declares mcp_servers, or
+//     cannot be read (ErrForeignMCPConfig and ErrConfigUnreadable, from
+//     codexPreflight, which names every such layer) and is run with
 //     DISABLE_MCP_CONFIG_FILTERING so the servers it was given reach the
 //     session whole. Both live with the adapters, in adapters.go.
 //

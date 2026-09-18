@@ -65,9 +65,10 @@ func newFakeWorker(dir string) (*fakeWorker, error) {
 	w := &fakeWorker{dir: dir, sc: sc, replies: map[int64]int64{}}
 	pgid, _ := syscall.Getpgid(0)
 	// What this agent was started with, for the parent to check no task
-	// token is in either.
+	// token is in either. The stamp is the kernel's, as on every entry: the
+	// parent waits on this process by it, and ends it by it.
 	_ = appendJSONLine(filepath.Join(dir, agentLogFile), agentLogEntry{
-		PID: os.Getpid(), PGID: pgid, StartedAt: time.Now(), Step: "start", Args: os.Args[1:], Env: os.Environ(),
+		PID: os.Getpid(), PGID: pgid, StartedAt: kernelStart(os.Getpid()), Step: "start", Args: os.Args[1:], Env: os.Environ(),
 	})
 	return w, nil
 }

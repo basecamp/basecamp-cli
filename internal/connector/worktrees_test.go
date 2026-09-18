@@ -1897,3 +1897,257 @@ func TestAPerWorktreeRefAtAnAnnotatedTagKeepsItsCommit(t *testing.T) {
 	assert.Contains(t, h.git(h.repo, "for-each-ref", "--format=%(objectname)", RetainedRefPrefix), tagged,
 		"the tag's commit is kept, not dropped with the tag")
 }
+
+// A planner answers where a task would work and what its checkout would
+// hold, and makes nothing: doctor has to ask the question a dispatch
+// answers, and must not create a worktree, a root or a ledger row to do it.
+func TestPlanSaysWhereATaskWouldWorkWithoutMakingAnything(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	plan, err := planner.Plan(ctx, route, "doctor")
+	require.NoError(t, err)
+	assert.Equal(t, h.repo, plan.Repository)
+	assert.Equal(t, "app", plan.Rel)
+	assert.Equal(t, filepath.Join(plan.Worktree, "app"), plan.Dir)
+	assert.NotEqual(t, route, plan.Dir, "a task with worktrees on does not work in the route")
+	_, err = os.Stat(plan.Worktree)
+	assert.ErrorIs(t, err, os.ErrNotExist, "planning creates no worktree")
+	_, err = os.Stat(h.root)
+	assert.ErrorIs(t, err, os.ErrNotExist, "and no root to hold one")
+
+	// Everything that would make, record or remove one refuses.
+	_, err = planner.Prepare(ctx, route, 1)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+	assert.ErrorIs(t, planner.Finish(ctx, route, plan.Dir), ErrPlanOnly)
+	assert.ErrorIs(t, planner.Recover(ctx), ErrPlanOnly)
+	_, err = planner.Prune(ctx, nil)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+
+	// The plan is the directory Prepare actually gives a task: same route,
+	// same name, same path.
+	workDir, err := h.wt.Prepare(ctx, route, 77)
+	require.NoError(t, err)
+	name := filepath.Base(filepath.Dir(workDir))
+	made, err := planner.Plan(ctx, route, name)
+	require.NoError(t, err)
+	assert.Equal(t, workDir, made.Dir, "doctor plans the directory a dispatch uses, not one like it")
+}
+
+// A planned worktree's files are the repository's at the commit it would be
+// made from: a file only the route has is in no worktree, and a file the
+// commit has is in every one of them, whatever the checkout says now.
+func TestPlannedWorkDirReadsTheCommitTheWorktreeWouldBeMadeFrom(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	h.write(h.repo, "app/tracked.toml", "committed\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "tracked")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	plan, err := planner.Plan(ctx, route, "doctor")
+	require.NoError(t, err)
+
+	got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, "tracked.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "committed\n", string(got), "a tracked file reads as the commit has it")
+
+	h.write(h.repo, "app/tracked.toml", "edited in the route\n")
+	got, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "tracked.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "committed\n", string(got), "the worktree would hold the commit, not the route's edit")
+
+	h.write(h.repo, "app/untracked.toml", "only in the route\n")
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "untracked.toml"))
+	assert.ErrorIs(t, err, os.ErrNotExist, "an untracked file is in no worktree")
+
+	// Outside the worktree is the machine, read as it is.
+	outside := filepath.Join(h.home, "outside.toml")
+	require.NoError(t, os.WriteFile(outside, []byte("on disk\n"), 0o600))
+	got, err = plan.ReadFile(ctx, outside)
+	require.NoError(t, err)
+	assert.Equal(t, "on disk\n", string(got))
+	_, err = plan.ReadFile(ctx, filepath.Join(h.home, "missing.toml"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// A planned read models a regular file the repository tracks, and says so
+// about everything else. A symbolic link is followed by the kernel at
+// dispatch to wherever it points, and git hands back its target instead of
+// that file; a submodule's directory the checkout leaves empty. Reading the
+// link's text as configuration is how doctor would call a profile ready
+// over a layer nothing read, so a layer like that is named, not guessed.
+func TestPlannedWorkDirSaysWhichLayersItDoesNotModel(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+
+	h.write(h.repo, "shared.toml", "shared content\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "app", ".codex"), 0o700))
+	require.NoError(t, os.Symlink("../../shared.toml", filepath.Join(h.repo, "app", ".codex", "config.toml")))
+	require.NoError(t, os.Symlink(".codex", filepath.Join(h.repo, "app", "linkdir")))
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "links")
+	// A submodule, without fetching anything: a gitlink in the tree is what
+	// a submodule is to the checkout.
+	h.git(h.repo, "update-index", "--add", "--cacheinfo", "160000,"+h.git(h.repo, "rev-parse", "HEAD")+",app/vendor")
+	h.git(h.repo, "commit", "-q", "-m", "a submodule")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	plan, err := planner.Plan(ctx, route, "doctor")
+	require.NoError(t, err)
+
+	for _, tc := range []struct{ name, path, kind string }{
+		{"a link where the file is", filepath.Join(plan.Dir, ".codex", "config.toml"), "a symbolic link"},
+		{"a link on the way to it", filepath.Join(plan.Dir, "linkdir", "config.toml"), "a symbolic link"},
+		{"a submodule on the way to it", filepath.Join(plan.Dir, "vendor", ".codex", "config.toml"), "a submodule"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := plan.ReadFile(ctx, tc.path)
+			require.ErrorIs(t, err, ErrNotModeled)
+			assert.NotErrorIs(t, err, os.ErrNotExist, "what was not read is not an absence")
+			var unmodeled *UnmodeledPathError
+			require.ErrorAs(t, err, &unmodeled)
+			assert.Equal(t, tc.kind, unmodeled.Kind)
+			assert.Contains(t, err.Error(), unmodeled.Path, "the layer that was not read is named")
+			assert.Contains(t, unmodeled.Path, plan.Worktree)
+		})
+	}
+
+	// A regular file the repository tracks is still read as the checkout
+	// would have it, which is the whole promise it does make.
+	got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, "..", "shared.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "shared content\n", string(got))
+
+	// And a directory is a directory, a file used as one is not.
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a directory")
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "README", "config.toml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory")
+}
+
+// A path in the repository is a path, not an option and not a glob: a
+// directory named "-app" or "conf[1]" is read as itself.
+func TestPlannedWorkDirReadsPathsGitCouldMistakeForSomethingElse(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	for _, dir := range []string{"-app", "conf[1]"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(h.repo, dir, ".codex"), 0o700))
+		h.write(h.repo, filepath.Join(dir, ".codex", "config.toml"), "name = \""+dir+"\"\n")
+	}
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "awkward names")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	for _, dir := range []string{"-app", "conf[1]"} {
+		plan, err := planner.Plan(ctx, filepath.Join(h.repo, dir), "doctor")
+		require.NoError(t, err)
+		got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex", "config.toml"))
+		require.NoError(t, err, "a directory named %q is a directory, not an option or a pattern", dir)
+		assert.Equal(t, "name = \""+dir+"\"\n", string(got))
+	}
+}
+
+// The planner needs no ledger, so it must not say it does.
+func TestPlanWorktreesSaysWhatItActuallyNeeds(t *testing.T) {
+	_, err := PlanWorktrees(WorktreesOptions{Root: "relative/root"})
+	require.ErrorIs(t, err, ErrNoRoot)
+	assert.NotContains(t, err.Error(), "ledger", "the planner takes none, so a refusal must not ask for one")
+
+	_, err = NewWorktrees(WorktreesOptions{Root: "/tmp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ledger", "the one that records worktrees does need it")
+}
+
+// A worktree is the commit's tree written out, so a route the tree does not
+// have is a working directory that would not be there: git writes no
+// directory for one that is untracked or ignored, and nothing could be
+// started in it. It is refused as the route it is, not waited on.
+func TestPlanRefusesARouteTheCheckoutWouldNotHold(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+
+	// The tracked route, and the repository itself, are what a checkout has.
+	for _, route := range []string{filepath.Join(h.repo, "app"), h.repo} {
+		plan, err := planner.Plan(ctx, route, "doctor")
+		require.NoError(t, err, "a directory the repository tracks is in every worktree of it")
+		assert.NotEmpty(t, plan.Dir)
+	}
+
+	// A directory that is only on disk is in no worktree.
+	untracked := filepath.Join(h.repo, "scratch")
+	require.NoError(t, os.MkdirAll(untracked, 0o700))
+	_, err = planner.Plan(ctx, untracked, "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+	assert.Contains(t, err.Error(), "no worktree of it would hold the route")
+
+	// One that is ignored is untracked with a reason, and no different.
+	h.write(h.repo, ".gitignore", "ignored/\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "ignore something")
+	ignored := filepath.Join(h.repo, "ignored")
+	require.NoError(t, os.MkdirAll(ignored, 0o700))
+	_, err = planner.Plan(ctx, ignored, "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+
+	// And a route the commit has as a file — a directory made on disk over
+	// a file the repository tracks — is not a directory to run in.
+	h.write(h.repo, "conflict", "a file at HEAD\n")
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "a file where a directory will be")
+	require.NoError(t, os.Remove(filepath.Join(h.repo, "conflict")))
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "conflict"), 0o700))
+	_, err = planner.Plan(ctx, filepath.Join(h.repo, "conflict"), "doctor")
+	require.ErrorIs(t, err, ErrRouteUnusable)
+	assert.Contains(t, err.Error(), "not a directory a session could run in")
+
+	// A submodule's directory the checkout does make, empty; a symbolic
+	// link it follows at dispatch. Neither is proved unusable, so neither
+	// is refused here.
+	h.git(h.repo, "update-index", "--add", "--cacheinfo", "160000,"+h.git(h.repo, "rev-parse", "HEAD")+",vendor")
+	require.NoError(t, os.Symlink("app", filepath.Join(h.repo, "applink")))
+	h.git(h.repo, "add", "applink")
+	h.git(h.repo, "commit", "-q", "-m", "a submodule and a link")
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "vendor"), 0o700))
+	for _, route := range []string{filepath.Join(h.repo, "vendor"), filepath.Join(h.repo, "applink")} {
+		_, err = planner.Plan(ctx, route, "doctor")
+		assert.NotErrorIs(t, err, ErrRouteUnusable, "%s is not proved unusable", route)
+	}
+}
+
+// A planner is only a planner: it has no ledger, so everything the ledger
+// answers refuses rather than reaching for one, and it is not asked for at
+// all where there are no worktrees to plan.
+func TestAPlannerRefusesEverythingItCannotAnswer(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+
+	_, err = planner.Retained(ctx)
+	assert.ErrorIs(t, err, ErrPlanOnly, "a planner has no ledger to list worktrees from")
+	_, err = planner.Prepare(ctx, filepath.Join(h.repo, "app"), 1)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+	assert.ErrorIs(t, planner.Finish(ctx, "", ""), ErrPlanOnly)
+	assert.ErrorIs(t, planner.Recover(ctx), ErrPlanOnly)
+	_, err = planner.Prune(ctx, nil)
+	assert.ErrorIs(t, err, ErrPlanOnly)
+
+	// With worktrees off, a task works in its route and there is nothing to
+	// plan: a planner that answered anyway would answer for a dispatch that
+	// would not happen.
+	_, err = PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup, Off: true})
+	assert.ErrorIs(t, err, ErrPlanNothing)
+}
