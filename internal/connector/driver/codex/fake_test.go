@@ -45,6 +45,12 @@ type scenario struct {
 	TurnContextAfterEvents bool `json:"turn_context_after_events"`
 	// Events are written to stdout after thread.started.
 	Events []string `json:"events"`
+	// LateEvents are written once LateAfter exists, and before any
+	// turn_context held back to the end. A test that needs the reader, or
+	// the turn, to be somewhere in particular when a line arrives puts it
+	// here and makes the file when it is there, rather than hoping.
+	LateEvents []string `json:"late_events"`
+	LateAfter  string   `json:"late_after"`
 	// NoThread skips thread.started.
 	NoThread bool `json:"no_thread"`
 	// RunMCP starts each MCP server as Codex would and waits for it.
@@ -184,6 +190,27 @@ func fakeCodex() int {
 	}
 	for _, e := range sc.Events {
 		fmt.Println(e)
+	}
+	if sc.LateAfter != "" {
+		// The barrier is the point of these events: said without it, they
+		// prove nothing about the ordering the test claims, and a test that
+		// passes on a timer is the very thing this harness is for catching.
+		// A trigger that never comes is a broken test, and the fake says so
+		// rather than going ahead.
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if _, err := os.Stat(sc.LateAfter); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				fmt.Fprintln(os.Stderr, "fake codex: the late events were never triggered:", sc.LateAfter)
+				return 2
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		for _, e := range sc.LateEvents {
+			fmt.Println(e)
+		}
 	}
 	if sc.TurnContextAfterEvents {
 		// The policy the driver judges is readable only once everything this

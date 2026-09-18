@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -1030,6 +1031,190 @@ func TestAnUnsafeSessionStillReportsItsRefusals(t *testing.T) {
 	waitDone(t, s)
 	assert.Len(t, recorder.Recorded(), 1, "the ledger holds the refusal the session made before its verdict")
 	assert.Len(t, result.Refusals, 1, "the result carries what the ledger carries")
+}
+
+// heldLedger is a ledger that takes its time over the first refusal it is
+// given, as a ledger that writes to a database can. It holds the reader on
+// the line it is reading, with the rest of the stream unread behind it, until
+// the test lets it go.
+type heldLedger struct {
+	drivertest.Refusals
+	writing chan struct{} // one send per write begun
+	release chan struct{}
+	once    sync.Once
+}
+
+func (l *heldLedger) RecordRefusal(ctx context.Context, refusal driver.Refusal) error {
+	l.once.Do(func() {
+		l.writing <- struct{}{}
+		<-l.release
+	})
+	return l.Refusals.RecordRefusal(ctx, refusal)
+}
+
+// An unsafe verdict does not end the turn before the reader has read what the
+// worker put on its stream. The verdict is reached on the policy check's own
+// goroutine, which is the one ending that is not the reader's, and the
+// refusals on the stream are the reader's to record: a turn ended the instant
+// the worker died carries a result short of what the ledger goes on to hold,
+// and for a refusal that is the whole point of the ending.
+//
+// The ordering is made, not waited for, at both ends. The refusals are held
+// behind a barrier the test releases once it has seen the turn in flight, so
+// the reader cannot reach them before there is a turn for them to be on; and
+// the ledger is held over its first write, so the reader is provably stopped
+// on the first of the two with the second still unread when the verdict
+// lands.
+func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
+	denial := func(id string) string {
+		return `{"type":"item.completed","item":{"id":"` + id + `","type":"mcp_tool_call","server":"other","tool":"write",` +
+			`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	}
+	unsafe := safeTurnContext()
+	unsafe["approval_policy"] = "on-request"
+	for name, deaf := range map[string]bool{
+		"a worker that took its prompt": false,
+		// Ending the worker closes its stdin, which wakes a prompt still
+		// blocked writing it. That writer is an ending of its own, and it
+		// would report the session as ended rather than as unsafe.
+		"a worker that stopped reading its input": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+			refusals := filepath.Join(t.TempDir(), "say-the-refusals")
+			h := newHarness(t, scenario{
+				TurnContext:            unsafe,
+				TurnContextAfterEvents: true,
+				Events:                 []string{`{"type":"turn.started"}`},
+				// Held until the turn is in flight: a refusal read before
+				// there is a turn is on no turn, and the test would be
+				// asking about something that never happened.
+				LateEvents: []string{denial("item_1"), denial("item_2")},
+				LateAfter:  refusals,
+				Deaf:       deaf,
+				// No turn.completed: the worker is still working when the
+				// check ends it, which is what this ending is for.
+				Hang: true,
+			})
+			cfg := h.config()
+			cfg.Refusals = ledger
+			s, err := h.drv.NewSession(context.Background(), cfg)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = s.Close() })
+
+			type answer struct {
+				result driver.PromptResult
+				err    error
+			}
+			// A prompt long enough to fill the pipe, so a worker that does
+			// not read it leaves the write blocked.
+			prompt := "Task 1. Event 2."
+			if deaf {
+				prompt = strings.Repeat("Event 1. ", 200_000)
+			}
+			answers := make(chan answer, 1)
+			go func() {
+				result, err := s.Prompt(context.Background(), prompt)
+				answers <- answer{result, err}
+			}()
+
+			// The turn is in flight, and only then are the refusals said.
+			session := s.(*session)
+			var inFlight chan struct{}
+			require.Eventually(t, func() bool {
+				session.mu.Lock()
+				defer session.mu.Unlock()
+				if session.turn == nil {
+					return false
+				}
+				inFlight = session.turn.done
+				return true
+			}, 20*time.Second, 5*time.Millisecond, "the turn never started")
+			require.NoError(t, os.WriteFile(refusals, nil, 0o600))
+			<-ledger.writing
+
+			// The turn must not finish while the reader is held — and if it
+			// does, that is the failure, so the ledger is let go the moment
+			// it does. The half second is only what lets the run finish when
+			// it does not.
+			go func() {
+				select {
+				case <-inFlight:
+				case <-time.After(500 * time.Millisecond):
+				}
+				close(ledger.release)
+			}()
+
+			got := <-answers
+			require.ErrorIs(t, got.err, driver.ErrUnsafeMode, "an unsafe session is reported as unsafe, whoever gets to the turn first")
+			require.ErrorContains(t, got.err, `Codex applied "on-request"`)
+			assert.Len(t, ledger.Recorded(), 2, "both refusals reach the ledger")
+			assert.Len(t, got.result.Refusals, 2,
+				"the result carries what the ledger carries, and carries %d of the %d recorded",
+				len(got.result.Refusals), len(ledger.Recorded()))
+		})
+	}
+}
+
+// A session closed under a turn still reports the refusals that turn made.
+// A worker that has stopped reading its input leaves the prompt's write
+// blocked, and closing the session fails that write: the turn is then
+// finished by the prompt's own writer rather than by the reader, and that
+// ending used to hand back an empty result over a turn that had refusals on
+// it.
+//
+// The reader is held in the ledger so that it cannot be the one to finish the
+// turn: the ending under test is the writer's, and nothing else.
+func TestASessionClosedUnderATurnStillReportsItsRefusals(t *testing.T) {
+	ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+	denial := `{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"other","tool":"write",` +
+		`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	refused := filepath.Join(t.TempDir(), "say-the-refusal")
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Deaf:        true,
+		Hang:        true,
+		Events:      []string{`{"type":"turn.started"}`},
+		// Held until the turn is in flight: a refusal read before there is
+		// a turn is on no turn, and this test is about what a turn carries.
+		LateEvents: []string{denial},
+		LateAfter:  refused,
+	})
+	cfg := h.config()
+	cfg.Refusals = ledger
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+
+	type answer struct {
+		result driver.PromptResult
+		err    error
+	}
+	answers := make(chan answer, 1)
+	go func() {
+		result, err := s.Prompt(context.Background(), strings.Repeat("Event 1. ", 200_000))
+		answers <- answer{result, err}
+	}()
+	waitDeaf(t, h)
+	session := s.(*session)
+	require.Eventually(t, func() bool {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return session.turn != nil
+	}, 20*time.Second, 5*time.Millisecond, "the turn never started")
+	require.NoError(t, os.WriteFile(refused, nil, 0o600))
+	// The refusal is the turn's: refused puts it there before it writes it,
+	// and the write is where the reader is now held.
+	<-ledger.writing
+
+	closed := make(chan struct{})
+	go func() { _ = s.Close(); close(closed) }()
+	got := <-answers
+	close(ledger.release)
+	<-closed
+
+	require.ErrorIs(t, got.err, driver.ErrSessionEnded)
+	assert.Len(t, got.result.Refusals, 1,
+		"the turn's refusals are on its result, and it carries %d", len(got.result.Refusals))
 }
 
 // Codex logs its sandbox refusals and keeps writing: each one is recorded,
