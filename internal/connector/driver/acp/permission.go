@@ -129,10 +129,11 @@ func (s *session) onRequest(id json.RawMessage, method string, params json.RawMe
 		Locations:  slices.Clone(info.locations),
 	}
 	if info.unplaceable || call.Unplaceable {
-		// The policy allows such a call only when every path it names is
-		// inside the working directory, and this is a call whose paths this
-		// driver could not carry whole. It is refused without being asked,
-		// rather than judged on the paths that fit.
+		// A call whose paths this driver could not carry whole is one it
+		// cannot describe to the policy, so it is refused without being
+		// asked rather than judged on the paths that fit. Fail closed: the
+		// policy is a seam a sandbox launcher will take over, and a call it
+		// was never shown must not pass by default.
 		s.refuse(id, req, t)
 		return
 	}

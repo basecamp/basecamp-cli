@@ -865,9 +865,8 @@ func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
 }
 
 // The one-owner rule (see internal/connector/driver/worker.go): a task whose
-// process tree is still alive never has its directory released or its record
-// settled.
-func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
+// process tree is still alive never has its record settled.
+func TestATaskWithASurvivingGrandchildIsNeverSettled(t *testing.T) {
 	work := t.TempDir()
 	worker, grandchild := drivertest.StartTree(t, work)
 	<-worker.Done() // the leader is gone; its grandchild is not
@@ -1476,8 +1475,8 @@ func TestARefusedHandoffIsAlwaysSaidOutLoud(t *testing.T) {
 
 // Copilot on #738: a delivered token whose holder could not be identified
 // used to be the same zero taker as no delivery at all, so the release point
-// settled the attempt and released its directory around a process that may
-// still have held the task's credential. It is held instead — here, and
+// settled the attempt around a process that may still have held the task's
+// credential. It is held instead — here, and
 // after a restart, because the ledger carries the state too.
 func TestAnAttemptWhoseTokenHolderIsUnaccountedForIsHeld(t *testing.T) {
 	h := newDispatchHarness(t, newFakeDriver(), nil)

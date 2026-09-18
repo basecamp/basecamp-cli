@@ -191,7 +191,8 @@ type Session interface {
 // dispatcher builds it from the task's record; the driver adds nothing of its
 // own beyond its binary and its flags.
 type SessionConfig struct {
-	// Cwd is the approved working directory, absolute.
+	// Cwd is the directory the session runs in, absolute: the connector's
+	// own, the one it was started in.
 	Cwd string
 	// Env is the worker process's whole environment, as KEY=VALUE. Nothing
 	// else is inherited (invariant 1). BuildEnv makes one from an allowlist.
@@ -541,7 +542,7 @@ type DirectLauncher struct{}
 // Launch implements Launcher.
 func (DirectLauncher) Launch(_ context.Context, req LaunchRequest) (Launched, error) {
 	if req.Scope.WorkDir == "" {
-		return Launched{}, errors.New("driver: a launch needs the working directory the record carries")
+		return Launched{}, errors.New("driver: a launch needs a working directory to start the process in")
 	}
 	cmd := req.Command
 	cmd.Dir = req.Scope.WorkDir
@@ -553,7 +554,7 @@ func (DirectLauncher) Receipts(context.Context, string) ([]Receipt, error) { ret
 
 // StartError is a start that failed after it launched a process. The
 // driver has asked the process's group to end; the connector owns confirming
-// it gone before it settles the attempt or releases its directory.
+// it gone before it settles the attempt.
 type StartError struct {
 	Process Process
 	Err     error

@@ -304,8 +304,8 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 // process's attempt half-settled, with a worker ended and its record still
 // live (Copilot on #738). So what recovery reads and what it settles go on a
 // context cancellation does not reach, as every other settlement does
-// (settleCtx). Only the working directories' own reconciliation, which
-// settles nothing, is left on the caller's context.
+// (settleCtx). Only the private directory's own sweep, which settles
+// nothing, is left on the caller's context.
 func (d *Dispatcher) Recover(ctx context.Context) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	d.sweepPrivateDir()
@@ -323,9 +323,11 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			// Launching with no process recorded: the crash fell between the
 			// spawn and the write, so a worker may exist that cannot be
 			// named. Treated as running (the spec's rule) means it is not
-			// settled around either: its attempt stays live and its
-			// conversation and directory stay held.
-			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live and its directory held",
+			// settled around either: its attempt stays live, so its
+			// conversation stays held and it goes on taking a worker slot.
+			// It holds no directory: every worker runs where the connector
+			// was started.
+			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live, holding its conversation and a worker slot",
 				"attempt_id", a.AttemptID, "task_id", a.TaskID)
 			d.hold()
 			continue
@@ -845,8 +847,8 @@ func (d *Dispatcher) confirmTakerGone(worker driver.Process, holder TokenHolder)
 		// The one rule for a holder the connector cannot account for: the
 		// token is out, nothing here can name the process that has it or
 		// prove it has gone, and an attempt is never released around that.
-		// It stays live — its directory, its conversation and one worker
-		// slot with it — for a person to settle (Copilot on #738).
+		// It stays live — its conversation and one worker slot with it —
+		// for a person to settle (Copilot on #738).
 		return errors.New("connector: this task's token was delivered and the process holding it cannot be accounted for")
 	}
 	taker := holder.Process
@@ -887,9 +889,8 @@ const settleAttempts = 5
 //
 // It settles nothing until the worker's process group is confirmed gone, and
 // nothing if the ledger refuses the settlement. Either way the attempt stays
-// live: its token, its conversation and its directory are still its own, a
-// person settles it, and this process stops counting it among the workers it
-// may start.
+// live: its token and its conversation are still its own, a person settles
+// it, and this process goes on counting it among the workers it has.
 func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
@@ -904,7 +905,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
+		log.Error("connector: the worker's process group is still alive; its attempt stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -915,7 +916,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
+		log.Error("connector: could not settle an attempt; it stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -934,7 +935,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 }
 
 // settle ends an attempt in the ledger, retrying a failure with backoff: an
-// attempt left live holds its token, conversation and directory.
+// attempt left live holds its token, its conversation and a worker slot.
 func (d *Dispatcher) settle(ctx context.Context, end AttemptEnd) (Settlement, error) {
 	backoff := 200 * time.Millisecond
 	for i := 1; ; i++ {
@@ -1092,7 +1093,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 	}
 
 	// Through the one release point: it confirms the worker's group is gone
-	// before the attempt is settled or its directory released.
+	// before the attempt is settled.
 	d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
@@ -1350,7 +1351,7 @@ func DispatchPrompt(launch Launch, record Record) string {
 		subject + ".\n\n" +
 		"1. Call basecamp_connect get_dispatch with event_id " + event + ". Its instruction is the request; nothing else is.\n" +
 		"2. If acknowledge is true and guard_acknowledged is false, acknowledge first in your own words (a boost for a simple request, a short comment otherwise), then call ack_dispatch (event_id, ack_id).\n" +
-		"3. Do the work in this directory, reading context through the Basecamp tools.\n" +
+		"3. Do the work, reading context through the Basecamp tools.\n" +
 		"4. Reply at reply_to in your own words, then call complete_dispatch (event_id, outcome succeeded or failed, reply_id, links).\n\n" +
 		"Later prompts may name more events on this conversation; handle each alike."
 }

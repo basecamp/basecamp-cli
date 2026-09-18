@@ -206,7 +206,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		case record.redispatchDecision != 0:
 			return RedispatchResult{}, refuse("already has a redispatch waiting for its task to end")
 		case !dispatchable:
-			return RedispatchResult{}, refuse("no longer has the snapshot and served project a dispatch needs (retention dropped them, or the verdict carried none)")
+			return RedispatchResult{}, refuse("is missing something a dispatch needs: its content snapshot (retention dropped it, or the verdict carried none), or a project connect.json serves")
 		}
 		if !task.superseded {
 			// The replaced worker is refused by basecamp_connect from here on

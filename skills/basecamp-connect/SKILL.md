@@ -100,8 +100,9 @@ the person who the credential is and let them decide. After setup, check
   not get from the CLI's own output is one to ask about.
 - **Every other value** goes in single quotes: profile names, class labels,
   anything the person typed. Write a single quote inside a value as
-  `'\''`. Single quotes stop `~` expanding, so write a directory as an absolute
-  path. Fixed words from this skill (`operator`, `spawn`, `90m`) need no quotes.
+  `'\''`. Fixed words from this skill (`operator`, `spawn`, `90m`) need no
+  quotes. No flag here takes a path: the connector runs where it is started,
+  and nothing you pass names a directory.
 
 Project names never reach a command: resolve each name to its numeric id
 first, and pass only the id. For example the project called `Launch $(date)`
@@ -283,8 +284,11 @@ pass `--allow <id>` for each.
   project it works in.
 - Show the names, let the person choose, and map each choice to its numeric
   `id` yourself. When a name matches more than one project, ask which.
-- For each project ask which local directory its work runs in. Check the
-  directory exists.
+- Do not ask where a project's work lives. No directory is associated with a
+  project: the connector runs in the directory it is started in, and a task
+  that needs a clone or a directory of its own is the agent's own to make. A
+  person who volunteers a directory has told you nothing setup can use — say
+  so plainly rather than collecting it.
 - Offer `--watch-completions` only when the person wants the agent to act on
   every completed to-do or card in a project without being assigned. Offer
   `--class` only when they want projects labelled (for example `internal`; see
