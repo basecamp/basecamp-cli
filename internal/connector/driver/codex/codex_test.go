@@ -1000,21 +1000,35 @@ func TestARefusalLoggedAfterTheOutputEndsIsStillRecorded(t *testing.T) {
 
 // A session stopped for running under a policy it was not asked to run under
 // still reports the refusals it made: they are the ledger's and the result's.
+//
+// The refusal has to be made before the verdict, and that ordering is made
+// rather than waited for: the fake writes the policy the check reads only
+// once its events are on the stream, so the kill the verdict brings cannot
+// land on a fake that has not yet logged its denial. Left to race, it does
+// not: under load the fake is killed between thread.started and the denial
+// about a third of the time, and the refusal the test reads for is never
+// written at all.
 func TestAnUnsafeSessionStillReportsItsRefusals(t *testing.T) {
 	recorder := &drivertest.Refusals{}
 	denial := `{"type":"item.completed","item":{"id":"item_9","type":"mcp_tool_call","server":"other","tool":"write","error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
 	unsafe := safeTurnContext()
 	unsafe["approval_policy"] = "on-request"
 	h := newHarness(t, scenario{
-		TurnContext: unsafe,
-		Events:      []string{`{"type":"turn.started"}`, denial, turnCompleted()},
+		TurnContext:            unsafe,
+		TurnContextAfterEvents: true,
+		Events:                 []string{`{"type":"turn.started"}`, denial, turnCompleted()},
 	})
 	cfg := h.config()
 	cfg.Refusals = recorder
 	s, result, err := h.run(context.Background(), cfg)
 	require.ErrorIs(t, err, driver.ErrUnsafeMode)
+	// The verdict is the policy the fake applied, not a check that gave up
+	// waiting for one: both read as ErrUnsafeMode, and only one of them is
+	// this test's subject.
+	require.ErrorContains(t, err, `Codex applied "on-request"`,
+		"the session was stopped for the policy it ran under")
 	waitDone(t, s)
-	assert.Len(t, recorder.Recorded(), 1)
+	assert.Len(t, recorder.Recorded(), 1, "the ledger holds the refusal the session made before its verdict")
 	assert.Len(t, result.Refusals, 1, "the result carries what the ledger carries")
 }
 
@@ -1040,6 +1054,49 @@ func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {
 	require.NoError(t, s.Close())
 	assert.Len(t, recorder.Recorded(), 3, "every refusal, wherever it is and however it reads")
 	assert.Len(t, result.Refusals, 3)
+}
+
+// A refusal read after the session's updates have closed is recorded and its
+// update dropped, not a panic. The reader owns the close, but it is not the
+// only goroutine that reads the worker's last word: a prompt's writer
+// finishing a canceled turn, and the policy check ending an unsafe one, both
+// call lastWord from goroutines of their own, and either may reach it after
+// the reader has gone. This makes that ordering rather than waiting for it —
+// the worker logs its refusal only once the reader has given up on it — and
+// then reads the last word from a goroutine that is not the reader's, as
+// those two do.
+func TestARefusalReadAfterTheUpdatesCloseIsNotAPanic(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		// The output ends while the worker lives on, so the reader waits out
+		// its grace and ends having read a stderr with no refusal in it.
+		CloseStdout: true,
+		Hang:        true,
+		// The refusal Codex logs on its way out, after all that.
+		StderrOnTerm: "patch rejected: writing outside of the project; rejected by user approval settings",
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	session := s.(*session)
+	go func() { _, _ = s.Prompt(context.Background(), "Event 1.") }()
+	// Drains until the session's updates are closed, which is the ordering
+	// this test is built on: no duration is waited out for it.
+	for range s.Updates() { //nolint:revive // the drain is the wait
+	}
+	require.Empty(t, recorder.Recorded(), "the reader ended having read no refusal")
+
+	// Now the worker is ended, and logs the refusal on its way out.
+	require.NoError(t, s.Close())
+	require.Eventually(t, func() bool { return strings.Contains(session.StderrTail(), "rejected") },
+		10*time.Second, 20*time.Millisecond, "the worker logged its refusal on its way out")
+	session.stderrRefusals()
+
+	assert.Len(t, recorder.Recorded(), 1,
+		"the refusal is recorded, and the update it carries is dropped rather than sent on a closed channel")
 }
 
 // A refusal Codex logged is recorded even when the turn it belonged to has

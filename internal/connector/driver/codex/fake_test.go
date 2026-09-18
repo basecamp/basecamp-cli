@@ -37,6 +37,12 @@ type scenario struct {
 	// OldTurnContext is written before the prompt is read, as an earlier
 	// turn of a resumed thread would be.
 	OldTurnContext map[string]any `json:"old_turn_context"`
+	// TurnContextAfterEvents holds the turn_context record back until the
+	// events are written. The policy check starts at thread.started and ends
+	// an unsafe session the moment it can read the record, so a test about
+	// what a session said before that verdict orders the two rather than
+	// racing them.
+	TurnContextAfterEvents bool `json:"turn_context_after_events"`
 	// Events are written to stdout after thread.started.
 	Events []string `json:"events"`
 	// NoThread skips thread.started.
@@ -155,7 +161,10 @@ func fakeCodex() int {
 	}
 
 	appendRecord(rollout, "session_meta", map[string]any{"id": sc.Thread})
-	if sc.TurnContext != nil {
+	writeTurnContext := func() {
+		if sc.TurnContext == nil {
+			return
+		}
 		tc := map[string]any{}
 		for k, v := range sc.TurnContext {
 			tc[k] = v
@@ -167,11 +176,20 @@ func fakeCodex() int {
 		_ = json.Unmarshal([]byte(strings.ReplaceAll(string(raw), "$CWD", obs.Cwd)), &tc)
 		appendRecord(rollout, "turn_context", tc)
 	}
+	if !sc.TurnContextAfterEvents {
+		writeTurnContext()
+	}
 	if !sc.NoThread {
 		fmt.Printf(`{"type":"thread.started","thread_id":%q}`+"\n", sc.Thread)
 	}
 	for _, e := range sc.Events {
 		fmt.Println(e)
+	}
+	if sc.TurnContextAfterEvents {
+		// The policy the driver judges is readable only once everything this
+		// turn had to say is on the stream: the verdict, and the kill it
+		// brings, cannot land on a fake that has not finished speaking.
+		writeTurnContext()
 	}
 	if sc.CloseStdout {
 		_ = os.Stdout.Close()

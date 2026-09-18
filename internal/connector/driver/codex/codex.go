@@ -455,6 +455,11 @@ type session struct {
 	verifyDone  chan struct{}
 	verifyErr   error
 	closed      bool
+	// updatesClosed is the reader's record that the updates channel is
+	// closed. It is read and written under the same lock every emit takes,
+	// so a goroutine still finishing a turn cannot send on a channel that
+	// has just been closed.
+	updatesClosed bool
 	// writing is a one-slot semaphore around the worker's stdin. A lock
 	// would be worse: a worker that stops reading its input blocks the
 	// write, and everything waiting on the lock — Close among them — waits
@@ -620,14 +625,40 @@ func (s *session) finish(t *turn, result driver.PromptResult, err error) {
 	close(t.done)
 }
 
+// emit offers an update to whoever is reading the session's. It is best
+// effort by design: an update nobody is there to take — because the buffer is
+// full, or because the session's updates are over — is dropped, never waited
+// on. The send is under the lock that closeUpdates takes, so the last word of
+// a turn being finished off the reader — the prompt's writer, the policy
+// check — is dropped rather than sent on a closed channel.
 func (s *session) emit(u driver.Update) {
 	u.At = time.Now()
 	u.Tool = s.red.Sanitize(u.Tool)
 	u.ToolCallID = s.red.Sanitize(u.ToolCallID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.updatesClosed {
+		return
+	}
 	select {
 	case s.updates <- u:
 	default:
 	}
+}
+
+// closeUpdates ends the session's updates, once. The reader owns the close,
+// but it is not the only goroutine that emits: a prompt's writer finishing a
+// canceled turn, or the policy check ending an unsafe one, may read a refusal
+// from the worker's stderr after the reader has gone. Closing under the lock
+// every emit takes is what makes that a dropped update rather than a panic.
+func (s *session) closeUpdates() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.updatesClosed {
+		return
+	}
+	s.updatesClosed = true
+	close(s.updates)
 }
 
 // read maps the process's JSON lines onto updates and the turn's result until
@@ -635,9 +666,9 @@ func (s *session) emit(u driver.Update) {
 func (s *session) read() {
 	defer func() {
 		// The updates channel closes last: finishing the turn still emits
-		// (a refusal read from stderr), and a send on a closed channel is a
-		// panic, not a dropped update.
-		defer close(s.updates)
+		// (a refusal read from stderr), and an update emitted after this is
+		// dropped rather than sent.
+		defer s.closeUpdates()
 		s.mu.Lock()
 		s.ended = true
 		t := s.turn

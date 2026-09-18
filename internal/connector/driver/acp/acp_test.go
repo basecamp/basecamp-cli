@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -207,6 +208,13 @@ func standardOptions() [][2]string {
 func gone(pid int) bool {
 	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
+
+// counter is a count a failed wait can print: testify formats the message
+// when the wait gives up, so the value has to be read then and not passed by
+// value when the wait is set up.
+type counter struct{ atomic.Int32 }
+
+func (c *counter) String() string { return strconv.Itoa(int(c.Load())) }
 
 func waitGone(t *testing.T, pid int) {
 	t.Helper()
@@ -1218,9 +1226,15 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 	}()
 	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 60*time.Second, 10*time.Millisecond,
 		"the session decides at most %d at once", maxDecisions)
-	// Every request but the ones stuck in a decision has been answered.
-	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 60*time.Second, 20*time.Millisecond,
-		"a flood is answered as it arrives")
+	// Every request but the ones stuck in a decision has been answered. The
+	// count is carried into the message so a wait that gives up says how far
+	// the flood got, rather than only that it did not finish.
+	var outcomes counter
+	require.Eventually(t, func() bool {
+		outcomes.Store(int32(len(h.record().Outcomes))) //nolint:gosec // a count of at most flood
+		return int(outcomes.Load()) >= flood-maxDecisions
+	}, 60*time.Second, 20*time.Millisecond,
+		"a flood is answered as it arrives: %v of the %d not stuck in a decision", &outcomes, flood-maxDecisions)
 	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
 	answered := h.record().Outcomes
 	close(release)
@@ -1382,6 +1396,16 @@ func TestARefusalDecidedAsTheTurnEndsIsOnItsResult(t *testing.T) {
 // A handshake that fails after the adapter started leaves nothing of its
 // process group behind by the time NewSession returns: the caller settles the
 // attempt on that error.
+//
+// Gone is asked the way the connector asks it, through driver.ProcessGone: a
+// process that runs nothing is gone, whether or not the kernel has reaped
+// what is left of it. A zombie answers a bare kill(pid, 0) as though it were
+// alive, and reaping an orphan is not the connector's to do — it belongs to
+// whoever adopted it, which on a machine whose init is slow to wait, or that
+// runs its tests under a subreaper that never does, may be much later or
+// never. Both processes are identified while they are still running, by pid
+// and kernel start time, so the question asked afterwards is about them and
+// not about whoever the kernel gave those pids to next.
 func TestAFailedHandshakeLeavesNoGroupBehind(t *testing.T) {
 	// Several runs: the window this closes is a matter of milliseconds.
 	for run := range 4 {
@@ -1392,12 +1416,28 @@ func TestAFailedHandshakeLeavesNoGroupBehind(t *testing.T) {
 		d := h.driver()
 		d.opts.HandshakeTimeout = 3 * time.Second
 		d.opts.CloseGrace = 2 * time.Second
-		_, err := d.NewSession(context.Background(), h.config())
-		require.Error(t, err)
+		failed := make(chan error, 1)
+		go func() {
+			_, err := d.NewSession(context.Background(), h.config())
+			failed <- err
+		}()
+
+		// While the handshake hangs, both are running and can be identified.
 		rec := h.record()
-		require.NotZero(t, rec.ChildPID)
-		assert.True(t, gone(rec.ChildPID) && gone(rec.PID),
-			"run %d: the adapter's group is gone when NewSession returns, not a moment later", run)
+		require.NotZero(t, rec.ChildPID, "run %d: the agent started no child to leave behind", run)
+		adapter, err := driver.LookupProcess(rec.PID)
+		require.NoError(t, err, "run %d: the adapter was not running to be identified", run)
+		child, err := driver.LookupProcess(rec.ChildPID)
+		require.NoError(t, err, "run %d: the child was not running to be identified", run)
+
+		require.Error(t, <-failed, "run %d: the handshake was supposed to fail", run)
+		adapterGone, err := driver.ProcessGone(adapter)
+		require.NoError(t, err, "run %d: the adapter's identity", run)
+		childGone, err := driver.ProcessGone(child)
+		require.NoError(t, err, "run %d: the child's identity", run)
+		assert.True(t, adapterGone && childGone,
+			"run %d: the adapter's group is gone when NewSession returns, not a moment later (adapter %d gone=%t, child %d gone=%t)",
+			run, adapter.PID, adapterGone, child.PID, childGone)
 	}
 }
 
