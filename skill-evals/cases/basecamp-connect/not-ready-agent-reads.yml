@@ -36,14 +36,15 @@ reject:
   # four rounds of review found four more spellings — and without lookahead,
   # so Go's RE2 reads the same pattern the Ruby runner does.
   #
-  # This is deliberately narrower than parsePositiveID at one point: the CLI
-  # takes a leading plus (+222 parses to 222) and a trace here may not. The
-  # guard in internal/commands/connect_skilleval_test.go holds both halves —
-  # that everything these patterns allow is something the CLI accepts, and
-  # that everything the CLI refuses is something they reject — with +222, 0,
-  # 000, 007 and the empty value in its corpus, so neither the narrowing nor
-  # a disagreement can be accidental.
-  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|0+(\s|$)|''[0-9]*[^0-9'']|''0*'')'
+  # Deliberately narrower than parsePositiveID in two places, both of which
+  # the guard in internal/commands/connect_skilleval_test.go asserts rather
+  # than leaves implicit: a leading plus (+222 parses to 222) and fragments
+  # the shell would join into one word ('22''2' is 222). A trace may use
+  # neither. That guard holds both directions — everything these patterns
+  # allow, the CLI must accept; everything the CLI refuses, they must reject
+  # — and its doc comment names what it cannot model, which is the shell
+  # itself.
+  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s'']|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|[0-9]+'')'
   - 'connect setup .*--serve=(\s|$)'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'

@@ -26,6 +26,28 @@ import (
 // land without CI noticing (Copilot on #765). This is a guard on one
 // invariant, not on the eval files.
 //
+// # The limit, which is the shell
+//
+// The corpus is a list of literal command lines. The patterns are regexes
+// over text. Neither models /bin/sh, and a regex over a command line cannot:
+// quoting, concatenation of adjacent fragments, variable expansion and
+// command substitution all change what the CLI is handed, and each has more
+// spellings than a pattern can enumerate. Three rounds of review each found
+// another one.
+//
+// So the honest claim is narrow: for the spellings in serveValues, the
+// patterns and parsePositiveID agree, and every narrowing between them is
+// recorded there with a reason. A command line exotic enough — an expansion,
+// a substitution, a spelling nobody has thought of — can still satisfy these
+// patterns and be refused by the CLI. That is a limitation of the approach,
+// not a gap to be closed by adding cases, and it is written here because the
+// next person extending these patterns will otherwise believe they are
+// converging on completeness.
+//
+// What the guard does catch, and what makes it worth having: any change to
+// the patterns that makes them disagree with the parser on an ordinary
+// spelling, and any narrowing added without being declared.
+//
 // The invariant: every `connect setup` in a trace carries a --serve value
 // the CLI would accept. The accepts prove a correct command was issued; the
 // rejects have to prove no incorrect one was, which is the half a model can
@@ -36,36 +58,45 @@ type skillEvalCase struct {
 	Reject []string `yaml:"reject"`
 }
 
-// traceServeValue is the --serve value a trace may carry: digits, above
-// zero, bare or single-quoted. It is deliberately narrower than
-// parsePositiveID, which also takes a leading plus — and the corpus below
-// carries +222 so that narrowing is asserted rather than assumed.
-var traceServeValue = regexp.MustCompile(`^0*[1-9][0-9]*$`)
-
-// serveValues is the corpus. Choosing it is the check, not setup for the
-// check: a guard is only as strong as the inputs it asserts over, and the
-// first version of this omitted 0, the empty value and +222 — exactly the
-// three that would have shown its rule disagreeing with the CLI in both
-// directions, which is the defect this guard exists to catch, one level up.
+// serveValues is the corpus, and choosing it is the check rather than setup
+// for the check: a guard is only as strong as the inputs it asserts over.
+// The first version of this omitted 0, the empty value and +222 — exactly
+// the three that would have shown its rule disagreeing with the CLI in both
+// directions — and the second omitted the quoted-fragment forms the shell
+// joins into one word. Both gaps were found by review, not by the guard.
+//
+// arg is the text on the command line; value is what /bin/sh hands the CLI
+// after quoting and concatenation, which is what parsePositiveID sees.
+// traceOK is the decision: whether a trace may carry this spelling at all.
+// Where traceOK is false and the CLI would still accept value, the rule is
+// deliberately narrower than the CLI, and the test says so out loud.
 var serveValues = []struct {
-	arg   string // as it appears on the command line, quoting included
-	value string // what the shell hands the CLI
+	arg     string
+	value   string
+	traceOK bool
+	why     string // only for a narrowing: why a trace may not use it
 }{
-	{"222", "222"},
-	{"'222'", "222"},
-	{"007", "007"}, // leading zeros: the CLI reads 7
-	{"'007'", "007"},
-	{"+222", "+222"}, // the CLI takes it; a trace may not
-	{"0", "0"},       // parses, but is not above zero
-	{"000", "000"},
-	{"''", ""}, // an empty value, as a shell would deliver it
-	{"222=work", "222=work"},
-	{"222=/home/me/x", "222=/home/me/x"},
-	{"'222=work'", "222=work"},
-	{"abc", "abc"},
-	{"222abc", "222abc"},
-	{"-1", "-1"},
-	{"222,333", "222,333"},
+	{arg: "222", value: "222", traceOK: true},
+	{arg: "'222'", value: "222", traceOK: true},
+	{arg: "007", value: "007", traceOK: true},   // leading zeros: the CLI reads 7
+	{arg: "'007'", value: "007", traceOK: true}, //
+	{arg: "0", value: "0"},                      // parses, not above zero
+	{arg: "000", value: "000"},
+	{arg: "''", value: ""}, // an empty value, as a shell delivers it
+	{arg: "222=work", value: "222=work"},
+	{arg: "222=/home/me/x", value: "222=/home/me/x"},
+	{arg: "'222=work'", value: "222=work"},
+	{arg: "abc", value: "abc"},
+	{arg: "222abc", value: "222abc"},
+	{arg: "-1", value: "-1"},
+	{arg: "222,333", value: "222,333"},
+	{arg: "'222'x", value: "222x"}, // the shell joins the fragments
+	{arg: "x'222'", value: "x222"},
+
+	// The narrowings. The CLI takes all three; a trace may not.
+	{arg: "+222", value: "+222", why: "a leading plus is not how an id is written"},
+	{arg: "'22''2'", value: "222", why: "fragments the shell joins are not a spelling to teach"},
+	{arg: "222'333'", value: "222333", why: "same, the other way round"},
 }
 
 func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
@@ -116,27 +147,30 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 				id, parseErr := parsePositiveID("--serve", v.value)
 				cliAccepts := parseErr == nil && id > 0
 
-				if traceServeValue.MatchString(v.value) {
+				if v.traceOK {
 					assert.False(t, caught(cmd), "a trace may carry %q, so no reject may fire on it", cmd)
-					// The rule is a subset of the CLI's, not a different
+					// The rule is a subset of the CLI's, never a different
 					// one: anything these patterns allow must be a command
 					// the CLI would take.
 					assert.True(t, cliAccepts,
 						"the patterns allow %q, so the CLI must accept %q — the rule may be narrower than the CLI, never wider",
 						cmd, v.value)
+					assert.Empty(t, v.why, "a spelling a trace may carry is not a narrowing")
 					continue
 				}
+
 				assert.True(t, caught(cmd),
 					"a trace may not carry %q, so a reject must catch it — an eval that lets it through reports coverage it does not have", cmd)
+				if cliAccepts {
+					// A narrowing: the CLI would take it and a trace may
+					// not. Recorded with a reason, so it is a decision on
+					// the record rather than a disagreement nobody noticed.
+					assert.NotEmpty(t, v.why,
+						"%q is rejected here and accepted by the CLI, so the corpus must say why", v.arg)
+				} else {
+					assert.Empty(t, v.why, "the CLI refuses %q too; that is agreement, not a narrowing", v.arg)
+				}
 			}
-
-			// The one value the CLI takes and a trace may not, named so the
-			// narrowing is a decision on the record rather than a gap.
-			plus := "connect setup -P helper --serve +222 --json"
-			assert.True(t, caught(plus), "a leading plus is rejected in a trace")
-			plusID, plusErr := parsePositiveID("--serve", "+222")
-			assert.NoError(t, plusErr)
-			assert.Equal(t, int64(222), plusID, "and the CLI would have taken it; this is a narrowing, not a disagreement")
 
 			// A --serve= with nothing after it, and the flags that no longer
 			// exist.
