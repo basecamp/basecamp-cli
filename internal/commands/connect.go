@@ -49,7 +49,7 @@ It runs in the foreground until interrupted. Stdout is a wire of one JSON
 object per line (events seen, verdicts, dispatches; never content), and logs
 go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
 shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
-isolated state directory and dispatches nothing. macOS and Linux only.`,
+isolated state directory and dispatches nothing. Linux only.`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --route 12345=/src/app
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,

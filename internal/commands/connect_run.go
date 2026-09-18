@@ -125,7 +125,7 @@ func connectSessionsPath(file setup.File) string {
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !connectSupportedOS(runtime.GOOS) {
-		return output.ErrUsage("basecamp connect runs on macOS and Linux only: it ends a crashed connector's workers by process group and start time, which only those two can read")
+		return output.ErrUsage("basecamp connect runs on Linux only: the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits")
 	}
 	app := appctx.FromContext(cmd.Context())
 	ctx := cmd.Context()
@@ -366,11 +366,22 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	return nil
 }
 
-// connectSupportedOS is where the connector runs: the platforms whose
-// process start times the driver can read, so a recorded worker group is
-// never signaled after its pid was reused.
+// connectSupportedOS is where the connector runs: Linux, and for now only
+// Linux.
+//
+// Two things have to hold, and macOS has only one of them. The driver must
+// be able to read process start times, so a recorded worker group is never
+// signaled after its pid was reused — macOS can. And the task token has to
+// reach the worker's MCP server, which it does on an inherited descriptor:
+// `connect worker-mcp` execs `basecamp mcp --connect-token-fd`, and that
+// hand-over is accepted only where the descriptors this process inherited
+// are sealed against everything it starts, which is Linux alone
+// (mcp_token_linux.go, and #736, which gated it deliberately). On macOS
+// every non-shadow dispatch would start a worker whose Basecamp tools fail
+// at the handshake, so the connector says so here rather than at the far
+// end of each task.
 func connectSupportedOS(goos string) bool {
-	return goos == "linux" || goos == "darwin"
+	return goos == "linux"
 }
 
 // connectRoutes is connect.json's routes as they are now, not as they were at

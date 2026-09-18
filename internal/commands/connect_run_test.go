@@ -45,10 +45,13 @@ func TestConnectStateLivesUnderXDGStateHome(t *testing.T) {
 	assert.DirExists(t, got)
 }
 
-func TestConnectRunsOnLinuxAndMacOSOnly(t *testing.T) {
+// Copilot on #738: macOS passed this check and then failed every non-shadow
+// dispatch at the worker's MCP handshake, because the token hand-over onto
+// an inherited descriptor is accepted only where those descriptors are
+// sealed — Linux (#736).
+func TestConnectRunsOnLinuxOnly(t *testing.T) {
 	assert.True(t, connectSupportedOS("linux"))
-	assert.True(t, connectSupportedOS("darwin"))
-	for _, goos := range []string{"freebsd", "openbsd", "windows"} {
+	for _, goos := range []string{"darwin", "freebsd", "openbsd", "windows"} {
 		assert.False(t, connectSupportedOS(goos), goos)
 	}
 }
