@@ -18,8 +18,11 @@ import (
 // meaning here: "nothing is waiting" starts records into a route that should
 // wait, and "everything is" stalls the connector on a bookkeeping table.
 //
-// A copy has to say where it can come apart from what it copies, so: nowhere,
-// and here is why each way is closed rather than reconciled.
+// A copy is only safe if the places it can come apart are closed and named,
+// not merely documented. There are three, they are all of them, and each is
+// closed in the step itself rather than reconciled afterwards. A fourth way
+// to write one half without the other is a bug in this list, not an
+// acceptable state to repair later.
 //
 //   - A worktree made. The row is deleted inside the transaction that moves
 //     the worktree to live (Ledger.moveWorktree), so a live worktree and a
@@ -27,9 +30,15 @@ import (
 //   - A restart. The map does not outlive the process and the row does, so
 //     Worktrees.Recover takes the unexpired backoffs back into memory before
 //     anything is dispatched — the one moment the two can be out of step.
-//   - A route that is no longer routed, or worktrees turned off. Neither is
-//     drift: the row is right and has stopped applying, and the dispatcher's
-//     ten-minute review and Recover respectively drop it.
+//   - A route connect.json stops naming, or worktrees turned off. Both go
+//     through Worktrees.ForgetWaitsExcept, which drops the row and the
+//     backoff armed from it under one hold of the lock. Dropping only the row
+//     would leave the dispatcher holding a route's records with nothing in
+//     status to show for it, which is the invisible wait this table ends.
+//
+// Every write to this table is Worktrees'. Nothing else may add one: a writer
+// that does not also hold the backoff cannot keep the two together, which is
+// what makes the list above closeable at all.
 //
 // It exists at all because `connect status` and `connect doctor` run in
 // another process, read the ledger read-only and never speak to a running

@@ -437,6 +437,26 @@ func (w *Worktrees) resumeWaits(ctx context.Context) {
 	}
 }
 
+// ForgetWaitsExcept implements WaitingWorkspaces: the row and the backoff it
+// armed go together, under the lock, so no caller can drop one and leave the
+// other. The ledger goes first — a crash between the two loses the map, which
+// dies with the process anyway, while the reverse would leave a row with
+// nothing keeping it.
+func (w *Worktrees) ForgetWaitsExcept(ctx context.Context, keep []string) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	dropped, err := w.ledger.PruneRouteWaits(ctx, keep)
+	if err != nil {
+		return 0, err
+	}
+	for route := range w.failures {
+		if !slices.Contains(keep, route) {
+			delete(w.failures, route)
+		}
+	}
+	return dropped, nil
+}
+
 // clearWait forgets the recorded wait on a route, if there was one.
 func (w *Worktrees) clearWait(ctx context.Context, route string) {
 	if err := w.ledger.ClearRouteWait(ctx, route); err != nil {
@@ -862,7 +882,7 @@ func (w *Worktrees) Recover(ctx context.Context) error {
 		return ErrPlanOnly
 	}
 	if w.off {
-		if dropped, err := w.ledger.PruneRouteWaits(ctx, nil); err != nil {
+		if dropped, err := w.ForgetWaitsExcept(ctx, nil); err != nil {
 			w.log.Warn("connector: could not drop the recorded waits on routes", "error", err)
 		} else if dropped > 0 {
 			w.log.Info("connector: worktrees are off, so no route is waiting for one", "routes", dropped)

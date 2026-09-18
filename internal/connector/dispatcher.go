@@ -88,6 +88,16 @@ type PerTaskWorkspaces interface {
 type WaitingWorkspaces interface {
 	Workspaces
 	RoutesWaiting() []string
+	// ForgetWaitsExcept drops what it knows about every route not in keep —
+	// the durable record and the backoff armed from it together, so the two
+	// cannot be left saying different things — and returns how many went.
+	// keep is connect.json's routes, and an empty keep drops everything.
+	//
+	// It belongs to the workspaces rather than the caller because the
+	// workspaces is what holds both halves. A caller that deleted the rows
+	// itself would leave the backoff behind, and a route waiting with no row
+	// to show for it is the invisible wait this whole table exists to end.
+	ForgetWaitsExcept(ctx context.Context, keep []string) (int, error)
 }
 
 // RecoveringWorkspaces is a Workspaces with state of its own to reconcile on
@@ -597,10 +607,17 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 	for _, route := range routes {
 		keep = append(keep, route.Path)
 	}
-	if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
-		d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
-	} else if dropped > 0 {
-		d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
+	// Through the workspaces, which holds the backoff as well as the row.
+	// Pruning the ledger from here would drop the row and leave the wait
+	// armed, and a route the dispatcher is holding records out of with
+	// nothing in status to show for it is the invisible wait this table was
+	// added to end.
+	if w, ok := d.opts.Workspaces.(WaitingWorkspaces); ok {
+		if dropped, err := w.ForgetWaitsExcept(ctx, keep); err != nil {
+			d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
+		} else if dropped > 0 {
+			d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
+		}
 	}
 	waits, err := d.ledger.RouteWaits(ctx)
 	if err != nil {

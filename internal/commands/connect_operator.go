@@ -258,12 +258,15 @@ func connectStatusSummary(r connectStatusReport) string {
 	if r.Status.Hold != nil {
 		parts = append(parts, "held")
 	}
+	// State-neutral: the rows are in two states, and a summary that called an
+	// elapsed one "waiting" would contradict the detail under it, which
+	// correctly says that route is startable and waiting for nothing.
 	if n := len(r.Status.Waiting); n > 0 {
 		routes := "routes"
 		if n == 1 {
 			routes = "route"
 		}
-		parts = append(parts, fmt.Sprintf("%d %s waiting for a worktree", n, routes))
+		parts = append(parts, fmt.Sprintf("%d %s whose last worktree attempt failed", n, routes))
 	}
 	parts = append(parts,
 		fmt.Sprintf("%d live tasks", len(r.Status.Tasks)),

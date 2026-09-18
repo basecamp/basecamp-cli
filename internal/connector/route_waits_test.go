@@ -16,6 +16,18 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
+// waitingWorktrees is a Worktrees over the harness's own ledger, so the
+// dispatcher's review runs against the pair that really holds the waits: the
+// rows and the backoffs armed from them.
+func waitingWorktrees(t *testing.T, l *Ledger) *Worktrees {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "worktrees")
+	require.NoError(t, os.MkdirAll(filepath.Dir(root), 0o700))
+	wt, err := NewWorktrees(WorktreesOptions{Ledger: l, Root: root})
+	require.NoError(t, err)
+	return wt
+}
+
 // A route in a Prepare backoff was visible in the connector's log and nowhere
 // else, and nobody reads a connector's stdout at three in the morning. The
 // wait goes into the ledger, which is what `connect status` and `connect
@@ -208,8 +220,11 @@ func TestAFailureCountSurvivesARestart(t *testing.T) {
 // worse than no row.
 func TestAWaitOnARouteNoLongerRoutedIsDropped(t *testing.T) {
 	var logs bytes.Buffer
+	var wt *Worktrees
 	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
 		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		wt = waitingWorktrees(t, o.Ledger)
+		o.Workspaces = wt
 	})
 	ctx := context.Background()
 	now := time.Now()
@@ -219,12 +234,19 @@ func TestAWaitOnARouteNoLongerRoutedIsDropped(t *testing.T) {
 			FirstAt: now.Add(-time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
 		}))
 	}
+	// And the backoffs those rows armed, as a running connector would hold
+	// them: the prune has to take both or the dispatcher goes on waiting on a
+	// route with nothing in status to show for it.
+	require.NoError(t, wt.Recover(ctx))
+	require.ElementsMatch(t, []string{testRoute, "/work/was-routed-here"}, wt.RoutesWaiting())
 
 	h.d.reviewWaitingRoutes(ctx)
 	waits, err := h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	require.Len(t, waits, 1, "only the route connect.json still names is still waiting")
 	assert.Equal(t, testRoute, waits[0].Route)
+	assert.Equal(t, []string{testRoute}, wt.RoutesWaiting(),
+		"and the backoff goes with the row, so no route is held with nothing to show for it")
 	assert.NotContains(t, logs.String(), "/work/was-routed-here")
 }
 
@@ -237,6 +259,7 @@ func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
 	var logs bytes.Buffer
 	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
 		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		o.Workspaces = waitingWorktrees(t, o.Ledger)
 	})
 	ctx := context.Background()
 	now := time.Now()
@@ -279,6 +302,7 @@ func TestAConfigNamingAnotherIdentityNeitherPrunesNorReports(t *testing.T) {
 	var logs bytes.Buffer
 	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
 		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		o.Workspaces = waitingWorktrees(t, o.Ledger)
 	})
 	ctx := context.Background()
 	now := time.Now()

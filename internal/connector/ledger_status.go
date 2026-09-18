@@ -107,9 +107,18 @@ type Status struct {
 	AuthorizedBlocked int `json:"authorized_blocked"`
 	RedispatchPending int `json:"redispatch_pending"`
 
-	// Waiting is every route whose last worktree attempt failed. Its records
-	// are admitted and startable and are not starting, which no other field
-	// of this status would say.
+	// Waiting is every route whose last worktree attempt failed and that
+	// nothing has since made a worktree on. No other field of this status
+	// would say so.
+	//
+	// The rows are in one of two states, and a consumer must not treat them
+	// alike: RouteWait.Waiting(now) is true while the backoff that failure
+	// armed is still running, and those routes are deliberately left out of
+	// the startable query, so their records are admitted and held. It is
+	// false once the backoff has run out, and then the route is startable
+	// again and the row is only a failure nothing has disproved — the next
+	// record on that route makes the next attempt, and there may be no such
+	// record.
 	Waiting []RouteWait `json:"waiting_routes"`
 
 	Tasks     []TaskStatus     `json:"live_tasks"`

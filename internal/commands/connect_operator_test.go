@@ -604,8 +604,8 @@ func TestStatusReportsTheRoutesWaitingForAWorktree(t *testing.T) {
 	// attempt comes with the next record on the route, whenever that is.
 	assert.Contains(t, out, `"backoff_until"`)
 	assert.NotContains(t, out, `"next_attempt_at"`)
-	assert.Contains(t, out, "1 route waiting for a worktree")
-	assert.NotContains(t, out, "1 routes waiting")
+	assert.Contains(t, out, "1 route whose last worktree attempt failed")
+	assert.NotContains(t, out, "1 routes whose")
 }
 
 // A status with nothing waiting says so, rather than leaving a reader to
@@ -638,6 +638,20 @@ func TestConnectDoctorTellsAnElapsedBackoffFromARunningOne(t *testing.T) {
 	msg = waitingRoutesMessage([]connector.RouteWait{elapsed}, now)
 	assert.Contains(t, msg, "its backoff has elapsed, and the next record on it is what tries again")
 	assert.NotContains(t, msg, "holds its records")
+}
+
+// The summary counts rows in both states, so it must not call them all
+// waiting: an elapsed row is startable and waiting for nothing, which is what
+// the detail under it says.
+func TestTheStatusSummaryDoesNotCallAnElapsedRowWaiting(t *testing.T) {
+	elapsed := time.Now().Add(-time.Hour)
+	summary := connectStatusSummary(connectStatusReport{Profile: "agent", Status: connector.Status{
+		Waiting: []connector.RouteWait{{
+			Route: "/work/app", Failures: 3, FirstAt: elapsed.Add(-time.Hour), LastAt: elapsed.Add(-time.Hour), Until: elapsed,
+		}},
+	}})
+	assert.Contains(t, summary, "1 route whose last worktree attempt failed")
+	assert.NotContains(t, summary, "waiting")
 }
 
 // A backoff that has elapsed is not a retry in flight. The status line says

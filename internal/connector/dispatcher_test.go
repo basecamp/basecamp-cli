@@ -1143,6 +1143,14 @@ func (w *waitingWorkspaces) Prepare(_ context.Context, route string, _ int64) (s
 
 func (w *waitingWorkspaces) RoutesWaiting() []string { return w.waiting }
 
+func (w *waitingWorkspaces) ForgetWaitsExcept(_ context.Context, keep []string) (int, error) {
+	before := len(w.waiting)
+	w.waiting = slices.DeleteFunc(slices.Clone(w.waiting), func(route string) bool {
+		return !slices.Contains(keep, route)
+	})
+	return before - len(w.waiting), nil
+}
+
 // Card 19: a route that cannot take a task must not starve the others.
 func TestAFailingRouteDoesNotStarveTheOthers(t *testing.T) {
 	fake := newFakeDriver()
