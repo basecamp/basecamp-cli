@@ -367,60 +367,70 @@ func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
 	assert.Equal(t, "Wait 41s, then re-run.", gateErr.Hint)
 }
 
-// spentBudget runs a gate whose budget is already gone — the state
-// waitSince reaches when a sleep for a refill or for a block wakes past the
-// deadline — and returns the rejection. The ten seconds it reports as waited
-// are the gate's, not the test's: nothing here sleeps.
-func spentBudget(t *testing.T, rl *RateLimiter) *GateError {
+// noJitter pins the retry spread to zero, so a sleep for a wait is exactly
+// that wait and the gate wakes the moment the thing it waited for is done —
+// and, a hair later, past a deadline set to that same moment. A timer never
+// fires early, so the budget below is spent by construction and not by
+// hoping a sleep overshoots.
+func noJitter(t *testing.T) {
 	t.Helper()
-	err := rl.waitSince(context.Background(), time.Now().Add(-10*time.Second), time.Now().Add(-time.Millisecond))
-
-	var gateErr *GateError
-	require.ErrorAs(t, err, &gateErr)
-	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
-	return gateErr
+	previous := jitter
+	jitter = func(time.Duration) time.Duration { return 0 }
+	t.Cleanup(func() { jitter = previous })
 }
 
 // A budget spent on the server's block says so. Blaming the client limit
 // here reads as "lower your parallelism", which is advice about a knob that
 // had nothing to do with a wait the server asked of everybody.
 func TestRateLimiterBudgetSpentOnTheServersBlockNamesTheServer(t *testing.T) {
+	noJitter(t)
 	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
-	require.NoError(t, rl.SetRetryAfterDuration(30*time.Second))
+	until := time.Now().Add(20 * time.Millisecond)
+	require.NoError(t, rl.SetRetryAfter(until))
 
-	gateErr := spentBudget(t, rl)
+	// The gate sleeps the block out and wakes past a deadline that ends with
+	// it: the shape the CI failure in #763 had, and the only way a spent
+	// budget is ever reached on a block.
+	err := rl.waitSince(context.Background(), time.Now().Add(-10*time.Second), until)
 
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
 	assert.Equal(t, "Rate limited by the server; waited 10s", gateErr.Message)
 	assert.Equal(t, "Re-run.", gateErr.Hint)
 }
 
-// The block that spent the budget is usually gone by the time the gate gives
-// up — sleeping it out to within a wakeup of the deadline is how the budget
-// went. It is still the wait the server asked for, and still not ours.
-func TestRateLimiterBudgetSpentOnABlockThatLiftedNamesTheServer(t *testing.T) {
-	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
-	require.NoError(t, rl.SetRetryAfter(time.Now().Add(-5*time.Millisecond)))
+// The store is shared, so the Retry-After it holds when a gate gives up is
+// not proof that this gate waited on one: a block can expire before the gate
+// ever looks, and another invocation's 429 can land while it sleeps for a
+// refill of its own. A wait our bucket imposed keeps its own name, and the
+// advice that goes with it.
+func TestRateLimiterBudgetSpentOnOurOwnRefillNamesTheClientLimit(t *testing.T) {
+	noJitter(t)
+	store := NewStore(t.TempDir())
+	rl := NewRateLimiter(store, RateLimiterConfig{MaxTokens: 1, RefillRate: 10, TokensPerRequest: 1})
+	require.NoError(t, rl.SetRetryAfter(time.Now().Add(-500*time.Millisecond)))
+	allowed, err := rl.Allow()
+	require.NoError(t, err)
+	require.True(t, allowed, "the block had lifted, so the token was there to take")
 
-	gateErr := spentBudget(t, rl)
+	// The deadline ends with the refill this gate is actually waiting for.
+	state, err := store.Load()
+	require.NoError(t, err)
+	refilled := state.RateLimiter.LastRefillAt.Add(100 * time.Millisecond)
+	err = rl.waitSince(context.Background(), time.Now().Add(-10*time.Second), refilled)
 
-	assert.Equal(t, "Rate limited by the server; waited 10s", gateErr.Message)
-	assert.Equal(t, "Re-run.", gateErr.Hint)
-}
-
-// A budget spent on our own bucket is the client limit, and a Retry-After
-// that expired before this gate ever started queueing does not take the
-// blame for it.
-func TestRateLimiterBudgetSpentOnOurOwnBucketNamesTheClientLimit(t *testing.T) {
-	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
-
-	gateErr := spentBudget(t, rl)
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
 	assert.Equal(t, "Too many requests (client limit 10/s); waited 10s", gateErr.Message)
 	assert.Equal(t, "Re-run, or lower parallelism.", gateErr.Hint)
 
-	require.NoError(t, rl.SetRetryAfter(time.Now().Add(-30*time.Second)))
-	stale := spentBudget(t, rl)
-	assert.Equal(t, "Too many requests (client limit 10/s); waited 10s", stale.Message)
-	assert.Equal(t, "Re-run, or lower parallelism.", stale.Hint)
+	state, err = store.Load()
+	require.NoError(t, err)
+	assert.True(t, state.RateLimiter.RetryAfterUntil.Before(time.Now()),
+		"the store still holds the expired block, which is what a gate reading it back would find")
+	assert.False(t, state.RateLimiter.RetryAfterUntil.IsZero(), "and there is one to find")
 }
 
 func TestCeilSeconds(t *testing.T) {

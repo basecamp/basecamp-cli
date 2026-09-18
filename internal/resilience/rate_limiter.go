@@ -138,15 +138,18 @@ func (rl *RateLimiter) Wait(ctx context.Context, deadline time.Time) error {
 	return rl.waitSince(ctx, rl.now(), deadline)
 }
 
-// waitSince is Wait for a gate that started queueing at start.
+// waitSince is Wait for a gate that started queueing at start. It carries
+// the cause of the sleep it is in, so that a budget which runs out can name
+// what it was spent on.
 func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time) error {
+	sleptOnServerBlock := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		remaining := deadline.Sub(rl.now())
 		if remaining <= 0 {
-			return rl.budgetError(start) //nolint:contextcheck // lock acquisition is context-independent by design
+			return rl.budgetError(sleptOnServerBlock, rl.now().Sub(start))
 		}
 		allowed, wait, blocked := rl.take() //nolint:contextcheck // lock acquisition is context-independent by design
 		if allowed {
@@ -155,6 +158,7 @@ func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time)
 		if wait > remaining {
 			return rl.gateError(blocked, wait, rl.now().Sub(start))
 		}
+		sleptOnServerBlock = blocked
 		if err := pause(ctx, sleepWithin(wait, remaining)); err != nil {
 			return err
 		}
@@ -176,12 +180,17 @@ func (rl *RateLimiter) gateError(blocked bool, wait, waited time.Duration) *Gate
 }
 
 // budgetError is the rejection for a gate whose budget ran out while it was
-// still queueing, which is where the wait it was spent on has to be named
-// rather than assumed. A server Retry-After that covered the wait is the
-// server's doing and nobody's parallelism; anything else is our own bucket.
-func (rl *RateLimiter) budgetError(start time.Time) *GateError {
-	waited := rl.now().Sub(start)
-	if !rl.blockedSince(start) {
+// still sleeping, and sleptOnServerBlock is what that last sleep was for, as
+// take saw it. A server Retry-After is the server's doing and nobody's
+// parallelism; anything else is our own bucket.
+//
+// The cause is carried out of the sleep rather than read back from the store
+// here, because the store is shared and by now says something else: another
+// invocation's 429 can land while this gate sleeps for a refill of its own,
+// and a block this gate never waited on can expire between the two. Either
+// one would hand a client-side timeout the server's name.
+func (rl *RateLimiter) budgetError(sleptOnServerBlock bool, waited time.Duration) *GateError {
+	if !sleptOnServerBlock {
 		return rl.clientLimitError(waited)
 	}
 	return &GateError{
@@ -189,18 +198,6 @@ func (rl *RateLimiter) budgetError(start time.Time) *GateError {
 		Hint:     "Re-run.",
 		sentinel: basecamp.ErrRateLimited,
 	}
-}
-
-// blockedSince reports whether a server Retry-After covered a wait that began
-// at start: one still in force, or one slept out that lifted before the
-// budget ran out. A store error reads as no block, since the client limit is
-// the only wait we know we imposed.
-func (rl *RateLimiter) blockedSince(start time.Time) bool {
-	state, err := rl.store.Load()
-	if err != nil {
-		return false
-	}
-	return state.RateLimiter.RetryAfterUntil.After(start)
 }
 
 // clientLimitError is the rejection for a wait our own token bucket imposed,
