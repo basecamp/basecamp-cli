@@ -155,6 +155,20 @@ func TestInvariantF2WarningEdgesSettleOnTheTrueState(t *testing.T) {
 
 // F1: while intake is paused on a full queue, the page it is in the middle of
 // is not checkpointed.
+//
+// That is an ORDER, not a window, and it has to be tested as one. On a
+// present-class entry the feed holds every page's position and saves nothing
+// until the walk has reached its frozen head AND the drain has accepted every
+// event — so the hold is visible only against a feed that demonstrably moved
+// on. Reading the checkpoint once, a fixed 50ms after the pause, measures a
+// duration instead: a save that happens but happens slowly is a pass, so the
+// test could never fail and never did.
+//
+// The walk here is two pages, and the second poll is the barrier. The feed
+// issues it only after every event of the first page was accepted and
+// `PageDelivered` ran for that page, so a save carried along with a page is
+// ordered BEFORE the barrier — caught however slowly it lands, rather than
+// only if it lands inside somebody's guess at a window.
 func TestInvariantF1APausedFeedDoesNotMoveTheCheckpoint(t *testing.T) {
 	ledger := newTestLedger(t)
 	queue, err := NewQueue(1, 1)
@@ -163,25 +177,69 @@ func TestInvariantF1APausedFeedDoesNotMoveTheCheckpoint(t *testing.T) {
 	intake.queue = queue
 	intake.opts.Queue = queue
 	minter.ScriptTicket(ticket())
-	polls.ScriptPage(eventfeed.PollPage{Events: []eventfeed.Event{testEvent(500), testEvent(501)}, Position: "after-both"})
+	polls.ScriptPage(eventfeed.PollPage{
+		Events:   []eventfeed.Event{testEvent(500), testEvent(501)},
+		Position: "after-the-first-page",
+		Next:     "https://3.basecampapi.com/2914079/events.json?position=after-the-first-page",
+	})
+	polls.ScriptPage(eventfeed.PollPage{
+		Events:   []eventfeed.Event{testEvent(502), testEvent(503)},
+		Position: "after-both-pages",
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Nothing durable has moved, read at a point the feed's own progress puts
+	// after any save that moved with a page.
+	checkpointUnmoved := func(why string) {
+		t.Helper()
+		_, ok, err := ledger.Load(ctx, intake.CheckpointKey())
+		require.NoError(t, err)
+		require.False(t, ok, why)
+	}
+	// One id out of the queue, which is the only thing that lets the blocked
+	// offer behind it through.
+	makeRoom := func() {
+		t.Helper()
+		_, err := queue.Take(ctx)
+		require.NoError(t, err)
+	}
+
 	done := runInBackground(ctx, t, intake)
 	subscribedConn(t, transport)
 
-	require.Eventually(t, queue.Paused, 5*time.Second, time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
-	_, ok, err := ledger.Load(ctx, intake.CheckpointKey())
-	require.NoError(t, err)
-	assert.False(t, ok, "a crash now must resume from before the page, not after it")
+	// The queue holds one: 500 fills it and 501 waits for room, so the feed
+	// is paused in the middle of the first page.
+	require.Eventually(t, queue.Paused, 5*time.Second, time.Millisecond,
+		"the first page's second event must find the queue full")
+	checkpointUnmoved("a crash mid-page must resume from before the page, not after it")
 
-	_, err = queue.Take(ctx)
-	require.NoError(t, err)
+	// Room for 501. The first page then completes and the walk follows its
+	// `next` — and that second poll is the barrier: the feed has advanced a
+	// whole page past the position it is holding.
+	makeRoom()
+	require.Eventually(t, func() bool { return polls.CallCount() >= 2 },
+		5*time.Second, 5*time.Millisecond, "the walk follows next into the second page")
+	checkpointUnmoved("a page delivered in full is still not a position saved")
+
+	// And paused again, now inside the second page, with the first page's
+	// events long since handed over: a feed that demonstrably advanced over a
+	// checkpoint that demonstrably did not.
+	require.Eventually(t, func() bool {
+		_, ok, err := ledger.Get(ctx, 502)
+		return err == nil && ok && queue.Paused()
+	}, 5*time.Second, 5*time.Millisecond, "the second page pauses the feed the same way")
+	checkpointUnmoved("two pages in, paused, and nothing durable has moved")
+
+	// Only the end of the walk moves it, and it moves to the last page's
+	// position — the whole walk, or none of it.
+	makeRoom()
+	makeRoom()
 	require.Eventually(t, func() bool {
 		position, ok, err := ledger.Load(ctx, intake.CheckpointKey())
-		return err == nil && ok && position == "after-both"
-	}, 5*time.Second, 5*time.Millisecond)
+		return err == nil && ok && position == "after-both-pages"
+	}, 5*time.Second, 5*time.Millisecond, "a drained queue lets the walk finish and save")
 
 	cancel()
 	awaitReturn(t, done, "Run should return on shutdown")
