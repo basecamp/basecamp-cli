@@ -335,3 +335,28 @@ func TestWorkerIsOneSetupKnowsAndDefaultsToClaude(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, WorkerClaude, next.Worker)
 }
+
+// The same refusal at the other reader: setup writes and re-reads the trust
+// anchor, so a null entry must not survive a round through it either
+// (Copilot on #765).
+func TestParseRefusesANullProjectEntry(t *testing.T) {
+	data, err := json.Marshal(validFile(t))
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	raw["projects"].(map[string]any)["48699913"] = nil
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+
+	_, err = Parse(data)
+	require.Error(t, err, "a null entry is not a served project")
+	assert.Contains(t, err.Error(), "48699913", "and setup names the project, which the type's own refusal cannot")
+
+	// And an empty object still is one.
+	raw["projects"].(map[string]any)["48699913"] = map[string]any{}
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+	f, err := Parse(data)
+	require.NoError(t, err)
+	assert.Contains(t, f.Projects, projectID)
+}

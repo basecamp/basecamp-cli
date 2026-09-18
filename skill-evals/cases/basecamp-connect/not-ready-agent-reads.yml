@@ -22,7 +22,7 @@ mocks:
     output: '{"ok":false,"code":"not_ready","error":"The connector is not ready, so /home/me/.config/basecamp/connect/helper/connect.json was not written. Project 222: Reading the project was refused (HTTP 403). Basecamp refuses this read to an Agent identity today, and admission makes it for every event: the connector would see mentions and block each one on a read it cannot make","hint":"If the agent is not on this project, add it there. Otherwise: Until Basecamp allows Agent identities these reads, run the connector as a bot user: basecamp connect setup -P <bot-profile> --expect-identity <identity-id>"}'
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
-  - 'connect setup .*--serve[ =](''222''|222)(\s|$)'
+  - 'connect setup .*--serve[ =](''222''|"222"|222)(\s|$)'
 reject:
   # What these evals guarantee about setup commands: every one in the trace
   # is a command the CLI would accept. The accepts above prove a correct one
@@ -46,6 +46,8 @@ reject:
   # itself.
   - 'connect setup .*--serve[ =]([0-9]*[^0-9\s''"]|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|"[0-9]*[^0-9"]|"0*"|"[0-9]*"[^\s]|[0-9]+[''"])'
   - 'connect setup .*--serve=(\s|$)'
+  # And --serve with no value at all, which cobra refuses outright.
+  - 'connect setup .*--serve\s*$'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
   - 'auth agent connect'

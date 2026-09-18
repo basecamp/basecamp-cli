@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,41 @@ type Project struct {
 	// it, and omitempty keeps it out of everything written from here, so the
 	// next `connect setup` writes the key away for good.
 	LegacyPath string `json:"path,omitempty"`
+}
+
+// UnmarshalJSON refuses a null entry, and decodes an object strictly.
+//
+// Both matter, and the first is the one that bites. A JSON null decodes into
+// a struct as the zero value without an error, so `"projects":{"123":null}`
+// would read as project 123 served with no settings. Nothing noticed that
+// before this file stopped carrying a path, because the path was required
+// and a null has none — the check was doing two jobs and looked like it was
+// doing one. connect.json is the trust anchor: a half-edited file, a bad
+// merge or a truncated write has to withhold authorization, not grant it
+// (Copilot on #765).
+//
+// The strictness is the second job the outer decoder used to do here.
+// setup.Parse refuses an unknown key so that a misspelled watch_completion
+// is a refusal rather than a project the operator believes is driven and is
+// not — and a type's own UnmarshalJSON does not inherit that setting, so it
+// is applied again here. It binds admission's reader too, which is the
+// narrower of the two behaviors and the right one: the keys a project entry
+// may carry are all known here, unlike the file's own, which carry other
+// steps' settings.
+func (p *Project) UnmarshalJSON(data []byte) error {
+	if string(bytes.TrimSpace(data)) == "null" {
+		return errors.New("a served project's entry is null; an entry is an object, {} for one with no settings")
+	}
+	// A local type to shed this method, or decoding recurses.
+	type project Project
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var raw project
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	*p = Project(raw)
+	return nil
 }
 
 // Policy is what admission reads from connect.json, plus the two facts that

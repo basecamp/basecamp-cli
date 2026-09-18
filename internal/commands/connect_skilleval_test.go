@@ -19,12 +19,18 @@ import (
 //
 // # What this holds, and what it does not
 //
-// Only the reject patterns, and only for the shape of a --serve value and
-// the removed --route flags. The accept, mock, expect_sequence and
+// The accept and reject patterns, and only for the shape of a --serve value
+// and the removed --route flags. The mock, expect_sequence and
 // accept_response patterns are read by the Ruby runner under its own regex
 // semantics and are not modeled here, so a malformed one of those can still
 // land without CI noticing (Copilot on #765). This is a guard on one
 // invariant, not on the eval files.
+//
+// accept was outside the claim for two rounds, honestly declared and then
+// twice the source of a finding: the rejects learned to allow the ordinary
+// double-quoted spelling and the accepts did not move with them, so a trace
+// the CLI would take failed the eval. A gap named is still a gap, and this
+// one had stopped being theoretical.
 //
 // # The limit, which is the shell
 //
@@ -57,6 +63,10 @@ type skillEvalCase struct {
 	Accept []string `yaml:"accept"`
 	Reject []string `yaml:"reject"`
 }
+
+// caseProject is the project every case in this directory is about, and the
+// id the corpus spells in different ways.
+const caseProject = int64(222)
 
 // serveValues is the corpus, and choosing it is the check rather than setup
 // for the check: a guard is only as strong as the inputs it asserts over.
@@ -127,20 +137,28 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 			var c skillEvalCase
 			require.NoError(t, yaml.Unmarshal(raw, &c))
 
-			rejects := make([]*regexp.Regexp, 0, len(c.Reject))
-			for _, p := range c.Reject {
-				re, err := regexp.Compile(p)
-				require.NoError(t, err, "reject pattern %q", p)
-				rejects = append(rejects, re)
+			compile := func(kind string, pats []string) []*regexp.Regexp {
+				out := make([]*regexp.Regexp, 0, len(pats))
+				for _, p := range pats {
+					re, err := regexp.Compile(p)
+					require.NoError(t, err, "%s pattern %q", kind, p)
+					out = append(out, re)
+				}
+				return out
 			}
-			caught := func(cmd string) bool {
-				for _, re := range rejects {
+			matches := func(res []*regexp.Regexp, cmd string) bool {
+				for _, re := range res {
 					if re.MatchString(cmd) {
 						return true
 					}
 				}
 				return false
 			}
+			rejects := compile("reject", c.Reject)
+			caught := func(cmd string) bool { return matches(rejects, cmd) }
+			// Only the accepts that speak about --serve: a case also accepts
+			// its profile and its operator, which say nothing about a value.
+			serveAccepts := compile("accept", filterServe(c.Accept))
 
 			// A case may forbid setup outright — unconfirmed-identity does,
 			// because the credential is not the agent the person named. The
@@ -160,6 +178,15 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 
 				if v.traceOK {
 					assert.False(t, caught(cmd), "a trace may carry %q, so no reject may fire on it", cmd)
+					// And the accepts must recognize it — but only when the
+					// value names the project the case is about. An accept
+					// is scenario-specific: 007 is a different project, and
+					// a case is right not to accept the wrong one. The
+					// spelling is what is under test here, not the id.
+					if id == caseProject {
+						assert.True(t, matches(serveAccepts, cmd),
+							"a trace may carry %q, so an accept must recognize that spelling", cmd)
+					}
 					// The rule is a subset of the CLI's, never a different
 					// one: anything these patterns allow must be a command
 					// the CLI would take.
@@ -172,6 +199,8 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 
 				assert.True(t, caught(cmd),
 					"a trace may not carry %q, so a reject must catch it — an eval that lets it through reports coverage it does not have", cmd)
+				assert.False(t, matches(serveAccepts, cmd),
+					"and no accept may recognize %q, or the eval would take it as the command it asked for", cmd)
 				if cliAccepts {
 					// A narrowing: the CLI would take it and a trace may
 					// not. Recorded with a reason, so it is a decision on
@@ -183,10 +212,12 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 				}
 			}
 
-			// A --serve= with nothing after it, and the flags that no longer
-			// exist.
+			// A --serve with no value, in both spellings cobra refuses, and
+			// the flags that no longer exist.
 			for _, cmd := range []string{
 				"connect setup -P helper --serve= --json",
+				"connect setup -P helper --serve",
+				"connect setup -P helper --serve ",
 				"connect setup -P helper --route 222=/home/me/x --json",
 				"connect setup -P helper --remove-route 222 --json",
 			} {
@@ -195,4 +226,17 @@ func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {
 		})
 	}
 	assert.GreaterOrEqual(t, checked, 3, "every setup-issuing case is covered")
+}
+
+// filterServe keeps the accept patterns that constrain a --serve value. A
+// case also accepts its profile and its operator, and those say nothing
+// about what a value may be.
+func filterServe(pats []string) []string {
+	out := make([]string, 0, len(pats))
+	for _, p := range pats {
+		if strings.Contains(p, "--serve") {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -286,6 +286,13 @@ func Parse(data []byte) (File, error) {
 	if err := refuseDuplicateKeys(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
+	// admission.Project refuses a null entry itself, so both readers fail
+	// closed. This runs first only to name the project in the message: a map
+	// value's own error cannot say which key it came from, and connect.json
+	// is a file an operator edits by hand.
+	if err := refuseNullProjects(data); err != nil {
+		return File{}, fmt.Errorf("parse connect.json: %w", err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var f File
@@ -311,6 +318,33 @@ func Parse(data []byte) (File, error) {
 		return File{}, err
 	}
 	return f, nil
+}
+
+// refuseNullProjects names the project whose entry is null, which the type's
+// own refusal cannot. A malformed trust anchor withholds authorization; this
+// only makes the refusal findable.
+func refuseNullProjects(data []byte) error {
+	var shape struct {
+		Projects map[string]json.RawMessage `json:"projects"`
+	}
+	// A document this cannot read is not this check's to report: the strict
+	// decode that follows says it better. This exists only to name a
+	// project, so it stands aside rather than competing.
+	if json.Unmarshal(data, &shape) != nil {
+		return nil //nolint:nilerr // the strict decode below reports it better
+	}
+	var ids []string
+	for id, raw := range shape.Projects {
+		if string(bytes.TrimSpace(raw)) == "null" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	return fmt.Errorf("project %s: its entry is null, which is not a served project; write {} for one with no settings, or take the project out",
+		strings.Join(ids, ", "))
 }
 
 // canonicalKey reports whether a key is in its one canonical spelling:

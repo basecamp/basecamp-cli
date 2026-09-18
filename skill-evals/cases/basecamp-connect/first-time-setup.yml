@@ -36,7 +36,7 @@ expect_sequence:
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
   - 'connect setup .*--operator-profile[ =]''?jorge\b'
-  - 'connect setup .*--serve[ =](''222''|222)(\s|$)'
+  - 'connect setup .*--serve[ =](''222''|"222"|222)(\s|$)'
 reject:
   # What these evals guarantee about setup commands: every one in the trace
   # is a command the CLI would accept. The accepts above prove a correct one
@@ -60,6 +60,8 @@ reject:
   # itself.
   - 'connect setup .*--serve[ =]([0-9]*[^0-9\s''"]|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|"[0-9]*[^0-9"]|"0*"|"[0-9]*"[^\s]|[0-9]+[''"])'
   - 'connect setup .*--serve=(\s|$)'
+  # And --serve with no value at all, which cobra refuses outright.
+  - 'connect setup .*--serve\s*$'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
   - '--with-token'

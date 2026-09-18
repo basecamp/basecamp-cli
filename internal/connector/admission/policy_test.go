@@ -55,3 +55,24 @@ func TestValidateFailsClosed(t *testing.T) {
 	}
 	require.NoError(t, basePolicy().Validate())
 }
+
+// Copilot on #765: connect.json is the trust anchor, so a malformed entry
+// must refuse rather than authorize.
+//
+// The path check that went with the routes was doing two jobs and looked
+// like one. It required a path, and because a JSON null decodes into a
+// struct as the zero value without an error, a null entry had no path and so
+// was refused. Take the path away and the null becomes a perfectly valid
+// served project: a half-edited file, a bad merge or a truncated write would
+// grant authorization where it used to withhold it.
+func TestANullProjectEntryIsRefusedRatherThanServed(t *testing.T) {
+	_, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":null}}`))
+	require.Error(t, err, "a null entry is not a served project")
+	assert.Contains(t, err.Error(), "{}", "and the refusal says what a valid entry looks like")
+
+	// An empty object is a served project with no settings, and stays one:
+	// this refuses the null, not the absence of settings.
+	p, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":{}}}`))
+	require.NoError(t, err)
+	assert.Contains(t, p.Projects, int64(48699913))
+}
