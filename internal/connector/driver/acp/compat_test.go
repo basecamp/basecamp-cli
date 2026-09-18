@@ -565,8 +565,10 @@ func checkDecoyMCPServer(t *testing.T, e compatEnv) {
 // Check 7: the task token's carriage, as the dispatcher builds it. The MCP
 // server is the connector's bridge (`basecamp connect worker-mcp`), the token
 // is served once on a socket in the attempt's private directory, and the
-// socket is told the worker's process group only once NewSession returns —
-// the order the dispatcher uses. The bridge must reach the socket from
+// socket is told the worker's process group as soon as that process exists,
+// while the adapter is still in its handshake — the order the dispatcher
+// uses, and the order this check now holds it to rather than performing on
+// its own after the fact. The bridge must reach the socket from
 // wherever the adapter starts it, the handoff must be delivered, and the
 // token must not be in any environment, command line or file of the worker's
 // processes. No Basecamp account is involved: the bridge's profile is a dummy
@@ -621,19 +623,54 @@ func checkTokenBridge(t *testing.T, e compatEnv) {
 		Scope:      driver.Scope{WorkDir: wd},
 		PrivateDir: private,
 	}
+	// The arming is the dispatcher's, done where the dispatcher does it: on
+	// the worker's process, as soon as that process exists and while the
+	// adapter is still in its handshake. Arming it after NewSession returned
+	// — which is what this check used to do — passes under either ordering
+	// and so says nothing about either; arming it here fails outright on the
+	// ordering the card is about, because an adapter that started its MCP
+	// servers during its handshake would then be waiting for a token nothing
+	// had armed the socket to hand over. tokenArming.verdict is the
+	// difference, and TestTheArmingCheckTellsTheTwoOrderingsApart proves it
+	// is one.
+	var arming tokenArming
+	cfg.Started = func(p driver.Process) {
+		arming.arm(p)
+		tokens.AllowGroup(p.PGID)
+	}
+	// Read before the start, not after it: the handoff this check is about
+	// can now happen while NewSession is still running, and a result read
+	// afterwards could not say whether it did.
+	handed := make(chan connector.Handoff, 1)
+	go func() { handed <- tokens.Result() }()
+
 	d := e.driverFor(t, "")
 	var s driver.Session
 	var places drivertest.Places
 	drivertest.RequireNoSecretFilesDuring(t, token, []string{wd, private, state}, func() {
 		started := time.Now()
 		s, err = d.NewSession(turnCtx(t), cfg)
+		arming.startReturned()
 		if err != nil {
 			t.Fatalf("NewSession: %v", err)
 		}
 		t.Logf("NewSession took %s", time.Since(started).Round(time.Millisecond))
-		tokens.AllowGroup(s.Process().PGID)
-		handed := make(chan connector.Handoff, 1)
-		go func() { handed <- tokens.Result() }()
+		if err := arming.verdict(); err != nil {
+			_ = s.Close()
+			t.Fatalf("the task token's socket was not armed in time: %v", err)
+		}
+		delivered := ""
+		select {
+		case h := <-handed:
+			// Taken while the adapter was still opening its session: this is
+			// the case the ordering exists for, and the old one could not
+			// have reached it.
+			handed <- h
+			delivered = "during the handshake"
+		default:
+			delivered = "after the handshake"
+		}
+		t.Logf("the token was taken %s", delivered)
 		deadline := time.After(90 * time.Second)
 		for {
 			places = addWorkerProcesses(places, s.Process().PID)

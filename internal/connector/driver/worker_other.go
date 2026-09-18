@@ -15,7 +15,7 @@ var errUnsupported = errors.New("driver: workers run on Unix only (process group
 type Worker struct{}
 
 // StartWorker refuses off Unix; nothing is started.
-func StartWorker(context.Context, Launcher, Scope, Command) (*Worker, error) {
+func StartWorker(context.Context, SessionConfig, Command) (*Worker, error) {
 	return nil, errors.Join(ErrNotStarted, errUnsupported)
 }
 

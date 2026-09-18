@@ -635,7 +635,14 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 		return nil
 	}
 	p := session.Process()
-	// The token goes only to this worker's own process group.
+	// The token goes only to this worker's own process group, and the socket
+	// was armed for it as soon as the process existed (SessionConfig.Started,
+	// in sessionConfig below). This is the backstop for a driver that
+	// announced nothing — one whose session runs somewhere the connector
+	// cannot signal, which has no group to allow either, so it arms on the
+	// zero group and the socket refuses every peer. AllowGroup takes the
+	// first group it is given and ignores the rest, so where the driver did
+	// announce, this changes nothing.
 	tokens.AllowGroup(p.PGID)
 	if err := d.ledger.MarkRunning(settleCtx, launch.AttemptID, recordedProcess(p, session.ID())); err != nil {
 		_ = session.Close()
@@ -735,6 +742,16 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 	return driver.SessionConfig{
 		Cwd: launch.WorkDir,
 		Env: driver.BuildEnv(driver.BaseEnv, d.opts.Lookup, nil),
+		// The socket is armed the moment the worker's process exists, which
+		// is inside NewSession and before whatever handshake the driver runs
+		// on top of it (driver invariant 7). Arming it after NewSession
+		// returned is a deadlock for any agent whose handshake does not
+		// finish until its MCP servers have connected: the server waits for a
+		// token the connector will not hand over until the handshake that is
+		// blocking it has returned, and both sides wait out their timeouts.
+		// AllowGroup does not block and takes only the first group it is
+		// given.
+		Started: func(p driver.Process) { tokens.AllowGroup(p.PGID) },
 		MCPServers: []driver.MCPServer{{
 			Name:    MCPServerName,
 			Command: d.opts.MCP.Command,

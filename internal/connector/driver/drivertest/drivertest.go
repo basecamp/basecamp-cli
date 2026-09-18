@@ -35,7 +35,7 @@ func StartTree(t *testing.T, dir string) (*driver.Worker, int) {
 	// The grandchild holds the working directory open and outlives its
 	// parent, which exits at once.
 	script := "cd " + dir + " && (sleep 300 & echo $! > " + pidFile + ") && exit 0"
-	worker, err := driver.StartWorker(context.Background(), nil, driver.Scope{WorkDir: dir},
+	worker, err := driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: dir}},
 		driver.Command{Path: "/bin/sh", Args: []string{"-c", script}, Env: []string{"PATH=/bin:/usr/bin"}})
 	if err != nil {
 		t.Fatalf("start a worker tree: %v", err)

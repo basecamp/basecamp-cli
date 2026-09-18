@@ -200,7 +200,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, sessionID 
 		return nil, fmt.Errorf("%w: %w: %w", driver.ErrNotStarted, driver.ErrUnusable, err)
 	}
 	env := d.env(cfg)
-	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
+	worker, err := driver.StartWorker(ctx, cfg, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
 	if err != nil {
 		_ = os.Remove(mcpPath)
 		return nil, err

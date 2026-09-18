@@ -188,14 +188,22 @@ type Worker struct {
 	releaseOnce sync.Once
 }
 
-// StartWorker launches cmd through launcher, in scope, as a new process group.
-// An error wrapping ErrNotStarted means no process exists; StartWorker returns
-// no other error.
-func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Command) (*Worker, error) {
+// StartWorker launches cmd through cfg's launcher, in cfg's scope, as a new
+// process group. An error wrapping ErrNotStarted means no process exists;
+// StartWorker returns no other error.
+//
+// The whole of cfg is taken rather than its launcher and scope so that the
+// announcement of the worker (cfg.Started, driver invariant 7) is made here,
+// once, for every driver: the connector cannot arm the task token's socket
+// until it knows the process group, and a driver that announced it only when
+// its handshake returned would deadlock an agent whose handshake waits on
+// its MCP servers.
+func StartWorker(ctx context.Context, cfg SessionConfig, cmd Command) (*Worker, error) {
+	launcher := cfg.Launcher
 	if launcher == nil {
 		launcher = DirectLauncher{}
 	}
-	launched, err := launcher.Launch(ctx, LaunchRequest{Scope: scope, Command: cmd})
+	launched, err := launcher.Launch(ctx, LaunchRequest{Scope: cfg.Scope, Command: cmd})
 	if err != nil {
 		return nil, fmt.Errorf("%w: launcher: %w", ErrNotStarted, err)
 	}
@@ -267,6 +275,13 @@ func StartWorker(ctx context.Context, launcher Launcher, scope Scope, cmd Comman
 		w.exit = exitOf(ec, err)
 		close(w.done)
 	}()
+	// The worker exists, and nothing has been asked of it yet: this is the
+	// earliest the connector can be told its process group, and the latest it
+	// can be told without a handshake that waits on the token socket waiting
+	// on itself (driver invariant 7).
+	if cfg.Started != nil {
+		cfg.Started(w.process)
+	}
 	return w, nil
 }
 

@@ -232,7 +232,7 @@ func (d *Driver) open(ctx context.Context, cfg driver.SessionConfig, loadID stri
 		more.Env = append(more.Env, driver.EnvOf(server.Env)...)
 	}
 	red := driver.NewRedactor(cfg.Redaction.With(more))
-	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{
+	worker, err := driver.StartWorker(ctx, cfg, driver.Command{
 		Path: d.opts.Binary, Args: append([]string{}, d.opts.Args...), Env: env, Dir: cfg.Cwd,
 	})
 	if err != nil {

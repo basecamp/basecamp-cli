@@ -29,7 +29,7 @@ func taskOf(p driver.Process) connector.TaskStatus {
 func runningTree(t *testing.T) (*driver.Worker, int) {
 	t.Helper()
 	pidFile := filepath.Join(t.TempDir(), "child")
-	worker, err := driver.StartWorker(context.Background(), nil, driver.Scope{WorkDir: t.TempDir()},
+	worker, err := driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: t.TempDir()}},
 		driver.Command{Path: "/bin/sh", Args: []string{"-c", "sleep 300 & echo $! > " + pidFile + "; wait"}, Env: []string{"PATH=/bin:/usr/bin"}})
 	if err != nil {
 		t.Fatalf("start a worker: %v", err)

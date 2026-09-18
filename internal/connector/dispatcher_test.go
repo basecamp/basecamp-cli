@@ -36,7 +36,11 @@ type fakeDriver struct {
 	sessions []*fakeSession
 	// turn answers each prompt; nil means end_turn at once.
 	turn func(s *fakeSession, n int, prompt string) (driver.PromptResult, error)
-	made chan *fakeSession
+	// handshake is what the driver does with the worker it has just started
+	// and announced, before NewSession returns: the ACP driver's handshake,
+	// where a real one runs. An error fails the start.
+	handshake func(cfg driver.SessionConfig) error
+	made      chan *fakeSession
 }
 
 func newFakeDriver() *fakeDriver { return &fakeDriver{made: make(chan *fakeSession, 16)} }
@@ -60,6 +64,18 @@ func (d *fakeDriver) NewSession(_ context.Context, cfg driver.SessionConfig) (dr
 	s := &fakeSession{d: d, cfg: cfg, done: make(chan struct{}), updates: make(chan driver.Update), canceled: make(chan struct{}, 1)}
 	d.sessions = append(d.sessions, s)
 	d.mu.Unlock()
+	// The worker's process exists from here: every driver that starts one
+	// says so before it opens a session on top of it (driver invariant 7),
+	// and a fake that did not would prove the dispatcher's ordering against a
+	// driver no driver is.
+	if cfg.Started != nil {
+		cfg.Started(s.Process())
+	}
+	if d.handshake != nil {
+		if err := d.handshake(cfg); err != nil {
+			return nil, err
+		}
+	}
 	d.made <- s
 	return s, nil
 }

@@ -313,7 +313,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", driver.ErrNotStarted, err)
 	}
-	worker, err := driver.StartWorker(ctx, cfg.Launcher, cfg.Scope, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
+	worker, err := driver.StartWorker(ctx, cfg, driver.Command{Path: d.opts.Binary, Args: args, Env: env, Dir: cfg.Cwd})
 	if err != nil {
 		return nil, err
 	}
