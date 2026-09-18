@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,34 +30,74 @@ const GuardAckBody = "👀 received"
 // a person can tell a notice from the agent's own words.
 const lifecycleSignature = "automatic notice from basecamp connect"
 
-// redispatchAsk is the only thing a lifecycle notice ever asks a person to do.
-// Every notice that carries it is retractable, because a person's decision on
-// the record answers it; every notice that does not — the guard
+// redispatchCommand is the only thing a lifecycle notice ever asks a person to
+// do. Every notice that carries it is retractable, because a person's decision
+// on the record answers it; every notice that does not — the guard
 // acknowledgement, the still-running notice, a completion notice reporting an
 // outcome nobody has to act on — is a record of a moment, and a record stands.
+const redispatchCommand = "basecamp connect redispatch "
+
 func redispatchAsk(eventID int64) string {
-	return "basecamp connect redispatch " + strconv.FormatInt(eventID, 10)
+	return redispatchCommand + strconv.FormatInt(eventID, 10)
 }
 
-// asksRedispatch reports whether a posted message asks a person to redispatch
-// eventID. It reads the body that went out, not the records: the records have
-// moved on — that is why the message is being retracted — and what a reader
-// is looking at is the words.
-func asksRedispatch(body string, eventID int64) bool {
-	text, ask := MessageText(body), redispatchAsk(eventID)
-	for from := 0; from+len(ask) <= len(text); {
-		i := strings.Index(text[from:], ask)
+// redispatchAsksIn is every event a posted message asks a person to
+// redispatch, in the order it names them and without repeats. One completion
+// notice speaks for a whole attempt, so it can ask about several.
+//
+// It reads the body that went out, not the records: the records have moved on
+// — that is why the message is being retracted — and what a reader is looking
+// at is the words.
+func redispatchAsksIn(body string) []int64 {
+	text := MessageText(body)
+	var (
+		out  []int64
+		seen map[int64]bool
+	)
+	for from := 0; from < len(text); {
+		i := strings.Index(text[from:], redispatchCommand)
 		if i < 0 {
 			break
 		}
-		end := from + i + len(ask)
-		// "redispatch 12" is not an ask for event 123.
-		if end == len(text) || text[end] < '0' || text[end] > '9' {
-			return true
+		digits := from + i + len(redispatchCommand)
+		end := digits
+		for end < len(text) && text[end] >= '0' && text[end] <= '9' {
+			end++
 		}
-		from = end
+		// The whole run of digits, so "redispatch 12" is an ask for event 12
+		// and for no other.
+		if id, err := strconv.ParseInt(text[digits:end], 10, 64); err == nil && !seen[id] {
+			if seen == nil {
+				seen = map[int64]bool{}
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+		from = digits
 	}
-	return false
+	return out
+}
+
+// asksRedispatch reports whether a posted message asks a person to redispatch
+// eventID.
+func asksRedispatch(body string, eventID int64) bool {
+	return slices.Contains(redispatchAsksIn(body), eventID)
+}
+
+// eventList names events the way a sentence does: "event 42", "events 42 and
+// 43", "events 42, 43 and 44".
+func eventList(ids []int64) string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = strconv.FormatInt(id, 10)
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return "event " + names[0]
+	}
+	return "events " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // renderHoldingReply is the reply to a mention or assignment in a project that
@@ -96,15 +137,24 @@ func renderRefusedStart(kind MessageKind, eventID int64) string {
 // connector does not know, and it does not touch the notice it answers. Nobody
 // is named: the connector knows who decided only as the handle the command
 // recorded, which is not a person on this card.
-func renderRetraction(kind MessageKind, eventID int64, action DecisionAction, at time.Time) string {
+func renderRetraction(kind MessageKind, eventID int64, others []int64, action DecisionAction, at time.Time) string {
 	id := strconv.FormatInt(eventID, 10)
 	answer := "A person ran it at " + clock(at) + ", and event " + id + " is not waiting for it now."
 	if action == DecisionDiscard {
 		answer = "A person closed event " + id + " instead, at " + clock(at) + ", and it is not waiting for anything now."
 	}
+	// A completion notice speaks for a whole attempt and can ask about several
+	// events. This answers one of them, and says so: a closing line that spoke
+	// for the notice would dismiss asks nobody has acted on, which is the
+	// mistake this whole change is about.
+	stands := "The earlier notice stands as a record of when it was written; nothing in it needs doing."
+	if len(others) > 0 {
+		stands = "The earlier notice stands as a record of when it was written. It also asks about " +
+			eventList(others) + "; this answers only event " + id + "."
+	}
 	lines := []string{
 		"Event " + id + ": an earlier notice here asked a person to run " + redispatchAsk(eventID) + ". " + answer,
-		"The earlier notice stands as a record of when it was written; nothing in it needs doing.",
+		stands,
 		"",
 		"Event " + id + " · " + lifecycleSignature,
 	}
@@ -369,7 +419,7 @@ func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecisi
 			eventID:     d.EventID,
 			retracts:    p.id,
 			destination: p.dest,
-			body:        renderRetraction(p.dest.Kind, d.EventID, d.Action, d.At),
+			body:        renderRetraction(p.dest.Kind, d.EventID, p.others, d.Action, d.At),
 		}); err != nil {
 			return err
 		}
@@ -378,10 +428,12 @@ func retractionIntents(ctx context.Context, tx Tx, now time.Time, d RecordDecisi
 }
 
 // postedAsk is one message the connector posted that asks for an event's
-// redispatch.
+// redispatch, with the other events it asks about — none, for a holding
+// reply; the rest of the attempt, for a completion notice.
 type postedAsk struct {
-	id   int64
-	dest Destination
+	id     int64
+	dest   Destination
+	others []int64
 }
 
 // postedAsks reads the latest ask for an event at each destination, and closes
@@ -410,9 +462,16 @@ ORDER BY o.id`, eventID)
 			return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)
 		}
 		p.dest.Kind = MessageKind(kind)
-		if asksRedispatch(body, eventID) {
-			latest[p.dest] = p
+		asked := redispatchAsksIn(body)
+		if !slices.Contains(asked, eventID) {
+			continue
 		}
+		for _, id := range asked {
+			if id != eventID {
+				p.others = append(p.others, id)
+			}
+		}
+		latest[p.dest] = p
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("connector: read the posted asks for event %d: %w", eventID, err)

@@ -173,6 +173,74 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 	})
 }
 
+// A completion notice speaks for a whole attempt and can ask about several
+// events. Answering one of them says so, and says nothing about the others:
+// the closing line is the one a reader acts on, and "nothing in it needs
+// doing" would dismiss asks nobody has touched.
+func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
+	ctx := context.Background()
+	ledger, clock := obLedger(t)
+	obAdmit(t, ledger, 1, "recording:10304028989")
+	l := obLaunch(t, ledger, 1)
+	obAdmit(t, ledger, 2, "recording:10304028989")
+	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, []int64{2}, joined)
+	exposed, err := ledger.ExposeEvent(ctx, l.AttemptID, 2)
+	require.NoError(t, err)
+	require.True(t, exposed)
+	clock.Advance(5 * time.Minute)
+	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopDeadline})
+	require.NoError(t, err)
+
+	basecamp := newFakeBasecamp(clock.Now)
+	ob := obOutbox(t, ledger, basecamp)
+	require.NoError(t, ob.Flush(ctx))
+	completion := obIntent(t, ledger, completionKey(l.AttemptID))
+	require.Equal(t, IntentSent, completion.State)
+	require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 1")
+	require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 2")
+
+	// One of the two is decided. The other's ask is untouched, and the
+	// retraction does not speak for it.
+	clock.Advance(time.Minute)
+	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	require.NoError(t, err)
+
+	first := obRetraction(t, ledger, completion, 1)
+	assert.Contains(t, first.Body, "It also asks about event 2; this answers only event 1.")
+	assert.NotContains(t, first.Body, "nothing in it needs doing")
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, IntentSent, obRetraction(t, ledger, completion, 1).State)
+
+	// The second is decided later, and gets its own answer, naming the first
+	// as the notice's other ask rather than claiming to answer it.
+	clock.Advance(time.Minute)
+	_, err = ledger.Discard(ctx, 2, "jorge")
+	require.NoError(t, err)
+	second := obRetraction(t, ledger, completion, 2)
+	assert.Contains(t, second.Body, "It also asks about event 1; this answers only event 2.")
+	require.NoError(t, ob.Flush(ctx))
+	assert.Equal(t, IntentSent, obRetraction(t, ledger, completion, 2).State)
+	assert.Len(t, basecamp.at(completion.Destination), 3, "the notice and one answer per event")
+}
+
+// Which events a posted message asks about, read off the words that went out.
+func TestRedispatchAsksInReadsEveryAsk(t *testing.T) {
+	two := renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed, Events: []SettledEvent{
+		{EventID: 41, Outcome: OutcomeFailed},
+		{EventID: 42, Outcome: OutcomeSucceeded, Reported: true},
+		{EventID: 43, Outcome: OutcomeUnknown},
+	}})
+	assert.Equal(t, []int64{41, 43}, redispatchAsksIn(two), "the succeeded event is reported, not asked about")
+	assert.Equal(t, []int64{7}, redispatchAsksIn(renderHoldingReply(MessageComment, 7)))
+	assert.Empty(t, redispatchAsksIn(GuardAckBody))
+	assert.Empty(t, redispatchAsksIn(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Time{})))
+	assert.Equal(t, "event 42", eventList([]int64{42}))
+	assert.Equal(t, "events 42 and 43", eventList([]int64{42, 43}))
+	assert.Equal(t, "events 42, 43 and 44", eventList([]int64{42, 43, 44}))
+}
+
 // A redispatch of a blocked record authorizes it; what settles the block is
 // the prerequisite its caller runs next, and that can fail. Until the record
 // has actually moved, the operator is still being told to redispatch, and
