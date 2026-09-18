@@ -314,6 +314,15 @@ func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, attemptID stri
 		record.ContentDropped, len(record.Decision.Snapshot) == 0,
 		!record.Decision.Served, record.Decision.ConversationKey == "":
 		return Launch{}, fmt.Errorf("connector: launch event %d (%s): %w", spec.EventID, record.State, ErrNotStartable)
+	case !slices.Contains(spec.Served, record.BucketID):
+		// Decision.Served is what admission wrote when it decided the
+		// record, so it says the project was served then. spec.Served is
+		// what connect.json serves now. The dispatcher reads the file again
+		// between choosing a record and launching it, so a project unserved
+		// in that window would otherwise start a task the operator has just
+		// withdrawn (Copilot on #765). The set the launch is given decides,
+		// here as for the records that join it.
+		return Launch{}, fmt.Errorf("connector: launch event %d in project %d, which is not served: %w", spec.EventID, record.BucketID, ErrNotStartable)
 	}
 	var busy bool
 	if err := tx.QueryRowContext(ctx, `

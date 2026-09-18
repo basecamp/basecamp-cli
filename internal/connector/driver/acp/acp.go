@@ -40,11 +40,10 @@
 //     when loadSession is true, session/resume when sessionCapabilities.resume
 //     is present, otherwise an error. Its history replay is not progress.
 //  6. A configuration this driver cannot run — an adapter with no asking mode
-//     for the policy's, a policy for another directory, an MCP server without
-//     an absolute command, a Codex config that declares MCP servers or that
-//     cannot be read — is
-//     ErrUnusable beside ErrNotStarted: nothing started, and a retry would
-//     fail the same way.
+//     for the policy's, a session with no absolute working directory to start
+//     in, an MCP server without an absolute command, a Codex config that
+//     declares MCP servers or that cannot be read — is ErrUnusable beside
+//     ErrNotStarted: nothing started, and a retry would fail the same way.
 //  7. The adapter is the pinned one: initialize must report protocol version
 //     1 and the Adapter's package and version, or the session is ended.
 //  8. Nothing the agent volunteers is kept: _auth/status_update (which

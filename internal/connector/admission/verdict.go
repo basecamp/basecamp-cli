@@ -98,11 +98,28 @@ type Admitter struct {
 	policy Policy
 	matrix Matrix
 	reads  Reads
+	// served reads the projects connect.json serves now. Nil means the
+	// policy's own map, frozen at construction; WithServed makes it live.
+	served func() map[int64]Project
 
 	attempts int
 	backoff  time.Duration
 	sleep    func(context.Context, time.Duration) error
 	now      func() time.Time
+}
+
+// policyNow is the policy this decision runs against: the one the admitter
+// was built with, with the served projects as they are at this moment when a
+// source for them was given. Trust and the agent's own id never move.
+//
+// The map is the caller's to copy; it is read, never written to.
+func (a *Admitter) policyNow() Policy {
+	if a.served == nil {
+		return a.policy
+	}
+	p := a.policy
+	p.Projects = a.served()
+	return p
 }
 
 // decision is one Decide call: the admitter, plus what the call has spent
@@ -146,6 +163,24 @@ func WithReadRetry(attempts int, backoff time.Duration) Option {
 // WithSleep replaces the wait between read attempts. Tests use it.
 func WithSleep(sleep func(context.Context, time.Duration) error) Option {
 	return func(a *Admitter) { a.sleep = sleep }
+}
+
+// WithServed makes the served projects live: admission reads them at each
+// decision instead of from the policy it was built with.
+//
+// The dispatcher already rereads connect.json, so without this, serving a
+// project while the connector runs changed only half the answer. Unserving
+// one left its events admitted and then never started — no work and no
+// holding reply, so the person who mentioned the agent got nothing. Serving
+// one left them blocked no_route until a restart, and the holding reply's own
+// remedy could not work: a redispatch re-runs admission, against the same
+// stale policy (Copilot on #765).
+//
+// Only the projects are live. Trust is not: who may drive the agent is a
+// different kind of decision, and changing it under a running connector is
+// not something this option quietly does.
+func WithServed(served func() map[int64]Project) Option {
+	return func(a *Admitter) { a.served = served }
 }
 
 // WithMatrix replaces the trigger matrix.
@@ -206,7 +241,8 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		ev.SeenAt = a.now()
 	}
 
-	gate := Gate(ev, a.policy, a.matrix)
+	policy := a.policyNow()
+	gate := Gate(ev, policy, a.matrix)
 	if gate.Discarded() {
 		return v.end(StateDiscarded, gate.Reason), nil
 	}
@@ -256,7 +292,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 
 	v.RecordingURL = summary.AppURL
-	if project, ok := a.policy.served(ev.BucketID); ok {
+	if project, ok := policy.served(ev.BucketID); ok {
 		v.Served, v.Class = true, project.Class
 	}
 
@@ -367,7 +403,7 @@ func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			}
 
 		case TriggerCompleted:
-			project, served := a.policy.served(ev.BucketID)
+			project, served := a.policyNow().served(ev.BucketID)
 			if served && project.WatchCompletions {
 				return rule, "", "", nil
 			}

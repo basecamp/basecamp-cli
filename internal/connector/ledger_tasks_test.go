@@ -414,6 +414,32 @@ func TestAFollowUpOnTheConversationJoinsTheTask(t *testing.T) {
 	assert.Equal(t, []int64{2}, joined)
 }
 
+// Copilot on #765: the originating record is held to the served set too, not
+// only the records that join it.
+//
+// The dispatcher chooses a record from the set connect.json served when it
+// ran the query, then reads the file again on its way into LaunchSpec. A
+// project unserved in between would otherwise start a task anyway, because
+// the record still carries the served bit admission wrote. The set the
+// launch is given is the one that decides.
+func TestALaunchIsRefusedForAProjectTheSpecDoesNotServe(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+
+	_, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID + 1}, Driver: "fake"})
+	assert.ErrorIs(t, err, ErrNotStartable, "another project's served set does not authorize this record")
+
+	_, err = ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "fake"})
+	assert.ErrorIs(t, err, ErrNotStartable, "and a launch that names no served project authorizes nothing")
+
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State, "nothing was written either time")
+
+	l, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "fake"})
+	require.NoError(t, err, "served, and it launches")
+	assert.NotZero(t, l.TaskID)
+}
+
 // Copilot on #765: a task is authorized against one project, so nothing from
 // another project joins it, however the conversation is shared.
 //

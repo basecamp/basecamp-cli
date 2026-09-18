@@ -130,9 +130,10 @@ func (f *fakeReads) totalReads() int {
 
 var errTransport = errors.New("connection reset")
 
-func newAdmitter(t *testing.T, p Policy, f *fakeReads) *Admitter {
+func newAdmitter(t *testing.T, p Policy, f *fakeReads, opts ...Option) *Admitter {
 	t.Helper()
-	a, err := NewAdmitter(p, f.reads(), WithSleep(func(context.Context, time.Duration) error { return nil }))
+	opts = append([]Option{WithSleep(func(context.Context, time.Duration) error { return nil })}, opts...)
+	a, err := NewAdmitter(p, f.reads(), opts...)
 	require.NoError(t, err)
 	return a
 }

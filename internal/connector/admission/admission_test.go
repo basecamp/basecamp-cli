@@ -1069,3 +1069,61 @@ func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
 	require.Len(t, h.memberAsOf, 1)
 	assert.False(t, h.memberAsOf[0].Before(before))
 }
+
+// Copilot on #765: admission reads the served projects as they are now, not
+// as they were when the connector started.
+//
+// The dispatcher already rereads connect.json, so serving a project while the
+// connector runs used to change only half the answer: admission went on
+// deciding against the startup policy. Unserving one left events admitted and
+// then silently unstarted — no work and no holding reply, so the person who
+// mentioned the agent got nothing. Serving one left events blocked no_route,
+// and the holding reply's own remedy ("a person can run it with redispatch")
+// could not work, because the redispatch re-ran admission against the same
+// stale policy.
+func TestAdmissionReadsTheServedProjectsAsTheyAreNow(t *testing.T) {
+	live := map[int64]Project{servedProj: {Class: "internal"}}
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() map[int64]Project { return live }))
+
+	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+	v := decide(t, a, ev)
+	require.Equal(t, StateAdmitted, v.State)
+	assert.True(t, v.Served)
+	assert.Equal(t, "internal", v.Class)
+
+	// The operator stops serving it. The next event is answered, not
+	// swallowed: blocked no_route is what the holding reply is written for.
+	delete(live, servedProj)
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 1, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonNoRoute, v.Reason)
+	assert.False(t, v.Served)
+
+	// And serving it again takes effect without a restart, which is what
+	// makes the holding reply's redispatch a real remedy.
+	live[servedProj] = Project{Class: "client-work"}
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 2, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateAdmitted, v.State)
+	assert.Equal(t, "client-work", v.Class, "and the entry read is the live one, not the startup copy")
+}
+
+// A trigger the gate only admits in a served project is discarded there once
+// the project stops being served, and is not answered: only mentioned and
+// assigned get a holding reply.
+func TestTheGateReadsTheLiveServedSetToo(t *testing.T) {
+	live := map[int64]Project{servedProj: {}}
+	f := newFakeReads()
+	summary := summaryWith(recordingID, servedProj, "Todo", operatorID, "<div>ship it</div>")
+	summary.Assignees = []basecamp.Person{{ID: agentID}}
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() map[int64]Project { return live }))
+
+	delete(live, servedProj)
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateDiscarded, v.State)
+	assert.Equal(t, ReasonNoRoute, v.Reason)
+}

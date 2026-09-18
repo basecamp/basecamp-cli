@@ -315,8 +315,16 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 
+	// connect.json's served projects as they are now, for admission and for
+	// dispatch alike. One reader, so the two halves of the answer cannot
+	// disagree: admission deciding against the startup file while the
+	// dispatcher read the current one is what left an unserved project's
+	// events admitted and never started — no work and no holding reply — and
+	// a newly served project's blocked until a restart (Copilot on #765).
+	served := newConnectServed(path, file, logger)
+
 	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
-	admitter, err := admission.NewAdmitter(policy, reads)
+	admitter, err := admission.NewAdmitter(policy, reads, admission.WithServed(served.Current))
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
@@ -347,7 +355,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		served := newConnectServed(path, file, logger)
 		worker, err := connectDriver(driverName, file.WorkerName(), f.adapters)
 		if err != nil {
 			return output.ErrUsage(err.Error())
