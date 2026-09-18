@@ -1071,10 +1071,10 @@ func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
 	assert.False(t, h.memberAsOf[0].Before(before))
 }
 
-// Copilot on #765: admission reads the served projects as they are now, not
-// as they were when the connector started.
+// Copilot on #765: admission reads the served projects at each decision, not
+// once when the connector started.
 //
-// The dispatcher already rereads connect.json, so serving a project while the
+// The dispatcher's reader already re-read the file, so serving a project while the
 // connector runs used to change only half the answer: admission went on
 // deciding against the startup policy. Unserving one left events admitted and
 // then silently unstarted — no work and no holding reply, so the person who

@@ -26,6 +26,12 @@ import (
 // land without CI noticing (Copilot on #765). This is a guard on one
 // invariant, not on the eval files.
 //
+// One of the patterns is a blunt instrument and says so: a value of all
+// digits can still be too large for an int64, and no shape can see a numeric
+// bound, so the rule caps a value at 18 digits. That is comfortably above any
+// real project id and one short of MaxInt64's 19, which makes MaxInt64 itself
+// a declared narrowing rather than a value the patterns quietly mishandle.
+//
 // accept was outside the claim for two rounds, honestly declared and then
 // twice the source of a finding: the rejects learned to allow the ordinary
 // double-quoted spelling and the accepts did not move with them, so a trace
@@ -113,11 +119,19 @@ var serveValues = []struct {
 	{arg: `"222=work"`, value: "222=work"},
 	{arg: `"222"x`, value: "222x"},
 
-	// The narrowings. The CLI takes all three; a trace may not.
+	// All digits and still refused: a numeric bound, which no shape-based
+	// pattern can see. The corpus is where a boundary like this gets
+	// noticed, and this one was not in it (Copilot on #765).
+	{arg: "9223372036854775808", value: "9223372036854775808"}, // MaxInt64 + 1
+	{arg: "999999999999999999", value: "999999999999999999", traceOK: true},
+
+	// The narrowings. The CLI takes all four; a trace may not.
 	{arg: "+222", value: "+222", why: "a leading plus is not how an id is written"},
 	{arg: "'22''2'", value: "222", why: "fragments the shell joins are not a spelling to teach"},
 	{arg: "222'333'", value: "222333", why: "same, the other way round"},
 	{arg: `'222'"333"`, value: "222333", why: "same, across both quote styles"},
+	{arg: "9223372036854775807", value: "9223372036854775807",
+		why: "MaxInt64 itself: the digit cap that catches the values above it cannot spare this one, and no project id is anywhere near"},
 }
 
 func TestConnectSkillEvalRejectsHoldTheServeValueRule(t *testing.T) {

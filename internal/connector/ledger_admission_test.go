@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -767,13 +768,19 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 		UpdatedAt:          time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC),
 	}
 
-	broken := true
+	// Atomic, not a plain bool: RunAdmission reads this from a worker
+	// goroutine while the test writes it, and an unsynchronised pair like
+	// that is a race whether or not the detector happens to catch it on a
+	// given run — which is exactly how a mystery flake reaches somebody
+	// else's PR (Copilot on #765).
+	var broken atomic.Bool
+	broken.Store(true)
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
 		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
 	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads},
 		admission.WithServed(func() (map[int64]admission.Project, error) {
-			if broken {
+			if broken.Load() {
 				return nil, errors.New("connect.json cannot be read")
 			}
 			return map[int64]admission.Project{adapterBucketID: {Class: "internal"}}, nil
@@ -803,7 +810,7 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 
 	// The operator repairs the file and redispatches, which is the remedy
 	// for a blocked record and the one the holding reply names.
-	broken = false
+	broken.Store(false)
 	res, err := ledger.Redispatch(ctx, ev.ID, "local:tester", []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.True(t, res.Rerun, "a blocked record's prerequisite is run again")

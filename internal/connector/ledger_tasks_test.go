@@ -417,11 +417,15 @@ func TestAFollowUpOnTheConversationJoinsTheTask(t *testing.T) {
 // Copilot on #765: the originating record is held to the served set too, not
 // only the records that join it.
 //
-// The dispatcher chooses a record from the set connect.json served when it
-// ran the query, then reads the file again on its way into LaunchSpec. A
-// project unserved in between would otherwise start a task anyway, because
-// the record still carries the served bit admission wrote. The set the
-// launch is given is the one that decides.
+// The ledger launches only what the set it is given covers, and a launch
+// naming no set authorizes nothing rather than defaulting open. For the
+// dispatcher that is belt and braces — one pass takes a single reading and
+// hands the same slice to the startable query and to LaunchSpec, so the
+// record is always in it — and it is what makes any other caller fail closed.
+//
+// It is not a fix for the window between reading connect.json and committing
+// the launch: an unserve landing there still starts this one task, and the
+// comment here used to say otherwise.
 func TestALaunchIsRefusedForAProjectTheSpecDoesNotServe(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()

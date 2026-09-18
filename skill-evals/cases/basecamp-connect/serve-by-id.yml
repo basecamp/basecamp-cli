@@ -46,6 +46,12 @@ reject:
   - 'connect setup .*--serve=(\s|$)'
   # And --serve with no value at all, which cobra refuses outright.
   - 'connect setup .*--serve\s*$'
+  # A value of all digits can still be too large for an int64, which no
+  # shape can see. Capped at 18 digits, comfortably above any real
+  # project id and safely below the 19 of MaxInt64 — so a trace may not
+  # carry 9223372036854775807 either, which the CLI would take. That
+  # narrowing is declared in the guard's corpus rather than left here.
+  - 'connect setup .*--serve[ =][''"]?[0-9]{19}'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
   # The name never reaches a command; only its id does. A project name is the
