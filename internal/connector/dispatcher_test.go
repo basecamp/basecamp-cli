@@ -1601,3 +1601,82 @@ func TestAnAttemptWhoseTokenHolderIsUnaccountedForIsHeld(t *testing.T) {
 		"the attempt stays live rather than being settled around the token's holder")
 	assert.Equal(t, 1, h.d.heldCount(), "and it holds one of the connector's worker slots until a person settles it")
 }
+
+// Copilot on #738: recovery settles what a previous process left, and a
+// shutdown signal arriving while it runs must not leave that attempt half
+// settled — its worker ended and its record still live.
+func TestRecoverySettlesEvenWhenTheRunContextIsAlreadyOver(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+	// A worker whose pid is above the kernel's maximum: gone, nothing left
+	// to signal, so only the settlement is in question.
+	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID,
+		AttemptProcess{PID: 1 << 30, PGID: 1 << 30, SessionID: "s"}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, h.d.Recover(ctx))
+
+	assert.Equal(t, "lost", readAttempt(t, h.ledger, l.AttemptID).StopReason,
+		"cleanup runs on a context cancellation does not reach")
+	assert.Zero(t, h.d.heldCount(), "so nothing is held for want of a settlement that was never tried")
+}
+
+// blockingReplies is a reply listing that answers only when its context ends.
+type blockingReplies struct{ asked chan struct{} }
+
+func (b blockingReplies) AgentReplies(ctx context.Context, _ int64, _ string, _ int64, _ time.Time) ([]AgentReply, error) {
+	select {
+	case b.asked <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Copilot on #738: adoption runs on the settlement's context, which a
+// shutdown deliberately does not cancel, and on the wait group Run waits on
+// at shutdown — so a slow reply listing could hold SIGINT for the whole
+// adoption budget.
+func TestAShutdownDoesNotWaitOutTheAdoptionBudget(t *testing.T) {
+	asked := make(chan struct{}, 1)
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Replies = blockingReplies{asked: asked}
+	})
+	ctx := context.Background()
+	admitOn(t, h.ledger, 1, "recording:1")
+	l := launch(t, h.ledger, 1)
+	// A worker that pulled its dispatch and acknowledged it, and an attempt
+	// that then ended without the event being reported: one candidate for
+	// the adopted-reply rule.
+	disp, err := h.ledger.Dispatch(ctx, l.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = disp.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = disp.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+	settlement, err := h.ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopLost})
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	// On the settlement's own context, as the release point runs it: the one
+	// a shutdown does not cancel.
+	go func() {
+		defer close(done)
+		h.d.adopt(context.WithoutCancel(ctx), settlement)
+	}()
+	select {
+	case <-asked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the settled task never reached the adopted-reply rule")
+	}
+
+	// What Run does on its way out. AdoptionBudget is two minutes.
+	h.d.stopAdopting()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a shutdown waited on the adoption budget")
+	}
+}

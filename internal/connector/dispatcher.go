@@ -188,6 +188,11 @@ type Dispatcher struct {
 	mu   sync.Mutex
 	live map[string]*taskRun
 	wg   sync.WaitGroup
+	// adopting is cancelled when Run is shutting down, which is what bounds
+	// the adopted-reply rule's reads: their own context is the settlement's,
+	// which a shutdown deliberately does not cancel.
+	adopting     context.Context
+	stopAdopting context.CancelFunc
 
 	// terminateRecorded ends a previous process's worker; a test seam.
 	terminateRecorded func(driver.Process, time.Duration) (bool, error)
@@ -255,6 +260,7 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 	// Every log line passes through the redaction rule; a task's own lines
 	// through its task's (taskRedaction).
 	opts.Redaction = opts.Redaction.With(driver.Redaction{Dirs: []string{opts.PrivateDir, opts.MCP.StateDir}})
+	adopting, stopAdopting := context.WithCancel(context.Background())
 	return &Dispatcher{
 		opts:   opts,
 		ledger: opts.Ledger,
@@ -262,6 +268,9 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		red:    driver.NewRedactor(opts.Redaction),
 		lines:  opts.Lines,
 		live:   map[string]*taskRun{},
+
+		adopting:     adopting,
+		stopAdopting: stopAdopting,
 
 		terminateRecorded: driver.TerminateRecorded,
 		confirmGroupGone:  driver.ConfirmGroupGone,
@@ -294,6 +303,11 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
+			// Adoption is a read of Basecamp with a budget of its own, and
+			// a shutdown must not wait that budget out for every task that
+			// has just settled: it is stopped here, and the wait that
+			// follows is only for it to notice.
+			d.stopAdopting()
 			d.wg.Wait()
 			return nil
 		case <-ticker.C:
@@ -302,14 +316,23 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 // Recover ends every attempt a previous process left live (invariant 5).
+//
+// It is cleanup, not dispatch. A shutdown while it runs must stop this
+// process from starting anything new; it must not leave a previous
+// process's attempt half-settled, with a worker ended and its record still
+// live (Copilot on #738). So what recovery reads and what it settles go on a
+// context cancellation does not reach, as every other settlement does
+// (settleCtx). Only the working directories' own reconciliation, which
+// settles nothing, is left on the caller's context.
 func (d *Dispatcher) Recover(ctx context.Context) error {
+	cleanupCtx := context.WithoutCancel(ctx)
 	d.sweepPrivateDir()
 	// Recovery counts the attempts it leaves live afresh, so running it
 	// twice does not count them twice.
 	d.mu.Lock()
 	d.held = 0
 	d.mu.Unlock()
-	attempts, err := d.ledger.LiveAttempts(ctx)
+	attempts, err := d.ledger.LiveAttempts(cleanupCtx)
 	if err != nil {
 		return err
 	}
@@ -341,7 +364,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			"task_id", a.TaskID, "was", string(a.State), "worker_signaled", signaled)
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
-		d.release(ctx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
+		d.release(cleanupCtx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
 			worker, TokenHolder{Process: a.Taker.Identity(), Unaccounted: a.TakerUnaccounted},
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
@@ -928,9 +951,11 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		return
 	}
 	reportUnreported(log, end.Stop, settlement)
-	// Adoption is a read of Basecamp, bounded but slow, and nothing waits on
-	// it: the settlement is already written, and the link it may add is not
-	// what the next dispatch depends on.
+	// Adoption is a read of Basecamp, bounded but slow, and no dispatch
+	// waits on it: the settlement is already written, and the link it may
+	// add is not what the next start depends on. A shutdown does not wait it
+	// out either — it cancels the reads (Run) and waits only for this to
+	// return.
 	d.wg.Go(func() { d.adopt(ctx, settlement) })
 	d.finishWorkspace(ctx, launch.Route, launch.WorkDir)
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
@@ -984,8 +1009,10 @@ func (d *Dispatcher) workspaceFinished(ctx context.Context, route, workDir strin
 }
 
 // AdoptionBudget bounds the reads one settlement spends on the adopted-reply
-// rule: settlement runs on a context a shutdown does not cancel, and a
-// shutdown must not wait on Basecamp for every live task.
+// rule. Settlement runs on a context a shutdown does not cancel — an attempt
+// half-settled is worse than a shutdown that takes a moment — but adoption
+// only adds a link to a record already written, so a shutdown ends it rather
+// than spending this budget on every task that has just settled.
 const AdoptionBudget = 2 * time.Minute
 
 // adopt applies the adopted-reply rule to a settled task.
@@ -993,8 +1020,13 @@ func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 	if d.opts.Replies == nil {
 		return
 	}
+	// The settlement's context outlives a shutdown on purpose; these reads
+	// do not (Copilot on #738).
+	written := ctx
 	ctx, cancel := context.WithTimeout(ctx, AdoptionBudget)
 	defer cancel()
+	stopOnShutdown := context.AfterFunc(d.adopting, cancel)
+	defer stopOnShutdown()
 	candidates, err := d.ledger.AdoptionCandidates(ctx, s.TaskID)
 	if err != nil {
 		d.log.Warn("connector: adoption candidates", "task_id", s.TaskID, "error", err)
@@ -1014,7 +1046,9 @@ func (d *Dispatcher) adopt(ctx context.Context, s Settlement) {
 		if !ok {
 			continue
 		}
-		if err := d.ledger.AdoptReply(ctx, s.TaskID, c.EventID, id); err != nil {
+		// The listing is what a shutdown cancels; a link it already found is
+		// written whatever happens next.
+		if err := d.ledger.AdoptReply(written, s.TaskID, c.EventID, id); err != nil {
 			d.log.Warn("connector: adopting a reply", "event_id", c.EventID, "error", err)
 		}
 	}
