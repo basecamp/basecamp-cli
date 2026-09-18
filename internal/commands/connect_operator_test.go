@@ -835,6 +835,8 @@ func TestConnectDoctorPreflightRefusesARouteThatCouldTakeNoWorktree(t *testing.T
 	assert.Contains(t, c.Message, "would get a working directory")
 	assert.NotContains(t, c.Message, route, "the route that would run is not named")
 	assert.Contains(t, c.Hint, "without worktrees", "a route that cannot take a worktree is not fixed by editing a Codex config")
+	assert.Contains(t, c.Message, "no worktree can be made on this route",
+		"and it is the route itself, proved, not a read that failed this once")
 }
 
 // A config layer that cannot be read refuses every session too — nothing

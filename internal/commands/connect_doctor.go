@@ -387,8 +387,12 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 func preflightHint(err error) (string, int) {
 	var unmodeled *connector.UnmodeledPathError
 	switch {
-	case errors.Is(err, errNoWorkDir):
+	case errors.Is(err, connector.ErrRouteUnusable):
 		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees.", 0
+	case errors.Is(err, errNoWorkDir):
+		// Not proved to be the route itself (#753): git, or the directory,
+		// could not be read this once, and a dispatch would try again.
+		return "Doctor could not tell whether a task would get a working directory there; run it again, and check that git runs and the directory can be read.", 0
 	case errors.Is(err, acp.ErrForeignMCPConfig):
 		return "Take the MCP servers out of that file (a key an escape hides counts), or start the connector with CODEX_HOME set to a Codex home that declares none.", 1
 	case errors.As(err, &unmodeled):
