@@ -76,3 +76,40 @@ func TestANullProjectEntryIsRefusedRatherThanServed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, p.Projects, int64(48699913))
 }
+
+// Copilot on #765: a field kept for compatibility is still load-bearing
+// while it is being read.
+//
+// LegacyPath is decoded and thrown away, and discarding a value is not the
+// same as not caring what it is. The old writer could only ever have put a
+// clean absolute path there, so anything else means the file is not what it
+// claims to be — and the old validation refused exactly those files. Reading
+// the key without its shape check would let the files that used to be
+// refused authorize their projects instead.
+func TestAMalformedLegacyPathIsRefusedBeforeItIsDiscarded(t *testing.T) {
+	policy := func(entry string) error {
+		_, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":` + entry + `}}`))
+		return err
+	}
+	for name, entry := range map[string]string{
+		"null":         `{"path":null}`,
+		"empty":        `{"path":""}`,
+		"relative":     `{"path":"work/app"}`,
+		"unclean":      `{"path":"/work/../etc"}`,
+		"not a string": `{"path":42}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Error(t, policy(entry), "the old validation refused this file, and so must reading it")
+		})
+	}
+
+	// What the old writer really wrote still opens, and the key is still
+	// discarded rather than kept.
+	p, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":{"path":"/work/app","class":"internal"}}}`))
+	require.NoError(t, err)
+	assert.Equal(t, "internal", p.Projects[48699913].Class)
+
+	// And a new file, which carries no path at all, is unaffected.
+	require.NoError(t, policy(`{"class":"internal"}`))
+	require.NoError(t, policy(`{}`))
+}

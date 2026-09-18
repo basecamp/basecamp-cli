@@ -360,3 +360,68 @@ func TestParseRefusesANullProjectEntry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, f.Projects, projectID)
 }
+
+// The same refusal at setup's reader, and it names the project: these are
+// files a person edits by hand (Copilot on #765).
+func TestParseRefusesAMalformedLegacyPath(t *testing.T) {
+	for name, path := range map[string]any{
+		"null":     nil,
+		"empty":    "",
+		"relative": "work/app",
+		"unclean":  "/work/../etc",
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal(validFile(t))
+			require.NoError(t, err)
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(data, &raw))
+			raw["projects"].(map[string]any)["48699913"] = map[string]any{"path": path}
+			data, err = json.Marshal(raw)
+			require.NoError(t, err)
+
+			_, err = Parse(data)
+			require.Error(t, err, "the old validation refused this file")
+			assert.Contains(t, err.Error(), "48699913", "and the refusal names the project")
+		})
+	}
+}
+
+// The other compatibility field on this file, checked against the same
+// question LegacyPath failed: what did the old validation guarantee about
+// this value, and is that guarantee still enforced while it is read?
+//
+// For worktrees the answer is "nothing beyond the type", and it is still
+// enforced: a non-bool is refused by the decode, as it always was. A null
+// reads as false, which is what an absent key reads as and what the value
+// means now — and, unlike a malformed path, it is not a shape the old
+// validation refused. Adding a refusal here would not restore a lost check;
+// it would be a new strictness that turns away files older setup accepted.
+// So this is deliberately unchanged, and that decision is pinned here rather
+// than left to the next reader to re-derive (Copilot on #765).
+func TestTheWorktreesCompatibilityFieldKeepsItsOldShapeRules(t *testing.T) {
+	with := func(v any) ([]byte, error) {
+		data, err := json.Marshal(validFile(t))
+		require.NoError(t, err)
+		var raw map[string]any
+		require.NoError(t, json.Unmarshal(data, &raw))
+		raw["worktrees"] = v
+		return json.Marshal(raw)
+	}
+
+	for name, v := range map[string]any{"true": true, "false": false, "null": nil} {
+		t.Run(name, func(t *testing.T) {
+			data, err := with(v)
+			require.NoError(t, err)
+			f, err := Parse(data)
+			require.NoError(t, err, "accepted before this change, and still accepted")
+			assert.False(t, f.LegacyWorktrees, "and read, then forgotten")
+		})
+	}
+
+	t.Run("not a bool", func(t *testing.T) {
+		data, err := with("yes")
+		require.NoError(t, err)
+		_, err = Parse(data)
+		assert.Error(t, err, "the one thing the type guaranteed, still guaranteed")
+	})
+}

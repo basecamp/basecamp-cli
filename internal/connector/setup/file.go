@@ -286,11 +286,11 @@ func Parse(data []byte) (File, error) {
 	if err := refuseDuplicateKeys(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
-	// admission.Project refuses a null entry itself, so both readers fail
-	// closed. This runs first only to name the project in the message: a map
-	// value's own error cannot say which key it came from, and connect.json
-	// is a file an operator edits by hand.
-	if err := refuseNullProjects(data); err != nil {
+	// admission.Project refuses a malformed entry itself, so both readers
+	// fail closed. This runs first only to name the project in the message:
+	// a map value's own error cannot say which key it came from, and
+	// connect.json is a file an operator edits by hand.
+	if err := refuseMalformedProjects(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -323,7 +323,7 @@ func Parse(data []byte) (File, error) {
 // refuseNullProjects names the project whose entry is null, which the type's
 // own refusal cannot. A malformed trust anchor withholds authorization; this
 // only makes the refusal findable.
-func refuseNullProjects(data []byte) error {
+func refuseMalformedProjects(data []byte) error {
 	var shape struct {
 		Projects map[string]json.RawMessage `json:"projects"`
 	}
@@ -333,18 +333,22 @@ func refuseNullProjects(data []byte) error {
 	if json.Unmarshal(data, &shape) != nil {
 		return nil //nolint:nilerr // the strict decode below reports it better
 	}
-	var ids []string
-	for id, raw := range shape.Projects {
-		if string(bytes.TrimSpace(raw)) == "null" {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
+	ids := make([]string, 0, len(shape.Projects))
+	for id := range shape.Projects {
+		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	return fmt.Errorf("project %s: its entry is null, which is not a served project; write {} for one with no settings, or take the project out",
-		strings.Join(ids, ", "))
+	for _, id := range ids {
+		entry := shape.Projects[id]
+		if string(bytes.TrimSpace(entry)) == "null" {
+			return fmt.Errorf("project %s: its entry is null, which is not a served project; write {} for one with no settings, or take the project out", id)
+		}
+		var p admission.Project
+		if err := json.Unmarshal(entry, &p); err != nil {
+			return fmt.Errorf("project %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // canonicalKey reports whether a key is in its one canonical spelling:

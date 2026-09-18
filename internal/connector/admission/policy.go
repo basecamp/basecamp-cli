@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 )
 
@@ -90,7 +91,44 @@ func (p *Project) UnmarshalJSON(data []byte) error {
 	if err := dec.Decode(&raw); err != nil {
 		return err
 	}
+	if err := checkLegacyPath(data); err != nil {
+		return err
+	}
 	*p = Project(raw)
+	return nil
+}
+
+// checkLegacyPath holds a path key that is present to the shape the writer
+// that produced it could only have written: a clean absolute path.
+//
+// LegacyPath is decoded and thrown away, which is not the same as not caring
+// what it is. A connector that routed projects wrote nothing but clean
+// absolute paths there, and setup refused a file carrying anything else — so
+// a null, an empty string, a relative or an unclean one means the file is not
+// what it claims to be, and the files the old validation refused would
+// otherwise be the ones that now authorize their projects (Copilot on #765).
+//
+// A key that is absent is a file written since the paths went, and is left
+// alone.
+func checkLegacyPath(data []byte) error {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return err
+	}
+	raw, ok := probe["path"]
+	if !ok {
+		return nil
+	}
+	if string(bytes.TrimSpace(raw)) == "null" {
+		return errors.New(`the "path" of a connector that routed projects is null; no such connector wrote that`)
+	}
+	var legacy string
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		return fmt.Errorf(`the "path" of a connector that routed projects is not a string: %w`, err)
+	}
+	if legacy == "" || !filepath.IsAbs(legacy) || filepath.Clean(legacy) != legacy {
+		return fmt.Errorf(`the "path" of a connector that routed projects is %q, which is not the clean absolute path such a connector wrote`, legacy)
+	}
 	return nil
 }
 
