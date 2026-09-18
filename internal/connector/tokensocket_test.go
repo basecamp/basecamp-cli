@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -493,4 +494,35 @@ func TestADeliveryToAnUnidentifiedProcessIsNotHandedAgain(t *testing.T) {
 	holder := s.Holder()
 	assert.True(t, holder.Held(), "the release point is told the token is out and unaccounted for")
 	assert.Zero(t, holder.Process.PID, "with no process to end, since none could be named")
+}
+
+// Beyond Copilot's list, the same rule one step earlier: the release point
+// closes the socket and waits for it to finish deciding, and a wait that
+// runs out used to be a warning the release went ahead past. A handoff
+// still in flight is a token that may cross to a process the attempt will
+// never have recorded, which is a holder nobody can account for.
+func TestAHandoffStillInFlightAtTheReleasePointHoldsTheAttempt(t *testing.T) {
+	blocked, release := make(chan struct{}, 1), make(chan struct{})
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, time.Minute,
+		func(conn *net.UnixConn) (PeerCredentials, error) {
+			select {
+			case blocked <- struct{}{}:
+			default:
+			}
+			<-release
+			return peerCredentials(conn)
+		}, processGroupOf, parentProcessOf, driver.LookupProcess)
+	require.NoError(t, err)
+	defer func() { close(release); s.Close() }()
+	s.AllowGroup(syscall.Getpgrp())
+
+	go func() { _, _ = fetch(t, s.Path()) }()
+	select {
+	case <-blocked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the handoff never started")
+	}
+
+	holder := settledTaker(s, slog.New(slog.DiscardHandler), "att", 50*time.Millisecond)
+	assert.True(t, holder.Held(), "an attempt is not released around a handoff that is still deciding")
 }

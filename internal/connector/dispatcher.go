@@ -813,7 +813,15 @@ func settledTaker(tokens *TokenSocket, log *slog.Logger, attemptID string, grace
 	// Nothing more is handed over; a delivery already under way finishes.
 	tokens.Close()
 	if !tokens.Settled(grace) {
-		log.Warn("connector: the task token's socket was still busy when its attempt ended", "attempt_id", attemptID)
+		// A handoff still deciding after the socket was closed and waited
+		// out is a token that may be crossing to a process this attempt
+		// will never see recorded. That is the same thing as a holder that
+		// cannot be accounted for, and it is held for the same reason.
+		log.Error("connector: the task token's socket was still busy when its attempt ended; the attempt is held rather than settled around a handoff that may still be in flight",
+			"attempt_id", attemptID)
+		holder := holderOf(tokens)
+		holder.Unaccounted = true
+		return holder
 	}
 	return holderOf(tokens)
 }
