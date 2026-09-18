@@ -816,7 +816,7 @@ func TestConnectDoctorPreflightNamesTheRepositoryForACommittedConfig(t *testing.
 	assert.Contains(t, c.Message, committed, "the file a person can go and change")
 	assert.Contains(t, c.Message, "committed in the repository")
 	assert.NotContains(t, c.Message, stateDir, "not a path inside a worktree that does not exist")
-	assert.Contains(t, c.Hint, "mcp_servers", "renaming the file in the message does not lose what the refusal is")
+	assert.Contains(t, c.Hint, "CODEX_HOME", "renaming the file in the message does not lose what the refusal is")
 }
 
 // With worktrees on, a route that can take no worktree takes no task: every
@@ -835,4 +835,45 @@ func TestConnectDoctorPreflightRefusesARouteThatCouldTakeNoWorktree(t *testing.T
 	assert.Contains(t, c.Message, "would get a working directory")
 	assert.NotContains(t, c.Message, route, "the route that would run is not named")
 	assert.Contains(t, c.Hint, "without worktrees", "a route that cannot take a worktree is not fixed by editing a Codex config")
+}
+
+// A config layer that cannot be read refuses every session too — nothing
+// can say it declares no MCP server — but it is not a declaration, and
+// telling a person to take mcp_servers out of a file they cannot read is
+// not a remedy.
+func TestConnectDoctorPreflightSaysWhatToDoAboutAnUnreadableConfig(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file whatever its mode says")
+	}
+	file, home, _ := codexProfile(t, 1)
+	config := writeCodexConfig(t, home, "model = \"gpt-5\"\n")
+	require.NoError(t, os.Chmod(config, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(config, 0o600) })
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status, "what cannot be read cannot be vouched for")
+	assert.Contains(t, c.Message, config)
+	assert.Contains(t, c.Message, "cannot be read")
+	assert.NotContains(t, c.Message, "declares MCP servers of its own",
+		"a file nobody could read is not a file that declares them")
+	assert.Contains(t, c.Hint, "readable")
+	assert.NotContains(t, c.Hint, "Take the MCP servers out",
+		"there are no MCP servers to take out of a file nothing has read")
+}
+
+// And one run names every layer a person has to change, not the first: the
+// shared layers are read before a route's own, so stopping at the first
+// would hide the route's until the shared one was fixed and doctor run
+// again.
+func TestConnectDoctorPreflightNamesEveryLayerInOneRun(t *testing.T) {
+	file, home, paths := codexProfile(t, 1)
+	user := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
+	project := writeCodexConfig(t, paths[0], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Contains(t, c.Message, user)
+	assert.Contains(t, c.Message, project, "the route's own layer is named in the same run as the shared one")
 }

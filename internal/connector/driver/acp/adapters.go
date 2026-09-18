@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -261,6 +262,57 @@ var ErrMCPServerNotConnected = fmt.Errorf("%w: an MCP server of the session did 
 // own, which the connector cannot keep out of a session.
 var ErrForeignMCPConfig = errors.New("acp: the agent's configuration declares MCP servers of its own")
 
+// ErrConfigUnreadable is an agent configuration file that is there and
+// cannot be read. It refuses a session as a declaration does — the agent
+// may read what this cannot, and a file nobody can read is not a file that
+// declares nothing — but it is not a declaration, and what a person does
+// about it is not what they do about one, so it is its own error and not
+// ErrForeignMCPConfig.
+var ErrConfigUnreadable = errors.New("acp: an agent configuration file cannot be read")
+
+// unreadableConfigError is one such file.
+type unreadableConfigError struct {
+	file string
+	err  error
+}
+
+func (e *unreadableConfigError) Error() string {
+	return fmt.Sprintf("acp: %s cannot be read, so it cannot be said to declare no MCP server of its own: %v", e.file, e.err)
+}
+
+func (e *unreadableConfigError) Unwrap() []error { return []error{ErrConfigUnreadable, e.err} }
+
+// refusalsError is every reason one session was refused: one line to read,
+// and every one of them still to errors.Is.
+type refusalsError struct{ errs []error }
+
+func (e *refusalsError) Error() string {
+	parts := make([]string, 0, len(e.errs))
+	for i, err := range e.errs {
+		msg := err.Error()
+		if i > 0 {
+			// The package's prefix is on each of them; once is enough to read.
+			msg = strings.TrimPrefix(msg, "acp: ")
+		}
+		parts = append(parts, msg)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (e *refusalsError) Unwrap() []error { return e.errs }
+
+// refused is every refusal as one error, and nil when there is none.
+func refused(errs []error) error {
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	default:
+		return &refusalsError{errs: errs}
+	}
+}
+
 // escapedTOMLKey is a table header or a key whose name carries a backslash
 // escape.
 var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
@@ -272,6 +324,9 @@ var escapedTOMLKey = regexp.MustCompile(`^\s*(\[\[?[^\]]*\\|[^=\n]*\\[^=\n]*=)`)
 // beside the connector's, or, named basecamp, in place of it with every tool
 // allowed; in the asking mode its tool calls need not be put to the policy at
 // all.
+//
+// It reads every layer rather than stopping at the first that refuses: a
+// person fixing this gets every file to change out of one run.
 //
 // It reads for the name, not the TOML: the name anywhere in the file — a
 // table header, a dotted key, an inline table, a profile, a comment — refuses
@@ -309,6 +364,14 @@ func codexPreflight(cwd string, lookup func(string) (string, bool), read func(st
 			break
 		}
 	}
+	// A working directory under the home directory names the user's layer
+	// twice; a layer is read, and refused, once.
+	files = slices.Compact(slices.Sorted(slices.Values(files)))
+
+	// Every layer is read, and every one that refuses the session is
+	// reported: what a person has to change is all of it, and naming the
+	// first would have them run this again for the next.
+	var refusals []error
 	for _, file := range files {
 		raw, err := read(file)
 		if err != nil {
@@ -317,22 +380,25 @@ func codexPreflight(cwd string, lookup func(string) (string, bool), read func(st
 			}
 			// A file that is there and cannot be read is not a file this can
 			// say anything about, and Codex may read it where this cannot.
-			return fmt.Errorf("%w: %s cannot be read: %w", ErrForeignMCPConfig, file, err)
+			refusals = append(refusals, &unreadableConfigError{file: file, err: err})
+			continue
 		}
 		text := strings.TrimPrefix(string(raw), "\ufeff")
 		if strings.Contains(text, "mcp_servers") {
-			return fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file)
+			refusals = append(refusals, fmt.Errorf("%w: %s (codex-acp would load them into the session)", ErrForeignMCPConfig, file))
+			continue
 		}
 		for _, line := range strings.Split(text, "\n") {
 			if escapedTOMLKey.MatchString(line) {
 				// TOML decodes escapes in a quoted key, so "mcp\u005fservers"
 				// is mcp_servers to Codex and something else to a reader. A
 				// key this cannot read plainly is refused rather than guessed.
-				return fmt.Errorf("%w: %s has a key this cannot read (an escape in a quoted key)", ErrForeignMCPConfig, file)
+				refusals = append(refusals, fmt.Errorf("%w: %s has a key this cannot read (an escape in a quoted key)", ErrForeignMCPConfig, file))
+				break
 			}
 		}
 	}
-	return nil
+	return refused(refusals)
 }
 
 // codexConfig is the thread config codex-acp layers onto every session. The

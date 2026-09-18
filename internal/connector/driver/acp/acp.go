@@ -41,7 +41,8 @@
 //     is present, otherwise an error. Its history replay is not progress.
 //  6. A configuration this driver cannot run — an adapter with no asking mode
 //     for the policy's, a policy for another directory, an MCP server without
-//     an absolute command, a Codex config that declares MCP servers — is
+//     an absolute command, a Codex config that declares MCP servers or that
+//     cannot be read — is
 //     ErrUnusable beside ErrNotStarted: nothing started, and a retry would
 //     fail the same way.
 //  7. The adapter is the pinned one: initialize must report protocol version

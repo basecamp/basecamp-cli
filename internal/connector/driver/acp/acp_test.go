@@ -1039,6 +1039,46 @@ func TestPreflightReadsTheEnvironmentTheAdapterWouldBeGiven(t *testing.T) {
 	require.ErrorIs(t, Preflight(CodexACP, cwd, lookup, nil), ErrForeignMCPConfig)
 }
 
+// A refusal names every layer that refuses, not the first: the layers are
+// read in a fixed order — the user's, the system's, then the project's — so
+// naming the first would have a person fix the user's config, run this
+// again, and only then learn about the project's.
+func TestTheCodexPreflightNamesEveryLayerThatRefusesTheSession(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cwd := filepath.Join(root, "repo", "sub")
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(cwd, ".codex"), 0o700))
+	lookup := func(name string) (string, bool) {
+		if name == "HOME" {
+			return home, true
+		}
+		return "", false
+	}
+	declares := []byte("[mcp_servers.linear]\ncommand = \"/bin/linear-mcp\"\n")
+	userConfig := filepath.Join(home, ".codex", "config.toml")
+	projectConfig := filepath.Join(cwd, ".codex", "config.toml")
+	require.NoError(t, os.WriteFile(userConfig, declares, 0o600))
+	require.NoError(t, os.WriteFile(projectConfig, declares, 0o600))
+
+	err := codexPreflight(cwd, lookup, nil)
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	assert.Contains(t, err.Error(), userConfig)
+	assert.Contains(t, err.Error(), projectConfig, "the layer after the first is named too")
+	assert.Equal(t, 1, strings.Count(err.Error(), userConfig),
+		"and a layer the walk reaches twice is named once")
+
+	// One that cannot be read and one that declares them are both said, and
+	// both are what they are to errors.Is.
+	require.NoError(t, os.Chmod(userConfig, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(userConfig, 0o600) })
+	err = codexPreflight(cwd, lookup, nil)
+	require.ErrorIs(t, err, ErrConfigUnreadable)
+	require.ErrorIs(t, err, ErrForeignMCPConfig)
+	assert.Contains(t, err.Error(), "cannot be read")
+	assert.Contains(t, err.Error(), projectConfig)
+}
+
 func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -1072,7 +1112,9 @@ func TestCodexConfigThatDeclaresMCPServersRefusesTheSession(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("model = \"x\"\nwindows_path = \"C:\\\\codex\"\n"), 0o600))
 	require.NoError(t, codexPreflight(cwd, lookup, nil), "an escape in a value is not a key")
 	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o000))
-	require.ErrorIs(t, codexPreflight(cwd, lookup, nil), ErrForeignMCPConfig, "a config this cannot read is refused, not assumed empty")
+	unreadable := codexPreflight(cwd, lookup, nil)
+	require.ErrorIs(t, unreadable, ErrConfigUnreadable, "a config this cannot read is refused, not assumed empty")
+	require.NotErrorIs(t, unreadable, ErrForeignMCPConfig, "but it is not a declaration, and a caller must be able to tell")
 	require.NoError(t, os.Chmod(filepath.Join(home, ".codex", "config.toml"), 0o600))
 	codexHome := filepath.Join(root, "codex-home")
 	require.NoError(t, os.MkdirAll(codexHome, 0o700))

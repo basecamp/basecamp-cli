@@ -369,7 +369,11 @@ func preflightHint(err error) string {
 	case errors.Is(err, errNoWorkDir):
 		return "With worktrees on, a route has to be a directory in a git repository with a commit: route the project elsewhere, or run the profile without worktrees."
 	case errors.Is(err, acp.ErrForeignMCPConfig):
-		return "Take mcp_servers out of that file, or start the connector with CODEX_HOME set to a Codex home that declares none."
+		// A declaration first: where a session is refused for both, the
+		// declaration is the one that is certainly there.
+		return "Take the MCP servers out of that file (a key an escape hides counts), or start the connector with CODEX_HOME set to a Codex home that declares none."
+	case errors.Is(err, acp.ErrConfigUnreadable):
+		return "Make that file readable by the user the connector runs as, or remove it: while it cannot be read, nothing can tell whether it declares MCP servers."
 	default:
 		return "The adapter refuses configuration on this machine that the connector cannot switch off; change it, then run doctor again."
 	}
