@@ -367,6 +367,62 @@ func TestRateLimiterWaitRoundsTheRetryAfterUp(t *testing.T) {
 	assert.Equal(t, "Wait 41s, then re-run.", gateErr.Hint)
 }
 
+// spentBudget runs a gate whose budget is already gone — the state
+// waitSince reaches when a sleep for a refill or for a block wakes past the
+// deadline — and returns the rejection. The ten seconds it reports as waited
+// are the gate's, not the test's: nothing here sleeps.
+func spentBudget(t *testing.T, rl *RateLimiter) *GateError {
+	t.Helper()
+	err := rl.waitSince(context.Background(), time.Now().Add(-10*time.Second), time.Now().Add(-time.Millisecond))
+
+	var gateErr *GateError
+	require.ErrorAs(t, err, &gateErr)
+	assert.ErrorIs(t, err, basecamp.ErrRateLimited)
+	return gateErr
+}
+
+// A budget spent on the server's block says so. Blaming the client limit
+// here reads as "lower your parallelism", which is advice about a knob that
+// had nothing to do with a wait the server asked of everybody.
+func TestRateLimiterBudgetSpentOnTheServersBlockNamesTheServer(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+	require.NoError(t, rl.SetRetryAfterDuration(30*time.Second))
+
+	gateErr := spentBudget(t, rl)
+
+	assert.Equal(t, "Rate limited by the server; waited 10s", gateErr.Message)
+	assert.Equal(t, "Re-run.", gateErr.Hint)
+}
+
+// The block that spent the budget is usually gone by the time the gate gives
+// up — sleeping it out to within a wakeup of the deadline is how the budget
+// went. It is still the wait the server asked for, and still not ours.
+func TestRateLimiterBudgetSpentOnABlockThatLiftedNamesTheServer(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+	require.NoError(t, rl.SetRetryAfter(time.Now().Add(-5*time.Millisecond)))
+
+	gateErr := spentBudget(t, rl)
+
+	assert.Equal(t, "Rate limited by the server; waited 10s", gateErr.Message)
+	assert.Equal(t, "Re-run.", gateErr.Hint)
+}
+
+// A budget spent on our own bucket is the client limit, and a Retry-After
+// that expired before this gate ever started queueing does not take the
+// blame for it.
+func TestRateLimiterBudgetSpentOnOurOwnBucketNamesTheClientLimit(t *testing.T) {
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{})
+
+	gateErr := spentBudget(t, rl)
+	assert.Equal(t, "Too many requests (client limit 10/s); waited 10s", gateErr.Message)
+	assert.Equal(t, "Re-run, or lower parallelism.", gateErr.Hint)
+
+	require.NoError(t, rl.SetRetryAfter(time.Now().Add(-30*time.Second)))
+	stale := spentBudget(t, rl)
+	assert.Equal(t, "Too many requests (client limit 10/s); waited 10s", stale.Message)
+	assert.Equal(t, "Re-run, or lower parallelism.", stale.Hint)
+}
+
 func TestCeilSeconds(t *testing.T) {
 	assert.Equal(t, 41*time.Second, ceilSeconds(40*time.Second+time.Millisecond))
 	assert.Equal(t, 40*time.Second, ceilSeconds(40*time.Second))

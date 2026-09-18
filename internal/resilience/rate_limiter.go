@@ -128,7 +128,9 @@ func sleepWithin(wait, remaining time.Duration) time.Duration {
 // Retry-After block to lift, until deadline. It returns nil when the request
 // may proceed, a *GateError when the deadline would pass first, or ctx.Err().
 // A Retry-After block that outlasts the deadline is reported immediately
-// rather than waited on, with the remaining time in the message.
+// rather than waited on, with the remaining time in the message, and a
+// budget spent queueing names the limit that held the gate: the server's
+// block, or our own bucket.
 // Cancellation and the deadline are checked before every attempt, so an
 // expired or canceled gate consumes nothing, and cancellation outranks the
 // deadline.
@@ -144,7 +146,7 @@ func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time)
 		}
 		remaining := deadline.Sub(rl.now())
 		if remaining <= 0 {
-			return rl.gateError(false, 0, rl.now().Sub(start))
+			return rl.budgetError(start) //nolint:contextcheck // lock acquisition is context-independent by design
 		}
 		allowed, wait, blocked := rl.take() //nolint:contextcheck // lock acquisition is context-independent by design
 		if allowed {
@@ -170,6 +172,40 @@ func (rl *RateLimiter) gateError(blocked bool, wait, waited time.Duration) *Gate
 			sentinel: basecamp.ErrRateLimited,
 		}
 	}
+	return rl.clientLimitError(waited)
+}
+
+// budgetError is the rejection for a gate whose budget ran out while it was
+// still queueing, which is where the wait it was spent on has to be named
+// rather than assumed. A server Retry-After that covered the wait is the
+// server's doing and nobody's parallelism; anything else is our own bucket.
+func (rl *RateLimiter) budgetError(start time.Time) *GateError {
+	waited := rl.now().Sub(start)
+	if !rl.blockedSince(start) {
+		return rl.clientLimitError(waited)
+	}
+	return &GateError{
+		Message:  fmt.Sprintf("Rate limited by the server; waited %s", waited.Round(time.Second)),
+		Hint:     "Re-run.",
+		sentinel: basecamp.ErrRateLimited,
+	}
+}
+
+// blockedSince reports whether a server Retry-After covered a wait that began
+// at start: one still in force, or one slept out that lifted before the
+// budget ran out. A store error reads as no block, since the client limit is
+// the only wait we know we imposed.
+func (rl *RateLimiter) blockedSince(start time.Time) bool {
+	state, err := rl.store.Load()
+	if err != nil {
+		return false
+	}
+	return state.RateLimiter.RetryAfterUntil.After(start)
+}
+
+// clientLimitError is the rejection for a wait our own token bucket imposed,
+// reported as the request rate the bucket allows.
+func (rl *RateLimiter) clientLimitError(waited time.Duration) *GateError {
 	requestsPerSecond := rl.config.RefillRate / rl.config.TokensPerRequest
 	return &GateError{
 		Message:  fmt.Sprintf("Too many requests (client limit %g/s); waited %s", requestsPerSecond, waited.Round(time.Second)),
