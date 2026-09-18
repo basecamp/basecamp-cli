@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -56,25 +57,69 @@ func (p Policy) Decide(_ context.Context, req driver.PermissionRequest) driver.P
 	return driver.PermissionDecision{Allow: false}
 }
 
+// maxLinkHops bounds how many links one path may be resolved through, as the
+// kernel's ELOOP does. A loop of links names no file, and a path this cannot
+// resolve is refused rather than guessed at.
+const maxLinkHops = 32
+
 // resolveExisting resolves the symlinks in the longest existing prefix of an
 // absolute path and appends the rest, which does not exist yet and so cannot
 // be a link.
+//
+// It walks the components itself rather than leaning on EvalSymlinks alone,
+// because EvalSymlinks answers ENOENT to two opposite questions: a component
+// that is not there, and a symlink that IS there and points at something
+// that is not. Treating the second as a name yet to be created approved a
+// write to <workdir>/link when the link pointed at /elsewhere/missing —
+// which is where the write would land, creating a file outside the working
+// directory (Copilot on #738). A link that exists is followed to wherever it
+// points, existing or not, and a link that cannot be read resolves to
+// nothing.
 func resolveExisting(path string) (string, bool) {
+	return resolveHops(path, maxLinkHops)
+}
+
+func resolveHops(path string, hops int) (string, bool) {
+	if hops <= 0 || !filepath.IsAbs(path) {
+		return "", false
+	}
 	rest := ""
-	for current := path; ; {
-		resolved, err := filepath.EvalSymlinks(current)
-		if err == nil {
+	for current := filepath.Clean(path); ; {
+		info, err := os.Lstat(current)
+		switch {
+		case err == nil && info.Mode()&fs.ModeSymlink != 0:
+			// A link that is there. Where it points is where a write to this
+			// path lands, whether or not anything is there yet.
+			target, err := os.Readlink(current)
+			if err != nil {
+				return "", false
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(current), target)
+			}
+			resolved, ok := resolveHops(target, hops-1)
+			if !ok {
+				return "", false
+			}
 			return filepath.Join(resolved, rest), true
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
+		case err == nil:
+			// Something that is there and is not a link; the links above it
+			// are what is left to resolve.
+			resolved, err := filepath.EvalSymlinks(current)
+			if err != nil {
+				return "", false
+			}
+			return filepath.Join(resolved, rest), true
+		case errors.Is(err, fs.ErrNotExist):
+			parent := filepath.Dir(current)
+			if parent == current {
+				return "", false
+			}
+			rest = filepath.Join(filepath.Base(current), rest)
+			current = parent
+		default:
 			return "", false
 		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", false
-		}
-		rest = filepath.Join(filepath.Base(current), rest)
-		current = parent
 	}
 }
 
