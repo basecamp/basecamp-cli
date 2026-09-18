@@ -301,6 +301,21 @@ func (e *refusalsError) Error() string {
 
 func (e *refusalsError) Unwrap() []error { return e.errs }
 
+// Refusals is every reason a preflight refused a session, one error each:
+// the refusals of a joined refusal, and err itself when it is one refusal or
+// something else entirely. A caller that reports a session's refusals — a
+// doctor that groups them by the routes they affect — needs them apart, and
+// reading them out of a joined message would be reading a message.
+func Refusals(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if joined, ok := err.(*refusalsError); ok { //nolint:errorlint // this is the join itself, not something wrapping one
+		return joined.errs
+	}
+	return []error{err}
+}
+
 // refused is every refusal as one error, and nil when there is none.
 func refused(errs []error) error {
 	switch len(errs) {

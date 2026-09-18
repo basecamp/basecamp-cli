@@ -877,3 +877,56 @@ func TestConnectDoctorPreflightNamesEveryLayerInOneRun(t *testing.T) {
 	assert.Contains(t, c.Message, user)
 	assert.Contains(t, c.Message, project, "the route's own layer is named in the same run as the shared one")
 }
+
+// A Codex config that is a symbolic link is read as the session reads it:
+// the file it points at. Reading the link's own text instead would find no
+// mcp_servers in it and call a profile ready that blocks every dispatch —
+// this card's bug in another costume.
+func TestConnectDoctorPreflightFollowsASymlinkedConfigAsTheSessionWould(t *testing.T) {
+	file, route, repo, _ := codexWorktreeProfile(t)
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "codex.toml"), []byte("[mcp_servers.linear]\ncommand = \"linear-mcp\"\n"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(route, ".codex"), 0o755))
+	require.NoError(t, os.Symlink("../../codex.toml", filepath.Join(route, ".codex", "config.toml")))
+	testGit(t, repo, os.Getenv("HOME"), "add", ".")
+	testGit(t, repo, os.Getenv("HOME"), "commit", "-q", "-m", "a linked codex config")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status,
+		"the link's target declares MCP servers, and the session reads the target")
+	assert.Contains(t, c.Message, filepath.Join(route, ".codex", "config.toml"))
+}
+
+// A route git could read as an option or a pattern is a route like any
+// other: doctor must not report it as a configuration it cannot read.
+func TestConnectDoctorPreflightReadsARouteNamedLikeAnOption(t *testing.T) {
+	file, _, repo, _ := codexWorktreeProfile(t)
+	dashed := filepath.Join(repo, "-app")
+	require.NoError(t, os.MkdirAll(dashed, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dashed, "README"), []byte("hi\n"), 0o600))
+	testGit(t, repo, os.Getenv("HOME"), "add", ".")
+	testGit(t, repo, os.Getenv("HOME"), "commit", "-q", "-m", "a directory named like an option")
+	file.Projects[2] = admission.Route{Path: dashed}
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusPass, c.Status, "nothing in that repository refuses a session")
+}
+
+// A layer every route shares is reported once for all of them even when one
+// route has a second reason of its own: they are grouped one refusal at a
+// time, not by the whole of what a route was refused for.
+func TestConnectDoctorPreflightGroupsEachRefusalOnItsOwn(t *testing.T) {
+	file, home, paths := codexProfile(t, 2)
+	user := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
+	project := writeCodexConfig(t, paths[1], "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
+
+	c, ok := preflightCheck(t, workerBinaryChecks(context.Background(), file))
+	require.True(t, ok)
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.Equal(t, 1, strings.Count(c.Message, user), "the shared layer is named once")
+	assert.Contains(t, c.Message, "any routed directory", "and named as every route's")
+	assert.Equal(t, 1, strings.Count(c.Message, project), "the second route's own layer is named too, once")
+	assert.Contains(t, c.Message, "start in "+paths[1]+":", "and named as that route's alone")
+	assert.NotContains(t, c.Message, "start in "+paths[0], "the route with only the shared reason is not named on its own")
+}

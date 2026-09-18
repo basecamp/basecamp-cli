@@ -319,21 +319,27 @@ func acpPreflightCheck(ctx context.Context, file setup.File) (setup.Check, bool)
 	seen := map[string]*failure{}
 	for _, id := range ids {
 		path := file.Projects[id].Path
-		err := plannerErr
-		if err == nil {
-			err = preflightRoute(ctx, a, planner, path)
+		errs := []error{plannerErr}
+		if plannerErr == nil {
+			// Each refusal apart, not the session's whole refusal: a layer
+			// every route shares is one reason for all of them, and a route
+			// that has a second one of its own must not turn the shared one
+			// into a reason of its own too.
+			errs = preflightRoute(ctx, a, planner, path)
 		}
-		if err == nil {
-			continue
+		for _, err := range errs {
+			if err == nil {
+				continue
+			}
+			reason := preflightReason(err)
+			f, ok := seen[reason]
+			if !ok {
+				f = &failure{reason: reason, hint: preflightHint(err)}
+				seen[reason] = f
+				failures = append(failures, f)
+			}
+			f.routes = append(f.routes, richtext.SanitizeSingleLine(path))
 		}
-		reason := preflightReason(err)
-		f, ok := seen[reason]
-		if !ok {
-			f = &failure{reason: reason, hint: preflightHint(err)}
-			seen[reason] = f
-			failures = append(failures, f)
-		}
-		f.routes = append(f.routes, richtext.SanitizeSingleLine(path))
 	}
 	if len(failures) == 0 {
 		c.Status = setup.StatusPass
@@ -412,30 +418,30 @@ func preflightPlanner(file setup.File) (*connector.Worktrees, error) {
 const preflightWorktreeName = "doctor"
 
 // preflightRoute runs the preflight for one route, in the directory a
-// dispatch on it would use.
-func preflightRoute(ctx context.Context, a acp.Adapter, planner *connector.Worktrees, route string) error {
+// dispatch on it would use, and gives back every refusal on its own.
+func preflightRoute(ctx context.Context, a acp.Adapter, planner *connector.Worktrees, route string) []error {
 	if planner == nil {
-		return acp.Preflight(a, route, nil, nil)
+		return acp.Refusals(acp.Preflight(a, route, nil, nil))
 	}
 	plan, err := planner.Plan(ctx, route, preflightWorktreeName)
 	if err != nil {
 		// A route that can take no worktree takes no task either: every
 		// dispatch on it waits in a backoff nothing reports.
-		return fmt.Errorf("%w: %w", errNoWorkDir, err)
+		return []error{fmt.Errorf("%w: %w", errNoWorkDir, err)}
 	}
 	read := func(name string) ([]byte, error) { return plan.ReadFile(ctx, name) }
-	err = acp.Preflight(a, plan.Dir, nil, read)
-	if err == nil {
-		return nil
+	refusals := acp.Refusals(acp.Preflight(a, plan.Dir, nil, read))
+	for i, refusal := range refusals {
+		// A file inside the planned worktree is the repository's, at the
+		// commit the worktree would be made from: say where a person can go
+		// and change it, not where a directory nobody has made yet would
+		// have held it. The error keeps its chain, so what it is stays the
+		// same as what it says.
+		if named := strings.ReplaceAll(refusal.Error(), plan.Worktree, plan.Repository); named != refusal.Error() {
+			refusals[i] = inRepositoryError{err: refusal, msg: named + " (committed in the repository, so every worktree of it has the file)"}
+		}
 	}
-	// A file inside the planned worktree is the repository's, at the commit
-	// the worktree would be made from: say where a person can go and change
-	// it, not where a directory nobody has made yet would have held it. The
-	// error keeps its chain, so what it is stays the same as what it says.
-	if named := strings.ReplaceAll(err.Error(), plan.Worktree, plan.Repository); named != err.Error() {
-		return inRepositoryError{err: err, msg: named + " (committed in the repository, so every worktree of it has the file)"}
-	}
-	return err
+	return refusals
 }
 
 // errNoWorkDir is a route no task could be given a working directory in.

@@ -1975,3 +1975,101 @@ func TestPlannedWorkDirReadsTheCommitTheWorktreeWouldBeMadeFrom(t *testing.T) {
 	_, err = plan.ReadFile(ctx, filepath.Join(h.home, "missing.toml"))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
+
+// A planned read resolves a path as the session would, symbolic links and
+// all: git hands back a link's target text where the checkout would hand
+// back the file it points at, and a doctor that read the text would say a
+// config declares nothing when the file it points at declares MCP servers.
+func TestPlannedWorkDirFollowsSymlinksAsTheCheckoutWould(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	route := filepath.Join(h.repo, "app")
+	outside := filepath.Join(h.home, "outside.toml")
+	require.NoError(t, os.WriteFile(outside, []byte("on the machine\n"), 0o600))
+
+	h.write(h.repo, "shared.toml", "shared content\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(h.repo, "app", ".codex"), 0o700))
+	for name, target := range map[string]string{
+		"app/.codex/config.toml": "../../shared.toml", // into the tree again
+		"app/absolute.toml":      outside,             // out onto the machine
+		"app/escaping.toml":      "../../../away.toml",
+		"app/loop.toml":          "loop.toml",
+		"app/linkdir":            ".codex", // a directory that is a link
+	} {
+		require.NoError(t, os.Symlink(target, filepath.Join(h.repo, filepath.FromSlash(name))))
+	}
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "links")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	plan, err := planner.Plan(ctx, route, "doctor")
+	require.NoError(t, err)
+
+	got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex", "config.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "shared content\n", string(got), "the file the link points at, not the link's text")
+
+	got, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "absolute.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "on the machine\n", string(got), "a link out of the worktree lands on the machine")
+
+	// A link that climbs out of the worktree lands under a directory that
+	// exists only once the worktree is made; nothing is there.
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "escaping.toml"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// A link to itself is not a file, and not an absence either: what this
+	// cannot resolve it refuses rather than calls empty.
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "loop.toml"))
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, os.ErrNotExist)
+	assert.Contains(t, err.Error(), "symbolic links")
+
+	// A directory on the way that is a link is followed too.
+	got, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "linkdir", "config.toml"))
+	require.NoError(t, err)
+	assert.Equal(t, "shared content\n", string(got))
+
+	// A directory is not a file, and neither is a file used as one.
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a directory")
+	_, err = plan.ReadFile(ctx, filepath.Join(plan.Dir, "README", "config.toml"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory")
+}
+
+// A path in the repository is a path, not an option and not a glob: a
+// directory named "-app" or "conf[1]" is read as itself.
+func TestPlannedWorkDirReadsPathsGitCouldMistakeForSomethingElse(t *testing.T) {
+	h := newWorktreeHarness(t)
+	ctx := context.Background()
+	for _, dir := range []string{"-app", "conf[1]"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(h.repo, dir, ".codex"), 0o700))
+		h.write(h.repo, filepath.Join(dir, ".codex", "config.toml"), "name = \""+dir+"\"\n")
+	}
+	h.git(h.repo, "add", ".")
+	h.git(h.repo, "commit", "-q", "-m", "awkward names")
+
+	planner, err := PlanWorktrees(WorktreesOptions{Root: h.root, Lookup: h.lookup})
+	require.NoError(t, err)
+	for _, dir := range []string{"-app", "conf[1]"} {
+		plan, err := planner.Plan(ctx, filepath.Join(h.repo, dir), "doctor")
+		require.NoError(t, err)
+		got, err := plan.ReadFile(ctx, filepath.Join(plan.Dir, ".codex", "config.toml"))
+		require.NoError(t, err, "a directory named %q is a directory, not an option or a pattern", dir)
+		assert.Equal(t, "name = \""+dir+"\"\n", string(got))
+	}
+}
+
+// The planner needs no ledger, so it must not say it does.
+func TestPlanWorktreesSaysWhatItActuallyNeeds(t *testing.T) {
+	_, err := PlanWorktrees(WorktreesOptions{Root: "relative/root"})
+	require.ErrorIs(t, err, ErrNoRoot)
+	assert.NotContains(t, err.Error(), "ledger", "the planner takes none, so a refusal must not ask for one")
+
+	_, err = NewWorktrees(WorktreesOptions{Root: "/tmp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ledger", "the one that records worktrees does need it")
+}
