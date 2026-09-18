@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,13 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
+
+// reviewWaits runs the tick's review over the snapshot dispatchReady would
+// take, so a test exercises the same one-snapshot derivation production does.
+func (h *dispatchHarness) reviewWaits(ctx context.Context) {
+	routes, known := h.d.opts.Routes()
+	h.d.reviewWaitingRoutes(ctx, routes, known)
+}
 
 // waitingWorktrees is a Worktrees over the harness's own ledger, so the
 // dispatcher's review runs against the pair that really holds the waits: the
@@ -164,16 +172,16 @@ func TestTheDispatcherSaysWaitingRoutesOutLoudOnASchedule(t *testing.T) {
 		FirstAt: now.Add(-6 * time.Hour), LastAt: now.Add(-time.Minute), Until: now.Add(PrepareBackoffMax),
 	}))
 
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	assert.Equal(t, 1, strings.Count(logs.String(), `"route":"/work/broken"`))
 	assert.Contains(t, logs.String(), `"failures":7`)
 	assert.Contains(t, logs.String(), "fatal: not a git repository")
 
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	assert.Equal(t, 1, strings.Count(logs.String(), `"route":"/work/broken"`), "not on every tick")
 
 	h.d.waitingAt = time.Time{}
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	assert.Equal(t, 2, strings.Count(logs.String(), `"route":"/work/broken"`), "and again ten minutes later")
 
 	// A route whose wait has elapsed is one the next record will try, so it is
@@ -184,7 +192,7 @@ func TestTheDispatcherSaysWaitingRoutesOutLoudOnASchedule(t *testing.T) {
 		Route: "/work/broken", Failures: 8, FirstAt: now.Add(-6 * time.Hour), LastAt: now.Add(-time.Hour), Until: now.Add(-time.Minute),
 	}))
 	h.d.waitingAt = time.Time{}
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	assert.NotContains(t, logs.String(), "/work/broken")
 }
 
@@ -240,7 +248,7 @@ func TestAWaitOnARouteNoLongerRoutedIsDropped(t *testing.T) {
 	require.NoError(t, wt.Recover(ctx))
 	require.ElementsMatch(t, []string{testRoute, "/work/was-routed-here"}, wt.RoutesWaiting())
 
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	waits, err := h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	require.Len(t, waits, 1, "only the route connect.json still names is still waiting")
@@ -273,7 +281,7 @@ func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
 	h.routesUnknown = true
 	h.mu.Unlock()
 
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	waits, err := h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	require.Len(t, waits, 1, "a file that could not be read says nothing about which routes exist")
@@ -287,7 +295,7 @@ func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
 	h.routesUnknown = false
 	h.mu.Unlock()
 	h.d.waitingAt = time.Time{}
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	waits, err = h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	assert.Empty(t, waits, "an empty set that was read is an empty set")
@@ -318,7 +326,7 @@ func TestAConfigNamingAnotherIdentityNeitherPrunesNorReports(t *testing.T) {
 	h.routesUnknown = true
 	h.mu.Unlock()
 
-	h.d.reviewWaitingRoutes(ctx)
+	h.reviewWaits(ctx)
 	waits, err := h.ledger.RouteWaits(ctx)
 	require.NoError(t, err)
 	require.Len(t, waits, 1, "another identity's file does not delete this ledger's record")
@@ -596,4 +604,54 @@ func TestRecoveryRefusesToStartWhenTheWaitsCannotBeDroppedWithWorktreesOff(t *te
 	err = off.Recover(ctx)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "drop the recorded waits on routes")
+}
+
+// One read of connect.json decides the whole tick. Asked twice, the two
+// answers can straddle the two-second cache: the tick would start records
+// against the routes it saw first while pruning the waits of the routes it
+// saw second, so a route removed in between is both dispatched to and
+// forgotten.
+func TestADispatchTickDecidesOnOneRouteSnapshot(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Workspaces = waitingWorktrees(t, o.Ledger)
+	})
+	ctx := context.Background()
+	h.mu.Lock()
+	h.routeReads = 0
+	h.mu.Unlock()
+
+	require.NoError(t, h.d.dispatchReady(ctx))
+
+	h.mu.Lock()
+	reads := h.routeReads
+	h.mu.Unlock()
+	assert.Equal(t, 1, reads, "the approval map and the prune come from the same read")
+}
+
+// A prune that the ledger refused leaves rows for routes this tick has just
+// seen connect.json stop naming. Reporting them would state as fact something
+// already observed to be false, and a confidently wrong warning is worse than
+// no warning — which is the whole subject of this table.
+func TestAFailedPruneDoesNotReportRoutesItJustSawRemoved(t *testing.T) {
+	var logs bytes.Buffer
+	ws := &waitingWorkspaces{forgetErr: errors.New("the ledger will not take it")}
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		o.Workspaces = ws
+	})
+	ctx := context.Background()
+	now := time.Now()
+	for _, route := range []string{testRoute, "/work/no-longer-routed"} {
+		require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+			Route: route, Failures: 3, Reason: "fatal: cannot chdir",
+			FirstAt: now.Add(-time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
+		}))
+	}
+
+	h.reviewWaits(ctx)
+
+	assert.Contains(t, logs.String(), "the ledger will not take it", "the prune failure is said")
+	assert.Contains(t, logs.String(), `"route":"`+testRoute+`"`, "a route connect.json still names is still reported")
+	assert.NotContains(t, logs.String(), "/work/no-longer-routed",
+		"and one it has stopped naming is not, however the prune went")
 }

@@ -150,7 +150,10 @@ type dispatchHarness struct {
 	// that names another agent: the routes come back empty and the dispatcher
 	// is told they are not this connector's.
 	routesUnknown bool
-	mu            sync.Mutex
+	// routeReads counts how many times connect.json has been read, so a test
+	// can hold a tick to one snapshot.
+	routeReads int
+	mu         sync.Mutex
 }
 
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
@@ -168,6 +171,7 @@ func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOp
 		Routes: func() (map[int64]admission.Route, bool) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
+			h.routeReads++
 			out := map[int64]admission.Route{}
 			for k, v := range h.routes {
 				out[k] = v
@@ -1132,6 +1136,8 @@ func TestAWorkerThatExitsNonZeroMidTurnFailedAndOneThatVanishedIsLost(t *testing
 type waitingWorkspaces struct {
 	fakeWorkspaces
 	waiting []string
+	// forgetErr is a ledger that will not take the prune.
+	forgetErr error
 }
 
 func (w *waitingWorkspaces) Prepare(_ context.Context, route string, _ int64) (string, error) {
@@ -1144,6 +1150,9 @@ func (w *waitingWorkspaces) Prepare(_ context.Context, route string, _ int64) (s
 func (w *waitingWorkspaces) RoutesWaiting() []string { return w.waiting }
 
 func (w *waitingWorkspaces) ForgetWaitsExcept(_ context.Context, keep []string) (int, error) {
+	if w.forgetErr != nil {
+		return 0, w.forgetErr
+	}
 	before := len(w.waiting)
 	w.waiting = slices.DeleteFunc(slices.Clone(w.waiting), func(route string) bool {
 		return !slices.Contains(keep, route)

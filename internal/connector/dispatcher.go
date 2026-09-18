@@ -457,7 +457,13 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	d.mu.Unlock()
 
-	approved := d.approvedRoutes()
+	// One read of connect.json for the whole tick. Asked twice, the two
+	// answers can straddle the two-second cache: this tick would then start
+	// records against the routes it saw first while pruning the waits of the
+	// routes it saw second, so a route removed in between is both dispatched
+	// to and forgotten. What the tick does is decided by one snapshot.
+	routes, known := d.opts.Routes()
+	approved := d.scopeRoutes(routes)
 	// Follow-ups first: an event on a live conversation joins its task, while
 	// connect.json still approves that task's directory for its project.
 	for _, r := range runs {
@@ -477,7 +483,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	// news that waits for a free worker slot: a connector at its concurrency
 	// would otherwise go quiet about a broken route for as long as its tasks
 	// run, which is when there is most to say and least attention to spare.
-	d.reviewWaitingRoutes(ctx)
+	d.reviewWaitingRoutes(ctx, routes, known)
 	if d.free() <= 0 {
 		return nil
 	}
@@ -583,14 +589,15 @@ func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]stri
 // Nothing here escalates. The count is reported, never acted on: a route that
 // has reached the cap fifty times is still a route that may work in a minute,
 // and the connector blocks only what it can prove.
-func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
+func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context, routes map[int64]admission.Route, known bool) {
 	if time.Since(d.waitingAt) < StrandedInterval {
 		return
 	}
 	d.waitingAt = time.Now()
-	// connect.json's routes entire, not the projects this run hears: a run
-	// scoped with --project must not drop the waits on routes it was not
-	// asked about.
+	// The tick's snapshot, passed in rather than read again: connect.json's
+	// routes entire, not the projects this run hears, because a run scoped
+	// with --project must not drop the waits on routes it was not asked
+	// about.
 	//
 	// And only when the file was actually read. Current returns an empty set
 	// for a connect.json that could not be read this once, which is "I could
@@ -599,7 +606,6 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 	// record of a route that has been failing all morning is the thing this
 	// whole table exists to keep. A row left standing a few minutes too long
 	// is the cheaper mistake by a wide margin.
-	routes, known := d.opts.Routes()
 	if !known {
 		return
 	}
@@ -629,6 +635,15 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 		if !w.Waiting(now) {
 			continue
 		}
+		// Against the same keep the prune used, not merely against what the
+		// read returned. A prune that failed leaves rows for routes this tick
+		// has just seen connect.json stop naming, and saying those routes are
+		// waiting would state as fact something already observed to be false.
+		// A confidently wrong warning is worse than no warning, which is the
+		// whole subject of this table.
+		if !slices.Contains(keep, w.Route) {
+			continue
+		}
 		d.log.Warn("connector: no worktree could be made on this route, so its records are held out of the window until its backoff ends; this is a machine to fix, not something the connector recovers from",
 			"route", w.Route, "failures", w.Failures, "failing_since", w.FirstAt.UTC().Format(time.RFC3339),
 			"backoff_until", w.Until.UTC().Format(time.RFC3339), "last_failure", w.Reason)
@@ -636,14 +651,22 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 }
 
 // approvedRoutes is connect.json's routes now, narrowed to the projects this
-// run hears.
+// run hears. A caller that also prunes takes one snapshot and calls
+// scopeRoutes instead, so both halves of its tick are decided by the same
+// read.
 func (d *Dispatcher) approvedRoutes() map[int64]string {
-	approved := map[int64]string{}
 	routes, _ := d.opts.Routes()
 	// Whether the file was read is deliberately not consulted here. A
 	// connect.json that does not load approves nothing, which holds work
 	// rather than losing it; the caller that must not act on an unread file
 	// is the one that deletes (reviewWaitingRoutes).
+	return d.scopeRoutes(routes)
+}
+
+// scopeRoutes narrows one snapshot of connect.json's routes to the projects
+// this run hears.
+func (d *Dispatcher) scopeRoutes(routes map[int64]admission.Route) map[int64]string {
+	approved := map[int64]string{}
 	for bucket, route := range routes {
 		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
 			approved[bucket] = route.Path
