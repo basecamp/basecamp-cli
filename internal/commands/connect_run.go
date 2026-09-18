@@ -575,8 +575,16 @@ func newConnectRoutes(path string, file setup.File, log *slog.Logger) *connectRo
 	return &connectRoutes{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
 }
 
-// Current returns a copy of the routes connect.json approves now.
-func (r *connectRoutes) Current() map[int64]admission.Route {
+// Current returns a copy of the routes connect.json approves now, and whether
+// they are the file's: false is a file that could not be read, or that names
+// another agent or account, which approves nothing.
+//
+// The two are returned together, under one hold of the lock, because they are
+// one fact. Asked separately they could straddle a reload — an empty set read
+// while the file was unreadable, paired with a "readable" answer from the
+// read after it — and a caller that deletes on an empty set would delete on a
+// set it never saw.
+func (r *connectRoutes) Current() (map[int64]admission.Route, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.routes == nil || r.now().Sub(r.loadedAt) >= connectRoutesTTL {
@@ -586,7 +594,7 @@ func (r *connectRoutes) Current() map[int64]admission.Route {
 	for k, v := range r.routes {
 		out[k] = v
 	}
-	return out
+	return out, !r.failing
 }
 
 func (r *connectRoutes) reload() {
@@ -622,7 +630,7 @@ type connectDispatch struct {
 	Buckets []int64
 	Ledger  *connector.Ledger
 	Driver  driver.Driver
-	Routes  func() map[int64]admission.Route
+	Routes  func() (map[int64]admission.Route, bool)
 
 	Profile     string
 	Executable  string

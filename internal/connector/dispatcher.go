@@ -109,8 +109,17 @@ type DispatcherOptions struct {
 	Ledger *Ledger
 	// Driver starts workers.
 	Driver driver.Driver
-	// Routes is connect.json's current routes by project.
-	Routes func() map[int64]admission.Route
+	// Routes is connect.json's current routes by project, and whether they
+	// are the file's: false is a file this run could not read, or one that
+	// now names another agent. The two come from one call because they are
+	// one fact — a set asked for separately from whether it was established
+	// can be paired with the answer from a different read.
+	//
+	// Dispatch does not distinguish them: a file that does not load approves
+	// nothing, and holding work is safe. Anything that would *delete* on an
+	// empty set must, because an absence nobody managed to observe is not an
+	// absence.
+	Routes func() (map[int64]admission.Route, bool)
 	// TokenWindow is how long a task token's socket waits for the worker's
 	// MCP server; DefaultTokenWindow when zero.
 	TokenWindow time.Duration
@@ -563,15 +572,25 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 	// connect.json's routes entire, not the projects this run hears: a run
 	// scoped with --project must not drop the waits on routes it was not
 	// asked about.
-	routes := d.opts.Routes()
-	keep := make([]string, 0, len(routes))
-	for _, route := range routes {
-		keep = append(keep, route.Path)
-	}
-	if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
-		d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
-	} else if dropped > 0 {
-		d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
+	//
+	// And only when the file was actually read. Current returns an empty set
+	// for a connect.json that could not be read this once, which is "I could
+	// not see" and not "there are no routes" — pruning against it would erase
+	// every recorded failure on one unreadable file, permanently, and the
+	// record of a route that has been failing all morning is the thing this
+	// whole table exists to keep. A row left standing a few minutes too long
+	// is the cheaper mistake by a wide margin.
+	routes, known := d.opts.Routes()
+	if known {
+		keep := make([]string, 0, len(routes))
+		for _, route := range routes {
+			keep = append(keep, route.Path)
+		}
+		if dropped, err := d.ledger.PruneRouteWaits(ctx, keep); err != nil {
+			d.log.Warn("connector: pruning the recorded waits on routes", "error", err)
+		} else if dropped > 0 {
+			d.log.Info("connector: routes connect.json no longer names are no longer reported as waiting", "routes", dropped)
+		}
 	}
 	waits, err := d.ledger.RouteWaits(ctx)
 	if err != nil {
@@ -593,7 +612,12 @@ func (d *Dispatcher) reviewWaitingRoutes(ctx context.Context) {
 // run hears.
 func (d *Dispatcher) approvedRoutes() map[int64]string {
 	approved := map[int64]string{}
-	for bucket, route := range d.opts.Routes() {
+	routes, _ := d.opts.Routes()
+	// Whether the file was read is deliberately not consulted here. A
+	// connect.json that does not load approves nothing, which holds work
+	// rather than losing it; the caller that must not act on an unread file
+	// is the one that deletes (reviewWaitingRoutes).
+	for bucket, route := range routes {
 		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
 			approved[bucket] = route.Path
 		}

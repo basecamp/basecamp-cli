@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // A route in a Prepare backoff was visible in the connector's log and nowhere
@@ -140,6 +142,11 @@ func TestTheDispatcherSaysWaitingRoutesOutLoudOnASchedule(t *testing.T) {
 	})
 	ctx := context.Background()
 	now := time.Now()
+	// connect.json still routes it: a wait is only reported for a route the
+	// file names, which TestAWaitOnARouteNoLongerRoutedIsDropped holds.
+	h.mu.Lock()
+	h.routes[700] = admission.Route{Path: "/work/broken"}
+	h.mu.Unlock()
 	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
 		Route: "/work/broken", Failures: 7, Reason: "fatal: not a git repository",
 		FirstAt: now.Add(-6 * time.Hour), LastAt: now.Add(-time.Minute), Until: now.Add(PrepareBackoffMax),
@@ -219,6 +226,43 @@ func TestAWaitOnARouteNoLongerRoutedIsDropped(t *testing.T) {
 	require.Len(t, waits, 1, "only the route connect.json still names is still waiting")
 	assert.Equal(t, testRoute, waits[0].Route)
 	assert.NotContains(t, logs.String(), "/work/was-routed-here")
+}
+
+// An absence nobody managed to observe is not an absence. connect.json that
+// could not be read this once yields an empty route set, and pruning against
+// it would erase every recorded failure permanently — losing the record of a
+// route that has been failing all morning, which is the thing this table
+// exists to keep.
+func TestAnUnreadableConfigErasesNoRecordedWait(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), nil)
+	ctx := context.Background()
+	now := time.Now()
+	require.NoError(t, h.ledger.RecordRouteWait(ctx, RouteWait{
+		Route: "/work/failing-all-morning", Failures: 14, Reason: "fatal: cannot chdir",
+		FirstAt: now.Add(-6 * time.Hour), LastAt: now, Until: now.Add(PrepareBackoffMax),
+	}))
+
+	h.mu.Lock()
+	h.routes = map[int64]admission.Route{}
+	h.routesUnreadable = true
+	h.mu.Unlock()
+
+	h.d.reviewWaitingRoutes(ctx)
+	waits, err := h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	require.Len(t, waits, 1, "a file that could not be read says nothing about which routes exist")
+	assert.Equal(t, 14, waits[0].Failures)
+
+	// A file that reads and routes nothing is a different fact, and does
+	// prune: the emptiness was observed.
+	h.mu.Lock()
+	h.routesUnreadable = false
+	h.mu.Unlock()
+	h.d.waitingAt = time.Time{}
+	h.d.reviewWaitingRoutes(ctx)
+	waits, err = h.ledger.RouteWaits(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, waits, "an empty set that was read is an empty set")
 }
 
 // Worktrees turned off: no route is waiting for a worktree that is never

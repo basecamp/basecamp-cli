@@ -600,7 +600,8 @@ func TestStatusReportsTheRoutesWaitingForAWorktree(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, `"waiting_routes"`)
 	assert.Contains(t, out, `"failures": 14`)
-	assert.Contains(t, out, "1 routes waiting for a worktree")
+	assert.Contains(t, out, "1 route waiting for a worktree")
+	assert.NotContains(t, out, "1 routes waiting")
 }
 
 // A status with nothing waiting says so, rather than leaving a reader to

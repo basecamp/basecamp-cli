@@ -259,7 +259,11 @@ func connectStatusSummary(r connectStatusReport) string {
 		parts = append(parts, "held")
 	}
 	if n := len(r.Status.Waiting); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d routes waiting for a worktree", n))
+		routes := "routes"
+		if n == 1 {
+			routes = "route"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s waiting for a worktree", n, routes))
 	}
 	parts = append(parts,
 		fmt.Sprintf("%d live tasks", len(r.Status.Tasks)),

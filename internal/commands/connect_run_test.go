@@ -78,23 +78,31 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	clock := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
 	routes := newConnectRoutes(path, file, slog.New(slog.DiscardHandler))
 	routes.now = func() time.Time { return clock }
-	assert.Equal(t, "/work/repo", routes.Current()[48929974].Path)
+	current, known := routes.Current()
+	assert.Equal(t, "/work/repo", current[48929974].Path)
+	assert.True(t, known)
 
 	unrouted := file
 	unrouted.Projects = map[int64]admission.Route{}
 	write(unrouted)
 	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "an unrouted project stops authorizing dispatch without a restart")
+	current, known = routes.Current()
+	assert.Empty(t, current, "an unrouted project stops authorizing dispatch without a restart")
+	assert.True(t, known, "a file that reads and routes nothing is read")
 
 	other := file
 	other.Agent.PersonID = 1
 	write(other)
 	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file naming another agent authorizes nothing")
+	current, known = routes.Current()
+	assert.Empty(t, current, "a file naming another agent authorizes nothing")
+	assert.False(t, known, "and is not this run's route set")
 
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
 	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file that no longer loads authorizes nothing")
+	current, known = routes.Current()
+	assert.Empty(t, current, "a file that no longer loads authorizes nothing")
+	assert.False(t, known, "an empty set nobody could read is not an empty set")
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.

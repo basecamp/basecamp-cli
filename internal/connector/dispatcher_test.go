@@ -146,7 +146,11 @@ type dispatchHarness struct {
 	fake   *fakeDriver
 	d      *Dispatcher
 	routes map[int64]admission.Route
-	mu     sync.Mutex
+	// routesUnreadable stands for a connect.json this run could not read: the
+	// routes come back empty and the dispatcher is told they are not the
+	// file's.
+	routesUnreadable bool
+	mu               sync.Mutex
 }
 
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
@@ -161,14 +165,14 @@ func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOp
 	opts := DispatcherOptions{
 		Ledger: h.ledger,
 		Driver: fake,
-		Routes: func() map[int64]admission.Route {
+		Routes: func() (map[int64]admission.Route, bool) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			out := map[int64]admission.Route{}
 			for k, v := range h.routes {
 				out[k] = v
 			}
-			return out
+			return out, !h.routesUnreadable
 		},
 		Concurrency: 2,
 		Deadline:    time.Hour,
