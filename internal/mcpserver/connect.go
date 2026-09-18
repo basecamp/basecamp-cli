@@ -238,6 +238,7 @@ func connectFailure(err error) *mcp.CallToolResult {
 		{connector.ErrReportConflict, "report_conflict"},
 		{connector.ErrNotDispatchable, "not_dispatchable"},
 		{connector.ErrInvalidReport, "invalid_report"},
+		{connector.ErrHeldByWorker, "not_dispatchable"},
 	} {
 		if errors.Is(err, known.err) {
 			message := known.err.Error()

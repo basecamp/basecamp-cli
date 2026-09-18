@@ -86,3 +86,27 @@ func TestEveryLogRecordPassesThroughTheRule(t *testing.T) {
 	assert.NotContains(t, out, "test-token-not-real")
 	assert.Contains(t, out, `"count":3`, "numbers stay numbers")
 }
+
+// Card 19: a refusal an agent writes to stderr is followed by whatever it
+// prints next, and the tail is only the last line. Lines keeps them all,
+// bounded and sanitized.
+func TestStderrLinesKeepARefusalTheDiagnosticsBury(t *testing.T) {
+	r := NewRedactor(Redaction{Secrets: []string{"test-token-not-real"}})
+	text := "refused: exec of /bin/rm (test-token-not-real)\nreading config\x07\n\nretrying in 2s\n"
+	lines := r.Lines(text)
+	require.Len(t, lines, 3, "the empty line is not one")
+	assert.Contains(t, lines[0], "refused: exec of /bin/rm", "the refusal is still there, first")
+	assert.NotContains(t, lines[0], "test-token-not-real", "and sanitized")
+	assert.Equal(t, "reading config", lines[1], "control characters are stripped")
+	assert.Equal(t, "retrying in 2s", lines[2])
+	assert.Equal(t, "retrying in 2s", r.Stderr(text), "the tail is still the last line")
+
+	many := make([]string, 0, maxStderrLines+20)
+	for i := range maxStderrLines + 20 {
+		many = append(many, fmt.Sprintf("line %d", i))
+	}
+	bounded := r.Lines(strings.Join(many, "\n"))
+	assert.Len(t, bounded, maxStderrLines, "and the whole thing is bounded")
+	assert.Equal(t, "line 69", bounded[len(bounded)-1], "keeping the newest")
+	assert.LessOrEqual(t, len(r.Lines(strings.Repeat("z", 4000))[0]), maxStderr)
+}

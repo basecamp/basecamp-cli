@@ -254,9 +254,12 @@ func serverNames(servers []driver.MCPServer) []string {
 }
 
 // writeMCPConfig writes the session's MCP servers owner-only. The file holds
-// the servers' environments, a task token among them, so it is created
+// each server's command, its declared environment and the path of the token
+// socket — never the task token, which crosses over that socket and is in no
+// file (the connector's "The task token's carriage"). It is still created
 // exclusively in the private directory and removed as soon as the agent has
-// started its servers, and again on Close.
+// started its servers, and again on Close: the socket path is not a secret,
+// but it is this attempt's, and nothing of an attempt outlives it.
 func writeMCPConfig(dir string, servers []driver.MCPServer) (string, error) {
 	type entry struct {
 		Type    string            `json:"type"`
@@ -362,8 +365,12 @@ func (s *session) Updates() <-chan driver.Update { return s.updates }
 func (s *session) Done() <-chan struct{}         { return s.worker.Done() }
 func (s *session) Exit() driver.Exit             { return s.worker.Exit() }
 
-// StderrTail is what may be passed on of the agent's stderr.
+// StderrTail is what may be passed on of the agent's stderr: its last line.
 func (s *session) StderrTail() string { return s.worker.StderrTail(s.red) }
+
+// StderrLines is every bounded line of it, which is where a refusal written
+// before the agent's later output is read (driver's "Refusals").
+func (s *session) StderrLines() []string { return s.worker.StderrLines(s.red) }
 
 // Prompt implements driver.Session.
 func (s *session) Prompt(ctx context.Context, prompt string) (driver.PromptResult, error) {
@@ -584,6 +591,18 @@ func (s *session) read() {
 		s.mu.Lock()
 		t := s.turn
 		s.mu.Unlock()
+		s.mu.Lock()
+		verified := s.verified
+		s.mu.Unlock()
+		// A session that ended without ever confirming what it was is not a
+		// worker that merely went away: it may have run a turn in a mode this
+		// driver never saw (invariant 2, and Copilot's reading of it). The
+		// dispatcher settles ErrSessionUnverified as failed rather than lost.
+		why := errors.Join(driver.ErrSessionEnded)
+		if !verified {
+			why = fmt.Errorf("%w: %w: the agent closed its output before it confirmed the session",
+				driver.ErrSessionUnverified, driver.ErrSessionEnded)
+		}
 		if t != nil {
 			// Copilot: the turn ends with nothing to report but what it
 			// refused, which the ledger already has, and which its caller
@@ -591,11 +610,11 @@ func (s *session) read() {
 			s.mu.Lock()
 			refusals := slices.Clone(t.refusals)
 			s.mu.Unlock()
-			s.finish(t, driver.PromptResult{Refusals: refusals}, driver.ErrSessionEnded)
+			s.finish(t, driver.PromptResult{Refusals: refusals}, why)
 		}
 		// Whatever comes next: there is no reader to finish a turn, so a
 		// later prompt is answered rather than left waiting.
-		s.end(driver.ErrSessionEnded)
+		s.end(why)
 		close(s.readerEnd)
 	}()
 	scanner := bufio.NewScanner(s.worker.Stdout())
@@ -750,10 +769,16 @@ func (s *session) refused(toolUseID, tool string) {
 // only the first time its tool call id is seen (driver's "Refusals").
 func (s *session) record(toolUseID, tool string) (driver.Refusal, bool) {
 	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(toolUseID), Tool: s.red.Sanitize(tool)}
-	if s.recorded[toolUseID] {
-		return refusal, false
+	// Once per tool call id, where there is one. A refusal with no id — one
+	// read from a line of output rather than from a call — is its own every
+	// time it happens: two identical refusals are two refusals (card 19's
+	// Codex accounting), and only an id can say otherwise.
+	if toolUseID != "" {
+		if s.recorded[toolUseID] {
+			return refusal, false
+		}
+		s.recorded[toolUseID] = true
 	}
-	s.recorded[toolUseID] = true
 	if s.recorder != nil {
 		// The recorder owns what happens when the ledger refuses the write;
 		// the refusal happened either way.
@@ -782,7 +807,10 @@ func (s *session) handleResult(m streamMessage) {
 	canceled := t.canceled
 	s.mu.Unlock()
 	for _, d := range m.PermissionDenials {
-		if slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == s.red.Sanitize(d.ToolUseID) }) {
+		// Only an id can say two refusals are one: denials with no id are
+		// each their own, however alike (Opus r9 — "" matched "" here and
+		// three nameless denials counted as one).
+		if d.ToolUseID != "" && slices.ContainsFunc(refusals, func(r driver.Refusal) bool { return r.ToolCallID == s.red.Sanitize(d.ToolUseID) }) {
 			continue
 		}
 		// A refusal the stream did not announce is still the driver's own

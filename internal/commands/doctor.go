@@ -1372,9 +1372,13 @@ func checkLegacyInstall() *Check {
 // under the session directory this profile's connector would use. A unix
 // socket path is 103 bytes at most, and a long home, a deep XDG_RUNTIME_DIR
 // or large account and person ids can pass it. The connector moves the socket
-// to a short private directory of its own rather than fail a dispatch, so
-// this is a warning about the layout, not a failure — but a person should
-// hear it here rather than discover it in a log.
+// to a short directory of its own rather than fail a dispatch, so this is a
+// warning about the layout, not a failure — but a person should hear it here
+// rather than discover it in a log.
+//
+// It answers for THIS process's environment: a connector started from a
+// systemd user unit, launchd or cron may have a different XDG_RUNTIME_DIR,
+// and the check says so in its message rather than pretending otherwise.
 //
 // It says nothing at all for a profile that is not set up as a connector.
 func checkConnectorSessionPaths(app *appctx.App) *Check {
@@ -1399,7 +1403,17 @@ func checkConnectorSessionPaths(app *appctx.App) *Check {
 		return check
 	}
 	check.Status = "warn"
-	check.Message = fmt.Sprintf("%s is too deep for a task token's socket (a unix socket path is %d bytes at most)", sessions, connector.MaxSocketPath)
-	check.Hint = "The connector will put each token socket in a short private directory instead. Set XDG_RUNTIME_DIR to a short path (for example /run/user/$UID) to keep it beside the session's own files."
+	check.Message = fmt.Sprintf("%s is too deep for a task token's socket (a unix socket path is %d bytes at most, and this is what XDG_RUNTIME_DIR gives this shell)", sessions, connector.MaxSocketPath)
+	check.Hint = shortRuntimeDirHint()
 	return check
+}
+
+// shortRuntimeDirHint names a short place for the runtime directory on this
+// platform: macOS has no /run/user.
+func shortRuntimeDirHint() string {
+	where := "/run/user/$UID"
+	if runtime.GOOS == "darwin" {
+		where = "/tmp"
+	}
+	return "The connector will put each token socket in a short directory of its own instead. Set XDG_RUNTIME_DIR to a short path (" + where + ", say) to keep it beside the session's own files."
 }

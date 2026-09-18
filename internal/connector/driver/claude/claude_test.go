@@ -80,7 +80,12 @@ func fakeClaude(scenario string) {
 	// the connector reads and may log.
 	secret := os.Getenv("FAKE_CLAUDE_SECRET")
 	if secret != "" {
+		// The secret first, then the noise that would bury it: a driver that
+		// reads only the LAST line would miss it, and one that reads the
+		// lines raw would pass it on.
 		fmt.Fprintln(os.Stderr, "claude: failed while using "+secret)
+		fmt.Fprintln(os.Stderr, "claude: retrying in 2s")
+		fmt.Fprintln(os.Stderr, "claude: giving up")
 	}
 
 	out := bufio.NewWriter(os.Stdout)
@@ -166,6 +171,26 @@ func fakeClaude(scenario string) {
 		}
 		if scenario == "die-secret" {
 			os.Exit(3)
+		}
+		if scenario == "nameless-result-denials" {
+			// Three denials in the result, none with a call id: three
+			// refusals, not one.
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID,
+				"permission_denials": []any{
+					map[string]any{"tool_name": "Bash"},
+					map[string]any{"tool_name": "Write"},
+					map[string]any{"tool_name": "WebFetch"},
+				}})
+			continue
+		}
+		if scenario == "two-nameless-refusals" {
+			// Two refusals of the same tool with no call id between them:
+			// two refusals, not one (card 19's Codex accounting).
+			for range 2 {
+				emit(map[string]any{"type": "system", "subtype": "permission_denied", "tool_name": "Bash"})
+			}
+			emit(map[string]any{"type": "result", "subtype": "success", "stop_reason": "end_turn", "is_error": false, "session_id": sessionID})
+			continue
 		}
 		if scenario == "denied-twice" {
 			// One refusal the stream announces twice and the result repeats.
@@ -687,11 +712,18 @@ func redactionFixture(t *testing.T, scenario string) fixture {
 	return f
 }
 
-func stderrTail(s driver.Session) string {
+// stderrText is everything of a session's stderr a driver would pass on: the
+// tail and every bounded line, which is where a refusal written before the
+// noise is read (driver's "Refusals").
+func stderrText(s driver.Session) []string {
+	var out []string
 	if tail, ok := s.(interface{ StderrTail() string }); ok {
-		return tail.StderrTail()
+		out = append(out, tail.StderrTail())
 	}
-	return ""
+	if lines, ok := s.(interface{ StderrLines() []string }); ok {
+		out = append(out, lines.StderrLines()...)
+	}
+	return out
 }
 
 // The redaction rule (driver's redact.go): nothing the driver hands back
@@ -714,7 +746,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			require.ErrorIs(t, err, driver.ErrUnsafeMode)
 			<-s.Done()
 			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
-				Updates: drain(s), Texts: []string{stderrTail(s)}}
+				Updates: drain(s), Texts: stderrText(s)}
 		}},
 		{Name: "prompt", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "denial-secret")
@@ -725,7 +757,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			go func() { updates <- drain(s) }()
 			require.NoError(t, s.Close())
 			return drivertest.Crossing{Errors: []error{err}, Results: []driver.PromptResult{result},
-				Updates: <-updates, Texts: []string{stderrTail(s)}}
+				Updates: <-updates, Texts: stderrText(s)}
 		}},
 		{Name: "cancel", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "deaf-secret")
@@ -735,7 +767,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			require.Eventually(t, func() bool { return len(ss(s).slot) == 1 }, 10*time.Second, 5*time.Millisecond)
 			err := s.Cancel(context.Background())
 			require.Error(t, err)
-			return drivertest.Crossing{Errors: []error{err}, Texts: []string{stderrTail(s)}}
+			return drivertest.Crossing{Errors: []error{err}, Texts: stderrText(s)}
 		}},
 		{Name: "close", Run: func(t *testing.T) drivertest.Crossing {
 			f := redactionFixture(t, "die-secret")
@@ -745,7 +777,7 @@ func TestNoErrorPathCarriesTheSecretOut(t *testing.T) {
 			closeErr := s.Close()
 			after, afterErr := s.Prompt(context.Background(), "again")
 			return drivertest.Crossing{Errors: []error{err, closeErr, afterErr}, Results: []driver.PromptResult{after},
-				Updates: drain(s), Texts: []string{stderrTail(s)}}
+				Updates: drain(s), Texts: stderrText(s)}
 		}},
 	})
 }
@@ -771,6 +803,8 @@ func TestEveryRefusalIsRecordedOnceAsItIsRead(t *testing.T) {
 		{"late-denial", []driver.Refusal{{ToolCallID: "toolu_late", Tool: "Bash"}}},
 		{"deny-then-die", []driver.Refusal{{ToolCallID: "toolu_dead", Tool: "Bash"}}},
 		{"denied-twice", []driver.Refusal{{ToolCallID: "toolu_twice", Tool: "Bash"}}},
+		{"two-nameless-refusals", []driver.Refusal{{Tool: "Bash"}, {Tool: "Bash"}}},
+		{"nameless-result-denials", []driver.Refusal{{Tool: "Bash"}, {Tool: "Write"}, {Tool: "WebFetch"}}},
 	} {
 		t.Run(tc.scenario, func(t *testing.T) {
 			f := newFixture(t, tc.scenario)

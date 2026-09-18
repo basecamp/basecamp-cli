@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -892,15 +893,50 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 	}
 	bound, err := canonicalAccount(p.AccountID)
 	if err != nil {
-		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q is not bound to an account", name),
-			"Bind it: basecamp profile set "+shellQuote(name)+" account_id <id>")
+		// An entry that names an account nothing can use is not an unbound
+		// profile: say what is wrong with the account it does name.
+		if p.AccountID != "" {
+			where := "the config file that defines the profile"
+			if path := profileFieldFile(app.Config, name, "account_id"); path != "" {
+				where = "the profile's entry in " + richtext.SanitizeSingleLine(path)
+			}
+			return "", output.ErrUsageHint(
+				fmt.Sprintf("Profile %q names account %q, which is not an account ID", name, p.AccountID),
+				"Correct account_id in "+where+".")
+		}
+		return "", unboundProfileError(app.Config, name)
 	}
 	if accountGivenExplicitly(app) && !accountIDsEqual(app.Config.AccountID, bound) {
 		return "", output.ErrUsageHint(
-			fmt.Sprintf("Profile %q is bound to account %s, and this command named account %s", name, bound, app.Config.AccountID),
+			fmt.Sprintf("Profile %q is bound to account %s%s, and this command named account %s", name, bound, boundIn(app.Config, name), app.Config.AccountID),
 			"Setup works in the profile's own account. Drop --account (or BASECAMP_ACCOUNT_ID).")
 	}
 	return bound, nil
+}
+
+// unboundProfileError refuses a profile that names no account, with the
+// remedy that will work for this one.
+//
+// No command binds an account on its own — `profile` has none for it. The
+// account is written by a command that stores a credential: `auth agent
+// connect`, which takes the Agent's own account, and the headless logins
+// (`auth login --with-token` or `--with-client-credentials` with --account).
+// A bot user logged in through the browser, which binds nothing, so for a
+// bot that already has its credential the account goes into its config entry
+// by hand rather than through another login.
+//
+// Those commands all write the global config's entry, which does not bind
+// every profile: globalBindingBlocker, the question they ask themselves,
+// says when it would not, and names the file to change instead.
+func unboundProfileError(cfg *config.Config, name string) error {
+	message := fmt.Sprintf("Profile %q is not bound to an account", name)
+	if blocker := globalBindingBlocker(cfg, name); blocker != "" {
+		return output.ErrUsageHint(message, blocker+".")
+	}
+	global := filepath.Join(config.GlobalConfigDir(), "config.json")
+	return output.ErrUsageHint(message,
+		"For an Agent, connecting it binds its own account: basecamp auth agent connect -P "+shellQuote(name)+
+			". A bot user's browser login binds none, so for a bot add account_id to the profile's entry in "+richtext.SanitizeSingleLine(global)+".")
 }
 
 // connectCredentialKind is the kind of credential the active profile holds,

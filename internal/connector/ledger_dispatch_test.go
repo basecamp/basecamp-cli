@@ -188,7 +188,6 @@ func TestGetDispatchCancelsTheGuardAndReportsAFiredOne(t *testing.T) {
 func TestGetDispatchCancelsAnArmedGuardOnAnAlreadyExposedEvent(t *testing.T) {
 	f := newDispatchFixture(t)
 	// Exposed at launch by the dispatcher, guard still armed.
-	require.NoError(t, f.ledger.SetState(context.Background(), 1, StateDispatched, ""))
 	_, err := f.ledger.db.ExecContext(context.Background(), `UPDATE task_events SET delivery = 'exposed' WHERE event_id = 1`)
 	require.NoError(t, err)
 
@@ -328,18 +327,16 @@ func TestAWorkerSeesOnlyItsOwnTask(t *testing.T) {
 func TestAnEventThatLeftThePathIsNotHandedOut(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 2, StateBlocked, "no_route"))
 
+	// A record on a live task cannot be taken off the path around its task.
+	require.ErrorIs(t, f.ledger.SetState(ctx, 2, StateBlocked, "no_route"), ErrOnALiveTask)
+
+	// It can be settled before a worker pulls it: finished work is not
+	// handed out for the first time.
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
 	_, _, err := f.d.Get(ctx, 2)
 	assert.ErrorIs(t, err, ErrNotDispatchable)
 	assert.Equal(t, "admitted", f.row(t, 2).Delivery)
-
-	// Withdrawn back to admitted, content and all: not a worker's any more.
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
-	require.NotEmpty(t, getRecord(t, f.ledger, 1).Decision.Snapshot)
-	_, _, err = f.d.Get(ctx, 1)
-	assert.ErrorIs(t, err, ErrNotDispatchable)
-	assert.Equal(t, "admitted", f.row(t, 1).Delivery)
 }
 
 // Retention took the instruction: a completed event asked for again answers
@@ -446,8 +443,8 @@ func TestCreateTaskInsideACallersTransaction(t *testing.T) {
 func TestCreateTaskRefusesARecordWithoutItsInstruction(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
 	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"), "never handed, it left dispatched with its task")
 	require.NoError(t, f.ledger.SetState(ctx, 1, StateAdmitted, ""))
 
 	_, err := f.ledger.CreateTask(ctx, []int64{1})
@@ -573,19 +570,30 @@ func TestCompletedWorkIsServedOnlyToItsWorker(t *testing.T) {
 }
 
 func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
-	ledger := newTestLedger(t)
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	ledger, err := OpenLedger(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
 	ctx := context.Background()
 	seenRecord(t, ledger, 1)
-	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
+	_, err = ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 	require.NoError(t, err)
 
+	// Each racer has its own handle on the file, so SQLite sees the race
+	// rather than database/sql's one connection serializing it.
 	const racers = 8
 	errs := make([]error, racers)
 	done := make(chan struct{})
 	for i := range racers {
 		go func() {
 			defer func() { done <- struct{}{} }()
-			_, errs[i] = ledger.CreateTask(ctx, []int64{1})
+			handle, err := OpenExistingLedger(ctx, path)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer handle.Close()
+			_, errs[i] = handle.CreateTask(ctx, []int64{1})
 		}()
 	}
 	for range racers {
@@ -609,7 +617,7 @@ func TestConcurrentLaunchesOfOneEventMakeOneTask(t *testing.T) {
 func TestTheEarliestSkipsAnEventThatLeftThePath(t *testing.T) {
 	f := newDispatchFixture(t)
 	ctx := context.Background()
-	require.NoError(t, f.ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""), "settled before any worker pulled it")
 
 	got, ok, err := f.d.Get(ctx, 0)
 	require.NoError(t, err)
@@ -782,6 +790,7 @@ func TestCompleteRefusesMalformedReports(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := f.d.Complete(ctx, 1, c)
 			require.ErrorIs(t, err, ErrInvalidReport)
+			assert.NotContains(t, err.Error(), "report on event", "what the worker got wrong reaches it without the ledger's own wrapping")
 			assert.Equal(t, "exposed", f.rowContext(ctx, t, 1).Delivery)
 		})
 	}
@@ -813,6 +822,10 @@ func TestStripMentionsOf(t *testing.T) {
 		"uppercase":                      {"a" + strings.ToUpper(agent[:14]) + agent[14:] + "b", "a b"},
 		"the first sgid is the one":      {strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1), strings.Replace(agent, "<bc-attachment ", `<bc-attachment sgid="" `, 1)},
 		"a stray < before it":            {"<" + agent + "hi " + other, "< hi " + other},
+		"self-closing, then a stray close": {selfClosing + " please deploy</p><p>thanks</p></bc-attachment> tail",
+			" " + " please deploy</p><p>thanks</p></bc-attachment> tail"},
+		"unclosed, then a stray close": {unclosed + " please deploy</p><p>thanks</p></bc-attachment> tail",
+			" " + " please deploy</p><p>thanks</p></bc-attachment> tail"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			assert.Equal(t, tc.want, StripMentionsOf(tc.in, adapterAgentID))
@@ -835,12 +848,14 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "basecamp", "connect"), root)
 	canonical := filepath.Join(root, StateDirName("999", adapterAgentID))
 
-	agentID, err := ResolveStateDir(canonical, "999")
+	resolved, agentID, err := ResolveStateDir(canonical, "999")
 	require.NoError(t, err)
 	assert.Equal(t, adapterAgentID, agentID)
-	agentID, err = ResolveStateDir(canonical+"/", "0999")
-	require.NoError(t, err, "accounts compare as numbers, and a trailing slash is the same directory")
+	assert.Equal(t, canonical, resolved)
+	resolved, agentID, err = ResolveStateDir(canonical+"/../"+StateDirName("999", adapterAgentID)+"/", "0999")
+	require.NoError(t, err, "accounts compare as numbers, and a trailing slash or a .. is the same directory")
 	assert.Equal(t, adapterAgentID, agentID)
+	assert.Equal(t, canonical, resolved, "the directory every caller goes on to use is the one that was checked")
 
 	for name, dir := range map[string]string{
 		"outside the root":   filepath.Join(t.TempDir(), StateDirName("999", adapterAgentID)),
@@ -849,11 +864,13 @@ func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
 		"no agent":           filepath.Join(root, "999-"),
 		"no account":         filepath.Join(root, "-52007412"),
 		"not a number":       filepath.Join(root, "999-abc"),
+		"a signed agent":     filepath.Join(root, "999-+52007412"),
+		"a padded agent":     filepath.Join(root, "999-052007412"),
 		"the root itself":    root,
 		"above the root":     filepath.Join(root, "..", StateDirName("999", adapterAgentID)),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ResolveStateDir(dir, "999")
+			_, _, err := ResolveStateDir(dir, "999")
 			assert.ErrorIs(t, err, ErrNotAStateDir)
 			var refusal *StateDirError
 			require.ErrorAs(t, err, &refusal, "the refusal says why in fields, not in a message to be parsed")
@@ -1005,6 +1022,9 @@ func TestAWithdrawalIsRefusedWhenAWorkerCouldHaveTheInstruction(t *testing.T) {
 		require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
 		_, err = f.ledger.createTask(ctx, tx, []int64{1, 2})
 		require.NoError(t, err)
+		// The database refuses it whoever writes, and on an untouched row.
+		_, err = tx.ExecContext(ctx, `UPDATE task_events SET withdrawn_at = 'raw' WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+		require.Error(t, err)
 		require.Error(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""), "create before withdraw is the wrong order")
 	})
 
@@ -1023,4 +1043,328 @@ func TestAWithdrawalIsRefusedWhenAWorkerCouldHaveTheInstruction(t *testing.T) {
 		_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET pulled_at = 'later' WHERE event_id = 1`)
 		require.Error(t, err)
 	})
+}
+
+// A worker whose task was superseded is told so, whatever it sends: the token
+// is checked before the report is.
+func TestASupersededWorkerIsRefusedBeforeItsReportIsRead(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+
+	for name, c := range map[string]Completion{
+		"no outcome": {},
+		"not a URL":  {Outcome: OutcomeSucceeded, Links: []string{"javascript:alert(1)"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.d.Complete(ctx, 1, c)
+			require.ErrorIs(t, err, ErrTaskTokenRefused)
+			assert.NotErrorIs(t, err, ErrInvalidReport)
+		})
+	}
+}
+
+// dispatchForTest dispatches a record the only way a record is dispatched: on
+// a task. A record a test walked to admitted by hand has no instruction, so one
+// is attached first; a seen record is admitted first.
+func dispatchForTest(t *testing.T, ledger *Ledger, id int64) TaskGrant {
+	t.Helper()
+	ctx := context.Background()
+	_, err := ledger.db.ExecContext(ctx, `UPDATE events
+SET snapshot = COALESCE(snapshot, CAST('{"content":"do it"}' AS BLOB)),
+    conversation_key = CASE WHEN conversation_key = '' THEN 'recording:' || id ELSE conversation_key END
+WHERE id = ?`, id)
+	require.NoError(t, err)
+	if getRecord(t, ledger, id).State == StateSeen {
+		require.NoError(t, ledger.SetState(ctx, id, StateAdmitted, ""))
+	}
+	grant, err := ledger.CreateTask(ctx, []int64{id})
+	require.NoError(t, err)
+	return grant
+}
+
+// createTask writes nothing when it refuses: the caller's transaction is as
+// it found it, whatever the caller does with it next.
+func TestCreateTaskWritesNothingWhenItRefuses(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	seenRecord(t, f.ledger, 3)
+	_, err := f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:3"))
+	require.NoError(t, err)
+	dispatchForTest(t, f.ledger, 3)
+	require.NoError(t, f.ledger.SetState(ctx, 3, StateCompleted, ""), "settled, and its snapshot is still there")
+
+	var tasksBefore, rowsBefore int
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&tasksBefore))
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events`).Scan(&rowsBefore))
+
+	tx, err := f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = f.ledger.createTask(ctx, tx, []int64{3})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "completed")
+	var tasksAfter, rowsAfter int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&tasksAfter))
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events`).Scan(&rowsAfter))
+	require.NoError(t, tx.Rollback())
+	assert.Equal(t, tasksBefore, tasksAfter, "no task row")
+	assert.Equal(t, rowsBefore, rowsAfter, "no task event row")
+}
+
+// Exposure written at launch is the dispatcher's word, not a worker's pull.
+// Until the worker pulls, finished work is not served to it, and it can
+// neither acknowledge nor complete anything.
+func TestALaunchExposureIsNotAPull(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	exposeAtLaunch := func(id int64) {
+		t.Helper()
+		_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = ?`, id)
+		require.NoError(t, err)
+	}
+	exposeAtLaunch(1)
+	exposeAtLaunch(2)
+
+	_, err := f.d.Ack(ctx, 1, nil)
+	assert.ErrorIs(t, err, ErrNotExposed, "nothing was pulled yet")
+	_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	assert.ErrorIs(t, err, ErrNotExposed)
+
+	// Settled before the worker ever pulled it: not served, and not the
+	// earliest either.
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+	_, _, err = f.d.Get(ctx, 1)
+	assert.ErrorIs(t, err, ErrNotDispatchable)
+	got, ok, err := f.d.Get(ctx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), got.EventID)
+
+	// Event 2 the worker did pull, just now. Settled after that, it is served
+	// again to the worker that has it, and its report is taken.
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
+	again, ok, err := f.d.Get(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, int64(2), again.EventID)
+	_, err = f.d.Ack(ctx, 2, nil)
+	require.NoError(t, err)
+}
+
+// A task is live until it is superseded, whatever became of its records, so a
+// conversation whose only event was settled before the worker pulled it is
+// still busy.
+func TestALiveTaskKeepsItsConversationBusy(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateCompleted, ""))
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateCompleted, ""))
+	seenRecord(t, f.ledger, 3)
+	_, err := f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:10304028989"))
+	require.NoError(t, err)
+
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	require.ErrorIs(t, err, ErrConversationBusy, "the first task is still live")
+
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	require.NoError(t, err)
+}
+
+// A task is made of work waiting for a worker, on a live task, and its rows
+// stay where they were written — the database says so too.
+func TestTheDatabaseRefusesAttachingWorkToTheWrongTask(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	seenRecord(t, f.ledger, 3)
+
+	_, err := f.ledger.db.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id) VALUES (?, 3)`, f.grant.ID)
+	require.Error(t, err, "a seen record is not work waiting for a worker")
+
+	other, err := f.ledger.CreateTask(ctx, []int64{})
+	require.Error(t, err)
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:3"))
+	require.NoError(t, err)
+	_, err = f.ledger.db.ExecContext(ctx, `INSERT INTO task_events (task_id, event_id) VALUES (?, 3)`, f.grant.ID)
+	require.Error(t, err, "a superseded task takes no new work")
+	_ = other
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET task_id = 99 WHERE event_id = 1`)
+	require.Error(t, err, "a task event does not move between tasks")
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET event_id = 3 WHERE event_id = 1`)
+	require.Error(t, err, "nor between events")
+}
+
+// An instruction is content, not an empty blob: a record with one would be
+// dispatched and never servable.
+func TestCreateTaskRefusesAnEmptyInstruction(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE events SET snapshot = CAST('' AS BLOB) WHERE id = 1`)
+	require.NoError(t, err)
+
+	_, err = f.ledger.CreateTask(ctx, []int64{1})
+	require.ErrorIs(t, err, ErrNotDispatchable)
+}
+
+// A reported outcome stands, and so does what came with it: an
+// acknowledgement arriving after the completion is refused, not written.
+func TestAnAcknowledgementAfterTheOutcomeIsRefused(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	require.NoError(t, err)
+
+	late := int64(4242)
+	_, err = f.d.Ack(ctx, 1, &late)
+
+	require.ErrorIs(t, err, ErrReportConflict)
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	assert.Nil(t, ack, "nothing was written")
+}
+
+// A withdrawn exposure is finished: the record it belonged to may be running
+// again on a new task, and the old row does not follow it.
+func TestAWithdrawnExposureDoesNotFollowTheRetry(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, err := f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	tx, err := f.ledger.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, f.ledger.supersedeTask(ctx, tx, f.grant.ID))
+	require.NoError(t, f.ledger.withdrawExposure(ctx, tx, f.grant.ID, 1, StateAdmitted, ""))
+	retry, err := f.ledger.createTask(ctx, tx, []int64{1})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	// The retry's worker pulls and completes it, so the record is completed.
+	d, err := f.ledger.Dispatch(ctx, retry.Token, adapterAgentID)
+	require.NoError(t, err)
+	_, _, err = d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded})
+	require.NoError(t, err)
+
+	// The withdrawn row on the old task stays where it was.
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'completed' WHERE task_id = ? AND event_id = 1`, f.grant.ID)
+	require.Error(t, err)
+	var delivery string
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT delivery FROM task_events WHERE task_id = ? AND event_id = 1`, f.grant.ID).Scan(&delivery))
+	assert.Equal(t, "exposed", delivery)
+}
+
+// A queued record does not go around the admitted one that holds its
+// conversation: admission queued it precisely because that one is next.
+func TestAQueuedRecordDoesNotJumpItsConversation(t *testing.T) {
+	ctx := context.Background()
+	ledger, err := OpenLedger(filepath.Join(t.TempDir(), "state", "connector.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(id, 0, "recording:10304028989"))
+		require.NoError(t, err)
+	}
+	require.Equal(t, StateQueued, getRecord(t, ledger, 2).State)
+
+	_, err = ledger.CreateTask(ctx, []int64{2})
+
+	require.ErrorIs(t, err, ErrConversationBusy)
+	assert.Contains(t, err.Error(), "event 1 is admitted ahead of event 2")
+	_, err = ledger.CreateTask(ctx, []int64{1})
+	assert.NoError(t, err, "and the record that is next dispatches")
+}
+
+// A task is its worker's until it is superseded, even after retention has
+// cleared what its records said: the conversation a task holds is written on
+// the task's own rows, where retention does not reach.
+func TestRetentionDoesNotFreeALiveTasksConversation(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		_, _, err := f.d.Get(ctx, id)
+		require.NoError(t, err)
+		_, err = f.d.Complete(ctx, id, Completion{Outcome: OutcomeSucceeded})
+		require.NoError(t, err)
+	}
+	dropped, err := f.ledger.DropContent(ctx, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 2, dropped, "the records' payloads are gone, conversation and all")
+
+	seenRecord(t, f.ledger, 3)
+	_, err = f.ledger.Admission().Commit(ctx, admittedVerdict(3, 0, "recording:10304028989"))
+	require.NoError(t, err)
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+
+	require.ErrorIs(t, err, ErrConversationBusy)
+	assert.Contains(t, err.Error(), "is live on the conversation of event 3")
+	require.NoError(t, f.ledger.SupersedeTask(ctx, f.grant.ID))
+	_, err = f.ledger.CreateTask(ctx, []int64{3})
+	assert.NoError(t, err, "and the conversation is free once the task is not")
+}
+
+// An acknowledgement with an id, after one without, is a second report, not
+// the same call retried: the receipt stands and nothing is written.
+func TestAnAcknowledgementIdAfterTheAcknowledgementIsRefused(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+
+	late := int64(4242)
+	_, err = f.d.Ack(ctx, 1, &late)
+
+	require.ErrorIs(t, err, ErrReportConflict)
+	assert.Contains(t, err.Error(), "acknowledged without an acknowledgement id")
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	assert.Nil(t, ack, "nothing was written")
+}
+
+// A retry that has nothing to point at answers the receipt it already has: no
+// id is not a different id.
+func TestAnAcknowledgementWithoutAnIdAfterOneWithItIsTheSameReceipt(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	posted := int64(4242)
+	first, err := f.d.Ack(ctx, 1, &posted)
+	require.NoError(t, err)
+
+	again, err := f.d.Ack(ctx, 1, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, first, again)
+	var ack *int64
+	require.NoError(t, f.ledger.db.QueryRowContext(ctx, `SELECT ack_id FROM task_events WHERE event_id = 1`).Scan(&ack))
+	require.NotNil(t, ack)
+	assert.Equal(t, posted, *ack, "and the id it did report is still there")
+}
+
+// The same rule holds for anything else writing to the file: an id is written
+// with the acknowledgement or not at all.
+func TestTheSchemaKeepsAnAcknowledgementIdWithItsAcknowledgement(t *testing.T) {
+	f := newDispatchFixture(t)
+	ctx := context.Background()
+	_, _, err := f.d.Get(ctx, 1)
+	require.NoError(t, err)
+	_, err = f.d.Ack(ctx, 1, nil)
+	require.NoError(t, err)
+
+	_, err = f.ledger.db.ExecContext(ctx, `UPDATE task_events SET ack_id = 4242 WHERE event_id = 1`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "written with the acknowledgement, once")
 }

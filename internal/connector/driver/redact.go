@@ -88,8 +88,12 @@ func EnvOf(m map[string]string) []string {
 const (
 	// minEnvValue is the shortest environment value removed by value.
 	minEnvValue = 6
-	// maxStderr is the most of a worker's stderr ever passed on.
+	// maxStderr is the most of a worker's stderr ever passed on, per line.
 	maxStderr = 300
+	// maxStderrLines is how many of a worker's last stderr lines Lines
+	// returns: enough that a refusal is not lost behind the diagnostics that
+	// follow it, few enough to be a bound.
+	maxStderrLines = 50
 )
 
 const (
@@ -185,11 +189,38 @@ func (r *Redactor) Sanitize(s string) string {
 // Stderr is what may be passed on of a worker's stderr: its last non-empty
 // line, sanitized, on one line, and no longer than maxStderr bytes.
 func (r *Redactor) Stderr(text string) string {
-	text = strings.TrimRightFunc(text, unicode.IsSpace)
-	if i := strings.LastIndexByte(text, '\n'); i >= 0 {
-		text = text[i+1:]
+	lines := r.Lines(text)
+	if len(lines) == 0 {
+		return ""
 	}
-	text = r.Sanitize(text)
+	return lines[len(lines)-1]
+}
+
+// Lines is what may be passed on of a worker's stderr when the LAST line is
+// not enough: its last maxStderrLines non-empty lines, each sanitized, on one
+// line and no longer than maxStderr bytes, oldest first.
+//
+// Stderr gives the last line, which is where a program that could not start
+// says why. A refusal, though, is written when it happens and whatever the
+// agent prints afterwards buries it, so a driver that reads refusals from
+// stderr reads them here (driver.go's "Refusals").
+func (r *Redactor) Lines(text string) []string {
+	raw := strings.Split(text, "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if clean := r.line(line); clean != "" {
+			out = append(out, clean)
+		}
+	}
+	if len(out) > maxStderrLines {
+		out = out[len(out)-maxStderrLines:]
+	}
+	return out
+}
+
+// line is one line of a worker's output, sanitized, on one line and bounded.
+func (r *Redactor) line(text string) string {
+	text = r.Sanitize(strings.TrimRight(text, "\r\n"))
 	text = strings.Map(func(c rune) rune {
 		if unicode.IsControl(c) {
 			return ' '
@@ -199,7 +230,7 @@ func (r *Redactor) Stderr(text string) string {
 	if len(text) > maxStderr {
 		text = strings.ToValidUTF8(text[len(text)-maxStderr:], "")
 	}
-	return text
+	return strings.TrimSpace(text)
 }
 
 // Err is err with its message sanitized. errors.Is still answers for every

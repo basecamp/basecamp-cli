@@ -852,6 +852,7 @@ func TestOutboxNeverAdoptsAWorkersOwnMessage(t *testing.T) {
 	workersOwn := basecamp.add(claimed.Destination, adapterAgentID, GuardAckBody)
 	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
+	obPull(t, d, 1)
 	_, err = d.Ack(ctx, 1, &workersOwn)
 	require.NoError(t, err)
 
@@ -1368,6 +1369,7 @@ func TestOutboxAWorkersMessageIsMatchedByKindToo(t *testing.T) {
 	// guard's boost.
 	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
+	obPull(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: &boost})
 	require.NoError(t, err)
 
@@ -1393,6 +1395,7 @@ func TestOutboxAStillRunningNoticeIsNotPostedAfterTheAttemptEnded(t *testing.T) 
 	// settlement calls for no completion notice either.
 	d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
 	require.NoError(t, err)
+	obPull(t, d, 1)
 	_, err = d.Complete(ctx, 1, Completion{Outcome: OutcomeSucceeded, ReplyID: id64(4242)})
 	require.NoError(t, err)
 	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopFinished})

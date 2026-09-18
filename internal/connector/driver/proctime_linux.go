@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -97,7 +98,20 @@ func groupRunning(pgid int) (bool, error) {
 	return false, nil
 }
 
+// bootTime is constant for as long as this machine has been up, and reading
+// it means scanning /proc/stat past every per-CPU line, so it is read once.
+var boot struct {
+	once sync.Once
+	at   time.Time
+	err  error
+}
+
 func bootTime() (time.Time, error) {
+	boot.once.Do(func() { boot.at, boot.err = readBootTime() })
+	return boot.at, boot.err
+}
+
+func readBootTime() (time.Time, error) {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
 		return time.Time{}, err
