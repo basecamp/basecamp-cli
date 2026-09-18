@@ -169,7 +169,18 @@ func TestIntakeRunsTheFeedThroughCatchUpAndStreaming(t *testing.T) {
 		return err == nil && ok
 	}, 5*time.Second, 5*time.Millisecond, "a live event reaches the ledger")
 
-	// Only the poll lane advances the durable position.
+	// Only the poll lane advances the durable position — and it advances it
+	// when the walk is OVER, not when the walk's events land. A fresh ledger
+	// has no position to resume, so this entry is present-class: the feed
+	// holds the page's position and saves it only once the drain has accepted
+	// every event buffered during the walk. The live event above is one of
+	// those, so seeing it in the ledger says the drain reached it, not that
+	// the save has run. Wait for the save rather than read across it.
+	require.Eventually(t, func() bool {
+		_, ok, err := ledger.Load(ctx, intake.CheckpointKey())
+		return err == nil && ok
+	}, 5*time.Second, 5*time.Millisecond, "the walk's held position reaches the ledger")
+
 	position, ok, err := ledger.Load(ctx, intake.CheckpointKey())
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -182,8 +193,15 @@ func TestIntakeRunsTheFeedThroughCatchUpAndStreaming(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, LanePoll, polled.Lane)
 
-	assert.Equal(t, 2, countLines(pointers.String()))
-	assert.Equal(t, 2, queue.Depth())
+	// The ledger row is written before the pointer line and the hand-off, so
+	// the counts are waited on rather than read the moment the rows appear.
+	// The wait is for "at least", so the equalities below still measure: a
+	// third pointer line or a third id fails them rather than satisfying them.
+	require.Eventually(t, func() bool {
+		return countLines(pointers.String()) >= 2 && queue.Depth() >= 2
+	}, 5*time.Second, 5*time.Millisecond, "both events are written out and handed over")
+	assert.Equal(t, 2, countLines(pointers.String()), "one pointer line per event, and no more")
+	assert.Equal(t, 2, queue.Depth(), "one id handed over per event, and no more")
 
 	cancel()
 	select {
