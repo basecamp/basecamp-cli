@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -207,6 +208,13 @@ func standardOptions() [][2]string {
 func gone(pid int) bool {
 	return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
+
+// counter is a count a failed wait can print: testify formats the message
+// when the wait gives up, so the value has to be read then and not passed by
+// value when the wait is set up.
+type counter struct{ atomic.Int32 }
+
+func (c *counter) String() string { return strconv.Itoa(int(c.Load())) }
 
 func waitGone(t *testing.T, pid int) {
 	t.Helper()
@@ -1218,9 +1226,15 @@ func TestAFloodOfPermissionRequestsIsBounded(t *testing.T) {
 	}()
 	require.Eventually(t, func() bool { return deciding.Load() == maxDecisions }, 60*time.Second, 10*time.Millisecond,
 		"the session decides at most %d at once", maxDecisions)
-	// Every request but the ones stuck in a decision has been answered.
-	require.Eventually(t, func() bool { return len(h.record().Outcomes) >= flood-maxDecisions }, 60*time.Second, 20*time.Millisecond,
-		"a flood is answered as it arrives")
+	// Every request but the ones stuck in a decision has been answered. The
+	// count is carried into the message so a wait that gives up says how far
+	// the flood got, rather than only that it did not finish.
+	var outcomes counter
+	require.Eventually(t, func() bool {
+		outcomes.Store(int32(len(h.record().Outcomes))) //nolint:gosec // a count of at most flood
+		return int(outcomes.Load()) >= flood-maxDecisions
+	}, 60*time.Second, 20*time.Millisecond,
+		"a flood is answered as it arrives: %v of the %d not stuck in a decision", &outcomes, flood-maxDecisions)
 	assert.LessOrEqual(t, deciding.Load(), int32(maxDecisions))
 	answered := h.record().Outcomes
 	close(release)

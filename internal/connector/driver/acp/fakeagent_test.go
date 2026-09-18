@@ -129,6 +129,16 @@ type fakeAgent struct {
 	sc  scenario
 	out *bufio.Writer
 
+	// publishing orders the record's publications: a flood of permission
+	// requests is answered on a goroutine each, and each writes the record
+	// once it has its outcome. Without it two publications interleave — one
+	// takes its snapshot, a later one takes a fuller snapshot and renames it
+	// into place, then the first renames its older one over that — and the
+	// file's last word is a record the agent has already moved past. A reader
+	// waiting for what the agent has done then waits for a word that has been
+	// said and unsaid.
+	publishing sync.Mutex
+
 	mu       sync.Mutex
 	rec      agentRecord
 	nextID   int
@@ -239,7 +249,12 @@ func runFakeChild() {
 	time.Sleep(time.Hour)
 }
 
+// flush publishes the record. The snapshot and its rename are one step, under
+// publishing, so what lands is never older than what landed before it — and
+// two publications never share the temporary file they rename from.
 func (a *fakeAgent) flush() {
+	a.publishing.Lock()
+	defer a.publishing.Unlock()
 	a.mu.Lock()
 	data, _ := json.Marshal(a.rec)
 	a.mu.Unlock()
